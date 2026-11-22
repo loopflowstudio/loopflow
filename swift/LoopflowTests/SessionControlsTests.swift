@@ -94,6 +94,7 @@ import ViewInspector
             #expect(model.selection == .task(id: "task-exact"))
             let promoted = try #require(model.sessions.value?.first { $0.id == session.id })
             #expect(promoted.work == .task(id: "task-exact"))
+            #expect(promoted.taskIds == ["task-exact"])
             #expect(promoted.cwd == (existing ? "/src/delivery" : session.cwd))
             #expect(promoted.agentProcessId == session.agentProcessId)
             #expect(promoted.taskPrimary)
@@ -165,7 +166,10 @@ private actor ControlsSource {
     init(assigned: Bool = false) throws {
         let session = try renameFixtureRecord("interactive", title: "Conversation")
         record = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(session)) as? [String: Any])
-        if assigned { record["work"] = ["kind": "task", "id": "task-exact"] }
+        if assigned {
+            record["work"] = ["kind": "task", "id": "task-exact"]
+            record["task_ids"] = ["task-exact"]
+        }
     }
 
     func holdList() { hold = true }
@@ -190,6 +194,7 @@ private actor ControlsSource {
             #expect(args.contains("--session"))
             #expect(!args.contains("--run"))
             record["work"] = ["kind": "task", "id": "task-exact"]
+            record["task_ids"] = ["task-exact"]
             record["task_primary"] = true
             return #"{"task":{"id":"task-exact","identifier":"INF-123","title":"Conversation"},"graph":null,"session_id":null,"milestone":"filed"}"#
         }
@@ -200,6 +205,7 @@ private actor ControlsSource {
         bindCount += 1
         if reject { reject = false; throw RegistryQueryError("Session changed before binding") }
         record["work"] = ["kind": "task", "id": "task-exact"]
+        record["task_ids"] = ["task-exact"]
         record["task_primary"] = true
         record["cwd"] = "/src/delivery"
         record["wave_id"] = "wave-exact"

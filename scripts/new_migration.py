@@ -3,7 +3,7 @@
 
     uv run python scripts/new_migration.py add_wave_colour
 
-Writes `rust/loopflow/src/store/migrations/<name>.sql`. The file is the
+Writes `rust/loopflow-storage/src/migrations/<name>.sql`. The file is the
 migration's registration and its name is its ledger identity; `build.rs` orders
 it by the first-parent commit on origin/main that adds it. A Task keeps one
 migration and edits it in place until it merges, so when the branch already
@@ -21,7 +21,11 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
-MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
+MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow-storage/src/migrations"
+MIGRATION_DIRECTORIES = (
+    Path("rust/loopflow/src/store/migrations"),
+    Path("rust/loopflow-storage/src/migrations"),
+)
 NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 SLUG_FILE = re.compile(r"^([a-z][a-z0-9_]*)\.sql$")
 DRAFT_MARKER = re.compile(r"^--[ \t]*draft:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
@@ -52,7 +56,13 @@ def _names() -> set[str]:
 def _unmerged() -> list[str]:
     """Slugs present here and absent on origin/main (or main without a remote)."""
     for main in ("origin/main", "main"):
-        listing = _git("ls-tree", "--name-only", main, "--", f"{MIGRATIONS_DIR.relative_to(REPO_ROOT)}/")
+        listing = _git(
+            "ls-tree",
+            "--name-only",
+            main,
+            "--",
+            *(f"{directory}/" for directory in MIGRATION_DIRECTORIES),
+        )
         if listing is None:
             continue
         merged = {Path(line).name for line in listing.splitlines()}

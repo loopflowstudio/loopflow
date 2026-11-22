@@ -3,10 +3,10 @@
 use anyhow::Result;
 use time::OffsetDateTime;
 
-use crate::lf::commands::util::short_id;
 use crate::lf::commands::WorkFilter;
-use crate::lf::output::{format_cost, format_int, truncate, Colors};
-use crate::session_record::SessionHistory;
+use loopflow_execution::output::short_id;
+use loopflow_execution::output::{format_cost, format_int, truncate, Colors};
+use loopflow_execution::session_record::SessionHistory;
 
 const REPO_WIDTH: usize = 18;
 const WORK_WIDTH: usize = 22;
@@ -38,7 +38,10 @@ pub fn run(
         if json {
             println!("{}", serde_json::to_string(&report)?);
         } else {
-            println!("{}", crate::context_usage::render_report(&report));
+            println!(
+                "{}",
+                loopflow_execution::context_usage::render_report(&report)
+            );
         }
         return Ok(());
     }
@@ -60,21 +63,24 @@ pub(crate) fn sessions(
 }
 
 /// `lf usage --context`: what each of `runs`' inputs was made of.
-pub fn context_report(runs: &[SessionHistory]) -> Result<crate::context_usage::ContextReport> {
+pub fn context_report(
+    runs: &[SessionHistory],
+) -> Result<loopflow_execution::context_usage::ContextReport> {
     // Oldest first: a Task's steps read in the order they ran.
-    let home = crate::store::lf_home_dir();
+    let home = loopflow_execution::store::lf_home_dir();
     let steps = if runs.is_empty() {
         Vec::new()
     } else {
-        let store = crate::store::sqlite::SqliteStore::open_processes_read_only(
-            &crate::store::database_path_from_env()?,
+        let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
+            &loopflow_execution::store::database_path_from_env()?,
+            loopflow_execution::store::token_key::encryption_key,
         )?;
         runs.iter()
             .rev()
-            .map(|run| crate::context_usage::step_context(&home, &store, run))
+            .map(|run| loopflow_execution::context_usage::step_context(&home, &store, run))
             .collect()
     };
-    Ok(crate::context_usage::ContextReport::new(steps))
+    Ok(loopflow_execution::context_usage::ContextReport::new(steps))
 }
 
 fn since_days(days: u32) -> i64 {
@@ -116,7 +122,7 @@ fn print_report(runs: &[SessionHistory], days: u32) {
     for run in runs {
         println!(
             "{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<SESSION_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  {id}",
-            time = crate::lf::output::format_time(run.observed_at),
+            time = loopflow_execution::output::format_time(run.observed_at),
             repo = truncate(&display_repo(run.repo.as_deref()), REPO_WIDTH),
             work = truncate(&run.work_label(), WORK_WIDTH),
             run = truncate(run.label(), SESSION_WIDTH),

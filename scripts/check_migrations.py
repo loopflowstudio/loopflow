@@ -17,6 +17,10 @@ forward migration.
   expand migration merged at least `STAGING_DAYS` ago left behind and exports
   the data it drops. A rebuild that keeps every column and a trigger or index
   change are additive. This is a CI measurement; nothing at runtime refuses.
+- A member the product stopped using carries `-- leaving: <table>[.<column>]
+  <Task ID>` in the migration that stopped using it. The mark names a current
+  member, and a contract whose expand step carries marks drops only marked
+  members.
 
     uv run python scripts/check_migrations.py
 
@@ -36,7 +40,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
-MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
+MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow-storage/src/migrations"
+MIGRATION_DIRECTORIES = (
+    Path("rust/loopflow/src/store/migrations"),
+    Path("rust/loopflow-storage/src/migrations"),
+)
 RELEASED = re.compile(r"^\d+\.\d+\.(?:\d+\.)?\d{3}_[a-z0-9_]+\.sql$")
 SLUG = re.compile(r"^([a-z][a-z0-9_]*)\.sql$")
 DRAFT_MARKER = re.compile(r"^--[ \t]*draft:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
@@ -44,10 +52,45 @@ DRAFT_MARKER = re.compile(r"^--[ \t]*draft:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.M
 # exported the data it drops before the SQL ran.
 EXPAND_MARKER = re.compile(r"^--[ \t]*expand:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
 EXPORTS_MARKER = re.compile(r"^--[ \t]*exports:[ \t]*(\S.*?)[ \t]*$", re.MULTILINE)
+# A member the product stopped using, and the Task that drops it.
+LEAVING_LINE = re.compile(r"^--[ \t]*leaving:(.*)$", re.MULTILINE)
+LEAVING_MARK = re.compile(
+    r"[ \t]*([a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)[ \t]+([A-Z][A-Z0-9]*-\d+)[ \t]*"
+)
 # How long an expand migration has been on origin/main before its contract may
 # drop what it left behind: the window in which lf processes on older builds
 # exit. The one place this number lives.
 STAGING_DAYS = 30
+
+
+@dataclass(frozen=True)
+class Leaving:
+    """`-- leaving: tasks.worktree LOO-877`: `member` is `table` or `table.column`."""
+
+    member: str
+    task: str
+
+    def covers(self, drop: str) -> bool:
+        """Whether this mark lets a contract drop `drop` (`table t` or `column t.c`)."""
+        kind, name = drop.split(" ", 1)
+        if kind == "column":
+            return self.member in (name, name.split(".", 1)[0])
+        return self.member == name
+
+
+def leaving_marks(name: str, sql: str) -> list[Leaving]:
+    marks = []
+    for line in LEAVING_LINE.findall(sql):
+        mark = LEAVING_MARK.fullmatch(line)
+        if mark is None:
+            _fail(f"{name}: `-- leaving:{line}` is not `-- leaving: <table>[.<column>] <Task ID>`")
+        marks.append(Leaving(member=mark.group(1), task=mark.group(2)))
+    return marks
+
+
+def drop_after(merged_at: dt.datetime) -> dt.date:
+    """The first day a contract may drop what a migration merged at `merged_at` left behind."""
+    return (merged_at + dt.timedelta(days=STAGING_DAYS)).date()
 
 
 def _fail(message: str) -> None:
@@ -65,7 +108,14 @@ def _migrations_at(ref: str) -> dict[str, bytes] | None:
     if exists.returncode != 0:
         return None
     listed = subprocess.run(
-        ["git", "ls-tree", "--name-only", ref, "--", f"{MIGRATIONS_DIR.relative_to(REPO_ROOT)}/"],
+        [
+            "git",
+            "ls-tree",
+            "--name-only",
+            ref,
+            "--",
+            *(f"{directory}/" for directory in MIGRATION_DIRECTORIES),
+        ],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -133,7 +183,12 @@ def _check_runtime_sql() -> None:
     names its columns: no positional INSERT, no `SELECT *`."""
     positional = re.compile(r"\bINSERT(?:\s+OR\s+\w+)?\s+INTO\s+\w+\s+VALUES\b", re.IGNORECASE)
     wildcard = re.compile(r"\bSELECT\s+(?:\w+\.)?\*", re.IGNORECASE)
-    for path in sorted((REPO_ROOT / "rust/loopflow/src").rglob("*.rs")):
+    sources = (
+        path
+        for crate in ("loopflow", "loopflow-execution", "loopflow-harness", "loopflow-storage")
+        for path in (REPO_ROOT / "rust" / crate / "src").rglob("*.rs")
+    )
+    for path in sorted(sources):
         if "test" in path.stem:
             continue
         # Unit-test modules trail production code; their fixtures seed historical schemas.
@@ -201,6 +256,12 @@ class Schema:
     views: dict[str, dict[str, Column]]
     unique_indexes: dict[str, UniqueIndex]
 
+    def has(self, member: str) -> bool:
+        """Whether `table` or `table.column` exists as a table or view."""
+        relation, _, column = member.partition(".")
+        columns = self.tables.get(relation, self.views.get(relation))
+        return columns is not None and (not column or column in columns)
+
     def members(self) -> set[str]:
         """`table waves`, `column waves.id`, `view wave_health`: what a drop names."""
         members = set()
@@ -221,12 +282,20 @@ class Catalog:
 
     @classmethod
     def of_origin_main(cls, files: dict[str, bytes]) -> Catalog:
-        directory = MIGRATIONS_DIR.relative_to(REPO_ROOT)
         listed = subprocess.run(
             [
-                "git", "log", "origin/main", "--first-parent", "--diff-merges=first-parent",
-                "--no-renames", "--diff-filter=A", "--reverse", "--format=%ct", "--name-only", "--",
-                f"{directory}/",
+                "git",
+                "log",
+                "origin/main",
+                "--first-parent",
+                "--diff-merges=first-parent",
+                "--no-renames",
+                "--diff-filter=A",
+                "--reverse",
+                "--format=%ct",
+                "--name-only",
+                "--",
+                *(f"{directory}/" for directory in MIGRATION_DIRECTORIES),
             ],
             cwd=REPO_ROOT,
             capture_output=True,
@@ -238,7 +307,7 @@ class Catalog:
         for line in listed.stdout.splitlines():
             if line.isdigit():
                 when = dt.datetime.fromtimestamp(int(line), dt.timezone.utc)
-            elif Path(line).parent == directory:  # `drafts/` once held same-named files
+            elif Path(line).parent in MIGRATION_DIRECTORIES:  # `drafts/` once held same-named files
                 added.setdefault(Path(line).name, when)
         return cls(files, added)
 
@@ -387,7 +456,11 @@ def _check_staging(local: dict[str, bytes], main: dict[str, bytes], unmerged: li
         sql = local[name].decode()
         before = _schema(conn)
         _apply(conn, name, sql)
-        drops, breaks = _compare(before, _schema(conn))
+        after = _schema(conn)
+        for mark in leaving_marks(name, sql):
+            if not after.has(mark.member):
+                _fail(f"{name} marks {mark.member} leaving, but no such table or column exists")
+        drops, breaks = _compare(before, after)
         if breaks:
             _fail(
                 f"{name} is not additive: {'; '.join(breaks)}. Stage it: add the new shape now"
@@ -424,8 +497,16 @@ def _check_contract(name: str, sql: str, drops: list[str], catalog: Catalog) -> 
     if age < dt.timedelta(days=STAGING_DAYS):
         _fail(
             f"{name} contracts {step}, which merged {age.days} days ago; its contract clears on"
-            f" {merged_at + dt.timedelta(days=STAGING_DAYS):%Y-%m-%d} ({STAGING_DAYS} days)"
+            f" {drop_after(merged_at):%Y-%m-%d} ({STAGING_DAYS} days)"
         )
+    marks = leaving_marks(expand_file, catalog.files[expand_file].decode())
+    if marks:
+        for item in drops:
+            if not any(mark.covers(item) for mark in marks):
+                _fail(
+                    f"{name} drops {item}, which {step} does not mark leaving;"
+                    " a contract of a marking migration drops only marked members"
+                )
     left_behind = _schema(catalog.replay(before=expand_file)).members()
     for item in drops:
         if item not in left_behind:
@@ -439,7 +520,8 @@ def _check_contract(name: str, sql: str, drops: list[str], catalog: Catalog) -> 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--write-package-order", action="store_true",
+        "--write-package-order",
+        action="store_true",
         help="record origin/main's migration order in the source package",
     )
     args = parser.parse_args()
@@ -461,7 +543,7 @@ def main() -> None:
         slugs = [name for name in catalog.ordered() if SLUG.match(name)]
         if any(name not in catalog.added for name in slugs):
             _fail("package order requires origin/main's full migration history")
-        (REPO_ROOT / "rust/loopflow/migration-order.txt").write_text(
+        (REPO_ROOT / "rust/loopflow-storage/migration-order.txt").write_text(
             "".join(f"{Path(name).stem}\n" for name in slugs)
         )
     # A merge-queue group may carry several Tasks' migrations at once.

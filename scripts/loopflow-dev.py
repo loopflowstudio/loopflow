@@ -11,8 +11,8 @@ Commands:
     test            Build and run tests
     ghostty-build   Build the pinned patched GhosttyKit
     ghostty-vt-build  Build the libghostty-vt archives lf links (--publish uploads)
-    run             Build and launch the app
-    run-debug       Build and run with stdout visible (--world <dir> opens an lf-world)
+    run             Build and launch Loopflow Dev on the live Machine
+    run-debug       The same, with stdout visible
     release         Build release .app and .dmg (delegates to release-loopflow.py)
     clean           Remove dev app and reset permissions
     xcode           Open in Xcode
@@ -44,6 +44,7 @@ from pathlib import Path
 import boto3
 import botocore.exceptions
 from app_bundle import install_app_executable
+from bundle_version import read_build_revision, read_release_version, stamp_bundle_version
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
@@ -57,15 +58,14 @@ DEV_BUNDLE_ID = "com.loopflow.mac.dev"
 DEV_SIGNING_IDENTITY = "Loopflow Dev"
 # The dev app's executable gets its own name so `pgrep -x Loopflow`, Activity
 # Monitor and `ps` address the release app without touching Loopflow Dev.
-DEV_EXECUTABLE = "Loopflow Dev"
+DEV_EXECUTABLE = DEV_APP.stem
 LOGIN_KEYCHAIN = Path.home() / "Library" / "Keychains" / "login.keychain-db"
 ENV_SETUP = REPO_ROOT / "scripts" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
-DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
 # One pin for the Ghostty revision Desktop's framework and lf's terminal library
 # are built from; build.rs reads the same file to fetch and link libghostty-vt.
-GHOSTTY_VT_PIN = REPO_ROOT / "rust" / "loopflow" / "ghostty-vt.json"
+GHOSTTY_VT_PIN = REPO_ROOT / "rust" / "loopflow-terminal" / "ghostty-vt.json"
 GHOSTTY_REVISION = json.loads(GHOSTTY_VT_PIN.read_text())["revision"]
 GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf8.xcframework.zip"
 # Rust target → Zig target for the libghostty-vt archives `lf` links.
@@ -75,18 +75,6 @@ GHOSTTY_VT_TARGETS = {
     "x86_64-unknown-linux-gnu": "x86_64-linux-gnu",
     "aarch64-unknown-linux-gnu": "aarch64-linux-gnu",
 }
-
-
-def _app_environment(repo: Path, world: Path | None = None) -> dict[str, str]:
-    env = {
-        "LOOPFLOW_DEV_WAVE_REPO": str(repo),
-        "LF_BIN": str(DEV_APP / "Contents/MacOS/lf"),
-    }
-    if value := os.environ.get("LF_HOME"):
-        env["LF_HOME"] = value
-    if world:
-        env.update(json.loads((world / "env.json").read_text()))
-    return env
 
 
 def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -99,33 +87,11 @@ def run_capture(cmd: list[str], cwd: Path | None = None) -> subprocess.Completed
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
 
 
-def run_app_bundle_with_log(
-    app_path: Path,
-    log_path: Path,
-    args: list[str] | None = None,
-    env: dict[str, str] | None = None,
-) -> int:
-    """Launch app bundle through LaunchServices and stream redirected stdout/stderr.
-
-    `env` entries are passed to the launched app via `open --env` (LaunchServices
-    does not inherit this process's environment).
-    """
-    DEV_LOG_DIR.mkdir(parents=True, exist_ok=True)
-
-    open_cmd = [
-        "open",
-        "-n",
-        "-W",
-        "--stdout",
-        str(log_path),
-        "--stderr",
-        str(log_path),
-    ]
-    for key, value in (env or {}).items():
-        open_cmd.extend(["--env", f"{key}={value}"])
-    open_cmd.append(str(app_path))
-    if args:
-        open_cmd.extend(["--args", *args])
+def run_app_bundle_with_log(open_args: list[str], env: dict[str, str]) -> int:
+    """Stream the Dev app's output until it quits."""
+    log_path = LOOPFLOW_STREAM_LOG
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    open_cmd = ["open", "-W", "--stdout", str(log_path), "--stderr", str(log_path), *open_args]
     with log_path.open("a", encoding="utf-8") as log_file:
         log_file.write(f"\n\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
         log_file.write(f"$ {' '.join(open_cmd)}\n\n")
@@ -133,10 +99,10 @@ def run_app_bundle_with_log(
 
     tail_process = subprocess.Popen(["tail", "-n", "0", "-F", str(log_path)])
     try:
-        return run(open_cmd, check=False).returncode
+        return subprocess.run(open_cmd, env=env).returncode
     except KeyboardInterrupt:
         print("\nStopping app...")
-        _stop_loopflow_app(app_path)
+        _stop_loopflow_app(DEV_APP)
         return 130
     finally:
         if tail_process.poll() is None:
@@ -519,94 +485,32 @@ def _publish_ghostty_vt_archive(archive: Path, name: str, sha256: str, base_url:
     return sha256
 
 
-def cmd_run() -> int:
-    """Build and launch the app."""
-    print("Building and running Loopflow...")
+def cmd_run(repo: Path = REPO_ROOT, debug: bool = False) -> int:
     result = cmd_install()
     if result != 0:
         return result
-    if not _check_repository_opening(REPO_ROOT):
-        return 1
-    # Tell the app which checkout initiated the launch. Repository discovery
-    # collapses linked worktrees to their authoritative main checkout.
-    command = ["open", "-n"]
-    for key, value in _app_environment(REPO_ROOT).items():
-        command.extend(["--env", f"{key}={value}"])
-    command.extend([str(DEV_APP), "--args", "--repo", str(REPO_ROOT)])
-    run(command)
-    return 0
 
-
-def _check_repository_opening(repo: Path, world: Path | None = None) -> bool:
-    cli = DEV_APP / "Contents" / "MacOS" / "lf"
-    # Match an app launch, not the enclosing agent's Task or process context.
+    print("Opening the Machine.", flush=True)
+    open_args = [
+        "-n",
+        "--env",
+        f"LOOPFLOW_DEV_WAVE_REPO={repo}",
+        str(DEV_APP),
+        "--args",
+        "--repo",
+        str(repo),
+    ]
     env = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
-    env.update(_app_environment(repo, world))
-    print(f"Checking repository opening through {cli}...", flush=True)
-    try:
-        result = subprocess.run(
-            [str(cli), "config", "repository", "--json"],
-            cwd=repo,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        detail = str(error)
-    else:
-        if result.returncode == 0:
-            return True
-        detail = result.stderr.strip() or f"lf exited with status {result.returncode}"
-
-    print(f"Loopflow Dev cannot open this repository:\n{detail}", file=sys.stderr)
-    print(
-        "The app uses its bundled CLI. Check the reported repository or schema error; "
-        "ordinary app commands never migrate the shared database.",
-        file=sys.stderr,
-    )
-    return False
-
-
-def _print_run_debug_checklist() -> None:
-    """Print the manual review path for Work and Session surfaces."""
-    print("Review checklist:")
-    print("  1. Select a Wave: inspect its plan, Tasks and Runs.")
-    print("  2. Open a Session under a Task and verify its terminal is retained across navigation.")
-    print("  3. Verify Task conditions and PR delivery refresh from lf wave status.")
-
-
-def cmd_run_debug(repo: Path = REPO_ROOT, world: Path | None = None) -> int:
-    """Build and run with stdout visible. `repo` is the repo the app opens;
-    `world` is an `lf-world build` directory whose data and repo it opens instead."""
-    if world:
-        repo = world / "repo"
-    print("Building and running Loopflow (debug mode with logs)...")
-    result = cmd_install()
-    if result != 0:
-        return result
-    if not _check_repository_opening(repo, world):
-        return 1
-    print("Logs: ~/.lf/logs/lf.log (exits: lf doctor)")
-    print(f"Stream log: {LOOPFLOW_STREAM_LOG}")
-    print(f"Bundled lf: {DEV_APP}/Contents/MacOS/lf")
-    print(
-        "The app and its children use the bundled CLI; "
-        "LF_HOME selects data, not a different binary."
-    )
-    print("Telemetry dashboard: Go → Telemetry (⌘1)")
-    _print_run_debug_checklist()
-    print("Press Ctrl+C to quit")
-    print("---")
-    return run_app_bundle_with_log(
-        DEV_APP,
-        LOOPFLOW_STREAM_LOG,
-        args=["--repo", str(repo)],
-        # Repository discovery collapses this checkout to its authoritative
-        # main checkout before displaying or reading it.
-        env=_app_environment(repo, world),
-    )
+    if debug:
+        print(f"Logs: {Path.home()}/.lf/logs/lf.log (exits: lf doctor)")
+        print("Telemetry dashboard: Go → Telemetry (⌘1)")
+        print("Review checklist:")
+        print("  1. Select a Wave: inspect its plan, Tasks and Runs.")
+        print("  2. Open a Task Session and check that its terminal survives navigation.")
+        print("  3. Verify Task conditions and PR delivery refresh from lf wave status.")
+        print(f"Stream log: {LOOPFLOW_STREAM_LOG} (Ctrl+C to quit)")
+        return run_app_bundle_with_log(open_args, env)
+    return subprocess.run(["open", *open_args], env=env).returncode
 
 
 def cmd_release() -> int:
@@ -781,20 +685,23 @@ def _ensure_dev_signing_identity() -> str:
 def _install_dev_app() -> None:
     """Install debug build to stable location for permissions persistence."""
     app_dir = DEV_APP / "Contents"
-    macos_dir = app_dir / "MacOS"
-    # Every install writes the whole of Contents/MacOS, so start it empty: a
-    # binary an older install left under another name can never be launched.
-    shutil.rmtree(macos_dir, ignore_errors=True)
-    macos_dir.mkdir(parents=True)
-    (app_dir / "Resources").mkdir(parents=True, exist_ok=True)
+    # Replace the previous bundle contents, including older bundled helpers and agents.
+    if app_dir.exists():
+        shutil.rmtree(app_dir)
+    (app_dir / "Resources").mkdir(parents=True)
 
-    # The dev plist names the executable `Loopflow Dev`, so install against it.
-    shutil.copy(SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir)
-    _apply_dev_identity(app_dir / "Info.plist")
-    install_app_executable(SWIFT_DIR / ".build" / "debug", app_dir / "Info.plist", app_dir)
+    plist = app_dir / "Info.plist"
+    info = plistlib.loads((SWIFT_DIR / "LoopflowMac" / "Info.plist").read_bytes())
+    info.update(
+        CFBundleIdentifier=DEV_BUNDLE_ID,
+        CFBundleExecutable=DEV_EXECUTABLE,
+        CFBundleName=DEV_EXECUTABLE,
+        CFBundleDisplayName=DEV_EXECUTABLE,
+    )
+    plist.write_bytes(plistlib.dumps(info))
+    stamp_bundle_version(plist, read_release_version(REPO_ROOT), read_build_revision(REPO_ROOT))
+    install_app_executable(SWIFT_DIR / ".build" / "debug", plist, app_dir)
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
-    _copy_bundled_tools(macos_dir)
-    (app_dir / "Resources" / DEV_CONTROL_CONFIG).unlink(missing_ok=True)
 
     run(
         [
@@ -814,18 +721,8 @@ def _install_dev_app() -> None:
     run(codesign_cmd)
 
 
-def _apply_dev_identity(plist: Path) -> None:
-    """Give the dev app its own settings domain and process name."""
-    run(["plutil", "-replace", "CFBundleIdentifier", "-string", DEV_BUNDLE_ID, str(plist)])
-    run(["plutil", "-replace", "CFBundleExecutable", "-string", DEV_EXECUTABLE, str(plist)])
-    run(["plutil", "-replace", "CFBundleName", "-string", "Loopflow Dev", str(plist)])
-    run(["plutil", "-replace", "CFBundleDisplayName", "-string", "Loopflow Dev", str(plist)])
-
-
-def _build_control_tools() -> Path:
-    # The app is a live operator surface even when its Swift shell is a dev
-    # build. The app selects its bundled CLI for every child; an ordinary lf
-    # never migrates the main Machine.
+def _build_lf() -> Path:
+    """Build the helper used by Xcode bundles and private test Machines."""
     target_dir = REPO_ROOT / "target" / "dev-app-control"
     cargo_cmd = [
         "/usr/bin/env",
@@ -845,22 +742,18 @@ def _build_control_tools() -> Path:
     return source
 
 
-def _copy_bundled_tools(app_macos_dir: Path) -> None:
-    agents = app_macos_dir.parent / "Library/LaunchAgents"
-    shutil.copytree(SWIFT_DIR / "LaunchAgents", agents, dirs_exist_ok=True)
-    shutil.copy(_build_control_tools(), app_macos_dir / "lf")
-
-
 def cmd_prepare_control_tools() -> int:
     """Prepare the same control binary the app verifies and copies."""
-    _build_control_tools()
+    _build_lf()
     return 0
 
 
 def cmd_bundle_control_tools(output: Path) -> int:
     """Build control tools into an Xcode app bundle."""
     output.mkdir(parents=True, exist_ok=True)
-    _copy_bundled_tools(output)
+    agents = output.parent / "Library/LaunchAgents"
+    shutil.copytree(SWIFT_DIR / "LaunchAgents", agents, dirs_exist_ok=True)
+    shutil.copy(_build_lf(), output / "lf")
     return 0
 
 
@@ -885,7 +778,7 @@ COMMANDS = {
     "ghostty-build": (cmd_ghostty_build, "Build the pinned patched GhosttyKit"),
     "ghostty-vt-build": (cmd_ghostty_vt_build, "Build the libghostty-vt archives lf links"),
     "run": (cmd_run, "Build and launch the app"),
-    "run-debug": (cmd_run_debug, "Build and run with stdout visible"),
+    "run-debug": (cmd_run, "Build and run with stdout visible"),
     "release": (cmd_release, "Build release .app and .dmg"),
     "clean": (cmd_clean, "Remove dev app and reset permissions"),
     "xcode": (cmd_xcode, "Open in Xcode"),
@@ -914,11 +807,6 @@ def main() -> int:
                 type=lambda p: Path(p).expanduser().resolve(),
                 default=REPO_ROOT,
                 help="Repo the app opens on launch (default: this checkout)",
-            )
-            sub.add_argument(
-                "--world",
-                type=lambda p: Path(p).expanduser().resolve(),
-                help="lf-world directory: open its repo with its LF_HOME and provider homes",
             )
         if name == "ghostty-vt-build":
             sub.add_argument(
@@ -952,7 +840,7 @@ def main() -> int:
 
     func, _ = COMMANDS[args.command]
     if args.command == "run-debug":
-        return func(repo=args.repo, world=args.world)
+        return func(repo=args.repo, debug=True)
     if args.command == "setup":
         return func(install=args.install, dry_run=args.dry_run)
     if args.command == "bundle-control-tools":

@@ -1,19 +1,6 @@
 import SwiftUI
 import CoreText
 
-public enum AppRuntime {
-    public static var isAutomatedTest: Bool {
-        let environment = ProcessInfo.processInfo.environment
-        if environment["XCTestConfigurationFilePath"] != nil ||
-            environment["LOOPFLOW_UI_TEST_MODE"] != nil {
-            return true
-        }
-
-        let arguments = ProcessInfo.processInfo.arguments
-        return arguments.contains("-ui-test-mode") || arguments.contains("--snapshot")
-    }
-}
-
 private final class LoopflowBundleToken {}
 
 extension Bundle {

@@ -29,19 +29,15 @@ struct WorkProjection {
 
     init(roadmaps: [WaveRoadmap], inventory: [RoadmapTask], sessions: [SessionRecord]) {
         var matched = Set<String>()
-        let visibleTaskIds = Set(inventory.flatMap { [$0.id, $0.runtime?.workId].compactMap { $0 } })
+        let visibleTaskIds = Set(inventory.map(\.id))
         var taskSessions: [String: [SessionRecord]] = [:]
         var waveSessions: [String: [SessionRecord]] = [:]
         // Index the shared memberships once. A Session may belong to more than
         // one Task; workspace and explicit membership must not duplicate a row.
         for session in sessions {
-            var taskIds = Set(session.taskIds)
-            if let taskId = session.workspace?.taskId { taskIds.insert(taskId) }
-            let visibleMemberships = taskIds.intersection(visibleTaskIds)
-            if session.primaryScope == nil {
-                for taskId in visibleMemberships {
-                    taskSessions[taskId, default: []].append(session)
-                }
+            let visibleMemberships = Set(session.taskIds).intersection(visibleTaskIds)
+            for taskId in visibleMemberships {
+                taskSessions[taskId, default: []].append(session)
             }
             if visibleMemberships.isEmpty {
                 let waveId = session.work?.kind == .wave ? session.work?.id
@@ -57,8 +53,8 @@ struct WorkProjection {
                 id: WorkNodeKey(repo: repo, work: .wave(id: wave.wave.id)),
                 roadmap: wave,
                 sessions: records,
-                tasks: wave.tasks.items.sorted { $0.task.rank < $1.task.rank }.map { task in
-                    let records = task.runtime.flatMap { taskSessions[$0.workId] } ?? []
+                tasks: wave.tasks.items.map { task in
+                    let records = taskSessions[task.id] ?? []
                     matched.formUnion(records.map(\.id))
                     return TaskProjection(
                         id: WorkNodeKey(repo: repo, work: .task(id: task.id)),
@@ -67,8 +63,8 @@ struct WorkProjection {
                 }
             )
         }
-        standaloneTasks = inventory.filter { $0.task.waveId == nil }.sorted { $0.task.rank < $1.task.rank }.map { task in
-            let records = taskSessions[task.runtime?.workId ?? task.id] ?? []
+        standaloneTasks = inventory.filter { $0.task.waveId == nil }.map { task in
+            let records = taskSessions[task.id] ?? []
             matched.formUnion(records.map(\.id))
             return TaskProjection(id: WorkNodeKey(repo: task.task.repo, work: .task(id: task.id)), task: task, sessions: records)
         }
@@ -105,7 +101,7 @@ struct WorkProjection {
         }
         guard let selection else { return nil }
         if let task = standaloneTasks.first(where: {
-            $0.id.work == selection || $0.task.runtime.map { WorkReference.task(id: $0.workId) } == selection
+            $0.id.work == selection
         }) {
             return WorkBreadcrumb(wave: nil, task: task, session: nil, siblings: task.sessions)
         }
@@ -114,7 +110,7 @@ struct WorkProjection {
                 return WorkBreadcrumb(wave: wave, task: nil, session: nil, siblings: wave.sessions)
             }
             if let task = wave.tasks.first(where: {
-                $0.id.work == selection || $0.task.runtime.map { WorkReference.task(id: $0.workId) } == selection
+                $0.id.work == selection
             }) {
                 return WorkBreadcrumb(wave: wave, task: task, session: nil, siblings: task.sessions)
             }
@@ -133,7 +129,7 @@ struct WorkProjection {
         guard let session = unmatchedSessions.first(where: { $0.id == sessionId }) else { return nil }
         if session.primaryScope == "repository" { return nil }
         if session.primaryScope == "wave" { return session.waveId.map { .wave(id: $0) } }
-        return session.workspace?.taskId.map { .task(id: $0) } ?? session.work
+        return session.taskIds.first.map { .task(id: $0) } ?? session.work
     }
 }
 
@@ -151,10 +147,8 @@ struct WorkBreadcrumb {
     }
 
     var taskWork: WorkReference? {
-        guard session?.primaryScope == nil else { return nil }
         if let task { return task.id.work }
-        if let id = session?.workspace?.taskId { return .task(id: id) }
-        if let work = session?.work, work.kind == .task { return work }
+        if let id = session?.taskIds.first { return .task(id: id) }
         return nil
     }
 }
@@ -172,30 +166,16 @@ struct SessionBindingDraft: Equatable {
     var error: String?
 }
 
-/// An in-place Session name edit. It belongs to exactly one Session; a
-/// completion for another Session can never touch it.
+/// An in-place Session name edit for exactly one Session. Saving it makes a
+/// pending change and closes it.
 struct SessionRenameDraft: Equatable {
-    let id = UUID()
     let sessionId: String
     var text: String
-    var error: String?
-    var submitting = false
-}
-
-/// One Task's in-flight `lf task run` or `lf task move` and its refusal.
-struct TaskRunDraft: Equatable {
-    enum Phase { case runningCommand, awaitingObservation }
-    var phase: Phase?
-    var acting: Bool { phase != nil }
-    var progress: String {
-        phase == .awaitingObservation ? "Task updated; refreshing…" : "Updating Task…"
-    }
-    var error: String?
 }
 
 /// A Wave view's named parts, as `lf desktop -p` names them.
 enum WaveViewPart: String, CaseIterable, Hashable {
-    case board, session, tiles
+    case backlog, session, tiles
 
     /// The Tasks strip distracts more than it helps for now (Jack Heart, LOO-673);
     /// Show… or `lf desktop show -p tiles` brings it back.
@@ -204,24 +184,18 @@ enum WaveViewPart: String, CaseIterable, Hashable {
     /// How the view's `Show…` menu names it.
     var title: String {
         switch self {
-        case .board: "Board"
+        case .backlog: "Backlog"
         case .session: "Session"
         case .tiles: "Tasks"
         }
     }
 }
 
-/// The section a Wave board shows, one at a time; Backlog by default.
-enum WaveBoardSection: String, CaseIterable, Hashable {
-    case backlog, working, autonomous, done
-
-    var title: String { rawValue.capitalized }
-}
-
 /// A Wave view's dividers: the conversation's share of the top band's width, and
-/// the top band's share of the view's height, golden by default.
+/// the top band's share of the view's height. The backlog takes the golden share
+/// of the band and the conversation the golden share of what remains.
 struct WaveViewRatios: Equatable {
-    var session = 1 - FocusSizing.golden
+    var session = (1 - FocusSizing.golden) * FocusSizing.golden
     var band = FocusSizing.golden
 }
 
@@ -229,6 +203,9 @@ struct WaveViewRatios: Equatable {
 @MainActor
 @Observable
 final class WorkNavigation {
+    let performanceOwner = UUID()
+    @ObservationIgnored var liveSessionCount: Int?
+
     enum SidebarFilter: String, CaseIterable {
         case working = "Working tasks"
         case available = "Available"
@@ -249,16 +226,20 @@ final class WorkNavigation {
     }
     /// Each board's page; it outlives entering a tile and coming back. Nil is the unsaved view.
     var boardPages: [Board?: Int] = [:]
-    /// Each Wave view's hidden board and strip; its conversation hides as its session pane.
+    /// Each Wave view's hidden backlog and strip; its conversation hides as its session pane.
     var hiddenViewParts: [Board: Set<WaveViewPart>] = [:]
-    /// Each Wave view's zoomed board or strip; its conversation zooms as its session pane.
+    /// Each Wave view's zoomed backlog or strip; its conversation zooms as its session pane.
     var zoomedViewParts: [Board: WaveViewPart] = [:]
     var waveRatios: [Board: WaveViewRatios] = [:]
-    var boardSections: [Board: WaveBoardSection] = [:]
+    /// Each Wave view's backlog selection, filter, search and draft; it outlives entering a Task.
+    var backlogs: [Board: BacklogState] = [:]
     var showsSlotHints = false
     var sidebarFilter: SidebarFilter = .working {
         willSet {
-            if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline") }
+            if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline:\(newValue.rawValue)", liveSessions: liveSessionCount, owner: performanceOwner) }
+        }
+        didSet {
+            if oldValue != sidebarFilter { Perf.acknowledged(Perf.hierarchyInteraction, id: "outline:\(sidebarFilter.rawValue)", owner: performanceOwner) }
         }
     }
     var sidebarFocusRequested = false
@@ -298,8 +279,8 @@ final class WorkNavigation {
         set {
             workspacePresentation.selectedSessionId = newValue
             // Leaving a Session abandons an unsubmitted edit; a submitted one
-            // still settles against its own Session.
-            if let renaming, renaming.sessionId != selectedSessionId, !renaming.submitting {
+            // is already a pending change.
+            if let renaming, renaming.sessionId != selectedSessionId {
                 self.renaming = nil
             }
             if let binding, binding.sessionId != selectedSessionId, !binding.submitting {
@@ -309,20 +290,19 @@ final class WorkNavigation {
     }
     var renaming: SessionRenameDraft?
     var binding: SessionBindingDraft?
-    /// Graph drafts by planning Task id; they survive Task and Session navigation.
-    var taskRunDrafts: [String: TaskRunDraft] = [:]
-    /// What the last Auto-Ship or Stop Auto-Ship on the window heading did.
-    var shipNotice: ShipNotice?
+    /// The window's one Notice: refusals, requested changes and failed reads.
+    let notices = NoticeCenter()
     var startingTaskSessions: Set<String> = []
-    var taskSessionErrors: [String: String] = [:]
+    /// The New Task request this window submitted and has not opened yet. Its
+    /// words stand in for the Task's conversation from the click until the
+    /// answer installs it.
+    var startingTask: StartingTask?
     /// Successful `task prepare` receipts, available before the next roadmap read.
     var preparedTaskWorktrees: [String: WorkspaceIdentity] = [:]
     /// Tasks whose Comments are expanded; a presentation fact, not a reading.
     var expandedComments: Set<String> = []
     /// Tasks whose Session history is disclosed; history is read only then.
     var expandedHistory: Set<String> = []
-    /// Wave planning notices whose Details are open, keyed by Task ID.
-    var expandedNotices: Set<String> = []
     /// Graph processes whose graph and steps are open, keyed by Graph process.
     var expandedGraphProcesses: Set<String> = []
     enum Destination: Equatable {

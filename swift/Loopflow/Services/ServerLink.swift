@@ -38,7 +38,7 @@ public actor ServerLink {
     private nonisolated let endpoint: ServerEndpoint
     private let carrier: any ServerCarrier
     private var order = ServerMessageOrder()
-    private var pending: [String: CheckedContinuation<RawJSON, any Error>] = [:]
+    private var pending: [String: CheckedContinuation<ServerAnswer, any Error>] = [:]
     private var subscriptions: [String: ServerSubscription] = [:]
     private var failure: (any Error)?
     private var unansweredReads = 0
@@ -57,6 +57,24 @@ public actor ServerLink {
     public static let unanswered = "Loopflow server did not answer in time; check `lf server status`"
     static let handshakeExpired = "Loopflow server did not answer within 10s; check `lf server status`"
 
+    /// Whether `error` lost the connection before an answer arrived, so a
+    /// change sent again under its request ID still runs once.
+    public static func lostLink(_ error: any Error) -> Bool {
+        if let error = error as? URLError {
+            switch error.code {
+            case .networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost,
+                 .cannotFindHost, .dnsLookupFailed, .timedOut:
+                return true
+            default:
+                return false
+            }
+        }
+        if let error = error as? RegistryQueryError {
+            return [disconnected, handshakeExpired, unanswered].contains(error.message)
+        }
+        return (error as NSError).domain == NSPOSIXErrorDomain
+    }
+
     public static func open(_ endpoint: ServerEndpoint) async throws -> ServerLink {
         let carrier = try await endpoint.control()
         do {
@@ -68,7 +86,7 @@ public actor ServerLink {
                 }
                 switch try ServerMessage(line: first) {
                 case .welcome(let welcome): return welcome
-                case .error(_, let code, let message, let data): throw ServerError(code: code, message: message, data: data)
+                case .error(_, let code, let message, let data, _): throw ServerError(code: code, message: message, data: data)
                 default: throw RegistryQueryError("Server did not welcome the connection")
                 }
             }
@@ -89,6 +107,12 @@ public actor ServerLink {
 
     public var isClosed: Bool { failure != nil }
 
+    /// What a window says of a reading from this server that this build can't
+    /// decode: the two are different builds, and the sentence names both.
+    public nonisolated var unreadable: String {
+        "This Loopflow (\(endpoint.client.version)) can't read what the server (\(welcome.build)) sent."
+    }
+
     /// Ends the connection on purpose: requests fail and watches end rather than resume.
     public func close() async {
         fail(RegistryQueryError(Self.closed), resumable: false)
@@ -101,11 +125,54 @@ public actor ServerLink {
     /// stalled server shows as unavailable rather than current. Without one the
     /// request waits, because its outcome would otherwise become unknown.
     public func request(_ operation: ServerOperation, deadline: Duration? = nil) async throws -> RawJSON {
-        guard let deadline else { return try await admitted(operation) }
+        try await request(operation, requestID: nil, deadline: deadline).result
+    }
+
+    /// A write under `requestID`, answered with the revisions it advanced. A
+    /// repeat under the same ID, on this or a later connection, gets the same
+    /// answer and runs nothing. A failed write throws a `ServerError` whose
+    /// `revisions` lists domains that advanced while it ran, including other writes.
+    public func write(_ change: ServedWrite, requestID: String) async throws -> ServerAnswer {
+        try await request(.command(change), requestID: requestID, deadline: nil)
+    }
+
+    private func request(_ operation: ServerOperation, requestID: String?, deadline: Duration?) async throws -> ServerAnswer {
+        let measured: ServerOperation? = switch operation {
+        case .read(let query): .measuredRead(query)
+        case .command(let change): .measuredWrite(change)
+        case .submittedCreation(let payload): .measuredSubmission(payload)
+        default: nil
+        }
+        if let measured, let work = InteractionTrace.current?.work, !work.isSealed {
+            if case .read = operation { work.servedRead() } else { work.servedWrite() }
+            defer { work.requestFinished() }
+            if welcome.revision < 6 {
+                work.sqlUnavailable()
+                return try await InteractionTrace.$current.withValue(nil) {
+                    try await self.request(operation, requestID: requestID, deadline: deadline)
+                }
+            }
+            do {
+                let response = try await request(measured, requestID: requestID, deadline: deadline)
+                let fields = try response.result.fields()
+                struct Receipt: Decodable { let id: String; let statements: UInt64; let rows: UInt64 }
+                guard let result = fields["result"] else {
+                    throw RegistryQueryError("Measured read is missing its result")
+                }
+                if let counts = try? fields["work"]?.decode(Receipt.self) {
+                    work.sql(statements: counts.statements, rows: counts.rows, receipt: counts.id)
+                } else { work.sqlUnavailable() }
+                return ServerAnswer(result: result, revisions: response.revisions)
+            } catch {
+                work.sqlUnavailable()
+                throw error
+            }
+        }
+        guard let deadline else { return try await admitted(operation, requestID: requestID) }
         struct Expired: Error {}
         do {
-            let value = try await withThrowingTaskGroup(of: RawJSON.self) { group in
-                group.addTask { try await self.admitted(operation) }
+            let value = try await withThrowingTaskGroup(of: ServerAnswer.self) { group in
+                group.addTask { try await self.admitted(operation, requestID: requestID) }
                 group.addTask {
                     try await Task.sleep(for: deadline)
                     throw Expired()
@@ -124,11 +191,11 @@ public actor ServerLink {
 
     /// Admission refusals ran nothing. Give ordinary concurrent loading time to
     /// drain without replaying a dispatched or disconnected command.
-    private func admitted(_ operation: ServerOperation) async throws -> RawJSON {
+    private func admitted(_ operation: ServerOperation, requestID: String?) async throws -> ServerAnswer {
         let deadline = ContinuousClock.now + Self.busyWait
         var delay = Duration.milliseconds(100)
         while true {
-            do { return try await requestOnce(operation) }
+            do { return try await requestOnce(operation, requestID: requestID) }
             catch let error as ServerError {
                 guard ContinuousClock.now < deadline, error.code == .busy,
                       case .integer = error.data["max"],
@@ -142,15 +209,15 @@ public actor ServerLink {
 
     private struct Ticket: Decodable { let ticket: String }
 
-    private func requestOnce(_ operation: ServerOperation) async throws -> RawJSON {
+    private func requestOnce(_ operation: ServerOperation, requestID: String?) async throws -> ServerAnswer {
         let id = UUID().uuidString
-        let message = try Self.line(.request(id: id, operation: operation, select: nil))
+        let message = try Self.line(.request(id: id, operation: operation, select: nil, requestID: requestID))
         if message.count <= ServerProtocol.maxMessage {
             return try await answer(id) { try await self.send(message) }
         }
         // An upload ticket admits a second connection carrying this one request;
         // its answer arrives here under the request's own id.
-        let ticket = try await requestOnce(.requestUpload(bytes: message.count)).decode(Ticket.self).ticket
+        let ticket = try await requestOnce(.requestUpload(bytes: message.count), requestID: nil).result.decode(Ticket.self).ticket
         return try await answer(id) {
             try await self.ticketed(ticket) { try await $0.send(message) }
         }
@@ -158,7 +225,7 @@ public actor ServerLink {
 
     /// Cancelling sends `cancel` and releases the wait; a command already
     /// dispatched may still complete.
-    private func answer(_ id: String, deliver: @escaping @Sendable () async throws -> Void) async throws -> RawJSON {
+    private func answer(_ id: String, deliver: @escaping @Sendable () async throws -> Void) async throws -> ServerAnswer {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 if let failure { continuation.resume(throwing: failure); return }
@@ -260,8 +327,8 @@ public actor ServerLink {
 
     private func deliver(_ message: ServerMessage) throws {
         switch message {
-        case .response(let id, _, let result):
-            pending.removeValue(forKey: id)?.resume(returning: result)
+        case .response(let id, _, let result, let revisions):
+            pending.removeValue(forKey: id)?.resume(returning: ServerAnswer(result: result, revisions: revisions))
             // A null result confirms a registered subscription; anything else is
             // a late answer to a forgotten request.
         case .reading(let id, let checkpoint, let frame):
@@ -283,9 +350,9 @@ public actor ServerLink {
             subscriptions[id]?.receive(event)
         case .ended(let id):
             subscriptions.removeValue(forKey: id)?.end()
-        case .error(let id?, let code, let message, let data):
-            settle(id, throwing: ServerError(code: code, message: message, data: data))
-        case .error(nil, let code, let message, let data):
+        case .error(let id?, let code, let message, let data, let revisions):
+            settle(id, throwing: ServerError(code: code, message: message, data: data, revisions: revisions))
+        case .error(nil, let code, let message, let data, _):
             throw ServerError(code: code, message: message, data: data)
         case .welcome, .status, .bridged, .admitted:
             throw RegistryQueryError("Server repeated its greeting; update the client")
@@ -312,7 +379,7 @@ public actor ServerLink {
                 }
                 switch try ServerMessage(line: first) {
                 case .admitted: break
-                case .error(_, let code, let message, let data): throw ServerError(code: code, message: message, data: data)
+                case .error(_, let code, let message, let data, _): throw ServerError(code: code, message: message, data: data)
                 default: throw RegistryQueryError("Server did not admit the ticket; update the client")
                 }
             }
@@ -369,14 +436,23 @@ private final class Expiry: @unchecked Sendable {
     func fire() { lock.withLock { value = true } }
 }
 
+extension ServerLink {
+    public func read(_ query: ServedRead, deadline: Duration?) async throws -> ReadOutput {
+        let result = try await request(.read(query), deadline: deadline)
+        return ReadOutput(result, unreadable: unreadable)
+    }
+}
+
 extension RegistryQuery {
     /// Typed reads and writes over the server `link` returns; nothing runs `lf`.
     /// A read or write unanswered within `deadline` is cancelled and reported.
     public static func served(deadline: Duration?, link: @escaping @Sendable () async throws -> ServerLink) -> RegistryQuery {
         RegistryQuery(serve: { read in
-            try await link().request(.read(read), deadline: deadline).printed
+            try await link().read(read, deadline: deadline)
         }, write: { change in
             String(decoding: try await link().request(.command(change), deadline: deadline).bytes, as: UTF8.self)
+        }, change: { change, requestID in
+            try await link().write(change, requestID: requestID).revisions
         }) { args, _ in
             throw RegistryQueryError("`lf \(args.joined(separator: " "))` runs only on the Machine")
         }
@@ -411,6 +487,8 @@ final class ServerSubscription: @unchecked Sendable {
     private let consumesEvents: Bool
     private let connect: @Sendable () async throws -> ServerLink
     private var stopped = false
+    private let work: InteractionWork?
+    private var initialReceipt = true
 
     init<Output: Sendable>(_ continuation: AsyncThrowingStream<Output, any Error>.Continuation,
                            query: ServedRead, events: Bool,
@@ -419,6 +497,8 @@ final class ServerSubscription: @unchecked Sendable {
         self.query = query
         self.consumesEvents = events
         self.connect = connect
+        self.work = InteractionTrace.current?.work
+        self.work?.servedRead()
         self.deliver = { update in
             guard let output = try encode(update) else { return true }
             switch continuation.yield(output) {
@@ -435,12 +515,16 @@ final class ServerSubscription: @unchecked Sendable {
         try Task.checkCancellation()
         let link = try await connect()
         try Task.checkCancellation()
-        let (stopped, resume) = lock.withLock { (self.stopped, consumesEvents ? nil : resumeToken) }
+        // Events need this link's baseline. Clear it before subscribing: the
+        // baseline reading can arrive before `register` returns.
+        let (stopped, resume) = lock.withLock {
+            eventBaseline = false
+            return (self.stopped, consumesEvents ? nil : resumeToken)
+        }
         guard !stopped else { return }
         try await link.register(self, query: query, resume: resume)
         let checkpoint: UInt64? = lock.withLock {
             self.link = link
-            eventBaseline = false
             return pending
         }
         // A failed send ends the link; its failure resumes this watch.
@@ -483,6 +567,13 @@ final class ServerSubscription: @unchecked Sendable {
         do {
             let delivered = try lock.withLock {
                 guard !stopped else { return true }
+                if checkpoint != resumeToken, let work {
+                    struct Receipt: Decodable { let id: String; let statements: UInt64; let rows: UInt64 }
+                    if let receipt = try? frame.fields()["work"]?.decode(Receipt.self) {
+                        work.sql(statements: receipt.statements, rows: receipt.rows, receipt: receipt.id)
+                    } else { work.sqlUnavailable() }
+                    if initialReceipt { work.requestFinished(); initialReceipt = false }
+                }
                 guard try deliver(.reading(frame)) else { return false }
                 resumeToken = checkpoint
                 eventBaseline = true

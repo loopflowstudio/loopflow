@@ -1,0 +1,83 @@
+[package]
+name = "loopflow-execution"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+test-support = ["dep:loopflow-test-support", "dep:ctor", "dep:axum", "loopflow-storage/test-support", "loopflow-harness/test-support", "loopflow-terminal/test-support"]
+
+[dependencies]
+loopflow-terminal = { path = "../loopflow-terminal" }
+loopflow-definitions = { path = "../loopflow-definitions" }
+loopflow-storage = { path = "../loopflow-storage" }
+loopflow-model = { path = "../loopflow-model" }
+loopflow-harness = { path = "../loopflow-harness" }
+clap = { version = "4.6", features = ["derive", "env"] }
+dirs = "7"
+ignore = "0.4"
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
+schemars = "1.2"
+shlex = "2.0"
+serde_urlencoded = "0.7"
+serde_yaml_ng = "0.10"
+yaml-edit = "0.3.2"
+tracing = "0.1"
+thiserror = "2.0"
+tiktoken-rs = "0.12"
+fancy-regex = "0.19"
+uuid = { version = "1", features = ["v4", "v5"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+once_cell = "1"
+regex = "1"
+
+sha2 = "0.10"
+hex = "0.4"
+secrecy = { version = "0.8", features = ["serde"] }
+
+anyhow = "1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# --- Runtime dependencies ---
+async-trait = "0.1"
+aes-gcm = "0.10"
+base64 = "0.23"
+bytes = "1"
+futures-util = "0.3"
+gethostname = "1.1"
+libc = "0.2"
+reqwest = { version = "0.13", features = ["blocking", "json", "stream"] }
+rusqlite = { version = "0.40", features = ["backup", "bundled", "hooks", "trace"] }
+fs2 = "0.4"
+time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = "0.30"
+tempfile = "3.27"
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
+
+# ARM file-selection latency includes hashing the executable for install authority.
+loopflow-test-support = { path = "../loopflow-test-support", optional = true }
+ctor = { version = "1.0.13", optional = true }
+axum = { version = "0.8", optional = true }
+
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+sha2 = { version = "0.10", features = ["asm"] }
+
+
+[dev-dependencies]
+ctrlc = { version = "3", features = ["termination"] }
+loopflow-storage = { path = "../loopflow-storage", features = ["test-support"] }
+loopflow-harness = { path = "../loopflow-harness", features = ["test-support"] }
+loopflow-terminal = { path = "../loopflow-terminal", features = ["test-support"] }
+rcgen = "0.14"
+axum = "0.8"
+ctor = "1.0.13"
+jsonschema = { version = "0.60", default-features = false }
+loopflow-test-support = { path = "../loopflow-test-support" }
+tokio = { version = "1", features = ["test-util"] }
+
+
+[build-dependencies]
+cc = "1"

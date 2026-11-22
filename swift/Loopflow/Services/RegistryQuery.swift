@@ -5,26 +5,11 @@
 //
 // On macOS the Work subscriptions, `ServedRead` reads and `ServedWrite` writes run
 // through the local server; other commands run the `lf`
-// shipped inside the app.
+// selected for the Machine.
 // Every read decodes shared wire types into app models. There is no HTTP
 // fallback; remote reads use the same CLI with explicit Machine selectors.
 
 import Foundation
-
-public enum SessionOpenIntent: String, Codable, Sendable, CaseIterable {
-    case resume, start, reveal
-
-    var arguments: [String] {
-        switch self {
-        case .resume: []
-        case .start: ["--start-if-free"]
-        case .reveal: ["--reveal-existing"]
-        }
-    }
-
-    /// Every intent flag a prepared command may carry.
-    public static let flags = Set(allCases.flatMap(\.arguments))
-}
 
 /// One `lf` query failed — the subprocess errored, or its JSON didn't decode.
 /// `stdout` is what a failed command printed before it exited, such as the
@@ -50,9 +35,8 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 /// `argv` prints in `cwd`, given `input` on stdin. A read whose command takes
 /// `--subscribe` is also served as that subscription.
 public enum ServedRead: Equatable, Sendable, Encodable {
-    case processHistory(id: String)
+    case sessionHistoryGet(id: String)
     case creationGet(requestID: String)
-    case processList
     case desktopViewList(directory: String)
     case sessionList(directory: String, headless: Bool, after: String?, limit: Int?, task: String?)
     case taskGet(directory: String, issue: String)
@@ -67,12 +51,10 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case machineSelf
     case desktopPortfolio
     case configSettings(directory: String, wave: String?, skill: String?, graph: String?, step: String?)
-    case desktopLayout(directory: String, work: String)
-    case repoPeople(directory: String)
     case graphList(directory: String)
     case desktopViewGet(directory: String, expression: String?)
     case taskRuns(directory: String, task: String, after: String?)
-    case processGet(id: String)
+    case graphRunGet(id: String)
     case sessionUsage(days: Int, wave: String?, project: String?, task: String?)
     case taskContext(task: String)
     case wavePlan(directory: String, wave: String)
@@ -80,7 +62,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case machineList
     case sessionHistory(since: String, limit: Int, wave: String?, project: String?, task: String?)
     case planList(directory: String, wave: String?, task: String?, all: Bool)
-    case repoPlan(directory: String)
+    case repoTracker(directory: String)
     case workResolve(directory: String, url: String)
     case repoPath(id: String)
     case waveGraph(directory: String, wave: String?)
@@ -91,9 +73,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     /// `since` (`7d`, `24h` or an RFC 3339 instant).
     case repoCi(since: String, wave: String?, repo: String?)
     /// Every login's state on this Machine; `cached` skips the providers.
-    case accountList(target: String?, cached: Bool)
-    /// How the repository selects an account for each provider.
-    case accountNext(directory: String, repo: String?, default: Bool, agent: String?)
+    case accountList(target: String?)
     /// The commands, skills, graphs and Waves under `path`, as `lf list` shows them.
     case skillList(directory: String, path: [String])
     /// The branch's check report as the provider prints it, with its state.
@@ -110,10 +90,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     /// The equivalent `lf` command, `--json` included.
     public var argv: [String] {
         switch self {
-        case .processHistory(let id): return ["session", "history", "show", id]
+        case .sessionHistoryGet(let id): return ["session", "history", "show", id]
         case .creationGet(let requestID): return ["server", "receipt", requestID, "--json"]
-        case .processList:
-            return ["process", "list", "--json"]
         case .desktopViewList:
             return ["desktop", "view", "list", "--json"]
         case .sessionList(_, let headless, let after, let limit, let task):
@@ -152,18 +130,14 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["config", "settings", "--json"] + (wave.map { ["--wave", $0] } ?? [])
                 + (skill.map { ["--skill", $0] } ?? []) + (graph.map { ["--graph", $0] } ?? [])
                 + (step.map { ["--step", $0] } ?? [])
-        case .desktopLayout(_, let work):
-            return ["desktop", "layout", work]
-        case .repoPeople:
-            return ["repo", "people", "--json"]
         case .graphList:
             return ["graph", "list", "--json"]
         case .desktopViewGet(_, let expression):
             return ["desktop", "view", "show"] + (expression.map { [$0] } ?? []) + ["--json"]
         case .taskRuns(_, let task, let after):
             return ["task", "runs", task] + (after.map { ["--after", $0] } ?? []) + ["--json"]
-        case .processGet(let id):
-            return ["process", "show", id, "--json"]
+        case .graphRunGet(let id):
+            return ["graph", "show", id, "--json"]
         case .sessionUsage(let days, let wave, let project, let task):
             return ["session", "usage", "--days", String(days)] + Self.work(wave: wave, project: project, task: task) + ["--json"]
         case .taskContext(let task):
@@ -180,8 +154,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .planList(_, let wave, let task, let all):
             return ["plan", "list"] + (wave.map { [$0] } ?? []) + (task.map { ["--task", $0] } ?? [])
                 + (all ? ["--all"] : []) + ["--json"]
-        case .repoPlan:
-            return ["repo", "plan", "--json"]
+        case .repoTracker:
+            return ["repo", "tracker", "--json"]
         case .workResolve(_, let url):
             return ["open", url, "--link", "--json"]
         case .repoPath(let id):
@@ -196,11 +170,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["machine", "doctor", "--json"]
         case .repoCi(let since, let wave, let repo):
             return ["repo", "ci", "--since", since] + argument("--wave", wave) + argument("--repo", repo) + ["--json"]
-        case .accountList(let target, let cached):
-            return ["account"] + argument(nil, target) + (cached ? ["--cached"] : [])
-                + ["--json"]
-        case .accountNext(_, let repo, let `default`, let agent):
-            return ["account", "next"] + argument("--agent", agent) + argument("--repo", repo) + (`default` ? ["--default"] : []) + ["--json"]
+        case .accountList(let target):
+            return ["account"] + argument(nil, target) + ["--json"]
         case .skillList(_, let path):
             return ["list"] + path + ["--json"]
         case .prChecks(_, let required):
@@ -229,9 +200,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
 
     private var tagged: TaggedFields {
         switch self {
-        case .processHistory(let id): TaggedFields("process.history", ["id": id])
+        case .sessionHistoryGet(let id): TaggedFields("session.history.get", ["id": id])
         case .creationGet(let requestID): TaggedFields("creation.get", ["request_id": requestID])
-        case .processList: TaggedFields("process.list")
         case .desktopViewList(let directory): TaggedFields("desktop.view.list", ["directory": directory])
         case .sessionList(let directory, let headless, let after, let limit, let task):
             TaggedFields("session.list", ["directory": directory, "headless": headless, "after": after, "limit": limit, "task": task])
@@ -256,15 +226,12 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .desktopPortfolio: TaggedFields("desktop.portfolio")
         case .configSettings(let directory, let wave, let skill, let graph, let step):
             TaggedFields("config.settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
-        case .desktopLayout(let directory, let work):
-            TaggedFields("desktop.layout", ["directory": directory, "work": work])
-        case .repoPeople(let directory): TaggedFields("repo.people", ["directory": directory])
         case .graphList(let directory): TaggedFields("graph.list", ["directory": directory])
         case .desktopViewGet(let directory, let expression):
             TaggedFields("desktop.view.get", ["directory": directory, "expression": expression])
         case .taskRuns(let directory, let task, let after):
             TaggedFields("task.runs", ["directory": directory, "task": task, "after": after])
-        case .processGet(let id): TaggedFields("process.get", ["id": id])
+        case .graphRunGet(let id): TaggedFields("graph.run.get", ["id": id])
         case .sessionUsage(let days, let wave, let project, let task):
             TaggedFields("session.usage", ["days": days, "wave": wave, "project": project, "task": task])
         case .taskContext(let task): TaggedFields("task.context", ["task": task])
@@ -277,7 +244,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("session.history", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])
         case .planList(let directory, let wave, let task, let all):
             TaggedFields("plan.list", ["directory": directory, "wave": wave, "task": task, "all": all])
-        case .repoPlan(let directory): TaggedFields("repo.plan", ["directory": directory])
+        case .repoTracker(let directory): TaggedFields("repo.tracker", ["directory": directory])
         case .workResolve(let directory, let url):
             TaggedFields("work.resolve", ["directory": directory, "url": url])
         case .repoPath(let id): TaggedFields("repo.path", ["id": id])
@@ -289,10 +256,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .machineDoctor: TaggedFields("machine.doctor")
         case .repoCi(let since, let wave, let repo):
             TaggedFields("repo.ci", ["since": since, "wave": wave, "repo": repo])
-        case .accountList(let target, let cached):
-            TaggedFields("account.list", ["target": target, "cached": cached])
-        case .accountNext(let directory, let repo, let `default`, let agent):
-            TaggedFields("account.next", ["directory": directory, "repo": repo, "default": `default`, "agent": agent])
+        case .accountList(let target):
+            TaggedFields("account.list", ["target": target])
         case .skillList(let directory, let path): TaggedFields("skill.list", ["directory": directory, "path": path])
         case .prChecks(let directory, let required):
             TaggedFields("pr.checks", ["directory": directory, "required": required])
@@ -314,14 +279,17 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskComplete(directory: String, issue: String)
     case taskReopen(directory: String, issue: String)
     case taskAbandon(directory: String, issue: String)
-    case taskUpdate(directory: String, issue: String, notes: String)
+    case taskUpdate(directory: String, issue: String, notes: String?, rank: Int?)
     case taskClaim(directory: String, issue: String)
     case taskUnassign(directory: String, issue: String)
     /// Start the Task's run detached; `approve` runs every step headless to
-    /// `end` and approves Auto-Ship, as `-b` does.
+    /// `end`, turning auto on, as `-b` does.
     case taskRun(directory: String, issue: String, graph: String?, from: String?, agent: String?, approve: Bool)
-    case taskShip(directory: String, issue: String)
-    case taskHold(directory: String, issue: String)
+    case taskAutoOn(directory: String, issue: String)
+    /// `lf task auto off <issue>`: turns the Task's auto setting off. `taskAutoOn` turns it on.
+    case taskAutoOff(directory: String, issue: String)
+    /// Answer one lost line of the directory's repository, whoever owns it.
+    case repoTrackerAnswer(directory: String, action: String, answer: LostAnswer)
     case taskSteer(directory: String, issue: String, message: String)
     case taskReport(directory: String, issue: String, message: String)
     case taskInterrupt(directory: String, issue: String)
@@ -339,13 +307,13 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case sessionBind(directory: String, id: String, task: String, preview: Bool)
     /// Start the Session's provider process as its own `lf` process, assigning nothing.
     /// The repository's conversation when it names no Session, Task or Wave.
-    case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?, intent: SessionOpenIntent)
+    case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?)
     case sessionNew(directory: String, requestID: String, id: String, agent: String?)
     case waveRename(directory: String, wave: String, name: String)
     case waveRemove(directory: String, wave: String, preview: Bool)
     case waveMachine(directory: String, wave: String, machine: String)
     /// Move the open Sessions the selector names to an agent.
-    case sessionMove(directory: String, blocked: Bool, on: String?, agent: String)
+    case sessionMove(directory: String, on: String?, agent: String)
     case waveCreate(directory: String, wave: String, objective: String?)
     case waveSync(directory: String, wave: String)
     case wavePlanBind(directory: String, wave: String, project: String)
@@ -361,18 +329,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case checkoutSync(directory: String, onto: String?, preview: Bool, manual: Bool, continueSync: Bool, abort: Bool,
                       adopt: Bool)
     case checkoutCreate(directory: String, name: String, preview: Bool, persistent: Bool)
-    /// Run from `/`: the Machine's logins, not a repository's.
-    case accountDisconnect(provider: String, email: String?)
+    /// Service credentials on the Machine, run from `/`.
+    case accountDisconnect(provider: String)
     /// Served, no browser profile is chosen interactively.
-    case accountConnect(provider: String, email: String?, chromeProfile: String?, import: Bool, apiKey: Bool)
-    case accountSet(provider: String, email: String?, loginEmail: String?, plan: String?,
-                    clearPlan: Bool, paidThrough: String?, clearPaidThrough: Bool, clearCooldown: Bool,
-                    chromeProfiles: [String], clearChromeProfiles: Bool)
-    /// `file` is a path on the Machine; the token never travels in the request.
-    case accountRedeemReset(provider: String, email: String, idempotencyKey: String?, creditId: String?)
-    case accountUse(login: String)
-    case accountPause(login: String)
-    case accountUnpause(login: String)
+    case accountConnect(provider: String, chromeProfile: String?, apiKey: Bool)
     /// Started detached and headless; the result is the Process carrying the run.
     case graphRun(directory: String, name: String, message: String?, agent: String?)
     /// Started detached and headless; the result is the Process carrying the run.
@@ -400,13 +360,12 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case desktopDashboardShow(directory: String, id: String, member: String)
     case desktopDashboardSlots(directory: String, id: String, revision: Int64, slots: String)
     case desktopDashboardMove(directory: String, board: String, member: String, destination: String)
-    case desktopLayoutSave(directory: String, work: String, layout: String)
 
     /// The equivalent `lf` command, without its `--cwd`.
     public var argv: [String] {
         switch self {
         case .prPublish, .prOpen, .prSubmit, .prArm, .prLand, .prAbandon, .prReconcile, .prRequestReview: return prArgv
-        case .accountDisconnect, .accountConnect, .accountSet, .accountRedeemReset, .accountUse, .accountPause, .accountUnpause:
+        case .accountDisconnect, .accountConnect:
             return accountArgv
         case .graphRun(_, let name, let message, let agent):
             return ["--batch"] + argument("--agent", agent) + ["graph", name] + argument(nil, message)
@@ -425,14 +384,18 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskComplete(_, let issue): return ["task", "complete", issue, "--json"]
         case .taskReopen(_, let issue): return ["task", "reopen", issue, "--json"]
         case .taskAbandon(_, let issue): return ["task", "abandon", issue, "--json"]
-        case .taskUpdate(_, let issue, let notes): return ["task", "update", issue, "--notes=\(notes)", "--json"]
+        case .taskUpdate(_, let issue, let notes, let rank):
+            return ["task", "update", issue] + (notes.map { ["--notes=\($0)"] } ?? [])
+                + (rank.map { ["--rank=\($0)"] } ?? []) + ["--json"]
         case .taskClaim(_, let issue): return ["task", "claim", issue, "--json"]
         case .taskUnassign(_, let issue): return ["task", "unassign", issue, "--json"]
         case .taskRun(_, let issue, let graph, let from, let agent, let approve):
             return (approve ? ["--batch"] : []) + argument("--agent", agent) + ["task", "run", issue]
                 + [graph].compactMap { $0 } + argument("--from", from) + ["--json"]
-        case .taskShip(_, let issue): return ["--task", issue, "ship", "--json"]
-        case .taskHold(_, let issue): return ["task", "hold", issue, "--json"]
+        case .taskAutoOn(_, let issue): return ["--task", issue, "task", "auto", "on", "--json"]
+        case .taskAutoOff(_, let issue): return ["task", "auto", "off", issue, "--json"]
+        case .repoTrackerAnswer(_, let action, let answer):
+            return ["repo", "tracker", "answer", action, answer == .keepTheirs ? "--keep-theirs" : "--use-mine", "--json"]
         case .taskSteer(_, let issue, let message): return ["steer", issue, message, "--json"]
         case .taskReport(_, let issue, let message): return ["task", "report", issue, message, "--json"]
         case .taskInterrupt(_, let issue): return ["task", "interrupt", issue, "--json"]
@@ -449,8 +412,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                     "--sequence", String(sequence)] + argument("--agent-process", agentProcess)
         case .sessionBind(_, let id, let task, let preview):
             return ["session", "bind", "--json", "--task", task] + (preview ? ["--dry-run"] : []) + ["--", id]
-        case .sessionResume(let directory, let id, let task, let wave, let agent, let intent):
-            return Self.prepared(agent, ["session", "resume"] + intent.arguments + [id].compactMap { $0 }
+        case .sessionResume(let directory, let id, let task, let wave, let agent):
+            return Self.prepared(agent, ["session", "resume"] + [id].compactMap { $0 }
                 + argument("--task", task) + argument("--wave", wave),
                 repo: id == nil && task == nil && wave == nil ? directory : nil)
         case .sessionNew(_, let requestID, let id, let agent):
@@ -458,8 +421,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .waveRename(_, let wave, let name): return ["wave", "rename", wave, name, "--json"]
         case .waveRemove(_, let wave, let preview): return ["wave", "remove", wave, "--json"] + (preview ? ["--preview"] : [])
         case .waveMachine(_, let wave, let machine): return ["--wave", wave, "set", "machine", machine, "--json"]
-        case .sessionMove(_, let blocked, let on, let agent):
-            return ["--agent", agent, "session", "move", "--all"] + (blocked ? ["--blocked"] : [])
+        case .sessionMove(_, let on, let agent):
+            return ["--agent", agent, "session", "move", "--all"]
                 + argument("--on", on) + ["--json"]
         case .waveCreate(_, let wave, let objective): return ["wave", "create", wave] + argument("--objective", objective) + ["--json"]
         case .waveSync(_, let wave): return ["wave", "sync", wave, "--json"]
@@ -499,7 +462,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return ["desktop", "dashboard", "slots", "query:" + id, "--revision=\(revision)"]
         case .desktopDashboardMove(_, let board, let member, let destination):
             return ["desktop", "dashboard", "move", "\(board)/\(member)", "--destination", destination]
-        case .desktopLayoutSave(_, let work, _): return ["desktop", "layout", work, "--save"]
         }
     }
 
@@ -552,33 +514,13 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         }
     }
 
-    private static func accountTarget(_ provider: String, _ email: String?) -> String {
-        email.map { "\(provider)=\($0)" } ?? provider
-    }
-
-    /// The `account` namespace's spellings.
     private var accountArgv: [String] {
         switch self {
-        case .accountDisconnect(let provider, let email):
-            return ["account", "disconnect", Self.accountTarget(provider, email)]
-        case .accountConnect(let provider, let email, let chromeProfile, let `import`, let apiKey):
-            let argv = ["account", "connect", Self.accountTarget(provider, email)] + argument("--chrome-profile", chromeProfile)
-            return argv + Self.flags([("--import", `import`), ("--api-key", apiKey)])
-        case .accountSet(let provider, let email, let loginEmail, let plan, let clearPlan, let paidThrough,
-                         let clearPaidThrough, let clearCooldown, let chromeProfiles, let clearChromeProfiles):
-            var argv = ["account", "set", Self.accountTarget(provider, email)]
-            argv += argument("--login-email", loginEmail) + argument("--plan", plan)
-            argv += argument("--paid-through", paidThrough)
-            argv += Self.flags([("--clear-plan", clearPlan), ("--clear-paid-through", clearPaidThrough),
-                                ("--clear-cooldown", clearCooldown), ("--clear-chrome-profiles", clearChromeProfiles)])
-            for profile in chromeProfiles { argv += ["--chrome-profile", profile] }
-            return argv
-        case .accountRedeemReset(let provider, let email, let idempotencyKey, let creditId):
-            return ["account", "redeem-reset", Self.accountTarget(provider, email)] + argument("--idempotency-key", idempotencyKey)
-                + argument("--credit-id", creditId) + ["--json"]
-        case .accountUse(let login): return ["account", "use", login]
-        case .accountPause(let login): return ["account", "pause", login]
-        case .accountUnpause(let login): return ["account", "unpause", login]
+        case .accountDisconnect(let provider):
+            return ["account", "disconnect", provider]
+        case .accountConnect(let provider, let chromeProfile, let apiKey):
+            return ["account", "connect", provider] + argument("--chrome-profile", chromeProfile)
+                + Self.flags([("--api-key", apiKey)])
         default: return []
         }
     }
@@ -608,7 +550,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .sessionStatus(_, _, _, _, _, _, let records):
             (try? JSONEncoder().encode(records)).map { String(decoding: $0, as: UTF8.self) }
         case .desktopDashboardSlots(_, _, _, let slots): slots
-        case .desktopLayoutSave(_, _, let layout): layout
         default: nil
         }
     }
@@ -624,8 +565,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("task.reopen", ["directory": directory, "issue": issue])
         case .taskAbandon(let directory, let issue):
             TaggedFields("task.abandon", ["directory": directory, "issue": issue])
-        case .taskUpdate(let directory, let issue, let notes):
-            TaggedFields("task.update", ["directory": directory, "issue": issue, "notes": notes])
+        case .taskUpdate(let directory, let issue, let notes, let rank):
+            TaggedFields("task.update", ["directory": directory, "issue": issue, "notes": notes, "rank": rank])
         case .taskClaim(let directory, let issue):
             TaggedFields("task.claim", ["directory": directory, "issue": issue])
         case .taskUnassign(let directory, let issue):
@@ -633,10 +574,12 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskRun(let directory, let issue, let graph, let from, let agent, let approve):
             TaggedFields("task.run", ["directory": directory, "issue": issue, "graph": graph, "from": from, "agent": agent,
                                       "approve": approve])
-        case .taskShip(let directory, let issue):
-            TaggedFields("task.ship", ["directory": directory, "issue": issue])
-        case .taskHold(let directory, let issue):
-            TaggedFields("task.hold", ["directory": directory, "issue": issue])
+        case .taskAutoOn(let directory, let issue):
+            TaggedFields("task.auto.on", ["directory": directory, "issue": issue])
+        case .repoTrackerAnswer(let directory, let action, let answer):
+            TaggedFields("repo.tracker.answer", ["directory": directory, "action": action, "answer": answer])
+        case .taskAutoOff(let directory, let issue):
+            TaggedFields("task.auto.off", ["directory": directory, "issue": issue, "reason": String?.none])
         case .taskSteer(let directory, let issue, let message):
             TaggedFields("task.steer", ["directory": directory, "issue": issue, "message": message])
         case .taskReport(let directory, let issue, let message):
@@ -658,9 +601,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                                             "records": records])
         case .sessionBind(let directory, let id, let task, let preview):
             TaggedFields("session.bind", ["directory": directory, "id": id, "task": task, "preview": preview])
-        case .sessionResume(let directory, let id, let task, let wave, let agent, let intent):
+        case .sessionResume(let directory, let id, let task, let wave, let agent):
             TaggedFields("session.resume", ["directory": directory, "id": id, "task": task, "wave": wave,
-                                            "agent": agent, "intent": intent.rawValue])
+                                            "agent": agent])
         case .sessionNew(let directory, let requestID, let id, let agent):
             TaggedFields("session.new", ["directory": directory, "request_id": requestID, "id": id, "agent": agent])
         case .waveRename(let directory, let wave, let name):
@@ -669,8 +612,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("wave.remove", ["directory": directory, "wave": wave, "preview": preview])
         case .waveMachine(let directory, let wave, let machine):
             TaggedFields("wave.machine", ["directory": directory, "wave": wave, "machine": machine])
-        case .sessionMove(let directory, let blocked, let on, let agent):
-            TaggedFields("session.move", ["directory": directory, "blocked": blocked, "on": on, "agent": agent])
+        case .sessionMove(let directory, let on, let agent):
+            TaggedFields("session.move", ["directory": directory, "on": on, "agent": agent])
         case .waveCreate(let directory, let wave, let objective):
             TaggedFields("wave.create", ["directory": directory, "wave": wave, "objective": objective])
         case .waveSync(let directory, let wave):
@@ -695,24 +638,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .checkoutCreate(let directory, let name, let preview, let persistent):
             TaggedFields("checkout.create", ["directory": directory, "name": name, "preview": preview,
                                              "persistent": persistent])
-        case .accountDisconnect(let provider, let email):
-            TaggedFields("account.disconnect", ["provider": provider, "email": email])
-        case .accountConnect(let provider, let email, let chromeProfile, let `import`, let apiKey):
-            TaggedFields("account.connect", ["provider": provider, "email": email, "chrome_profile": chromeProfile,
-                                             "import": `import`, "api_key": apiKey])
-        case .accountSet(let provider, let email, let loginEmail, let plan, let clearPlan, let paidThrough,
-                         let clearPaidThrough, let clearCooldown, let chromeProfiles, let clearChromeProfiles):
-            TaggedFields("account.set", ["provider": provider, "email": email, "login_email": loginEmail,
-                                         "plan": plan, "clear_plan": clearPlan,
-                                         "paid_through": paidThrough, "clear_paid_through": clearPaidThrough,
-                                         "clear_cooldown": clearCooldown, "chrome_profiles": chromeProfiles,
-                                         "clear_chrome_profiles": clearChromeProfiles])
-        case .accountRedeemReset(let provider, let email, let idempotencyKey, let creditId):
-            TaggedFields("account.redeem_reset", ["provider": provider, "email": email,
-                                                  "idempotency_key": idempotencyKey, "credit_id": creditId])
-        case .accountUse(let login): TaggedFields("account.use", ["login": login])
-        case .accountPause(let login): TaggedFields("account.pause", ["login": login])
-        case .accountUnpause(let login): TaggedFields("account.unpause", ["login": login])
+        case .accountDisconnect(let provider):
+            TaggedFields("account.disconnect", ["provider": provider])
+        case .accountConnect(let provider, let chromeProfile, let apiKey):
+            TaggedFields("account.connect", ["provider": provider, "chrome_profile": chromeProfile, "api_key": apiKey])
         case .graphRun(let directory, let name, let message, let agent):
             TaggedFields("graph.run", ["directory": directory, "name": name, "message": message, "agent": agent])
         case .skillRun(let directory, let name, let message, let agent):
@@ -757,8 +686,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .desktopDashboardMove(let directory, let board, let member, let destination):
             TaggedFields("desktop.dashboard.move", ["directory": directory, "board": board, "member": member,
                                        "destination": destination])
-        case .desktopLayoutSave(let directory, let work, let layout):
-            TaggedFields("desktop.layout.save", ["directory": directory, "work": work, "layout": layout])
         }
     }
 
@@ -799,16 +726,46 @@ struct TaggedFields {
     }
 }
 
+/// The output of one read and, for a server response, the build that supplied it.
+public struct ReadOutput: Sendable {
+    private let json: RawJSON
+    public var text: String { String(decoding: json.bytes, as: UTF8.self) }
+    private let unreadable: String?
+
+    public init(_ text: String) {
+        self.init(RawJSON(Data(text.utf8)))
+    }
+
+    init(_ json: RawJSON, unreadable: String? = nil) {
+        self.json = json
+        self.unreadable = unreadable
+    }
+
+    public func decode<T: Decodable>(_ type: T.Type) throws -> T {
+        do {
+            return try json.decode(type)
+        } catch {
+            if let unreadable, let error = error as? DecodingError {
+                throw RegistryQueryError("\(unreadable) \(error.place)")
+            }
+            throw RegistryQueryError("lf query JSON did not decode: \(error)")
+        }
+    }
+}
+
 public struct RegistryQuery: Sendable {
     public private(set) var remoteMachine: String?
     private var run: RegistryRunner
     private var runWithInput: @Sendable ([String], String?, String) async throws -> String
     /// What a `ServedRead`'s `argv` prints: served in the app when the
     /// transport can, else run.
-    private var serve: @Sendable (ServedRead) async throws -> String
+    private var serve: @Sendable (ServedRead) async throws -> ReadOutput
     /// What a `ServedWrite`'s `argv` prints: made in the app when the
     /// transport can, else run.
     private var write: @Sendable (ServedWrite) async throws -> String
+    /// A change under its request ID, answered with the revisions it advanced;
+    /// nil where the transport cannot say (the CLI).
+    private var change: @Sendable (ServedWrite, String) async throws -> Revisions?
     private let observeFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)?
     private var observeRead: (@Sendable ([String], String?) async throws -> LineSubscription)?
     private let observeWork: (@Sendable () async throws -> WorkObservation)?
@@ -817,8 +774,9 @@ public struct RegistryQuery: Sendable {
         runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
             throw RegistryQueryError("Draft comparison is unavailable on this transport")
         },
-        serve: (@Sendable (ServedRead) async throws -> String)? = nil,
+        serve: (@Sendable (ServedRead) async throws -> ReadOutput)? = nil,
         write: (@Sendable (ServedWrite) async throws -> String)? = nil,
+        change: (@Sendable (ServedWrite, String) async throws -> Revisions?)? = nil,
         watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
         subscribeRead: (@Sendable ([String], String?) async throws -> LineSubscription)? = nil,
         subscribeWork: (@Sendable () async throws -> WorkObservation)? = nil,
@@ -826,17 +784,24 @@ public struct RegistryQuery: Sendable {
     ) {
         self.runWithInput = runWithInput
         self.serve = serve ?? { query in
-            if let input = query.input { return try await runWithInput(query.argv, query.cwd, input) }
+            if let input = query.input { return ReadOutput(try await runWithInput(query.argv, query.cwd, input)) }
             let output = try await run(query.argv, query.cwd)
-            // This CLI spelling renders text; the shared read carries a JSON string.
-            if case .processHistory = query {
-                return String(decoding: try JSONEncoder().encode(output), as: UTF8.self)
+            // These CLI commands print bare text. Their served reads return JSON strings.
+            switch query {
+            case .sessionHistoryGet, .repoPath:
+                return ReadOutput(RawJSON(try JSONEncoder().encode(output)))
+            default:
+                return ReadOutput(output)
             }
-            return output
         }
-        self.write = write ?? { change in
+        let write = write ?? { change in
             if let input = change.input { return try await runWithInput(change.argv, change.cwd, input) }
             return try await run(change.argv, change.cwd)
+        }
+        self.write = write
+        self.change = change ?? { change, _ in
+            _ = try await write(change)
+            return nil
         }
         self.run = run
         self.observeFiles = watchFiles
@@ -845,7 +810,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func viewPlan(expression: String?, repoPath: String) async throws -> WorkViewPlan {
-        try Self.decode(WorkViewPlan.self, from: await serve(.desktopViewGet(directory: repoPath, expression: expression)))
+        try await serve(.desktopViewGet(directory: repoPath, expression: expression)).decode(WorkViewPlan.self)
     }
 
     public func editDashboardQuery(id: String, expression: String, revision: Int64?, repoPath: String) async throws -> Dashboard {
@@ -891,18 +856,8 @@ public struct RegistryQuery: Sendable {
             .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: "task:" + task, destination: "task:" + target)))
     }
 
-    public func paneLayout(work: String, repoPath: String) async throws -> WorkPaneLayout? {
-        try Self.decode(WorkPaneLayout?.self, from: await serve(.desktopLayout(directory: repoPath, work: work)))
-    }
-
-    public func savePaneLayout(_ layout: WorkPaneLayout, repoPath: String) async throws -> WorkPaneLayout {
-        let input = String(decoding: try JSONEncoder().encode(layout), as: UTF8.self)
-        return try Self.decode(WorkPaneLayout.self, from: await write(
-            .desktopLayoutSave(directory: repoPath, work: layout.work.selector, layout: input)))
-    }
-
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {
-        if arguments.isEmpty { return try Self.decode(Portfolio.self, from: await serve(.desktopPortfolio)) }
+        if arguments.isEmpty { return try await serve(.desktopPortfolio).decode(Portfolio.self) }
         return try Self.decode(Portfolio.self, from: await write(.desktopPortfolioSet(change: arguments)))
     }
 
@@ -984,7 +939,8 @@ public struct RegistryQuery: Sendable {
                     }
                     continuation.onTermination = { _ in reader.cancel() }
                 }
-                return LineSubscription(lines: lines, send: subscription.send, cancel: subscription.cancel)
+                return LineSubscription(lines: lines, send: subscription.send, cancel: subscription.cancel,
+                                        unreadable: subscription.unreadable)
             }
         }
         return query
@@ -1018,7 +974,7 @@ public struct RegistryQuery: Sendable {
         }
         query.serve = { [serve] read in
             let stdout = try await serve(read)
-            record(stdout)
+            record(stdout.text)
             return stdout
         }
         query.write = { [write] change in
@@ -1036,33 +992,32 @@ public struct RegistryQuery: Sendable {
     }
 
     public func repositoryPath(id: String) async throws -> String {
-        try await serve(.repoPath(id: id)).trimmingCharacters(in: .whitespacesAndNewlines)
+        try await serve(.repoPath(id: id)).decode(String.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Current Waves across the machine. The shared
     /// reader excludes historical registrations; callers only slice by repo.
     public func allWaves() async throws -> [Wave] {
         let stdout = try await serve(.waveList)
-        let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
+        let snapshots = try stdout.decode([WaveSnapshot].self)
         return snapshots.map { $0.toWave() }
     }
 
     /// One page of a Wave's closed Tasks, most recently closed first. The
     /// Wave's status carries only its open Tasks.
     public func closedTasks(wave: String, after: String? = nil, cwd: String) async throws -> ClosedTaskPage {
-        try Self.decode(ClosedTaskPage.self, from: await serve(.taskList(directory: cwd, wave: wave, after: after)))
+        try await serve(.taskList(directory: cwd, wave: wave, after: after)).decode(ClosedTaskPage.self)
     }
 
     /// One Wave's Project/Task work and recorded execution state.
     public func status(wave: String, cwd: String?) async throws
         -> WaveDetailSnapshot {
         // Without a repository the Wave resolves from `/`, where the app runs.
-        let stdout = try await serve(.wavePlan(directory: cwd ?? "/", wave: wave))
-        return try Self.decode(WaveDetailSnapshot.self, from: stdout)
+        try await serve(.wavePlan(directory: cwd ?? "/", wave: wave)).decode(WaveDetailSnapshot.self)
     }
 
-    /// Refresh one Wave's planning from its provider (Linear, or the
-    /// repository's Git planning ref), retrying pending deliveries.
+    /// Refresh one Wave's planning from its tracker, or the repository's plan
+    /// from its hub, retrying pending deliveries.
     public func syncPlanning(wave: String, cwd: String) async throws {
         _ = try await write(.waveSync(directory: cwd, wave: wave))
     }
@@ -1077,7 +1032,7 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(WaveAdded.self, from: await write(.waveCreate(directory: cwd, wave: name, objective: objective)))
     }
 
-    /// `lf wave rename`: same Wave id, Tasks and chapters; its files move on main.
+    /// `lf wave rename`: same Wave id, Tasks and projects; its files move on main.
     /// The receipt's `summary` names anything left to finish.
     public func renameWave(wave: String, newName: String, cwd: String) async throws -> WaveRenamed {
         try Self.decode(WaveRenamed.self, from: await write(.waveRename(directory: cwd, wave: wave, name: newName)))
@@ -1089,14 +1044,14 @@ public struct RegistryQuery: Sendable {
     }
 
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
-        try Self.decode(RoadmapSnapshot.self, from: await serve(
-            .planList(directory: "/", wave: wave, task: nil, all: wave == nil)))
+        try await serve(
+            .planList(directory: "/", wave: wave, task: nil, all: wave == nil)).decode(RoadmapSnapshot.self)
     }
 
     /// Resolve a public Work address through Rust's repository and Work owners.
     /// Reads only: no checkout, Session or window is prepared.
     public func workLink(_ url: URL) async throws -> WorkLink {
-        let links = try Self.decode([WorkLink].self, from: await serve(.workResolve(directory: "/", url: url.absoluteString)))
+        let links = try await serve(.workResolve(directory: "/", url: url.absoluteString)).decode([WorkLink].self)
         guard let link = links.first, links.count == 1 else {
             throw RegistryQueryError("The Work link did not resolve to one destination.")
         }
@@ -1105,18 +1060,17 @@ public struct RegistryQuery: Sendable {
 
     /// Without a repository the Task resolves across every repository.
     public func taskDestination(issue: String, repo: String?) async throws -> RoadmapSnapshot {
-        try Self.decode(RoadmapSnapshot.self, from: await serve(
-            .planList(directory: repo ?? "/", wave: nil, task: issue, all: repo == nil)))
+        try await serve(
+            .planList(directory: repo ?? "/", wave: nil, task: issue, all: repo == nil)).decode(RoadmapSnapshot.self)
     }
 
-    public func peerPlanningStatus(cwd: String) async throws -> [PeerPlanningStatus] {
-        struct Status: Decodable { let destinations: [PeerPlanningStatus] }
-        return try Self.decode(Status.self, from: await serve(.repoPlan(directory: cwd))).destinations
+    public func repositoryPlan(cwd: String) async throws -> RepositoryPlan {
+        try await serve(.repoTracker(directory: cwd)).decode(RepositoryPlan.self)
     }
 
     public func localMachineId() async throws -> String {
         struct MachineIdentity: Decodable { let id: String }
-        return try Self.decode(MachineIdentity.self, from: await serve(.machineSelf)).id
+        return try await serve(.machineSelf).decode(MachineIdentity.self).id
     }
 
     /// Whether this transport keeps a workspace current by itself. Without one,
@@ -1139,8 +1093,8 @@ public struct RegistryQuery: Sendable {
         project: String? = nil,
         task: String? = nil
     ) async throws -> WorkActivitySnapshot {
-        try Self.decode(WorkActivitySnapshot.self, from: await serve(
-            .sessionHistory(since: since, limit: limit, wave: wave, project: project, task: task)))
+        try await serve(
+            .sessionHistory(since: since, limit: limit, wave: wave, project: project, task: task)).decode(WorkActivitySnapshot.self)
     }
 
     // Task content reads and saves address the Task by issue and run outside its
@@ -1149,12 +1103,11 @@ public struct RegistryQuery: Sendable {
     /// Files changed by one Task, classified across commits, index, worktree,
     /// and untracked state relative to the Task's recorded base.
     public func taskChanges(issue: String, base: String = "parent", head: String? = nil) async throws -> TaskChangesSnapshot {
-        let stdout = try await serve(.taskChanges(issue: issue, base: base, head: head))
-        return try Self.decode(TaskChangesSnapshot.self, from: stdout)
+        try await serve(.taskChanges(issue: issue, base: base, head: head)).decode(TaskChangesSnapshot.self)
     }
 
-    public func processHistory(id: String) async throws -> String {
-        try Self.decode(String.self, from: await serve(.processHistory(id: id)))
+    public func sessionHistoryText(id: String) async throws -> String {
+        try await serve(.sessionHistoryGet(id: id)).decode(String.self)
     }
 
     /// One store-driven reading keeps position, readiness and run history together.
@@ -1167,14 +1120,7 @@ public struct RegistryQuery: Sendable {
     /// Every selectable Graph with the topology it would capture, via the shared loader.
     public func graphCatalog(cwd: String?) async throws -> [GraphCatalogEntry] {
         // Without a repository the catalog resolves from `/`, where the app runs.
-        let stdout = try await serve(.graphList(directory: cwd ?? "/"))
-        return try Self.decode([GraphCatalogEntry].self, from: stdout)
-    }
-
-    /// The repository's Task owners with their GitHub users; lf caches each email's lookup.
-    public func repoPeople(cwd: String?) async throws -> [RepoPerson] {
-        let stdout = try await serve(.repoPeople(directory: cwd ?? "/"))
-        return try Self.decode([RepoPerson].self, from: stdout)
+        try await serve(.graphList(directory: cwd ?? "/")).decode([GraphCatalogEntry].self)
     }
 
     public func customizeGraph(_ name: String, cwd: String?) async throws -> String {
@@ -1191,37 +1137,31 @@ public struct RegistryQuery: Sendable {
     }
 
     /// New Task: Rust files the request in `wave` (nil files it in the
-    /// repository), starts it as `lf task run` does and admits its conversation
-    /// with the request as the first turn. Returns once the Graph registers.
-    public func createTask(request: String, wave: String?, graph: String?, cwd: String?, requestID: String = UUID().uuidString) async throws -> TaskCreateReceipt {
-        try Self.decode(TaskCreateReceipt.self, from: await write(.taskCreate(directory: cwd ?? "/", requestID: requestID,
-            title: nil, request: request, wave: wave, graph: graph, session: nil, run: true)))
+    /// repository). With `run` it also admits its conversation with the request
+    /// as the first turn and returns once both are recorded; the conversation
+    /// makes the checkout and starts the Graph. Without, the Task is filed
+    /// unstarted and nothing runs.
+    public func createTask(request: String, wave: String?, graph: String?, run: Bool, cwd: String?, requestID: String = UUID().uuidString) async throws -> TaskCreated {
+        try Self.decode(TaskCreated.self, from: await write(.taskCreate(directory: cwd ?? "/", requestID: requestID,
+            title: nil, request: request, wave: wave, graph: graph, session: nil, run: run)))
     }
 
     /// The graph a new Task in `wave`, or the repository when nil, would take up.
     public func waveGraph(wave: String?, cwd: String?) async throws -> WaveGraph {
-        try Self.decode(WaveGraph.self, from: await serve(.waveGraph(directory: cwd ?? "/", wave: wave)))
+        try await serve(.waveGraph(directory: cwd ?? "/", wave: wave)).decode(WaveGraph.self)
     }
 
-    /// Ship the Task: run the rest of its graph to the end headless, standing
-    /// in at each interactive step. Returns once it is shipping; it runs on until the Task lands.
-    public func shipTask(issue: String, cwd: String?) async throws {
-        _ = try await write(.taskShip(directory: cwd ?? "/", issue: issue))
-    }
 
-    /// Withdraw a Task's Auto-Ship approval: its ship process stops and any
-    /// auto-merge Loopflow armed is disabled.
-    public func stopShipping(issue: String, cwd: String?) async throws {
-        _ = try await write(.taskHold(directory: cwd ?? "/", issue: issue))
-    }
-
-    public func moveTask(issue: String, wave: String?, cwd: String?) async throws {
-        _ = try await write(.taskMove(directory: cwd ?? "/", issue: issue, wave: wave, machine: nil))
+    /// Send `change` under `requestID`; a repeat under it gets the first answer.
+    /// Returns the revisions it advanced. A refusal throws a `ServerError` whose
+    /// `revisions` is nil; a change that failed partway carries what it advanced.
+    public func change(_ change: ServedWrite, requestID: String) async throws -> Revisions? {
+        try await self.change(change, requestID)
     }
 
     /// Your registered Machines. This Machine appears only when a default names it.
     public func machines() async throws -> [Machine] {
-        try Self.decode([Machine].self, from: await serve(.machineList))
+        try await serve(.machineList).decode([Machine].self)
     }
 
     /// Move a Task to `machine` through `lf task move --machine`, or set your
@@ -1233,23 +1173,6 @@ public struct RegistryQuery: Sendable {
         }
     }
 
-    /// `lf task claim` or `lf task unassign`.
-    public func assignTask(issue: String, claimed: Bool, cwd: String?) async throws {
-        _ = try await write(claimed ? .taskClaim(directory: cwd ?? "/", issue: issue)
-                               : .taskUnassign(directory: cwd ?? "/", issue: issue))
-    }
-
-    public func completeTask(issue: String, cwd: String?) async throws {
-        _ = try await write(.taskComplete(directory: cwd ?? "/", issue: issue))
-    }
-
-    public func reopenTask(issue: String, cwd: String?) async throws {
-        _ = try await write(.taskReopen(directory: cwd ?? "/", issue: issue))
-    }
-
-    public func abandonTask(issue: String, cwd: String?) async throws {
-        _ = try await write(.taskAbandon(directory: cwd ?? "/", issue: issue))
-    }
 
     /// Complete Task-attributed Session input/provider history. Read-only; querying
     /// an unstarted Task neither prepares nor starts it.
@@ -1260,12 +1183,17 @@ public struct RegistryQuery: Sendable {
     /// What each recorded step's submitted input was made of, oldest first,
     /// with Task totals. Read-only, from retained local captures.
     public func taskContext(task: String) async throws -> ContextReport {
-        let stdout = try await serve(.taskContext(task: task))
-        return try Self.decode(ContextReport.self, from: stdout)
+        try await serve(.taskContext(task: task)).decode(ContextReport.self)
     }
 
     public func updateTaskDirective(id: String, text: String, cwd: String) async throws {
-        _ = try await write(.taskUpdate(directory: cwd, issue: id, notes: text))
+        _ = try await write(.taskUpdate(directory: cwd, issue: id, notes: text, rank: nil))
+    }
+
+    /// `lf task update <issue> --rank=<rank>`: the Task's position in its Project,
+    /// from 0; Rust renumbers its siblings and moves it in Linear.
+    public func rankTask(issue: String, rank: Int, cwd: String) async throws {
+        _ = try await write(.taskUpdate(directory: cwd, issue: issue, notes: nil, rank: rank))
     }
 
     /// One Task's complete patch, or the patch for a selected changed file.
@@ -1276,8 +1204,7 @@ public struct RegistryQuery: Sendable {
         head: String? = nil,
         draft: String? = nil
     ) async throws -> TaskDiffSnapshot {
-        let stdout = try await serve(.taskDiff(issue: issue, path: path, base: base, head: head, draft: draft))
-        return try Self.decode(TaskDiffSnapshot.self, from: stdout)
+        try await serve(.taskDiff(issue: issue, path: path, base: base, head: head, draft: draft)).decode(TaskDiffSnapshot.self)
     }
 
     /// Current contents of one file, constrained to the Task worktree.
@@ -1285,8 +1212,7 @@ public struct RegistryQuery: Sendable {
         issue: String,
         path: String
     ) async throws -> TaskFileSnapshot {
-        let stdout = try await serve(.taskFile(issue: issue, path: path))
-        return try Self.decode(TaskFileSnapshot.self, from: stdout)
+        try await serve(.taskFile(issue: issue, path: path)).decode(TaskFileSnapshot.self)
     }
 
     public func saveTaskFile(issue: String, path: String, revision: String,
@@ -1299,50 +1225,36 @@ public struct RegistryQuery: Sendable {
     /// One bounded page, ordered by stable Session identity.
     public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
                             cwd: String? = nil) async throws -> SessionPage {
-        try Self.decode(SessionPage.self, from: await serve(
-            .sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100, task: nil)))
+        try await serve(
+            .sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100, task: nil)).decode(SessionPage.self)
     }
 
-    /// The repository or Wave's retained conversation; explicit opening only.
+    /// The repository or Wave's retained conversation, created when missing.
     public func ensurePrimarySession(wave: String? = nil, cwd: String) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
-            .sessionResume(directory: cwd, id: nil, task: nil, wave: wave, agent: nil, intent: .start)))
+            .sessionResume(directory: cwd, id: nil, task: nil, wave: wave, agent: nil)))
     }
 
-    /// Select the Task's ongoing conversation. Start may create it; reveal
-    /// requires existing history. External ownership offers Take back.
-    public func prepareTaskSession(issue: String, cwd: String?, intent: SessionOpenIntent = .start) async throws -> SessionRecord {
+    /// The Task's ongoing conversation, created when missing.
+    public func prepareTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
-            .sessionResume(directory: cwd ?? "/", id: nil, task: issue, wave: nil, agent: nil, intent: intent)))
+            .sessionResume(directory: cwd ?? "/", id: nil, task: issue, wave: nil, agent: nil)))
     }
 
-    /// Rust's Start after a refused reveal: only an authoritative absence of
-    /// history offers it. A failed Start reports its own failure, and a failed
-    /// read offers nothing.
-    public func startOffer(refused intent: SessionOpenIntent, issue: String, cwd: String) async -> SessionAction? {
-        guard intent == .reveal,
-              let report = try? Self.decode(SessionResumeExplanation.self, from: await run(
-                  ["session", "resume", "--task", issue, "--explain", "--json"], cwd)),
-              report.state == nil, report.action?.intent == .start,
-              report.impediments.isEmpty, report.unavailable.isEmpty else { return nil }
-        return report.actions.first { $0.kind == .open && $0.unavailableReason == nil }
-    }
-
-    /// Prepare without launching. Resume transfers control; Start and reveal never
-    /// replace input. Only Start may create the first provider thread. Naming the
-    /// Session's Task or Wave as `work` makes its `open_argv` resume managed.
+    /// Prepare without launching; `open_argv` views a held terminal, resumes an
+    /// ended Session, or takes over a native client. Naming the Session's Task or
+    /// Wave as `work` makes its `open_argv` resume managed.
     public func prepareSession(
         id: String,
         work: WorkReference? = nil,
         agent: String? = nil,
-        cwd: String? = nil,
-        intent: SessionOpenIntent = .start
+        cwd: String? = nil
     ) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
             .sessionResume(directory: cwd ?? "/", id: id,
                            task: work?.kind == .task ? work?.id : nil,
                            wave: work?.kind == .wave ? work?.id : nil,
-                           agent: agent, intent: intent)))
+                           agent: agent)))
     }
 
     /// Give one Session a human-assigned name and return the authoritative
@@ -1361,14 +1273,6 @@ public struct RegistryQuery: Sendable {
     public func resetSession(_ session: SessionRecord, agent: String?, cwd: String?, requestID: String = UUID().uuidString) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
             .sessionNew(directory: cwd ?? "/", requestID: requestID, id: session.id, agent: agent)))
-    }
-
-    /// Move the open Sessions whose login cannot take their model now to
-    /// `agent` (`harness[:model]`) or `account`: idle ones at their next open,
-    /// busy ones after their turn. The report says which went where.
-    public func moveBlockedSessions(agent: String, cwd: String?) async throws -> SessionMoveReport {
-        try Self.decode(SessionMoveReport.self, from: await write(
-            .sessionMove(directory: cwd ?? "/", blocked: true, on: nil, agent: agent)))
     }
 
     /// Create a Task around the selected conversation without launching work.
@@ -1395,47 +1299,38 @@ public struct RegistryQuery: Sendable {
         project: String? = nil,
         task: String? = nil
     ) async throws -> [SessionHistory] {
-        try Self.decode([SessionHistory].self, from: await serve(
-            .sessionUsage(days: days, wave: wave, project: project, task: task)))
+        try await serve(
+            .sessionUsage(days: days, wave: wave, project: project, task: task)).decode([SessionHistory].self)
     }
 
     /// The codebase on disk, as a tree of directories weighted by tokens.
     /// Mirrors Rust `CodeNode`. Runs in `repoPath` — `lf tokens` measures the
     /// repo it is invoked in.
     public func codebase(repoPath: String) async throws -> CodeNode {
-        try Self.decode(CodeNode.self, from: await serve(.repoTokens(directory: repoPath, days: nil)))
+        try await serve(.repoTokens(directory: repoPath, days: nil)).decode(CodeNode.self)
     }
 
     /// How big the codebase was on each day it changed. Mirrors Rust
     /// `CodeSnapshot`. Blob counts are cached by sha, so only the first walk of
     /// a window pays to tokenize.
     public func codebaseHistory(repoPath: String, days: Int = 30) async throws -> [CodeSnapshot] {
-        try Self.decode([CodeSnapshot].self, from: await serve(.repoTokens(directory: repoPath, days: days)))
+        try await serve(.repoTokens(directory: repoPath, days: days)).decode([CodeSnapshot].self)
     }
 
     /// How much Session history providers still keep, and what they remove next.
     /// Mirrors Rust `RetentionSummary`.
     public func retention() async throws -> RetentionSummary {
-        try Self.decode(RetentionSummary.self, from: await serve(.sessionRetention))
+        try await serve(.sessionRetention).decode(RetentionSummary.self)
     }
 
     /// The ledger's self-audit, including continuity and lineage tripwires.
     public func doctor() async throws -> DoctorReport {
-        try Self.decode(DoctorReport.self, from: await serve(.machineDoctor))
+        try await serve(.machineDoctor).decode(DoctorReport.self)
     }
 
     /// Decode retained wire text through the decoder live reads use.
     public static func decode<T: Decodable>(_ type: T.Type, from stdout: String) throws -> T {
-        // `lf` prints one JSON line; trim any surrounding whitespace/newline.
-        let trimmed = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let data = trimmed.data(using: .utf8) else {
-            throw RegistryQueryError("lf query returned non-UTF8 output")
-        }
-        do {
-            return try JSONDecoder().decode(T.self, from: data)
-        } catch {
-            throw RegistryQueryError("lf query JSON did not decode: \(error)")
-        }
+        try ReadOutput(stdout).decode(type)
     }
 }
 
@@ -1458,6 +1353,28 @@ public struct TaskCreateReceipt: Codable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case task, graph, milestone
         case sessionId = "session_id"
+    }
+}
+
+/// `task.create`'s answer: the receipt, plus the primary conversation's record
+/// and the Task's planning row read when answering. A repeat reads them again;
+/// the stored receipt that `creation.lookup` returns holds neither.
+public struct TaskCreated: Decodable, Sendable {
+    public let receipt: TaskCreateReceipt
+    public let session: SessionRecord?
+    /// The Task's row in the Work projection's shape, so a window selects the
+    /// Task before its planning subscription lists it.
+    public let row: RoadmapTask
+
+    enum CodingKeys: String, CodingKey {
+        case session, row
+    }
+
+    public init(from decoder: Decoder) throws {
+        receipt = try TaskCreateReceipt(from: decoder)
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        session = try values.decode(SessionRecord?.self, forKey: .session)
+        row = try values.decode(RoadmapTask.self, forKey: .row)
     }
 }
 
@@ -1678,6 +1595,8 @@ public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
     public let workSource: String?
     public let waveName: String?
     public let skill: String?
+    /// SHA-256 of the resolved skill text the run launched with.
+    public let skillVersion: String?
     public let observedAt: Int
     public let firstProviderAttemptAt: Int?
     public let recordedOutcome: String?
@@ -1716,6 +1635,7 @@ public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
         case sessionId = "session_id", artifactKey = "artifact_key", callerArtifactKey = "caller_artifact_key"
         case taskPrId = "task_pr_id", taskId = "task_id", waveId = "wave_id"
         case taskIdentifier = "task_identifier", waveName = "wave_name", workSource = "work_source"
+        case skillVersion = "skill_version"
         case observedAt = "observed_at", firstProviderAttemptAt = "first_provider_attempt_at"
         case recordedOutcome = "recorded_outcome", recordedAt = "recorded_at", evidenceGaps = "evidence_gaps"
     }
@@ -1982,7 +1902,6 @@ public struct HomeRetention: Codable, Sendable, Equatable, Identifiable {
 }
 
 public struct DoctorReport: Decodable, Sendable {
-    public let rows: Int
     public let checks: [DoctorCheck]
 }
 

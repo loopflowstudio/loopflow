@@ -1,0 +1,1072 @@
+//! Whole files and marked source excerpts in conversation context. Size targets never select launch content.
+//!
+//! Claude's hook string limit is 10,000 characters; Codex 0.161.0's default
+//! is 2,500 approximate tokens (ceil(UTF-8 bytes / 4)). The shared 10,000-byte
+//! ceiling also avoids the observed Claude Unicode spill. Budget the rendered
+//! string, including paths, escaping and the compact-only active skill.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+
+use crate::error::CoreError;
+use crate::prompt::{
+    gather_documents, render_reference, write_prompt_log, Document, DocumentSource, GatherSpec,
+};
+
+pub const CONTEXT_DELIVERY_ENV: &str = "LF_CONTEXT_DELIVERY";
+
+const HOOK_CONTEXT_BYTES: usize = 10_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ContextMoment {
+    Start,
+    Compact,
+    Tool,
+    /// A tool boundary, or a bare launch's prompt: the hook reads the
+    /// Session's unread steers and Task update from the store and reports
+    /// nothing to the server.
+    Steer,
+    /// A turn ended: the Machine server records it, then refreshes planning
+    /// (whose changes become steers for the next boundary) and applies a
+    /// pending Session move.
+    Stop,
+}
+
+/// Captured source identities, not frozen context. Hooks reread scratch and Wave
+/// files; references and the active skill retain their complete launch bytes.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ContextDelivery {
+    /// Captured before launch; managed start/compact boundaries refresh it.
+    pub identity: Option<SessionIdentity>,
+    /// Durable identity and canonical main-checkout address captured at launch.
+    pub repository: Option<(loopflow_model::durable::RepositoryId, PathBuf)>,
+    pub repo: PathBuf,
+    pub wave: Option<String>,
+    pub skill_file: Option<PathBuf>,
+    pub references: Vec<PathBuf>,
+    /// Sources already supplied in task text; absent in historical deliveries.
+    pub submitted_docs: Option<Vec<PathBuf>>,
+    pub home: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SessionIdentity {
+    pub session: String,
+    pub task: Option<(String, String)>,
+}
+
+impl ContextDelivery {
+    pub fn prepare(components: &crate::prompt::PromptComponents) -> Result<Self, CoreError> {
+        let repo = fs::canonicalize(&components.repo_root)?;
+        let mut references = Vec::new();
+        for doc in &components.summaries {
+            references.push(write_prompt_log(&repo, &doc.content, "summary", None)?);
+        }
+        if components.diff.is_some() || !components.diff_files.is_empty() {
+            let paths = components
+                .diff_files
+                .iter()
+                .map(|doc| doc.path.as_str())
+                .collect::<Vec<_>>();
+            references.push(write_prompt_log(&repo, &format!(
+                "Inspect current changes with `git diff` and `git diff main...HEAD`.\nChanged paths: {}\n",
+                serde_json::to_string(&paths).expect("paths serialize")
+            ), "changes", None)?);
+        }
+        let skill_file = components
+            .skill
+            .as_ref()
+            .map(|skill| {
+                let source = skill
+                    .source
+                    .as_ref()
+                    .map(|source| {
+                        format!(
+                    "Original skill source: {}. Resolve relative assets from its directory.\n\n",
+                    serde_json::to_string(&source.path).expect("skill path serializes")
+                )
+                    })
+                    .unwrap_or_default();
+                write_prompt_log(
+                    &repo,
+                    &format!("{source}{}", skill.source_text()),
+                    "active-skill",
+                    None,
+                )
+            })
+            .transpose()?;
+        let repository = crate::store::read_existing_registry()
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
+            .map(|store| -> Result<_, CoreError> {
+                let root = crate::repository::discover(&repo)
+                    .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+                Ok(store
+                    .sqlite
+                    .repository_id(&root.to_string())
+                    .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
+                    .map(|id| (id, root.as_path().to_path_buf())))
+            })
+            .transpose()?
+            .flatten();
+        Ok(Self {
+            identity: None,
+            repository,
+            repo: repo.clone(),
+            wave: components.wave.clone(),
+            skill_file,
+            references,
+            submitted_docs: Some(
+                components
+                    .docs
+                    .iter()
+                    .filter(|doc| doc.source == DocumentSource::Docs)
+                    .map(|doc| {
+                        let path = repo.join(&doc.path);
+                        path.canonicalize().unwrap_or(path)
+                    })
+                    .collect(),
+            ),
+            home: crate::store::lf_home_dir(),
+        })
+    }
+
+    /// Refresh the identity the launch owner knows, without making hooks open
+    /// the store. Bare launches keep this snapshot for their whole run.
+    pub fn identify(
+        &mut self,
+        store: &loopflow_storage::sqlite::SqliteStore,
+        session: &str,
+    ) -> crate::store::StoreResult<bool> {
+        let task = match store.session_task_ids(session)?.as_slice() {
+            [task] => store.task(task)?,
+            _ => None,
+        };
+        let identity = Some(SessionIdentity {
+            session: session.to_owned(),
+            task: task.map(|task| (task.identifier, task.title)),
+        });
+        let changed = self.identity != identity;
+        self.identity = identity;
+        Ok(changed)
+    }
+
+    /// Follow a moved checkout to where the store now places the repository;
+    /// returns whether anything moved.
+    pub fn relocate(
+        &mut self,
+        store: &loopflow_storage::sqlite::SqliteStore,
+    ) -> anyhow::Result<bool> {
+        let Some((id, source)) = &self.repository else {
+            return Ok(false);
+        };
+        let Some(destination) = store.repository_path(id)? else {
+            return Ok(false);
+        };
+        let destination = PathBuf::from(destination);
+        if *source == destination {
+            return Ok(false);
+        }
+        let update = |path: &mut PathBuf| {
+            if let Ok(relative) = path.strip_prefix(source) {
+                *path = destination.join(relative);
+            }
+        };
+        update(&mut self.repo);
+        if let Some(path) = &mut self.skill_file {
+            update(path);
+        }
+        for path in &mut self.references {
+            update(path);
+        }
+        for path in self.submitted_docs.iter_mut().flatten() {
+            update(path);
+        }
+        self.repository = Some((id.clone(), destination));
+        Ok(true)
+    }
+
+    pub fn block(&self, moment: ContextMoment) -> Result<ContextBlock, CoreError> {
+        self.block_with_prefix(moment, "")
+    }
+
+    pub fn block_with_prefix(
+        &self,
+        moment: ContextMoment,
+        prefix: &str,
+    ) -> Result<ContextBlock, CoreError> {
+        let wave = self.wave.as_deref();
+        let mut documents = gather_documents(&GatherSpec {
+            repo_root: self.repo.clone(),
+            wave: self.wave.clone(),
+            ..Default::default()
+        })?;
+        documents.retain(|doc| {
+            let path = self.repo.join(&doc.path);
+            let path = path.canonicalize().unwrap_or(path);
+            !self
+                .submitted_docs
+                .as_ref()
+                .is_some_and(|submitted| submitted.contains(&path))
+        });
+        order_documents(&mut documents, wave, &|doc| {
+            std::fs::metadata(self.repo.join(&doc.path))
+                .and_then(|metadata| metadata.modified())
+                .ok()
+        });
+        let identity = self
+            .identity
+            .as_ref()
+            .map(|identity| {
+                let mut text = format!("This Session: {}\n", identity.session);
+                if let Some((identifier, title)) = &identity.task {
+                    text.push_str(&format!(
+                        "This Session's Task: {identifier} {}\n",
+                        serde_json::to_string(title).expect("title serializes")
+                    ));
+                }
+                render_reference(&text)
+            })
+            .unwrap_or_default();
+        let prefix = format!("{identity}{prefix}");
+        render_block(
+            &self.repo,
+            wave,
+            moment,
+            self.skill_file.as_deref(),
+            &self.references,
+            documents,
+            &prefix,
+        )
+    }
+
+    /// Each provider process receives its own saved launch context separately
+    /// from the declarations the provider asks a person to trust. Returns the
+    /// delivery file the provider's hooks read.
+    pub fn configure_hooks(&self, command: &mut std::process::Command) -> anyhow::Result<PathBuf> {
+        // Provider environments outlive directory moves. Keep their launch
+        // description in the Machine, where the hook's address stays valid.
+        let directory = self.home.join("context-deliveries");
+        let path = directory.join(format!("{}.json", uuid::Uuid::new_v4()));
+        self.save(&path)?;
+        command.env(CONTEXT_DELIVERY_ENV, &path);
+        Ok(path)
+    }
+
+    /// App-server hooks inherit the server environment, not thread shell policy,
+    /// so each conversation is bound by its native ID before its first turn.
+    pub fn bind_codex_session(&self, session: &str) -> anyhow::Result<()> {
+        self.save(&native_delivery_path(&self.home, session))
+    }
+
+    /// The delivery file at `path`; errors name the file, never its contents.
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
+        let bytes = fs::read(path).map_err(|error| {
+            anyhow::anyhow!("Read provider context delivery {}: {error}; reconnect the Loopflow Session to restore its binding", path.display())
+        })?;
+        serde_json::from_slice(&bytes).map_err(|error| {
+            anyhow::anyhow!(
+                "Decode provider context delivery {}: {error}",
+                path.display()
+            )
+        })
+    }
+
+    /// Replace the delivery file at `path` whole, so a hook never reads half of it.
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        let parent = path.parent().expect("context binding has a parent");
+        fs::create_dir_all(parent)?;
+        let file = tempfile::NamedTempFile::new_in(parent)?;
+        serde_json::to_writer(file.as_file(), self)?;
+        file.persist(path)?;
+        Ok(())
+    }
+
+    /// The command a provider hook runs, up to the moment it declares.
+    pub(crate) fn hook_command(&self) -> anyhow::Result<String> {
+        let executable = crate::os_process::resolve_lf_binary()?;
+        Ok(format!(
+            "env LF_HOME={} {} __context-block --moment",
+            crate::os_process::shell_escape(&self.home.to_string_lossy()),
+            crate::os_process::shell_escape(&executable.to_string_lossy()),
+        ))
+    }
+
+    /// Shell that exits 0 when no steer can be waiting for this conversation,
+    /// so a hook starts lf only for new steering: the seen marker is newer
+    /// than every marker a steer for it touches. dash's -nt is false when the
+    /// second file is missing, so test existence first.
+    pub(crate) fn steer_gate(&self) -> String {
+        format!(
+            "s=\"${seen}\"; [ -n \"$s\" ] || exit 0; n() {{ [ ! -e \"$1\" ] || [ \"$s\" -nt \"$1\" ]; }}; [ -e \"$s\" ] && n {latest} && n \"${session}\" && n \"${task}\" && exit 0;",
+            seen = crate::steer::STEER_SEEN_ENV,
+            latest = crate::os_process::shell_escape(
+                &loopflow_storage::steer_markers::latest_marker(&self.home).to_string_lossy()
+            ),
+            session = crate::steer::STEER_SESSION_ENV,
+            task = crate::steer::STEER_TASK_ENV,
+        )
+    }
+
+    /// The provider hooks of one launch. Every launch prints its context
+    /// block at session start and after a compaction, and reads its own
+    /// steers and Task update from the store after a tool call and at a
+    /// prompt. A managed launch also reports its starts, prompts and turn
+    /// ends to the server for recording.
+    pub fn hook_settings(
+        &self,
+        kind: crate::harness::LaunchKind,
+    ) -> anyhow::Result<serde_json::Value> {
+        let command = self.hook_command()?;
+        let gate = self.steer_gate();
+        let context = |moment: &str| serde_json::json!({"type":"command","command":format!("{command} {moment}"),"timeout":30});
+        let hook = |command: String| serde_json::json!([{"hooks":[{"type":"command","command":command,"timeout":10}]}]);
+        let start = serde_json::json!([
+            {"matcher": "startup|resume|clear", "hooks": [context("start")]},
+            {"matcher": "compact", "hooks": [context("compact")]},
+        ]);
+        let steer = hook(format!("{gate} {command} steer"));
+        if !kind.is_managed() {
+            return Ok(serde_json::json!({
+                "PostToolUse": steer,
+                "UserPromptSubmit": steer,
+                "SessionStart": start,
+            }));
+        }
+        // A managed prompt hook always runs: the server records the turn it starts.
+        Ok(serde_json::json!({
+            "Stop": hook(format!("{command} stop")),
+            "PostToolUse": steer,
+            "UserPromptSubmit": hook(format!("{command} tool")),
+            "SessionStart": start,
+        }))
+    }
+}
+
+/// Where a launch's start hook leaves the provider thread it started, beside
+/// the launch's delivery file. Only a bare Codex needs it, so lf creates the
+/// file for that launch alone: it names every other bare thread before launch.
+pub fn reported_thread_path(delivery: &Path) -> PathBuf {
+    delivery.with_extension("thread")
+}
+
+pub fn native_delivery_path(home: &Path, session: &str) -> PathBuf {
+    // Native IDs are opaque; never interpret one as a filesystem path.
+    home.join("context-deliveries")
+        .join(format!("{}.json", hex::encode(Sha256::digest(session))))
+}
+
+/// One complete, readable source in the checkout or saved launch references.
+#[derive(Debug, Serialize)]
+struct ContextFile {
+    source: String,
+    path: PathBuf,
+    bytes: usize,
+}
+
+/// The complete listing is retained even when its pointer alone fits the hook.
+#[derive(Debug)]
+pub struct ContextBlock {
+    pub text: String,
+    pub manifest_path: PathBuf,
+}
+
+/// The plan a step builds from, where kickoff and design write it.
+const PLAN: &str = "scratch/plan.md";
+
+/// The selected Wave's memory, then the plan, then scratch with the most
+/// recently edited first: the files work is touching now, not the smallest.
+fn order_documents(
+    documents: &mut [Document],
+    wave: Option<&str>,
+    modified: &dyn Fn(&Document) -> Option<std::time::SystemTime>,
+) {
+    let memory = wave.map(|wave| format!(".lf/wave/{wave}/MEMORY.md"));
+    let priority = |doc: &Document| {
+        if memory.as_deref() == Some(doc.path.as_str()) {
+            0
+        } else if doc.path == PLAN {
+            1
+        } else if doc.source == DocumentSource::Scratch {
+            2
+        } else {
+            3
+        }
+    };
+    documents.sort_by_cached_key(|doc| {
+        (
+            priority(doc),
+            std::cmp::Reverse(modified(doc)),
+            doc.path.clone(),
+        )
+    });
+}
+
+/// Named by its content: a hook that runs on every model request with the same
+/// checkout files reuses one manifest instead of writing another.
+fn write_manifest(repo_root: &Path, manifest: &str) -> Result<PathBuf, CoreError> {
+    let digest = hex::encode(Sha256::digest(manifest.as_bytes()));
+    let prompts = repo_root.join(".lf/prompts");
+    let path = prompts.join(format!("{}-context-manifest.md", &digest[..16]));
+    if path.exists() {
+        return Ok(path);
+    }
+    fs::create_dir_all(&prompts)?;
+    crate::git::exclude(repo_root, ".lf/prompts/")?;
+    let mut file = tempfile::NamedTempFile::new_in(&prompts)?;
+    std::io::Write::write_all(&mut file, manifest.as_bytes())?;
+    file.persist(&path).map_err(|error| error.error)?;
+    Ok(path)
+}
+
+fn render_block(
+    repo_root: &Path,
+    wave: Option<&str>,
+    moment: ContextMoment,
+    skill_file: Option<&Path>,
+    references: &[PathBuf],
+    documents: Vec<Document>,
+    prefix: &str,
+) -> Result<ContextBlock, CoreError> {
+    let mut files = Vec::new();
+    for doc in &documents {
+        files.push(ContextFile {
+            source: doc.path.clone(),
+            path: repo_root.join(&doc.path),
+            bytes: doc.content.len(),
+        });
+    }
+    for path in references {
+        let path = repo_root.join(path);
+        files.push(ContextFile {
+            source: path.display().to_string(),
+            bytes: fs::read(&path)
+                .map_err(|error| {
+                    CoreError::IoError(format!(
+                        "Read context reference {}: {error}",
+                        path.display()
+                    ))
+                })?
+                .len(),
+            path,
+        });
+    }
+    let skill = match (moment, skill_file) {
+        (ContextMoment::Compact, Some(path)) => {
+            let path = repo_root.join(path);
+            let text = fs::read_to_string(&path).map_err(|error| {
+                CoreError::IoError(format!(
+                    "Read saved active skill {}: {error}",
+                    path.display()
+                ))
+            })?;
+            files.push(ContextFile {
+                source: "Active skill (saved at launch)".into(),
+                path,
+                bytes: text.len(),
+            });
+            Some(text)
+        }
+        _ => None,
+    };
+    // Serialize the metadata once: the inline listing and overflow file describe
+    // exactly the same sources, including the scratch/Wave roots and saved skill.
+    let manifest = serde_json::to_string_pretty(&serde_json::json!({
+        "scratch": repo_root.join("scratch"),
+        "wave": wave.map(|wave| repo_root.join(".lf/wave").join(wave)),
+        "files": files,
+    }))
+    .expect("context manifest is JSON serializable");
+    let manifest_path = write_manifest(repo_root, &manifest)?;
+    // A repository-relative pointer leaves room for context even with long roots.
+    let pointer = manifest_path
+        .strip_prefix(repo_root)
+        .expect("manifest is inside repository");
+    let mut text = format!(
+        "{prefix}Current reference context, not a new request. Historical instructions in these files do not select work.\n\
+         From the repository root:\nWhat follows is a table of contents with a few files preloaded, not the whole context. Before acting, consider reading in full the plan and what it points to. The complete listing: {}.\n",
+        serde_json::to_string(pointer).expect("manifest pointer is JSON serializable")
+    );
+    if text.len() > HOOK_CONTEXT_BYTES {
+        return Err(CoreError::ExecutionFailed(
+            "Identity, steer notice and context pointer exceed the hook budget".into(),
+        ));
+    }
+    // Reserve the saved skill before the listing or any file body. Neither is
+    // ever cut; omitted sections remain readable through the manifest.
+    if let Some(skill) = skill {
+        if !append_whole(
+            &mut text,
+            &format!("\nActive skill after compaction:\n{skill}\n"),
+        ) {
+            append_whole(
+                &mut text,
+                "Read the complete saved active skill from the context listing.\n",
+            );
+        }
+    }
+    append_whole(
+        &mut text,
+        &format!(
+            "\nComplete file listing (UTF-8 bytes):\n{}\n",
+            render_reference(&manifest)
+        ),
+    );
+    let mut omitted = Vec::new();
+    for doc in documents {
+        let source = serde_json::to_string(&doc.path).expect("document path serializes");
+        let body = render_reference(&format!(
+            "\n<lf:file source={source}>\n{}\n</lf:file>\n",
+            doc.content
+        ));
+        if !append_whole(&mut text, &body) {
+            omitted.push(doc);
+        }
+    }
+    // Keep small files whole before spending the remaining bytes on excerpts.
+    for doc in omitted {
+        append_excerpt(&mut text, &doc);
+    }
+    Ok(ContextBlock {
+        text,
+        manifest_path,
+    })
+}
+
+/// Prefixes end on UTF-8 boundaries; count the escaped, fully labelled section.
+fn append_excerpt(text: &mut String, doc: &Document) {
+    let source = serde_json::to_string(&doc.path).expect("document path serializes");
+    let render = |end| {
+        render_reference(&format!(
+        "\n<lf:file source={source} excerpt=\"start\" bytes=\"{}\">\nExcerpt from the start; read the rest from the complete source {source} ({} UTF-8 bytes).\n{}\n</lf:file>\n",
+        doc.content.len(), doc.content.len(), &doc.content[..end]
+    ))
+    };
+    // Only nonempty prefixes can be excerpts. Escaping never shrinks them, so
+    // bytes beyond the remaining budget cannot fit and need no boundary index.
+    let remaining = HOOK_CONTEXT_BYTES.saturating_sub(text.len());
+    let boundaries: Vec<_> = doc
+        .content
+        .char_indices()
+        .map(|(index, ch)| index + ch.len_utf8())
+        .take_while(|&end| end <= remaining)
+        .collect();
+    let count = boundaries.partition_point(|&end| render(end).len() <= remaining);
+    if count > 0 {
+        text.push_str(&render(boundaries[count - 1]));
+    }
+}
+
+/// Selection always counts rendered bytes, including reference escaping.
+fn append_whole(text: &mut String, section: &str) -> bool {
+    if text.len() + section.len() > HOOK_CONTEXT_BYTES {
+        return false;
+    }
+    text.push_str(section);
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::Path;
+
+    use serde_json::Value;
+    use tempfile::tempdir;
+
+    use super::{
+        order_documents, render_block, ContextDelivery, ContextMoment, HOOK_CONTEXT_BYTES,
+    };
+    use crate::prompt::{render_reference, Document, DocumentSource};
+
+    fn delivery(repo: &Path) -> ContextDelivery {
+        ContextDelivery {
+            identity: None,
+            repository: None,
+            repo: repo.canonicalize().unwrap(),
+            wave: None,
+            skill_file: None,
+            submitted_docs: None,
+            references: Vec::new(),
+            home: repo.join("machine"),
+        }
+    }
+
+    fn document(path: &str, content: &str, source: DocumentSource) -> Document {
+        Document {
+            path: path.into(),
+            content: content.into(),
+            source,
+        }
+    }
+
+    #[test]
+    fn context_block_keeps_clipboard_in_first_turn_not_a_reference_file() {
+        let repo = tempdir().unwrap();
+        let components = crate::prompt::PromptComponents {
+            repo_root: repo.path().display().to_string(),
+            skill: Some(crate::graph::Skill {
+                source: None,
+                name: "test".into(),
+                content: Some("Test skill".into()),
+                agent: None,
+                occurrence: None,
+                settings: Default::default(),
+                action_style: None,
+                docs: None,
+            }),
+            message: Some("Fix this".into()),
+            clipboard: Some("🦀 $reference\r\n".repeat(10_000)),
+            ..Default::default()
+        };
+        let turn = crate::prompt::format_first_turn(&components);
+        assert!(turn.starts_with("<lf:skill:test>\nTest skill"));
+        assert!(turn.contains("</lf:skill:test>\n\n<lf:message>\nFix this\n</lf:message>\n\n"));
+        assert!(turn.contains("<lf:clipboard>\n🦀 &#36;reference\r\n"));
+        assert!(turn.ends_with("\n</lf:clipboard>"));
+        assert!(crate::agent::validate_terminal_turn(&turn).is_err());
+        let delivery = ContextDelivery::prepare(&components).unwrap();
+        assert!(delivery.references.is_empty());
+        let block = delivery.block(ContextMoment::Start).unwrap();
+        assert!(!block.text.contains("🦀"));
+        assert!(!fs::read_dir(repo.path().join(".lf/prompts"))
+            .unwrap()
+            .any(|entry| entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("clipboard")));
+    }
+
+    #[test]
+    fn saved_context_reads_checkout_wave_without_registration() {
+        let repo = tempdir().unwrap();
+        fs::create_dir_all(repo.path().join(".lf/wave/parent/child")).unwrap();
+        fs::write(repo.path().join(".lf/wave/parent/GOAL.md"), "Ancestor goal").unwrap();
+        let memory = repo.path().join(".lf/wave/parent/child/MEMORY.md");
+        fs::write(&memory, "Initial memory").unwrap();
+        let delivery = ContextDelivery::prepare(&crate::prompt::PromptComponents {
+            repo_root: repo.path().display().to_string(),
+            wave: Some("parent/child".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        let start = delivery.block(ContextMoment::Start).unwrap();
+        assert!(start.text.contains("Ancestor goal"));
+        assert!(start.text.contains("Initial memory"));
+        fs::write(&memory, "Current memory").unwrap();
+        let compact = delivery.block(ContextMoment::Compact).unwrap();
+        assert!(compact.text.contains("Current memory"));
+        assert!(!compact.text.contains("Initial memory"));
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(compact.manifest_path).unwrap()).unwrap();
+        let file = manifest["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|file| file["source"] == ".lf/wave/parent/child/MEMORY.md")
+            .unwrap();
+        assert_eq!(
+            Path::new(file["path"].as_str().unwrap()),
+            memory.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn context_block_reads_current_files_with_marked_unicode_excerpts() {
+        let repo = tempdir().unwrap();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        let large = format!("WHOLE_START{}WHOLE_END", "🦀".repeat(50_000));
+        fs::write(repo.path().join("scratch/large.md"), &large).unwrap();
+        fs::write(repo.path().join("scratch/small.md"), "fresh one").unwrap();
+        let first = delivery(repo.path()).block(ContextMoment::Start).unwrap();
+        assert!(first.text.len() <= HOOK_CONTEXT_BYTES);
+        assert!(first.text.contains("fresh one"));
+        assert!(first.text.contains("WHOLE_START"));
+        assert!(first.text.contains("excerpt=\"start\""));
+        assert!(first
+            .text
+            .contains("read the rest from the complete source \"scratch/large.md\""));
+        assert!(!first.text.contains("WHOLE_END"));
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(first.manifest_path).unwrap()).unwrap();
+        let large_file = manifest["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|file| file["source"] == "scratch/large.md")
+            .unwrap();
+        assert_eq!(large_file["bytes"], large.len());
+        assert_eq!(
+            fs::read_to_string(large_file["path"].as_str().unwrap()).unwrap(),
+            large
+        );
+
+        fs::write(repo.path().join("scratch/small.md"), "fresh two").unwrap();
+        fs::write(
+            repo.path().join("scratch/large.md"),
+            large.replace("WHOLE_START", "UPDATED_START"),
+        )
+        .unwrap();
+        let compact = delivery(repo.path()).block(ContextMoment::Compact).unwrap();
+        assert!(compact.text.contains("fresh two"));
+        assert!(compact.text.contains("UPDATED_START"));
+        assert!(!compact.text.contains("WHOLE_START"));
+        assert!(!compact.text.contains("fresh one"));
+    }
+
+    #[test]
+    fn repeated_requests_over_unchanged_files_write_one_manifest() {
+        let repo = tempdir().unwrap();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        fs::write(repo.path().join("scratch/plan.md"), "the plan").unwrap();
+        let delivery = delivery(repo.path());
+        let manifests = || {
+            fs::read_dir(repo.path().join(".lf/prompts"))
+                .unwrap()
+                .filter(|entry| {
+                    entry
+                        .as_ref()
+                        .unwrap()
+                        .file_name()
+                        .to_string_lossy()
+                        .contains("context-manifest")
+                })
+                .count()
+        };
+        let first = delivery.block(ContextMoment::Tool).unwrap();
+        for _ in 0..20 {
+            assert_eq!(
+                delivery.block(ContextMoment::Tool).unwrap().manifest_path,
+                first.manifest_path
+            );
+        }
+        assert_eq!(manifests(), 1);
+        fs::write(repo.path().join("scratch/plan.md"), "the new plan").unwrap();
+        delivery.block(ContextMoment::Tool).unwrap();
+        assert_eq!(manifests(), 2);
+    }
+
+    #[test]
+    fn context_block_reports_unreadable_text_instead_of_claiming_a_complete_listing() {
+        let repo = tempdir().unwrap();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        fs::write(repo.path().join("scratch/invalid.md"), [0xff, 0xfe]).unwrap();
+        let error = delivery(repo.path())
+            .block(ContextMoment::Start)
+            .unwrap_err();
+        assert!(error.to_string().contains("scratch/invalid.md"));
+    }
+
+    #[test]
+    fn context_block_prioritizes_selected_memory_then_the_plan_then_recent_scratch() {
+        let mut docs = vec![
+            document("scratch/b.md", "four", DocumentSource::Scratch),
+            document(".lf/wave/parent/MEMORY.md", "p", DocumentSource::Wave),
+            document("scratch/a.md", "one", DocumentSource::Scratch),
+            document("scratch/plan.md", "the plan", DocumentSource::Scratch),
+            document(
+                ".lf/wave/parent/child/MEMORY.md",
+                "selected memory",
+                DocumentSource::Wave,
+            ),
+        ];
+        // The longer, later-edited note outranks the shorter, older one.
+        let edited = |doc: &Document| {
+            let seconds = if doc.path == "scratch/b.md" { 20 } else { 10 };
+            Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
+        };
+        order_documents(&mut docs, Some("parent/child"), &edited);
+        assert_eq!(
+            docs.iter().map(|doc| doc.path.as_str()).collect::<Vec<_>>(),
+            [
+                ".lf/wave/parent/child/MEMORY.md",
+                "scratch/plan.md",
+                "scratch/b.md",
+                "scratch/a.md",
+                ".lf/wave/parent/MEMORY.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn context_block_overflow_keeps_the_entire_listing_and_skill_readable() {
+        let repo = tempdir().unwrap();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        for index in 0..200 {
+            fs::write(
+                repo.path().join(format!("scratch/file-{index:03}.md")),
+                format!("file {index}"),
+            )
+            .unwrap();
+        }
+        let skill = "ACTIVE_START\n".to_owned() + &"saved skill\n".repeat(2_000) + "ACTIVE_END";
+        let skill_path = repo.path().join("active-skill.md");
+        fs::write(&skill_path, &skill).unwrap();
+        let block = ContextDelivery {
+            skill_file: Some(skill_path.clone()),
+            ..delivery(repo.path())
+        }
+        .block(ContextMoment::Compact)
+        .unwrap();
+        assert!(block.text.len() <= HOOK_CONTEXT_BYTES);
+        assert!(!block.text.contains("Complete file listing (UTF-8 bytes)"));
+        assert!(!block.text.contains("ACTIVE_START"));
+        assert!(!block.text.contains("ACTIVE_END"));
+        assert!(block.text.contains("Read the complete saved active skill"));
+        assert!(block
+            .text
+            .contains(block.manifest_path.file_name().unwrap().to_str().unwrap()));
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(block.manifest_path).unwrap()).unwrap();
+        assert_eq!(manifest["files"].as_array().unwrap().len(), 201);
+        for file in manifest["files"].as_array().unwrap() {
+            let contents = fs::read(file["path"].as_str().unwrap()).unwrap();
+            assert_eq!(contents.len() as u64, file["bytes"].as_u64().unwrap());
+        }
+        assert_eq!(fs::read_to_string(&skill_path).unwrap(), skill);
+    }
+
+    #[test]
+    fn context_block_reserves_skill_when_only_the_combined_listing_overflows() {
+        let repo = tempdir().unwrap();
+        // Long names keep the listing over the remaining space wherever the
+        // temporary directory lives; its path is short on Linux.
+        let references: Vec<_> = (0..20)
+            .map(|index| {
+                let path = repo.path().join(format!("reference-{index:0>60}.md"));
+                fs::write(&path, "Listed reference, not preloaded").unwrap();
+                path
+            })
+            .collect();
+        let skill_path = repo.path().join("skill.md");
+        let skill = "s".repeat(7_000);
+        fs::write(&skill_path, &skill).unwrap();
+        let block = ContextDelivery {
+            skill_file: Some(skill_path),
+            references,
+            ..delivery(repo.path())
+        }
+        .block(ContextMoment::Compact)
+        .unwrap();
+        let manifest = fs::read_to_string(block.manifest_path).unwrap();
+        assert!(manifest.len() < HOOK_CONTEXT_BYTES);
+        assert!(manifest.len() + skill.len() > HOOK_CONTEXT_BYTES);
+        assert!(block.text.len() <= HOOK_CONTEXT_BYTES);
+        assert!(block.text.contains(&skill));
+        assert!(!block.text.contains("Complete file listing (UTF-8 bytes)"));
+        assert!(!block.text.contains("Listed reference, not preloaded"));
+        let manifest: Value = serde_json::from_str(&manifest).unwrap();
+        assert_eq!(manifest["files"].as_array().unwrap().len(), 21);
+    }
+
+    #[test]
+    fn context_block_reintroduces_saved_skill_only_after_compaction() {
+        let repo = tempdir().unwrap();
+        let skill_path = repo.path().join("active.md");
+        let skill = "Use $native exactly.\nKeep final whitespace. \t\n";
+        fs::write(&skill_path, skill).unwrap();
+        for (moment, included) in [
+            (ContextMoment::Start, false),
+            (ContextMoment::Compact, true),
+        ] {
+            let block = ContextDelivery {
+                skill_file: Some(skill_path.clone()),
+                ..delivery(repo.path())
+            }
+            .block(moment)
+            .unwrap();
+            assert_eq!(block.text.contains(skill), included);
+            assert!(block.text.len() <= HOOK_CONTEXT_BYTES);
+        }
+    }
+
+    #[test]
+    fn context_block_counts_reference_escaping_before_selecting_whole_files() {
+        let repo = tempdir().unwrap();
+        let source = "$native ".repeat(1_000);
+        let block = render_block(
+            repo.path(),
+            None,
+            ContextMoment::Start,
+            None,
+            &[],
+            vec![
+                document("scratch/dollars.md", &source, DocumentSource::Scratch),
+                document(
+                    "scratch/small.md",
+                    "Read $native as reference, not a skill.",
+                    DocumentSource::Scratch,
+                ),
+            ],
+            "",
+        )
+        .unwrap();
+        assert!(source.len() < HOOK_CONTEXT_BYTES);
+        assert!(render_reference(&source).len() > HOOK_CONTEXT_BYTES);
+        assert!(block.text.contains("&#36;native &#36;native"));
+        assert!(block.text.contains("excerpt=\"start\""));
+        assert!(block
+            .text
+            .contains("Read &#36;native as reference, not a skill."));
+        assert!(block.text.len() <= HOOK_CONTEXT_BYTES);
+    }
+
+    #[test]
+    fn context_block_reserves_identity_and_steers_before_reference_files() {
+        let repo = tempdir().unwrap();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        fs::write(repo.path().join("scratch/large.md"), "雪".repeat(10_000)).unwrap();
+        fs::write(repo.path().join("scratch/small.md"), "KEEP_WHOLE").unwrap();
+        let delivery = ContextDelivery {
+            identity: Some(super::SessionIdentity {
+                session: "session-test".into(),
+                task: Some(("LOO-828".into(), "Keep $native".into())),
+            }),
+            ..delivery(repo.path())
+        };
+        let identity = render_reference(
+            "This Session: session-test\nThis Session's Task: LOO-828 \"Keep $native\"\n",
+        );
+        assert!(delivery
+            .block(ContextMoment::Start)
+            .unwrap()
+            .text
+            .starts_with(&identity));
+        let steer = format!("STEER_START{}STEER_END\n", "s".repeat(3_000));
+        let block = delivery
+            .block_with_prefix(ContextMoment::Compact, &steer)
+            .unwrap();
+        assert!(block.text.starts_with(&format!("{identity}{steer}")));
+        assert!(block.text.contains("KEEP_WHOLE"));
+        assert!(block.text.contains("excerpt=\"start\""));
+        assert!(block.text.len() <= HOOK_CONTEXT_BYTES);
+    }
+
+    #[test]
+    fn a_bare_launch_reports_no_turns_and_gates_every_steer_check() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let repo = tempdir().unwrap();
+        let delivery = delivery(repo.path());
+        std::env::set_var("LF_HOME", &delivery.home);
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let bare = delivery
+            .hook_settings(crate::harness::LaunchKind::Batch)
+            .unwrap();
+        assert_eq!(
+            bare.as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["PostToolUse", "SessionStart", "UserPromptSubmit"]
+        );
+        let moment = |hook: &serde_json::Value| {
+            let command = hook["command"].as_str().unwrap();
+            command.rsplit(' ').next().unwrap().to_owned()
+        };
+        let moments: Vec<_> = bare["SessionStart"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|group| group["hooks"].as_array().unwrap())
+            .map(moment)
+            .collect();
+        assert_eq!(moments, ["start", "compact"]);
+        // No server records a bare prompt, so it too waits for a marker.
+        for event in ["PostToolUse", "UserPromptSubmit"] {
+            let hook = &bare[event][0]["hooks"][0];
+            assert_eq!(moment(hook), "steer");
+            assert!(hook["command"]
+                .as_str()
+                .unwrap()
+                .starts_with("s=\"$LF_STEER_SEEN\""));
+        }
+    }
+
+    #[test]
+    fn native_hooks_never_install_a_subscription_switcher() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let repo = tempdir().unwrap();
+        let delivery = delivery(repo.path());
+        std::env::set_var("LF_HOME", &delivery.home);
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        for kind in [
+            crate::harness::LaunchKind::Batch,
+            crate::harness::LaunchKind::WorkSession,
+        ] {
+            let hooks = delivery.hook_settings(kind).unwrap();
+            assert!(hooks.get("StopFailure").is_none());
+            assert!(!hooks.to_string().contains("record-limit"));
+        }
+    }
+
+    #[test]
+    fn tool_hook_starts_lf_only_after_a_newer_steer() {
+        use std::os::unix::fs::PermissionsExt;
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let repo = tempdir().unwrap();
+        let delivery = delivery(repo.path());
+        let ran = repo.path().join("ran");
+        let stub = repo.path().join("lf");
+        fs::write(&stub, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
+        fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("LF_HOME", &delivery.home);
+        std::env::set_var("LF_BIN", &stub);
+        let settings = delivery
+            .hook_settings(crate::harness::LaunchKind::WorkSession)
+            .unwrap();
+        let command = settings["PostToolUse"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+        let seen = delivery.home.join("steers/seen/agent");
+        let session = loopflow_storage::steer_markers::session_marker(&delivery.home, "session");
+        let task = loopflow_storage::steer_markers::task_marker(&delivery.home, "task");
+        let starts_lf = |seen: Option<&Path>| {
+            let _ = fs::remove_file(&ran);
+            let mut hook = std::process::Command::new("/bin/sh");
+            hook.args(["-c", command])
+                .env_remove(crate::steer::STEER_SEEN_ENV)
+                .env(crate::steer::STEER_SESSION_ENV, &session)
+                .env(crate::steer::STEER_TASK_ENV, &task);
+            if let Some(seen) = seen {
+                hook.env(crate::steer::STEER_SEEN_ENV, seen);
+            }
+            assert!(hook.status().unwrap().success());
+            ran.exists()
+        };
+        assert!(!starts_lf(None), "no steer adapter, nothing to deliver");
+        assert!(starts_lf(Some(&seen)), "the first boundary checks");
+        // The started hook marks its check before reading pending steers.
+        loopflow_storage::steer_markers::touch(&seen).unwrap();
+        assert!(
+            !starts_lf(Some(&seen)),
+            "nothing saved since the last check"
+        );
+        // macOS `sh` compares whole seconds, so the fixture spaces its stamps.
+        let mut clock = std::time::SystemTime::now();
+        let mut stamp = |path: &Path| {
+            clock += std::time::Duration::from_secs(5);
+            loopflow_storage::steer_markers::touch(path).unwrap();
+            let file = fs::File::options().write(true).open(path).unwrap();
+            file.set_modified(clock).unwrap();
+        };
+        stamp(&loopflow_storage::steer_markers::task_marker(
+            &delivery.home,
+            "another-task",
+        ));
+        stamp(&seen);
+        assert!(!starts_lf(Some(&seen)), "another Task's steer");
+        for marker in [
+            &loopflow_storage::steer_markers::latest_marker(&delivery.home),
+            &session,
+            &task,
+        ] {
+            stamp(marker);
+            assert!(starts_lf(Some(&seen)), "a steer saved after the check");
+            stamp(&seen);
+            assert!(!starts_lf(Some(&seen)), "checked since");
+        }
+    }
+}

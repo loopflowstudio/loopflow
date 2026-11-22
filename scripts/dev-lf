@@ -1,6 +1,7 @@
 #!/bin/bash
 # Build and run lf from the current repo's source tree.
 # Usage: scripts/dev-lf [args...]             e.g.  scripts/dev-lf design
+#        scripts/dev-lf --isolated-build [args...]  bypass caches in target/isolated
 #        source scripts/dev-lf [args...]      applies shell directives like `cd`
 #
 # Run directly — do NOT use `uv run scripts/dev-lf` (uv mangles args
@@ -23,9 +24,22 @@ return_or_exit() {
 }
 
 run_dev_lf() {
-    local repo directive_file status_file exit_code run_status
+    local repo target isolated directive_file status_file exit_code run_status
 
     repo="$(git rev-parse --show-toplevel)" || return "$?"
+    isolated=0
+    if [[ "${1:-}" == "--isolated-build" ]]; then
+        isolated=1
+        shift
+    fi
+    target="${CARGO_TARGET_DIR:-$repo/target}"
+    if [[ "$isolated" -eq 1 ]]; then
+        target="$repo/target/isolated"
+    fi
+    # Cargo resolves relative targets from the invoking directory.
+    if [[ "$target" != /* ]]; then
+        target="$PWD/$target"
+    fi
     directive_file="$(mktemp)"
     status_file="$(mktemp)"
 
@@ -38,13 +52,17 @@ run_dev_lf() {
         else
             export RUST_LOG="${RUST_LOG:-lf=debug,loopflow=debug}"
         fi
-        cargo build -p loopflow --bin lf --manifest-path "$repo/Cargo.toml" </dev/null 2>&1 |
-            grep -E '^   Compiling|^    Finished|^error' >&2
-        echo "running: $repo/target/debug/lf $*" >&2
+        export CARGO_TARGET_DIR="$target"
+        if [[ "$isolated" -eq 1 ]]; then
+            export RUSTC_WRAPPER= RUSTC_WORKSPACE_WRAPPER= SCCACHE_DISABLE=1
+        fi
+        uv run --project "$repo" python "$repo/scripts/build_cache.py" \
+            cargo build -p loopflow --bin lf --manifest-path "$repo/Cargo.toml" </dev/null >&2
+        echo "running: $target/debug/lf $*" >&2
 
         exit_code=0
-        LF_BIN="$repo/target/debug/lf" LOOPFLOW_DIRECTIVE_FILE="$directive_file" \
-            "$repo/target/debug/lf" "$@" || exit_code=$?
+        LF_BIN="$target/debug/lf" LOOPFLOW_DIRECTIVE_FILE="$directive_file" \
+            "$target/debug/lf" "$@" || exit_code=$?
         printf '%s\n' "$exit_code" >"$status_file"
     )
     run_status=$?

@@ -7,26 +7,30 @@ struct TaskWorkflowHeader: View {
     let model: WorkModel
     let task: RoadmapTask
     /// The Task part of the workspace stream, as last read.
-    let work: WorkReading<TaskOverview>
+    let work: Reading<TaskOverview>
     var workspaceActions: AnyView? = nil
     @Environment(\.palette) private var palette
 
     @State private var confirmingAbandon = false
     @State private var expandedTasks: Set<String> = []
 
+    private var lifecycleLabel: String {
+        switch task.lifecycle {
+        case .done: "Completed"
+        case .abandoned: "Canceled"
+        default: task.lifecycle.label.capitalized
+        }
+    }
+
     private var controls: some View {
             HStack(alignment: .center, spacing: Spacing.md) {
-                if let label = task.task.terminalLabel {
-                    Text(label)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(task.task.isSuccessful ? palette.success : palette.failure)
-                        .accessibilityIdentifier("task-lifecycle-status")
-                }
+                Text(lifecycleLabel)
+                    .fontWeight(task.isCompleted ? .semibold : .regular)
+                    .foregroundStyle(task.lifecycle == .done ? palette.success
+                        : task.lifecycle == .abandoned ? palette.failure : palette.textSecondary)
+                    .accessibilityIdentifier("task-lifecycle-status")
                 if task.isUnassigned {
                     Text("Unassigned").foregroundStyle(palette.textSecondary)
-                } else if task.task.terminalLabel == nil, let state = task.task.state {
-                    Text(state.capitalized).foregroundStyle(palette.textSecondary)
-                        .accessibilityIdentifier("task-lifecycle-status")
                 }
                 if let workflow = work.value?.graph {
                     Text(positionLabel(workflow))
@@ -34,7 +38,7 @@ struct TaskWorkflowHeader: View {
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-workflow-position")
                     if let action = runAction(workflow) {
-                        Button(action.label) { Task { await model.startTask(nil, task: task) } }
+                        Button(action.label) { model.startTaskFromInput(nil, task: task) }
                             .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
                             .disabled(unavailable != nil)
                             .help(unavailable ?? action.help)
@@ -44,7 +48,7 @@ struct TaskWorkflowHeader: View {
                     // Start the next run at a step: back, ahead, or waiting at an interactive step.
                     Menu("Start from…") {
                         ForEach([TaskGraph.start] + workflow.interactiveSteps.map(\.name), id: \.self) { step in
-                            Button(step) { Task { await model.startTask(nil, from: step, task: task) } }
+                            Button(step) { model.startTaskFromInput(nil, from: step, task: task) }
                                 .accessibilityIdentifier("task-workflow-move-\(step)")
                         }
                     }
@@ -53,67 +57,53 @@ struct TaskWorkflowHeader: View {
                     .help(unavailable ?? "lf task run \(task.task.identifier) --from <step>")
                     .accessibilityIdentifier("task-workflow-move")
 
-                } else if work.value != nil, work.errorMessage == nil {
+                } else if work.value != nil {
                     // The shared resolver reports the first-run default and its owner.
                     Text(task.graphName.map { "\($0) · \(task.graphSource ?? "")" } ?? "No workflow selected")
                         .foregroundStyle(palette.textSecondary)
                     Menu("Choose workflow") {
-                        ForEach(model.workflowCatalog.value ?? [], id: \.name) { choice in
-                            Button(choice.name) { Task { await model.startTask(choice.name, task: task) } }
-                        }
+                        StartFlowItems(model: model, chosen: task.graphName) { model.startTaskFromInput($0, task: task) }
                     }.task { await model.loadGraphCatalog() }
-                    Button("Start") { Task { await model.startTask(nil, task: task) } }
+                    Button("Start") { model.startTaskFromInput(nil, task: task) }
                         .buttonStyle(WorkOutlineButtonStyle())
                         .disabled(unavailable != nil)
                         .help(unavailable ?? "lf task run \(task.task.identifier)")
                         .accessibilityIdentifier("task-workflow-start")
                     Spacer()
                 } else {
-                    Text(work.errorMessage.map { "Workflow could not be read: \($0)" }
-                         ?? "Reading workflow…")
-                        .foregroundStyle(palette.textSecondary)
+                    if work.isLoading {
+                        Text(task.setupPosition ?? "Reading workflow…").foregroundStyle(palette.textSecondary)
+                    }
                     Spacer()
                 }
-                if task.task.isTerminal || task.runtime?.status.isTerminal == true {
-                    Button("Reopen") { Task { await model.reopenTask(task) } }
-                        .disabled(acting || readingUnavailable != nil)
+                if task.isCompleted {
+                    Button("Reopen") { model.reopenTask(task) }
+                        .disabled(readingUnavailable != nil)
                         .accessibilityIdentifier("task-reopen")
                 } else {
-                    Button("Complete") { Task { await model.completeTask(task) } }
-                        .disabled(acting || readingUnavailable != nil)
+                    Button("Complete") { model.completeTaskFromInput(task) }
+                        .disabled(readingUnavailable != nil)
                         .accessibilityIdentifier("task-complete")
                     Button(task.runtime?.owner == nil ? "Claim" : "Unassign") {
-                        Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
+                        model.assignTask(task, claimed: task.runtime?.owner == nil)
                     }
-                    .disabled(acting || readingUnavailable != nil)
+                    .disabled(readingUnavailable != nil)
                     .accessibilityIdentifier("task-claim-unassign")
                     Button("Abandon…", role: .destructive) { confirmingAbandon = true }
-                        .disabled(acting || readingUnavailable != nil)
+                        .disabled(readingUnavailable != nil)
                         .accessibilityIdentifier("task-abandon")
                 }
                 workspaceActions
-                if acting {
-                    ProgressView().controlSize(.small)
-                    Text(draft?.progress ?? "Updating Task…").foregroundStyle(palette.textSecondary)
-                }
             }
             .lineLimit(1)
             .frame(minHeight: 28)
     }
 
-    private var draft: TaskRunDraft? { model.navigation.taskRunDrafts[task.id] }
-    private var acting: Bool { draft?.acting == true }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ScrollView(.horizontal) { controls }
                 .scrollIndicators(.visible)
-            if work.value?.graph != nil, let error = work.errorMessage {
-                Text("Workflow refresh failed: \(error)")
-                    .foregroundStyle(palette.failure)
-                    .textSelection(.enabled)
-                    .accessibilityIdentifier("task-workflow-refresh-error")
-            }
             DisclosureGroup("Overview", isExpanded: Binding(
                 get: { expandedTasks.contains(task.id) },
                 set: { if $0 { expandedTasks.insert(task.id) } else { expandedTasks.remove(task.id) } }
@@ -125,7 +115,7 @@ struct TaskWorkflowHeader: View {
                         choices: choices(workflow, shape),
                         unavailable: unavailable, fits: true,
                         hint: { "lf task run \(task.task.identifier) · to \($0.to)" },
-                        choose: { _ in Task { await model.startTask(nil, task: task) } })
+                        choose: { _ in model.startTaskFromInput(nil, task: task) })
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Text(task.task.description)
@@ -137,33 +127,15 @@ struct TaskWorkflowHeader: View {
             TaskPlanningFactsView(task: task)
             // Completion may fail after the Workflow has already arrived.
             if let conflict = task.runtime?.completionPending {
-                HStack(spacing: Spacing.sm) {
-                    Text(conflict)
-                        .foregroundStyle(palette.failure)
-                        .textSelection(.enabled)
-                        .accessibilityIdentifier("task-completion-pending")
-                    Button("Retry completion") {
-                        Task { await model.completeTask(task) }
-                    }
-                    .buttonStyle(WorkOutlineButtonStyle())
-                    .disabled(acting || readingUnavailable != nil)
-                    .help("lf task complete \(task.task.identifier)")
-                    .accessibilityIdentifier("task-completion-retry")
-                }
-            }
-            if let error = draft?.error ?? model.navigation.taskSessionErrors[task.id] {
-                Text(error)
+                Text(conflict)
                     .foregroundStyle(palette.failure)
-                    .lineLimit(3)
                     .textSelection(.enabled)
-                    .accessibilityIdentifier("task-workflow-error")
-                Button("Refresh readings") { model.rescanWork() }
-                    .accessibilityIdentifier("task-refresh-readings")
+                    .accessibilityIdentifier("task-completion-pending")
             }
         }
         .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
             Button("Abandon Task", role: .destructive) {
-                Task { await model.abandonTask(task) }
+                model.abandonTask(task)
             }
         } message: {
             Text("Cancels the Task, closes its PRs and deletes its branches. Unassign it instead to keep its work for later.")
@@ -174,24 +146,24 @@ struct TaskWorkflowHeader: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             palette.background
-            if task.task.terminalLabel != nil {
-                (task.task.isSuccessful ? palette.success : palette.failure).opacity(0.14)
+            if task.isCompleted {
+                (task.lifecycle == .done ? palette.success : palette.failure).opacity(0.14)
             }
         }
         .overlay(alignment: .leading) {
-            if task.task.terminalLabel != nil {
+            if task.isCompleted {
                 Rectangle()
-                    .fill(task.task.isSuccessful ? palette.success : palette.failure)
+                    .fill(task.lifecycle == .done ? palette.success : palette.failure)
                     .frame(width: 3)
             }
         }
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
         .accessibilityIdentifier("task-workflow")
         .onChange(of: work, initial: true) { _, reading in
-            if reading.value != nil { Perf.endAfterCommit(Perf.workflowReady, id: task.id) }
+            if reading.value != nil { Perf.stateObserved(Perf.workflowReady, id: task.id, owner: model.navigation.performanceOwner) }
         }
         .onChange(of: task.id) { _, id in
-            if work.value != nil { Perf.endAfterCommit(Perf.workflowReady, id: id) }
+            if work.value != nil { Perf.stateObserved(Perf.workflowReady, id: id, owner: model.navigation.performanceOwner) }
         }
     }
 
@@ -230,68 +202,62 @@ struct TaskWorkflowHeader: View {
 
     /// Why no run can be started now.
     private var unavailable: String? {
-        if acting { return draft?.progress ?? "Updating Task…" }
-        if task.task.isTerminal { return "Reopen the Task before starting work" }
-        return readingUnavailable ?? task.runControl.unavailable
+        readingUnavailable ?? task.runControl.unavailable
     }
 
     private var readingUnavailable: String? {
-        if let error = work.errorMessage ?? model.roadmap.errorMessage { return error }
+        if !model.pendingChanges.acceptsChanges { return PendingChanges.awayText }
         if model.showsSavedPlanning { return WorkCache.savedReason }
         return nil
     }
 }
 
-/// Auto-Ship at the right end of the Workflow bar, always visible; while
-/// shipping the same spot holds Stop Auto-Ship. Rust decides whether shipping
-/// can start. Sidebar rows and menus carry no ship control.
-struct TaskShipControl: View {
+/// The Auto toggle at the right end of the Workflow bar. On: the Task's run
+/// takes its interactive steps and lands it. Turning it on is `lf task auto on`, which
+/// also runs the Task; Rust decides whether that can start. Sidebar rows and
+/// menus carry no auto control.
+struct TaskAutoControl: View {
     let model: WorkModel
     let task: RoadmapTask
 
     @State private var hovered = false
     @State private var confirmingAbandon = false
 
-    private var acting: Bool { model.navigation.taskRunDrafts[task.id]?.acting == true }
-
     private var readingUnavailable: String? {
-        if let error = model.roadmap.errorMessage { return error }
+        if !model.pendingChanges.acceptsChanges { return PendingChanges.awayText }
         if model.showsSavedPlanning { return WorkCache.savedReason }
         return nil
     }
 
+    /// The Task reading's own mark; until it arrives, the state its row carries.
+    private var on: Bool {
+        guard let execution = model.taskExecution[task.id].value else { return task.selectionStates.contains(.auto) }
+        return execution.auto?.state == .on
+    }
+
     var body: some View {
         Group {
-            if task.shipping != nil {
-                Button("Stop Auto-Ship") { Task { await model.stopShipping(task) } }
-                    .buttonStyle(WorkOutlineButtonStyle())
-                    .disabled(acting || readingUnavailable != nil)
-                    .help("lf --task \(task.task.identifier) ship --stop: withdraw it and disarm auto-merge")
-                    .accessibilityIdentifier("task-ship-stop")
-            } else if !(task.task.isTerminal || task.runtime?.status.isTerminal == true) {
-                let refusal = readingUnavailable ?? task.shipControl.unavailable
+            if on {
+                toggle(refusal: readingUnavailable)
+            } else if !task.isCompleted {
                 HStack(spacing: Spacing.sm) {
-                    // Hovering Auto-Ship offers the other ways out of this Task.
+                    // Hovering Auto offers the other ways out of this Task.
                     if hovered {
                         let owned = task.runtime?.owner != nil
                         Button(owned ? "Unassign" : "Claim") {
-                            Task { await model.assignTask(task, claimed: !owned) }
+                            model.assignTask(task, claimed: !owned)
                         }
                         .buttonStyle(WorkOutlineButtonStyle())
-                        .disabled(acting || readingUnavailable != nil)
+                        .disabled(readingUnavailable != nil)
                         .help(owned ? "lf task unassign: nobody owns it, so nothing moves it; its checkout, PR and history stay"
                                     : "lf task claim: you own it on this Machine")
                         .accessibilityIdentifier("task-unassign")
                         Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                             .buttonStyle(WorkOutlineButtonStyle(destructive: true))
-                            .disabled(acting || readingUnavailable != nil)
-                            .accessibilityIdentifier("task-ship-abandon")
+                            .disabled(readingUnavailable != nil)
+                            .accessibilityIdentifier("task-abandon")
                     }
-                    Button("Auto-Ship") { Task { await model.shipTask(task) } }
-                        .buttonStyle(WorkShipButtonStyle())
-                        .disabled(acting || refusal != nil)
-                        .help(refusal ?? "lf --task \(task.task.identifier) ship: run every remaining step and land it")
-                        .accessibilityIdentifier("task-ship")
+                    toggle(refusal: readingUnavailable ?? task.runControl.unavailable)
                 }
                 .onHover { inside in withAnimation(.easeOut(duration: 0.12)) { hovered = inside } }
             }
@@ -299,23 +265,37 @@ struct TaskShipControl: View {
         .fixedSize()
         .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
             Button("Abandon Task", role: .destructive) {
-                Task { await model.abandonTask(task) }
+                model.abandonTask(task)
             }
         } message: {
             Text("Cancels the Task, closes its PRs and deletes its branches. Unassign it instead to keep its work for later.")
         }
     }
+
+    private func toggle(refusal: String?) -> some View {
+        let issue = task.task.identifier
+        return Toggle("Auto", isOn: Binding(get: { on }, set: { turnOn in
+            if turnOn { model.turnAutoOn(task) } else { model.turnAutoOff(task) }
+        }))
+        .toggleStyle(.switch).controlSize(.small)
+        .font(Typography.body(12.5))
+        .disabled(refusal != nil)
+        .help(refusal ?? (on
+            ? "lf task auto off \(issue): the run waits at its next interactive step for you, and auto-merge is disarmed"
+            : "lf task auto on \(issue): run every remaining step and land it"))
+        .accessibilityIdentifier("task-auto")
+    }
 }
 
 /// The selected Task's Workflow under the jump bar: its interactive steps as dots, what
-/// is happening now, and Auto-Ship or Stop Auto-Ship. Clicking the dots opens a
+/// is happening now, and the Auto toggle. Clicking the dots opens a
 /// row with each interactive step, who takes part there and where the Task is. Rust owns the
-/// graph, the position and the shipping reason; this only arranges them.
+/// graph, the position and whether auto can start; this only arranges them.
 struct TaskWorkflowBar: View {
     let model: WorkModel
     let task: RoadmapTask
     /// The Task part of the workspace stream, as last read.
-    let work: WorkReading<TaskOverview>
+    let work: Reading<TaskOverview>
     /// Per viewer: the bar opens to its step cells.
     @State private var expanded = false
     @Environment(\.palette) private var palette
@@ -325,7 +305,7 @@ struct TaskWorkflowBar: View {
         enum Place: Equatable { case passed, here, going, ahead }
         let name: String
         let place: Place
-        /// You, or a stand-in while shipping; `end` has no one.
+        /// You, or a stand-in while auto is on; `end` has no one.
         let who: String?
         let note: String
         /// Where the Task stands now or is headed.
@@ -342,11 +322,11 @@ struct TaskWorkflowBar: View {
                 }
                 Text(live)
                     .lineLimit(1).truncationMode(.tail)
-                    .foregroundStyle(task.shipping?.state == .restarting ? palette.warning : palette.textSecondary)
+                    .foregroundStyle(palette.textSecondary)
                     .help(live)
                     .accessibilityIdentifier("task-workflow-bar-live")
                 Spacer(minLength: 0)
-                TaskShipControl(model: model, task: task)
+                TaskAutoControl(model: model, task: task)
             }
             .padding(.horizontal, 14)
             .frame(height: 34)
@@ -406,40 +386,41 @@ struct TaskWorkflowBar: View {
         switch place {
         case .passed: palette.textTertiary
         case .here: palette.text
-        case .going: task.shipping != nil ? palette.success : palette.working
+        case .going: auto?.state == .on ? palette.success : palette.working
         case .ahead: .clear
         }
     }
 
     private var stages: [Stage] {
-        work.value?.graph.map { Self.stages($0, shipping: task.shipping != nil) } ?? []
+        work.value?.graph.map { Self.stages($0, auto: auto?.state == .on) } ?? []
     }
 
-    /// What is happening now, in one line: shipping and who approved it, or
-    /// the stop that keeps it from shipping.
+    private var auto: Auto? { model.taskExecution[task.id].value?.auto }
+
+    /// What is happening now, in one line: where the Task stands, and its
+    /// auto setting when someone set one.
     var live: String {
-        let execution = model.taskExecution[task.id].value
-        if let shipping = task.shipping {
-            guard let approval = execution?.shipApproval else { return shipping.reason }
-            return "\(shipping.reason) · approved by \(approval.by.label)"
-        }
-        guard let stop = execution?.shipStop else { return position }
-        return "\(Self.notShipping(stop, issue: task.task.identifier)) · \(position)"
+        guard let auto else { return position }
+        return "\(position) · \(Self.autoLine(auto))"
     }
 
-    static func notShipping(_ stop: ShipMark, issue: String) -> String {
-        let when = Date(timeIntervalSince1970: TimeInterval(stop.at)).formatted(date: .abbreviated, time: .shortened)
-        return "Not shipping: \(stop.by.label) stopped it \(when) · lf ship \(issue) approves it again"
+    static func autoLine(_ mark: Auto) -> String {
+        switch mark.state {
+        case .on: return "auto on, by \(mark.by.label)"
+        case .off:
+            let when = Date(timeIntervalSince1970: TimeInterval(mark.at)).formatted(date: .abbreviated, time: .shortened)
+            return "auto off by \(mark.by.label) \(when)"
+        }
     }
 
     private var position: String {
         guard let workflow = work.value?.graph else {
-            if let error = work.errorMessage { return "Workflow could not be read: \(error)" }
-            if work.value == nil { return "Reading workflow…" }
+            if work.value == nil { return work.isLoading ? task.setupPosition ?? "Reading workflow…" : "" }
             return task.graphName.map { "Takes up \($0) when it starts" } ?? "No workflow selected"
         }
         switch workflow.position {
-        case .at(TaskGraph.start): return "Not started"
+        // A Task that took up its Graph and is waiting for setup to start it.
+        case .at(TaskGraph.start): return task.setupPosition ?? "Not started"
         case .at(TaskGraph.end): return "At its end"
         case .at(let step): return "At \(step) · yours"
         case .run(let from, let at, let process, let running):
@@ -451,8 +432,8 @@ struct TaskWorkflowBar: View {
     }
 
     /// The Workflow's interactive steps in order, then `end`, each placed
-    /// against the Task's position. While shipping, stand-ins take the steps ahead.
-    static func stages(_ workflow: TaskGraph, shipping: Bool) -> [Stage] {
+    /// against the Task's position. While auto is on, stand-ins take the steps ahead.
+    static func stages(_ workflow: TaskGraph, auto: Bool) -> [Stage] {
         let names = workflow.interactiveSteps.map(\.name) + [TaskGraph.end]
         let (at, going): (String, Bool) = switch workflow.position {
         case .at(let step): (step, false)
@@ -462,87 +443,14 @@ struct TaskWorkflowBar: View {
         let here = names.firstIndex(of: at) ?? -1
         return names.enumerated().map { index, name in
             let place: Stage.Place = index < here ? .passed : index == here ? (going ? .going : .here) : .ahead
-            let who: String? = name == "end" ? nil : (shipping && index >= here ? "stand-in" : "you")
+            let who: String? = name == "end" ? nil : (auto && index >= here ? "stand-in" : "you")
             let note: String = switch place {
             case .here: "here now"
             case .going: "on the way"
             case .passed: "passed"
-            case .ahead: shipping ? "agents will run it" : "ahead"
+            case .ahead: auto ? "agents will run it" : "ahead"
             }
             return Stage(name: name, place: place, who: who, note: note)
-        }
-    }
-}
-
-/// What the last Auto-Ship or Stop Auto-Ship did, shown briefly.
-struct ShipNotice: Equatable {
-    let id = UUID()
-    let taskID: String
-    let issue: String
-    let shipped: Bool
-
-    init(task: RoadmapTask, shipped: Bool) {
-        taskID = task.id
-        issue = task.task.identifier
-        self.shipped = shipped
-    }
-}
-
-/// The toast after Auto-Ship; its Undo is Stop Auto-Ship.
-struct ShipNoticeToast: View {
-    let notice: ShipNotice
-    let undo: () -> Void
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        HStack(spacing: Spacing.md) {
-            Text(notice.shipped
-                 ? "\(notice.issue) is shipping"
-                 : "\(notice.issue) is back in Working · auto-merge disarmed")
-                .accessibilityIdentifier("task-ship-notice")
-            if notice.shipped {
-                Button("Undo", action: undo)
-                    .buttonStyle(.plain)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(palette.success)
-                    .help("Stop Auto-Ship")
-                    .accessibilityIdentifier("task-ship-undo")
-            }
-        }
-        .font(Typography.body(12))
-        .foregroundStyle(palette.text)
-        .padding(.leading, 14)
-        .padding(.trailing, 10)
-        .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 9).fill(palette.surfaceElement))
-        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(palette.border, lineWidth: 1))
-        .shadow(color: palette.shadow, radius: 8, y: 2)
-    }
-}
-
-/// The window's ship toast, shown for six seconds after Auto-Ship or Stop
-/// Auto-Ship; its Undo is Stop Auto-Ship.
-struct ShipNoticeOverlay: View {
-    let model: WorkModel
-
-    var body: some View {
-        let navigation = model.navigation
-        ZStack {
-            if let notice = navigation.shipNotice {
-                ShipNoticeToast(notice: notice) {
-                    guard let task = model.task(id: notice.taskID)?.task else { return }
-                    Task { await model.stopShipping(task) }
-                }
-                .padding(.bottom, 18)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .zIndex(ZIndex.toast)
-        .animation(.easeOut(duration: 0.18), value: navigation.shipNotice)
-        .task(id: navigation.shipNotice) {
-            guard navigation.shipNotice != nil else { return }
-            try? await Task.sleep(for: .seconds(6))
-            if !Task.isCancelled { navigation.shipNotice = nil }
         }
     }
 }
@@ -552,22 +460,9 @@ struct ShipNoticeOverlay: View {
 struct TaskHeading: View {
     let task: RoadmapTask
 
-    /// The Task's lifecycle, the state Working Tasks and Shipping list by;
-    /// Linear's planning state never overrides it. What shipping is doing
-    /// now reads in the Workflow bar.
-    var state: String {
-        switch task.runtime?.status {
-        case .idle: return "Idle"
-        case .active: return "Active"
-        case .moving: return "Moving"
-        case .shipping: return "Shipping"
-        case .done: return "Done"
-        case .abandoned: return "Abandoned"
-        case .unstarted, nil:
-            guard task.task.isTerminal else { return "Unstarted" }
-            return task.task.isSuccessful ? "Done" : "Abandoned"
-        }
-    }
+    /// The Task's lifecycle, the state Working Tasks list by; Linear's planning
+    /// state never overrides it. What its run is doing now reads in the Workflow bar.
+    var state: String { task.lifecycle.label.capitalized }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -588,8 +483,7 @@ struct TaskStartOffer: View {
     let task: RoadmapTask
 
     private var unavailable: String? {
-        if let draft = model.navigation.taskRunDrafts[task.id], draft.acting { return draft.progress ?? "Updating Task…" }
-        if let error = model.roadmap.errorMessage { return error }
+        if !model.pendingChanges.acceptsChanges { return PendingChanges.awayText }
         if model.showsSavedPlanning { return WorkCache.savedReason }
         return task.runControl.unavailable
     }
@@ -598,12 +492,11 @@ struct TaskStartOffer: View {
         SessionSlotOffer(
             title: "Not started", systemImage: "play.circle",
             action: "Start", actionImage: "play.fill",
-            note: model.navigation.taskRunDrafts[task.id]?.error
-                ?? "Starts this Task’s Workflow and its first conversation.",
+            note: "Starts this Task’s Workflow and its first conversation.",
             unavailable: unavailable, help: "lf task run \(task.task.identifier)",
             accessibilityLabel: "Start \(task.task.identifier)",
             actionIdentifier: "task-start-\(task.id)",
-            perform: { Task { await model.startTask(nil, task: task) } }
+            perform: { model.startTaskFromInput(nil, task: task) }
         ) {
             Text(task.task.description.isEmpty ? "No description recorded." : task.task.description)
                 .lineLimit(8)
@@ -622,26 +515,26 @@ struct TaskActionItems: View {
     @State private var copied: String?
 
     private var unavailable: Bool {
-        model.navigation.taskRunDrafts[task.id]?.acting == true || model.roadmap.errorMessage != nil || model.showsSavedPlanning
+        model.showsSavedPlanning || !model.pendingChanges.acceptsChanges
     }
 
     var body: some View {
         Button("New conversation") { newConversation?() }.disabled(newConversation == nil || unavailable)
         Menu("Move to Wave") {
-            Button("No Wave") { Task { await model.moveTask(task, toWave: nil) } }
+            Button("No Wave") { model.moveTask(task, toWave: nil) }
                 .disabled(task.task.waveId == nil)
             ForEach(model.visibleRoadmaps.filter { $0.wave.repo == task.task.repo }, id: \.wave.id) { destination in
                 Button(destination.wave.displayName) {
-                    Task { await model.moveTask(task, toWave: destination.wave.id) }
+                    model.moveTask(task, toWave: destination.wave.id)
                 }.disabled(destination.wave.id == task.task.waveId)
             }
         }.disabled(unavailable).accessibilityIdentifier("task-move-wave")
-        if task.task.isTerminal || task.runtime?.status.isTerminal == true {
-            Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
+        if task.isCompleted {
+            Button("Reopen Task") { model.reopenTask(task) }.disabled(unavailable)
         } else {
-            Button("Complete Task") { Task { await model.completeTask(task) } }.disabled(unavailable)
+            Button("Complete Task") { model.completeTaskFromInput(task) }.disabled(unavailable)
             Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
-                Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
+                model.assignTask(task, claimed: task.runtime?.owner == nil)
             }.disabled(unavailable)
         }
         if let wave { Button("Open owning Wave") { model.select(.wave(id: wave.id)) } }
@@ -665,7 +558,6 @@ struct TaskActionItems: View {
                 Button("Make \(session.title) primary…") { model.beginSessionBinding(session) }
             }
         }
-        if let error = model.navigation.taskRunDrafts[task.id]?.error { Text(error) }
     }
 
     private func copy(_ value: String, key: String) {
@@ -703,7 +595,6 @@ struct GraphProcessLog: View {
     var query: RegistryQuery = RegistryQueryLocal.shared
     var openFiles: (() -> Void)? = nil
     @State private var captured: WorkFrame.TaskPart?
-    @State private var historyQuery: RegistryQuery?
     @State private var error: String?
     @State private var refresh = 0
     @Environment(\.palette) private var palette
@@ -717,8 +608,7 @@ struct GraphProcessLog: View {
         let graphs = readsWindow ? work?.graphProcesses : captured?.graphProcesses.map(\.entry)
         let details = readsWindow ? model.graphProcesses : Dictionary(uniqueKeysWithValues:
             (captured?.graphProcesses ?? []).map { ($0.entry.id, $0) })
-        let contentQuery = readsWindow ? query : historyQuery
-        let readError = readsWindow ? reading?.errorMessage : error
+        let readError = readsWindow ? reading?.failure : error
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
@@ -726,7 +616,7 @@ struct GraphProcessLog: View {
                         TaskRunPosition(workflow: work.graph,
                                         execution: readsWindow ? task?.execution : captured?.row?.execution)
                     } else {
-                        Text("Reading workflow…")
+                        Text(task?.setupPosition ?? "Reading workflow…")
                     }
                     Spacer()
                     if let openFiles { Button("Files", action: openFiles) }
@@ -734,21 +624,17 @@ struct GraphProcessLog: View {
                 if !readsWindow {
                     Button("Refresh") { refresh += 1 }
                 }
-                if let readError {
-                    Text("Graph processes could not be read: \(readError)").padding(.vertical, 6)
-                }
                 if let graphs {
                     if let graph = graphs.last {
                         GraphProcessView(model: model, graph: graph,
                             run: details[graph.id],
-                            startedBy: readsWindow ? task.flatMap { model.taskExecution[$0.id].value?.startedBy } : nil,
-                            historyQuery: contentQuery)
+                            startedBy: readsWindow ? task.flatMap { model.taskExecution[$0.id].value?.startedBy } : nil)
                     }
                     if graphs.count > 1 {
                         DisclosureGroup("Earlier runs (\(graphs.count - 1))") {
                             ForEach(Array(graphs.dropLast().reversed())) { graph in
                                 GraphProcessView(model: model, graph: graph,
-                                    run: details[graph.id], historyQuery: contentQuery)
+                                    run: details[graph.id])
                             }
                         }
                         .padding(.vertical, 8)
@@ -772,6 +658,7 @@ struct GraphProcessLog: View {
         .background(palette.background)
         .environment(\.colorScheme, .light)
         .accessibilityIdentifier("task-graph-processes")
+        .onChange(of: error) { old, new in model.reported("graph-processes", "Graph processes", from: old, to: new) }
         .task(id: refresh) {
             guard !readsWindow else { return }
             do {
@@ -791,7 +678,6 @@ struct GraphProcessLog: View {
                     ownerQuery = query
                     subject = task?.runtime?.workId ?? taskId
                 }
-                historyQuery = ownerQuery
                 let subscription = try await ownerQuery.subscribeTask(task: subject)
                 do {
                     for try await line in subscription.lines {
@@ -830,7 +716,7 @@ struct TaskDiagnosticsView: View {
     }
 }
 
-/// The Task's conversations and mechanical Processes, including headless work and
+/// The Task's conversations, including headless work and
 /// conversations without turns: raw records, shown under Debug. Its Graph
 /// processes are listed by `GraphProcessLog`.
 struct TaskWorkView: View {
@@ -848,17 +734,9 @@ struct TaskWorkView: View {
                     row(session.interactive ? "Session" : "Run", id: session.id, name: session.title,
                         state: session.completedAt == nil ? "open" : "completed")
                 }
-                ForEach(work.processes) { process in
-                    row(process.isAgent ? "Agent" : "Process", id: process.id,
-                        name: process.command ?? "Unknown command", state: process.outcome ?? "unknown")
-                }
-                if work.sessions.isEmpty && work.processes.isEmpty {
+                if work.sessions.isEmpty {
                     Text("No recorded work.")
                 }
-            }
-            if let error = model.taskExecution[task.id].errorMessage {
-                Text("Work could not be read: \(error)")
-                Button("Retry") { model.rescanWork() }
             }
         }
         .font(Typography.body(12))
@@ -887,7 +765,6 @@ struct GraphProcessView: View {
     let graph: GraphProcessInventoryEntry
     let run: GraphProcessDetail?
     var startedBy: Starter? = nil
-    var historyQuery: RegistryQuery? = nil
     private var expanded: Bool { model.navigation.expandedGraphProcesses.contains(graph.id) }
     @Environment(\.palette) private var palette
 
@@ -955,7 +832,7 @@ struct GraphProcessView: View {
             Text([run.presentation.reason, graphIterationLabel(run.iterations)]
                 .compactMap { $0 }.joined(separator: " · "))
                 .accessibilityIdentifier("graph-process-status-\(graph.id)")
-            GraphRunHistory(steps: run.steps, historyQuery: historyQuery)
+            GraphRunHistory(steps: run.steps)
         } else {
             Text("Reading Graph…")
         }
@@ -964,16 +841,15 @@ struct GraphProcessView: View {
 
 
 /// Leaf history stays inspectable without a terminal or window. No summary is
-/// invented from an exit: only the recorded Process facts appear here.
+/// invented from an exit: only the recorded step facts appear here.
 struct GraphRunHistory: View {
     let steps: [GraphStepProcess]
-    var historyQuery: RegistryQuery? = nil
 
     var body: some View {
         ForEach(GraphStepGroup.groups(steps)) { group in
             DisclosureGroup(group.label) {
                 ForEach(group.steps) { step in
-                    GraphRunStep(step: step, historyQuery: historyQuery)
+                    GraphRunStep(step: step)
                 }
             }
             .accessibilityIdentifier("graph-process-loop-\(group.id)")
@@ -983,10 +859,6 @@ struct GraphRunHistory: View {
 
 struct GraphRunStep: View {
     let step: GraphStepProcess
-    var historyQuery: RegistryQuery? = nil
-    @State private var history: String?
-    @State private var error: String?
-    @State private var reading = false
 
     var body: some View {
         DisclosureGroup {
@@ -999,20 +871,6 @@ struct GraphRunStep: View {
                         .formatted(date: .abbreviated, time: .standard))
                 }
                 if let code = step.exitCode { Text("Exit \(code)") }
-                if let historyQuery {
-                    Button("Read process history") {
-                        reading = true
-                        Task {
-                            defer { reading = false }
-                            do { history = try await historyQuery.processHistory(id: step.lfProcessId); error = nil }
-                            catch { self.error = error.localizedDescription }
-                        }
-                    }
-                    .disabled(reading)
-                    .accessibilityIdentifier("graph-step-history-\(step.id)")
-                }
-                if let history { Text(history).font(Typography.code(10)) }
-                if let error { Text("History unavailable: \(error)") }
             }
             .textSelection(.enabled)
         } label: {

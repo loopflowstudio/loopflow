@@ -33,7 +33,7 @@ struct ServerPerformanceTests {
         for _ in 0..<31 {
             var start = ContinuousClock.now
             let reading = try await ServerClient.read(.allPlans, location: location)
-            #expect(reading.contains("Performance fixture"))
+            #expect(reading.text.contains("Performance fixture"))
             results["read_ms", default: []].append(start.elapsedMs)
             start = .now
             _ = try await ServerClient.write(.sessionRename(directory: root.path, id: session, name: "Measured Session"), location: location)

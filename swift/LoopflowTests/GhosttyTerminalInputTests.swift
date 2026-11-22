@@ -12,6 +12,100 @@ import GhosttyKit
 #if canImport(GhosttyKit)
 @Suite("Retained terminal mounts", .requiresDisplay, .serialized)
 struct GhosttyTerminalMountTests {
+    @Test("Delayed input readiness restores selected focus without taking Find's editor")
+    @MainActor
+    func delayedInputReadinessRestoresFocus() async throws {
+        _ = NSApplication.shared
+        let directory = URL(fileURLWithPath: "/tmp/lf-focus-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let pool = GhosttySurfacePool()
+        let identity = TerminalIdentity.session("focus-recovery", machineId: fixtureMachineId)
+        let terminal = pool.view(for: identity)
+        terminal.workingDirectory = directory.path
+        // A disposable relay speaks the production status socket. Each file
+        // advances one reading; no provider or personal Session is involved.
+        terminal.command = """
+        /bin/sh -c \(shellEscape("""
+        printf '%s' "$LF_RELAY_FOCUSED" > "\(directory.path)/initial-focus"
+        {
+          printf '%s\\n' '{"generation":1,"state":"connected","native_ready":false,"message":null}'
+          for phase in 1 2 3; do
+            while [ ! -e "\(directory.path)/$phase" ]; do sleep 0.01; done
+            if [ "$phase" = 2 ]; then state=reconnecting; ready=false; else state=connected; ready=true; fi
+            printf '{"generation":%s,"state":"%s","native_ready":%s,"message":null}\\n' "$phase" "$state" "$ready"
+          done
+          cat < /dev/tty
+        } | /usr/bin/nc -U "$LF_SERVER_STATUS"
+        """))
+        """
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        terminal.updateFocus(isFocused: true, isEnabled: true)
+        terminal.createSurface(manager: manager)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = GhosttyTerminalMount(terminal: terminal)
+        defer {
+            pool.release(identity)
+            terminal.destroySurface()
+            window.contentView = nil
+            try? FileManager.default.removeItem(at: directory)
+        }
+        func wait(_ condition: () -> Bool) async throws {
+            let deadline = ContinuousClock.now + .seconds(5)
+            while !condition() {
+                try #require(ContinuousClock.now < deadline)
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        func advance(_ phase: Int) throws {
+            try Data().write(to: directory.appendingPathComponent(String(phase)))
+        }
+        try await wait { terminal.connectionReading?.state == .connected }
+        #expect(try String(contentsOf: directory.appendingPathComponent("initial-focus"), encoding: .utf8) == "0")
+        #expect(!terminal.connectionAcceptsInput)
+        window.makeFirstResponder(nil)
+        try advance(1)
+        try await wait { terminal.connectionAcceptsInput }
+        #expect(window.firstResponder === terminal)
+        terminal.searchBar.open(needle: "draft")
+        let editor = window.firstResponder
+        try advance(2)
+        try await wait { terminal.connectionReading?.state == .reconnecting }
+        try advance(3)
+        try await wait { terminal.connectionAcceptsInput }
+        #expect(window.firstResponder === editor)
+        terminal.updateFocus(isFocused: true, isEnabled: true)
+        #expect(window.firstResponder === editor)
+    }
+
+    @Test("A retired viewer cannot take focus back from its Refresh replacement")
+    @MainActor
+    func retiredViewerCannotRegainFocus() throws {
+        _ = NSApplication.shared
+        let pool = GhosttySurfacePool()
+        let identity = TerminalIdentity.session("retired-viewer", machineId: fixtureMachineId)
+        let retired = pool.view(for: identity)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        let root = NSView(frame: window.contentLayoutRect)
+        window.contentView = root
+        defer { window.contentView = nil; pool.release(identity) }
+        root.addSubview(GhosttyTerminalMount(terminal: retired))
+        retired.updateFocus(isFocused: true, isEnabled: true)
+        try #require(window.firstResponder === retired)
+        pool.release(identity)
+        let replacement = pool.view(for: identity)
+        root.addSubview(GhosttyTerminalMount(terminal: replacement))
+        replacement.updateFocus(isFocused: true, isEnabled: true)
+        try #require(window.firstResponder === replacement)
+        // SwiftUI can update the outgoing representable after the replacement mounts.
+        retired.updateFocus(isFocused: true, isEnabled: true)
+        #expect(window.firstResponder === replacement)
+        #expect(retired.childExited)
+        #expect(!window.makeFirstResponder(retired))
+    }
+
     @Test("An off-window representable cannot steal a displayed terminal")
     @MainActor
     func offWindowTerminalMount() async throws {
@@ -387,7 +481,7 @@ struct GhosttyTerminalInputTests {
         #expect(terminal.surface == surface)
     }
 
-    @Test("Shell-launched sessions focus their live terminal and external clients stay elsewhere")
+    @Test("Shell-launched sessions focus their live terminal; another window holds no view of them")
     @MainActor
     func shellSessionAttachment() async throws {
         _ = NSApplication.shared
@@ -413,7 +507,7 @@ struct GhosttyTerminalInputTests {
                 "id": id, "run_id": id, "interactive": true, "work": NSNull(), "title": id,
                 "workspace": ["machine_id": fixtureMachineId, "worktree": NSTemporaryDirectory(), "task_id": NSNull(), "unavailable": NSNull()],
                 "detail": "test", "cwd": NSTemporaryDirectory(), "state": "active",
-                "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "blocked": false, "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn": NSNull(), "raw": false, "terminal_ids": [pane], "open_argv": ["unused"],
+                "work_path": NSNull(), "action": sessionActionFixture(state: "active"), "blocked": false, "title_source": "generated", "ended": NSNull(), "start": NSNull(), "outlook": NSNull(), "status_line": NSNull(), "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn": NSNull(), "raw": false, "terminal_ids": [pane], "open_argv": ["unused"],
             ])
             records.append(try JSONDecoder().decode(SessionRecord.self, from: data))
         }
@@ -426,9 +520,7 @@ struct GhosttyTerminalInputTests {
         }
         let otherWindow = SessionsStore(repoPath: NSTemporaryDirectory())
         otherWindow.reconcile(records)
-        #expect(otherWindow.sessions.allSatisfy { $0.state == .elsewhere })
-        await otherWindow.select("one")
-        #expect(otherWindow.sessions.first { $0.id == "one" }?.state == .elsewhere)
+        #expect(otherWindow.sessions.allSatisfy { $0.state == .pending && $0.surface == nil })
         #expect(registry.surfaces.hasSurface(.shell(records[0].terminalIds[0], machineId: fixtureMachineId)))
     }
 

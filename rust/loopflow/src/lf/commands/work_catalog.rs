@@ -4,9 +4,9 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 
-use crate::durable::WorkRef;
 use crate::lf::commands::WorkFilter;
-use crate::store::sqlite::WorkIdentity;
+use loopflow_model::durable::WorkRef;
+use loopflow_storage::sqlite::WorkIdentity;
 
 #[derive(Debug, Default)]
 pub(crate) struct WorkCatalog {

@@ -7,16 +7,16 @@
 //! cargo test -p loopflow --test codex_live_smoke -- --ignored
 //! ```
 
+use loopflow_execution::process::attachment;
 use std::time::Duration;
 
-use loopflow::agent::AgentConfig;
-use loopflow::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
-use loopflow::harness::codex::CodexHarness;
-use loopflow::harness::{ApprovalPolicy, Harness};
-use loopflow::id::LfProcessId;
-use loopflow::session::{LfSession, TitleSource};
-use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::{open_ephemeral_store, StorageConfig};
+use loopflow_execution::agent::AgentConfig;
+use loopflow_execution::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
+use loopflow_execution::harness::codex::Driver as CodexDriver;
+use loopflow_execution::harness::{ApprovalPolicy, Driver};
+use loopflow_execution::session::{LfSession, TitleSource};
+use loopflow_execution::store::{open_ephemeral_store, StorageConfig};
+use loopflow_model::id::LfProcessId;
 use tokio::sync::mpsc;
 
 #[tokio::test]
@@ -24,7 +24,6 @@ use tokio::sync::mpsc;
 async fn codex_live_one_turn_smoke() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
 
     // Every launch is recorded: admit one Session in a private store.
     std::env::set_var("LF_HOME", dir.path());
@@ -32,38 +31,37 @@ async fn codex_live_one_turn_smoke() {
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .expect("store");
-    let store = SqliteStore::new(&database).expect("store");
-    store
-        .create_session(
-            LfSession {
-                captured: None,
-                task_id: None,
-                wave_id: None,
-                graph_lf_process_id: None,
-                work_source: None,
-                bound_at: None,
-                id: "smoke".into(),
-                artifact_key: Some(uuid::Uuid::new_v4().simple().to_string()),
-                caller_artifact_key: None,
-                input_published: false,
-                cwd: dir.path().into(),
-                skill: None,
-                provider: Some("codex".into()),
-                model: None,
-                node: None,
-                iterations: None,
-                interactive: false,
-                repo: None,
-                title: "Codex live smoke".into(),
-                title_source: TitleSource::Generated,
-                request: None,
-                ready_summary: None,
-                completed_at: None,
-                created_at: 1,
-            },
-            None,
-        )
-        .expect("session");
+    let store = loopflow_execution::store::open_sqlite(&database).expect("store");
+    loopflow_execution::store::sessions::create_session(
+        &store,
+        LfSession {
+            captured: None,
+            task_id: None,
+            wave_id: None,
+            graph_lf_process_id: None,
+            work_source: None,
+            bound_at: None,
+            id: "smoke".into(),
+            artifact_key: Some(uuid::Uuid::new_v4().simple().to_string()),
+            caller_artifact_key: None,
+            input_published: false,
+            cwd: dir.path().into(),
+            skill: None,
+            provider: Some("codex".into()),
+            model: None,
+            node: None,
+            iterations: None,
+            interactive: false,
+            repo: None,
+            title: "Codex live smoke".into(),
+            title_source: TitleSource::Generated,
+            request: None,
+            completed_at: None,
+            created_at: 1,
+        },
+        None,
+    )
+    .expect("session");
     let parent = LfProcessId::new();
     rusqlite::Connection::open(&database)
         .expect("store")
@@ -72,16 +70,26 @@ async fn codex_live_one_turn_smoke() {
             [&parent],
         )
         .expect("record attaching lf Process");
-    let attachment = store
-        .claim_session_attachment("smoke", None, &parent, true)
-        .expect("attachment");
+    let attachment =
+        attachment::claim_session_attachment(&store, "smoke", None, &parent).expect("attachment");
     let config = AgentConfig {
-        agent: Some("codex".to_string()),
         cwd: Some(dir.path().to_path_buf()),
-        session_attachment: Some(("smoke".into(), attachment)),
-        ..AgentConfig::default()
+        ..AgentConfig::new(loopflow_execution::config::Agent::parse("codex").unwrap())
     };
-    harness.start(&config).await.expect("codex start");
+    let mut harness = CodexDriver::new(
+        &loopflow_execution::harness::launch_for_test(
+            loopflow_harness::HarnessKind::Codex,
+            &config,
+            &loopflow_execution::harness::Recording {
+                store,
+                session: "smoke".into(),
+                attachment,
+            },
+        ),
+        tx,
+        ApprovalPolicy::AutoApprove,
+    );
+    harness.start().await.expect("codex start");
     assert!(
         harness.agent_session().is_some(),
         "thread id should be captured during start"

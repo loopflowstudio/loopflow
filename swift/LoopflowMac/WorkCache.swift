@@ -34,7 +34,7 @@ struct WorkSnapshot: Codable, Equatable, Sendable {
 }
 
 final class WorkCache: @unchecked Sendable {
-    static let version = 2
+    static let version = 3
     /// Most-recently saved repositories kept; older ones are dropped.
     static let maxRepositories = 8
     /// One read larger than this is not kept; the launch reads it instead.
@@ -47,6 +47,8 @@ final class WorkCache: @unchecked Sendable {
     }
 
     private let url: URL
+    /// Where the cache lives; saved Task list readings sit beside it.
+    let directory: URL
     private let queue = DispatchQueue(label: "studio.loopflow.workspace-cache", qos: .utility)
     private var snapshot = WorkSnapshot()
     /// Whether `snapshot` already holds this process's view of the file.
@@ -55,6 +57,7 @@ final class WorkCache: @unchecked Sendable {
     private var lastInput: [String: Int] = [:]
 
     init(directory: URL) {
+        self.directory = directory
         // Keep the stored filename and envelope readable across presentation renames.
         url = directory.appendingPathComponent("workspace.json", isDirectory: false)
     }
@@ -63,12 +66,14 @@ final class WorkCache: @unchecked Sendable {
     /// shares it, so one window's save never drops another's repository.
     static let home = WorkCache(directory: homeDirectory)
 
-    /// Where Desktop keeps what it saves inside the Machine.
-    static var homeDirectory: URL {
-        let home = ProcessInfo.processInfo.environment["LF_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+    /// The Machine this process is on: `LF_HOME`, else `~/.lf`.
+    static var machineHome: URL {
+        ProcessInfo.processInfo.environment["LF_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".lf", isDirectory: true)
-        return home.appendingPathComponent("desktop-cache", isDirectory: true)
     }
+
+    /// Where Desktop keeps what it saves inside the Machine.
+    static var homeDirectory: URL { machineHome.appendingPathComponent("desktop-cache", isDirectory: true) }
 
     /// The saved workspace, or `nil` when absent, corrupt or from another version.
     /// An unusable file is removed so the next save starts clean.
@@ -192,6 +197,9 @@ final class WorkCache: @unchecked Sendable {
             if object["run_control"] != nil {
                 object["run_control"] = ["unavailable": savedReason]
             }
+            if let states = object["selection_states"] as? [String] {
+                object["selection_states"] = states.filter { !["available", "busy", "blocked"].contains($0) }
+            }
 
             return object.mapValues(quiet)
         }
@@ -203,8 +211,8 @@ final class WorkCache: @unchecked Sendable {
         return quiet.count == pages.count ? quiet : nil
     }
 
-    /// Every Session becomes `unknown` and keeps only its open action; `lf`
-    /// decides whether opening is still possible.
+    /// Every Session becomes `unknown`; its saved action stays, and `lf`
+    /// decides what opening does now.
     static func quietSessionPage(_ text: String) -> String? {
         rewrite(text) { value in
             guard var page = value as? [String: Any], let entries = page["entries"] as? [[String: Any]] else { return value }
@@ -213,9 +221,6 @@ final class WorkCache: @unchecked Sendable {
                 entry["state"] = SessionState.unknown.rawValue
                 entry["availability"] = NSNull()
                 entry["program_status"] = NSNull()
-                entry["actions"] = (entry["actions"] as? [[String: Any]] ?? []).filter {
-                    $0["kind"] as? String == SessionActionKind.open.rawValue
-                }
                 return entry
             }
             return page

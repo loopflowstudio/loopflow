@@ -3,16 +3,16 @@ use anyhow::{anyhow, Result};
 
 use std::path::Path;
 
-use crate::ops::people::{repo_people, RepoPerson};
+use loopflow_execution::ops::people::{repo_people, RepoPerson};
 
 /// The owners of Tasks in the repository containing `directory`, with
 /// warnings for GitHub lookups that failed.
 pub fn people(directory: &Path) -> Result<(Vec<RepoPerson>, Vec<String>)> {
-    let repo = crate::repository::CanonicalRepo::containing(directory)?
+    let repo = loopflow_execution::repository::containing(directory)?
         .ok_or_else(|| anyhow!("run `lf repo people` in a repository"))?;
     let runtime = tokio::runtime::Runtime::new()?;
-    let store = runtime.block_on(crate::store::open_store(
-        &crate::store::storage_config_from_env()?,
+    let store = runtime.block_on(loopflow_execution::store::open_store(
+        &loopflow_execution::store::storage_config_from_env()?,
     ))?;
     repo_people(&store.sqlite, repo.as_path())
 }

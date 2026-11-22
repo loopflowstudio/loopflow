@@ -26,10 +26,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ARCHITECTURE = Path("docs/dev/reference.md")
-MIGRATIONS = Path("rust/loopflow/src/store/migrations")
+MIGRATIONS = Path("rust/loopflow-storage/src/migrations")
 LF_MOD = Path("rust/loopflow/src/lf/mod.rs")
 CRATE_MANIFEST = Path("rust/loopflow/Cargo.toml")
-PROVIDERS = Path("rust/loopflow/src/provider_auth/mod.rs")
+PROVIDERS = Path("rust/loopflow-storage/src/provider.rs")
 GRAPHS = Path(".lf/graphs")
 
 CODE_TOKEN = re.compile(r"`([^`]+)`")
@@ -51,7 +51,7 @@ SCAN_ROOTS = (
     Path(".github/CI.md"),
     Path("rust/loopflow/tests/README.md"),
     Path("tests/e2e/README.md"),
-    Path("VISUAL_DESIGN.md"),
+    Path("DESIGN.md"),
     Path("deploy"),
     Path("docs"),
     Path("release"),
@@ -59,9 +59,10 @@ SCAN_ROOTS = (
     Path("scripts"),
     Path("python/loopflow"),
     Path("rust/loopflow/src"),
+    Path("rust/loopflow-execution"),
+    Path("rust/loopflow-storage"),
     Path("swift/Loopflow"),
     Path("swift/LoopflowMac"),
-    Path("swift/DESIGN.md"),
     Path("swift/README.md"),
     Path("website"),
     Path(".lf"),
@@ -250,10 +251,17 @@ def _production_rust(source: str) -> str:
     return source
 
 
+def _rust_sources(root: Path) -> list[Path]:
+    return sorted(
+        path
+        for crate in ("loopflow", "loopflow-execution", "loopflow-harness", "loopflow-storage")
+        for path in (root / "rust" / crate / "src").rglob("*.rs")
+    )
+
+
 def _discover_executable_edges(root: Path) -> set[str]:
     edges: set[str] = set()
-    source_root = root / "rust/loopflow/src"
-    for path in sorted(source_root.rglob("*.rs")):
+    for path in _rust_sources(root):
         relative = path.relative_to(root)
         # `tests.rs` is an out-of-line `#[cfg(test)] mod tests;`.
         if "tests" in relative.parts or path.name == "tests.rs" or MIGRATIONS in relative.parents:
@@ -292,6 +300,7 @@ def _ordered_migrations(root: Path) -> list[Path]:
             "--name-only",
             "--format=",
             "--",
+            "rust/loopflow/src/store/migrations",
             str(MIGRATIONS),
         ],
         cwd=root,
@@ -478,8 +487,7 @@ def _link_errors(root: Path, text: str) -> list[str]:
 
 def _wave_locator_errors(root: Path) -> list[str]:
     errors: list[str] = []
-    source_root = root / "rust/loopflow/src"
-    for path in sorted(source_root.rglob("*.rs")):
+    for path in _rust_sources(root):
         source = _production_rust(path.read_text())
         for number, line in enumerate(source.splitlines(), start=1):
             if "get_wave_by_name(" in line:

@@ -16,8 +16,11 @@ pub fn run(
     difftool: bool,
 ) -> Result<()> {
     if difftool {
-        let checkout = crate::ops::task::file_context(&crate::ops::task::file_store()?, issue)?;
-        let changes = crate::ops::task::task_changes(issue, base, head)?;
+        let checkout = loopflow_execution::ops::task::file_context(
+            &loopflow_execution::ops::task::file_store()?,
+            issue,
+        )?;
+        let changes = loopflow_execution::ops::task::task_changes(issue, base, head)?;
         let mut command = Command::new("git");
         command
             .current_dir(&checkout.worktree)
@@ -29,12 +32,15 @@ pub fn run(
         command.arg("--").args(path);
         return Err(command.exec()).context("start Git's configured difftool");
     }
-    let snapshot = crate::ops::task::task_diff(issue, path, base, head, draft)?;
+    let snapshot = loopflow_execution::ops::task::task_diff(issue, path, base, head, draft)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
         if std::io::stdout().is_terminal() {
-            let checkout = crate::ops::task::file_context(&crate::ops::task::file_store()?, issue)?;
+            let checkout = loopflow_execution::ops::task::file_context(
+                &loopflow_execution::ops::task::file_store()?,
+                issue,
+            )?;
             page(&checkout.worktree, &snapshot.patch)?;
         } else {
             std::io::stdout().write_all(snapshot.patch.as_bytes())?;

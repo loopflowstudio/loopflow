@@ -18,10 +18,10 @@ public enum ProjectStatus: String, Decodable, Sendable, Hashable {
 }
 
 public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
-    public let sync: PlanningSyncStatus
+    public let sync: TrackerSync
     public let current: Bool
     public let id: String
-    public let linearId: String?
+    public let trackerId: String?
     public let slug: String
     public let name: String
     public let status: ProjectStatus
@@ -30,8 +30,21 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
 
     enum CodingKeys: String, CodingKey {
         case id, slug, name, status, krs, current, sync
-        case linearId = "linear_id"
+        case trackerId = "tracker_id"
         case metricTargets = "metric_targets"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sync = try values.decode(TrackerSync.self, forKey: .sync)
+        current = try values.decode(Bool.self, forKey: .current)
+        id = try values.decode(String.self, forKey: .id)
+        trackerId = try values.decode(String?.self, forKey: .trackerId)
+        slug = try values.decode(String.self, forKey: .slug)
+        name = try values.decode(String.self, forKey: .name)
+        status = try values.decode(ProjectStatus.self, forKey: .status)
+        metricTargets = try values.decode([MetricTarget].self, forKey: .metricTargets)
+        krs = try values.decode([PlanningKeyResult].self, forKey: .krs)
     }
 }
 
@@ -49,9 +62,9 @@ public struct PlanningKeyResult: Decodable, Sendable, Identifiable, Hashable {
     public let holds: Bool
 }
 
-public struct TaskAcquisition: Decodable, Sendable, Hashable {
+public struct TrackerState: Decodable, Sendable, Hashable {
     public let state: State
-    public let observedAt: Int64?
+    public let syncedAt: Int64?
 
     public enum State: String, Decodable, Sendable {
         case available, invalid, removed, absent, unavailable
@@ -59,19 +72,25 @@ public struct TaskAcquisition: Decodable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case state
-        case observedAt = "observed_at"
+        case syncedAt = "synced_at"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        state = try values.decode(State.self, forKey: .state)
+        syncedAt = try values.decode(Int64?.self, forKey: .syncedAt)
     }
 }
 
 public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
-    public let acquisition: TaskAcquisition
-    public let sync: PlanningSyncStatus
+    public let trackerState: TrackerState
+    public let sync: TrackerSync
     public let id: String
     public let repositoryId: String
     public let repo: String
     public let projectId: String?
-    public let waveId: String?
-    public let linearId: String?
+    public internal(set) var waveId: String?
+    public let trackerId: String?
     public let identifier: String
     public let name: String
     public let description: String
@@ -84,10 +103,31 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     enum CodingKeys: String, CodingKey {
         case repositoryId = "repo_id", projectId = "project_id", waveId = "wave_id"
         case repo
-        case id, identifier, name, description, rank, state, assignee, sync, acquisition
-        case linearId = "linear_id"
+        case id, identifier, name, description, rank, state, assignee, sync
+        case trackerState = "tracker_state"
+        case trackerId = "tracker_id"
         case completedAt = "completed_at"
         case dueDate = "due_date"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        trackerState = try values.decode(TrackerState.self, forKey: .trackerState)
+        sync = try values.decode(TrackerSync.self, forKey: .sync)
+        id = try values.decode(String.self, forKey: .id)
+        repositoryId = try values.decode(String.self, forKey: .repositoryId)
+        repo = try values.decode(String.self, forKey: .repo)
+        projectId = try values.decode(String?.self, forKey: .projectId)
+        waveId = try values.decode(String?.self, forKey: .waveId)
+        trackerId = try values.decode(String?.self, forKey: .trackerId)
+        identifier = try values.decode(String.self, forKey: .identifier)
+        name = try values.decode(String.self, forKey: .name)
+        description = try values.decode(String.self, forKey: .description)
+        rank = try values.decode(UInt32.self, forKey: .rank)
+        state = try values.decode(String?.self, forKey: .state)
+        completedAt = try values.decode(String?.self, forKey: .completedAt)
+        dueDate = try values.decode(String?.self, forKey: .dueDate)
+        assignee = try values.decode(String?.self, forKey: .assignee)
     }
 
     public var terminalLabel: String? {
@@ -98,11 +138,6 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
         }
     }
 
-    public var historyLabel: String? {
-        isSuccessful && completedAt == nil ? "Completed · date unavailable" : terminalLabel
-    }
-
-    public var isTerminal: Bool { isSuccessful || state == "canceled" || state == "duplicate" }
     public var isSuccessful: Bool { state == "completed" }
 }
 
@@ -115,7 +150,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let updatedAt: String
     public let provider: String?
     /// Who owns the Task on which Machine; absent when it is unowned.
-    public let owner: TaskOwner?
+    public internal(set) var owner: TaskOwner?
 
     enum CodingKeys: String, CodingKey {
         case status, reason, provider, owner
@@ -126,13 +161,13 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
 }
 
 /// A Machine for display. A missing id is an unknown Machine.
-public struct MachineRef: Decodable, Sendable, Hashable {
+public struct MachineRef: Codable, Sendable, Hashable {
     public let id: String?
     public let label: String?
 }
 
 /// The person and Machine that own a Task.
-public struct TaskOwner: Decodable, Sendable, Hashable {
+public struct TaskOwner: Codable, Sendable, Hashable {
     public let person: String?
     /// The owner's lowercase Git email: the display fallback when they have no
     /// name, not their identity.
@@ -154,6 +189,14 @@ public struct TaskOwner: Decodable, Sendable, Hashable {
         personKey = try container.decodeIfPresent(String.self, forKey: .personKey)
         personId = try container.decode(String?.self, forKey: .personId)
         machine = try container.decode(MachineRef.self, forKey: .machine)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(person, forKey: .person)
+        try container.encodeIfPresent(personKey, forKey: .personKey)
+        try container.encode(personId, forKey: .personId)
+        try container.encode(machine, forKey: .machine)
     }
 
     /// "Jack Heart on mini"; "Machine unknown" when the Machine was never recorded.
@@ -199,15 +242,19 @@ public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
 /// Where a Task sits on the Wave board, derived once in Rust: the board, the
 /// sidebar's Working Tasks and every count read it.
 public enum TaskSection: String, Decodable, Sendable, Hashable {
-    case backlog, working, autonomous, done, abandoned
+    case backlog, working, done, abandoned
 }
 
 public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public var id: String { task.id }
 
-    public let task: TaskPlanningSnapshot
+    public internal(set) var task: TaskPlanningSnapshot
     public let reference: TaskReferenceSnapshot
-    public let runtime: TaskRuntimeSnapshot?
+    /// Effective lifecycle, including planning withdrawal of never-started work.
+    public internal(set) var lifecycle: TaskState
+    /// The same states Rust uses for Task selections and conversation activity.
+    public let selectionStates: Set<WorkSelectionState>
+    public internal(set) var runtime: TaskRuntimeSnapshot?
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
     public let actions: TaskActionModel
@@ -216,68 +263,53 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let latestGraphProcess: GraphProcessDetail?
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
-    public let shipControl: TaskRunControl
-    public let shipping: ShippingSnapshot?
     public let pr: PrSnapshot?
-    public let section: TaskSection
+    public internal(set) var section: TaskSection
+    /// Whether its owner is you, decided in Rust; false when nobody owns it.
+    public let ownedByYou: Bool
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, condition, actions, execution, section, pr
+        case task, reference, runtime, condition, actions, execution, section, pr, lifecycle
+        case selectionStates = "selection_states"
+        case ownedByYou = "owned_by_you"
         case graphName = "graph_name"
         case graphSource = "graph_source"
         case latestGraphProcess = "latest_graph_process"
         case runControl = "run_control"
-        case shipControl = "ship_control"
-        case shipping
         case nextMove = "next_move"
     }
 
     /// A started Task nobody owns: nothing moves it until someone claims it.
     public var isUnassigned: Bool {
         guard let runtime else { return false }
-        return runtime.owner == nil && runtime.status != .unstarted && !runtime.status.isTerminal
+        return runtime.owner == nil && lifecycle != .unstarted && !lifecycle.isTerminal
     }
 
     // What a Task's Session slot does follows its state alone, never its owner:
-    // unstarted offers Start, working opens with Start, finished reveals history.
+    // unstarted offers Start, working opens by itself, finished opens when asked.
 
     /// Not yet started and still open: it has no checkout, so no conversation to
     /// open, and its Session slot offers Start instead.
-    public var awaitsStart: Bool { (runtime?.status ?? .unstarted) == .unstarted && !task.isTerminal }
+    public var awaitsStart: Bool { lifecycle == .unstarted }
 
-    public var isCompleted: Bool { runtime?.status.isTerminal ?? task.isTerminal }
-
-    /// Working Tasks start their conversation when opened, owned or not: opening
-    /// claims nothing. Unstarted and finished Tasks only show history.
-    public var conversationIntent: SessionOpenIntent {
-        runtime?.status.isWorking == true ? .start : .reveal
-    }
-}
-
-/// What a shipped Task is doing, derived in Rust; nothing here waits on a person.
-public struct ShippingSnapshot: Decodable, Sendable, Hashable {
-    public let shippedAt: Int64
-    public let state: State
-    public let reason: String
-
-    public enum State: String, Decodable, Sendable, Hashable {
-        case building, landing, repairing, restarting, unassigned
+    /// Where a Task that never ran its Graph stands, as the server reads it:
+    /// starting that Graph, or why its setup stopped.
+    public var setupPosition: String? {
+        guard let execution, [.starting, .blocked].contains(execution.state) else { return nil }
+        return execution.reason
     }
 
-    public var label: String {
-        switch state {
-        case .building: "Building"
-        case .landing: "Landing"
-        case .repairing: "Repairing"
-        case .restarting: "Restarting"
-        case .unassigned: "Unassigned"
-        }
+    /// Completion dates may be unknown even when the lifecycle is settled.
+    public var historyLabel: String {
+        lifecycle == .done && task.completedAt == nil ? "Done · date unavailable" : lifecycle.label
     }
 
-    enum CodingKeys: String, CodingKey {
-        case state, reason
-        case shippedAt = "shipped_at"
-    }
+    public var isCompleted: Bool { lifecycle.isTerminal }
+
+    /// Working Tasks open their conversation without being asked, owned or not:
+    /// opening claims nothing. Unstarted and finished Tasks open one only when a
+    /// person asks, or when Desktop already shows its Session.
+    public var opensConversationAutomatically: Bool { lifecycle.isWorking }
 }
 
 public enum WorkNextMoveOwner: String, Decodable, Sendable, Hashable {
@@ -461,6 +493,12 @@ public enum WorkEvidence<Item: Decodable & Sendable & Hashable>: Decodable, Send
     public var unavailableReason: String? {
         if case let .unavailable(reason) = self { return reason }
         return nil
+    }
+
+    /// Whether more items exist than were read.
+    public var truncated: Bool {
+        if case let .available(_, truncated) = self { return truncated }
+        return false
     }
 
     /// The items that pass `isIncluded`; unavailable evidence stays unavailable.

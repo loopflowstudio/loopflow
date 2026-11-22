@@ -14,14 +14,12 @@ struct SessionActionSheet: View {
                 TextField("Session name", text: Binding(
                     get: { model.navigation.renaming?.text ?? draft.text },
                     set: { model.navigation.renaming?.text = $0 }))
-                    .disabled(draft.submitting)
-                    .onSubmit { Task { await model.commitSessionRename() } }
+                    .onSubmit { model.commitSessionRename() }
                     .accessibilityIdentifier("session-rename-field")
-                if let error = draft.error { Text(error).foregroundStyle(palette.warning) }
                 HStack {
                     Button("Cancel") { model.cancelSessionRename() }.keyboardShortcut(.cancelAction)
-                    Button("Save") { Task { await model.commitSessionRename() } }.keyboardShortcut(.defaultAction)
-                }.disabled(draft.submitting)
+                    Button("Save") { model.commitSessionRename() }.keyboardShortcut(.defaultAction)
+                }
             }.padding(20).frame(width: 380)
         }
     }

@@ -76,7 +76,7 @@ enum SessionProgramStatus {
         case .reported(_, let report):
             let kind = report.kind.map { " · \($0.rawValue.capitalized)" } ?? ""
             let progress = report.progress.map { " · \($0)%" } ?? ""
-            return "\(report.state.rawValue.capitalized)\(kind)\(progress)"
+            return "\(report.state.label)\(kind)\(progress)"
         case .available: return "Available · inferred"
         case .unknown, .unavailable: return nil
         }
@@ -116,6 +116,7 @@ struct PaneProgramHeading: Equatable {
         case "claude": name = "Claude"; symbol = "sparkle"
         case "pi": name = "Pi"; symbol = "terminal"
         case "opencode": name = "OpenCode"; symbol = "chevron.left.forwardslash.chevron.right"
+        case "agy": name = "Antigravity"; symbol = "terminal"
         case .some(let value) where !value.isEmpty:
             name = ProgramStatusReport.displaySafe(value); symbol = "bubble.left"
         default:

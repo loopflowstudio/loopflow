@@ -1,4 +1,5 @@
-//! Client access has no execution or installation authority.
+//! `lf server`: the resident server, its readiness and protocol, and the
+//! entry another Machine reaches it through.
 use crate::lf::ServerCommand;
 
 pub fn run(command: &ServerCommand) -> anyhow::Result<()> {
@@ -6,15 +7,18 @@ pub fn run(command: &ServerCommand) -> anyhow::Result<()> {
         ServerCommand::Receipt { request_id, .. } => {
             println!(
                 "{}",
-                serde_json::to_string_pretty(&crate::engine::creation::lookup(request_id)?)?
+                serde_json::to_string_pretty(&loopflow_execution::engine::creation::lookup(
+                    request_id
+                )?)?
             );
             Ok(())
         }
         ServerCommand::Run => crate::server::run(),
+        ServerCommand::Connect => crate::server::connect::run(),
         ServerCommand::Status => {
             println!(
                 "{}",
-                serde_json::to_string(&crate::server::client::status()?)?
+                serde_json::to_string(&loopflow_execution::machine::client::status()?)?
             );
             Ok(())
         }

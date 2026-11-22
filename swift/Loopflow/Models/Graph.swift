@@ -95,11 +95,12 @@ public struct GraphStepProcess: Decodable, Sendable, Hashable, Identifiable {
     public let completedAt: Int64?
     public let outcome: String?
     public let exitCode: Int32?
+    public let error: String?
 
     public var id: String { lfProcessId }
 
     enum CodingKeys: String, CodingKey {
-        case label, key, iterations, outcome
+        case label, key, iterations, outcome, error
         case lfProcessId = "lf_process_id"
         case startedAt = "started_at"
         case completedAt = "completed_at"
@@ -174,16 +175,80 @@ public struct TaskExecutionSnapshot: Decodable, Sendable, Hashable {
     public let reason: String
     public let step: String?
     public let captured: Int64?
+    /// Where the run's `lf task run` died before the run stopped.
+    public let died: RunDied?
+    /// What happens next to a run that died; `reason` already says it.
+    public let outlook: SessionOutlook?
+
+    enum CodingKeys: String, CodingKey {
+        case state, reason, step, captured, died, outlook
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        state = try values.decode(TaskExecutionState.self, forKey: .state)
+        reason = try values.decode(String.self, forKey: .reason)
+        step = try values.decodeIfPresent(String.self, forKey: .step)
+        captured = try values.decodeIfPresent(Int64.self, forKey: .captured)
+        died = try values.decode(RunDied?.self, forKey: .died)
+        outlook = try values.decode(SessionOutlook?.self, forKey: .outlook)
+    }
+}
+
+/// A Task run's carrier died while the run was at a step.
+public struct RunDied: Decodable, Sendable, Hashable {
+    public let atStep: String
+    /// RFC 3339; nil when nobody recorded the death.
+    public let at: String?
+
+    enum CodingKeys: String, CodingKey {
+        case atStep = "at_step"
+        case at
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        atStep = try values.decode(String.self, forKey: .atStep)
+        at = try values.decode(String?.self, forKey: .at)
+    }
 }
 
 /// One autonomous definition, including an invalid local source.
 public struct GraphCatalogEntry: Decodable, Sendable, Hashable, Identifiable {
     public let name: String
+    /// Its `description:` line; nil when the file has none or does not load.
+    public let description: String?
     public let source: String?
     public let compiled: CompiledGraph?
     public let composition: GraphComposition?
     public let unavailable: String?
+    /// The Graphs that include this one with `graph:`; empty for a Graph people start with.
+    public let includedBy: [String]
+    /// What it runs for: a Task, or a Wave's own operation.
+    public let runs: GraphSubject
     public var id: String { name }
+
+    enum CodingKeys: String, CodingKey {
+        case name, description, source, compiled, composition, unavailable, runs
+        case includedBy = "included_by"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        name = try values.decode(String.self, forKey: .name)
+        description = try values.decode(String?.self, forKey: .description)
+        source = try values.decode(String?.self, forKey: .source)
+        compiled = try values.decode(CompiledGraph?.self, forKey: .compiled)
+        composition = try values.decode(GraphComposition?.self, forKey: .composition)
+        unavailable = try values.decode(String?.self, forKey: .unavailable)
+        includedBy = try values.decode([String].self, forKey: .includedBy)
+        runs = try values.decode(GraphSubject.self, forKey: .runs)
+    }
+}
+
+/// What a Graph is started on.
+public enum GraphSubject: String, Decodable, Sendable, Hashable {
+    case task, wave
 }
 
 /// A graph as a Workflow: `start`, its interactive steps in order, `end`, and

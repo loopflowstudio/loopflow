@@ -12,7 +12,7 @@ the server delivering Task updates and recording Codex turns itself
 ([Waking an idle conversation](../../rust/loopflow/src/server/README.md#waking-an-idle-conversation)),
 Desktop's `session.status` and transcript telemetry (LOO-822) are built.
 [What runs on a Machine](index.md#what-runs-on-a-machine) is the model, and
-the [transport README](../../rust/loopflow/src/transport/README.md) describes
+the [transport README](../../rust/loopflow-execution/src/transport/README.md) describes
 the held terminals and headless launches behind it. This page keeps the
 telemetry design, the pieces not yet built and the open questions. Delete it
 when the last piece lands.
@@ -68,7 +68,7 @@ A Claude Code 2.1.322 transcript read the same day ends a turn with an
 so `end_turn` with nothing after it is the signal and `turn_duration` a
 confirmation.
 
-One reader per harness (`transcript/{claude,codex,pi,opencode}.rs`) turns a
+One reader per harness (`transcript/{claude,codex,pi,opencode,antigravity}.rs`) turns a
 transcript's rows into `Turn`s, for `lf history show` and the live reading
 alike: one turn from what woke the agent until it hands back, with its id,
 state, model and usage, and the requests and agent work inside it as items.
@@ -177,7 +177,7 @@ status itself.
 
 | Piece | Removes | Needs |
 | --- | --- | --- |
-| Every view types; size follows the newest view; the server's emulator answers every terminal query and replies coming from a view's terminal are dropped before the PTY | Takeover tokens, **Move here**, and Desktop's relay status handshake (`LF_SERVER_STATUS`, "Opening… Input paused") | |
+| The server's emulator answers every terminal query, so no view's replies reach the PTY | Desktop's relay status handshake (`LF_SERVER_STATUS`, "Opening… Input paused"), once Reconnecting, Session unavailable and Retry have another carrier | |
 | Retire leaked processes and find the tests that leak them | Test and demo leftovers | |
 
 Server operations for these pieces are added under one protocol revision
@@ -186,14 +186,22 @@ one each.
 
 ### Every view types
 
-What a held terminal's views would become:
+Built. A held terminal has no controlling view:
 
-- **Size.** The most recently opened view owns the terminal size; other views
-  render that grid. When it closes, ownership falls back to the next most
-  recently opened view. A reconnect is not an open, and a Desktop pane counts
-  as open only while it is shown.
-- **Input.** Every view can type. There is no controlling view, takeover
-  token or **Move here**.
+- **Input.** Every view can type. There is no takeover token or **Move
+  here**. Opening a Session whose provider runs in a native client outside a
+  held terminal takes it over: lf cannot share that terminal.
+- **Size and focus.** The live view a person most recently focused or typed in
+  (or attached with `focused: true`, the default for an interactive terminal)
+  sets the terminal size and colors; other views render that grid. Unfocused
+  attaches (`focused: false`, used by Desktop panes and `--unfocused`) leave the
+  current owner alone until focused or typed in, and when the owner detaches,
+  the next most recent live view takes over (ties keep the current owner). Views
+  report focus through DEC 1004 and carry their last known focus on reconnect;
+  hosts that don't report focus fall back to typing (or a focused attach).
+  Focus-out (`CSI O`) reaches the agent only from the sizing view.
+- **Queries.** Only the sizing view's answers to terminal queries reach the
+  agent; other views' replies are dropped before the PTY.
 
 ## Open
 

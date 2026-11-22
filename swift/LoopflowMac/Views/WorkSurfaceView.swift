@@ -9,37 +9,18 @@ struct WorkSurfaceView: View {
     @Bindable var model: WorkModel
     var onOpenSession: (SessionRecord) -> Void = { _ in }
     /// Starts an independent Task-context conversation in the Task's checkout.
-    var onNewSession: ((String) async throws -> Void)?
+    var onNewSession: (@MainActor (String) async throws -> Void)?
 
     @Environment(\.palette) private var palette
-    @State private var controlError: String?
     @State private var editingTask: RoadmapTask?
 
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
-    private var queryError: String? { model.roadmap.errorMessage }
     private var visibleWaves: [WaveRoadmap] { model.visibleRoadmaps }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let queryError {
-                evidenceBanner(
-                    title: snapshot == nil
-                        ? "Roadmap unavailable"
-                        : "Refresh failed — showing the last roadmap",
-                    detail: queryError
-                )
-            }
-            if let controlError {
-                evidenceBanner(title: "Control failed", detail: controlError)
-            }
-            if let selection = model.selection, selection.kind == .task,
-               let error = model.navigation.taskSessionErrors[selection.id] {
-                evidenceBanner(title: "New session failed", detail: error)
-            }
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .background(palette.background)
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(palette.background)
         .sheet(item: $editingTask) { task in
             TaskDirectiveEditor(model: model, task: task)
         }
@@ -52,17 +33,12 @@ struct WorkSurfaceView: View {
         if let selection = model.selection, selection.kind == .task,
            model.navigation.selectedTaskEvidence?.task.id == selection.id {
             taskDetail
-        } else if snapshot == nil, queryError == nil {
+        } else if snapshot == nil, model.roadmap.isLoading {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("loopflow-work-loading")
         } else if snapshot == nil {
-            ContentUnavailableView(
-                "Work unavailable",
-                systemImage: "exclamationmark.triangle",
-                description: Text("Couldn't read the latest work. Refresh to try again.")
-            )
-            .accessibilityIdentifier("loopflow-work-unavailable")
+            Color.clear
         } else if visibleWaves.isEmpty, model.visibleWaves.isEmpty, model.visibleTasks.isEmpty {
             ContentUnavailableView(
                 model.repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
@@ -75,7 +51,7 @@ struct WorkSurfaceView: View {
             case nil:
                 ContentUnavailableView("Choose Work", systemImage: "list.bullet")
             case .wave:
-                if let selection = model.selection { WaveStandupBoard(model: model, view: .wave(selection.id)) }
+                if let selection = model.selection { BacklogView(model: model, view: .wave(selection.id)) }
             case .project:
                 missingSelection
             case .task:
@@ -108,10 +84,7 @@ struct WorkSurfaceView: View {
         if let selection = model.selection, let found = model.task(id: selection.id) {
             let task = found.task
             let sessions = model.sessions.value.map { _ in
-                model.visibleSessions.filter { record in
-                    guard record.primaryScope == nil else { return false }
-                    return task.runtime.map { record.names(task: $0.workId) } ?? false
-                }
+                model.visibleSessions.filter { $0.names(task: task.id) }
             }
             scrollingDetail(identifier: "loopflow-detail-task") {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -125,14 +98,7 @@ struct WorkSurfaceView: View {
                         Spacer(minLength: Spacing.sm)
                         if let onNewSession {
                             Button {
-                                let navigation = model.navigation
-                                guard navigation.startingTaskSessions.insert(task.id).inserted else { return }
-                                navigation.taskSessionErrors[task.id] = nil
-                                Task {
-                                    defer { navigation.startingTaskSessions.remove(task.id) }
-                                    do { try await onNewSession(task.id) }
-                                    catch { navigation.taskSessionErrors[task.id] = error.localizedDescription }
-                                }
+                                model.newTaskSession(task.id, open: onNewSession)
                             } label: {
                                 Label("New session", systemImage: "plus.bubble")
                             }
@@ -149,9 +115,12 @@ struct WorkSurfaceView: View {
                             .accessibilityLabel(taskConditionAccessibilityLabel(task))
                         Spacer()
                         if let workspace = task.reference.workspace {
-                            Button("Worktree") { openWorktree(workspace) }
+                            Button("Worktree") { model.openWorktree(workspace) }
                                 .buttonStyle(WorkPlainButtonStyle())
                                 .font(Typography.body(12.5))
+                        }
+                        if let parent = model.taskExecution[task.id].value?.stackParent {
+                            TaskStackParentLabel(parent: parent)
                         }
                         if let github = task.pr?.publication?.github {
                             Link("PR #\(github.number)", destination: github.url)
@@ -162,12 +131,12 @@ struct WorkSurfaceView: View {
                     .tint(palette.actionInk)
                     .foregroundStyle(palette.actionInk)
                     TaskPlanningFactsView(task: task)
-                    if task.task.acquisition.state != .available {
-                        Text("Planning evidence: \(task.task.acquisition.state.rawValue)")
+                    if task.task.trackerState.state != .available {
+                        Text("Tracker state: \(task.task.trackerState.state.rawValue)")
                             .font(Typography.caption())
                             .foregroundStyle(palette.textSecondary)
                     }
-                    PlanningSyncView(sync: task.task.sync)
+                    TrackerSyncView(sync: task.task.sync, repo: task.task.repo)
                     TaskWorkflowHeader(model: model, task: task, work: model.taskWork[task.id])
                         .id(task.id)
                 }
@@ -182,11 +151,25 @@ struct WorkSurfaceView: View {
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
                     .accessibilityIdentifier("task-debug")
+                // A Task conversation that is not running, or that the server started again, prints the
+                // server's sentence: starting, coming back, or the command that opens it.
+                if let conversation = (sessions ?? []).first(where: \.taskPrimary),
+                   conversation.outlook != nil || conversation.start != nil,
+                   let line = conversation.statusLine {
+                    Label("Conversation: \(line)", systemImage: "arrow.clockwise")
+                        .font(Typography.body(12.5))
+                        .foregroundStyle(palette.textSecondary)
+                        .accessibilityIdentifier("task-conversation-line")
+                }
                 // Exact Available links preserve access to secondary conversations
                 // needing input without restoring a Session inventory.
                 ForEach((sessions ?? []).filter { $0.availability == .available }) { session in
-                    Button { onOpenSession(session) } label: {
-                        Label(session.readySummary ?? "Input needed in \(session.title)", systemImage: "bubble.left")
+                    Button {
+                        Perf.userAction(Perf.taskWorkspaceReady, scenario: "session", id: session.id,
+                                        repository: model.repoPath, liveSessions: model.liveSessionCount,
+                                        owner: model.navigation.performanceOwner) { onOpenSession(session) }
+                    } label: {
+                        Label("Input needed in \(session.title)", systemImage: "bubble.left")
                     }
                     .buttonStyle(WorkPlainButtonStyle())
                     .accessibilityIdentifier("task-available-\(session.id)")
@@ -214,7 +197,7 @@ struct WorkSurfaceView: View {
                 TaskCommentsView(model: model, task: task)
             }
             .onChange(of: task.id, initial: true) { _, id in
-                Perf.endAfterCommit(Perf.taskWorkspaceReady, id: id)
+                Perf.stateObserved(Perf.taskWorkspaceReady, id: id, owner: model.navigation.performanceOwner, inputReady: false)
             }
         } else {
             missingSelection
@@ -254,21 +237,6 @@ struct WorkSurfaceView: View {
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.sm)
         .background(palette.warning.opacity(0.12))
-    }
-
-    // MARK: - Controls
-
-    private func openWorktree(_ workspace: TaskWorktreeSnapshot) {
-        var components = URLComponents()
-        components.scheme = "warp"
-        components.host = "action"
-        components.path = "/new_window"
-        components.queryItems = [URLQueryItem(name: "path", value: workspace.worktree)]
-        guard let url = components.url, NSWorkspace.shared.open(url) else {
-            controlError = "Warp could not open \(workspace.worktree)."
-            return
-        }
-        controlError = nil
     }
 }
 
@@ -336,4 +304,24 @@ struct TaskDirectiveEditor: View {
         .interactiveDismissDisabled(isSaving)
     }
 }
+
+/// The open Task a stacked Task builds on, as `lf task status` names it.
+struct TaskStackParentLabel: View {
+    let parent: TaskStackParent
+    @Environment(\.palette) private var palette
+
+    var help: String {
+        let pr = parent.prNumber.map { " (PR #\($0))" } ?? ""
+        return "Builds on \(parent.identifier)'s branch \(parent.branch)\(pr). lf sync main detaches it."
+    }
+
+    var body: some View {
+        Text("Stacked on \(parent.identifier)")
+            .font(Typography.body(12.5))
+            .foregroundStyle(palette.textSecondary)
+            .help(help)
+            .accessibilityIdentifier("task-stack-parent")
+    }
+}
+
 #endif

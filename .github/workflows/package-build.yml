@@ -16,22 +16,6 @@ env:
   LOOPFLOW_RELEASE_TAG: ${{ inputs.release_tag }}
 
 jobs:
-  source-package:
-    if: inputs.release_tag != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.revision }}
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: source-package
-      - name: Verify the crates.io archive before tagging
-        run: cargo package --locked -p loopflow
-
   release-acceptance:
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -18,13 +18,13 @@
     (subpath "/System") (subpath "/usr") (subpath "/bin")
     (subpath "/sbin") (subpath "/Library/Apple") (subpath "/Library/Developer")
     (subpath "/Applications/Xcode.app") (subpath "/private/etc") (subpath "/dev")
-    (subpath (param "HOME")) (subpath (param "RECEIPTS"))
+    (subpath (param "HOME"))
     (subpath (param "REPO")) (subpath (param "CODE"))
     (literal (param "CLI")) (literal (param "HELPER")))
 (deny file-write*)
 ; Session transport sockets live in the fixture home's own /tmp directory.
 (allow file-read-data (subpath (param "TRANSPORT")))
-(allow file-write* (subpath (param "HOME")) (subpath (param "RECEIPTS")) (subpath (param "TRANSPORT"))
+(allow file-write* (subpath (param "HOME")) (subpath (param "TRANSPORT"))
     (literal "/dev/null") (literal "/dev/ptmx") (regex #"^/dev/(ttys|pty)"))
 ; Shells inherit these restrictions. Copied providers and scheduling tools
 ; cannot execute, even if a copied record or shell startup file names them.

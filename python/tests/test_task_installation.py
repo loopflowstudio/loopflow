@@ -100,3 +100,31 @@ def test_stuck_docker_daemon_is_bounded_infrastructure_failure(monkeypatch):
 
     with pytest.raises(SystemExit, match="Infrastructure failure: Docker did not respond"):
         installation._wait_for_docker()
+
+
+def test_packaged_migration_order_keeps_first_additions_across_source_moves(tmp_path):
+    def git(*args):
+        subprocess.run(
+            ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", *args],
+            cwd=tmp_path,
+            capture_output=True,
+            check=True,
+        )
+
+    old = tmp_path / "rust/loopflow/src/store/migrations"
+    moved = tmp_path / "rust/loopflow-storage/src/migrations"
+    old.mkdir(parents=True)
+    (old / "z_first.sql").write_text("SELECT 1;\n")
+    (old / "drafts").mkdir()
+    (old / "drafts/a_later.sql").write_text("SELECT 1;\n")
+    git("init", "--initial-branch=main")
+    git("add", ".")
+    git("commit", "-m", "original migration")
+    moved.parent.mkdir(parents=True)
+    git("mv", str(old), str(moved))
+    git("mv", str(moved / "drafts/a_later.sql"), str(moved / "a_later.sql"))
+    git("commit", "-m", "move storage and merge another migration")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    (moved / "b_unmerged.sql").write_text("SELECT 1;\n")
+
+    assert installation._migration_order(tmp_path) == "z_first\na_later\nb_unmerged\n"

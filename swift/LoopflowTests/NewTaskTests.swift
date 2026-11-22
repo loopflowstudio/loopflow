@@ -25,10 +25,13 @@ struct NewTaskTests {
             calls.withLock { $0.append(args) }
             return args.starts(with: ["task"]) ? receipt : repository
         }
-        let created = try await query.createTask(request: "-v is ignored", wave: "product", graph: "auto", cwd: "/repo")
-        #expect(created.task.identifier == "LOO-1")
-        #expect(created.graph == "code")
-        #expect(created.sessionId != nil)
+        let created = try await query.createTask(request: "-v is ignored", wave: "product", graph: "auto", run: true, cwd: "/repo")
+        #expect(created.receipt.task.identifier == "LOO-1")
+        #expect(created.receipt.graph == "code")
+        #expect(created.session?.id == created.receipt.sessionId)
+        #expect(created.session?.openArgv.isEmpty == false)
+        // Until the Task's reading arrives, its row says where it stands.
+        #expect(created.row.setupPosition == "Starting code")
         let shown = try await query.waveGraph(wave: nil, cwd: "/repo")
         #expect(shown.wave == nil)
         #expect(shown.default.name == "code")
@@ -39,11 +42,32 @@ struct NewTaskTests {
             ["task", "create", "--wave", "product", "--graph", "auto", "--run", "--json", "--", "-v is ignored"],
             ["wave", "graph", "show", "--no-wave", "--json"],
         ])
-        // A run that failed after filing reports the Task with no graph or conversation.
-        let failed = try RegistryQuery.decode([TaskCreateReceipt].self, from: fixture("task_create_receipt.json"))[1]
-        #expect(failed.graph == nil && failed.sessionId == nil)
+        // A headless `-b` run answers with no conversation.
+        let batch = try RegistryQuery.decode([TaskCreated].self, from: fixture("task_create_receipt.json"))[1]
+        #expect(batch.receipt.sessionId == nil && batch.session == nil)
         // Every Wave and the repository decode, including a null Wave.
         _ = try RegistryQuery.decode([WaveGraph].self, from: fixture("wave_graph.json"))
+    }
+
+    @Test("File creates the Task without running it and selects its row in that backlog")
+    func fileLeavesTheTaskUnstartedAndSelected() async throws {
+        let receipts = try #require(JSONSerialization.jsonObject(with: Data(fixture("task_create_receipt.json").utf8)) as? [Any])
+        let receipt = String(decoding: try JSONSerialization.data(withJSONObject: receipts[1]), as: UTF8.self)
+        let calls = OSAllocatedUnfairLock<[[String]]>(initialState: [])
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            guard args.starts(with: ["task", "create"]) else { throw RegistryQueryError("Filing only creates") }
+            calls.withLock { $0.append(args) }
+            return receipt
+        }, repoPath: "/repo")
+        model.navigation.backlogs[.repository] = BacklogState(selection: ["other"], filter: .mine, query: "old")
+        try await model.fileTask(request: "an idea", wave: nil, graph: nil)
+        let submitted = try #require(calls.withLock { $0 }.first)
+        #expect(!submitted.contains("--run") && submitted.suffix(2) == ["--", "an idea"])
+        let created = try RegistryQuery.decode(TaskCreated.self, from: receipt)
+        let state = try #require(model.navigation.backlogs[.repository])
+        #expect(state.selection == [created.receipt.task.id] && state.filter == .all && state.query.isEmpty)
+        #expect(state.notice == "Filed \(created.receipt.task.identifier)")
+        #expect(model.navigation.startingTask == nil)
     }
 
     @Test("The sheet follows the scope's reported workflow, names whose default it is, and waits for a request")
@@ -65,6 +89,7 @@ struct NewTaskTests {
         #expect(named == "· loopflow's default")
         _ = try sheet.find(viewWithAccessibilityIdentifier: "new-task-steps")
         #expect(try sheet.find(viewWithAccessibilityIdentifier: "new-task-create").button().isDisabled())
+        #expect(try sheet.find(viewWithAccessibilityIdentifier: "new-task-file").button().isDisabled())
     }
 }
 #endif

@@ -16,17 +16,16 @@ struct DashboardEditor: View {
             Text(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard").font(.headline)
             TextField("Name", text: $name)
             TextField("Query", text: $expression, axis: .vertical).font(.system(.body, design: .monospaced))
-            Text("For example: (wave:product state:open), state:available or state:shipping")
+            Text("For example: (wave:product state:open), state:available or state:auto")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Pin in sidebar", isOn: $pinned)
-            if let error = model.dashboardError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save") {
                     Task {
-                        await model.saveDashboard(id: id, expression: expression, name: name, pinned: pinned, revision: revision)
-                        if model.dashboardError == nil { dismiss() }
+                        if await model.saveDashboard(id: id, expression: expression, name: name, pinned: pinned,
+                                                     revision: revision) { dismiss() }
                     }
                 }.keyboardShortcut(.defaultAction).disabled(model.dashboardSaving || expression.isEmpty || name.isEmpty)
             }
@@ -94,9 +93,6 @@ struct DashboardView: View {
                         Button(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard") { editing = true }
                     }
                 }.padding(10)
-                if let error = model.dashboardError ?? model.selectionPlans.errorMessage {
-                    Text(error).foregroundStyle(palette.warning).textSelection(.enabled)
-                }
                 // One line: membership may be incomplete; every reason stays in its help.
                 if let first = plan.resolution.unavailable.first {
                     let more = plan.resolution.unavailable.count - 1
@@ -129,7 +125,7 @@ struct DashboardView: View {
                 }
             } else {
                 ContentUnavailableView("Dashboard unavailable", systemImage: "exclamationmark.triangle",
-                    description: Text(model.selectionPlans.errorMessage ?? "This Dashboard is no longer available."))
+                    description: Text("This Dashboard is no longer available."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }.padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(palette.surfaceMuted)
@@ -326,7 +322,7 @@ extension WorkModel {
     /// Hide or restore a tile. Rust decides the mode; hiding never touches the order.
     func setTile(_ plan: WorkViewPlan, _ member: WorkMemberRef, hidden: Bool) {
         guard let id = plan.dashboardID else {
-            dashboardError = "Save this Dashboard before arranging its Work."; return
+            navigation.notices.post(Notice("Save this Dashboard before arranging its Work.")); return
         }
         Task { await setDashboardTile(id, member: member.work, hidden: hidden) }
     }
@@ -340,7 +336,7 @@ extension WorkSelection {
     var queryText: String {
         func value(_ text: String) -> String { text.contains(where: { $0.isWhitespace || $0 == "(" || $0 == ")" }) ? "\"" + text + "\"" : text }
         switch expression {
-        case .repository: return "state:open"
+        case .repository: return "state:working"
         case .wave(let id): return "wave:" + value(id)
         case .work(let work): return work.kind.rawValue + ":" + value(work.id)
         case .query(let id): return "query:" + value(id)

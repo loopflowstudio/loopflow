@@ -11,7 +11,7 @@ struct TaskHistoryView: View {
     let task: RoadmapTask
     @Environment(\.palette) private var palette
 
-    private var reading: WorkReading<[SessionHistory]> { model.sessionHistory[task.id] }
+    private var reading: Reading<[SessionHistory]> { model.sessionHistory[task.id] }
     private var history: [SessionHistory]? { reading.value }
     private var expanded: Bool { model.navigation.expandedHistory.contains(task.id) }
     private var inFlight: Bool { model.sessionHistory.inFlight.contains(task.id) }
@@ -24,7 +24,6 @@ struct TaskHistoryView: View {
                 count: expanded ? history?.count : nil,
                 expanded: expanded,
                 inFlight: inFlight,
-                failure: expanded && reading.errorMessage != nil ? history != nil : nil,
                 identifier: "task-history",
                 accessibilityLabel: "Session history, \(expanded ? "expanded" : "collapsed")",
                 help: "Complete recorded Session history for \(task.task.identifier)",
@@ -34,8 +33,7 @@ struct TaskHistoryView: View {
                         navigation.expandedHistory.insert(task.id)
                         load()
                     }
-                },
-                retry: load
+                }
             )
             if expanded {
                 if let history { list(history) } else { statusText }
@@ -50,7 +48,7 @@ struct TaskHistoryView: View {
 
     @ViewBuilder
     private var statusText: some View {
-        Text(reading.errorMessage.map { "History could not be read: \($0)" } ?? "Reading history…")
+        Text(reading.isLoading ? "Reading history…" : "")
             .font(Typography.body(12))
             .foregroundStyle(palette.textSecondary)
             .textSelection(.enabled)
@@ -59,14 +57,6 @@ struct TaskHistoryView: View {
 
     private func list(_ history: [SessionHistory]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let reason = reading.errorMessage {
-                Text("Latest read failed: \(reason)")
-                    .font(Typography.body(12))
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
-                    .padding(.bottom, Spacing.xs)
-                    .accessibilityIdentifier("task-history-status")
-            }
             if history.isEmpty {
                 Text("No Session history recorded for this Task.")
                     .font(Typography.body(12))

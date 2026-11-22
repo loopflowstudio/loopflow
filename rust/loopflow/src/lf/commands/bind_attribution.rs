@@ -10,10 +10,10 @@ use anyhow::Result;
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use crate::lf::commands::util::short_id;
-use crate::lf::output::{format_cost, format_int, truncate, Colors};
-use crate::session::SessionBind;
-use crate::session_record::SessionHistory;
+use loopflow_execution::output::short_id;
+use loopflow_execution::output::{format_cost, format_int, truncate, Colors};
+use loopflow_execution::session::SessionBind;
+use loopflow_execution::session_record::SessionHistory;
 
 #[derive(Debug, Serialize)]
 pub struct BindReport {
@@ -27,7 +27,7 @@ pub struct BindReport {
 
 #[derive(Debug, Serialize)]
 pub struct BoundSession {
-    pub session_id: crate::id::LfSessionId,
+    pub session_id: loopflow_model::id::LfSessionId,
     pub task: String,
     pub wave: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
@@ -77,7 +77,7 @@ impl Usage {
 /// One captured input reduced to what the comparison measures.
 #[derive(Debug)]
 struct Step {
-    session_id: crate::id::LfSessionId,
+    session_id: loopflow_model::id::LfSessionId,
     task: Option<String>,
     wave: Option<String>,
     ended_at: Option<i64>,
@@ -97,16 +97,20 @@ pub(crate) fn run(json: bool) -> Result<()> {
 }
 
 fn read() -> Result<(Vec<Step>, Vec<SessionBind>)> {
-    let database = crate::store::database_path_from_env()?;
+    let database = loopflow_execution::store::database_path_from_env()?;
     if !database.exists() {
         return Ok((Vec::new(), Vec::new()));
     }
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database)?;
-    let steps = store
-        .conversation_history(None, None, None, None, 0, false)?
-        .iter()
-        .map(step)
-        .collect();
+    let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
+        &database,
+        loopflow_execution::store::token_key::encryption_key,
+    )?;
+    let steps = loopflow_execution::store::sessions::conversation_history(
+        &store, None, None, None, None, 0, false,
+    )?
+    .iter()
+    .map(step)
+    .collect();
     Ok((steps, store.bound_sessions()?))
 }
 

@@ -2,21 +2,20 @@ import Foundation
 import Testing
 @testable import Loopflow
 
-/// The owner protocol from `rust/loopflow/src/transport/wire.rs`, read from Rust's fixtures.
+/// The owner protocol from `rust/loopflow-execution/src/transport/wire.rs`, read from Rust's fixtures.
 struct OwnerStreamTests {
-    @Test func heartbeatUsesOwnerProtocolWithoutTakingControlOrConsumingAttachmentReply() throws {
+    @Test func heartbeatUsesOwnerProtocolWithoutTakingTheSizeOrConsumingAttachmentReply() throws {
         var stream = try observed()
         let request = try stream.heartbeatRequest(id: 2)
         #expect(request.first == OwnerTag.request.rawValue)
         #expect(try JSONDecoder().decode(JSONValue.self, from: Data(request.dropFirst(5)))
                 == .object(["id": .integer(2), "kind": .string("controlled")]))
         stream.expectAttachment(3)
-        let reply = Data(#"{"answers":2,"seq":2,"kind":"controlled","held":true}"#.utf8)
+        let reply = Data(#"{"answers":2,"seq":2,"kind":"controlled","viewed":true,"ready":true}"#.utf8)
         #expect(try stream.receive(OwnerStream.frame(.reply, body: reply)).isEmpty)
         #expect(stream.awaitingAttachment)
         #expect(stream.ready)
-        #expect(!(stream.inputControl), "Controlled reports whether anyone holds control, not this viewer")
-        #expect(!(stream.geometryControl))
+        #expect(!stream.sizing, "Controlled reports whether any view is attached, not who sizes")
         #expect(throws: Never.self) { try stream.heartbeatRequest(id: 4) }
     }
 
@@ -28,7 +27,7 @@ struct OwnerStreamTests {
         #expect(throws: (any Error).self) { try stream.receive(OwnerStream.frame(.reply, body: unexpected)) }
     }
 
-    @Test func remoteDirectoryAdvancesTheStreamWithoutChangingLocalState() throws {
+    @Test func remoteDirectoryAdvancesTheStreamAndTheNextOwnerEventArrives() throws {
         let wire = try loadFixtureData("owner/directory.bin")
         for size in [1, 7, wire.count] {
             var stream = try observed()
@@ -37,11 +36,11 @@ struct OwnerStreamTests {
                 events += try stream.receive(wire.subdata(in: start..<min(start + size, wire.count)))
             }
             #expect(events.count == 1)
-            guard case .control(let input, let geometry) = events.first else {
+            guard case .sizing(let sizing) = events.first else {
                 Issue.record("The event following a directory report must still arrive"); return
             }
-            #expect(!(input))
-            #expect(!(geometry))
+            #expect(sizing, "The owner event names this viewer")
+            #expect(stream.sizing)
             #expect(stream.ready)
         }
     }
@@ -68,20 +67,19 @@ struct OwnerStreamTests {
             #expect(String(decoding: output, as: UTF8.self).hasPrefix("live\r\n"))
             #expect(String(decoding: output, as: UTF8.self).contains("other-nonce"))
             #expect(stream.ready)
-            #expect(!(stream.inputControl))
-            #expect(!(stream.geometryControl))
+            #expect(!stream.sizing, "Another viewer sizes the terminal")
         }
     }
 
     @Test func gapsAndOversizedFramesRequireReconnect() throws {
         var stream = try observed()
-        let gap = Data("\u{1b}_lf1;fixture-nonce;{\"seq\":4,\"type\":\"control\",\"held\":false,\"notice\":null}\u{1b}\\".utf8)
+        let gap = Data("\u{1b}_lf1;fixture-nonce;{\"seq\":4,\"type\":\"live\"}\u{1b}\\".utf8)
         #expect(throws: (any Error).self) { try stream.receive(OwnerStream.frame(.out, body: gap)) }
         var oversized = OwnerStream()
         #expect(throws: (any Error).self) { try oversized.receive(Data([3, 0, 64, 0, 1])) }
     }
 
-    @Test func ownerReportsAndClearUseTheSharedStatusShapeWithoutChangingClaims() throws {
+    @Test func ownerReportsAndClearUseTheSharedStatusShapeWithoutChangingTheSize() throws {
         let wire = try loadFixtureData("owner/program-status.bin")
         for size in [1, 7, wire.count] {
             var stream = try observed()
@@ -97,27 +95,35 @@ struct OwnerStreamTests {
             #expect(reports.first?.summary?.msg == "Needs a decision")
             #expect(reports.last?.seen == true)
             #expect(reports.last?.summary == nil)
-            #expect(!(stream.inputControl))
-            #expect(!(stream.geometryControl))
+            #expect(!stream.sizing)
         }
     }
 
-    @Test func controlGrantWaitsForTheReplacementScreenAndLossRevokesInput() throws {
+    @Test func sizeWaitsForTheReplacementScreenAndFollowsTheOwnerEvent() throws {
         var stream = try observed()
         stream.expectAttachment(2)
-        let reply = Data(#"{"answers":2,"seq":2,"kind":"attached","viewer":"mobile-viewer","nonce":"fixture-nonce","token":"test-claim","terminal":true,"owner":"mobile-viewer"}"#.utf8)
+        let reply = Data(#"{"answers":2,"seq":2,"kind":"attached","viewer":"mobile-viewer","nonce":"fixture-nonce","terminal":true,"owner":"mobile-viewer"}"#.utf8)
         #expect(try stream.receive(OwnerStream.frame(.reply, body: reply)).isEmpty)
         #expect(!(stream.ready))
         let resize = Data("\u{1b}_lf1;fixture-nonce;{\"seq\":3,\"type\":\"resize\",\"rows\":20,\"cols\":44}\u{1b}\\".utf8)
         let events = try stream.receive(OwnerStream.frame(.out, body: resize))
-        guard case .control(let input, let geometry) = events.last else { Issue.record("Expected the new grant"); return }
-        #expect(input)
-        #expect(geometry)
+        guard case .sizing(let sizing) = events.last else { Issue.record("Expected the size"); return }
+        #expect(sizing)
         #expect(stream.ready)
-        let lost = Data("\u{1b}_lf1;fixture-nonce;{\"seq\":4,\"type\":\"control\",\"held\":false,\"notice\":null}\u{1b}\\".utf8)
-        _ = try stream.receive(OwnerStream.frame(.out, body: lost))
-        #expect(!(stream.inputControl))
-        #expect(stream.geometryControl, "Input and geometry are distinct claims")
+        let taken = Data("\u{1b}_lf1;fixture-nonce;{\"seq\":4,\"type\":\"owner\",\"viewer\":\"desktop-viewer\",\"name\":\"Loopflow\",\"held\":false}\u{1b}\\".utf8)
+        guard case .sizing(let after) = try stream.receive(OwnerStream.frame(.out, body: taken)).last else {
+            Issue.record("Expected the handoff"); return
+        }
+        #expect(!after)
+        #expect(!stream.ended, "Another view taking the size is not a fault")
+    }
+
+    @Test func attachRequestCarriesOnlyTheCurrentShape() throws {
+        let request = try OwnerStream.attachRequest(id: 7, columns: 80, rows: 24, name: "Loopflow iPhone")
+        #expect(try JSONDecoder().decode(JSONValue.self, from: Data(request.dropFirst(5))) == .object([
+            "id": .integer(7), "kind": .string("attach"), "rows": .integer(24), "cols": .integer(80),
+            "name": .string("Loopflow iPhone"), "focused": .bool(true),
+        ]))
     }
 
     private func observed() throws -> OwnerStream {

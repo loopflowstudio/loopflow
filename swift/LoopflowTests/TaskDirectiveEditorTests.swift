@@ -35,7 +35,7 @@ struct TaskDirectiveEditorTests {
         }
         model.setRepoPath("/src/loopflow")
         #expect(model.task(id: "issue-review")?.task.task.description == original)
-        if outcome == .unreadable { #expect(model.roadmap.errorMessage == "Planning offline") }
+        if outcome == .unreadable { #expect(model.roadmap.failure == "Planning offline") }
 
         await source.setOutcome(.success)
         try await model.updateTaskDirective(task: selected.task, text: draft)
@@ -43,7 +43,7 @@ struct TaskDirectiveEditorTests {
         let authoritative = draft + "\nProvider-normalized."
         #expect(model.task(id: "issue-review")?.task.task.description == authoritative)
         #expect(model.task(id: "issue-review")?.task.task.isSuccessful == false)
-        #expect(model.roadmap.errorMessage == nil)
+        #expect(model.roadmap.failure == nil)
         // Description renders as Markdown: inline code loses its backticks,
         // authored line breaks stay.
         let rendered = "--Keep the human's wording\nIncluding code, $variables and \"quotes\".\nProvider-normalized."

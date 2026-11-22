@@ -9,18 +9,41 @@ struct LocalLfError: LocalizedError {
     let errorDescription: String?
 }
 
-enum LocalWaveAgentLauncher {
-    /// Run a filed Task on its graph. `lf task run` owns graph selection,
-    /// worktree placement and where to start; the app does not reproduce them.
-    /// It returns once the Task's Graph is running, which keeps on without the app.
-    static func runTask(repoPath: String, issue: String) async throws {
-        _ = try await queryLf(["task", "run", issue], cwd: WaveOrigin.resolve(repoPath))
+enum MachineLf: Equatable {
+    case privateHome(String)
+    case bundled(String)
+    case installed(String)
+
+    var startsServer: Bool {
+        if case .installed = self { return false }
+        return true
     }
 
+    var path: String {
+        get throws {
+            switch self {
+            case .privateHome(let path):
+                guard FileManager.default.isExecutableFile(atPath: path) else {
+                    throw LocalLfError(errorDescription: "The private Machine’s lf at \(path) is not executable.")
+                }
+                return path
+            case .bundled(let path): return path
+            case .installed(let path):
+                guard FileManager.default.isExecutableFile(atPath: path) else {
+                    throw LocalLfError(errorDescription: "Loopflow is not installed on this Machine (no lf at \(path)). "
+                        + "Install Loopflow, then open Loopflow Dev again.")
+                }
+                return path
+            }
+        }
+    }
+}
+
+enum LocalWaveAgentLauncher {
     /// Ensure Task Work and its checkout without running a Graph; returns
     /// the authoritative worktree.
     static func checkoutTask(repoPath: String, issue: String) async throws -> WorkspaceIdentity {
-        let stdout = try await runCheckedOutput(taskCheckoutCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)
+        let stdout = try await runCheckedOutput(taskCheckoutCommand(lfPath: try machineLf().path, issue: issue), cwd: repoPath)
         return try taskCheckoutWorkspace(stdout)
     }
 
@@ -38,32 +61,30 @@ enum LocalWaveAgentLauncher {
         }
     }
 
-    /// Use the app's bundled CLI, or the explicit `LF_BIN` a private `LF_HOME` selects.
-    static func controlLfPath(
-        bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
-        environment: [String: String] = ProcessInfo.processInfo.environment
-    ) throws -> String {
-        if environment["LF_HOME"] != nil, let selected = environment["LF_BIN"] {
-            guard FileManager.default.isExecutableFile(atPath: selected) else {
-                throw LocalLfError(errorDescription: "LF_BIN \(selected) is not an executable lf.")
-            }
-            return selected
-        }
-        guard let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) else {
-            throw LocalLfError(
-                errorDescription: "Loopflow.app is missing its executable bundled lf helper at Contents/MacOS/lf. "
-                    + "Rebuild or reinstall Loopflow; PATH fallback is disabled."
-            )
-        }
-        return bundled.path
+    static func publicLfEntry(environment: [String: String], home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+        let directory = environment["LF_INSTALL_DIR"].map { URL(filePath: $0) }
+            ?? home.appending(path: ".local/bin")
+        return directory.appending(path: "lf")
     }
 
-    /// Run an `lf` query verb (`list`, `status`, `monitor`, …) and return its
-    /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
-    /// facts by shelling the daemonless Machine `lf` over the local store, not
-    /// by streaming a center. Throws on a spawn failure or a non-zero exit.
+    static func machineLf(
+        bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> MachineLf {
+        let privateHome = environment["LF_HOME"] != nil
+        if privateHome, let selected = environment["LF_BIN"] { return .privateHome(selected) }
+        if let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) { return .bundled(bundled.path) }
+        let entry = publicLfEntry(environment: environment).path
+        return privateHome ? .privateHome(entry) : .installed(entry)
+    }
+
+    /// Run the selected Machine's `lf` and return stdout. Desktop uses this
+    /// for socket discovery and CLI-only reads. Throws on spawn or command failure.
     static func queryLf(_ subargs: [String], cwd: String?, input: String? = nil) async throws -> String {
-        let lfPath = try controlLfPath()
+        let work = InteractionTrace.current?.work
+        let counted = work?.cliRead() == true
+        defer { if counted { work?.requestFinished() } }
+        let lfPath = try machineLf().path
         let result: (status: Int32, stdout: String, stderr: String)
         do {
             result = try await run([lfPath] + subargs, cwd: cwd, input: input)
@@ -129,8 +150,11 @@ enum LocalWaveAgentLauncher {
         cwd: String? = nil,
         input: String? = nil
     ) async throws -> (status: Int32, stdout: String, stderr: String) {
+        let interaction = InteractionTrace.current.flatMap { $0.work.isSealed ? nil : $0 }
         let worker = Task.detached(priority: .userInitiated) {
-            try await collect(args, cwd: cwd, input: input)
+            try await InteractionTrace.$current.withValue(interaction) {
+                try await collect(args, cwd: cwd, input: input)
+            }
         }
         return try await withTaskCancellationHandler {
             let result = try await worker.value
@@ -141,12 +165,47 @@ enum LocalWaveAgentLauncher {
         }
     }
 
+    private static func recordSQL(_ directory: URL, work: InteractionWork) {
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil),
+              !files.isEmpty else { work.sqlUnavailable(); return }
+        for file in files where file.pathExtension == "jsonl" {
+            guard let data = try? String(contentsOf: file, encoding: .utf8),
+                  let last = data.split(separator: "\n").last,
+                  let row = try? JSONSerialization.jsonObject(with: Data(last.utf8)) as? [String: Any],
+                  row["event"] as? String == "end",
+                  let statements = row["statements"] as? UInt64,
+                  let rows = row["rows"] as? UInt64 else { work.sqlUnavailable(); continue }
+            work.sql(statements: statements, rows: rows, receipt: file.lastPathComponent)
+        }
+    }
+
     private static func collect(
         _ args: [String], cwd: String?, input: String?
     ) async throws -> (status: Int32, stdout: String, stderr: String) {
         try Task.checkCancellation()
         let deadline = ProcessInfo.processInfo.systemUptime + 30
         let process = queryProcess(args, cwd: cwd)
+        let interaction = InteractionTrace.current
+        var receipts: URL?
+        if let interaction, let executable = args.first, executable.hasSuffix("/lf") || executable == "lf" {
+            let directory = WorkCache.homeDirectory.appendingPathComponent("timings/interaction-cli")
+                .appendingPathComponent(interaction.id.uuidString).appendingPathComponent(UUID().uuidString)
+            if (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil {
+                receipts = directory
+                process.environment?["LF_PERF_OUTPUT"] = directory.path
+                process.environment?["LF_PERF_INTERACTION"] = interaction.id.uuidString
+            } else { interaction.work.sqlUnavailable() }
+        }
+        defer {
+            if let interaction, let receipts {
+                recordSQL(receipts, work: interaction.work)
+                try? FileManager.default.removeItem(at: receipts)
+                let parent = receipts.deletingLastPathComponent()
+                if (try? FileManager.default.contentsOfDirectory(atPath: parent.path).isEmpty) == true {
+                    try? FileManager.default.removeItem(at: parent)
+                }
+            }
+        }
         let stdout = Pipe.uninherited()
         let stderr = Pipe.uninherited()
         let stdin = input.map { _ in Pipe.uninherited() }

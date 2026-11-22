@@ -4,16 +4,15 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use clap::Args;
 
-use crate::durable::{GraphProcessDetail, GraphProcessFilter, GraphProcessPage};
-use crate::repository::CanonicalRepo;
-use crate::session::GraphProcessSummaryState;
-use crate::store::{open_store, storage_config_from_env};
+use loopflow_execution::durable::{GraphProcessDetail, GraphProcessFilter, GraphProcessPage};
+use loopflow_execution::session::GraphProcessSummaryState;
+use loopflow_execution::store::{open_store, storage_config_from_env};
 
 #[derive(Debug, Default, Args)]
 pub struct GraphProcessInventoryArgs {
-    /// List or show Graphs that ran, from their Processes, instead of reusable templates
+    /// List Graph runs instead of reusable templates
     #[arg(long)]
-    pub processes: bool,
+    pub runs: bool,
     /// Include every repository and graphs with unknown repository evidence
     #[arg(long)]
     pub all: bool,
@@ -40,7 +39,7 @@ pub struct GraphProcessInventoryArgs {
 
 impl GraphProcessInventoryArgs {
     pub fn is_empty(&self) -> bool {
-        !self.processes
+        !self.runs
             && !self.all
             && self.limit.is_none()
             && self.after.is_none()
@@ -70,7 +69,7 @@ pub fn list(args: &GraphProcessInventoryArgs, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// `lf graph list --processes`' page, scoped to the repository containing
+/// `lf graph list --runs`' page, scoped to the repository containing
 /// `directory` unless `--all`.
 pub fn page(directory: &Path, args: &GraphProcessInventoryArgs) -> Result<GraphProcessPage> {
     tokio::runtime::Runtime::new()?.block_on(async {
@@ -78,18 +77,20 @@ pub fn page(directory: &Path, args: &GraphProcessInventoryArgs) -> Result<GraphP
         let repo = if args.all {
             None
         } else {
-            CanonicalRepo::containing(directory)?.map(|repo| repo.to_string())
+            loopflow_execution::repository::containing(directory)?.map(|repo| repo.to_string())
         };
         let filter = GraphProcessFilter {
             task_id: args
                 .for_task
                 .as_deref()
                 .map(|task| {
-                    store
-                        .sqlite
-                        .resolve_task_id(task, repo.as_deref())
-                        .map_err(anyhow::Error::from)?
-                        .context("Task was not found")
+                    loopflow_execution::store::children::resolve_task_id(
+                        &store.sqlite,
+                        task,
+                        repo.as_deref(),
+                    )
+                    .map_err(anyhow::Error::from)?
+                    .context("Task was not found")
                 })
                 .transpose()?,
             wave_id: args
@@ -123,10 +124,10 @@ pub fn page(directory: &Path, args: &GraphProcessInventoryArgs) -> Result<GraphP
     })
 }
 
-pub fn inspect(selector: &str, json: bool) -> Result<()> {
-    let detail = detail(selector)?;
+/// Prints one Graph that ran, with each step and how it exited.
+pub fn print(detail: &GraphProcessDetail, json: bool) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(&detail)?);
+        println!("{}", serde_json::to_string_pretty(detail)?);
         return Ok(());
     }
     let summary = &detail.entry.summary;
@@ -142,13 +143,15 @@ pub fn inspect(selector: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// `lf graph show <selector> --processes`: one Graph that ran, with its steps.
+/// `lf graph show <selector>`: one Graph that ran, with its steps.
 pub fn detail(selector: &str) -> Result<GraphProcessDetail> {
+    find(selector)?.with_context(|| format!("no Graph run {selector} was recorded"))
+}
+
+/// The Graph run `selector` names, if one was recorded.
+pub fn find(selector: &str) -> Result<Option<GraphProcessDetail>> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
-        store
-            .graph_detail(selector)
-            .await?
-            .context("no Graph has that Graph process")
+        Ok(store.graph_detail(selector).await?)
     })
 }

@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
-use loopflow::graph::Command as GraphCommand;
+use loopflow_execution::graph::Command as GraphCommand;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 use support::EnvGuard;

@@ -3,12 +3,12 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use clap::{CommandFactory, Parser};
-use loopflow::definition::{resolve_definition, DefinitionKind, Target};
-use loopflow::graph::compile_graph;
-use loopflow::graph::load_graph;
-use loopflow::graph::ConcreteStep;
 use loopflow::lf::navigation::normalize_args;
 use loopflow::lf::{Cli, Commands, GraphCommand, SkillCommand};
+use loopflow_execution::definition::{resolve_definition, DefinitionKind, Target};
+use loopflow_execution::graph::compile_graph;
+use loopflow_execution::graph::load_graph;
+use loopflow_execution::graph::ConcreteStep;
 use tempfile::TempDir;
 
 fn fixture() -> TempDir {
@@ -125,8 +125,8 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
             vec!["install", "advance-switch", "--help"],
         ],
         vec![
-            vec!["help", "account", "next"],
-            vec!["account", "next", "--help"],
+            vec!["help", "account", "connect"],
+            vec!["account", "connect", "--help"],
         ],
         vec![
             vec!["help", "paired"],
@@ -231,13 +231,20 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
     assert_eq!(retired.status.code(), Some(2));
     assert!(retired.stdout.is_empty());
     assert!(String::from_utf8_lossy(&retired.stderr).contains("skill not found: list"));
-    let db = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
-    assert_eq!(
-        db.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
-            .get::<_, i64>(0))
-            .unwrap(),
-        0
-    );
+    // A launch would have created the store and a Session in it.
+    let sessions = || {
+        let store = home.path().join(".lf/loopflow.db");
+        if !store.exists() {
+            return 0;
+        }
+        rusqlite::Connection::open(&store)
+            .unwrap()
+            .query_row("SELECT count(*) FROM agent_sessions", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap()
+    };
+    assert_eq!(sessions(), 0);
 
     fs::write(
         repo.path().join(".lf/skills/list.md"),
@@ -279,13 +286,7 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
         success(run(repo.path(), home.path(), &["help", "--", "task"])),
         success(run(repo.path(), home.path(), &["help", "task"]))
     );
-    assert_eq!(
-        db.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
-            .get::<_, i64>(0))
-            .unwrap(),
-        0,
-        "inspection must not start an agent Session"
-    );
+    assert_eq!(sessions(), 0, "inspection must not start an agent Session");
 }
 
 #[test]
@@ -319,13 +320,7 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
             "--repo",
             "a/b",
         ],
-        &[
-            "account",
-            "--cached",
-            "connect",
-            "codex",
-            "work@example.com",
-        ],
+        &["account", "--json", "connect", "codex", "work@example.com"],
         &["account", "route", "--json", "set", "codex", "work@"],
         &["wt", "rm", "unused"],
         &["-M", "unused", "skill", "solo"],
@@ -522,8 +517,8 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
     let normalized =
         |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
     assert_eq!(
-        normalized(&["lf", "account", "nex"]),
-        ["lf", "account", "next"]
+        normalized(&["lf", "account", "connec"]),
+        ["lf", "account", "connect"]
     );
     assert_eq!(
         normalized(&["lf", "land", "--wait-and-fix"]),
@@ -548,28 +543,31 @@ fn help_for_a_provider_stops_at_the_provider_as_execution_does() {
     let normalized =
         |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
     assert_eq!(
-        normalized(&["lf", "account", "codex", "--cached"]),
-        ["lf", "account", "codex", "--cached"]
+        normalized(&["lf", "account", "linear", "--json"]),
+        ["lf", "account", "linear", "--json"]
     );
     assert_eq!(
-        normalized(&["lf", "account", "codex", "use", "a@example.com"]),
-        ["lf", "account", "codex", "use", "a@example.com"]
+        normalized(&["lf", "account", "linear", "use", "a@example.com"]),
+        ["lf", "account", "linear", "use", "a@example.com"]
     );
     let tree = loopflow::lf::navigation::command_tree();
-    let help = normalized(&["lf", "account", "codex", "--help"]);
-    assert_eq!(help, ["lf", "help", "account", "codex"]);
+    let help = normalized(&["lf", "account", "linear", "--help"]);
+    assert_eq!(help, ["lf", "help", "account", "linear"]);
     let (_, canonical) = loopflow::lf::navigation::resolve_path(&tree, &help[2..]).unwrap();
     assert_eq!(canonical, ["account"]);
 
-    let verb = normalized(&["lf", "account", "codex", "use", "--help"]);
+    let verb = normalized(&["lf", "account", "linear", "use", "--help"]);
     let error = loopflow::lf::navigation::resolve_path(&tree, &verb[2..]).unwrap_err();
     assert!(
         error
             .to_string()
-            .contains("unknown command: lf account codex use"),
+            .contains("unknown command: lf account linear use"),
         "{error}"
     );
-    for path in [["account", "codex", "use"], ["account", "codex", "nosuch"]] {
+    for path in [
+        ["account", "linear", "use"],
+        ["account", "linear", "nosuch"],
+    ] {
         let path = path.map(String::from);
         assert!(loopflow::lf::navigation::resolve_path(&tree, &path).is_err());
     }
@@ -605,19 +603,18 @@ fn open_is_one_root_command_and_keeps_pr_open_explicit() {
         "open",
         "--session",
         "session-exact",
-        "--diff",
         "--json",
     ])
     .unwrap();
     assert!(
-        matches!(&composed.command, Some(Commands::Open(args)) if args.selection.session.as_deref() == Some("session-exact") && args.selection.diff && args.selection.json)
+        matches!(&composed.command, Some(Commands::Open(args)) if args.selection.session.as_deref() == Some("session-exact") && args.selection.json)
     );
     assert!(Cli::command()
         .find_subcommand("desktop")
         .unwrap()
         .find_subcommand("open")
         .is_none());
-    let saved: loopflow::graph::Command =
+    let saved: loopflow_execution::graph::Command =
         serde_json::from_value(serde_json::json!({"command": "open", "args": []})).unwrap();
     assert_eq!(saved.clone().current().argv(), ["lf", "open"]);
     assert!(Cli::try_parse_from(["lf", "pr", "open", "--help"])
@@ -659,7 +656,7 @@ fn desktop_state_uses_the_retained_reader_without_an_inspect_alias() {
 }
 
 #[test]
-fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
+fn history_owns_recorded_reads_and_replay() {
     let parse = |args: &[&str]| {
         Cli::try_parse_from(normalize_args(args.iter().map(|s| s.to_string()).collect()).unwrap())
             .unwrap()
@@ -687,11 +684,8 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
     assert_eq!(feed.since, "24h");
     assert!(feed.json);
 
-    for verb in ["list", "show", "replay"] {
-        let mut args = vec!["lf", "history", verb];
-        if matches!(verb, "show" | "replay") {
-            args.push("exact-capture");
-        }
+    for verb in ["show", "replay"] {
+        let args = ["lf", "history", verb, "exact-capture"];
         assert!(matches!(
             parse(&args).command,
             Some(Commands::Session {
@@ -699,7 +693,6 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
             })
         ));
     }
-    assert!(Cli::try_parse_from(["lf", "process", "replay", "exact-capture"]).is_err());
     assert!(matches!(
         parse(&["lf", "replay", "exact-capture"]).command,
         Some(Commands::Session {
@@ -712,25 +705,6 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
             cmd: loopflow::lf::SessionCommand::Usage(_)
         })
     ));
-    for verb in ["ps", "top"] {
-        assert!(matches!(
-            parse(&["lf", verb]).command,
-            Some(Commands::Process { .. })
-        ));
-    }
-    assert!(matches!(
-        parse(&["lf", "monitor", "ps"]).command,
-        Some(Commands::Process {
-            cmd: loopflow::lf::commands::process::ProcessCommand::List { .. }
-        })
-    ));
-    // `lf monitor <retired verb>` moves to `lf process list` and fails there
-    // instead of running a skill named `monitor`.
-    for verb in ["activity", "active"] {
-        let args = normalize_args(["lf", "monitor", verb].map(str::to_owned).to_vec()).unwrap();
-        assert_eq!(args, ["lf", "process", "list", verb]);
-        assert!(Cli::try_parse_from(args).is_err());
-    }
     assert!(Cli::command().find_subcommand("replay").is_none());
 }
 
@@ -738,7 +712,7 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
 fn history_help_is_passive_and_saved_commands_keep_their_evidence_selectors() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
-    for verb in ["list", "show", "usage", "replay"] {
+    for verb in ["show", "usage", "replay"] {
         let help = success(run(repo.path(), home.path(), &["history", verb, "--help"]));
         assert_eq!(
             help,
@@ -768,7 +742,7 @@ fn history_help_is_passive_and_saved_commands_keep_their_evidence_selectors() {
         ("replay", vec!["capture-id"], vec!["replay", "capture-id"]),
     ] {
         let saved = serde_json::json!({"command": command, "args": args});
-        let restored: loopflow::graph::Command = serde_json::from_value(saved).unwrap();
+        let restored: loopflow_execution::graph::Command = serde_json::from_value(saved).unwrap();
         assert_eq!(restored.command, "session");
         assert_eq!(
             restored.args,
@@ -776,7 +750,7 @@ fn history_help_is_passive_and_saved_commands_keep_their_evidence_selectors() {
             "{command} {args:?}"
         );
     }
-    let usage: loopflow::graph::Command =
+    let usage: loopflow_execution::graph::Command =
         serde_json::from_value(serde_json::json!({"command": "usage", "args": ["--days", "0"]}))
             .unwrap();
     assert_eq!(usage.command, "session");
@@ -875,10 +849,7 @@ fn moved_commands_have_one_owner_and_keep_their_short_names() {
     }
     // `lf planning` is the plans namespace; its old repository spellings move.
     for (old, path) in [
-        (vec!["planning", "key"], vec!["repo", "plan", "key"]),
-        (vec!["planning"], vec!["repo", "plan"]),
-        (vec!["monitor", "ps"], vec!["process", "list"]),
-        (vec!["ship", "--stop"], vec!["task", "hold"]),
+        (vec!["planning"], vec!["repo", "tracker"]),
         (vec!["desktop", "task"], vec!["task", "show"]),
         (vec!["wave", "status", "--sync"], vec!["wave", "sync"]),
         (
@@ -936,9 +907,11 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
             "credentials",
             "doctor",
             "end",
+            "hub",
             "list",
             "ondemand",
             "pool",
+            "prune",
             "public",
             "remove",
             "rename",
@@ -1089,13 +1062,13 @@ fn wave_catalog_reads_imported_definitions_and_keeps_empty_goals() {
     assert!(json_entries(repo.path(), home.path(), &["list", "wave", "--json"]).is_empty());
     assert!(!home.path().join(".lf").exists());
     let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
-    store
-        .ensure_wave(
-            repo.path().canonicalize().unwrap().to_str().unwrap(),
-            "parent/child",
-        )
-        .unwrap();
+        loopflow_execution::store::open_sqlite(&home.path().join(".lf/loopflow.db")).unwrap();
+    loopflow_execution::work::wave::bootstrap::ensure_wave(
+        &store,
+        repo.path().canonicalize().unwrap().to_str().unwrap(),
+        "parent/child",
+    )
+    .unwrap();
     let rows = json_entries(repo.path(), home.path(), &["list", "wave", "--json"]);
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0]["name"], "parent");
@@ -1111,8 +1084,6 @@ fn remote_selection_preserves_command_arguments_and_literal_boundaries() {
     use loopflow::lf::navigation::machine_invocation;
     let args = [
         "lf",
-        "--account",
-        "personal@",
         "--machine=mini",
         "--forward-agent",
         "--task",
@@ -1125,13 +1096,10 @@ fn remote_selection_preserves_command_arguments_and_literal_boundaries() {
     .map(String::from);
     let (cli, command) = machine_invocation(&args).unwrap().unwrap();
     assert_eq!(cli.machine.as_deref(), Some("mini"));
-    assert!(cli.account.is_empty());
     assert!(cli.forward_agent);
     assert_eq!(
         command,
         [
-            "--account",
-            "personal@",
             "--task",
             "LOO-123",
             "implement",
@@ -1251,19 +1219,11 @@ fn desktop_verbs_take_pane_paths_without_public_lifetime_tokens() {
     assert!(matches!(cli.command, Some(Commands::Desktop {
         cmd: DesktopCommand::Goto { index: 2, target }
     }) if target.json));
-    let cli = Cli::try_parse_from([
-        "lf",
-        "desktop",
-        "do",
-        "section",
-        "-p",
-        "board",
-        "section=done",
-    ])
-    .unwrap();
+    let cli =
+        Cli::try_parse_from(["lf", "desktop", "do", "page", "-p", "tiles", "page=2"]).unwrap();
     assert!(matches!(cli.command, Some(Commands::Desktop {
         cmd: DesktopCommand::Do { action, args, target }
-    }) if action == "section" && args == ["section=done"] && target.pane.as_deref() == Some("board")));
+    }) if action == "page" && args == ["page=2"] && target.pane.as_deref() == Some("tiles")));
     for removed in [
         &["desktop", "text", "hello"][..],
         &["desktop", "read", "--region", "screen"],
@@ -1423,13 +1383,15 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     let database = home.path().join("loopflow.db");
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let store = runtime
-        .block_on(loopflow::store::open_ephemeral_store(
-            &loopflow::store::StorageConfig::sqlite(database.clone()),
+        .block_on(loopflow_execution::store::open_ephemeral_store(
+            &loopflow_execution::store::StorageConfig::sqlite(database.clone()),
         ))
         .unwrap();
     let conn = rusqlite::Connection::open(&database).unwrap();
-    conn.execute_batch(include_str!("fixtures/saved_selection_work.sql"))
-        .unwrap();
+    conn.execute_batch(include_str!(
+        "../../loopflow-execution/tests/fixtures/saved_selection_work.sql"
+    ))
+    .unwrap();
     let path = repo.path().canonicalize().unwrap().display().to_string();
     conn.execute("UPDATE repository_plans SET repo=?1", [&path])
         .unwrap();
@@ -1464,7 +1426,8 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let plan: loopflow::work::selection::ViewPlan = serde_json::from_slice(&output.stdout).unwrap();
+    let plan: loopflow_execution::work::selection::ViewPlan =
+        serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(plan.contents.len(), 1);
     assert_eq!(plan.contents[0].title, "Backlog");
     assert!(plan.contents[0].primary_session.is_none());
@@ -1497,7 +1460,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         "{}",
         String::from_utf8_lossy(&saved.stderr)
     );
-    let saved: loopflow::work::selection::Dashboard =
+    let saved: loopflow_execution::work::selection::Dashboard =
         serde_json::from_slice(&saved.stdout).unwrap();
     let after_save = counts();
     assert_eq!((after_save.0, after_save.1), (before.0, before.1));
@@ -1508,13 +1471,14 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         "{}",
         String::from_utf8_lossy(&reopened.stderr)
     );
-    let reopened: loopflow::work::selection::ViewPlan =
+    let reopened: loopflow_execution::work::selection::ViewPlan =
         serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened.saved_revision, Some(saved.revision));
     assert_eq!(reopened.arrangement, saved.arrangement);
     assert_eq!(counts(), after_save);
     let task_id =
-        loopflow::durable::TaskId::parse("task_33333333333333333333333333333333").unwrap();
+        loopflow_execution::durable::TaskId::parse("task_33333333333333333333333333333333")
+            .unwrap();
     let revision = runtime
         .block_on(store.get_task(&task_id))
         .unwrap()
@@ -1585,19 +1549,21 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     assert_eq!(removed.status.code(), Some(2));
     let before_reads = counts();
     let defaults = invoke(&["desktop", "view", "show"]);
-    let defaults: loopflow::work::selection::ViewPlan =
+    let defaults: loopflow_execution::work::selection::ViewPlan =
         serde_json::from_slice(&defaults.stdout).unwrap();
     assert!(defaults.dashboard_id.is_none());
     // Both Waves and the two idle Tasks; the unstarted one isn't Working.
     assert_eq!(defaults.contents.len(), 4);
     let plan = invoke(&["desktop", "view", "show", "query:backlog"]);
-    let plan: loopflow::work::selection::ViewPlan = serde_json::from_slice(&plan.stdout).unwrap();
+    let plan: loopflow_execution::work::selection::ViewPlan =
+        serde_json::from_slice(&plan.stdout).unwrap();
     assert_eq!(plan.name.as_deref(), Some("Later"));
     assert!(plan.pinned);
     assert_eq!(plan.contents.len(), 1);
-    let layout = invoke(&["desktop", "layout", "repository"]);
-    assert!(layout.status.success());
-    assert_eq!(String::from_utf8_lossy(&layout.stdout).trim(), "null");
+    // Desktop keeps each Work's panes; the command reads only Dashboards.
+    assert!(!invoke(&["desktop", "layout", "repository"])
+        .status
+        .success());
     assert_eq!(counts(), before_reads);
     let stale = invoke(&[
         "desktop",
@@ -1609,7 +1575,8 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     ]);
     assert!(!stale.status.success());
     let plan = invoke(&["desktop", "view", "show", "query:backlog"]);
-    let plan: loopflow::work::selection::ViewPlan = serde_json::from_slice(&plan.stdout).unwrap();
+    let plan: loopflow_execution::work::selection::ViewPlan =
+        serde_json::from_slice(&plan.stdout).unwrap();
     assert!(plan.pinned);
     assert_eq!(plan.saved_revision, Some(3));
     let invoke_input = |args: &[&str], input: &str| {
@@ -1636,7 +1603,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         "{}",
         String::from_utf8_lossy(&hidden.stderr)
     );
-    let arranged: loopflow::work::selection::Dashboard =
+    let arranged: loopflow_execution::work::selection::Dashboard =
         serde_json::from_slice(&hidden.stdout).unwrap();
     assert!(arranged.arrangement.project().visible.is_empty());
     assert_eq!(arranged.arrangement.order.len(), 1);
@@ -1674,7 +1641,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     let moved: Vec<String> = serde_json::from_slice(&moved.stdout).unwrap();
     assert_eq!(moved[0], order[order.len() - 1]);
     let reopened = invoke(&["desktop", "view", "show", "query:backlog"]);
-    let reopened: loopflow::work::selection::ViewPlan =
+    let reopened: loopflow_execution::work::selection::ViewPlan =
         serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened.arrangement, arranged.arrangement);
     assert_eq!(reopened.saved_revision, Some(arranged.revision));
@@ -1696,64 +1663,17 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         String::from_utf8_lossy(&slots.stderr)
     );
     let read = invoke(&["desktop", "layout", "query:backlog"]);
-    let read: loopflow::work::selection::Dashboard = serde_json::from_slice(&read.stdout).unwrap();
+    let read: loopflow_execution::work::selection::Dashboard =
+        serde_json::from_slice(&read.stdout).unwrap();
     assert_eq!((read.slots, read.revision), (None, arranged.revision + 1));
-    let mut layout: loopflow::work::selection::WorkPaneLayout =
-        serde_json::from_str(include_str!("../../../tests/fixtures/dto/pane_layout.json")).unwrap();
-    layout.revision = 0;
-    // The fixture's conversation is not recorded here; the session pane shows the start state.
-    if let loopflow::work::selection::PaneTree::Split { first, .. } = &mut layout.tree {
-        **first = loopflow::work::selection::PaneTree::Pane {
-            id: "pane-0".into(),
-            content: loopflow::work::selection::PaneIntent::Session {
-                session_id: None,
-                location: None,
-            },
-        };
-    }
-    layout.focused = None;
-    layout.zoomed = None;
-    layout.hidden.clear();
-    let input = serde_json::to_string(&layout).unwrap();
-    let saved = invoke_input(
-        &[
-            "desktop",
-            "layout",
-            "task:task_22222222222222222222222222222222",
-            "--save",
-        ],
-        &input,
-    );
-    assert!(
-        saved.status.success(),
-        "{}",
-        String::from_utf8_lossy(&saved.stderr)
-    );
-    let saved: loopflow::work::selection::WorkPaneLayout =
-        serde_json::from_slice(&saved.stdout).unwrap();
-    assert_eq!(saved.drafts, layout.drafts);
-    assert_eq!(saved.revision, 1);
-    assert!(!invoke_input(
-        &[
-            "desktop",
-            "layout",
-            "task:task_22222222222222222222222222222222",
-            "--save"
-        ],
-        &input
-    )
-    .status
-    .success());
-    let before_read = counts();
-    let reopened = invoke(&[
+    // Desktop keeps each Work's panes; only Dashboards have a stored layout.
+    assert!(!invoke(&[
         "desktop",
         "layout",
         "task:task_22222222222222222222222222222222",
-    ]);
-    let reopened: loopflow::work::selection::WorkPaneLayout =
-        serde_json::from_slice(&reopened.stdout).unwrap();
-    assert_eq!(reopened, saved);
-    assert_eq!(counts(), before_read);
+    ])
+    .status
+    .success());
     assert_eq!((counts().0, counts().1), (before.0, before.1));
     assert_eq!(
         conn.query_row("SELECT count(*) FROM dashboards", [], |row| row

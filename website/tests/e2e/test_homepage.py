@@ -49,14 +49,20 @@ def test_pictures_and_sections_tell_the_page(homepage: Page) -> None:
     expect(homepage.locator("#mac .people li")).to_have_count(4)
     expect(homepage.locator(".system .wfs > li code")).to_have_text(["feature", "code", "research"])
     card = homepage.locator('.clihero .term[aria-label="lf commands"]').text_content()
-    for command in ("lf wt create", "--machine mini", "lf pr open", "lf land --wait-and-fix", "lf account"):
+    for command in (
+        "lf wt create",
+        "--machine mini",
+        "lf pr open",
+        "lf land --wait-and-fix",
+        "lf usage",
+    ):
         assert command in card
     expect(homepage.locator("#works li")).to_have_count(5)
     for link in homepage.locator("#works a").all():
         expect(link).to_have_attribute("target", "_blank")
-    expect(homepage.locator(".belief").get_by_role("link", name="Download for Mac")).to_have_attribute(
-        "href", "https://downloads.loopflow.studio/Loopflow-latest.dmg"
-    )
+    expect(
+        homepage.locator(".belief").get_by_role("link", name="Download for Mac")
+    ).to_have_attribute("href", "https://downloads.loopflow.studio/Loopflow-latest.dmg")
 
 
 def test_no_superseded_or_review_content(homepage: Page) -> None:
@@ -64,7 +70,15 @@ def test_no_superseded_or_review_content(homepage: Page) -> None:
         homepage.locator(".home-stage, .home-autonomy, .review-note, .review-bar, form")
     ).to_have_count(0)
     body = homepage.locator("body").text_content()
-    for text in ("Review note for Jack", "goes here", "stands in", "localhost"):
+    for text in (
+        "Review note for Jack",
+        "goes here",
+        "stands in",
+        "localhost",
+        "--account",
+        "multi-subscription balancing",
+        "78% left",
+    ):
         assert text not in body
     assert not homepage.locator(
         '[src*="/directions/"], [href*="/directions/"], script[src*="home.js"]'
@@ -89,7 +103,7 @@ def test_body_command_names_use_monospace(homepage: Page) -> None:
     names = homepage.locator(".clihero p code")
     assert names.count() >= 2
     for name in names.all():
-        assert "JetBrains Mono" in name.evaluate("el => getComputedStyle(el).fontFamily")
+        assert "Spline Sans Mono" in name.evaluate("el => getComputedStyle(el).fontFamily")
 
 
 def test_landing_variant_url_returns_404(page: Page, base_url: str):

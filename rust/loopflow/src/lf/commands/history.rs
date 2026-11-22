@@ -1,15 +1,8 @@
-use std::num::NonZeroU32;
-
 use anyhow::Context;
 use clap::Subcommand;
 
 use crate::lf::commands::session_history::SessionView;
-use crate::lf::output::print_process;
-use crate::process::{
-    ProcessCursor, ProcessEntry, ProcessFilter, ProcessOutcomeFilter, ProcessWorkFilter,
-};
-use crate::repository::CanonicalRepo;
-use crate::store::{open_store, storage_config_from_env};
+use loopflow_execution::store::{open_store, storage_config_from_env};
 
 #[derive(Debug, clap::Args)]
 pub struct HistoryFeed {
@@ -72,38 +65,7 @@ pub struct UsageArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum HistoryCommand {
-    /// List a bounded page of recorded commands, newest first
-    List {
-        #[arg(long)]
-        json: bool,
-        /// Include all repositories
-        #[arg(long)]
-        all: bool,
-        #[arg(long, default_value = "100")]
-        limit: NonZeroU32,
-        /// Continue with the previous page's next object, encoded as JSON
-        #[arg(long, value_parser = parse_cursor)]
-        after: Option<ProcessCursor>,
-        /// Direct children of an exact or unambiguous parent Process; for an
-        /// AgentProcess, the lf commands it issued
-        #[arg(long)]
-        parent: Option<String>,
-        /// Commands issued by this Session
-        #[arg(long)]
-        caller: Option<String>,
-        /// Literal command text, ignoring ASCII case
-        #[arg(long)]
-        search: Option<String>,
-        #[arg(long, value_parser = ["succeeded", "failed", "interrupted", "unknown"])]
-        outcome: Option<String>,
-        /// Recorded work for a Task, including completed Tasks
-        #[arg(long, conflicts_with = "wave")]
-        task: Option<String>,
-        /// Recorded work for a Wave
-        #[arg(long)]
-        wave: Option<String>,
-    },
-    /// Inspect a process or Session by identity
+    /// Inspect a Session by identity
     Show {
         id: String,
         #[arg(long, conflicts_with = "final_answer")]
@@ -160,8 +122,8 @@ pub enum HistoryCommand {
         /// Captured input identity or an unambiguous displayed prefix
         run: String,
     },
-    /// Write this Machine's Sessions, Processes and captures as JSON lines,
-    /// for the Machine that copies them before giving this one back
+    /// Write this Machine's Sessions and captures as JSON lines, for the
+    /// Machine that copies them before giving this one back
     Export {
         /// Relative window (7d, 24h, 30m) or RFC3339 start
         #[arg(long)]
@@ -170,37 +132,31 @@ pub enum HistoryCommand {
 }
 
 impl HistoryCommand {
-    /// Whether this command changes state, and so records a Process.
+    /// Whether this command changes state, and so writes a journal trace.
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::List { .. }
-            | Self::Show { .. }
-            | Self::Search { .. }
-            | Self::Linear { .. }
-            | Self::Export { .. } => false,
+            Self::Show { .. } | Self::Search { .. } | Self::Linear { .. } | Self::Export { .. } => {
+                false
+            }
             Self::Replay { .. } => true,
         }
     }
 }
 
 fn export(since: &str) -> anyhow::Result<()> {
-    let since = super::util::parse_since(since, time::OffsetDateTime::now_utc())?;
+    let since = loopflow_execution::output::parse_since(since, time::OffsetDateTime::now_utc())?;
     let runtime = tokio::runtime::Runtime::new()?;
     let store = runtime.block_on(open_store(&storage_config_from_env()?))?;
     let stdout = std::io::stdout();
     let mut out = std::io::BufWriter::new(stdout.lock());
-    crate::machine_records::export(
+    loopflow_execution::machine_records::export(
         &store.sqlite,
-        &crate::store::lf_home_dir(),
+        &loopflow_execution::store::lf_home_dir(),
         since.unix_timestamp(),
         &mut out,
     )?;
     std::io::Write::flush(&mut out)?;
     Ok(())
-}
-
-fn parse_cursor(value: &str) -> Result<ProcessCursor, String> {
-    serde_json::from_str(value).map_err(|error| error.to_string())
 }
 
 /// `lf session usage`.
@@ -290,90 +246,7 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
             .unwrap_or(SessionView::Summary);
             show(id, *json, input.as_deref(), view)
         }
-        HistoryCommand::List {
-            json,
-            all,
-            limit,
-            after,
-            parent,
-            caller,
-            search,
-            outcome,
-            task,
-            wave,
-        } => tokio::runtime::Runtime::new()?.block_on(async {
-            let store = open_store(&storage_config_from_env()?).await?;
-            let repo = if *all {
-                None
-            } else {
-                CanonicalRepo::current()?.map(|repo| repo.to_string())
-            };
-            let performed_work = match (task, wave) {
-                (Some(task), _) => Some(ProcessWorkFilter::Task(
-                    store
-                        .sqlite
-                        .resolve_task_id(task, repo.as_deref())?
-                        .context("Task was not found")?,
-                )),
-                (_, Some(wave)) => Some(ProcessWorkFilter::Wave(
-                    store
-                        .sqlite
-                        .resolve_wave_id(wave, repo.as_deref())?
-                        .context("Wave was not found")?,
-                )),
-                _ => None,
-            };
-            // An lf parent started its children; an agent parent issued them.
-            let (parent_lf_process_id, caller_agent_process_id) = match parent {
-                Some(parent) => match store
-                    .resolve_process(parent)
-                    .await?
-                    .context("Parent Process was not found")?
-                {
-                    ProcessEntry::Lf(parent) => (Some(parent.id), None),
-                    ProcessEntry::Agent(parent) => (None, Some(parent.id)),
-                },
-                None => (None, None),
-            };
-            let filter = ProcessFilter {
-                repo,
-                parent_lf_process_id,
-                caller_agent_process_id,
-                caller_session_id: caller.clone().map(Into::into),
-                command_contains: search.clone(),
-                outcome: outcome.as_deref().map(|value| match value {
-                    "succeeded" => ProcessOutcomeFilter::Succeeded,
-                    "failed" => ProcessOutcomeFilter::Failed,
-                    "interrupted" => ProcessOutcomeFilter::Interrupted,
-                    _ => ProcessOutcomeFilter::Unknown,
-                }),
-                performed_work,
-                ..Default::default()
-            };
-            let page = store.processes(&filter, after.as_ref(), *limit).await?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&page)?);
-            } else {
-                for process in &page.entries {
-                    print_process(process);
-                }
-                if let Some(next) = page.next {
-                    println!(
-                        "Continue with --after '{}' and the same filters",
-                        serde_json::to_string(&next)?
-                    );
-                }
-            }
-            Ok(())
-        }),
     }
-}
-
-/// What `lf history show` found: this Machine's own record, or a copy.
-#[derive(Debug)]
-enum Shown {
-    Local(Option<crate::process::ProcessEntry>),
-    Copied(crate::machine_records::CopiedHistory),
 }
 
 fn show(id: &str, json: bool, input: Option<&str>, view: SessionView) -> anyhow::Result<()> {
@@ -387,56 +260,38 @@ pub(crate) fn render(
     input: Option<&str>,
     view: SessionView,
 ) -> anyhow::Result<String> {
-    let shown = tokio::runtime::Runtime::new()?.block_on(async {
+    let copied = tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
-        let process = store.resolve_process(id).await?;
-        let session = store.session(id).await?;
-        anyhow::ensure!(
-            process.is_none() || session.is_none(),
-            "Identity matches both a process and a Session; use an exact identity"
-        );
-        if process.is_none() && session.is_none() {
+        if store.session(id).await?.is_none() {
             // A Session copied from a given-back Machine, when nothing here is it.
-            let copied = store.sqlite.copied_history(id)?;
-            let copied =
-                copied.with_context(|| format!("Process or Session {id} was not found"))?;
-            return Ok(Shown::Copied(copied));
+            let copied = loopflow_execution::store::machines::copied_history(&store.sqlite, id)?;
+            return Ok(Some(
+                copied.with_context(|| format!("Session {id} was not found"))?,
+            ));
         }
         if let Some(input) = input {
-            anyhow::ensure!(session.is_some(), "--input requires a Session identity");
-            let captured = store.sqlite.input_history(input)?;
+            let captured =
+                loopflow_execution::store::sessions::input_history(&store.sqlite, input)?;
             anyhow::ensure!(
                 captured.session_id == id,
                 "Input does not belong to Session {id}"
             );
         }
-        Ok::<_, anyhow::Error>(Shown::Local(process))
+        Ok::<_, anyhow::Error>(None)
     })?;
-    let process = match shown {
-        Shown::Local(process) => process,
-        Shown::Copied(copied) => {
+    match copied {
+        Some(copied) => {
             anyhow::ensure!(
                 !json && input.is_none() && view == SessionView::Summary,
                 "Session {id} is a copy from {}; it reads as text",
                 copied.session.origin_name()
             );
-            return Ok(format!("{}\n", copied.render(&crate::store::lf_home_dir())));
-        }
-    };
-    match process {
-        Some(process) => {
-            anyhow::ensure!(
-                view == SessionView::Summary,
-                "--final, --context, --instructions and --transcript inspect Session evidence; Processes record command outcomes"
-            );
-            let summary = if json {
-                String::new()
-            } else {
-                format!("{}\n", crate::lf::output::render_process(&process))
-            };
             Ok(format!(
-                "{summary}{}\n",
-                serde_json::to_string_pretty(&process)?
+                "{}\n",
+                loopflow_execution::machine_records::render(
+                    &copied,
+                    &loopflow_execution::store::lf_home_dir()
+                )
             ))
         }
         None => super::session_history::render(input.unwrap_or(id), view, json),

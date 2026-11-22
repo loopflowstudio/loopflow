@@ -4,8 +4,8 @@ use std::process::Command;
 
 use clap::Parser;
 
-use loopflow::durable::GraphProcessPage;
-use loopflow::store::{open_ephemeral_store, StorageConfig};
+use loopflow_execution::durable::GraphProcessPage;
+use loopflow_execution::store::{open_ephemeral_store, StorageConfig};
 
 #[test]
 fn graph_inventory_wire_keeps_unknowns_and_requires_metadata() {
@@ -54,7 +54,7 @@ async fn public_graph_discovery_reads_saved_detail_without_selecting_work() {
     open_ephemeral_store(&StorageConfig::sqlite(dir.path().join("loopflow.db")))
         .await
         .unwrap();
-    let expected_repo = loopflow::repository::CanonicalRepo::discover(dir.path())
+    let expected_repo = loopflow_execution::repository::discover(dir.path())
         .unwrap()
         .to_string();
     // A Graph whose definition no longer exists: only its Processes describe it.
@@ -71,7 +71,7 @@ async fn public_graph_discovery_reads_saved_detail_without_selecting_work() {
         &[
             "graph",
             "list",
-            "--processes",
+            "--runs",
             "--all",
             "--json",
             "--limit",
@@ -88,13 +88,13 @@ async fn public_graph_discovery_reads_saved_detail_without_selecting_work() {
     assert_eq!(page.entries[0].summary.id, graph);
     assert_eq!(
         page.entries[0].summary.state,
-        loopflow::session::GraphProcessSummaryState::Stopped
+        loopflow_execution::session::GraphProcessSummaryState::Stopped
     );
     assert_eq!(
         page.entries[0].repo.as_deref(),
         Some(expected_repo.as_str())
     );
-    let scoped = command(dir.path(), &["graph", "list", "--processes", "--json"]);
+    let scoped = command(dir.path(), &["graph", "list", "--runs", "--json"]);
     assert!(
         scoped.status.success(),
         "{}",
@@ -108,16 +108,14 @@ async fn public_graph_discovery_reads_saved_detail_without_selecting_work() {
             .id,
         graph
     );
-    let detail = command(
-        dir.path(),
-        &["graph", "show", "--processes", "--json", &graph],
-    );
+    // A run's id needs no flag: no authored Graph has that name.
+    let detail = command(dir.path(), &["graph", "show", "--json", &graph]);
     assert!(
         detail.status.success(),
         "{}",
         String::from_utf8_lossy(&detail.stderr)
     );
-    let detail: loopflow::durable::GraphProcessDetail =
+    let detail: loopflow_execution::durable::GraphProcessDetail =
         serde_json::from_slice(&detail.stdout).unwrap();
     assert_eq!(detail.compiled.name, "no-template");
     assert_eq!(detail.compiled.steps[0].label, "saved-skill");
@@ -145,7 +143,7 @@ fn graph_inventory_flags_do_not_select_task_launch_context() {
         "lf",
         "graph",
         "list",
-        "--processes",
+        "--runs",
         "--for-task",
         "PROOF-1",
         "--for-wave",
@@ -167,31 +165,19 @@ fn graph_inventory_flags_do_not_select_task_launch_context() {
         _ => panic!("expected Graph discovery"),
     }
     assert!(
-        loopflow::lf::Cli::try_parse_from([
-            "lf",
-            "graph",
-            "list",
-            "--processes",
-            "--managed",
-            "true"
-        ])
-        .is_err(),
+        loopflow::lf::Cli::try_parse_from(["lf", "graph", "list", "--runs", "--managed", "true"])
+            .is_err(),
         "no Graph is selected over another"
+    );
+    assert!(
+        loopflow::lf::Cli::try_parse_from(["lf", "graph", "list", "--runs", "--limit", "0"])
+            .is_err()
     );
     assert!(loopflow::lf::Cli::try_parse_from([
         "lf",
         "graph",
         "list",
-        "--processes",
-        "--limit",
-        "0"
-    ])
-    .is_err());
-    assert!(loopflow::lf::Cli::try_parse_from([
-        "lf",
-        "graph",
-        "list",
-        "--processes",
+        "--runs",
         "--taskless",
         "--for-task",
         "PROOF-1"
@@ -235,14 +221,13 @@ fn graph_catalog_and_wave_selection_read_the_same_graphs() {
     );
     let customized = run(&["graph", "customize", "feature"]);
     assert!(customized.status.success());
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    store
-        .ensure_wave_project(
-            repo.path().canonicalize().unwrap().to_str().unwrap(),
-            "proof",
-        )
-        .unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    loopflow_execution::work::wave::bootstrap::ensure_wave_project(
+        &store,
+        repo.path().canonicalize().unwrap().to_str().unwrap(),
+        "proof",
+    )
+    .unwrap();
     // A Wave selects a graph by name; its definition is the committed graph.
     let definition = repo.path().join(".lf/graphs/feature.yaml");
     let selected = run(&["--wave", "proof", "set", "graph", "feature"]);
@@ -264,7 +249,7 @@ fn graph_catalog_and_wave_selection_read_the_same_graphs() {
 }
 
 #[test]
-fn showing_one_definition_does_not_require_catalog_enumeration() {
+fn showing_one_definition_survives_an_unreadable_graphs_directory() {
     let repo = tempfile::tempdir().unwrap();
     let run = |name: &str| command(repo.path(), &["graph", "show", name, "--json"]);
     std::fs::create_dir(repo.path().join(".lf")).unwrap();
@@ -296,4 +281,70 @@ fn showing_one_definition_does_not_require_catalog_enumeration() {
     let entry: serde_json::Value = serde_json::from_slice(&invalid.stdout).unwrap();
     assert!(entry["compiled"].is_null());
     assert!(entry["unavailable"].is_string());
+}
+
+/// A Graph run whose lf was SIGKILLed never wrote its end; `lf graph list`
+/// reads it ended from its own pid, before any liveness pass records it.
+#[tokio::test]
+async fn a_killed_graph_run_lists_as_stopped_and_a_live_one_as_current() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(Command::new("git")
+        .args(["init", "--quiet"])
+        .arg(dir.path())
+        .status()
+        .unwrap()
+        .success());
+    open_ephemeral_store(&StorageConfig::sqlite(dir.path().join("loopflow.db")))
+        .await
+        .unwrap();
+    let repo = loopflow_execution::repository::discover(dir.path())
+        .unwrap()
+        .to_string();
+    let db = rusqlite::Connection::open(dir.path().join("loopflow.db")).unwrap();
+    let running = |name: &str, child: &std::process::Child| {
+        let id = support::record_graph(
+            dir.path(),
+            std::path::Path::new(&repo),
+            name,
+            "implement",
+            "succeeded",
+        );
+        let birth = loopflow_execution::process::os_process::process_started_at(child.id())
+            .unwrap()
+            .unwrap();
+        db.execute(
+            "UPDATE graph_processes SET ended_at=NULL,exit_code=NULL,error=NULL,pid=?2,
+                os_started_at=?3 WHERE lf_process_id=?1",
+            rusqlite::params![id, child.id(), birth],
+        )
+        .unwrap();
+        id
+    };
+    let mut killed_lf = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+    let mut live_lf = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+    let killed = running("killed", &killed_lf);
+    let live = running("live", &live_lf);
+    killed_lf.kill().unwrap();
+    killed_lf.wait().unwrap();
+
+    let output = command(dir.path(), &["graph", "list", "--runs", "--json"]);
+    live_lf.kill().unwrap();
+    live_lf.wait().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let page: GraphProcessPage = serde_json::from_slice(&output.stdout).unwrap();
+    let state = |id: &str| {
+        page.entries
+            .iter()
+            .find(|entry| entry.summary.id == id)
+            .unwrap()
+            .summary
+            .state
+    };
+    use loopflow_execution::session::GraphProcessSummaryState;
+    assert_eq!(state(&killed), GraphProcessSummaryState::Stopped);
+    assert_eq!(state(&live), GraphProcessSummaryState::Current);
 }

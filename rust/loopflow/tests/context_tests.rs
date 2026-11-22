@@ -4,16 +4,16 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use loopflow::context_block::{ContextDelivery, ContextMoment};
-use loopflow::ops::resolve_work_binding;
-use loopflow::prompt::format_prompt;
-use loopflow::prompt::gather_context;
-use loopflow::prompt::DocumentSource;
-use loopflow::prompt::GatherContextOpts;
-use loopflow::prompt::PromptComponents;
-use loopflow::prompt::Surface;
-use loopflow::prompt::{gather_documents, GatherSpec};
-use loopflow::store::{open_ephemeral_store, StorageConfig};
+use loopflow_execution::context_block::{ContextDelivery, ContextMoment};
+use loopflow_execution::ops::resolve_work_binding;
+use loopflow_execution::prompt::format_prompt;
+use loopflow_execution::prompt::gather_context;
+use loopflow_execution::prompt::DocumentSource;
+use loopflow_execution::prompt::GatherContextOpts;
+use loopflow_execution::prompt::PromptComponents;
+use loopflow_execution::prompt::Surface;
+use loopflow_execution::prompt::{gather_documents, GatherSpec};
+use loopflow_execution::store::{open_ephemeral_store, StorageConfig};
 use tempfile::TempDir;
 
 fn init_repo(dir: &Path) {
@@ -494,7 +494,7 @@ fn nested_wave_reads_checkout_ancestor_markdown_in_order() {
         ..Default::default()
     })
     .unwrap();
-    loopflow::prompt::drop_duplicate_docs(&mut components, repo);
+    loopflow_execution::prompt::drop_duplicate_docs(&mut components, repo);
     let paths: Vec<_> = components
         .docs
         .iter()
@@ -567,16 +567,16 @@ fn context_delivery_repository_memory_is_included_once_without_a_wave() {
         ..Default::default()
     })
     .unwrap();
-    let decisions = loopflow::prompt::drop_duplicate_docs(&mut components, temp.path());
+    let decisions = loopflow_execution::prompt::drop_duplicate_docs(&mut components, temp.path());
     assert_eq!(components.docs.len(), 1);
     assert_eq!(components.docs[0].source, DocumentSource::Docs);
     assert!(decisions.iter().any(|decision| {
         decision.source_path.as_deref() == Some("MEMORY.md")
-            && decision.decision == loopflow::trace::ContextDecisionKind::Deduplicated
+            && decision.decision == loopflow_execution::trace::ContextDecisionKind::Deduplicated
     }));
     let delivery = ContextDelivery::prepare(&components).unwrap();
     assert!(delivery.references.is_empty());
-    let prompt = loopflow::prompt::format_first_turn(&components);
+    let prompt = loopflow_execution::prompt::format_first_turn(&components);
     assert_eq!(prompt.matches("Repository decisions.").count(), 1);
     assert!(!delivery
         .block(ContextMoment::Start)
@@ -643,13 +643,18 @@ async fn worktree_reads_its_checkout_wave_memory() {
     .unwrap();
 
     fs::write(worktree.join(".lf/wave/goals/GOAL.md"), "Checkout goal.").unwrap();
-    loopflow::store::sqlite::SqliteStore::new(&loopflow::store::database_path_from_env().unwrap())
-        .unwrap()
-        .ensure_wave(origin.canonicalize().unwrap().to_str().unwrap(), "goals")
-        .unwrap();
+    loopflow_execution::work::wave::bootstrap::ensure_wave(
+        &loopflow_execution::store::open_sqlite(
+            &loopflow_execution::store::database_path_from_env().unwrap(),
+        )
+        .unwrap(),
+        origin.canonicalize().unwrap().to_str().unwrap(),
+        "goals",
+    )
+    .unwrap();
     let store = Arc::new(
         open_ephemeral_store(&StorageConfig::sqlite(
-            loopflow::store::database_path_from_env().unwrap(),
+            loopflow_execution::store::database_path_from_env().unwrap(),
         ))
         .await
         .unwrap(),

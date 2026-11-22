@@ -17,26 +17,13 @@ struct WaveDetailReadingTests {
             sourceWindowStart: "2026-08-13T18:00:00Z",
             sourceWindowEnd: "2026-08-20T18:00:00Z"
         ))
-        reading.recordFailure(RegistryQueryError("registry busy"))
+        reading.clear()
 
         #expect(reading.snapshot == nil)
-        #expect(reading.errorMessage == "Wave status unavailable: registry busy")
     }
 
-    @Test("a successful refresh clears the stale warning")
-    func successfulRefreshClearsWarning() throws {
-        let detail = try planningWave()
-        var reading = WaveDetailReading()
-        reading.recordFailure(RegistryQueryError("registry busy"))
-
-        reading.update(detail)
-
-        #expect(reading.errorMessage == nil)
-        #expect(reading.snapshot?.wave.id == "wave-1")
-    }
-
-    @Test("a readable status with no chapter does not revive cached KRs")
-    func missingCurrentChapterReplacesCachedPlan() throws {
+    @Test("a readable status with no project does not revive cached KRs")
+    func missingCurrentProjectReplacesCachedPlan() throws {
         let cached = WavePlan(objective: "Earlier objective", projects: try planningWave().workMap.projects)
         #expect(cached.currentProject?.krs.isEmpty == false)
 
@@ -47,9 +34,8 @@ struct WaveDetailReadingTests {
         #expect(reading.plan(cached: cached).currentProject == nil)
         #expect(reading.plan(cached: cached).objective == current.workMap.objective)
 
-        reading.recordFailure(RegistryQueryError("registry unavailable"))
+        reading.clear()
         #expect(reading.plan(cached: cached) == cached)
-        #expect(reading.errorMessage != nil)
     }
 
     @Test("Mac metric rows render the shared DTO fields without recomputing evidence")
@@ -112,7 +98,7 @@ struct WaveDetailReadingTests {
         #expect(known.headline == "1 of 3 Project targets currently hold.")
     }
 
-    @Test("an unset chapter target preserves the reading without failing the measure")
+    @Test("an unset project target preserves the reading without failing the measure")
     func untargetedMetricIsNeutral() throws {
         let portfolio = try JSONDecoder().decode(MetricPortfolio.self, from: loadFixtureData("metric_portfolio.json"))
         let metric = try #require(portfolio.metrics.first { $0.target == nil })
@@ -126,13 +112,13 @@ struct WaveDetailReadingTests {
         #expect(presentation.headline == "No targets set for this Project.")
     }
 
-    @Test("unavailable chapter planning retains the reading and never claims no target")
-    func unavailableChapterIsExplicit() throws {
+    @Test("unavailable Project planning retains the reading and never claims no target")
+    func unavailableProjectIsExplicit() throws {
         let fixture = try JSONDecoder().decode(MetricPortfolio.self, from: loadFixtureData("metric_portfolio.json"))
         let metric = try #require(fixture.metrics.first { $0.identity.metricId == "target-unavailable" })
         for metrics in [[], [metric]] {
             let presentation = WaveMetricPortfolioPresentation(portfolio: MetricPortfolio(
-                metrics: metrics, contractIssues: [.chapterUnavailable(waveId: "wave-unavailable", reason: "PM snapshot unavailable")]
+                metrics: metrics, contractIssues: [.projectUnavailable(waveId: "wave-unavailable", reason: "PM snapshot unavailable")]
             ))
             #expect(presentation.headline == "Project targets unavailable.")
             #expect(presentation.requiresWorkCount == 0)

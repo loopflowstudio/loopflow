@@ -1,7 +1,6 @@
 //! The JSON Schema of the protocol, generated from the wire types. `lf server
-//! describe` prints it; the fixtures in `rust/loopflow/tests/fixtures/dto/server/` validate
+//! describe` prints it; the fixtures in `rust/loopflow-execution/tests/fixtures/dto/server/` validate
 //! against it.
-use std::borrow::Cow;
 
 use schemars::generate::SchemaSettings;
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
@@ -20,7 +19,7 @@ pub fn describe() -> Value {
     let server = generator.subschema_for::<ServerMessage>();
     generator.subschema_for::<Hello>();
     generator.subschema_for::<Welcome>();
-    let close = generator.subschema_for::<crate::transport::wire::Close>();
+    let close = generator.subschema_for::<loopflow_execution::transport::wire::Close>();
     let mut schema = json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "Loopflow server protocol",
@@ -53,7 +52,7 @@ fn add_examples(schema: &mut Value) {
             .entry(kind)
             .or_insert_with(|| parse(text)["result"].clone());
     }
-    for group in ["Read", "Write", "ServerOperation"] {
+    for group in ["Read", "Write", "ServerOperation", "MeasuredOperation"] {
         let Some(arms) = schema["$defs"][group]["oneOf"].as_array_mut() else {
             continue;
         };
@@ -77,56 +76,56 @@ fn add_examples(schema: &mut Value) {
 /// Recorded requests, embedded so `describe` needs no source tree. Each
 /// names its operation; a test fails when a request fixture is missing here.
 const REQUESTS: &[&str] = &[
-    include_str!("../../tests/fixtures/dto/server/account_connect.json"),
-    include_str!("../../tests/fixtures/dto/server/account_disconnect.json"),
-    include_str!("../../tests/fixtures/dto/server/account_list.json"),
-    include_str!("../../tests/fixtures/dto/server/account_redeem_reset.json"),
-    include_str!("../../tests/fixtures/dto/server/account_next_request.json"),
-    include_str!("../../tests/fixtures/dto/server/account_set.json"),
-    include_str!("../../tests/fixtures/dto/server/account_use.json"),
-    include_str!("../../tests/fixtures/dto/server/account_pause.json"),
-    include_str!("../../tests/fixtures/dto/server/account_unpause.json"),
-    include_str!("../../tests/fixtures/dto/server/attach.json"),
-    include_str!("../../tests/fixtures/dto/server/session_start.json"),
-    include_str!("../../tests/fixtures/dto/server/checkout_commit.json"),
-    include_str!("../../tests/fixtures/dto/server/checkout_create.json"),
-    include_str!("../../tests/fixtures/dto/server/checkout_sync.json"),
-    include_str!("../../tests/fixtures/dto/server/configuration.json"),
-    include_str!("../../tests/fixtures/dto/server/graph_run.json"),
-    include_str!("../../tests/fixtures/dto/server/pr_abandon.json"),
-    include_str!("../../tests/fixtures/dto/server/pr_arm.json"),
-    include_str!("../../tests/fixtures/dto/server/pr_checks.json"),
-    include_str!("../../tests/fixtures/dto/server/pr_land.json"),
-    include_str!("../../tests/fixtures/dto/server/pr_open.json"),
-    include_str!("../../tests/fixtures/dto/server/pr_publish.json"),
-    include_str!("../../tests/fixtures/dto/server/pr_reconcile.json"),
-    include_str!("../../tests/fixtures/dto/server/pr_request_review.json"),
-    include_str!("../../tests/fixtures/dto/server/pr_reviews.json"),
-    include_str!("../../tests/fixtures/dto/server/pr_submit.json"),
-    include_str!("../../tests/fixtures/dto/server/repo_ci.json"),
-    include_str!("../../tests/fixtures/dto/server/repo_release.json"),
-    include_str!("../../tests/fixtures/dto/server/session_steer.json"),
-    include_str!("../../tests/fixtures/dto/server/session_boundary.json"),
-    include_str!("../../tests/fixtures/dto/server/session_status.json"),
-    include_str!("../../tests/fixtures/dto/server/skill_list.json"),
-    include_str!("../../tests/fixtures/dto/server/skill_run.json"),
-    include_str!("../../tests/fixtures/dto/server/task_from_session.json"),
-    include_str!("../../tests/fixtures/dto/server/task_hold.json"),
-    include_str!("../../tests/fixtures/dto/server/task_interrupt.json"),
-    include_str!("../../tests/fixtures/dto/server/task_report.json"),
-    include_str!("../../tests/fixtures/dto/server/task_run.json"),
-    include_str!("../../tests/fixtures/dto/server/task_ship.json"),
-    include_str!("../../tests/fixtures/dto/server/task_steer.json"),
-    include_str!("../../tests/fixtures/dto/server/view_plan.json"),
-    include_str!("../../tests/fixtures/dto/server/wave_plan_bind.json"),
-    include_str!("../../tests/fixtures/dto/server/wave_plan_connect.json"),
-    include_str!("../../tests/fixtures/dto/server/wave_plan_reteam.json"),
-    include_str!("../../tests/fixtures/dto/server/configure_remote.json"),
-    include_str!("../../tests/fixtures/dto/server/mobile_status_request.json"),
-    include_str!("../../tests/fixtures/dto/server/session_page.json"),
-    include_str!("../../tests/fixtures/dto/server/session_continue.json"),
-    include_str!("../../tests/fixtures/dto/server/task_create.json"),
-    include_str!("../../tests/fixtures/dto/server/upload.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_write.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_read.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_read.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_connect.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_disconnect.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_list.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/attach.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_start.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/checkout_commit.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/checkout_create.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/checkout_sync.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/configuration.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/graph_run.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/pr_abandon.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/pr_arm.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/pr_checks.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/pr_land.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/pr_open.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/pr_publish.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/pr_reconcile.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/pr_request_review.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/pr_reviews.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/pr_submit.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/repo_ci.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/repo_release.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_steer.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_boundary.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_status.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/skill_list.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/skill_run.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_from_session.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_auto_off.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/machine_request.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_interrupt.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_report.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_run.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_steer.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/view_plan.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/wave_plan_bind.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/wave_plan_connect.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/wave_plan_reteam.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/configure_remote.json"),
+    include_str!(
+        "../../../loopflow-execution/tests/fixtures/dto/server/mobile_status_request.json"
+    ),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_page.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_continue.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_create.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/upload.json"),
 ];
 
 /// Recorded answers and the operation each answers. A new `response`
@@ -135,157 +134,167 @@ const RESPONSES: &[(&str, &str, &str)] = &[
     (
         "account",
         "account.disconnect",
-        include_str!("../../tests/fixtures/dto/server/account.json"),
-    ),
-    (
-        "account_redeemed",
-        "account.redeem_reset",
-        include_str!("../../tests/fixtures/dto/server/account_redeemed.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account.json"),
     ),
     (
         "account_report",
         "account.list",
-        include_str!("../../tests/fixtures/dto/server/account_report.json"),
-    ),
-    (
-        "account_next",
-        "account.next",
-        include_str!("../../tests/fixtures/dto/server/account_next.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_report.json"),
     ),
     (
         "checkout_committed",
         "checkout.commit",
-        include_str!("../../tests/fixtures/dto/server/checkout_committed.json"),
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/checkout_committed.json"
+        ),
     ),
     (
         "checkout_created",
         "checkout.create",
-        include_str!("../../tests/fixtures/dto/server/checkout_created.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/checkout_created.json"),
     ),
     (
         "checkout_sync_planned",
         "checkout.sync",
-        include_str!("../../tests/fixtures/dto/server/checkout_sync_planned.json"),
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/checkout_sync_planned.json"
+        ),
     ),
     (
         "checkout_syncing",
         "checkout.sync",
-        include_str!("../../tests/fixtures/dto/server/checkout_syncing.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/checkout_syncing.json"),
     ),
     (
         "launched",
         "repo.release",
-        include_str!("../../tests/fixtures/dto/server/launched.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/launched.json"),
     ),
     (
         "attached",
         "session.attach",
-        include_str!("../../tests/fixtures/dto/server/attached.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/attached.json"),
     ),
     (
         "session_started",
         "session.start",
-        include_str!("../../tests/fixtures/dto/server/session_started.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_started.json"),
     ),
     (
         "pr_abandoned",
         "pr.abandon",
-        include_str!("../../tests/fixtures/dto/server/pr_abandoned.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/pr_abandoned.json"),
     ),
     (
         "pr_checks_report",
         "pr.checks",
-        include_str!("../../tests/fixtures/dto/server/pr_checks_report.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/pr_checks_report.json"),
     ),
     (
         "pr_delivery_check",
         "pr.reconcile",
-        include_str!("../../tests/fixtures/dto/server/pr_delivery_check.json"),
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/pr_delivery_check.json"
+        ),
     ),
     (
         "pr_prepared",
         "pr.submit",
-        include_str!("../../tests/fixtures/dto/server/pr_prepared.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/pr_prepared.json"),
     ),
     (
         "pr_published",
         "pr.publish",
-        include_str!("../../tests/fixtures/dto/server/pr_published.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/pr_published.json"),
     ),
     (
         "pr_review_requested",
         "pr.request_review",
-        include_str!("../../tests/fixtures/dto/server/pr_review_requested.json"),
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/pr_review_requested.json"
+        ),
     ),
     (
         "pr_reviews_report",
         "pr.reviews",
-        include_str!("../../tests/fixtures/dto/server/pr_reviews_report.json"),
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/pr_reviews_report.json"
+        ),
     ),
     (
         "repo_ci_report",
         "repo.ci",
-        include_str!("../../tests/fixtures/dto/server/repo_ci_report.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/repo_ci_report.json"),
     ),
     (
         "response",
         "session.rename",
-        include_str!("../../tests/fixtures/dto/server/response.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/response.json"),
     ),
     (
         "session_boundary_answer",
         "session.boundary",
-        include_str!("../../tests/fixtures/dto/server/session_boundary_answer.json"),
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/session_boundary_answer.json"
+        ),
     ),
     (
         "session_steered",
         "session.steer",
-        include_str!("../../tests/fixtures/dto/server/session_steered.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_steered.json"),
     ),
     (
         "skill_entries",
         "skill.list",
-        include_str!("../../tests/fixtures/dto/server/skill_entries.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/skill_entries.json"),
     ),
     (
-        "task_held",
-        "task.hold",
-        include_str!("../../tests/fixtures/dto/server/task_held.json"),
+        "task_auto_off_answer",
+        "task.auto.off",
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/task_auto_off_answer.json"
+        ),
     ),
     (
         "task_running",
         "task.run",
-        include_str!("../../tests/fixtures/dto/server/task_running.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_running.json"),
     ),
     (
-        "task_shipping",
-        "task.ship",
-        include_str!("../../tests/fixtures/dto/server/task_shipping.json"),
+        "task_auto_on_answer",
+        "task.auto.on",
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on_answer.json"
+        ),
     ),
     (
         "wave_plan_connected",
         "wave.plan.connect",
-        include_str!("../../tests/fixtures/dto/server/wave_plan_connected.json"),
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/wave_plan_connected.json"
+        ),
     ),
     (
         "wave_plan_reteamed",
         "wave.plan.reteam",
-        include_str!("../../tests/fixtures/dto/server/wave_plan_reteamed.json"),
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/wave_plan_reteamed.json"
+        ),
     ),
     (
         "ticket_reply",
         "request.upload",
-        include_str!("../../tests/fixtures/dto/server/ticket_reply.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/ticket_reply.json"),
     ),
     (
         "mobile_status",
         "mobile.status",
-        include_str!("../../tests/fixtures/dto/server/mobile_status.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/mobile_status.json"),
     ),
     (
         "remote",
         "mobile.configure",
-        include_str!("../../tests/fixtures/dto/server/remote.json"),
+        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/remote.json"),
     ),
 ];
 
@@ -320,23 +329,10 @@ pub fn summary() -> String {
 /// A bare `time::OffsetDateTime` as its serde writes it: year, ordinal day,
 /// hour, minute, second, nanosecond and the offset's hours, minutes and
 /// seconds. A field that wants RFC 3339 says `time::serde::rfc3339`.
-pub(crate) type TimeTuple = (i32, u16, u8, u8, u8, u32, i8, i8, i8);
+#[cfg(test)]
+pub(crate) use loopflow_execution::store::TimeTuple;
 
-/// A result that is `serde_json::Value` on the wire: this build promises no
-/// shape for it, and the schema says so rather than inventing one.
-#[derive(Debug)]
-pub struct Untyped;
-
-impl JsonSchema for Untyped {
-    fn schema_name() -> Cow<'static, str> {
-        "Untyped".into()
-    }
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({
-            "description": "Untyped on the wire: any JSON value, with no shape promised.",
-        })
-    }
-}
+pub use loopflow_execution::machine::schema::Untyped;
 
 /// A result whose shape the request's own fields choose.
 pub(crate) fn either<A: JsonSchema, B: JsonSchema>(generator: &mut SchemaGenerator) -> Schema {
@@ -363,15 +359,18 @@ mod tests {
     }
 
     fn fixtures() -> BTreeMap<String, Value> {
-        std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dto/server"))
-            .unwrap()
-            .map(|entry| {
-                let path = entry.unwrap().path();
-                let name = path.file_stem().unwrap().to_str().unwrap().to_owned();
-                let raw = std::fs::read_to_string(&path).unwrap();
-                (name, serde_json::from_str(&raw).unwrap())
-            })
-            .collect()
+        std::fs::read_dir(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../loopflow-execution/tests/fixtures/dto/server"),
+        )
+        .unwrap()
+        .map(|entry| {
+            let path = entry.unwrap().path();
+            let name = path.file_stem().unwrap().to_str().unwrap().to_owned();
+            let raw = std::fs::read_to_string(&path).unwrap();
+            (name, serde_json::from_str(&raw).unwrap())
+        })
+        .collect()
     }
 
     /// The arms of a tagged definition, by the value of their `tag`.
@@ -389,7 +388,7 @@ mod tests {
     }
 
     fn operations(schema: &Value) -> BTreeMap<String, Value> {
-        ["ServerOperation", "Read", "Write"]
+        ["ServerOperation", "Read", "Write", "MeasuredOperation"]
             .into_iter()
             .flat_map(|definition| arms(schema, definition, "kind"))
             .collect()
@@ -521,7 +520,7 @@ mod tests {
         for reason in ["replaced", "finished", "retired"] {
             let close = serde_json::json!({"reason":reason});
             assert!(validator.is_valid(&close));
-            let decoded: crate::transport::wire::Close =
+            let decoded: loopflow_execution::transport::wire::Close =
                 serde_json::from_value(close.clone()).unwrap();
             assert_eq!(serde_json::to_value(decoded).unwrap(), close);
         }

@@ -1,0 +1,9 @@
+description: Build, deliver and verify. You review the change, then check it on main.
+steps:
+- graph: plan
+- loop:
+    - loop:
+        - graph: build
+        - interactive: ship-review     # you read the page; iterate goes back to build
+    - graph: deliver
+    - interactive: verify

@@ -116,10 +116,15 @@ struct TaskGraphTests {
 
         let blocked = snapshots[2]
         #expect(graphNodeStates(blocked.compiled, latest: blocked)[3] == .blocked)
+        #expect(blocked.steps.last?.error == "check exited 1: 2 tests failed")
         let evidence = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_stalled.json"))
         #expect(evidence.state == .stalled)
         let held = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_waiting.json"))
         #expect(held.state == .waiting)
+        let died = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_died.json"))
+        #expect(died.died?.atStep == "implement")
+        #expect(died.outlook?.kind == .waitingForYou && died.outlook?.command == "lf task run LOO-12")
+        #expect(held.died == nil && held.outlook == nil)
         // A preview only marks stages.
         let preview = graphNodeStates(review.compiled, latest: nil)
         #expect(preview[4] == .pendingHuman && preview[1] == .pending)
@@ -385,7 +390,7 @@ private final class ScriptedReader {
 
     private func send(_ part: WorkPart, answers: Int, body: Any) {
         sequence += 1
-        let line: [String: Any] = ["answers": answers, "unavailable": NSNull(), "body": body]
+        let line: [String: Any] = ["answers": answers, "unavailable": NSNull(), "body": body, "read_at": NSNull()]
         let scope = WorkScope(repo: repo, headless: false, task: task, activity: nil, taskListWave: nil)
         guard let data = try? JSONSerialization.data(withJSONObject: line),
               let frame = try? WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: data) else { return }
@@ -421,12 +426,12 @@ struct TaskGraphProofTests {
         let shells = workspace.multiplexer.layout.allPanes.map(\.id)
         let layout = workspace.multiplexer.layout
 
-        let reviewed = WorkReference.task(id: "ts_review00000000000000000000000000")
+        let reviewed = WorkReference.task(id: "issue-review")
         var session = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(
             renameFixtureRecord("design", title: "review-design", work: reviewed)
         )) as? [String: Any])
         session["state"] = "active"
-        session["actions"] = sessionActionFixture(state: "active")
+        session["action"] = sessionActionFixture(state: "active")
         session["terminal_ids"] = [shells[0]]
         session["open_argv"] = ["must-not-launch"]
         let source = try GraphSource(session: JSONSerialization.data(withJSONObject: [session]))

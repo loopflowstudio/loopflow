@@ -14,7 +14,7 @@ tmux show-environment -g | grep -E '^(LF|LOOPFLOW)_'       # what new tmux sessi
 
 | Variable | Set by | Read by | Policy |
 |---|---|---|---|
-| `LF_HOME` | A person, for an experiment; every lf launch path for its children; cron and CI-watch launchd plists; test fixtures | `store::lf_home_dir`, Desktop's observation client | Selects the data directory. Unset means `~/.lf`. The database is always `$LF_HOME/loopflow.db`. |
+| `LF_HOME` | A person, for an experiment; every lf launch path for its children; cron and CI-watch launchd plists; test fixtures | `store::lf_home_dir`, Desktop's observation client | Selects the data directory. Unset means `~/.lf`. The store is always `$LF_HOME/loopflow.db`, with its history and turns beside it in `$LF_HOME/history.db`. |
 | `LF_BIN` | Desktop and lf launch paths, test fixtures | CLI dispatch and child launch | Explicit executable selection for private `LF_HOME` launches. Ordinary Sessions and agents receive the stable installed entry, or the Desktop helper that launched them; main-Machine dispatch ignores inherited selections. It grants no migration or process-control authority. |
 
 Without a private `LF_HOME`, source commands forward to the installed CLI,
@@ -38,8 +38,6 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LF_AS` | `--as` | Run and Task commands | Declares the Work a command contributes to; resolved against the registry. |
 | `LF_GRAPH_ID` | Graph process, for each agent step | The step's agent and skills | Names the Graph a step serves: its Graph process's id. Steps of one Graph share notes under it; `lf` reads nothing from it. |
 | `LF_WAVE_ID` | Wave and Task launches | Wave resolution | Default Wave for a child command. |
-| `LF_HUMAN_SESSION`, `LF_PREPARED_CAPTURE` | Conversation launch | `ops::human_session`, removed on use | Identify the prepared conversation a new terminal opens. |
-| `LF_PROVIDER_ACCOUNT_ID` | Provider launch | provider callback | Records which account a provider child used. |
 | `LF_INSTALL_SWITCH` | Published install | `installation` | One-shot capability; must equal the id of the switch receipt in progress. |
 | `LF_EXPECTED_MACHINE_ID` | `lf --machine` | `lf machine`, the remote preamble | Refuses a Machine-addressed command that reached a different Machine. |
 | `LF_TERMINAL_ID`, `LF_TERMINAL_TTY` | Desktop's terminal | Session capture | Attach a Session to the terminal showing it. |
@@ -47,21 +45,44 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LOOPFLOW_DIRECTIVE_FILE` | Shell integration, agent launch with a relay | `lf` commands that ask the parent shell to act | Removed for agents unless a scoped relay is supplied. |
 | `LOOPFLOW_GRAPH_NAME` | Graph process | Skill prose | Names the running Graph for the agent. |
 
-## Account selection and credentials
+## The caller's session
 
-Account selection names resident logins; SSH transfers credential bytes on stdin,
-never in environment variables. Detached Session shells scrub transient credentials.
+A conversation sets markers in its own shells: lf's process context above and
+its provider's own. Every provider lf starts (Claude, Codex, OpenCode, Pi, Antigravity, in
+chats, batches, work sessions and workers) drops the caller's, by name, from
+one list (`CALLER_SESSION_ENV`), before applying the new conversation's.
+
+| Set by | Removed |
+|---|---|
+| lf | the process-context variables above |
+| Claude Code | `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_SESSION_ATTENDED`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_EXECPATH`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_CODE_CHILD_NOTES_DIR`, `CLAUDE_PID`, `CLAUDE_EFFORT`, `AI_AGENT` |
+| Codex | `CODEX_CI`, `CODEX_SANDBOX`, `CODEX_SANDBOX_NETWORK_DISABLED`, `CODEX_SESSION_ID`, `CODEX_THREAD_ID`, `CODEX_TOOL_CALL_ID`, `CODEX_VERSION`, `CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS` |
+
+An inherited `CLAUDE_CODE_CHILD_SESSION` turns off an interactive Claude's
+transcript (`-p` runs keep theirs), so the Session couldn't be resumed; an
+inherited `CODEX_SANDBOX` gives a nested Codex its parent's sandbox. Settings a person chooses pass through:
+`CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_*`,
+`ANTHROPIC_*`, `CODEX_HOME`, `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_*`,
+and the `NO_COLOR`, `PAGER` and locale values Codex also sets. lf's hooks
+still read `CLAUDE_CODE_MESSAGING_SOCKET`: they run inside the new provider,
+which sets its own.
+
+## Native authentication and forwarded credentials
+
+Native clients own login selection. Explicit `forward.env` and `forward.files`
+settings send named values and home files through SSH stdin, never in command
+arguments. Forwarded variables enter the destination launch environment; detached
+Session shells scrub transient credentials.
 
 | Variable | Policy |
 |---|---|
 | `LF_SETTINGS` | User-supplied YAML preference mapping; below explicit CLI and above database/files. Inherited by child commands and forwarded remotely. Never include credentials. |
 | `LF_AGENT_OVERRIDE` | User-supplied agent preference inherited by children and remote commands. Explicit CLI wins; Loopflow never exports a CLI or resolved default through this variable. Cleared for independent Session shells. Contains no credential. |
-| `LF_ACCOUNT_SELECTION` | Account preference/restriction for this invocation and its children; contains no credential. |
-| `LF_TASK_SOURCE` | One SSH invocation's saved Task ID, identifier, optional provider issue ID, branch and required commit. Contains no planning payload, local paths or execution authority. |
+| `LF_TASK_SOURCE` | One SSH invocation's saved Task ID, identifier, optional tracker issue ID, branch and required commit. Contains no planning payload, local paths or execution authority. |
 | `LF_DISCORD_TOKEN` | Chat bridge token; removed before any provider child. |
-| `LF_CREDENTIAL_SOCKET`, `LF_AUTH_BROWSER_FIFO` | Local credential broker and browser handoff for login. |
-| `GH_TOKEN`, `OPENCODE_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY` | Provider credentials, applied per program. |
-| `CODEX_HOME`, `CLAUDE_CONFIG_DIR` | Set per provider child to the managed account's directory. |
+| `LF_CREDENTIAL_SOCKET` | Local service credential broker. |
+| `GH_TOKEN`, `OPENCODE_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY` | Provider credentials, applied per program. Exported API-key variables are removed from Claude and Codex launches. |
+| `CODEX_HOME`, `CLAUDE_CONFIG_DIR` | Native provider homes inherited from the caller. |
 
 ## Installation and tooling
 
@@ -76,16 +97,15 @@ never in environment variables. Detached Session shells scrub transient credenti
 | `LF_RELEASE_*` | Release scripts | Inputs from `lf repo release` to its scripts. |
 
 `LF_TEST_*`, `LF_PROBE_*`, `LOOPFLOW_UI_TEST_*` and
-`LOOPFLOW_TEST_*` exist only in tests and their fixtures. The three
-`LF_TEST_CLAUDE_*_URL` readers in `subscription.rs` are compiled only under
-`cfg(test)`.
+`LOOPFLOW_TEST_*` exist only in tests and their fixtures.
 
 ## Removed
 
 `LF_DB_PATH`, `LF_CONTROL_BIN`, `LF_CONTROL_HOME`, `LF_CONTROL_DB_PATH`,
 `LF_RUN_CONTEXT`, `LF_TASK_ORIGIN`, `LF_PARENT_RUN_ID`, `LF_RUN_LEASE`,
 `LF_WORKTREE_WRITER_ID`, `LF_SSH_TARGET`, `LF_AGENT_INVOCATION_ID`,
-`LF_INSTALL_PROMOTE_HOP`, `LF_HUMAN_SESSION_RUN_BIND`,
+`LF_INSTALL_PROMOTE_HOP`, `LF_HUMAN_SESSION`, `LF_HUMAN_SESSION_RUN`,
+`LF_HUMAN_SESSION_RUN_BIND`,
 `LF_EXTERNAL_TERMINAL`, the `LF_TASK_*` and `LF_PROJECT_*` lease trio, and the
 `LF_LINEAR_*`, `LF_GITHUB_WEBHOOK_*` and `LF_LFD_ALLOW_NON_LOOPBACK` daemon
 settings. Nothing reads them. An older running lf may still export some of

@@ -9,151 +9,107 @@ same records; it keeps no copy of its own.
 Missing evidence stays missing. Usage a provider never reported reads as `-`,
 never as zero, and a process with no exit record is unknown, not still running.
 
-## What it cost
+## Cost and context budgets
 
 ```bash
-lf session usage --task LOO-12          # every conversation that worked on one Task
-lf session usage --days 0 --wave infra  # all time, for one Wave
+lf session usage --task LOO-12            # every Session that worked on LOO-12
+lf session usage --days 0 --wave infra    # all-time usage for one Wave (default window: 30 days)
+lf session usage --task LOO-12 --context  # each step's input by source, flagging over-budget items with *
+lf session usage --weekly                 # weekly trend by step, harness, Task, and turn time vs. context size
 ```
 
-Each row is one Session's recorded input: input, output and cache-read tokens,
-cost, and how many of its provider streams finished (`FINAL`). `GAPS` counts the
-places the record is incomplete. The window defaults to the last 30 days.
+Each row reports input, output, and cache-read tokens, cost (where the provider
+reports it: Pi and OpenCode report per-turn cost; Claude, Codex and Antigravity
+report tokens, plus Claude's running `total_cost_usd`; an Antigravity row
+counts the conversation lf started, not its subagents'), finished streams (`FINAL`),
+and any recording gaps (`GAPS`).
 
-New usage rows hold one turn's tokens and model from the provider's transcript.
-Turn-end hooks ask the Machine server to read and record ended turns; the
-hooks themselves open no store. At provider exit, the launching process reads
-the whole transcript, records usage still missing and fills in unrecorded
-completions. This exit read needs no server and also covers bare headless runs,
-which have no turn-end hook. Recording is best-effort: a missed turn-end read
-can be caught at the next turn end or exit. Raw conversations lf never launched
-get no usage or completion rows.
+For work sessions and workers, turn-end hooks ask the server to record each
+turn from the provider's transcript; at exit, the launching process catches any
+missed turns (and covers bare chats and batches without needing the server).
+Raw conversations started outside `lf` are shown live without recording usage
+rows.
 
-Claude and Codex usage rows carry tokens without cost. Pi and OpenCode include
-the turn's reported cost. Claude's live completion keeps `total_cost_usd`, a
-running process total; it is not a per-turn cost. A bare run in a Task's
-checkout counts toward that Task. Runs outside Task and Wave checkouts also
-record rows today.
+`--context` breaks each step's input into instructions, memory, scratch, goal,
+steers, carried conversation, and tool output. Check or adjust your authoring
+targets with `lf context` ([Context budgets](config.md#context-budgets-and-assembly)).
 
-Find where the tokens went:
+## Task summaries
 
 ```bash
-lf session usage --task LOO-12 --context   # each step's input, broken down by source, against your budgets
-lf session usage --weekly                  # context cost and turn time, week by week
+lf task status LOO-12 --json | jq .summary
 ```
 
-`--context` splits each step's submitted input into its sources (instructions,
-memory, scratch, goal, steers, carried conversation, tool output) and marks the
-ones over budget with `*`. The
-weekly report shows the trend, then breaks the latest week down by step, harness
-and Task, and shows how turn time grows as context grows. `lf context` shows
-each budget, where it was set and current usage;
-[configuration](config.md#context-budgets) says how to change them.
+Once a Task completes or is abandoned, its `summary` records how and when it
+ended, the Graph it ran, how many times each loop iterated (`loop_passes`),
+whether auto was on or off at the end (`auto`, `null` if never set), wall time from its first Graph run, and the
+headline from its last `reflect` step. Every run in `lf session usage --json`
+also carries `skill_version` (SHA-256 of the skill text) so you can compare
+runs across skill edits.
 
-## What happened
+## Conversation history and transcripts
 
 ```bash
-lf session history --task LOO-12                  # what its Sessions did: input, turns, outcomes
-lf session history list --task LOO-12             # every command that ran for it, newest first
-lf session history list --search "land" --all     # one command, across every repository
-lf session history show <id> --final              # what the agent concluded
-lf session history show <id> --context            # what its input was made of
-lf session history show <id> --transcript         # the conversation, as its providers kept it
-lf session history search "cleanupPeriodDays" --since 30d   # text across recent conversations
-lf session retention                              # what providers still keep, and what goes next
+lf session history --task LOO-12                              # chronological turns and outcomes
+lf session history show <id> --final                          # the agent's final answer
+lf session history show <id> --context                        # what input was assembled
+lf session history show <id> --transcript                     # full conversation from the provider's files
+lf session history show <id> --instructions                   # which skills/guidance were included and why
+lf session history search "cleanupPeriodDays" --since 30d     # search recent conversations
+lf session retention                                          # what providers still keep and what expires next
 ```
 
-`lf session history` orders what Sessions did — input captured, provider turns,
-recorded outcomes — each tagged with its Task or Wave. Changes no Session made
-(PRs, Steers, Workflow moves, sync) are on the Task: `lf task status`.
-`session history list` is the command record underneath it, one row per lf or
-agent process (`kind`), with its parent and outcome. Narrow it with `--parent`,
-`--caller SESSION` or `--outcome`; an agent `--parent` lists the lf commands it
-issued.
+Conversation text stays in each provider's native store (Claude, Codex, Pi
+or Antigravity files, or OpenCode's SQLite DB); Loopflow reads it on demand rather than
+duplicating it. Claude removes conversations idle longer than
+`cleanupPeriodDays` (30 days by default in Claude's `settings.json`); Codex,
+OpenCode, and Pi keep everything.
 
-`session history show` opens any process or Session by ID. `--events` prints a
-Session's raw input events, including which account it actually ran on.
-`--instructions` explains which instructions were included and which were left out.
+Loopflow stores its own lightweight records separately from active state in
+`~/.lf/history.db`: one row per provider turn (kept permanently) and 90 days of
+Session history (retries, failures, provider switches), pruned hourly by the
+server or on demand with `lf machine prune`.
 
-Conversation text stays with its provider: `session history show` reads it from Claude,
-Codex or Pi transcript files or OpenCode's own store, and lf stores none of
-it. Each turn, from what woke the agent until it handed back, prints one line
-and then what was asked and done in it:
-
-```text
-── 2026-11-10 16:25 UTC · ended 2026-11-10 16:27 UTC · claude-opus-5-5 · 41.2k in (38.0k cached) · 1.1k out
-
-you: Explain the build
-  · Bash {"command":"ls"}
-
-It builds with cargo.
-```
-
-`--json` gives each turn its `id`, `state`, `started_at`, `ended_at`, `model`,
-`usage` and `items`, where an item is a `request` or something the `agent` did.
-When a transcript is gone, it prints the recorded turns (time, status, final
-answer) and why: Claude removes conversations idle longer than
-`cleanupPeriodDays` (30 days unless set in its `settings.json`); Codex, OpenCode
-and Pi keep everything. Raise `cleanupPeriodDays` to keep more Claude history.
-
-Replay a captured request as new work, with the same prompt, model, account and
-permissions; the original record is left alone:
+Replay any captured request as new work (same prompt, model, and permissions,
+current native login) without touching the original record:
 
 ```bash
 lf replay <run-id>
 ```
 
-## What's running now
+## Live runs, codebase size, and health
 
 ```bash
-lf process top                  # live call trees, refreshing; the first move when work feels slow
-lf process list --json          # one parseable snapshot, for another tool or agent
-lf process prune --dry-run      # receipts, orphaned providers and Process rows safe to remove
+lf session list                           # live Sessions on this Machine (OS-confirmed PIDs)
+lf graph list --runs --state current      # live Graph runs
+lf graph show <RUN_ID>                    # step-by-step results for any Graph run
+lf repo tokens                            # lines and tokens per directory (tracked files, same tokenizer as budgets)
+lf repo tokens --days 90                  # codebase token growth over time
+lf machine doctor                         # installation, store, lock contention, PTYs, and stray processes
+lf machine doctor --plan                  # read-only check of repository planning
 ```
 
-Both show only processes the OS says are alive; finished calls drop out and move
-to `lf session history`. `lf process prune` removes stale receipts and provider
-processes whose lf parent is provably dead, never an unclaimed provider, then
-forgets finished Process rows nothing references and compacts the store.
-
-## How big the codebase is
-
-```bash
-lf repo tokens            # lines and tokens per directory, tracked files only
-lf repo tokens --days 90  # the codebase's size on each day it changed
-```
-
-Tokens are counted with the same tokenizer the prompt assembler budgets with,
-so this tree and your context budgets measure the same thing. A lockfile is
-cheap in lines and expensive in tokens; this shows it.
-
-## Is Loopflow healthy
-
-```bash
-lf machine doctor             # store, process records, lineage, attribution, installation, lock contention
-lf machine doctor --plan  # repository planning, read without changing it
-```
-
-Each check reports ok, warn or fail with its detail. `--json` returns the same audit.
+`lf machine doctor` checks each subsystem (`ok`, `warn`, or `fail`, plus
+`--json`) and lists any stray agent processes left behind after a crash so you
+can inspect and stop them by PID.
 
 ## Reference
 
 | Command | What it does |
 |---|---|
-| `lf session usage [--task\|--wave] [--days N]` | Recorded provider usage per Session |
-| `lf session usage --context` / `--weekly` | Input by source / context cost and turn time by week |
-| `lf session usage --parent SESSION` | Usage of the inputs one Session issued |
-| `lf session history [--task\|--wave]` | What Sessions did, newest first |
-| `lf session history list` | Recorded commands; filter by Task, Wave, parent, caller, text, outcome |
-| `lf session history show ID` | One process or Session; `--final`, `--context`, `--transcript`, `--events`, `--instructions` |
-| `lf session history search TEXT` / `lf session retention` | Find text in recent conversations / what providers still keep |
-| `lf replay ID` | New work from a captured request |
-| `lf process list`, `lf process top` | Live process trees |
-| `lf process prune` | Remove dead receipts, orphaned providers and finished Process rows |
+| `lf session usage [--task\|--wave] [--days N]` | Recorded token/cost usage per Session |
+| `lf session usage --context` / `--weekly` | Input breakdown by source / weekly context & latency trend |
+| `lf session usage --parent SESSION` | Usage of child runs issued by one Session |
+| `lf session history [--task\|--wave]` | Chronological Session activity |
+| `lf session history show ID` | Inspect one Session (`--final`, `--context`, `--transcript`, `--events`, `--instructions`) |
+| `lf session history search TEXT` / `lf session retention` | Search conversations / check provider retention |
+| `lf replay ID` | Re-run a captured request as new work |
+| `lf session list`, `lf graph list` | Live Sessions and Graph runs |
 | `lf repo tokens [--days N]` | Codebase size in lines and tokens |
-| `lf machine doctor [--plan]` | Installation, storage and process integrity |
+| `lf machine doctor [--plan]`, `lf machine prune` | Health audit / prune expired history and compact DBs |
 
-`lf usage`, `lf history` and `lf doctor` resolve to the same commands. Every
-flag is in the [`lf` reference](lf-reference.md#lf-session).
+`lf usage`, `lf history`, and `lf doctor` resolve to the same commands. Full
+flags: [`lf session`](lf-reference.md#lf-session).
 
-Next: [Orchestration](orchestration.md): run Graphs on other machines and agents, and customize the built-in ones.
+Next: [Orchestration](orchestration.md): customize Skills, compose Graphs,
+loops, and human review checkpoints.

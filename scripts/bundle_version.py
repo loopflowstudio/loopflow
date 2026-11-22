@@ -1,7 +1,8 @@
-"""Read and stamp the version used by macOS app bundles."""
+"""Read and stamp app versions and source revisions."""
 
 from __future__ import annotations
 
+import argparse
 import os
 import plistlib
 import re
@@ -40,6 +41,14 @@ def read_source_revision(repo_root: Path) -> str:
     return os.environ.get("GITHUB_SHA") or "unknown"
 
 
+def read_build_revision(repo_root: Path) -> str:
+    revision = read_source_revision(repo_root)
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=repo_root, capture_output=True, text=True, check=False
+    )
+    return f"{revision}-dirty" if status.returncode != 0 or status.stdout.strip() else revision
+
+
 def stamp_bundle_version(info_plist: Path, version: str, revision: str) -> None:
     """Desktop names its version and source revision in every launch and diagnostic."""
     data = plistlib.loads(info_plist.read_bytes())
@@ -54,3 +63,11 @@ def stamp_release_bundle_id(info_plist: Path) -> None:
     data = plistlib.loads(info_plist.read_bytes())
     data["CFBundleIdentifier"] = RELEASE_BUNDLE_ID
     info_plist.write_bytes(plistlib.dumps(data))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("info_plist", type=Path)
+    args = parser.parse_args()
+    root = Path(__file__).resolve().parents[1]
+    stamp_bundle_version(args.info_plist, read_release_version(root), read_build_revision(root))

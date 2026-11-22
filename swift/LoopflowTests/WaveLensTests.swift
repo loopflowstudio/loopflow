@@ -170,13 +170,13 @@ struct WaveLensTests {
 
     private func makeTask(state: String, reason: String) throws -> RoadmapTask {
         let json = """
-        {"task":{"repo_id":"repo_00000000000040008000000000000001","repo":"/src/loopflow","project_id":"project-1","wave_id":"wave-1","id":"\(reason)","identifier":"W2-1","name":"n","description":"","rank":1,"state":"unstarted","completed_at":null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},"assignee":null},
+        {"task":{"repo_id":"repo_00000000000040008000000000000001","repo":"/src/loopflow","project_id":"project-1","wave_id":"wave-1","id":"\(reason)","identifier":"W2-1","name":"n","description":"","rank":1,"state":"unstarted","completed_at":null, "due_date": null, "tracker_state": {"state": "available", "synced_at": null}, "tracker_id": null, "sync": {"actions": []},"assignee":null},
         "reference":{"issue_url":null,"workspace":null},"runtime":null,
-        "graph_name":"feature","graph_source":"repository","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
+        "graph_name":"feature","graph_source":"repository","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},
         "next_move":{"owner":"task","reason":"\(reason)"},
         "condition":{"state":"\(state)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null},"unresolved_execution":false},
         "actions":{"recommended":null,"reason":"Task is ready to start"},
-        "pr":null,"section":"working"}
+        "pr":null,"section":"working","owned_by_you":false}
         """
         return try JSONDecoder().decode(RoadmapTask.self, from: Data(json.utf8))
     }

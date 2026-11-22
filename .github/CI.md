@@ -133,9 +133,9 @@ Rust partitions wait for one shared build; the other suites run independently.
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
 | `e2e-smoke` | ubuntu-latest | both planning-reconnect proofs, then `tests/e2e/test_smoke.sh` |
 | `task-installation` | ubuntu-latest | `uv run python scripts/test_task_installation.py` |
-| `swift-test` | macos-26 | app build, headless model/view tests, launch-and-quit check, boundary check |
+| `swift-test` | macos-26 | app build, complementary headless model/view and transport/CLI groups (six minutes each on PRs), launch-and-quit check, boundary check |
 | `macos-process-test` | macos-15, macos-26 | deleted-executable and exact process-authority regression |
-| `loopflow-ui-test` | macos-26 | Desktop app/test-runner compile; native iOS model and UI tests on a disposable Simulator |
+| `loopflow-ui-test` | macos-26 | Desktop app/test-runner compile; native iOS model tests on a disposable Simulator |
 
 Candidate and merge-group jobs must all pass for `tests-result` to pass; a
 macOS job may skip only when the classifier says it is unreached or outside
@@ -231,7 +231,6 @@ the next green run closes it.
 | `403. A required agreement is missing or has expired` | The Account Holder accepts the new agreement at developer.apple.com. No code change; retrying fails until then. |
 | `401. Unauthenticated` | `NOTARY_KEY_ID`, `NOTARY_ISSUER` or `NOTARY_KEY` is wrong. Fix it in Doppler `loopflow`/`prd` and copy it to the Actions secrets. |
 
-Release candidates also run `cargo package --locked -p loopflow`. This compiles
-the extracted crates.io archive before tagging, so repository-only embedded
-files cannot pass on the strength of native binaries. Publication keeps the
-same locked dependencies.
+Loopflow ships native packages for all four targets. Workspace crates are private
+path dependencies; release publication and recovery verify native artifacts,
+installer, DMGs, appcasts and website without a crates.io stage.

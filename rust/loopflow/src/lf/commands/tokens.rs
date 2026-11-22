@@ -22,10 +22,10 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 
-use crate::journal::open_ledger;
-use crate::lf::output::{format_int, truncate, Colors};
-use crate::prompt::count_tokens;
-use crate::store::sqlite::SqliteStore;
+use loopflow_execution::journal::open_ledger;
+use loopflow_execution::output::{format_int, truncate, Colors};
+use loopflow_execution::prompt::count_tokens;
+use loopflow_storage::sqlite::SqliteStore;
 
 const NAME_WIDTH: usize = 44;
 const NUM_WIDTH: usize = 12;
@@ -617,6 +617,9 @@ mod tests {
 
         let (lines, tokens) = measure(&link).expect("measure link");
         assert_eq!(lines, 1);
-        assert_eq!(tokens, crate::prompt::count_tokens("target.txt"));
+        assert_eq!(
+            tokens,
+            loopflow_execution::prompt::count_tokens("target.txt")
+        );
     }
 }

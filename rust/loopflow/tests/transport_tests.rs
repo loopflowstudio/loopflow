@@ -6,19 +6,17 @@
 mod support;
 
 // Decode a terminal's persisted screen with the same pinned Ghostty library.
-#[allow(dead_code)]
-#[path = "../src/ghostty_vt.rs"]
-mod ghostty_vt;
+use loopflow_terminal::ghostty_vt;
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use loopflow::program_status;
 use loopflow_test_support::{MachineServer, TestRepo};
 use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
@@ -43,8 +41,7 @@ impl Drop for Fixture {
         };
         let holders: Vec<libc::pid_t> = sql
             .prepare(
-                r#"SELECT pid FROM processes WHERE command='["lf","holder","run"]'
-                   AND completed_at IS NULL AND pid IS NOT NULL"#,
+                "SELECT DISTINCT attached_pid FROM agent_sessions WHERE attached_pid IS NOT NULL",
             )
             .and_then(|mut query| {
                 query
@@ -164,6 +161,27 @@ read -r answer < /dev/tty
 "#,
         )
     }
+    /// `lf -a claude resume` in a view, whose provider launch (the `count`th
+    /// logged) must start a new thread, not resume one. Returns that launch's
+    /// line after ending its held terminal.
+    fn resume_starts_a_new_thread(&self, path: &str, count: usize) -> String {
+        let mut launch = self.command(&["-a", "claude", "resume"]);
+        launch.env("PATH", path);
+        let view = Terminal::spawn(launch);
+        let launched = self.launches(count).pop().unwrap();
+        let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
+        let _provider = KillOnDrop(provider);
+        assert!(
+            launched.contains("--session-id ") && !launched.contains("--resume "),
+            "{launched}"
+        );
+        let held = self.terminal_of(&session_of(&self.sql(), &launched));
+        view.stop();
+        // SAFETY: the pid the fixture's provider recorded for itself.
+        unsafe { libc::kill(provider, libc::SIGKILL) };
+        self.held_ends(&held);
+        launched
+    }
     /// The first `count` lines `waiting_provider` logged, once they exist.
     fn launches(&self, count: usize) -> Vec<String> {
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -210,14 +228,10 @@ read -r answer < /dev/tty
         assert_eq!(answer["revision"], HELD_REVISION, "{answer}");
         (socket, answer["answer"].clone())
     }
-    /// A view of a held terminal, through the server's entrance.
+    /// A 24x80 view of a held terminal, through the server's entrance.
     #[track_caller]
-    fn held_viewer(&self, terminal: &str, control: bool) -> Viewer {
-        self.held_attach(
-            terminal,
-            json!({"kind":"attach","control":control,"replace":true,
-                "own":control.then_some("take"),"rows":24,"cols":80}),
-        )
+    fn held_viewer(&self, terminal: &str) -> Viewer {
+        self.held_attach(terminal, json!({"kind":"attach","rows":24,"cols":80}))
     }
     /// Start `argv` in a held terminal, as `session.start` does for a launch.
     fn start_held(&self, argv: &[&str]) -> String {
@@ -228,24 +242,25 @@ read -r answer < /dev/tty
             ("PATH", "/usr/bin:/bin"),
             ("RUST_LOG", "off"),
         ];
-        let started = loopflow::server::client::Connection::open_at(&self.endpoint("machine"))
-            .unwrap()
-            .request(loopflow::server::wire::Operation::Server(
-                loopflow::server::wire::ServerOperation::SessionStart {
-                    session: None,
-                    request: uuid::Uuid::new_v4().to_string(),
-                    argv: argv.iter().map(|arg| arg.to_string()).collect(),
-                    cwd: self.repo.path().to_path_buf(),
-                    env: env
-                        .iter()
-                        .map(|(name, value)| (name.to_string(), value.to_string()))
-                        .collect(),
-                    rows: 24,
-                    cols: 80,
-                    placement: None,
-                },
-            ))
-            .unwrap();
+        let started =
+            loopflow_execution::machine::client::Connection::open_at(&self.endpoint("machine"))
+                .unwrap()
+                .request(loopflow::server::wire::Operation::Server(
+                    loopflow::server::wire::ServerOperation::SessionStart {
+                        session: None,
+                        request: uuid::Uuid::new_v4().to_string(),
+                        argv: argv.iter().map(|arg| arg.to_string()).collect(),
+                        cwd: self.repo.path().to_path_buf(),
+                        env: env
+                            .iter()
+                            .map(|(name, value)| (name.to_string(), value.to_string()))
+                            .collect(),
+                        rows: 24,
+                        cols: 80,
+                        placement: None,
+                    },
+                ))
+                .unwrap();
         started.result["terminal_id"].as_str().unwrap().to_owned()
     }
     /// A view of a held terminal attached with `request`.
@@ -265,8 +280,8 @@ read -r answer < /dev/tty
             )
             .unwrap()
     }
-    /// Wait until a viewer holds input control of a held terminal.
-    fn wait_held_controlled(&self, terminal: &str) {
+    /// Wait until some view is attached to a held terminal.
+    fn wait_held_viewed(&self, terminal: &str) {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let (mut socket, answer) = self.held_entrance(terminal);
@@ -279,13 +294,10 @@ read -r answer < /dev/tty
                 .unwrap();
             let (tag, payload) = read_frame(&mut socket).unwrap();
             assert_eq!(tag, REPLY);
-            if serde_json::from_slice::<Value>(&payload).unwrap()["held"] == true {
+            if serde_json::from_slice::<Value>(&payload).unwrap()["viewed"] == true {
                 return;
             }
-            assert!(
-                Instant::now() < deadline,
-                "{terminal} never had a controlling viewer"
-            );
+            assert!(Instant::now() < deadline, "{terminal} was never viewed");
             std::thread::sleep(Duration::from_millis(50));
         }
     }
@@ -336,8 +348,7 @@ read -r answer < /dev/tty
         }
     }
 }
-/// The revision of what follows the held-terminal entrance's answer.
-const HELD_REVISION: u32 = 3;
+const HELD_REVISION: u32 = loopflow_execution::transport::registry::REVISION;
 const REPLY: u8 = 0x01;
 const SNAPSHOT: u8 = 0x02;
 const OUT: u8 = 0x03;
@@ -385,7 +396,6 @@ enum Item {
 
 struct Viewer {
     socket: UnixStream,
-    token: Option<String>,
     id: String,
     nonce: String,
     ids: u64,
@@ -397,7 +407,6 @@ impl Viewer {
             .unwrap();
         Self {
             socket,
-            token: None,
             id: String::new(),
             nonce: String::new(),
             ids: 0,
@@ -422,7 +431,6 @@ impl Viewer {
         self.ids
     }
     fn accept(&mut self, attached: &Value) {
-        self.token = attached["token"].as_str().map(str::to_owned);
         self.id = attached["viewer"].as_str().unwrap().to_owned();
         self.nonce = attached["nonce"].as_str().unwrap().to_owned();
     }
@@ -565,7 +573,6 @@ printf '%s' "$answer" > '{home}/answer'
         .output()
         .unwrap();
     assert!(agent.status.success(), "{agent:?}");
-    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
     let opened = fixture
         .command(&[
             "open",
@@ -578,7 +585,8 @@ printf '%s' "$answer" > '{home}/answer'
             "--tab",
             "--json",
         ])
-        .env("PATH", &path)
+        .env("PATH", "/usr/bin:/bin")
+        .env("REX_BIN_DIR", &bin)
         .output()
         .unwrap();
     assert!(opened.status.success(), "{opened:?}");
@@ -608,7 +616,7 @@ printf '%s' "$answer" > '{home}/answer'
     assert_eq!(fixture.launches(1), [checkout.to_str().unwrap()]);
     assert!(rex
         .pwd(container, &block)
-        .is_some_and(|url| url.ends_with(&format!("{}/", checkout.display()))));
+        .is_some_and(|url| url.ends_with(&format!("{}/", worktree.display()))));
     rex.write(container, &block, "typed-here\n");
     assert_eq!(fixture.wait_file("answer"), "typed-here");
 }
@@ -644,15 +652,21 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
         // A bare launch runs directly, from a Desktop pane too.
         let mut command = fixture.command(&["-i", "-a", "claude", ":", "terminal placement"]);
         command.env("PATH", path).env("LF_SERVER", "1");
-        let terminal = Terminal::spawn_with_placement(command, Some(valid));
+        // The stand-in waits on /dev/tty while we read the active attachment.
+        take_controlling_terminal(&mut command);
+        let mut terminal = Terminal::spawn_with_placement(command, Some(valid));
         let launch = fixture.launches(1).pop().unwrap();
         let session = session_of(&fixture.sql(), &launch);
-        // The launching lf, which stays recorded after the provider exits and
-        // its attachment is released.
-        let placement: Option<String> = fixture.sql().query_row(
-            "SELECT p.terminal_id FROM agent_sessions s JOIN processes a ON a.id=s.agent_process_id JOIN processes p ON p.id=a.parent_lf_process_id WHERE s.id=?1",
-            [&session], |row| row.get(0),
-        ).unwrap();
+        // The launching lf's placement, recorded on the attachment it holds.
+        let placement: Option<String> = fixture
+            .sql()
+            .query_row(
+                "SELECT attached_terminal_id FROM agent_sessions WHERE id=?1",
+                [&session],
+                |row| row.get(0),
+            )
+            .unwrap();
+        terminal.assert_viewing("bare Desktop conversation");
         terminal.stop();
         assert_eq!(placement.as_deref(), valid.then_some("desktop-shell"));
     }
@@ -663,7 +677,6 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
 /// closing the terminal ends it.
 #[test]
 fn bare_lf_runs_its_provider_in_the_foreground_and_ends_with_its_terminal() {
-    use std::os::unix::process::CommandExt;
     let fixture = Fixture::new();
     let path = fixture.provider(
         r#"#!/bin/sh
@@ -702,16 +715,7 @@ read -r answer < /dev/tty
         .stdin(slave.try_clone().unwrap())
         .stdout(slave.try_clone().unwrap())
         .stderr(slave);
-    // SAFETY: setsid and ioctl are async-signal-safe. The PTY becomes lf's
-    // controlling terminal, as a shell's is.
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
+    take_controlling_terminal(&mut command);
     let mut lf = command.spawn().unwrap();
     drop(command);
     // The reader holds the only master descriptor; closing the terminal is
@@ -777,10 +781,14 @@ fn held_desktop_launch_links_its_session_to_the_pane() {
     let launch = fixture.launches(1).pop().unwrap();
     let session = session_of(&fixture.sql(), &launch);
     let held = fixture.terminal_of(&session);
-    let placement: Option<String> = fixture.sql().query_row(
-        "SELECT p.terminal_id FROM agent_sessions s JOIN processes a ON a.id=s.agent_process_id JOIN processes p ON p.id=a.attached_lf_process_id WHERE s.id=?1",
-        [&session], |row| row.get(0),
-    ).unwrap();
+    let placement: Option<String> = fixture
+        .sql()
+        .query_row(
+            "SELECT attached_terminal_id FROM agent_sessions WHERE id=?1",
+            [&session],
+            |row| row.get(0),
+        )
+        .unwrap();
     terminal.stop();
     let provider: libc::pid_t = launch.split(':').next().unwrap().parse().unwrap();
     // SAFETY: the pid the fixture's provider recorded for itself.
@@ -805,17 +813,6 @@ fn a_held_conversation_outlives_its_view() {
     let _provider = KillOnDrop(provider);
     let session = session_of(&fixture.sql(), &launch);
     let held = fixture.terminal_of(&session);
-    let named: Option<String> = fixture
-        .sql()
-        .query_row(
-            "SELECT p.held_terminal_id FROM agent_sessions s
-             JOIN processes a ON a.id=s.agent_process_id
-             JOIN processes p ON p.id=a.attached_lf_process_id WHERE s.id=?1",
-            [&session],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(named.as_deref(), Some(held.as_str()));
     view.stop();
     std::thread::sleep(Duration::from_secs(5));
     let ended: bool = fixture
@@ -828,6 +825,86 @@ fn a_held_conversation_outlives_its_view() {
         .unwrap();
     assert!(!ended, "an unviewed held conversation ended for being idle");
     assert!(alive(provider), "the held agent ended for being idle");
+    // SAFETY: the pid the fixture's provider recorded for itself.
+    unsafe { libc::kill(provider, libc::SIGKILL) };
+    fixture.held_ends(&held);
+}
+
+/// Two `lf resume`s of one Session at once start one provider. Both decide
+/// before either launch runs, so both start a launch terminal; the one that
+/// loses ends, and its view joins the terminal running the conversation
+/// instead of leaving a view nested in a held terminal nobody sees.
+#[test]
+fn simultaneous_resumes_share_one_provider_and_leave_no_view_behind() {
+    let fixture = Fixture::new();
+    let _service = ServerProof::start(&fixture, false);
+    let path = fixture.waiting_provider();
+    let prepared = fixture
+        .command(&["-a", "claude", "resume", "--prepare", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let session = prepared["id"].as_str().unwrap().to_owned();
+    // Hold the Session's launch lock so both openers decide only after it
+    // is released, before either delegated launch has started its provider.
+    let locks = fixture.home.path().join("human-sessions");
+    std::fs::create_dir_all(&locks).unwrap();
+    let name = hex::encode(&Sha256::digest(session.as_bytes())[..16]);
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(locks.join(format!(".{name}.launch.lock")))
+        .unwrap();
+    // SAFETY: flock on a descriptor this test owns.
+    assert_eq!(unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) }, 0);
+    let open = || {
+        let mut command = fixture.command(&["resume", &session]);
+        command.env("PATH", &path);
+        Terminal::spawn_with_placement(command, Some(true))
+    };
+    let mut first = open();
+    let mut second = open();
+    std::thread::sleep(Duration::from_secs(2));
+    drop(lock);
+    first.wait_text("ready for");
+    second.wait_text("ready for");
+    let launches = fixture.launches(1);
+    let provider: libc::pid_t = launches[0].split(':').next().unwrap().parse().unwrap();
+    let _provider = KillOnDrop(provider);
+    first.assert_viewing("the first view");
+    second.assert_viewing("the second view");
+    assert_eq!(fixture.launches(1).len(), 1, "{launches:?}");
+    first.stop();
+    second.stop();
+    let held = fixture.terminal_of(&session);
+    let running = || -> Vec<String> {
+        let sql = fixture.sql();
+        let mut query = sql
+            .prepare("SELECT id FROM held_terminals WHERE ended_at IS NULL")
+            .unwrap();
+        query
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    };
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while running() != [held.clone()] {
+        assert!(
+            Instant::now() < deadline,
+            "held terminals still running beside {held}: {:?}",
+            running()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
     // SAFETY: the pid the fixture's provider recorded for itself.
     unsafe { libc::kill(provider, libc::SIGKILL) };
     fixture.held_ends(&held);
@@ -872,7 +949,16 @@ fn piped_resume_json_runs_here_and_returns_once() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    fixture.launches(1);
+    let launch = fixture.launches(1).pop().unwrap();
+    // The held `resume` that opened the Session becomes the provider: no
+    // `lf -i` or launcher sits between it and the holder.
+    let parent = launch.split(':').nth(1).unwrap();
+    let parent = std::process::Command::new("/bin/ps")
+        .args(["-o", "command=", "-p", parent])
+        .output()
+        .unwrap();
+    let parent = String::from_utf8_lossy(&parent.stdout);
+    assert!(parent.contains("holder run"), "{parent}");
     viewer.stdin.take().unwrap().write_all(b"done\n").unwrap();
     let result = wait_for_viewer(viewer, Duration::from_secs(30));
     assert!(result.status.success(), "{result:?}");
@@ -900,10 +986,12 @@ fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
     let source_id = source["id"].as_str().unwrap();
     let sql = fixture.sql();
     let input = format!("run_{}", uuid::Uuid::new_v4().simple());
+    let native = uuid::Uuid::new_v4().to_string();
+    // The input resumes the native conversation its captured row names.
     sql.execute(
-        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-         VALUES(?1,'captured',?2,1,json_object('artifact_key',?2))",
-        [source_id, &input],
+        "INSERT INTO session_events(session_id,provider_thread,kind,receipt_key,observed_at,payload)
+         VALUES(?1,?3,'captured',?2,1,json_object('artifact_key',?2))",
+        [source_id, &input, &native],
     )
     .unwrap();
     sql.execute(
@@ -911,17 +999,11 @@ fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
         rusqlite::params![source_id, sql.last_insert_rowid()],
     )
     .unwrap();
-    let native = uuid::Uuid::new_v4().to_string();
     sql.execute(
         "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
         [source_id, &native],
     )
     .unwrap();
-    sql.execute(
-        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-         SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id',?3,'account_id',NULL)),current_capture FROM agent_sessions WHERE id=?1",
-        [source_id, &input, &native],
-    ).unwrap();
     let transcript = if source_provider == "codex" {
         fixture.home.path().join(format!(
             "codex/sessions/2026/11/02/rollout-2026-11-02T00-00-00-{native}.jsonl"
@@ -956,7 +1038,8 @@ fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
     let result = wait_for_viewer(viewer, Duration::from_secs(30));
     assert!(result.status.success(), "{result:?}");
     // Exactly one JSON record, for the resulting conversation.
-    let returned: Value = serde_json::from_slice(&result.stdout).unwrap();
+    let returned: Value =
+        serde_json::from_slice(&result.stdout).unwrap_or_else(|e| panic!("{e}: {result:?}"));
     let id = returned["id"].as_str().unwrap();
     assert_eq!(id != source_id, fork);
     assert_eq!(returned["provider"], "claude");
@@ -1009,10 +1092,25 @@ fn provider_changing_resume_json_launches_once_and_keeps_the_session() {
     prepared_thread_json("resume", false, "codex");
 }
 
+/// Give the child its own session with the PTY on stdin as its terminal.
+fn take_controlling_terminal(command: &mut Command) {
+    // SAFETY: setsid and ioctl are async-signal-safe. Stdin is installed
+    // before the hook runs.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
 /// An `lf resume` typed at a terminal: its screen is a pseudo-terminal, read
 /// in the background so the viewer never blocks on it; its stdin stays open.
 struct Terminal {
     child: Child,
+    keyboard: Option<std::fs::File>,
     screen: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
 }
 impl Terminal {
@@ -1033,7 +1131,11 @@ impl Terminal {
                 written.lock().unwrap().extend_from_slice(&buffer[..read]);
             }
         });
-        Self { child, screen }
+        Self {
+            child,
+            screen,
+            keyboard: None,
+        }
     }
 
     fn spawn(command: Command) -> Self {
@@ -1060,6 +1162,7 @@ impl Terminal {
         let mut master = unsafe { std::fs::File::from_raw_fd(master) };
         // SAFETY: the fresh slave descriptor is owned only by this File.
         let slave = unsafe { std::fs::File::from_raw_fd(slave) };
+        let keyboard = placement.map(|_| master.try_clone().unwrap());
         if let Some(valid) = placement {
             // SAFETY: slave is a live PTY; ttyname returns a terminated name.
             let tty = unsafe { std::ffi::CStr::from_ptr(libc::ttyname(slave.as_raw_fd())) }
@@ -1087,7 +1190,11 @@ impl Terminal {
                 written.lock().unwrap().extend_from_slice(&buffer[..read]);
             }
         });
-        Self { child, screen }
+        Self {
+            child,
+            screen,
+            keyboard,
+        }
     }
     /// Panics with the screen when the viewer has left the conversation.
     fn assert_viewing(&mut self, what: &str) {
@@ -1160,7 +1267,8 @@ fn headless_run(command: &[&str], resume: bool) {
     let provider = bin.join("opencode");
     std::fs::write(
         &provider,
-        include_str!("support/opencode_server.py").replace("__WAIT__", "False"),
+        include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
+            .replace("__WAIT__", "False"),
     )
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -1170,6 +1278,8 @@ fn headless_run(command: &[&str], resume: bool) {
     fixture
         .repo
         .create_file(".lf/graphs/proof.yaml", "- probe\n");
+    fixture.repo.stage_all();
+    fixture.repo.commit("Define the probe skill and Graph");
     std::fs::write(fixture.home.path().join("hold-turn"), "").unwrap();
     let mut creator = fixture
         .command(&[&["-b", "--agent", "opencode"], command].concat())
@@ -1188,17 +1298,39 @@ fn headless_run(command: &[&str], resume: bool) {
     let launched = fixture.wait_file("launched");
     let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
     let (session, step): (String,String) = sql.query_row("SELECT session_id,lf_process_id FROM session_events WHERE kind='captured' AND receipt_key=?1", [launched.trim()], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
-    let outcome = |id: &str| -> Option<String> {
-        sql.query_row("SELECT outcome FROM processes WHERE id=?1", [id], |r| {
-            r.get(0)
-        })
+    // A Graph step or run settles on its own row with its exit; a bare run
+    // ends with its agent, whose exit lf may not see.
+    let graph_row = |id: &str| -> bool {
+        sql.query_row(
+            "SELECT EXISTS(SELECT 1 FROM graph_process_steps WHERE lf_process_id=?1)
+                 OR EXISTS(SELECT 1 FROM graph_processes WHERE lf_process_id=?1)",
+            [id],
+            |r| r.get(0),
+        )
         .unwrap()
+    };
+    let outcome = |id: &str| -> Option<Option<i64>> {
+        let (ended, exit): (bool, Option<i64>) = sql
+            .query_row(
+                "SELECT ended_at IS NOT NULL,exit_code FROM (
+                     SELECT ended_at,exit_code FROM graph_process_steps WHERE lf_process_id=?1
+                     UNION ALL SELECT ended_at,exit_code FROM graph_processes WHERE lf_process_id=?1
+                     UNION ALL SELECT agent_ended_at,agent_exit_code FROM agent_sessions
+                         WHERE agent_launcher_lf_process_id=?1)
+                 LIMIT 1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        ended.then_some(exit)
     };
     let settles = |id: &str, what: &str| {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
-            if let Some(outcome) = outcome(id) {
-                assert_eq!(outcome, "succeeded");
+            if let Some(exit) = outcome(id) {
+                if graph_row(id) {
+                    assert_eq!(exit, Some(0), "{what} failed");
+                }
                 return;
             }
             assert!(Instant::now() < deadline, "{what} did not settle");
@@ -1297,21 +1429,31 @@ fn every_viewer_starts_with_the_snapshot_and_shares_live_output() {
     let fixture = Fixture::new();
     let _server = fixture.machine_server();
     let held = fixture.start_held(&["/bin/sh", "-c", ECHO_LINES]);
-    fixture.wait_file("drawn");
-    std::thread::sleep(Duration::from_millis(100));
-    let mut first = fixture.held_viewer(&held, true);
-    let mut second = fixture.held_viewer(&held, false);
-    for viewer in [&mut first, &mut second] {
-        let items = viewer.until_event("owner");
-        let Item::Snapshot(snapshot) = &items[0] else {
-            panic!("stream does not begin with the snapshot: {items:?}");
-        };
-        assert!(String::from_utf8_lossy(snapshot).contains("drawn"));
-        assert_eq!(events(&items, "resize")[0]["rows"], 24);
-    }
-    first.input("hello\n");
+    let mut first = fixture.held_viewer(&held);
+    let items = until_out(&mut first, "drawn");
+    assert!(
+        matches!(items[0], Item::Snapshot(_)),
+        "stream does not begin with the snapshot: {items:?}"
+    );
+    // The server has shown `drawn` to the first view, so its screen holds it.
+    let mut second = fixture.held_viewer(&held);
+    let items = second.until_event("owner");
+    let Item::Snapshot(snapshot) = &items[0] else {
+        panic!("stream does not begin with the snapshot: {items:?}");
+    };
+    assert!(String::from_utf8_lossy(snapshot).contains("drawn"));
+    assert_eq!(events(&items, "resize")[0]["rows"], 24);
+    // Both views type into the same agent, and both see what each typed.
+    // Each view has its own connection, so the second line waits for the
+    // first to be echoed; otherwise their arrival order is unspecified.
+    second.input("hello\n");
     for viewer in [&mut first, &mut second] {
         let items = until_out(viewer, "line hello");
+        assert!(items.iter().all(|item| !matches!(item, Item::Snapshot(_))));
+    }
+    first.input("again\n");
+    for viewer in [&mut first, &mut second] {
+        let items = until_out(viewer, "line again");
         assert!(items.iter().all(|item| !matches!(item, Item::Snapshot(_))));
     }
     first.input("done\n");
@@ -1354,16 +1496,15 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     let mut first = launch(&["-a", "claude", "resume"]);
     let session = session_of(&fixture.sql(), &fixture.launches(1)[0]);
     let terminal = fixture.terminal_of(&session);
-    let attach = |control: bool| {
-        let socket = loopflow::server::client::attach(
+    let attach = || {
+        let socket = loopflow_execution::machine::client::attach(
             &fixture.endpoint("machine"),
             &session.as_str().into(),
         )
         .unwrap();
-        Viewer::new(socket).attach(json!({"kind":"attach","control":control,
-            "replace":control,"own":null,"rows":24,"cols":80}))
+        Viewer::new(socket).attach(json!({"kind":"attach","rows":24,"cols":80}))
     };
-    let mut observer = attach(false);
+    let mut observer = attach();
     let next = fixture
         .command(&["session", "new", &session, "--prepare", "--json"])
         .env("PATH", &path)
@@ -1376,7 +1517,7 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     fixture.held_ends(&terminal);
     assert_eq!(fixture.launches(1).len(), 1);
     assert!(!fixture.home.path().join("answers").exists());
-    assert!(loopflow::server::client::attach(
+    assert!(loopflow_execution::machine::client::attach(
         &fixture.endpoint("machine"),
         &session.as_str().into(),
     )
@@ -1387,14 +1528,14 @@ printf '%s\n' "$answer" >> "$HOME/answers"
     fixture.launches(2);
     let successor = fixture.terminal_of(&session);
     assert_ne!(successor, terminal);
-    let mut viewer = attach(true);
+    let mut viewer = attach();
     viewer.input("once\n");
     assert_eq!(viewer.until_close(), json!({"reason":"finished"}));
     second.wait_exit();
     fixture.held_ends(&successor);
     assert_eq!(fixture.launches(2).len(), 2);
     assert_eq!(fixture.wait_file("answers"), "once\n");
-    assert!(loopflow::server::client::attach(
+    assert!(loopflow_execution::machine::client::attach(
         &fixture.endpoint("machine"),
         &session.as_str().into(),
     )
@@ -1415,7 +1556,12 @@ fn viewer_stream_close_passes_reason_unchanged() {
         .spawn()
         .unwrap();
     let mut input = child.stdin.take().unwrap();
-    input.write_all(&frame(REQUEST, br#"{"id":1,"kind":"attach","control":true,"replace":false,"own":null,"rows":24,"cols":80}"#)).unwrap();
+    input
+        .write_all(&frame(
+            REQUEST,
+            br#"{"id":1,"kind":"attach","rows":24,"cols":80}"#,
+        ))
+        .unwrap();
     let mut output = child.stdout.take().unwrap();
     assert_eq!(read_frame(&mut output).unwrap().0, REPLY);
     input.write_all(&frame(INPUT, b"finish\n")).unwrap();
@@ -1467,7 +1613,7 @@ exit 7
         .env("LF_SERVER", "1")
         .env("LF_SERVER_STATUS", &status.path);
     let mut relay = Terminal::spawn(command);
-    wait_server_status(&status, "connected", true, 1);
+    wait_server_status(&status, "connected", 1);
     relay
         .child
         .stdin
@@ -1475,7 +1621,7 @@ exit 7
         .unwrap()
         .write_all(b"finish\n")
         .unwrap();
-    wait_server_status(&status, "ended", false, 1);
+    wait_server_status(&status, "ended", 1);
     assert_eq!(relay.wait_exit().code(), Some(7));
     assert_eq!(status.reading().unwrap()["state"], "ended");
     fixture.held_ends(&held);
@@ -1489,7 +1635,7 @@ fn first_snapshot_uses_the_new_viewers_dimensions() {
         "/bin/sh", "-c",
         "i=1; while [ $i -le 20 ]; do printf 'line %s: abcdefghijklmnopqrstuvwxyz0123456789\\r\\n' \"$i\"; i=$((i+1)); done; printf 'ready> '; read -r answer",
     ]);
-    let mut first = fixture.held_viewer(&held, true);
+    let mut first = fixture.held_viewer(&held);
     let mut expected = ghostty_vt::Terminal::new(80, 24).unwrap();
     for item in until_out(&mut first, "ready> ") {
         if let Item::Snapshot(bytes) | Item::Out(bytes) = item {
@@ -1497,12 +1643,7 @@ fn first_snapshot_uses_the_new_viewers_dimensions() {
         }
     }
     expected.resize(40, 12).unwrap();
-    let mut second = fixture.held_attach(
-        &held,
-        json!({
-            "kind":"attach", "control":true, "replace":true, "own":"take", "rows":12, "cols":40,
-        }),
-    );
+    let mut second = fixture.held_attach(&held, json!({"kind":"attach", "rows":12, "cols":40}));
     let Some(Item::Snapshot(snapshot)) = second.next() else {
         panic!("fresh viewer must start with its screen");
     };
@@ -1520,9 +1661,10 @@ fn resize_reaches_every_viewer_as_its_own_event_and_program_bytes_do_not() {
     let _server = fixture.machine_server();
     let held = fixture.start_held(&["/bin/sh", "-c", ECHO_LINES]);
     fixture.wait_file("drawn");
-    let mut sizer = fixture.held_viewer(&held, true);
-    let mut observer = fixture.held_viewer(&held, false);
-    observer.until_event("owner");
+    // The newest view sizes the terminal.
+    let mut observer = fixture.held_viewer(&held);
+    let mut sizer = fixture.held_viewer(&held);
+    until_owner(&mut observer, &sizer.id);
     sizer.request(json!({"kind":"resize","rows":30,"cols":100}));
     let items = observer.until_event("resize");
     let resize = events(&items, "resize");
@@ -1551,73 +1693,184 @@ fn resize_reaches_every_viewer_as_its_own_event_and_program_bytes_do_not() {
     sizer.finish();
 }
 
+/// Legacy attaches, input and focus take the size and colors.
 #[test]
-fn ownership_queues_behind_a_taker_and_tells_the_loser_who_took_it() {
+fn the_latest_view_used_sizes_the_terminal_and_hands_size_back_as_it_leaves() {
     let fixture = Fixture::new();
     let _server = fixture.machine_server();
     let held = fixture.start_held(&["/bin/sh", "-c", ECHO_LINES]);
     fixture.wait_file("drawn");
-    let mut typist = fixture.held_viewer(&held, true);
+    let attach = |rows: u16, cols: u16, name: &str| {
+        fixture.held_attach(
+            &held,
+            json!({"kind":"attach","rows":rows,"cols":cols,"name":name}),
+        )
+    };
     let dark = json!({"background":"#111111","foreground":"#eeeeee"});
-    let light = json!({"background":"#eeeeee","foreground":"#111111"});
-    typist.request(json!({"kind":"theme","theme":dark}));
-    typist.until_event("theme");
-    let mut waiting = fixture.held_attach(
-        &held,
-        json!({"kind":"attach","control":false,"replace":true,"own":"request","rows":30,"cols":90,"name":"pane 2"}),
+    let mut first = attach(24, 80, "pane 1");
+    first.request(json!({"kind":"theme","theme":dark}));
+    first.until_event("theme");
+
+    // Attaching sizes it; a view that reported no colors supplies no override.
+    let mut second = attach(30, 90, "pane 2");
+    let items = second.until_event("owner");
+    let owner = events(&items, "owner")[0];
+    assert_eq!(
+        (&owner["viewer"], &owner["held"]),
+        (&json!(second.id), &json!(true))
     );
-    let items = waiting.until_event("owner");
+    assert!(events(&items, "theme").is_empty(), "{items:?}");
+    let items = until_owner(&mut first, &second.id);
+    let lost = events(&items, "owner").pop().unwrap();
+    assert_eq!(
+        (&lost["name"], &lost["held"]),
+        (&json!("pane 2"), &json!(false))
+    );
+    assert_eq!(events(&items, "resize").pop().unwrap()["cols"], 90);
+    second.input("size\n");
+    until_out(&mut second, "30 90");
+    let mut third = attach(40, 120, "tmux %4");
+    third.until_event("owner");
+
+    // Typing sizes it, and its colors reach every view.
+    first.input("size\n");
+    until_out(&mut first, "24 80");
+    for viewer in [&mut second, &mut third] {
+        let id = first.id.clone();
+        let items = until_owner(viewer, &id);
+        assert_eq!(events(&items, "theme")[0]["theme"], dark);
+        assert_eq!(events(&items, "resize").pop().unwrap()["cols"], 80);
+    }
+
+    // Gaining focus sizes it.
+    second.request(json!({"kind":"focus","focused":true}));
+    until_owner(&mut first, &second.id);
+    second.input("size\n");
+    until_out(&mut second, "30 90");
+
+    // It leaves: the first view typed after the third attached, so it sizes.
+    second.request(json!({"kind":"leave"}));
+    drop(second);
+    let first_id = first.id.clone();
+    let items = until_owner(&mut first, &first_id);
+    assert_eq!(events(&items, "owner").pop().unwrap()["held"], true);
+    assert_eq!(events(&items, "resize").pop().unwrap()["cols"], 80);
     assert_eq!(events(&items, "theme")[0]["theme"], dark);
-    waiting.request(json!({"kind":"theme","theme":light}));
-    waiting.request(json!({"kind":"controlled"}));
-    waiting.until_reply();
-    typist.input("size\n");
-    for viewer in [&mut waiting, &mut typist] {
-        let items = until_out(viewer, "24 80");
-        assert!(events(&items, "theme").is_empty(), "{items:?}");
-    }
-    let mut taker = fixture.held_attach(
-        &held,
-        json!({"kind":"attach","control":false,"replace":true,"own":"take","rows":40,"cols":120,"name":"tmux %4"}),
-    );
-    let items = taker.until_event("owner");
-    assert!(events(&items, "theme").is_empty(), "{items:?}");
-    // An owner without a color report supplies no override, even to new observers.
-    let mut observer = fixture.held_viewer(&held, false);
-    let items = observer.until_event("owner");
-    assert!(events(&items, "theme").is_empty(), "{items:?}");
-    let items = until_owner(&mut typist, &taker.id);
-    assert!(events(&items, "theme").is_empty(), "{items:?}");
-    let lost = events(&items, "owner");
-    assert!(
-        lost.iter().any(|event| event["viewer"] == taker.id
-            && event["name"] == "tmux %4"
-            && event["held"] == false),
-        "{items:?}"
-    );
-    typist.input("size\n");
-    until_out(&mut typist, "40 120");
-    // The taker leaves: the queued request supplies size and colors to everyone.
-    taker.request(json!({"kind":"leave"}));
-    drop(taker);
-    let waiting_id = waiting.id.clone();
-    let items = until_owner(&mut waiting, &waiting_id);
-    assert_eq!(events(&items, "owner").last().unwrap()["held"], true);
-    assert_eq!(events(&items, "theme")[0]["theme"], light);
-    let seq = events(&items, "owner").last().unwrap()["seq"].clone();
-    waiting.request(json!({"kind":"controlled"}));
-    assert_eq!(waiting.until_reply()["seq"], seq);
-    for viewer in [&mut typist, &mut observer] {
-        let items = until_owner(viewer, &waiting_id);
-        assert_eq!(events(&items, "theme")[0]["theme"], light);
-    }
-    let mut fresh = fixture.held_viewer(&held, false);
-    let items = fresh.until_event("owner");
-    assert_eq!(events(&items, "theme")[0]["theme"], light);
-    typist.input("size\n");
-    until_out(&mut typist, "30 90");
-    typist.input("done\n");
-    typist.finish();
+    until_owner(&mut third, &first_id);
+
+    // The first leaves too: the one view left sizes it.
+    first.request(json!({"kind":"leave"}));
+    drop(first);
+    let third_id = third.id.clone();
+    let items = until_owner(&mut third, &third_id);
+    let owner = events(&items, "owner").pop().unwrap().clone();
+    assert_eq!(owner["held"], true);
+    assert_eq!(events(&items, "resize").pop().unwrap()["cols"], 120);
+    third.request(json!({"kind":"controlled"}));
+    let reply = third.until_reply();
+    assert_eq!(reply["viewed"], true, "{reply}");
+    assert_eq!(reply["seq"], owner["seq"]);
+    third.input("size\n");
+    until_out(&mut third, "40 120");
+    third.input("done\n");
+    third.finish();
+}
+
+#[test]
+fn an_unfocused_view_leaves_the_session_with_the_view_in_use() {
+    let fixture = Fixture::new();
+    let _server = fixture.machine_server();
+    let child = r#"
+stty -echo
+printf '\033[?1004hready\n'
+read -r start
+trap 'touch "$HOME/winch"' WINCH
+printf 'watching\n'
+while IFS= read -r line; do
+    printf '%s\n' "$line" >> "$HOME/lines"
+    stty size
+    [ "$line" = done ] && exit 0
+done
+"#;
+    let held = fixture.start_held(&["/bin/bash", "-c", child]);
+    let mut first = fixture.held_attach(&held, json!({"kind":"attach","rows":40,"cols":120}));
+    until_out(&mut first, "ready");
+    first.input("start\n");
+    until_out(&mut first, "watching");
+
+    let background = json!({"kind":"attach","rows":24,"cols":80,"focused":false});
+    let (socket, _) = fixture.held_entrance(&held);
+    let mut second = Viewer::new(socket);
+    second.request(background.clone());
+    let reply = second.until_reply();
+    assert_eq!(reply["owner"], first.id);
+    second.accept(&reply);
+    let items = until_owner(&mut second, &first.id);
+    assert_eq!(events(&items, "owner")[0]["held"], false);
+    assert_eq!(events(&items, "resize")[0]["cols"], 120);
+    second.request(json!({"kind":"focus","focused":false}));
+    second.request(json!({"kind":"controlled"}));
+    second.until_reply();
+    first.input("first\n");
+    until_out(&mut first, "40 120");
+    assert!(!fixture.home.path().join("winch").exists());
+
+    second.request(json!({"kind":"focus","focused":true}));
+    until_owner(&mut first, &second.id);
+    first.request(json!({"kind":"focus","focused":false}));
+    first.request(json!({"kind":"controlled"}));
+    first.until_reply();
+    second.request(json!({"kind":"focus","focused":false}));
+    second.input("second\n");
+    until_out(&mut second, "24 80");
+    assert_eq!(fixture.wait_file("lines"), "first\n\x1b[I\x1b[Osecond\n");
+
+    let mut third = fixture.held_attach(&held, background);
+    until_owner(&mut third, &second.id);
+    drop(second);
+    let items = until_owner(&mut third, &first.id);
+    assert_eq!(events(&items, "resize")[0]["cols"], 120);
+    drop(first);
+    let id = third.id.clone();
+    let items = until_owner(&mut third, &id);
+    assert_eq!(events(&items, "resize")[0]["cols"], 80);
+    third.input("done\n");
+    third.finish();
+}
+
+/// Every view's terminal answers the agent's queries; the agent hears only
+/// the sizing view's answers. Another view's keys end an open paste first.
+#[test]
+fn only_the_sizing_views_terminal_answers_reach_the_agent() {
+    let fixture = Fixture::new();
+    let _server = fixture.machine_server();
+    let held = fixture.start_held(&["/bin/sh", "-c", ECHO_LINES]);
+    fixture.wait_file("drawn");
+    let mut first = fixture.held_viewer(&held);
+    let mut second = fixture.held_viewer(&held);
+    until_owner(&mut first, &second.id);
+    // The second view sizes: the first's cursor report is dropped, its keys kept.
+    first.input("\x1b[5;5Rfrom-first\n");
+    // Typing made the first view the sizer, so now the second's is dropped.
+    // Events follow the output read in the same pass, so the line may come first.
+    until(&mut second, |items| {
+        String::from_utf8_lossy(&out(items)).contains("line from-first\r")
+            && events(items, "owner").last().unwrap()["viewer"] == first.id
+    });
+    second.input("\x1b]11;rgb:0000/0000/0000\x1b\\from-second\n");
+    until_out(&mut first, "line from-second\r");
+    // The second view sizes again: its answer reaches the agent unchanged.
+    second.input("\x1b[9;9Rkept\n");
+    until_out(&mut first, "line \x1b[9;9Rkept\r");
+    // A paste left open in one view is closed before another view's keys.
+    second.input("\x1b[200~partial");
+    // The server reads a connection in order: once it answers, the paste is queued.
+    second.request(json!({"kind":"controlled"}));
+    second.until_reply();
+    first.input("x\n");
+    until_out(&mut second, "line \x1b[200~partial\x1b[201~x\r");
+    first.input("done\n");
+    first.finish();
 }
 
 #[test]
@@ -1648,10 +1901,12 @@ fn completed_task_cleanup_ends_its_held_shell_and_settles_jobs() {
         .unwrap();
     fixture.wait_file("ready");
     let owner = fixture.wait_shell_terminal("cleanup-shell");
-    // The launch attaches after the shell starts; take over only from it.
-    fixture.wait_held_controlled(&owner);
-    let mut viewer = fixture.held_viewer(&owner, true);
+    // The launch's view attaches after the shell starts; close it and view
+    // through this one.
+    fixture.wait_held_viewed(&owner);
+    launch.kill().unwrap();
     launch.wait().unwrap();
+    let mut viewer = fixture.held_viewer(&owner);
     viewer.input("sleep 60 & printf '%s\\n' $! > \"$HOME/job\"\r");
     let job = fixture.wait_file("job").trim().parse::<u32>().unwrap();
     fixture.sql().execute("UPDATE tasks SET issue_title='Completed shell',issue_description='',workspace_slug='task',updated_at=1,planning_completed=1,planning_completed_at='2000-01-01T00:00:00Z' WHERE id=?1", [task]).unwrap();
@@ -1682,19 +1937,15 @@ fn completed_task_cleanup_ends_its_held_shell_and_settles_jobs() {
     assert_eq!(viewer.until_close(), json!({"reason":"retired"}));
     fixture.held_ends(&owner);
     fixture.shell_settles(&owner);
-    let (settled, requested): (bool, i64) = fixture
+    let settled: bool = fixture
         .sql()
         .query_row(
-            "SELECT jobs_settled,close_requested FROM desktop_shells WHERE terminal_id=?1",
+            "SELECT jobs_settled FROM desktop_shells WHERE terminal_id=?1",
             [&owner],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| r.get(0),
         )
         .unwrap();
     assert!(settled);
-    assert_eq!(
-        requested, 0,
-        "automatic cleanup must not store a shell Close"
-    );
     assert!(fixture.repo.path().is_dir());
     let status = Command::new("ps")
         .args(["-p", &job.to_string(), "-o", "stat="])
@@ -1709,16 +1960,19 @@ fn completed_task_cleanup_ends_its_held_shell_and_settles_jobs() {
 }
 
 impl Fixture {
-    fn shell_task(&self, task: &str) -> loopflow::durable::MachineId {
+    fn shell_task(&self, task: &str) -> loopflow_execution::durable::MachineId {
         let output = self.command(&["machine", "id"]).output().unwrap();
         assert!(output.status.success(), "{output:?}");
         let store =
-            loopflow::store::sqlite::SqliteStore::new(&self.home.path().join("loopflow.db"))
-                .unwrap();
-        let repo = store
-            .ensure_repository(self.repo.path().to_str().unwrap())
-            .unwrap();
-        let machine = store.local_machine().unwrap().id;
+            loopflow_execution::store::open_sqlite(&self.home.path().join("loopflow.db")).unwrap();
+        let repo = loopflow_execution::repository::location::ensure_repository(
+            &store,
+            self.repo.path().to_str().unwrap(),
+        )
+        .unwrap();
+        let machine = loopflow_execution::store::machines::local_machine(&store)
+            .unwrap()
+            .id;
         self.sql()
             .execute(
                 "INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
@@ -1864,9 +2118,10 @@ fn shell_reconnects_and_settles(integrated: bool) {
         "$(literal); spaced argument"
     );
     let owner = fixture.wait_shell_terminal("desktop-shell");
-    fixture.wait_held_controlled(&owner);
-    let mut viewer = fixture.held_viewer(&owner, true);
+    fixture.wait_held_viewed(&owner);
+    launch.kill().unwrap();
     launch.wait().unwrap();
+    let mut viewer = fixture.held_viewer(&owner);
     viewer.input("export RETAINED=still-here; sleep 30 & printf 'job:%s\\n' $! > \"$HOME/job\"; printf 'state-ready\\n'\r");
     until_out(&mut viewer, "state-ready");
     viewer.input(
@@ -1904,9 +2159,10 @@ fn shell_reconnects_and_settles(integrated: bool) {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    fixture.wait_held_controlled(&owner);
-    let mut returning = fixture.held_viewer(&owner, true);
+    fixture.wait_held_viewed(&owner);
+    retry.kill().unwrap();
     retry.wait().unwrap();
+    let mut returning = fixture.held_viewer(&owner);
     returning.input("printf 'value:%s\\n' \"$RETAINED\"\r");
     until_out(&mut returning, "value:still-here");
     assert_eq!(fixture.wait_file("launches").lines().count(), 1);
@@ -1995,9 +2251,10 @@ fn desktop_shell_repeated_lifecycles_leave_no_jobs() {
             .unwrap();
         fixture.wait_file("cycle-ready");
         let owner = fixture.wait_shell_terminal(&id);
-        fixture.wait_held_controlled(&owner);
-        let mut viewer = fixture.held_viewer(&owner, true);
+        fixture.wait_held_viewed(&owner);
+        launch.kill().unwrap();
         launch.wait().unwrap();
+        let mut viewer = fixture.held_viewer(&owner);
         viewer
             .input("sleep 30 & printf '%s\\n' $$ > \"$HOME/shell-pid\"; printf 'cycle-ready\\n'\r");
         until_out(&mut viewer, "cycle-ready");
@@ -2071,8 +2328,10 @@ impl<'a> ServerProof<'a> {
         // The server observes an installed Machine; startup creates no Work.
         tokio::runtime::Runtime::new()
             .unwrap()
-            .block_on(loopflow::store::open_ephemeral_store(
-                &loopflow::store::StorageConfig::sqlite(fixture.home.path().join("loopflow.db")),
+            .block_on(loopflow_execution::store::open_ephemeral_store(
+                &loopflow_execution::store::StorageConfig::sqlite(
+                    fixture.home.path().join("loopflow.db"),
+                ),
             ))
             .unwrap();
         let mut service = Self {
@@ -2165,9 +2424,9 @@ impl<'a> ServerProof<'a> {
     fn ready(&self) -> String {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
-            if let Ok(connection) =
-                loopflow::server::client::Connection::open_at(&self.fixture.endpoint("machine"))
-            {
+            if let Ok(connection) = loopflow_execution::machine::client::Connection::open_at(
+                &self.fixture.endpoint("machine"),
+            ) {
                 if self.remote_address.is_none_or(|address| {
                     std::net::TcpStream::connect_timeout(&address, Duration::from_millis(100))
                         .is_ok()
@@ -2214,10 +2473,11 @@ impl<'a> ServerProof<'a> {
         }
     }
 
-    fn connect(&self) -> loopflow::server::client::Connection {
-        let connection =
-            loopflow::server::client::Connection::open_at(&self.fixture.endpoint("machine"))
-                .unwrap();
+    fn connect(&self) -> loopflow_execution::machine::client::Connection {
+        let connection = loopflow_execution::machine::client::Connection::open_at(
+            &self.fixture.endpoint("machine"),
+        )
+        .unwrap();
         connection
             .set_read_timeout(Some(Duration::from_secs(15)))
             .unwrap();
@@ -2226,7 +2486,9 @@ impl<'a> ServerProof<'a> {
 
     fn request(&self, operation: Value) -> Value {
         self.connect()
-            .request(serde_json::from_value(operation).unwrap())
+            .request(
+                serde_json::from_value::<loopflow::server::wire::Operation>(operation).unwrap(),
+            )
             .unwrap()
             .result
     }
@@ -2268,7 +2530,10 @@ fn server_task_watch_replaces_readings_across_repositories() {
     let query = json!({"kind":"view.select","expression":"kind:task state:open"});
     let mut watch = service.connect();
     let tasks = watch
-        .subscribe(serde_json::from_value(query.clone()).unwrap())
+        .subscribe(
+            serde_json::from_value::<loopflow::lf::commands::read::Read>(query.clone()).unwrap(),
+            None,
+        )
         .unwrap();
     let first = watch.reading(&tasks).unwrap().expect("a reading");
     let contents = |frame: &Value| -> Vec<Value> {
@@ -2384,20 +2649,18 @@ impl ConnectionStatus {
     }
 }
 
-fn wait_server_status(status: &ConnectionStatus, state: &str, input: bool, generation: u64) {
+fn wait_server_status(status: &ConnectionStatus, state: &str, generation: u64) {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let reading = status.reading();
         if reading.as_ref().is_some_and(|reading| {
-            reading["state"] == state
-                && reading["input"] == input
-                && reading["generation"].as_u64().unwrap() >= generation
+            reading["state"] == state && reading["generation"].as_u64().unwrap() >= generation
         }) {
             return;
         }
         assert!(
             Instant::now() < deadline,
-            "Expected {state}/{input}, got {reading:?}"
+            "Expected {state}, got {reading:?}"
         );
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -2573,7 +2836,10 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
     let roadmap = json!({"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true});
     let mut watch = service.connect();
     let watched = watch
-        .subscribe(serde_json::from_value(roadmap.clone()).unwrap())
+        .subscribe(
+            serde_json::from_value::<loopflow::lf::commands::read::Read>(roadmap.clone()).unwrap(),
+            None,
+        )
         .unwrap();
     let initial = watch.reading(&watched).unwrap().expect("a reading");
     assert!(initial["unavailable"].is_null(), "{initial}");
@@ -2586,8 +2852,10 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
     let mut abandoned = service.connect();
     abandoned
         .send(
-            serde_json::from_value(json!({"kind":"mobile.configure","configuration":proposed}))
-                .unwrap(),
+            serde_json::from_value::<loopflow::server::wire::Operation>(
+                json!({"kind":"mobile.configure","configuration":proposed}),
+            )
+            .unwrap(),
         )
         .unwrap();
     assert_eq!(fixture.wait_file("certificate-requested"), "ready");
@@ -2656,7 +2924,7 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
         assert!(welcome["machine"]["id"].is_string(), "{welcome}");
         reader
             .send(Message::Text(
-                json!({"type":"subscribe","id":"remote-watch","operation":roadmap})
+                json!({"type":"subscribe","id":"remote-watch","operation":roadmap,"sender":null})
                     .to_string()
                     .into(),
             ))
@@ -2976,42 +3244,222 @@ fn command_line(pid: libc::pid_t) -> (libc::pid_t, String) {
     )
 }
 
+/// Desktop's viewer can disappear with a draft still in the provider's editor.
+/// Reopening and Refresh add views beside any other; none replaces that
+/// provider, accepted input or another view.
 #[test]
-fn a_held_pane_reads_reconnecting_until_the_next_server_answers() {
+fn desktop_crash_reopen_keeps_draft_and_submits_new_input_once() {
     let fixture = Fixture::new();
-    let mut service = ServerProof::start(&fixture, false);
-    let path = fixture.waiting_provider();
+    let service = ServerProof::start(&fixture, false);
+    let path = fixture.provider(
+        r#"#!/bin/bash
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo -icanon min 1 < /dev/tty
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+printf 'editor-ready\r\n'
+draft=
+while IFS= read -r -n 1 char < /dev/tty; do
+    if [ -z "$char" ]; then
+        printf '%s\n' "$draft" >> "$HOME/answers"
+        printf 'received:%s\r\n' "$draft"
+        draft=
+    else
+        draft="$draft$char"
+        printf 'draft:%s\r\n' "$draft"
+    fi
+done
+"#,
+    );
     let mut launch = fixture.command(&["-a", "claude", "resume"]);
     launch.env("PATH", &path);
+    let mut first = Terminal::spawn(launch);
+    let launched = fixture.launches(1).pop().unwrap();
+    let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
+    let _provider = KillOnDrop(provider);
+    let session = session_of(&fixture.sql(), &launched);
+    let held = fixture.terminal_of(&session);
+    let agent: String = fixture
+        .sql()
+        .query_row(
+            "SELECT agent_process_id FROM agent_sessions WHERE id=?1",
+            [&session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    first.wait_text("editor-ready");
+    first
+        .child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"unsent-")
+        .unwrap();
+    first.wait_text("draft:unsent-");
+    first.stop();
+
+    let open = |name: &str| {
+        let status = ConnectionStatus::new(fixture.home.path().join(name));
+        let mut command = service.command(&["session", "resume", &session]);
+        command
+            .env("PATH", &path)
+            .env("LF_SERVER", "1")
+            .env("LF_SERVER_STATUS", &status.path);
+        let mut view = Terminal::spawn(command);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let reading = status.reading();
+            if reading.as_ref().is_some_and(|reading| {
+                reading["state"] == "connected" && reading["native_ready"] == true
+            }) {
+                break;
+            }
+            view.assert_viewing("the Desktop recovery viewer");
+            assert!(Instant::now() < deadline, "not ready: {reading:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        (view, status)
+    };
+    let type_into = |view: &mut Terminal, text: &str| {
+        view.child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(text.as_bytes())
+            .unwrap();
+    };
+    let (mut reopened, status) = open("reopened.sock");
+    type_into(&mut reopened, "draft\n");
+    reopened.wait_text("received:unsent-draft");
+    // Another view joins; both type into the same provider.
+    let mut visitor = service.command(&["session", "resume", &session]);
+    visitor.env("PATH", &path);
+    let mut visitor = Terminal::spawn(visitor);
+    visitor.wait_text("received:unsent-draft");
+    type_into(&mut visitor, "other-viewer\n");
+    reopened.wait_text("received:other-viewer");
+    type_into(&mut reopened, "from-desktop\n");
+    visitor.wait_text("received:from-desktop");
+    reopened.assert_viewing("the Desktop view beside another");
+    assert_eq!(status.reading().unwrap()["state"], "connected");
+    reopened.stop();
+    drop(status);
+    // Refresh displays the same provider beside the other view.
+    let (mut refreshed, _status) = open("refreshed.sock");
+    type_into(&mut visitor, "still-elsewhere\n");
+    refreshed.wait_text("received:still-elsewhere");
+    visitor.assert_viewing("the other view after Desktop Refresh");
+    type_into(&mut refreshed, "after-refresh\n");
+    visitor.wait_text("received:after-refresh");
+    // The other view detaches; Desktop keeps typing.
+    type_into(&mut visitor, "\x1d");
+    assert!(visitor.wait_exit().success());
+    type_into(&mut refreshed, "after-visitor\n");
+    refreshed.wait_text("received:after-visitor");
+    assert_eq!(
+        fixture.wait_file("answers"),
+        "unsent-draft\nother-viewer\nfrom-desktop\nstill-elsewhere\nafter-refresh\nafter-visitor\n"
+    );
+    assert_eq!(fixture.launches(1), vec![launched.clone()]);
+    assert_eq!(session_of(&fixture.sql(), &launched), session);
+    assert_eq!(fixture.terminal_of(&session), held);
+    let current_agent: String = fixture
+        .sql()
+        .query_row(
+            "SELECT agent_process_id FROM agent_sessions WHERE id=?1",
+            [&session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(current_agent, agent);
+    assert!(alive(provider));
+    refreshed.stop();
+    // SAFETY: this fixture's provider recorded its own pid.
+    unsafe { libc::kill(provider, libc::SIGKILL) };
+    fixture.held_ends(&held);
+}
+
+#[test]
+fn a_resumed_relay_keeps_focus_across_server_restarts() {
+    let fixture = Fixture::new();
+    let mut service = ServerProof::start(&fixture, false);
+    let path = fixture.provider(
+        r#"#!/bin/bash
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+printf '%s' "${LF_RELAY_FOCUSED+present}" > "$HOME/provider-focus"
+stty raw -echo < /dev/tty
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+for marker in blurred typed; do
+    IFS= read -r -d R answer < /dev/tty
+    printf 'observed-%s' "$marker"
+done
+read -r answer < /dev/tty
+"#,
+    );
+    let mut launch = fixture.command(&["-a", "claude", "resume"]);
+    launch.env("PATH", &path).env("LF_RELAY_FOCUSED", "0");
     let first = Terminal::spawn_with_placement(launch, Some(true));
     let launched = fixture.launches(1).pop().unwrap();
     let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
     let _provider = KillOnDrop(provider);
     let session = session_of(&fixture.sql(), &launched);
     let held = fixture.terminal_of(&session);
+    assert_eq!(
+        std::fs::read(fixture.home.path().join("provider-focus")).unwrap(),
+        b""
+    );
     first.stop();
-    // Desktop's pane: the Session's held terminal, with a native status row.
+
+    let wide_view = || fixture.held_attach(&held, json!({"kind":"attach","cols":120,"rows":40}));
+    let owner = |cols: u64| {
+        let (socket, _) = fixture.held_entrance(&held);
+        let mut probe = Viewer::new(socket);
+        probe.request(json!({"kind":"attach","focused":false,"cols":40,"rows":20}));
+        let reply = probe.until_reply();
+        probe.accept(&reply);
+        let items = probe.until_event("owner");
+        assert_eq!(events(&items, "resize")[0]["cols"], cols);
+        reply["owner"].as_str().unwrap().to_owned()
+    };
+    let mut wide = wide_view();
+    let mut regular = service.command(&["session", "resume", &session]);
+    regular.env("PATH", &path);
+    let mut regular = Terminal::spawn_with_placement(regular, Some(true));
+    regular.wait_text("\x1b[?1004h");
+    let regular_id = owner(80);
+    assert_ne!(regular_id, wide.id);
+    until_owner(&mut wide, &regular_id);
+    regular.stop();
+    let wide_id = wide.id.clone();
+    until_owner(&mut wide, &wide_id);
+
+    let mut piped = service.command(&["session", "resume", &session]);
+    piped.env("PATH", &path);
+    let mut piped = Terminal::spawn(piped);
+    piped.wait_text("\x1b[?1004h");
+    assert_eq!(owner(120), wide.id);
+    piped.stop();
+
+    let mut passive = service.command(&["session", "resume", &session, "--unfocused"]);
+    passive.env("PATH", &path);
+    let mut passive = Terminal::spawn_with_placement(passive, Some(true));
+    passive.wait_text("\x1b[?1004h");
+    assert_eq!(owner(120), wide.id);
+    passive.stop();
+
     let status = ConnectionStatus::new(fixture.home.path().join("connection.sock"));
-    let mut command = service.command(&[
-        "session",
-        "attach",
-        "--terminal",
-        &held,
-        "--session",
-        &session,
-    ]);
+    let mut command = service.command(&["session", "resume", &session]);
     command
         .env("PATH", &path)
+        .env("LF_RELAY_FOCUSED", "0")
         .env("LF_SERVER", "1")
         .env("LF_SERVER_STATUS", &status.path);
-    let mut view = Terminal::spawn(command);
+    let mut view = Terminal::spawn_with_placement(command, Some(true));
     let ready = |after: u64| {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let reading = status.reading();
             if reading.as_ref().is_some_and(|reading| {
                 reading["state"] == "connected"
-                    && reading["input"] == true
                     && reading["native_ready"] == true
                     && reading["generation"].as_u64().unwrap() > after
             }) {
@@ -3021,13 +3469,36 @@ fn a_held_pane_reads_reconnecting_until_the_next_server_answers() {
             std::thread::sleep(Duration::from_millis(20));
         }
     };
-    let generation = ready(0);
-    service.stop();
-    wait_server_status(&status, "reconnecting", false, generation + 1);
-    service.child = Some(service.launch());
-    service.ready();
-    ready(generation);
-    view.assert_viewing("the held pane");
+    let mut generation = ready(0);
+    assert_eq!(owner(120), wide.id);
+    for (keys, marker, focused) in [
+        (b"x\x1b[O\x1b[1;1R".as_slice(), "observed-blurred", false),
+        (b"yR".as_slice(), "observed-typed", true),
+    ] {
+        view.keyboard.as_mut().unwrap().write_all(keys).unwrap();
+        view.wait_text(marker);
+        service.stop();
+        wait_server_status(&status, "reconnecting", generation + 1);
+        // Give the new server a sizing view before allowing the relay to reconnect.
+        let pid = view.child.id() as libc::pid_t;
+        // SAFETY: this fixture owns the live viewer process.
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
+        service.child = Some(service.launch());
+        service.ready();
+        wide = wide_view();
+        // SAFETY: resume the same viewer after its replacement peer is attached.
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGCONT) }, 0);
+        generation = ready(generation);
+        assert_eq!(owner(if focused { 80 } else { 120 }) != wide.id, focused);
+        if !focused {
+            view.wait_text("\x1b[5n");
+            view.keyboard
+                .as_mut()
+                .unwrap()
+                .write_all(b"\x1b[0n")
+                .unwrap();
+        }
+    }
     view.stop();
     // SAFETY: the pid the fixture's provider recorded for itself.
     unsafe { libc::kill(provider, libc::SIGKILL) };
@@ -3037,7 +3508,8 @@ fn a_held_pane_reads_reconnecting_until_the_next_server_answers() {
 /// A managed launch refused for a stopped server started no provider, so the
 /// next launch starts that conversation fresh instead of resuming one that
 /// never ran (real Claude answers `--resume` with "No conversation found").
-/// The refused launch is piped, so it runs unheld and its owner checks the server.
+/// The refused launch is piped, so it runs unheld and checks the server
+/// before its provider starts.
 #[test]
 fn a_launch_refused_for_a_stopped_server_leaves_nothing_to_resume() {
     let fixture = Fixture::new();
@@ -3066,21 +3538,79 @@ fn a_launch_refused_for_a_stopped_server_leaves_nothing_to_resume() {
     );
 
     let _service = ServerProof::start(&fixture, false);
-    let mut launch = fixture.command(&["-a", "claude", "resume"]);
-    launch.env("PATH", &path);
-    let view = Terminal::spawn(launch);
-    let launched = fixture.launches(1).pop().unwrap();
-    let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
-    let _provider = KillOnDrop(provider);
-    assert!(
-        launched.contains("--session-id ") && !launched.contains("--resume "),
-        "{launched}"
+    fixture.resume_starts_a_new_thread(&path, 1);
+}
+
+/// A launch that could not find the provider's CLI named a Claude conversation
+/// that Claude never wrote. The next launch starts it fresh; `--resume` on that
+/// name answers "No conversation found" and the conversation never opens.
+/// Started by `lf open`, the launcher's error answers the opening and the log keeps it.
+#[test]
+fn a_launch_that_found_no_provider_leaves_nothing_to_resume() {
+    let fixture = Fixture::new();
+    // lf appends its tool directories to any PATH, so a Claude Code installed
+    // in one of the system's is found and nothing here is missing.
+    let bare = "/usr/bin:/bin:/usr/sbin:/sbin";
+    let searched = loopflow_execution::os_process::tool_path(bare, fixture.home.path());
+    if let Some(found) = searched
+        .split(':')
+        .map(|dir| Path::new(dir).join("claude"))
+        .find(|claude| claude.exists())
+    {
+        eprintln!("skipped: this Machine has {}", found.display());
+        return;
+    }
+    let _service = ServerProof::start(&fixture, false);
+    let path = fixture.waiting_provider();
+    let missing = fixture
+        .command(&["-a", "claude", "resume"])
+        .env("PATH", bare)
+        .env("LF_OPEN_RECEIPT", fixture.home.path().join("receipt"))
+        .env_remove("RUST_LOG")
+        .output()
+        .unwrap();
+    // The held terminal relays the launcher's error on its one stream.
+    let shown = String::from_utf8_lossy(&missing.stdout);
+    assert!(shown.contains("'claude' is not installed"), "{missing:?}");
+    let log = std::fs::read_to_string(fixture.home.path().join("logs/lf.log")).unwrap();
+    assert!(log.contains("'claude' is not installed"), "{log}");
+    // The launcher answered the opening with its own error, before the pane's status line.
+    let reason = std::fs::read_to_string(fixture.home.path().join("receipt")).unwrap();
+    assert!(reason.starts_with("'claude' is not installed"), "{reason}");
+    assert!(!reason.contains("status"), "{reason}");
+
+    fixture.resume_starts_a_new_thread(&path, 1);
+}
+
+/// A provider that started and exited before saving anything (a failed
+/// login, a trust prompt refused, a crash, Ctrl+C before typing) leaves a
+/// recorded thread with no transcript. The next launch starts it fresh with
+/// `--session-id`; `--resume` would answer "No conversation found".
+#[test]
+fn a_provider_that_exits_before_saving_starts_fresh_next_time() {
+    let fixture = Fixture::new();
+    let _service = ServerProof::start(&fixture, false);
+    let path = fixture.provider(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+if [ ! -e "$HOME/exited" ]; then : > "$HOME/exited"; exit 1; fi
+stty -echo < /dev/tty
+printf 'ready for %s\r\n' "$*"
+read -r answer < /dev/tty
+"#,
     );
-    let held = fixture.terminal_of(&session_of(&fixture.sql(), &launched));
-    view.stop();
-    // SAFETY: the pid the fixture's provider recorded for itself.
-    unsafe { libc::kill(provider, libc::SIGKILL) };
-    fixture.held_ends(&held);
+    let exited = fixture
+        .command(&["-a", "claude", "resume"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    let first = fixture.launches(1).pop().unwrap();
+    assert!(first.contains("--session-id "), "{first} {exited:?}");
+
+    let launched = fixture.resume_starts_a_new_thread(&path, 2);
+    let sql = fixture.sql();
+    assert_eq!(session_of(&sql, &launched), session_of(&sql, &first));
 }
 
 /// The server reads every held terminal's Program Status, viewed or not:
@@ -3133,69 +3663,6 @@ read -r answer < /dev/tty
         );
         std::thread::sleep(Duration::from_millis(100));
     }
-    // SAFETY: the pid the fixture's provider recorded for itself.
-    unsafe { libc::kill(provider, libc::SIGKILL) };
-    fixture.held_ends(&held);
-}
-
-/// A Session an earlier build's `lf session serve` owner still runs restarts
-/// held when resumed: that owner, found by its recorded pid and birth, ends
-/// first, so no second agent runs on its thread.
-#[test]
-fn resume_ends_an_earlier_builds_owner_and_continues_held() {
-    use std::os::unix::process::ExitStatusExt;
-    let fixture = Fixture::new();
-    let _server = fixture.machine_server();
-    let path = fixture.waiting_provider();
-    let prepared = fixture
-        .command(&["-a", "claude", "resume", "--prepare", "--json"])
-        .env("PATH", &path)
-        .output()
-        .unwrap();
-    assert!(prepared.status.success(), "{prepared:?}");
-    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
-    let session = prepared["id"].as_str().unwrap().to_owned();
-    // The earlier build's owner: a plain process its row names by pid and birth.
-    let mut stand_in = Command::new("/bin/sleep").arg("600").spawn().unwrap();
-    let born = time::OffsetDateTime::now_utc().unix_timestamp();
-    let pid = stand_in.id();
-    let (exited, reaped) = std::sync::mpsc::channel();
-    std::thread::spawn(move || exited.send(stand_in.wait().unwrap()));
-    let owner = "00000000-0000-4000-8000-0000000008a1";
-    let sql = fixture.sql();
-    sql.execute(
-        r#"INSERT INTO processes(id,trace_id,command,started_at,pid,os_started_at)
-           VALUES(?1,?1,'["lf","session","serve","--terminal","--","lf"]',?2,?3,?2)"#,
-        rusqlite::params![owner, born, pid],
-    )
-    .unwrap();
-    sql.execute(
-        "UPDATE agent_sessions SET transport_lf_process_id=?1,held_terminal_id=NULL WHERE id=?2",
-        rusqlite::params![owner, session],
-    )
-    .unwrap();
-    let mut command = fixture.command(&["resume", &session]);
-    command.env("PATH", path);
-    let view = Terminal::spawn_with_placement(command, Some(true));
-    let launch = fixture.launches(1).pop().unwrap();
-    let provider: libc::pid_t = launch.split(':').next().unwrap().parse().unwrap();
-    let _provider = KillOnDrop(provider);
-    let status = reaped
-        .recv_timeout(Duration::from_secs(10))
-        .expect("the earlier owner outlived the resume");
-    assert_eq!(status.signal(), Some(libc::SIGTERM));
-    let held = fixture.terminal_of(&session);
-    assert!(fixture.held_running(&held));
-    let owner_after: Option<String> = sql
-        .query_row(
-            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
-            [&session],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(owner_after, None);
-    assert_eq!(fixture.launches(1).len(), 1);
-    view.stop();
     // SAFETY: the pid the fixture's provider recorded for itself.
     unsafe { libc::kill(provider, libc::SIGKILL) };
     fixture.held_ends(&held);
@@ -3618,25 +4085,6 @@ fn a_held_view_waits_for_a_holder_stopped_at_server_startup() {
         )
         .unwrap();
     assert_eq!(code, None, "nobody saw the agent exit");
-    let unfinished = || {
-        fixture
-            .sql()
-            .query_row(
-                r#"SELECT COUNT(*) FROM processes WHERE command='["lf","holder","run"]'
-                   AND pid=?1 AND completed_at IS NULL"#,
-                [holder],
-                |r| r.get::<_, i64>(0),
-            )
-            .unwrap()
-    };
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while unfinished() > 0 {
-        assert!(
-            Instant::now() < deadline,
-            "the gone holder's row never ended"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
     assert_eq!(fixture.held_entrance(&terminal).1, "ended");
     assert!(!view.wait_exit().success());
 }
@@ -3647,13 +4095,13 @@ fn a_held_view_waits_for_a_holder_stopped_at_server_startup() {
 /// before it was presented is refused by name.
 #[test]
 fn session_attach_waits_for_a_holder_stopped_at_server_startup() {
-    use loopflow::engine::{Error, ErrorCode};
     use loopflow::server::wire::{Operation, ServerOperation};
+    use loopflow_execution::engine::{Error, ErrorCode};
 
     let fixture = Fixture::new();
     let mut service = ServerProof::start(&fixture, false);
     let home = fixture.home.path();
-    let session: loopflow::id::LfSessionId = "session_held_attach".into();
+    let session: loopflow_model::id::LfSessionId = "session_held_attach".into();
     let script = format!(
         "echo $$ > {home}/agent.pid; i=0; while [ ! -e {home}/stop ]; do i=$((i+1)); printf 'tick:%d\\n' $i; sleep 0.1; done",
         home = home.display()
@@ -3716,7 +4164,7 @@ fn session_attach_waits_for_a_holder_stopped_at_server_startup() {
     signal(libc::SIGCONT);
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut socket = loop {
-        match loopflow::server::client::attach(&fixture.endpoint("machine"), &session) {
+        match loopflow_execution::machine::client::attach(&fixture.endpoint("machine"), &session) {
             Ok(socket) => break socket,
             Err(failure) => {
                 let waiting = refused(failure);
@@ -3732,7 +4180,7 @@ fn session_attach_waits_for_a_holder_stopped_at_server_startup() {
     socket
         .write_all(&frame(
             REQUEST,
-            json!({"id":1,"kind":"attach","control":true,"replace":true,"own":"take","rows":24,"cols":80})
+            json!({"id":1,"kind":"attach","rows":24,"cols":80})
                 .to_string()
                 .as_bytes(),
         ))
@@ -3892,91 +4340,4 @@ fn task_cleanup_ends_an_abandoned_tasks_held_terminal() {
         .unwrap();
     let _ = fixture.command(&["task", "retire", task]).output().unwrap();
     fixture.held_ends(&terminal);
-}
-
-/// Every held terminal shares its build's one holder, which `lf ps` lists
-/// once across a server restart; no owner process runs per terminal.
-#[test]
-fn held_terminals_list_one_holder_process() {
-    let fixture = Fixture::new();
-    let mut service = ServerProof::start(&fixture, false);
-    let home = fixture.home.path();
-    let start = |service: &ServerProof, request: &str| {
-        let script = format!("while [ ! -e {}/stop ]; do sleep 0.1; done", home.display());
-        let started = service
-            .connect()
-            .request(loopflow::server::wire::Operation::Server(
-                loopflow::server::wire::ServerOperation::SessionStart {
-                    session: None,
-                    request: request.into(),
-                    argv: vec!["/bin/sh".into(), "-c".into(), script],
-                    cwd: home.to_path_buf(),
-                    env: vec![("PATH".into(), "/usr/bin:/bin".into())],
-                    rows: 24,
-                    cols: 80,
-                    placement: None,
-                },
-            ))
-            .unwrap();
-        started.result["terminal_id"].as_str().unwrap().to_owned()
-    };
-    let terminals = [start(&service, "first"), start(&service, "second")];
-    let listed = |service: &ServerProof| {
-        let output = service
-            .command(&["process", "list", "--json"])
-            .stdin(Stdio::null())
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{output:?}");
-        let snapshot: Value = serde_json::from_slice(&output.stdout).unwrap();
-        snapshot["nodes"].as_array().unwrap().clone()
-    };
-    let holders = |nodes: &[Value]| -> Vec<u64> {
-        nodes
-            .iter()
-            .filter(|node| node["label"] == "lf holder")
-            .map(|node| node["pid"].as_u64().unwrap())
-            .collect()
-    };
-    let nodes = listed(&service);
-    let first = holders(&nodes);
-    assert_eq!(first.len(), 1, "{nodes:#?}");
-    assert!(command_line(first[0] as libc::pid_t)
-        .1
-        .contains("holder run"));
-    // A new server takes up the same holder and records nothing new.
-    service.stop();
-    service.child = Some(service.launch());
-    service.ready();
-    assert_eq!(holders(&listed(&service)), first);
-
-    std::fs::write(home.join("stop"), "").unwrap();
-    for terminal in &terminals {
-        fixture.held_ends(terminal);
-    }
-    // The holder leaves, as it would after idling: the server that adopted it
-    // settles its row, though only the server that started it saw the exit.
-    let holder = first[0] as libc::pid_t;
-    // SAFETY: the holder this fixture's servers recorded.
-    unsafe { libc::kill(holder, libc::SIGKILL) };
-    // A settled holder row is completed, then forgotten: none stays unfinished.
-    let unfinished = || {
-        fixture
-            .sql()
-            .query_row(
-                r#"SELECT COUNT(*) FROM processes WHERE command='["lf","holder","run"]'
-                   AND pid=?1 AND completed_at IS NULL"#,
-                [holder],
-                |r| r.get::<_, i64>(0),
-            )
-            .unwrap()
-    };
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while unfinished() > 0 {
-        assert!(
-            Instant::now() < deadline,
-            "the adopted holder's row never ended"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
 }

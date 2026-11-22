@@ -58,7 +58,7 @@ fn custom_home_initializes_once_and_refuses_schema_repair() {
             |row| row.get(0),
         )
         .unwrap();
-    let error = loopflow::store::sqlite::SqliteStore::new(&database)
+    let error = loopflow_execution::store::open_sqlite(&database)
         .unwrap_err()
         .to_string();
     assert!(error.contains("disposable"), "{error}");
@@ -87,10 +87,13 @@ fn graph_steps_keep_the_explicit_home() {
     .unwrap();
     success(output);
     let connection = Connection::open(home.path().join("loopflow.db")).unwrap();
-    let child_commands: i64 = connection.query_row(
-        "SELECT count(*) FROM processes e JOIN graph_process_steps s ON s.lf_process_id=e.id WHERE e.exit_code=0",
-        [], |row| row.get(0)
-    ).unwrap();
+    let child_commands: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM graph_process_steps WHERE exit_code=0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(child_commands, 1);
 }
 

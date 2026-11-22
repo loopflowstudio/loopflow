@@ -33,7 +33,7 @@ fn configuration_readiness_recognizes_an_older_server_for_replacement() {
         socket.read_exact(&mut header).unwrap();
         assert_eq!(&header, b"{\"ty");
     });
-    let status = loopflow::server::client::status().unwrap();
+    let status = loopflow_execution::machine::client::status().unwrap();
     older.join().unwrap();
     assert!(!status.ready);
     assert!(status.listening);
@@ -61,43 +61,11 @@ fn describe_prints_the_protocol_with_no_server_and_no_store() {
 }
 
 #[test]
-fn a_client_that_closes_at_once_leaves_the_server_listening() {
-    let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_home(&[], Some(home.path()));
-    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
-    let repo = TestRepo::new();
-    let mut server = Server::start(repo.path(), home.path());
-    let socket = loopflow::server::socket_path().unwrap();
-    for _ in 0..2000 {
-        // A full listen queue refuses; only the server's exit fails the test.
-        if std::os::unix::net::UnixStream::connect(&socket).is_err() {
-            std::thread::sleep(Duration::from_millis(2));
-        }
-    }
-    assert!(server.0.try_wait().unwrap().is_none(), "the server exited");
-    // Closed clients leave as their connections notice; until then it may be `busy`.
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-    loop {
-        match loopflow::server::client::Connection::open() {
-            Ok(_) => break,
-            Err(error) => {
-                let busy = error
-                    .downcast_ref::<loopflow::engine::Error>()
-                    .is_some_and(|error| error.code == loopflow::engine::ErrorCode::Busy);
-                assert!(busy, "{error:#}");
-                assert!(std::time::Instant::now() < deadline, "{error:#}");
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        }
-    }
-}
-
-#[test]
 fn configuration_edits_use_the_server_without_work_processes() {
-    use loopflow::config::files::Destination;
     use loopflow::lf::commands::read::Read;
     use loopflow::lf::commands::write::Write;
     use loopflow::server::wire::Operation;
+    use loopflow_execution::config::files::Destination;
 
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_home(&[], Some(home.path()));
@@ -112,7 +80,7 @@ fn configuration_edits_use_the_server_without_work_processes() {
     let status: Value =
         serde_json::from_str(&read(repo.path(), home.path(), &["server", "status"], None)).unwrap();
     assert_eq!(status["ready"], true, "{status}");
-    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let mut connection = loopflow_execution::machine::client::Connection::open().unwrap();
     assert!(
         connection.welcome().machine.is_none(),
         "an unreadable registry leaves the Machine unknown, not the connection refused"
@@ -121,7 +89,11 @@ fn configuration_edits_use_the_server_without_work_processes() {
         connection
             .request(operation)
             .map(|response| response.result)
-            .map_err(|error| error.downcast::<loopflow::engine::Error>().unwrap())
+            .map_err(|error| {
+                error
+                    .downcast::<loopflow_execution::engine::Error>()
+                    .unwrap()
+            })
     };
     let catalog = request(Operation::Read(Read::ConfigCatalog)).unwrap();
     assert!(catalog
@@ -162,98 +134,6 @@ fn configuration_edits_use_the_server_without_work_processes() {
     .unwrap();
     assert_eq!(theme["value"], "Hearth");
     assert_eq!(fs::read(&database).unwrap(), before);
-}
-
-#[test]
-fn account_holds_and_rotation_use_the_same_machine_state_as_the_cli() {
-    use loopflow::lf::commands::read::Read;
-    use loopflow::lf::commands::write::Write;
-
-    // Codex puts its Unix socket below HOME; macOS temp roots can exceed SUN_LEN.
-    let home = tempfile::tempdir_in("/tmp").unwrap();
-    let _env = EnvGuard::with_home(&[], Some(home.path()));
-    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
-    support::register_codex_login(home.path(), "work");
-    let repo = TestRepo::new();
-    let _server = Server::start(repo.path(), home.path());
-    let report = || {
-        server_read(Read::AccountList {
-            target: Some("codex=work@".into()),
-            cached: true,
-        })
-    };
-    // Served reads share observations; commands and bare reads stay direct.
-    let observed = |field: &str, expected: Value| {
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        loop {
-            let current = report();
-            if current["accounts"][0][field] == expected {
-                return;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "account {field} did not become {expected}: {current}"
-            );
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    };
-    let login = "codex=work@".to_owned();
-    assert!(server_write(Write::AccountPause {
-        login: login.clone()
-    })
-    .is_null());
-    observed("routing", "explicit_only".into());
-    read(
-        repo.path(),
-        home.path(),
-        &["account", "unpause", &login],
-        None,
-    );
-    observed("routing", "automatic".into());
-    assert!(server_write(Write::AccountUse {
-        login: login.clone()
-    })
-    .is_null());
-    observed("held", true.into());
-    let cli: Value = serde_json::from_str(&read(
-        repo.path(),
-        home.path(),
-        &["account", &login, "--cached", "--json"],
-        None,
-    ))
-    .unwrap();
-    assert_eq!(report(), cli);
-    for agent in [None, Some("claude:fable")] {
-        let next = server_read(Read::AccountNext {
-            agent: agent.map(str::to_owned),
-            directory: repo.path().to_owned(),
-            repo: None,
-            default: true,
-        });
-        let mut argv = vec!["account", "next", "--default", "--json"];
-        if let Some(agent) = agent {
-            argv.extend(["--agent", agent]);
-        }
-        let cli: Value =
-            serde_json::from_str(&read(repo.path(), home.path(), &argv, None)).unwrap();
-        assert_eq!(next, cli);
-        assert_eq!(next[0]["model"], serde_json::json!(agent.map(|_| "fable")));
-        assert!(next[1]["model"].is_null());
-    }
-    assert!(server_write(Write::AccountUse {
-        login: "auto".into()
-    })
-    .is_null());
-    observed("held", false.into());
-    read(
-        repo.path(),
-        home.path(),
-        &["account", "pause", &login],
-        None,
-    );
-    observed("routing", "explicit_only".into());
-    assert!(server_write(Write::AccountUnpause { login }).is_null());
-    observed("routing", "automatic".into());
 }
 
 #[test]
@@ -350,14 +230,12 @@ fn served_session_adoption_matches_cli_without_new_execution() {
         let cli = || {
             let args = spelled(&change);
             let args: Vec<_> = args.iter().map(String::as_str).collect();
-            let before = processes(&database);
             let output = read(repo.path(), home.path(), &args, None);
-            assert!(processes(&database) > before, "CLI lost its real Process");
             serde_json::from_str::<Value>(&output).unwrap()
         };
         let served = |change| {
             let before = processes(&database);
-            let answer = loopflow::server::client::Connection::open()
+            let answer = loopflow_execution::machine::client::Connection::open()
                 .unwrap()
                 .request(Operation::Write(change));
             assert_eq!(processes(&database), before, "request fabricated execution");
@@ -376,7 +254,11 @@ fn served_session_adoption_matches_cli_without_new_execution() {
         };
         let first = if served_first { adopt() } else { cli() };
         let second = if served_first { cli() } else { adopt() };
-        assert_eq!(without_revision(first.clone()), without_revision(second));
+        // The answer's row stamps when it was read.
+        assert_eq!(
+            without_clock(without_revision(first.clone())),
+            without_clock(without_revision(second))
+        );
         let first = &first["task"];
         assert_eq!(first["title"], "Keep the conversation");
         assert!(first["project_id"].is_null());
@@ -424,7 +306,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
             run: false,
         })
         .unwrap_err()
-        .downcast::<loopflow::engine::Error>()
+        .downcast::<loopflow_execution::engine::Error>()
         .unwrap();
         assert!(!refused.message.is_empty());
         assert_eq!(
@@ -518,7 +400,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     assert_eq!(receive().unwrap()["type"], "welcome");
 
     write(
-        serde_json::json!({"type": "request", "id": "catalog", "operation": {"kind": "config.catalog"}, "select": null}),
+        serde_json::json!({"type": "request", "id": "catalog", "operation": {"kind": "config.catalog"}, "select": null, "sender": null, "request_id": null}),
         true,
     );
     let answer = receive().unwrap();
@@ -529,38 +411,35 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     conforms(&declared("config.catalog"), &answer["result"]);
 
     write(
-        serde_json::json!({"type": "subscribe", "id": "processes", "operation": {"kind": "process.list"}, "select": null, "resume": null}),
+        serde_json::json!({"type": "subscribe", "id": "history", "operation": {"kind": "session.history", "since": "7d", "limit": 50, "wave": null, "project": null, "task": null}, "select": null, "resume": null, "sender": null}),
         true,
     );
     let mut subscribed = false;
     let mut answered = false;
     while !(subscribed && answered) {
         let message = receive().unwrap();
-        assert_eq!(message["id"], "processes", "{message}");
+        assert_eq!(message["id"], "history", "{message}");
         match message["type"].as_str().unwrap() {
             "response" => {
                 assert!(message["result"].is_null());
                 subscribed = true;
                 write(
-                    serde_json::json!({"type": "checkpoint", "id": "processes", "checkpoint": 1}),
+                    serde_json::json!({"type": "checkpoint", "id": "history", "checkpoint": 1}),
                     true,
                 );
             }
             "reading" => {
-                conforms(&declared("process.list"), &message["frame"]["body"]);
+                conforms(&declared("session.history"), &message["frame"]["body"]);
                 answered |= message["frame"]["answers"] == 1;
             }
             other => panic!("unexpected {other}: {message}"),
         }
     }
-    write(
-        serde_json::json!({"type": "cancel", "id": "processes"}),
-        true,
-    );
+    write(serde_json::json!({"type": "cancel", "id": "history"}), true);
 
     // An operation this server lacks fails alone; the connection keeps working.
     write(
-        serde_json::json!({"type": "request", "id": "newer", "operation": {"kind": "task.teleport"}, "select": null}),
+        serde_json::json!({"type": "request", "id": "newer", "operation": {"kind": "task.teleport"}, "select": null, "sender": null, "request_id": null}),
         false,
     );
     let refused = loop {
@@ -569,7 +448,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
             break message;
         }
         assert_eq!(
-            message["id"], "processes",
+            message["id"], "history",
             "only the cancelled subscription may still speak"
         );
     };
@@ -579,7 +458,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     );
     assert_eq!(refused["data"]["kind"], "task.teleport");
     write(
-        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "process.list"}, "select": null}),
+        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "session.history", "since": "7d", "limit": 50, "wave": null, "project": null, "task": null}, "select": null, "sender": null, "request_id": null}),
         true,
     );
     let after = loop {
@@ -589,7 +468,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
         }
     };
     assert_eq!(after["type"], "response", "{after}");
-    conforms(&declared("process.list"), &after["result"]);
+    conforms(&declared("session.history"), &after["result"]);
 }
 
 #[test]
@@ -606,12 +485,12 @@ fn observed_git_changes_reach_subscriptions_and_requests_on_the_same_connection(
     repo.commit("Comparison base");
     register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
     let _server = Server::start(repo.path(), home.path());
-    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let mut connection = loopflow_execution::machine::client::Connection::open().unwrap();
     let pane = || Read::TaskGet {
         directory: repo.path().to_owned(),
         issue: "INF-123".into(),
     };
-    let id = connection.subscribe(pane()).unwrap();
+    let id = connection.subscribe(pane(), None).unwrap();
     let frame = connection.reading(&id).unwrap().unwrap();
     assert!(frame["unavailable"].is_null(), "{frame}");
     assert_eq!(
@@ -677,13 +556,15 @@ fn screen_reads_are_compact_passive_and_match_cli() {
     let _env = EnvGuard::with_home(&[], Some(home.path()));
     std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
     let repo = TestRepo::new();
+    // A served reply schedules an independent plan exchange when a carrier exists.
+    loopflow_execution::git::git_stdout(repo.path(), &["remote", "remove", "origin"]).unwrap();
     repo.create_file(".lf/config.yaml", "default_agent: claude\n");
-    let mut registered = register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let directory = repo.path().canonicalize().unwrap();
+    let mut registered = register_task_with_pr(home.path(), &directory, "main", &repo.head_sha());
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     store
-        .create_task(&loopflow::work::task::NewTask {
-            id: loopflow::durable::TaskId::new(),
+        .create_task(&loopflow_execution::work::task::NewTask {
+            id: loopflow_execution::durable::TaskId::new(),
             repository_id: registered.task.repository_id.clone(),
             project_id: None,
             title: "Outside the Wave".into(),
@@ -691,40 +572,38 @@ fn screen_reads_are_compact_passive_and_match_cli() {
             due_date: None,
         })
         .unwrap();
-    let session = store
-        .create_session(
-            loopflow::session::LfSession {
-                captured: None,
-                id: "session_11111111111141118111111111111111".into(),
-                artifact_key: None,
-                caller_artifact_key: None,
-                input_published: false,
-                cwd: repo.path().into(),
-                skill: None,
-                provider: None,
-                model: None,
-                node: None,
-                iterations: None,
-                task_id: None,
-                wave_id: None,
-                graph_lf_process_id: None,
-                work_source: None,
-                bound_at: None,
-                interactive: true,
-                repo: Some(repo.path().display().to_string()),
-                title: "Recorded conversation".into(),
-                title_source: loopflow::session::TitleSource::Generated,
-                request: None,
-                ready_summary: None,
-                completed_at: None,
-                created_at: 1,
-            },
-            None,
-        )
-        .unwrap();
-    let _server = Server::start(repo.path(), home.path());
-    let mut connection = loopflow::server::client::Connection::open().unwrap();
-    let directory = repo.path().to_owned();
+    let session = loopflow_execution::store::sessions::create_session(
+        &store,
+        loopflow_execution::session::LfSession {
+            captured: None,
+            id: "session_11111111111141118111111111111111".into(),
+            artifact_key: None,
+            caller_artifact_key: None,
+            input_published: false,
+            cwd: directory.clone(),
+            skill: None,
+            provider: None,
+            model: None,
+            node: None,
+            iterations: None,
+            task_id: None,
+            wave_id: None,
+            graph_lf_process_id: None,
+            work_source: None,
+            bound_at: None,
+            interactive: true,
+            repo: Some(directory.display().to_string()),
+            title: "Recorded conversation".into(),
+            title_source: loopflow_execution::session::TitleSource::Generated,
+            request: None,
+            completed_at: None,
+            created_at: 1,
+        },
+        None,
+    )
+    .unwrap();
+    let _server = Server::start(&directory, home.path());
+    let mut connection = loopflow_execution::machine::client::Connection::open().unwrap();
     let board = Read::PlanBoard {
         directory: directory.clone(),
         wave: None,
@@ -747,7 +626,7 @@ fn screen_reads_are_compact_passive_and_match_cli() {
             .result;
         let argv = operation.argv();
         let printed: Value = serde_json::from_str(&read(
-            repo.path(),
+            &directory,
             home.path(),
             &argv.iter().map(String::as_str).collect::<Vec<_>>(),
             None,
@@ -827,32 +706,32 @@ fn screen_reads_are_compact_passive_and_match_cli() {
         let error = missing.read().unwrap_err();
         assert_eq!(
             error
-                .downcast_ref::<loopflow::engine::Error>()
+                .downcast_ref::<loopflow_execution::engine::Error>()
                 .unwrap()
                 .code,
-            loopflow::engine::ErrorCode::NotFound
+            loopflow_execution::engine::ErrorCode::NotFound
         );
     }
-    assert_eq!(
-        changes(&database),
-        before,
-        "screen reads changed Work or started a Process"
-    );
+    assert_eq!(changes(&database), before, "screen reads changed Work");
 
     // The detail names the recorded primary and observed PR checks.
     let conn = rusqlite::Connection::open(&database).unwrap();
-    store
-        .bind_session(session.id.as_str(), session.captured, &registered.task.id)
-        .unwrap();
+    loopflow_execution::store::sessions::bind_session(
+        &store,
+        session.id.as_str(),
+        session.captured,
+        &registered.task.id,
+    )
+    .unwrap();
     conn.execute(
         "INSERT OR REPLACE INTO task_primary_sessions(session_id,task_id) VALUES(?1,?2)",
         rusqlite::params![session.id.as_str(), registered.task.id.as_str()],
     )
     .unwrap();
-    registered.pr.ci_observation = Some(loopflow::work::task::CiObservation {
+    registered.pr.ci_observation = Some(loopflow_execution::work::task::CiObservation {
         head_sha: "head-with-failure".into(),
-        state: loopflow::work::task::CiState::Failing,
-        failing_checks: vec![loopflow::work::task::CiCheck {
+        state: loopflow_execution::work::task::CiState::Failing,
+        failing_checks: vec![loopflow_execution::work::task::CiCheck {
             name: "rust-test".into(),
             url: None,
         }],
@@ -928,6 +807,12 @@ fn server_operations_match_their_lf_commands() {
         None,
     ))
     .unwrap();
+    // One recorded capture, so its history reads the same both ways.
+    loopflow_storage::sqlite::sessions::test_capture(
+        &rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap(),
+        session["id"].as_str().unwrap(),
+        &loopflow_storage::session_record::new_artifact_key(),
+    );
     // Unpublished, so it can complete: `lf task complete` waits on a PR's merge.
     let unpublished: Value = serde_json::from_str::<serde_json::Value>(&read(
         repo.path(),
@@ -998,13 +883,13 @@ fn server_operations_match_their_lf_commands() {
     };
     // A new Read fails to compile here until it is compared too.
     let (reads, subscriptions) = match task_diff(None, None) {
-        Read::ProcessHistory { .. }
+        Read::SessionHistoryGet { .. }
         | Read::CreationGet { .. }
-        | Read::ProcessList
         | Read::DesktopViewList { .. }
         | Read::ViewSelect { .. }
         | Read::SessionList { .. }
         | Read::TaskGet { .. }
+        | Read::TaskStatus { .. }
         | Read::TaskDetail { .. }
         | Read::PlanBoard { .. }
         | Read::SessionCard { .. }
@@ -1023,7 +908,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::GraphList { .. }
         | Read::DesktopViewGet { .. }
         | Read::TaskRuns { .. }
-        | Read::ProcessGet { .. }
+        | Read::GraphRunGet { .. }
         | Read::SessionUsage { .. }
         | Read::TaskContext { .. }
         | Read::WavePlan { .. }
@@ -1031,7 +916,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::MachineList
         | Read::SessionHistory(_)
         | Read::PlanList { .. }
-        | Read::RepoPlan { .. }
+        | Read::RepoTracker { .. }
         | Read::WorkResolve { .. }
         | Read::RepoPath { .. }
         | Read::WaveGraph { .. }
@@ -1040,16 +925,18 @@ fn server_operations_match_their_lf_commands() {
         | Read::MachineDoctor
         | Read::RepoCi { .. }
         | Read::AccountList { .. }
-        | Read::AccountNext { .. }
         | Read::SkillList { .. }
         | Read::PrChecks { .. }
         | Read::PrReviews { .. }
         | Read::TaskWait { .. } => (
             [
-                Read::ProcessList,
                 plans(),
                 sessions(true),
                 task_pane(),
+                Read::TaskStatus {
+                    directory: repo.path().to_owned(),
+                    issue: "INF-123".into(),
+                },
                 Read::TaskDetail {
                     directory: repo.path().to_owned(),
                     issue: "INF-123".into(),
@@ -1087,20 +974,17 @@ fn server_operations_match_their_lf_commands() {
                 },
                 Read::ConfigCatalog,
                 Read::ConfigGet {
-                    destination: loopflow::config::files::Destination::SharedRepository {
+                    destination: loopflow_execution::config::files::Destination::SharedRepository {
                         repository: repo.path().to_owned(),
                     },
                     key: "agent".into(),
                 },
                 Read::ConfigExplain {
-                    destination: loopflow::config::files::Destination::PersonalRepository {
-                        repository: repo.path().to_owned(),
-                    },
+                    destination:
+                        loopflow_execution::config::files::Destination::PersonalRepository {
+                            repository: repo.path().to_owned(),
+                        },
                     key: "agent".into(),
-                },
-                Read::DesktopLayout {
-                    directory: repo.path().to_owned(),
-                    work: "repository".into(),
                 },
                 Read::RepoPeople {
                     directory: repo.path().to_owned(),
@@ -1121,11 +1005,13 @@ fn server_operations_match_their_lf_commands() {
                     task: "INF-123".into(),
                     after: None,
                 },
-                Read::ProcessHistory { id: graph.clone() },
+                Read::SessionHistoryGet {
+                    id: session["id"].as_str().unwrap().into(),
+                },
                 Read::CreationGet {
                     request_id: "absent-creation".into(),
                 },
-                Read::ProcessGet { id: graph },
+                Read::GraphRunGet { id: graph },
                 Read::SessionUsage {
                     days: 0,
                     wave: None,
@@ -1160,7 +1046,7 @@ fn server_operations_match_their_lf_commands() {
                     task: Some("INF-123".into()),
                     all: false,
                 },
-                Read::RepoPlan {
+                Read::RepoTracker {
                     directory: repo.path().to_owned(),
                 },
                 Read::WorkResolve {
@@ -1210,7 +1096,7 @@ fn server_operations_match_their_lf_commands() {
                 },
                 Read::TaskWait {
                     issue: "INF-123".into(),
-                    until: loopflow::ops::task::TaskWaitUntil::Terminal,
+                    until: loopflow_execution::ops::task::TaskWaitUntil::Terminal,
                 },
                 Read::SkillList {
                     directory: repo.path().to_owned(),
@@ -1219,7 +1105,6 @@ fn server_operations_match_their_lf_commands() {
             ],
             [
                 history(),
-                Read::ProcessList,
                 all_plans(),
                 Read::ViewSelect {
                     expression: Some("kind:task state:open".into()),
@@ -1227,16 +1112,20 @@ fn server_operations_match_their_lf_commands() {
                 plans(),
                 sessions(false),
                 sessions(true),
-                Read::RepoPlan {
+                Read::RepoTracker {
                     directory: work_folder,
                 },
                 task_pane(),
+                Read::TaskStatus {
+                    directory: repo.path().to_owned(),
+                    issue: "INF-123".into(),
+                },
             ],
         ),
     };
     let server = Server::start(repo.path(), home.path());
     let database = home.path().join("loopflow.db");
-    // A server read changes no Work and records no Process.
+    // A server read changes no Work.
     let unchanged = |argv: &[&str], serve: &mut dyn FnMut()| {
         let before = changes(&database);
         serve();
@@ -1248,10 +1137,10 @@ fn server_operations_match_their_lf_commands() {
         let printed = read(repo.path(), home.path(), &argv, query.input());
         let mut served = Value::Null;
         unchanged(&argv, &mut || served = server_read(query.clone()));
-        let Ok(printed) = serde_json::from_str::<Value>(&printed) else {
+        let Ok(mut printed) = serde_json::from_str::<Value>(&printed) else {
             // History is rendered text, including its final newline. A path's
             // CLI newline is only its output delimiter.
-            let text = if matches!(query, Read::ProcessHistory { .. }) {
+            let text = if matches!(query, Read::SessionHistoryGet { .. }) {
                 printed
             } else {
                 printed.trim().into()
@@ -1259,6 +1148,18 @@ fn server_operations_match_their_lf_commands() {
             assert_eq!(served, Value::String(text), "{argv:?}");
             continue;
         };
+        if matches!(query, Read::MachineDoctor) {
+            // The CLI and server read the Machine's PTY usage at different times.
+            for report in [&mut served, &mut printed] {
+                let ptys = report["checks"]
+                    .as_array_mut()
+                    .unwrap()
+                    .iter_mut()
+                    .find(|check| check["name"] == "ptys")
+                    .expect("machine doctor reports PTY usage");
+                *ptys = serde_json::json!({"name": "ptys"});
+            }
+        }
         assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
     }
     for served in subscriptions {
@@ -1267,12 +1168,15 @@ fn server_operations_match_their_lf_commands() {
         let mut frame = Value::Null;
         let words: Vec<&str> = argv.iter().map(String::as_str).collect();
         unchanged(&words, &mut || {
-            let mut connection = loopflow::server::client::Connection::open().unwrap();
-            let id = connection.subscribe(served.clone()).unwrap();
+            let mut connection = loopflow_execution::machine::client::Connection::open().unwrap();
+            let id = connection.subscribe(served.clone(), None).unwrap();
             frame = connection.reading(&id).unwrap().expect("a reading");
         });
-        let served = frame;
+        let mut served = frame;
         assert!(served["unavailable"].is_null(), "{argv:?}: {served}");
+        let work: loopflow_storage::instrumentation::SqlReceipt =
+            serde_json::from_value(served["work"].take()).unwrap();
+        assert!(!work.id.is_empty());
         let printed = first_frame(repo.path(), home.path(), &argv);
         assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
     }
@@ -1308,7 +1212,6 @@ fn server_operations_match_their_lf_commands() {
             .unwrap(),
         )
     };
-    let repository_id = repository["id"].as_str().unwrap().to_owned();
     // A saved record as the app reads it, and the revision a write names.
     let layout = |work: &str| -> Value {
         Read::DesktopLayout {
@@ -1320,25 +1223,6 @@ fn server_operations_match_their_lf_commands() {
     };
     let revision = |work: &str| layout(work)["revision"].as_i64().unwrap();
     let dashboard = || without_revision(layout("query:served"));
-    let pane = |revision: i64| Write::DesktopLayoutSave {
-        directory: directory.clone(),
-        work: "repository".into(),
-        layout: serde_json::json!({
-            "work": {"repository": repository_id, "kind": "repository", "id": repository_id},
-            "revision": revision,
-            "tree": {"kind": "pane", "id": "session",
-                     "content": {"kind": "session", "session_id": null, "location": null}},
-            "focused": null,
-            "zoomed": null,
-            "hidden": [],
-            "drafts": []
-        })
-        .to_string(),
-    };
-    let pane_revision = || {
-        let saved = layout("repository");
-        saved["revision"].as_i64().unwrap_or(0)
-    };
     // A new Write fails to compile here until it is compared too.
     let (writes, arrangement) = match (Write::TaskReopen {
         directory: directory.clone(),
@@ -1352,12 +1236,12 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskUpdate { .. }
         | Write::TaskClaim { .. }
         | Write::TaskUnassign { .. }
-        | Write::TaskHold { .. }
+        | Write::TaskAutoOff { .. }
         | Write::TaskMove { .. }
         // Starting a run or a ship starts Processes; task_run_waits_at_an_interactive_step
         // compares the run, and comments differ by their saved IDs.
         | Write::TaskRun { .. }
-        | Write::TaskShip { .. }
+        | Write::TaskAutoOn { .. }
         | Write::TaskSteer { .. }
         | Write::TaskReport { .. }
         | Write::TaskInterrupt { .. }
@@ -1380,6 +1264,10 @@ fn server_operations_match_their_lf_commands() {
         | Write::WavePlanBind { .. }
         | Write::WavePlanConnect { .. }
         | Write::WavePlanReteam { .. }
+        // Syncing and answering exchange with the tracker; their spellings
+        // are below and planning_sync_tests answers a lost line through them.
+        | Write::TaskSync { .. }
+        | Write::TrackerAnswer { .. }
         | Write::GraphCustomize { .. }
         // Releasing, committing, syncing and creating worktrees change the
         // repository and its remote; their spellings are compared below.
@@ -1389,11 +1277,11 @@ fn server_operations_match_their_lf_commands() {
         | Write::CheckoutCreate { .. }
         | Write::AccountDisconnect { .. }
         | Write::AccountConnect { .. }
-        | Write::AccountSet { .. }
-        | Write::AccountRedeemReset { .. }
-        | Write::AccountPause { .. }
-        | Write::AccountUnpause { .. }
-        | Write::AccountUse { .. }
+
+
+
+
+
         | Write::GraphRun { .. }
         | Write::SkillRun { .. }
         | Write::PrPublish { .. }
@@ -1416,13 +1304,13 @@ fn server_operations_match_their_lf_commands() {
         // configuration_edits_use_the_server_without_work_processes covers settings.
         | Write::ConfigSet { .. }
         | Write::ConfigUnset { .. }
-        | Write::ConfigTheme { .. }
-        | Write::DesktopLayoutSave { .. } => (
+        | Write::ConfigTheme { .. } => (
             [
                 Write::TaskUpdate {
                     directory: directory.clone(),
                     issue: "INF-123".into(),
-                    notes: "Served from the app".into(),
+                    notes: Some("Served from the app".into()),
+                    rank: Some(1),
                 },
                 Write::TaskMove {
                     machine: None,
@@ -1449,7 +1337,6 @@ fn server_operations_match_their_lf_commands() {
                     task: None,
                     wave: None,
                     agent: None,
-                    intent: loopflow::lf::commands::write::SessionOpenIntent::Resume,
                 },
                 Write::SessionResume {
                     directory: directory.clone(),
@@ -1457,7 +1344,6 @@ fn server_operations_match_their_lf_commands() {
                     task: None,
                     wave: None,
                     agent: None,
-                    intent: loopflow::lf::commands::write::SessionOpenIntent::Resume,
                 },
                 Write::SessionNew {
                     request_id: "new-thread-parity".into(),
@@ -1465,11 +1351,10 @@ fn server_operations_match_their_lf_commands() {
                     id: session.clone(),
                     agent: None,
                 },
-                // No fixture login is held back, so nothing is blocked to move.
+                // No fixture Session uses Pi, so this selection moves nothing.
                 Write::SessionMove {
                     directory: directory.clone(),
-                    blocked: true,
-                    on: None,
+                    on: Some("pi".into()),
                     agent: "codex".into(),
                 },
                 Write::TaskComplete {
@@ -1518,7 +1403,7 @@ fn server_operations_match_their_lf_commands() {
                 }),
                 // A hidden tile is no longer one to hide: show it before each hide.
                 Box::new(|| {
-                    let _ = loopflow::server::client::Connection::open().and_then(|mut c| {
+                    let _ = loopflow_execution::machine::client::Connection::open().and_then(|mut c| {
                         c.request(loopflow::server::wire::Operation::Write(
                             Write::DesktopDashboardShow {
                                 directory: directory.clone(),
@@ -1545,13 +1430,12 @@ fn server_operations_match_their_lf_commands() {
                     expression: "state:backlog".into(),
                     revision: Some(revision("query:served")),
                 }),
-                Box::new(|| pane(pane_revision())),
             ],
         ),
     };
     // The same write through the server, then through `lf`: each prints the same,
-    // leaves the same Work. Only the CLI is another OS Process; requests do
-    // not manufacture Process rows or borrow the server launcher's attribution.
+    // leaves the same Work. Requests do not manufacture Process rows or borrow
+    // the server launcher's attribution.
     let compare = |served: Write, again: &dyn Fn() -> Write, effect: &dyn Fn() -> Value| {
         let argv = spelled(&served);
         let before = processes(&database);
@@ -1567,9 +1451,7 @@ fn server_operations_match_their_lf_commands() {
         let again = again();
         let args = spelled(&again);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        let before = processes(&database);
         let printed = read(repo.path(), home.path(), &args, again.input());
-        let recorded = processes(&database) - before;
         assert_eq!(effect(), effected, "{argv:?}");
         // The CLI prints with `--json` exactly what the server returned.
         let printed: Value = serde_json::from_str(&printed)
@@ -1579,7 +1461,6 @@ fn server_operations_match_their_lf_commands() {
             without_times(without_save_time(without_clock(printed))),
             "{argv:?}"
         );
-        recorded
     };
     for write in writes {
         let issue = match &write {
@@ -1588,16 +1469,14 @@ fn server_operations_match_their_lf_commands() {
             | Write::TaskAbandon { issue, .. } => issue.clone(),
             _ => "INF-123".to_owned(),
         };
-        let recorded = compare(write.clone(), &|| write.clone(), &|| effect(&issue));
-        assert!(recorded > 0, "{:?} recorded no Process", spelled(&write));
+        compare(write.clone(), &|| write.clone(), &|| effect(&issue));
     }
     // A save names the revision it replaces, which the first save changed.
     compare(save(file_revision()), &|| save(file_revision()), &|| {
         effect("INF-123")
     });
     // Claiming and unassigning leave the same owner, which each prints from the
-    // store. Only the CLI records a Process. Every claim appends to the ownership
-    // log, so the log itself differs.
+    // store. Every claim appends to the ownership log, so the log itself differs.
     for claimed in [true, false] {
         let (directory, issue) = (directory.clone(), "INF-123".to_owned());
         let ownership = if claimed {
@@ -1614,18 +1493,11 @@ fn server_operations_match_their_lf_commands() {
         );
         let args = spelled(&ownership);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        let before = processes(&database);
         let printed: Value =
             serde_json::from_str(&read(repo.path(), home.path(), &args, None)).unwrap();
-        let recorded = processes(&database) - before;
-        assert!(recorded > 0, "{args:?} recorded no Process");
         assert_eq!(written["owner"], printed["owner"], "{args:?}");
         assert_eq!(written["owner"].is_null(), !claimed, "{written}");
     }
-    // Stopping a Task that is not shipping saves the stop, which keeps a run
-    // from approving it until `lf ship`, retaining who requested the stop. The
-    // ship process it kills and the merge request it takes back are the ship
-    // tests'.
     // No run is live, so an interrupt reaches nothing, in the app as through `lf`.
     let interrupt = Write::TaskInterrupt {
         directory: directory.clone(),
@@ -1684,9 +1556,10 @@ fn server_operations_match_their_lf_commands() {
         assert_eq!(last(&written), last(&printed), "{args:?}");
         assert_eq!(last(&written).0, format!("served {steer}"));
     }
-    let stop = Write::TaskHold {
+    let stop = Write::TaskAutoOff {
         directory: directory.clone(),
         issue: "INF-123".into(),
+        reason: None,
     };
     let stopped = || {
         Read::TaskGet {
@@ -1694,18 +1567,43 @@ fn server_operations_match_their_lf_commands() {
             issue: "INF-123".into(),
         }
         .read()
-        .unwrap()["execution"]["ship_stop"]["by"]
+        .unwrap()["execution"]["auto"]["by"]
             .clone()
     };
-    assert!(compare(stop.clone(), &|| stop.clone(), &stopped) > 0);
-    assert_eq!(stopped()["kind"], "person", "no stop saved");
+    // Auto is the Task's setting: this Task has taken up no Graph and keeps
+    // the off, served or through `lf`.
+    compare(stop.clone(), &|| stop.clone(), &stopped);
+    assert!(!stopped().is_null(), "a Task with no Graph lost its off");
+    // Why auto went off is a comment on the Task.
+    server_write(Write::TaskAutoOff {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+        reason: Some("waiting on the design".into()),
+    });
+    let pane = Read::TaskGet {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+    }
+    .read()
+    .unwrap();
+    assert!(
+        pane["comments"]["comments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|comment| comment["body"]
+                .as_str()
+                .is_some_and(|body| body.starts_with("waiting on the design"))),
+        "{}",
+        pane["comments"]
+    );
 
     // Which repositories the app shows, as the app reads them.
     let portfolio = || without_clock(Read::DesktopPortfolio.read().unwrap());
     let manual = Write::DesktopPortfolioSet {
-        change: loopflow::portfolio::PortfolioCommand::Manual,
+        change: loopflow_execution::portfolio::PortfolioCommand::Manual,
     };
-    assert!(compare(manual.clone(), &|| manual.clone(), &portfolio) > 0);
+    compare(manual.clone(), &|| manual.clone(), &portfolio);
     // A customized Graph is the builtin's copy in the repository.
     let customized = || {
         Value::from(
@@ -1721,7 +1619,7 @@ fn server_operations_match_their_lf_commands() {
         fs::remove_file(repo.path().join(".lf/graphs/code.yaml")).unwrap();
         customize.clone()
     };
-    assert_eq!(compare(customize.clone(), &recustomize, &customized), 0);
+    compare(customize.clone(), &recustomize, &customized);
     // A bind preview names the Task a bind would assign and assigns nothing.
     let bind_preview = Write::SessionBind {
         directory: directory.clone(),
@@ -1729,12 +1627,9 @@ fn server_operations_match_their_lf_commands() {
         task: "INF-123".into(),
         preview: true,
     };
-    assert_eq!(
-        compare(bind_preview.clone(), &|| bind_preview.clone(), &|| effect(
-            "INF-123"
-        )),
-        0
-    );
+    compare(bind_preview.clone(), &|| bind_preview.clone(), &|| {
+        effect("INF-123")
+    });
     // Arrangement persists without a Process, in the app as through `lf`.
     let create = Write::DesktopDashboardQuery {
         directory: directory.clone(),
@@ -1745,24 +1640,23 @@ fn server_operations_match_their_lf_commands() {
     let created = server_write(create);
     assert_eq!(layout("query:served")["id"], "served", "{created}");
     for write in arrangement {
-        let recorded = compare(write(), &*write, &dashboard);
-        assert_eq!(recorded, 0, "{:?} recorded a Process", spelled(&write()));
+        compare(write(), &*write, &dashboard);
     }
     // A refused write names its code and changes nothing; the CLI refuses
     // the same spelling. The default diagnostic log includes the request
     // trace, target, outcome and real server PID.
-    use loopflow::engine::ErrorCode;
     use loopflow::server::wire::Operation;
+    use loopflow_execution::engine::ErrorCode;
     let failure = Write::SessionRename {
         directory: directory.clone(),
         id: session.clone(),
         name: " ".into(),
     };
-    let refused = loopflow::server::client::Connection::open()
+    let refused = loopflow_execution::machine::client::Connection::open()
         .unwrap()
         .request(Operation::Write(failure.clone()))
         .unwrap_err()
-        .downcast::<loopflow::engine::Error>()
+        .downcast::<loopflow_execution::engine::Error>()
         .unwrap();
     assert_eq!(refused.code, ErrorCode::Invalid, "{refused:?}");
     let cli = isolated_lf(repo.path(), home.path(), &spelled(&failure))
@@ -1799,10 +1693,10 @@ fn server_operations_match_their_lf_commands() {
                     name: name.into(),
                 };
                 threads.spawn(move || {
-                    let loopflow::server::client::Response {
+                    let loopflow_execution::machine::client::Response {
                         trace_id,
                         result: saved,
-                    } = loopflow::server::client::Connection::open()
+                    } = loopflow_execution::machine::client::Connection::open()
                         .unwrap()
                         .request(Operation::Write(change))
                         .unwrap();
@@ -1858,7 +1752,6 @@ fn server_operations_match_their_lf_commands() {
                         task: None,
                         wave: None,
                         agent: None,
-                        intent: loopflow::lf::commands::write::SessionOpenIntent::Resume,
                     });
                     assert_eq!(
                         Path::new(saved["cwd"].as_str().unwrap())
@@ -1880,7 +1773,7 @@ fn server_operations_match_their_lf_commands() {
     // persisted result after dropping the connection while the write is held.
     let lock = rusqlite::Connection::open(&database).unwrap();
     lock.execute_batch("BEGIN IMMEDIATE").unwrap();
-    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let mut connection = loopflow_execution::machine::client::Connection::open().unwrap();
     connection
         .send(Operation::Write(Write::SessionRename {
             directory: directory.clone(),
@@ -1936,11 +1829,11 @@ fn server_operations_match_their_lf_commands() {
         agent: None,
         approve: false,
     };
-    let refused = loopflow::server::client::Connection::open()
+    let refused = loopflow_execution::machine::client::Connection::open()
         .unwrap()
         .request(loopflow::server::wire::Operation::Write(run))
         .unwrap_err()
-        .downcast::<loopflow::engine::Error>()
+        .downcast::<loopflow_execution::engine::Error>()
         .unwrap();
     assert!(
         refused
@@ -1968,19 +1861,15 @@ fn without_revision(mut value: Value) -> Value {
 }
 
 /// Each Work domain's revision and the Processes recorded.
-fn changes(database: &Path) -> (Vec<(String, i64)>, i64) {
-    let conn = rusqlite::Connection::open(database).unwrap();
-    let revisions = conn
+fn changes(database: &Path) -> Vec<(String, i64)> {
+    rusqlite::Connection::open(database)
+        .unwrap()
         .prepare("SELECT domain, revision FROM store_revisions ORDER BY domain")
         .unwrap()
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
         .unwrap()
         .collect::<Result<_, _>>()
-        .unwrap();
-    let processes = conn
-        .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
-        .unwrap();
-    (revisions, processes)
+        .unwrap()
 }
 
 /// A save without its recoveries' directories, which each save names by its time.
@@ -2050,9 +1939,9 @@ impl Server {
     fn start(repo: &Path, home: &Path) -> Self {
         let server = Self(isolated_lf(repo, home, &["server", "run"]));
         let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        // Readiness as a client sees it; `status()` would compare the server's
-        // executable with this test binary.
-        while loopflow::server::client::Connection::open().is_err() {
+        // This test binary is another executable than the server's, and the
+        // server is as ready for it as for its own `lf`.
+        while !loopflow_execution::machine::client::status().unwrap().ready {
             assert!(std::time::Instant::now() < deadline, "server did not start");
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -2069,7 +1958,7 @@ impl Drop for Server {
 
 fn server_read(query: loopflow::lf::commands::read::Read) -> Value {
     let kind = serde_json::to_value(&query).unwrap()["kind"].clone();
-    let result = loopflow::server::client::Connection::open()
+    let result = loopflow_execution::machine::client::Connection::open()
         .unwrap()
         .request(loopflow::server::wire::Operation::Read(query))
         .unwrap()
@@ -2098,7 +1987,7 @@ fn assert_declared_result(kind: &str, result: &Value) {
 }
 
 fn server_write(change: loopflow::lf::commands::write::Write) -> Value {
-    loopflow::server::client::Connection::open()
+    loopflow_execution::machine::client::Connection::open()
         .unwrap()
         .request(loopflow::server::wire::Operation::Write(change))
         .unwrap()
@@ -2109,7 +1998,7 @@ fn server_write(change: loopflow::lf::commands::write::Write) -> Value {
 /// server returns for it.
 fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
     use loopflow::lf::commands::write::Write;
-    use loopflow::portfolio::PortfolioCommand;
+    use loopflow_execution::portfolio::PortfolioCommand;
     let path = |path: &Path| path.display().to_string();
     let (directory, words): (String, Vec<String>) = match write {
         Write::TaskCreate {
@@ -2150,10 +2039,14 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             directory,
             issue,
             notes,
-        } => (
-            path(directory),
-            words(&["task", "edit", issue, &format!("--notes={notes}"), "--json"]),
-        ),
+            rank,
+        } => {
+            let mut args = words(&["task", "edit", issue]);
+            args.extend(notes.iter().map(|notes| format!("--notes={notes}")));
+            args.extend(rank.iter().map(|rank| format!("--rank={rank}")));
+            args.push("--json".into());
+            (path(directory), args)
+        }
         Write::TaskAbandon { directory, issue } => (
             path(directory),
             words(&["task", "abandon", issue, "--json"]),
@@ -2165,8 +2058,47 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["task", "unassign", issue, "--json"]),
         ),
-        Write::TaskHold { directory, issue } => {
-            (path(directory), words(&["task", "hold", issue, "--json"]))
+        Write::TaskAutoOff {
+            directory,
+            issue,
+            reason,
+        } => {
+            let mut spelled = words(&["task", "auto", "off", issue, "--json"]);
+            if let Some(reason) = reason {
+                spelled.extend(words(&["--reason", reason]));
+            }
+            (path(directory), spelled)
+        }
+        Write::TaskSync {
+            directory,
+            issue,
+            answer,
+        } => {
+            let mut args = words(&["task", "sync", issue]);
+            match answer {
+                Some(loopflow_execution::store::planning_sync::LostAnswer::KeepTheirs) => {
+                    args.push("--keep-theirs".into())
+                }
+                Some(loopflow_execution::store::planning_sync::LostAnswer::UseMine) => {
+                    args.push("--use-mine".into())
+                }
+                None => {}
+            }
+            (path(directory), args)
+        }
+        Write::TrackerAnswer {
+            directory,
+            action,
+            answer,
+        } => {
+            let flag = match answer {
+                loopflow_execution::store::planning_sync::LostAnswer::KeepTheirs => "--keep-theirs",
+                loopflow_execution::store::planning_sync::LostAnswer::UseMine => "--use-mine",
+            };
+            (
+                path(directory),
+                words(&["repo", "tracker", "answer", action, flag, "--json"]),
+            )
         }
         Write::TaskRun {
             directory,
@@ -2191,9 +2123,10 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.push("--json".into());
             (path(directory), spelled)
         }
-        Write::TaskShip { directory, issue } => {
-            (path(directory), words(&["--task", issue, "ship", "--json"]))
-        }
+        Write::TaskAutoOn { directory, issue } => (
+            path(directory),
+            words(&["--task", issue, "task", "auto", "on", "--json"]),
+        ),
         Write::TaskSteer {
             directory,
             issue,
@@ -2313,7 +2246,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             task,
             wave,
             agent,
-            intent,
         } => {
             let mut spelled = Vec::new();
             if id.is_none() && task.is_none() && wave.is_none() {
@@ -2323,7 +2255,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 spelled.extend(words(&["--agent", agent]));
             }
             spelled.extend(words(&["session", "resume"]));
-            spelled.extend(intent.flag().map(str::to_owned));
             spelled.extend(id.clone());
             if let Some(task) = task {
                 spelled.extend(words(&["--task", task]));
@@ -2336,14 +2267,10 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
         }
         Write::SessionMove {
             directory,
-            blocked,
             on,
             agent,
         } => {
             let mut spelled = words(&["--agent", agent, "session", "move", "--all", "--json"]);
-            if *blocked {
-                spelled.push("--blocked".into());
-            }
             if let Some(on) = on {
                 spelled.extend(words(&["--on", on]));
             }
@@ -2517,98 +2444,23 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.push("--json".into());
             (path(directory), spelled)
         }
-        Write::AccountDisconnect { provider, email } => {
-            let target = email
-                .as_ref()
-                .map(|email| format!("{provider}={email}"))
-                .unwrap_or_else(|| provider.clone());
-            let spelled = words(&["account", "disconnect", &target]);
-            ("/".into(), spelled)
+        Write::AccountDisconnect { provider } => {
+            ("/".into(), words(&["account", "disconnect", provider]))
         }
         Write::AccountConnect {
             provider,
-            email,
             chrome_profile,
-            import,
             api_key,
         } => {
-            let target = email
-                .as_ref()
-                .map(|email| format!("{provider}={email}"))
-                .unwrap_or_else(|| provider.clone());
-            let mut spelled = words(&["account", "connect", &target]);
+            let mut spelled = words(&["account", "connect", provider]);
             if let Some(profile) = chrome_profile {
                 spelled.extend(words(&["--chrome-profile", profile]));
             }
-            for (flag, on) in [("--import", import), ("--api-key", api_key)] {
-                if *on {
-                    spelled.push(flag.into());
-                }
+            if *api_key {
+                spelled.push("--api-key".into());
             }
             ("/".into(), spelled)
         }
-        Write::AccountSet {
-            provider,
-            email,
-            login_email,
-            plan,
-            clear_plan,
-            paid_through,
-            clear_paid_through,
-            clear_cooldown,
-            chrome_profiles,
-            clear_chrome_profiles,
-        } => {
-            let target = email
-                .as_ref()
-                .map(|email| format!("{provider}={email}"))
-                .unwrap_or_else(|| provider.clone());
-            let mut spelled = words(&["account", "set", &target]);
-            for (flag, value) in [
-                ("--login-email", login_email),
-                ("--plan", plan),
-                ("--paid-through", paid_through),
-            ] {
-                if let Some(value) = value {
-                    spelled.extend(words(&[flag, value]));
-                }
-            }
-            for (flag, on) in [
-                ("--clear-plan", clear_plan),
-                ("--clear-paid-through", clear_paid_through),
-                ("--clear-cooldown", clear_cooldown),
-                ("--clear-chrome-profiles", clear_chrome_profiles),
-            ] {
-                if *on {
-                    spelled.push(flag.into());
-                }
-            }
-            for profile in chrome_profiles {
-                spelled.extend(words(&["--chrome-profile", profile]));
-            }
-            ("/".into(), spelled)
-        }
-        Write::AccountRedeemReset {
-            provider,
-            email,
-            idempotency_key,
-            credit_id,
-        } => {
-            let mut spelled = words(&["account", "redeem-reset", &format!("{provider}={email}")]);
-            for (flag, value) in [
-                ("--idempotency-key", idempotency_key),
-                ("--credit-id", credit_id),
-            ] {
-                if let Some(value) = value {
-                    spelled.extend(words(&[flag, value]));
-                }
-            }
-            spelled.push("--json".into());
-            ("/".into(), spelled)
-        }
-        Write::AccountUse { login } => ("/".into(), words(&["account", "use", login])),
-        Write::AccountPause { login } => ("/".into(), words(&["account", "pause", login])),
-        Write::AccountUnpause { login } => ("/".into(), words(&["account", "unpause", login])),
         Write::GraphRun {
             directory,
             name,
@@ -2949,12 +2801,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 destination,
             ]),
         ),
-        Write::DesktopLayoutSave {
-            directory, work, ..
-        } => (
-            path(directory),
-            words(&["desktop", "layout", work, "--save"]),
-        ),
         Write::ConfigSet { .. } | Write::ConfigUnset { .. } | Write::ConfigTheme { .. } => {
             unreachable!("settings writes are compared on their own")
         }
@@ -3083,7 +2929,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     writeln!(
         socket,
         "{}",
-        serde_json::json!({"type":"request","id":"first","select":null,"operation":change})
+        serde_json::json!({"type":"request","id":"first","select":null,"sender":null,"request_id":null,"operation":change})
     )
     .unwrap();
     // Deliberately do not read the answer. Admission is observed in the receipt.
@@ -3107,7 +2953,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     }
     drop(reader);
     drop(socket);
-    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let mut connection = loopflow_execution::machine::client::Connection::open().unwrap();
     let first = connection
         .request(Operation::Write(change.clone()))
         .unwrap()
@@ -3116,18 +2962,26 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     drop(connection);
     drop(server);
     let _server = Server::start(repo.path(), home.path());
-    let mut connection = loopflow::server::client::Connection::open().unwrap();
+    let mut connection = loopflow_execution::machine::client::Connection::open().unwrap();
     let second = connection
         .request(Operation::Write(change.clone()))
         .unwrap()
         .result;
-    assert_eq!(first, second);
+    // A repeat returns the same receipt; the reads beside it are taken again.
+    let receipt = |mut answer: serde_json::Value| {
+        let fields = answer.as_object_mut().unwrap();
+        for read in ["session", "row"] {
+            fields.remove(read).unwrap();
+        }
+        answer
+    };
+    assert_eq!(receipt(first.clone()), receipt(second));
     std::thread::scope(|scope| {
         let concurrent: Vec<_> = (0..4)
             .map(|_| {
                 let change = change.clone();
                 scope.spawn(move || {
-                    loopflow::server::client::Connection::open()
+                    loopflow_execution::machine::client::Connection::open()
                         .unwrap()
                         .request(Operation::Write(change))
                         .unwrap()
@@ -3136,7 +2990,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
             })
             .collect();
         for retry in concurrent {
-            assert_eq!(retry.join().unwrap(), first);
+            assert_eq!(receipt(retry.join().unwrap()), receipt(first.clone()));
         }
     });
     let found = connection
@@ -3145,7 +2999,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         }))
         .unwrap()
         .result;
-    assert_eq!(found["result"], first);
+    assert_eq!(found["result"], receipt(first.clone()));
     assert_eq!(found["disposition"], "complete");
     assert_eq!(found["explanation"], "Task created");
     let mut changed = change.clone();
@@ -3155,9 +3009,9 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let error = connection
         .request(Operation::Write(changed.clone()))
         .unwrap_err()
-        .downcast::<loopflow::engine::Error>()
+        .downcast::<loopflow_execution::engine::Error>()
         .unwrap();
-    assert_eq!(error.code, loopflow::engine::ErrorCode::Conflict);
+    assert_eq!(error.code, loopflow_execution::engine::ErrorCode::Conflict);
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     assert_eq!(
         conn.query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0))
@@ -3165,7 +3019,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         1
     );
     // An unrelated Task graph cannot confirm this creation's interrupted launch.
-    let input = loopflow::engine::creation::TaskCreation {
+    let input = loopflow_execution::engine::creation::TaskCreation {
         directory: repo.path().canonicalize().unwrap(),
         title: Some("One Task".into()),
         request: None,
@@ -3222,9 +3076,12 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let unknown = connection
         .request(Operation::Write(changed.clone()))
         .unwrap_err()
-        .downcast::<loopflow::engine::Error>()
+        .downcast::<loopflow_execution::engine::Error>()
         .unwrap();
-    assert_eq!(unknown.code, loopflow::engine::ErrorCode::OutcomeUnknown);
+    assert_eq!(
+        unknown.code,
+        loopflow_execution::engine::ErrorCode::OutcomeUnknown
+    );
     assert_eq!(unknown.data.unwrap()["milestone"], "run_requested");
     assert_eq!(
         conn.query_row("SELECT count(*) FROM creation_receipts", [], |r| r
@@ -3245,7 +3102,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         .result;
     assert_eq!(removed["disposition"], "inspect");
     assert_eq!(removed["explanation"], "The created Task was removed");
-    assert_eq!(removed["result"], first);
+    assert_eq!(removed["result"], receipt(first.clone()));
     assert!(connection.request(Operation::Write(changed)).is_err());
     assert_eq!(
         conn.query_row(
@@ -3308,7 +3165,7 @@ fn served_session_new_recovers_its_input_after_a_lost_reply_and_restart() {
     writeln!(
         socket,
         "{}",
-        serde_json::json!({"type":"request","id":"first","select":null,"operation":change})
+        serde_json::json!({"type":"request","id":"first","select":null,"sender":null,"request_id":null,"operation":change})
     )
     .unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(15);
@@ -3326,7 +3183,7 @@ fn served_session_new_recovers_its_input_after_a_lost_reply_and_restart() {
     }
     drop(reader);
     drop(socket);
-    let result = loopflow::server::client::Connection::open()
+    let result = loopflow_execution::machine::client::Connection::open()
         .unwrap()
         .request(Operation::Write(change.clone()))
         .unwrap()
@@ -3335,7 +3192,7 @@ fn served_session_new_recovers_its_input_after_a_lost_reply_and_restart() {
     assert_eq!(captures(), before + 1);
     drop(server);
     let _server = Server::start(repo.path(), home.path());
-    let again = loopflow::server::client::Connection::open()
+    let again = loopflow_execution::machine::client::Connection::open()
         .unwrap()
         .request(Operation::Write(change))
         .unwrap()

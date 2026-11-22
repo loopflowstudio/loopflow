@@ -46,16 +46,16 @@
       <p>Coding agents can do amazing things for you, but they ask amazing focus of you. How can you, a human with a single locus of attention, stay in sync with an entire parallel agent swarm? Shipping tens of thousands of lines is the easy part. Making them lines worth keeping — lines you don’t revert next month — is the hard part.</p>
       <p>Loopflow helps you do that by arranging your agent sessions around clear work boundaries: long-lived areas of responsibility and objectives and concrete outcomes. You don’t have to keep every session window open for fear of it disappearing, or remember why you wanted to do this massive change in the first place.</p>
       <p>Each task has one owner, one working copy and one pull request, so your agents and a friend’s agents can work in the same project without taking the same task or writing over each other.</p>
-      <p>The plan is shared: your tasks live on a shared ref in your project’s GitHub repository, or in Linear, with Asana and Notion coming. Comment on someone’s task, and their agents read it before their next step. Your conversations stay on your computer; only the plan travels.</p>
+      <p>The plan is shared: your tasks live on a shared ref in your project’s GitHub repository, or in Linear or Asana. Comment on someone’s task, and their agents read it before their next step. Your conversations stay on your computer; only the plan travels.</p>
       <p>Your work has defined workflows — how an idea gets researched, designed, implemented, validated, shipped, etc. — and the points at which you want to get involved: be that early on in design, later on in trying it out, both, or neither. Each wave and task has an associated workflow that is used to drive work forward and ensures that each session you come to in Loopflow is one where your input really matters.</p>
       <p>Loopflow ships reasonable workflows for software engineering, and they are templates. Change them, or write down the way you work and share it.</p>
-      <p class="more"><a href="/docs/work">Tasks and Waves ↗</a><a href="/docs/orchestration#where-a-person-takes-part">Write a workflow ↗</a><a href="/docs/work#share-the-plan">Share the plan ↗</a></p>
+      <p class="more"><a href="/docs/work">Tasks and Waves ↗</a><a href="/docs/orchestration#where-a-person-takes-part">Write a workflow ↗</a><a href="/docs/work#share-the-plan-with-your-team">Share the plan ↗</a></p>
     </article>
     <article>
       <div class="card"><ul class="wfs">
-<li><code>feature</code><p class="line"><i>start</i><span>task-design →</span><b>design</b><span>pursue →</span><b>demo</b><span>ship →</span><i>end</i></p><small>The default. You jam on the design, and you try every change before it ships.</small></li>
-<li><code>code</code><p class="line"><i>start</i><span>pursue →</span><b>demo</b><span>ship →</span><i>end</i></p><small>One stop. Your agent builds straight from the task, and you try the change.</small></li>
-<li><code>research</code><p class="line"><i>start</i><span>research →</span><b>findings</b><i>end</i></p><small>No pull request. Your agent investigates, and the task ends when you accept the findings.</small></li>
+<li><code>feature</code><p class="line"><i>start</i><b>explore</b><span>plan →</span><span>build →</span><b>ship-review</b><span>deliver →</span><b>verify</b><i>end</i></p><small>The default. You jam on the design, and you try every change before it ships.</small></li>
+<li><code>code</code><p class="line"><i>start</i><span>plan →</span><span>build →</span><b>ship-review</b><span>deliver →</span><b>verify</b><i>end</i></p><small>One stop. Your agent builds straight from the task, and you try the change.</small></li>
+<li><code>research</code><p class="line"><i>start</i><span>research →</span><b>research</b><i>end</i></p><small>No pull request. Your agent investigates, and the task ends when you accept the findings.</small></li>
       </ul></div>
       <p class="cap">Three workflows that ship with Loopflow. The highlighted stops are where you come in; everything between them runs on its own.</p>
 <pre tabindex="0" aria-label="A comment reaching a teammate's agent" class="term"><span class="p">$</span> <b>lf</b> task claim ETU-14         <span class="c"># Theo takes it, on their laptop</span>
@@ -92,14 +92,13 @@
   <p class="hand">Each session knows how to hand its work to a run in a way that stays faithful to your process: a run follows the workflow you wrote down and stops where you said you want to be involved. Every run, its steps and its result are recorded, so you can watch one live or read what it did afterwards. And the work happens in its own process, off the main thread, so a long run never fills your conversation’s context; the session just reads back the outcome.</p>
   <div class="halves">
     <article>
-      <p>It scales across your machines and your subscriptions: private, secure remote jobs and telemetry made easy through <code>ssh</code>, and multi-subscription balancing that moves to the next login when one runs out.</p>
-      <p class="more"><a href="/docs/lf-reference">The CLI ↗</a><a href="/docs/orchestration">Skills and Graphs ↗</a><a href="/docs/subscriptions">Accounts and usage ↗</a></p>
+      <p>Run work across your machines through <code>ssh</code>, with persistent conversations and provider-reported usage. Choose the model and harness for each Skill; headless runs can continue through your configured fallback order.</p>
+      <p class="more"><a href="/docs/lf-reference">The CLI ↗</a><a href="/docs/orchestration">Skills and Graphs ↗</a><a href="/docs/subscriptions">Native authentication ↗</a></p>
     </article>
     <article>
 <pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> wt create cpu-pods       <span class="c"># a worktree and a branch</span>
 
 <span class="p">$</span> <b>lf</b> --machine mini \         <span class="c"># where it runs</span>
-     --account claude=you@ \  <span class="c"># whose login pays</span>
      -a claude:opus \         <span class="c"># which agent and model</span>
      --wt cpu-pods \          <span class="c"># in which worktree</span>
      --docs docs/runpod.md \  <span class="c"># what it reads first</span>
@@ -108,11 +107,6 @@
 
 <span class="p">$</span> <b>lf</b> pr open                  <span class="c"># a draft PR, opened for you</span>
 <span class="p">$</span> <b>lf</b> land --wait-and-fix      <span class="c"># merge when checks pass; fix if not</span>
-
-<span class="p">$</span> <b>lf</b> account
-<span class="c">  claude  you@    </span><i class="bar"><i style="width:78%"></i></i><span class="c">  78% left</span>
-<span class="c">  claude  work@   </span><i class="bar"><i style="width:21%"></i></i><span class="c">  21% left</span>
-<span class="c">  codex   you@    </span><i class="bar"><i style="width:52%"></i></i><span class="c">  52% left</span>
 
 <span class="p">$</span> <b>lf</b> usage --wt cpu-pods
 <span class="c">  3 sessions · 2 agents · 412k tokens · $4.18</span>
@@ -127,7 +121,7 @@
   <ul>
     <li><b><a href="https://claude.com/claude-code" target="_blank" rel="noopener">Claude Code</a> · <a href="https://openai.com/codex" target="_blank" rel="noopener">Codex</a> · <a href="https://opencode.ai" target="_blank" rel="noopener">OpenCode</a> · <a href="https://pi.dev" target="_blank" rel="noopener">Pi</a></b><span>the coding agent, on your own account</span></li>
     <li><b><a href="https://github.com" target="_blank" rel="noopener">GitHub</a></b><span>your code, your pull requests, and your reviewers</span></li>
-    <li><b><a href="https://linear.app" target="_blank" rel="noopener">Linear</a> · Asana · Notion</b><span>the plan your team already reads, or keep it in Git; Asana and Notion coming</span></li>
+    <li><b><a href="https://linear.app" target="_blank" rel="noopener">Linear</a> · Asana</b><span>the plan your team already reads, or keep it in Git</span></li>
     <li><b><a href="https://wisprflow.ai" target="_blank" rel="noopener">Wispr Flow</a></b><span>talk instead of typing</span></li>
     <li><b><a href="https://cmux.com" target="_blank" rel="noopener">cmux</a> · <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a></b><span><code>lf</code> runs inside them</span></li>
   </ul>

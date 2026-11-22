@@ -14,27 +14,19 @@ from markdown import markdown as markdown_to_html
 from starlette.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from starlette.routing import Route
 
-from internal_pages import colors_page, design_page, fonts_page
-
 BASE_URL = "https://loopflow.studio"
 RELEASE_TAG = os.environ.get("LOOPFLOW_RELEASE_TAG", "development")
 STATIC_DIR = Path(__file__).parent / "static"
 STYLE_VERSION = hashlib.sha256((STATIC_DIR / "style.css").read_bytes()).hexdigest()[:12]
 
 app, rt = fast_app(
-    htmlkw={"lang": "en"},
+    # Pico would follow OS dark mode; the site has no dark scheme.
+    htmlkw={"lang": "en", "data-theme": "light"},
     hdrs=(
-        Meta(name="viewport", content="width=device-width, initial-scale=1"),
         Link(rel="icon", href="/static/logo.svg", type="image/svg+xml"),
-        NotStr(
-            '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">'
-        ),
-        Link(
-            rel="stylesheet",
-            href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap",
-        ),
         Link(rel="stylesheet", href=f"/static/style.css?v={STYLE_VERSION}"),
     ),
+    exception_handlers={404: lambda request, exc: not_found_page()},
 )
 
 
@@ -45,77 +37,15 @@ def SkipLink():
     return A("Skip to main content", href="#main-content", cls="skip-link")
 
 
-def Navbar():
-    return Nav(
-        Div(
-            Div(
-                A(
-                    Img(src="/static/logo.svg", alt="Loopflow"),
-                    href="/",
-                    cls="nav-logo",
-                ),
-                A("Loopflow", href="/", cls="nav-title"),
-                cls="nav-brand-group",
-            ),
-            Ul(
-                Li(A("Graphs", href="/docs/orchestration")),
-                Li(A("Docs", href="/docs")),
-                Li(
-                    A(
-                        "GitHub",
-                        href="https://github.com/loopflowstudio/loopflow",
-                        target="_blank",
-                        rel="noopener noreferrer",
-                        cls="external-link",
-                        **{"aria-label": "GitHub (opens in new tab)"},
-                    )
-                ),
-                Li(A("Install", href="/download", cls="btn btn-primary")),
-                cls="nav-links",
-            ),
-            cls="container",
-        ),
-        **{"aria-label": "Main navigation"},
-    )
-
-
-def SiteFooter():
-    return Footer(
-        Div(
-            Div(
-                P("Loopflow, a software instrument."),
-                P(
-                    "Built by ",
-                    A(
-                        "Loopflow Studio",
-                        href="https://github.com/loopflowstudio",
-                        target="_blank",
-                        rel="noopener noreferrer",
-                        cls="external-link",
-                        **{"aria-label": "Loopflow Studio (opens in new tab)"},
-                    ),
-                    cls="built-by",
-                ),
-                cls="footer-text",
-            ),
-            Div(
-                A("Docs", href="/docs"),
-                A("GitHub", href="https://github.com/loopflowstudio/loopflow"),
-                cls="footer-links",
-            ),
-            cls="container",
-        ),
-    )
-
-
 def CopyButton(text: str):
     return Button(
         NotStr(
             '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" /></svg>'
         ),
+        type="button",
         cls="copy-btn",
-        onclick=f"navigator.clipboard.writeText('{text}')",
-        **{"aria-label": "Copy to clipboard"},
+        data_copy=text,
+        **{"aria-label": "Copy to clipboard", "aria-live": "polite"},
     )
 
 
@@ -123,7 +53,7 @@ def CopyButton(text: str):
 SITE_CONTENT = yaml.safe_load((Path(__file__).parent / "content.yaml").read_text())
 STUDIO_CONTENT = SITE_CONTENT["studio"]
 HOME_CONTENT = SITE_CONTENT["homepage"]
-INSTALL_CONTENT = HOME_CONTENT["install"]
+INSTALL_CONTENT = SITE_CONTENT["install"]
 # The homepage is drawn, not listed: its mock, cards and copy are one template.
 HOME_HTML = (
     (Path(__file__).parent / "home.html")
@@ -135,11 +65,11 @@ HOME_HTML = (
 # Copy buttons carry the text they copy.
 COPY_SCRIPT = """
 document.querySelectorAll('[data-copy]').forEach(function (button) {
-  var label = button.textContent;
+  var label = button.innerHTML;
   button.addEventListener('click', function () {
     navigator.clipboard.writeText(button.dataset.copy).then(function () {
       button.textContent = 'Copied';
-      setTimeout(function () { button.textContent = label; }, 1600);
+      setTimeout(function () { button.innerHTML = label; }, 1600);
     });
   });
 });
@@ -205,7 +135,12 @@ DOCS_AREAS = (
         "extend",
         "See your work wherever you are, and change how it runs.",
         (
-            DocPage("Surfaces", "surfaces", "Desktop, cmux, Herdr, tmux, and your own view"),
+            DocPage("Surfaces", "surfaces", "Desktop, Rex, cmux, Herdr, tmux, and your own view"),
+            DocPage(
+                "Workspaces",
+                "workspaces",
+                "Open conversations, sibling tabs, and Task overviews across hosts",
+            ),
             DocPage(
                 "Connect clients", "server", "Local server status, updates and connection recovery"
             ),
@@ -227,9 +162,9 @@ DOCS_AREAS = (
             DocPage("lf command reference", "lf-reference", "Commands, flags, and builtins"),
             DocPage("Configuration", "config", "Context, models, profiles, and launch behavior"),
             DocPage(
-                "Subscriptions",
+                "Native authentication",
                 "subscriptions",
-                "Provider identities, routes, health, and remote selection",
+                "Native logins, conversation history, and headless recovery",
             ),
             DocPage(
                 "Security",
@@ -354,17 +289,18 @@ def generate_llms_txt() -> str:
         if doc_path(slug)
     )
     return f"""# Loopflow
-> A software instrument that runs on your machine: durable Work, replaceable agents. lf is the CLI for daily work and the API agents call to run Skills, conduct Waves, deliver Tasks, and observe Machine-local evidence.
+> Local-first task and workflow system for coding agents (Claude Code, Codex, OpenCode, Pi, Antigravity). Each Task gets its own Git worktree, branch, persistent multi-view conversation, customizable YAML/Markdown workflow (Graph), and pull request.
 
-Loopflow runs one Skill through a provider and records that launch in an
-immutable Machine-local Run record. Stable Wave, Project, and Task Work preserves
-purpose across provider processes. Authored behavior lives in the repository;
-bounded planning state lives on its Machine; shared planning and delivery truth
-lives in Linear and GitHub. Reach another Machine explicitly with `lf --machine`.
-Install: `curl -fsSL
-https://loopflow.studio/install.sh | sh && lf init`. Every docs page below is
-raw markdown at its `.md` URL (or request the canonical URL with `Accept:
-text/markdown`); the complete corpus is at {BASE_URL}/llms-full.txt.
+Loopflow runs locally on macOS or Linux (or over SSH / rented Daytona, Modal, RunPod, and AWS machines) using your native provider logins. Nothing is hosted, and Loopflow bills nothing.
+
+Key capabilities:
+- **Multi-harness + failover:** Mix Claude Code, Codex, OpenCode, Pi, and Antigravity per repo, Wave, Skill, or Graph step; configure `agents: [claude, codex]` for automatic usage-limit failover and backoff.
+- **Version-controlled workflows:** Markdown Skills (extend builtins with `extends: builtin`) and YAML Graphs with loops, `xor` branches, `write-docs`, repo-local `.lf/qa/` playbooks, one-page `human-review`, `reflect`, and `gate` (publishes PR first so CI runs during review).
+- **Durable Tasks & Sessions:** Isolated worktrees, stacked PRs (`lf sync <parent-ID>`), auto-merge with CI repair (`lf land --wait-and-fix`), and persistent conversations that survive terminal close, `lf install` updates, crashes, and reboots.
+- **Team-native planning:** Syncs via a Git ref on `origin` by default, or two-way with Linear or Asana; coworkers comment in Linear/Asana and review on GitHub without installing `lf`. Waves group Tasks with shared `GOAL.md`, `MEMORY.md`, KRs, and defaults.
+- **Surface-agnostic + Agent API:** Loopflow Desktop (macOS + phone over Tailscale), Rex, cmux, Herdr, tmux, or any terminal. Every read supports `--json` and `--subscribe`. Install: `curl -fsSL https://loopflow.studio/install.sh | sh && lf init`.
+
+Every docs page below is raw Markdown at its `.md` URL (or send `Accept: text/markdown` to the canonical URL); the complete corpus is at {BASE_URL}/llms-full.txt.
 
 ## Docs
 
@@ -791,8 +727,8 @@ SITEMAP_XML_CONTENT = generate_sitemap_xml()
 # Pages
 
 
-def _topbar(current: str) -> FT:
-    """The one bar on the homepage and studio pages: brand, links, a company menu, install."""
+def SiteHeader(current: str) -> FT:
+    """The one bar on every page: brand, links, a company menu, install."""
 
     def link(item: dict) -> FT:
         return A(
@@ -802,44 +738,72 @@ def _topbar(current: str) -> FT:
             aria_current="page" if item["href"] == current else None,
         )
 
-    install = SITE_CONTENT["install"]
-    return Header(
-        A(Img(src="/static/logo.svg", alt=""), "loopflow", href="/", cls="brand"),
-        Nav(
-            *[
-                Details(
-                    Summary(item["label"]),
-                    Div(*[link(entry) for entry in item["menu"]], cls="menu"),
-                )
-                if "menu" in item
-                else link(item)
-                for item in SITE_CONTENT["navigation"]
-            ],
-            A(install["label"], href=install["href"], cls="button solid"),
-            aria_label="Main navigation",
+    return Div(
+        Header(
+            A(Img(src="/static/logo.svg", alt=""), "loopflow", href="/", cls="brand"),
+            Nav(
+                *[
+                    Details(
+                        Summary(item["label"]),
+                        Div(*[link(entry) for entry in item["menu"]], cls="menu"),
+                    )
+                    if "menu" in item
+                    else link(item)
+                    for item in SITE_CONTENT["navigation"]
+                ],
+                A(INSTALL_CONTENT["label"], href=INSTALL_CONTENT["href"], cls="button solid"),
+                aria_label="Main navigation",
+            ),
         ),
+        cls="site-header",
+    )
+
+
+def SiteFooter() -> FT:
+    footer = SITE_CONTENT["footer"]
+    return Div(
+        Footer(
+            Span(footer["text"]),
+            Div(*[A(link["label"], href=link["href"]) for link in footer["links"]]),
+        ),
+        cls="site-footer",
+    )
+
+
+def SitePage(title: str, current: str, *main, cls: str) -> tuple:
+    """A page on the site: skip link, the bar, its main content, the footer."""
+    return (
+        Title(title),
+        SkipLink(),
+        Div(SiteHeader(current), Main(*main, id="main-content"), SiteFooter(), cls=cls),
+    )
+
+
+def not_found_page() -> tuple:
+    return SitePage(
+        "Page not found — Loopflow",
+        "",
+        Section(
+            H1("Page not found"),
+            P(A("Home", href="/"), " · ", A("Docs", href="/docs"), cls="intro"),
+            cls="studio-hero",
+        ),
+        cls="home-page",
     )
 
 
 def _studio_page(current: str, content: dict, *sections) -> tuple:
-    return (
-        Title(content["title"]),
-        SkipLink(),
-        Div(
-            _topbar(current),
-            Main(
-                Section(
-                    P(content["label"], cls="eyebrow kicker") if "label" in content else None,
-                    H1(content["heading"]),
-                    P(content["lede"], cls="intro") if "lede" in content else None,
-                    cls="studio-hero",
-                ),
-                *sections,
-                id="main-content",
-                cls="home",
-            ),
-            cls="home-page",
+    return SitePage(
+        content["title"],
+        current,
+        Section(
+            P(content["label"], cls="eyebrow kicker") if "label" in content else None,
+            H1(content["heading"]),
+            P(content["lede"], cls="intro") if "lede" in content else None,
+            cls="studio-hero",
         ),
+        *sections,
+        cls="home-page",
     )
 
 
@@ -891,30 +855,11 @@ def build_effort_page(slug: str) -> tuple:
     )
 
 
-def _product_page(title: str, current: str, *sections) -> tuple:
-    return (
-        Title(title),
-        SkipLink(),
-        Div(
-            _topbar(current),
-            Main(*sections, id="main-content", cls="home"),
-            Footer(
-                Span(HOME_CONTENT["footer"]["text"]),
-                Div(
-                    *[
-                        A(link["label"], href=link["href"])
-                        for link in HOME_CONTENT["footer"]["links"]
-                    ]
-                ),
-            ),
-            Script(COPY_SCRIPT),
-            cls="home-page",
-        ),
-    )
-
-
 def build_homepage() -> tuple:
-    return _product_page("Loopflow — " + HOME_CONTENT["title"], "/", NotStr(HOME_HTML))
+    return (
+        *SitePage("Loopflow — " + HOME_CONTENT["title"], "/", NotStr(HOME_HTML), cls="home-page"),
+        Script(COPY_SCRIPT),
+    )
 
 
 @rt("/")
@@ -993,12 +938,10 @@ def _docs_page(slug: str, title: str, architecture: bool = False):
     heading, body = _split_doc_source(content)
     page = DOC_PAGE_BY_SLUG.get(slug)
     return (
-        Title(title),
         *((Meta(name="robots", content="noindex,nofollow"),) if architecture else ()),
-        SkipLink(),
-        Script(src="/static/docs.js", defer=True),
-        Navbar(),
-        Main(
+        *SitePage(
+            title,
+            "/docs",
             Section(
                 Div(
                     ArchitectureNav(slug) if architecture else DocsNav(slug),
@@ -1043,9 +986,9 @@ def _docs_page(slug: str, title: str, architecture: bool = False):
                 ),
                 cls="docs-hero",
             ),
-            id="main-content",
+            cls="docs-page",
         ),
-        SiteFooter(),
+        Script(src="/static/docs.js", defer=True),
     )
 
 
@@ -1127,86 +1070,64 @@ def get(request, slug: str):
 
 @rt("/download")
 def get():
-    return (
-        Title("Install Loopflow"),
-        SkipLink(),
-        Navbar(),
-        Main(
-            Section(
+    install_command = INSTALL_CONTENT["install_command"]
+    return SitePage(
+        "Install Loopflow",
+        "/download",
+        Section(
+            Div(
+                Img(src="/static/logo.svg", alt="Loopflow", cls="hero-logo"),
+                H1("Install"),
+                P("Runs on your computer. Nothing to register.", cls="tagline"),
                 Div(
-                    Img(src="/static/logo.svg", alt="Loopflow", cls="hero-logo"),
-                    H1("Install"),
-                    P("Runs on your computer. Nothing to register.", cls="tagline"),
                     Div(
-                        Div(
-                            H2("Mac app"),
-                            P(
-                                "Start here. The app shows your goals, your tasks, and the conversations available to you, "
-                                "and it includes the command line tool.",
-                                cls="install-desc",
-                            ),
-                            A(
-                                "Download for Mac",
-                                href=INSTALL_CONTENT["download_url"],
-                                cls="btn btn-primary",
-                            ),
-                            cls="mac-app-option",
-                        ),
-                        H2("Command line"),
+                        H2("Mac app"),
                         P(
-                            "The same tool without the app, for macOS or Linux. "
-                            "Everything the app does, it does by running these commands.",
+                            "Start here. The app shows your goals, your tasks, and the conversations available to you, "
+                            "and it includes the command line tool.",
                             cls="install-desc",
                         ),
-                        Div(
-                            Pre(
-                                Code("curl -fsSL https://loopflow.studio/install.sh | sh"),
-                                cls="install-code",
-                                tabindex="0",
-                            ),
-                            CopyButton("curl -fsSL https://loopflow.studio/install.sh | sh"),
-                            cls="install-code-wrapper",
+                        A(
+                            "Download for Mac",
+                            href=INSTALL_CONTENT["download_url"],
+                            cls="button solid",
                         ),
-                        Div(
-                            P("Then, inside a project:", cls="next-skill-label"),
-                            Pre(
-                                Code("cd your-project\nlf init"),
-                                cls="install-code next-skills",
-                                tabindex="0",
-                            ),
-                            cls="next-skills-wrapper",
-                        ),
-                        P(
-                            "Before you start: an AI coding tool (Claude Code or Codex), signed in, "
-                            "and a project that uses Git.",
-                            cls="system-req",
-                        ),
-                        cls="install-option",
-                        style="max-width: 420px; margin: 0 auto;",
+                        cls="mac-app-option",
                     ),
-                    cls="container",
+                    H2("Command line"),
+                    P(
+                        "The same tool without the app, for macOS or Linux. "
+                        "Everything the app does, it does by running these commands.",
+                        cls="install-desc",
+                    ),
+                    Div(
+                        Pre(Code(install_command), cls="install-code", tabindex="0"),
+                        CopyButton(install_command),
+                        cls="install-code-wrapper",
+                    ),
+                    Div(
+                        P("Then, inside a project:", cls="next-skill-label"),
+                        Pre(
+                            Code("cd your-project\nlf init"),
+                            cls="install-code next-skills",
+                            tabindex="0",
+                        ),
+                        cls="next-skills-wrapper",
+                    ),
+                    P(
+                        "Before you start: an AI coding tool (Claude Code or Codex), signed in, "
+                        "and a project that uses Git.",
+                        cls="system-req",
+                    ),
+                    cls="install-option",
                 ),
-                cls="hero hero-centered download-hero",
+                cls="container",
             ),
-            id="main-content",
+            cls="hero hero-centered download-hero",
         ),
-        SiteFooter(),
+        Script(COPY_SCRIPT),
+        cls="download-page",
     )
-
-
-@rt("/fonts")
-def get():
-    return fonts_page()
-
-
-@rt("/colors")
-def get():
-    return colors_page()
-
-
-@rt("/design")
-def get():
-    return design_page()
 
 
 def _llms_txt_handler(request):
@@ -1225,22 +1146,31 @@ def _healthz_handler(request):
     return JSONResponse({"status": "ok", "release": RELEASE_TAG})
 
 
-# Insert machine-readable routes at the beginning to avoid the static handler
+def _font_handler(request):
+    font = STATIC_DIR / "fonts" / request.path_params["name"]
+    if not font.is_file():
+        return PlainTextResponse("Not found", status_code=404)
+    # The portable architecture page loads these cross-origin.
+    return FileResponse(
+        font,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=31536000, immutable",
+        },
+    )
+
+
+def _favicon_handler(request):
+    return FileResponse(STATIC_DIR / "logo.svg", media_type="image/svg+xml")
+
+
+# fast_app's static route answers any path with a file extension; these go first.
+app.routes.insert(0, Route("/favicon.ico", _favicon_handler, methods=["GET"]))
+app.routes.insert(0, Route("/static/fonts/{name}", _font_handler, methods=["GET"]))
 app.routes.insert(0, Route("/llms.txt", _llms_txt_handler, methods=["GET"]))
 app.routes.insert(0, Route("/llms-full.txt", _llms_full_txt_handler, methods=["GET"]))
 app.routes.insert(0, Route("/sitemap.xml", _sitemap_handler, methods=["GET"]))
 app.routes.insert(0, Route("/healthz", _healthz_handler, methods=["GET"]))
-
-
-@rt("/favicon.ico")
-async def favicon():
-    """Serve logo.svg as favicon for browsers that request .ico."""
-    return FileResponse("static/logo.svg", media_type="image/svg+xml")
-
-
-@rt("/static/{fname:path}")
-async def static(fname: str):
-    return FileResponse(f"static/{fname}")
 
 
 if __name__ == "__main__":

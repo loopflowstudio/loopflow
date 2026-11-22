@@ -6,7 +6,7 @@
 //! target receives. Unless the target is this Machine, `reorder_args` (in the
 //! binary) and `ssh::parse_remote_command` parse those arguments for the
 //! local side, and `ssh::run` sends them. An SSH exit of 255 becomes
-//! `machine::transport_failure`, which names the recovery. Without
+//! `machine::connection::transport_failure`, which names the recovery. Without
 //! `--machine`, `work_route::forward` sends a Task's work to its owning
 //! Machine; that route is read from planning (ownership rows in
 //! `store/sqlite/task_ownership.rs`).
@@ -17,9 +17,9 @@
 use clap::{CommandFactory, Parser};
 
 use super::parse_remote_command;
-use crate::lf::commands::machine::transport_failure;
 use crate::lf::navigation::machine_invocation;
 use crate::lf::Cli;
+use loopflow_execution::machine::connection::transport_failure;
 
 fn invoke(args: &[&str]) -> Result<Option<(Cli, Vec<String>)>, clap::Error> {
     let argv = std::iter::once("lf")

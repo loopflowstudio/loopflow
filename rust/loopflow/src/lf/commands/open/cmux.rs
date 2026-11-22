@@ -8,25 +8,10 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
-use crate::work::selection::SplitAxis;
-
 /// The app bundles its CLI without adding it to PATH.
 const BUNDLED: &str = "/Applications/cmux.app/Contents/Resources/bin/cmux";
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub(super) struct CmuxLocation {
-    socket: String,
-    workspace: String,
-}
-
-impl CmuxLocation {
-    pub(super) fn current() -> Option<Self> {
-        Some(Self {
-            socket: std::env::var("CMUX_SOCKET_PATH").ok()?,
-            workspace: std::env::var("CMUX_WORKSPACE_ID").ok()?,
-        })
-    }
-}
+use loopflow_execution::terminal_host::CmuxLocation;
 
 pub(super) struct Cmux {
     cli: PathBuf,
@@ -135,13 +120,6 @@ pub(super) fn terminal(label: &str, cwd: &Path, argv: Vec<String>) -> Value {
             argv.iter().map(|word| shell_quote(word)).collect::<Vec<_>>().join(" "))}]}})
 }
 
-pub(super) fn split(axis: SplitAxis, ratio: f64, before: Value, after: Value) -> Value {
-    json!({
-        "direction": if axis == SplitAxis::Vertical { "horizontal" } else { "vertical" },
-        "split": ratio, "children": [before, after],
-    })
-}
-
 fn shell_quote(word: &str) -> String {
     format!("'{}'", word.replace('\'', r"'\''"))
 }
@@ -198,7 +176,7 @@ fn reference(output: &str, prefix: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{group_of, reference, split, terminal};
+    use super::{group_of, reference, terminal};
     use serde_json::json;
     use std::path::Path;
 
@@ -241,13 +219,5 @@ mod tests {
             pane["pane"]["surfaces"][0]["command"],
             r"cd '/repo/it'\''s' && 'lf' 'task' 'a b'"
         );
-        let split = split(
-            crate::work::selection::SplitAxis::Vertical,
-            0.6,
-            pane.clone(),
-            pane,
-        );
-        assert_eq!(split["direction"], "horizontal");
-        assert_eq!(split["children"].as_array().unwrap().len(), 2);
     }
 }

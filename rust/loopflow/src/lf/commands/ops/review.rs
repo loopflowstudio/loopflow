@@ -1,7 +1,7 @@
 //! The text form of `lf pr reviews`. Reads and requests go through
 //! `engine::pr`; inline threads stay on GitHub.
 
-use crate::engine::pr::Reviews;
+use loopflow_execution::engine::pr::Reviews;
 
 /// Render the review report the way `lf pr reviews` prints it: the review
 /// commit is kept so an old approval never reads as one of the current head.

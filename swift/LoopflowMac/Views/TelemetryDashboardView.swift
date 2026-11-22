@@ -217,9 +217,6 @@ struct TelemetryDashboardView: View {
                     .help(check.detail)
                 }
                 Spacer()
-                Text("\(doctor.rows) events")
-                    .font(Typography.code(11))
-                    .foregroundStyle(palette.textSecondary)
             }
         }
     }

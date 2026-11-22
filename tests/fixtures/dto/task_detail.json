@@ -20,6 +20,31 @@
   },
   "sessions": [
     {
+      "id": "session_5e55105e000040008000000000000002",
+      "title": "LOO-2 conversation",
+      "provider": "claude",
+      "interactive": true,
+      "state": "closed",
+      "available": false,
+      "cwd": "/src/loopflow.loo-2",
+      "agent_process_id": "44444444-4444-4444-8444-444444444444",
+      "ended": {
+        "at": "2026-11-17T12:01:00Z",
+        "exit_code": 137
+      },
+      "start": {
+        "attempts": 1,
+        "last_started_at": "2026-11-17T12:01:02Z"
+      },
+      "outlook": {
+        "kind": "coming_back",
+        "at": "2026-11-17T12:02:02Z",
+        "reason": null,
+        "command": null
+      },
+      "status_line": "died 12:01 (exit 137) · starts again 12:02"
+    },
+    {
       "id": "manual",
       "title": "Checkout conversation",
       "provider": "claude",
@@ -27,9 +52,14 @@
       "state": "closed",
       "available": false,
       "cwd": "/src/loopflow.loo-2",
-      "agent_process_id": null
+      "agent_process_id": null,
+      "ended": null,
+      "start": null,
+      "outlook": null,
+      "status_line": null
     }
   ],
+  "conversation": "session_5e55105e000040008000000000000002",
   "graph_processes": [
     {
       "id": "00000005-0000-4000-8000-000000000000",
@@ -54,5 +84,19 @@
     ],
     "refresh_error": null,
     "conflicts": {}
+  },
+  "summary": null,
+  "auto": {
+    "state": "on",
+    "at": 1795107435,
+    "by": {
+      "kind": "config",
+      "layer": "wave"
+    }
+  },
+  "stack_parent": {
+    "identifier": "LOO-1",
+    "branch": "jack/loo-1-parse-mail",
+    "pr_number": 1718
   }
 }

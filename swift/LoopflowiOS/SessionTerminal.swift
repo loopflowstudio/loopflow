@@ -84,6 +84,7 @@ struct SessionTerminal: UIViewControllerRepresentable {
 
     static func dismantleUIViewController(_ controller: SessionTerminalController, coordinator: ()) {
         controller.link.render = nil
+        controller.link.prepareFrame = nil
         controller.terminal.close()
     }
 }
@@ -120,6 +121,7 @@ final class SessionTerminalController: UIViewController, UIScrollViewDelegate {
             controller.applyAppearance()
         }
         link.render = { [weak self] bytes, reset in self?.render(bytes, reset: reset) }
+        link.prepareFrame = { [weak self] in self?.terminal.prepareFrame() }
 
         scroller.delegate = self
         scroller.contentInsetAdjustmentBehavior = .never

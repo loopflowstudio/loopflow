@@ -3,11 +3,11 @@ import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
-/// Named Session drill-down: shared rename readback, retained rejections,
+/// Named Session drill-down: rename in the click, refusals through the Notice,
 /// and no late publication into another Session or an older read.
 @MainActor
 @Suite struct SessionRenameTests {
-    @Test("A held rename publishes Rust's name; an older poll cannot restore the old one")
+    @Test("A rename shows in the click; an older poll cannot restore the old name")
     func heldRenameSurvivesNavigationAndPolling() async throws {
         let source = RenameSource(records: [
             try record("first", title: "review-design"),
@@ -21,23 +21,21 @@ import Testing
         model.navigation.renaming?.text = "Launch design"
 
         await source.holdNext("rename")
-        let rename = Task { await model.commitSessionRename() }
+        model.commitSessionRename()
+        // The write is held: the new name already shows and the edit is closed.
+        #expect(title(model, "first") == "Launch design")
+        #expect(model.navigation.renaming == nil)
         await source.waitUntilHeld("rename")
-        #expect(model.navigation.renaming?.submitting == true)
 
-        // The human moves on while the rename is in flight, and a poll that
-        // started before the write is also held.
+        // The human moves on, and a poll that started before the write is held too.
         model.navigation.selectedSessionId = "second"
-        #expect(model.navigation.renaming?.sessionId == "first")
         await source.holdNext("list")
         let poll = Task { await model.refreshSessions() }
         await source.waitUntilHeld("list")
 
         await source.release("rename")
-        await rename.value
+        await settle(model)
         #expect(title(model, "first") == "Launch design")
-        #expect(model.sessions.value?.first { $0.id == "first" }?.titleSource == .human)
-        #expect(model.navigation.renaming == nil)
         #expect(model.navigation.selectedSessionId == "second")
 
         await source.release("list")
@@ -47,8 +45,8 @@ import Testing
         #expect(await source.renames == [["session", "rename", "--json", "--", "first", "Launch design"]])
     }
 
-    @Test("A rejected rename keeps the typed name and error on that Session only")
-    func rejectionRetainsDraft() async throws {
+    @Test("A refused rename restores the name and says why in one Notice")
+    func refusalRestoresTheName() async throws {
         let source = RenameSource(records: [
             try record("first", title: "review-design"),
             try record("second", title: "lyric-cadenza"),
@@ -59,22 +57,16 @@ import Testing
         model.navigation.selectedSessionId = "first"
         model.beginSessionRename(try #require(model.sessions.value?.first { $0.id == "first" }))
         model.navigation.renaming?.text = "An overlong name"
-        await model.commitSessionRename()
-
-        let draft = try #require(model.navigation.renaming)
-        #expect(draft.sessionId == "first")
-        #expect(draft.text == "An overlong name")
-        #expect(draft.submitting == false)
-        #expect(draft.error?.contains("at most 80") == true)
+        model.commitSessionRename()
+        #expect(title(model, "first") == "An overlong name")
+        await settle(model)
         #expect(title(model, "first") == "review-design")
-
-        // Leaving the Session abandons the unsubmitted edit rather than
-        // carrying it onto the next Session.
-        model.navigation.selectedSessionId = "second"
+        #expect(model.navigation.notices.current?.text
+            == "review-design couldn't be renamed: Session name must be at most 80 characters")
         #expect(model.navigation.renaming == nil)
     }
 
-    @Test("A late rename cannot dismiss a newer draft for the same Session")
+    @Test("A late rename answer cannot dismiss a newer draft for the same Session")
     func lateRenameKeepsNewDraft() async throws {
         let first = try record("first", title: "Original")
         let second = try record("second", title: "Other")
@@ -84,22 +76,20 @@ import Testing
         model.beginSessionRename(first)
         model.navigation.renaming?.text = "Submitted"
         await source.holdNext("rename")
-        let saving = Task { await model.commitSessionRename() }
+        model.commitSessionRename()
         await source.waitUntilHeld("rename")
-        model.beginSessionRename(second)
         model.beginSessionRename(first)
         model.navigation.renaming?.text = "New unsent name"
         await source.release("rename")
-        await saving.value
+        await settle(model)
         #expect(title(model, "first") == "Submitted")
         #expect(model.navigation.renaming?.text == "New unsent name")
-        #expect(model.navigation.renaming?.submitting == false)
     }
 
     @Test("The breadcrumb drills Wave → Task → exact Session, with siblings as the final choice")
     func breadcrumbNamesTheExactSession() throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
-        let task = WorkReference.task(id: "ts_review00000000000000000000000000")
+        let task = WorkReference.task(id: "issue-review")
         let one = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: [try record("first", title: "review-design", work: task)])
         let single = try #require(one.breadcrumb(selection: nil, sessionId: "first"))
         #expect(single.wave?.roadmap.wave.name == "product")
@@ -122,6 +112,12 @@ import Testing
         #expect(unmatched.wave == nil && unmatched.task == nil)
     }
 
+    /// Waits for the Machine's answer to every pending change.
+    private func settle(_ model: WorkModel) async {
+        for _ in 0..<400 where !model.pendingChanges.changes.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        for _ in 0..<20 { await Task.yield() }
+    }
+
     private func title(_ model: WorkModel, _ id: String) -> String? {
         model.sessions.value?.first { $0.id == id }?.title
     }
@@ -136,8 +132,8 @@ func renameFixtureRecord(
     return try JSONDecoder().decode(SessionRecord.self, from: Data("""
     {"id":"\(id)","run_id":"run_\(id)", "interactive": true,"work":\(workJSON),"title":"\(title)",
      "detail":"codex","cwd":"/src/loopflow","state":"active","wave_id":null,"work_path":null,
-     "actions":\(sessionActionFixtureJSON(state: "active")),
-     "ready_summary":null,"blocked": false, "title_source":"\(source)","task_primary":false, "graph_membership":{"kind":"independent"},
+     "action":\(sessionActionFixtureJSON(state: "active")),
+     "blocked": false, "title_source":"\(source)","ended": null, "start": null, "outlook": null, "status_line": null, "task_primary":false, "graph_membership":{"kind":"independent"},
      "task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["lf","session","resume","\(id)"]}
     """.utf8))
 }

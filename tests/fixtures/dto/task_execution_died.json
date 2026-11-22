@@ -1,0 +1,16 @@
+{
+  "state": "blocked",
+  "reason": "Run died 09:14 at implement · started 5 times; `lf task run LOO-12` starts it again",
+  "step": "implement",
+  "captured": 12,
+  "died": {
+    "at_step": "implement",
+    "at": "2026-11-19T09:14:00Z"
+  },
+  "outlook": {
+    "kind": "waiting_for_you",
+    "at": null,
+    "reason": "started 5 times",
+    "command": "lf task run LOO-12"
+  }
+}

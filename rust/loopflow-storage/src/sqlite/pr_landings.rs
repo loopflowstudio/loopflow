@@ -1,0 +1,575 @@
+//! SQLite persistence for finite pull-request delivery checks.
+
+use std::path::PathBuf;
+
+use rusqlite::{params, types::Type, OptionalExtension, TransactionBehavior};
+use time::OffsetDateTime;
+
+use crate::pr_landing::{
+    LandingPlacement, LandingSupervisor, PrLanding, PrLandingId, PrLandingState,
+};
+use crate::work::task::TaskId;
+use crate::{StoreError, StoreResult};
+
+fn timestamp(value: OffsetDateTime) -> i64 {
+    value.unix_timestamp()
+}
+
+fn datetime(index: usize, value: i64) -> rusqlite::Result<OffsetDateTime> {
+    OffsetDateTime::from_unix_timestamp(value).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(index, Type::Integer, Box::new(error))
+    })
+}
+
+fn invalid_column(
+    index: usize,
+    error: impl std::error::Error + Send + Sync + 'static,
+) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(index, Type::Text, Box::new(error))
+}
+
+fn map_landing(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrLanding> {
+    let generation = row.get::<_, i64>(12)? as u64;
+    let placement = match row.get::<_, Option<String>>(13)?.as_deref() {
+        None => None,
+        Some("local") => Some(LandingPlacement::Local),
+        Some(value) => {
+            return Err(invalid_column(
+                13,
+                crate::pr_landing::PrLandingDataError::InvalidInvariant(format!(
+                    "invalid stored landing placement: {value}"
+                )),
+            ))
+        }
+    };
+    let supervisor = match placement {
+        Some(placement) => Some(LandingSupervisor {
+            placement,
+            process_id: row.get::<_, i64>(15)? as u32,
+            heartbeat_at: datetime(16, row.get(16)?)?,
+        }),
+        None => None,
+    };
+    let state = row
+        .get::<_, String>(11)?
+        .parse()
+        .map_err(|error| invalid_column(11, error))?;
+    Ok(PrLanding {
+        id: PrLandingId::from_raw(row.get::<_, String>(0)?),
+        repo: row.get(1)?,
+        pr_number: row.get::<_, i64>(2)? as u32,
+        worktree: PathBuf::from(row.get::<_, String>(3)?),
+        branch: row.get(4)?,
+        task_id: row.get::<_, Option<String>>(5)?.map(TaskId::from_raw),
+        requested_head_sha: row.get(6)?,
+        observed_head_sha: row.get(7)?,
+        merge_commit: row.get(8)?,
+        state,
+        generation,
+        supervisor,
+        blocked_reason: row.get(17)?,
+        created_at: datetime(18, row.get(18)?)?,
+        updated_at: datetime(19, row.get(19)?)?,
+    })
+}
+
+const LANDING_COLUMNS: &str = "
+    id, repo, pr_number, worktree, branch, task_id,
+    requested_head_sha, observed_head_sha, merge_commit, after_merge,
+    next_slug, state, generation, supervisor_placement, supervisor_machine_id,
+    supervisor_process_id, supervisor_heartbeat_at,
+    blocked_reason, created_at, updated_at";
+
+impl super::SqliteStore {
+    /// A landing of `worktree` that still awaits its merge.
+    pub fn pending_landing_at(&self, worktree: &std::path::Path) -> StoreResult<Option<String>> {
+        let worktree = std::fs::canonicalize(worktree).unwrap_or_else(|_| worktree.to_path_buf());
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT id FROM pr_landings WHERE worktree=?1
+                 AND state NOT IN ('merged','closed') ORDER BY updated_at DESC LIMIT 1",
+                rusqlite::params![worktree.to_string_lossy()],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// The Task's newest landing that still awaits its merge.
+    pub fn pending_task_landing(&self, task: &TaskId) -> StoreResult<Option<PrLanding>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                &format!(
+                    "SELECT {LANDING_COLUMNS} FROM pr_landings WHERE task_id=?1
+                     AND state NOT IN ('merged','closed') ORDER BY updated_at DESC LIMIT 1"
+                ),
+                [task.as_str()],
+                map_landing,
+            )
+            .optional()?)
+    }
+
+    pub fn pending_pr_landings(&self, repo: &str) -> StoreResult<Vec<PrLanding>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(&format!(
+            "SELECT {LANDING_COLUMNS} FROM pr_landings
+             WHERE repo=?1 AND state NOT IN ('merged', 'closed') ORDER BY created_at, id"
+        ))?;
+        let rows = statement
+            .query_map([repo], map_landing)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn release_pr_landing(&self, landing: &PrLanding) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE pr_landings SET supervisor_placement=NULL, supervisor_machine_id=NULL,
+             supervisor_process_id=NULL, supervisor_heartbeat_at=NULL, generation=generation+1
+             WHERE id=?1 AND generation=?2",
+            params![landing.id.as_str(), landing.generation as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn start_or_join_pr_landing(&self, landing: &PrLanding) -> StoreResult<PrLanding> {
+        landing
+            .validate()
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing = transaction
+            .query_row(
+                &format!(
+                    "SELECT {LANDING_COLUMNS} FROM pr_landings
+                     WHERE repo=?1 AND pr_number=?2
+                     ORDER BY CASE WHEN state IN ('watching', 'repairing') THEN 0 ELSE 1 END,
+                              created_at DESC LIMIT 1"
+                ),
+                params![landing.repo, i64::from(landing.pr_number)],
+                map_landing,
+            )
+            .optional()?;
+        if let Some(existing) = existing.filter(|existing| {
+            matches!(
+                existing.state,
+                PrLandingState::Watching | PrLandingState::Repairing | PrLandingState::Blocked
+            )
+        }) {
+            if existing.task_id != landing.task_id {
+                return Err(StoreError::InvalidData(format!(
+                    "active landing {} belongs to a different Task identity",
+                    existing.id
+                )));
+            }
+            if existing.state == PrLandingState::Blocked {
+                let generation = existing.generation.checked_add(1).ok_or_else(|| {
+                    StoreError::InvalidData("landing generation is exhausted".to_string())
+                })?;
+                transaction.execute(
+                    "UPDATE pr_landings
+                     SET state='watching', generation=?2, blocked_reason=NULL,
+                         supervisor_placement=NULL, supervisor_machine_id=NULL,
+                         supervisor_process_id=NULL, supervisor_heartbeat_at=NULL,
+                         worktree=?3, branch=?4
+                     WHERE id=?1",
+                    params![
+                        existing.id.as_str(),
+                        generation as i64,
+                        landing.worktree.display().to_string(),
+                        landing.branch,
+                    ],
+                )?;
+            }
+            // Joining updates intent; the active supervisor keeps its checkout
+            // and its OS lock until it finishes. A blocked retry can relocate.
+            transaction.execute(
+                "UPDATE pr_landings
+                 SET requested_head_sha=?2, updated_at=?3
+                 WHERE id=?1 AND state IN ('watching', 'repairing')",
+                params![
+                    existing.id.as_str(),
+                    landing.requested_head_sha,
+                    timestamp(landing.updated_at),
+                ],
+            )?;
+            let joined = transaction.query_row(
+                &format!("SELECT {LANDING_COLUMNS} FROM pr_landings WHERE id=?1"),
+                [existing.id.as_str()],
+                map_landing,
+            )?;
+            transaction.commit()?;
+            return Ok(joined);
+        }
+        let settled_same_head = transaction
+            .query_row(
+                &format!(
+                    "SELECT {LANDING_COLUMNS} FROM pr_landings
+                     WHERE repo=?1 AND pr_number=?2 AND requested_head_sha=?3
+                     ORDER BY created_at DESC LIMIT 1"
+                ),
+                params![
+                    landing.repo,
+                    i64::from(landing.pr_number),
+                    landing.requested_head_sha
+                ],
+                map_landing,
+            )
+            .optional()?;
+        if let Some(existing) = settled_same_head {
+            transaction.commit()?;
+            return Ok(existing);
+        }
+        transaction.execute(
+            "INSERT INTO pr_landings (
+                id, repo, pr_number, worktree, branch, task_id,
+                requested_head_sha, observed_head_sha, merge_commit, state, generation, supervisor_placement, supervisor_machine_id,
+                supervisor_process_id, supervisor_heartbeat_at,
+                blocked_reason, created_at, updated_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10,
+                NULL, NULL, NULL, NULL, NULL, ?11, ?11
+             )",
+            params![
+                landing.id.as_str(),
+                landing.repo,
+                i64::from(landing.pr_number),
+                landing.worktree.display().to_string(),
+                landing.branch,
+                landing.task_id.as_ref().map(TaskId::as_str),
+                landing.requested_head_sha,
+                landing.observed_head_sha,
+                landing.state.as_str(),
+                landing.generation as i64,
+                timestamp(landing.created_at),
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(landing.clone())
+    }
+
+    pub fn get_pr_landing(&self, landing_id: &PrLandingId) -> StoreResult<Option<PrLanding>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            &format!("SELECT {LANDING_COLUMNS} FROM pr_landings WHERE id=?1"),
+            [landing_id.as_str()],
+            map_landing,
+        )
+        .optional()
+        .map_err(StoreError::from)
+    }
+
+    pub fn claim_pr_landing(
+        &self,
+        landing_id: &PrLandingId,
+        expected_generation: u64,
+        claim: &LandingSupervisor,
+        stale_before: OffsetDateTime,
+    ) -> StoreResult<Option<PrLanding>> {
+        if claim.process_id == 0 {
+            return Err(StoreError::InvalidData(
+                "landing supervisor process id cannot be zero".to_string(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = transaction
+            .query_row(
+                &format!("SELECT {LANDING_COLUMNS} FROM pr_landings WHERE id=?1"),
+                [landing_id.as_str()],
+                map_landing,
+            )
+            .optional()?;
+        let Some(current) = current else {
+            transaction.commit()?;
+            return Ok(None);
+        };
+        if current.state.is_terminal() || current.generation != expected_generation {
+            transaction.commit()?;
+            return Ok(None);
+        }
+        let stale = current
+            .supervisor
+            .as_ref()
+            .is_some_and(|owner| owner.heartbeat_at <= stale_before);
+        if current.supervisor.is_some() && !stale {
+            transaction.commit()?;
+            return Ok(None);
+        }
+        let generation = if stale {
+            expected_generation.checked_add(1).ok_or_else(|| {
+                StoreError::InvalidData("landing generation is exhausted".to_string())
+            })?
+        } else {
+            expected_generation
+        };
+        let now = claim.heartbeat_at;
+        let changed = transaction.execute(
+            "UPDATE pr_landings
+             SET generation=?2, supervisor_placement=?3, supervisor_machine_id=?4,
+                 supervisor_process_id=?5, supervisor_heartbeat_at=?6, updated_at=?6
+             WHERE id=?1 AND generation=?7 AND state IN ('watching', 'repairing', 'blocked')",
+            params![
+                landing_id.as_str(),
+                generation as i64,
+                claim.placement.storage_str(),
+                Option::<String>::None,
+                i64::from(claim.process_id),
+                timestamp(now),
+                expected_generation as i64,
+            ],
+        )?;
+        let claimed = if changed == 1 {
+            transaction.query_row(
+                &format!("SELECT {LANDING_COLUMNS} FROM pr_landings WHERE id=?1"),
+                [landing_id.as_str()],
+                map_landing,
+            )?
+        } else {
+            transaction.commit()?;
+            return Ok(None);
+        };
+        transaction.commit()?;
+        Ok(Some(claimed))
+    }
+
+    pub fn heartbeat_pr_landing(
+        &self,
+        landing_id: &PrLandingId,
+        expected_generation: u64,
+        now: OffsetDateTime,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute(
+            "UPDATE pr_landings
+             SET supervisor_heartbeat_at=?3, updated_at=?3
+             WHERE id=?1 AND generation=?2
+               AND state IN ('watching', 'repairing', 'blocked')
+               AND supervisor_process_id IS NOT NULL",
+            params![
+                landing_id.as_str(),
+                expected_generation as i64,
+                timestamp(now)
+            ],
+        )? == 1)
+    }
+
+    pub fn update_pr_landing(&self, landing: &PrLanding) -> StoreResult<bool> {
+        landing
+            .validate()
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute(
+            "UPDATE pr_landings
+             SET state=?3, observed_head_sha=?4, merge_commit=?5,
+                 blocked_reason=?6,
+                 supervisor_heartbeat_at=?7, updated_at=?7
+             WHERE id=?1 AND generation=?2
+               AND state IN ('watching', 'repairing', 'blocked')",
+            params![
+                landing.id.as_str(),
+                landing.generation as i64,
+                landing.state.as_str(),
+                landing.observed_head_sha,
+                landing.merge_commit,
+                landing.blocked_reason,
+                timestamp(landing.updated_at),
+            ],
+        )? == 1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use time::OffsetDateTime;
+
+    use crate::pr_landing::{
+        LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
+    };
+    use crate::sqlite::SqliteStore;
+    use crate::work::task::TaskId;
+
+    fn landing(now: OffsetDateTime) -> PrLanding {
+        PrLanding::new(
+            NewPrLanding {
+                repo: "loopflowstudio/loopflow".to_string(),
+                pr_number: 248,
+                worktree: PathBuf::from("/tmp/loopflow.make-pr-landing-a-watched"),
+                branch: "jack/make-pr-landing-a-watched".to_string(),
+                task_id: None,
+                requested_head_sha: "head-a".to_string(),
+            },
+            now,
+        )
+        .unwrap()
+    }
+
+    fn store() -> (tempfile::TempDir, SqliteStore) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("registry.db");
+        let store = crate::test_fixture::open(&path).unwrap();
+        (directory, store)
+    }
+
+    #[test]
+    fn landing_claims_join_and_fence_stale_generations() {
+        let (_directory, store) = store();
+        let now = OffsetDateTime::now_utc();
+        let candidate = landing(now);
+        let created = store.start_or_join_pr_landing(&candidate).unwrap();
+        let joined = store.start_or_join_pr_landing(&landing(now)).unwrap();
+        assert_eq!(joined.id, created.id);
+
+        let local = LandingSupervisor {
+            placement: LandingPlacement::Local,
+            process_id: 41,
+            heartbeat_at: now,
+        };
+        let claimed = store
+            .claim_pr_landing(&created.id, 1, &local, now - time::Duration::minutes(1))
+            .unwrap()
+            .unwrap();
+        assert_eq!(claimed.generation, 1);
+        assert!(store
+            .claim_pr_landing(
+                &created.id,
+                1,
+                &LandingSupervisor {
+                    placement: LandingPlacement::Local,
+                    process_id: 42,
+                    heartbeat_at: now,
+                },
+                now - time::Duration::minutes(1),
+            )
+            .unwrap()
+            .is_none());
+
+        let replacement = store
+            .claim_pr_landing(
+                &created.id,
+                1,
+                &LandingSupervisor {
+                    placement: LandingPlacement::Local,
+                    process_id: 42,
+                    heartbeat_at: now + time::Duration::minutes(2),
+                },
+                now + time::Duration::minutes(1),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(replacement.generation, 2);
+        let mut stale = claimed;
+        stale.state = PrLandingState::Merged;
+        stale.merge_commit = Some("merge-a".to_string());
+        assert!(!store.update_pr_landing(&stale).unwrap());
+        let mut merged = replacement;
+        merged.state = PrLandingState::Merged;
+        merged.merge_commit = Some("merge-a".to_string());
+        assert!(store.update_pr_landing(&merged).unwrap());
+
+        let same_head = store.start_or_join_pr_landing(&landing(now)).unwrap();
+        assert_eq!(same_head.id, created.id);
+        let mut next_head = landing(now);
+        next_head.requested_head_sha = "head-b".to_string();
+        next_head.observed_head_sha = "head-b".to_string();
+        let next_head = store.start_or_join_pr_landing(&next_head).unwrap();
+        assert_ne!(next_head.id, created.id);
+    }
+
+    #[test]
+    fn joining_active_landing_refreshes_head_and_preserves_task_placement() {
+        let (_directory, store) = store();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("PRAGMA foreign_keys=OFF")
+            .unwrap();
+        let now = OffsetDateTime::now_utc();
+        let mut initial = landing(now);
+        initial.task_id = Some(TaskId::new());
+        let created = store.start_or_join_pr_landing(&initial).unwrap();
+
+        let mut revised = initial;
+        revised.requested_head_sha = "head-b".to_string();
+        revised.observed_head_sha = "head-b".to_string();
+        revised.worktree = PathBuf::from("/tmp/another-checkout");
+        revised.branch = "another-local-branch".to_string();
+        let joined = store.start_or_join_pr_landing(&revised).unwrap();
+
+        assert_eq!(joined.id, created.id);
+        assert_eq!(joined.task_id, created.task_id);
+        assert_eq!(joined.requested_head_sha, "head-b");
+        assert_eq!(joined.worktree, created.worktree);
+        assert_eq!(joined.branch, created.branch);
+    }
+
+    #[test]
+    fn concurrent_retries_resume_one_blocked_landing_and_fence_its_old_owner() {
+        let (_directory, store) = store();
+        let now = OffsetDateTime::now_utc();
+        let mut candidate = landing(now);
+        let created = store.start_or_join_pr_landing(&candidate).unwrap();
+        let claim = LandingSupervisor {
+            placement: LandingPlacement::Local,
+            process_id: 41,
+            heartbeat_at: now,
+        };
+        let mut old = store
+            .claim_pr_landing(&created.id, 1, &claim, now - time::Duration::minutes(1))
+            .unwrap()
+            .unwrap();
+        old.state = PrLandingState::Blocked;
+        old.blocked_reason = Some("provider credential revoked".to_string());
+        assert!(store.update_pr_landing(&old).unwrap());
+
+        candidate.worktree = PathBuf::from("/tmp/resumed-checkout");
+        candidate.branch = "resumed-local-branch".to_string();
+
+        let barrier = std::sync::Barrier::new(2);
+        let retries = std::thread::scope(|scope| {
+            let retry = || {
+                barrier.wait();
+                store.start_or_join_pr_landing(&candidate).unwrap()
+            };
+            let first = scope.spawn(retry);
+            let second = scope.spawn(retry);
+            [first.join().unwrap(), second.join().unwrap()]
+        });
+        for resumed in &retries {
+            assert_eq!(resumed.id, old.id);
+            assert_eq!(resumed.generation, old.generation + 1);
+            assert_eq!(resumed.state, PrLandingState::Watching);
+            assert!(resumed.blocked_reason.is_none());
+            assert!(resumed.supervisor.is_none());
+            assert_eq!(resumed.worktree, candidate.worktree);
+            assert_eq!(resumed.branch, candidate.branch);
+        }
+        assert!(!store.update_pr_landing(&old).unwrap());
+        assert!(!store
+            .heartbeat_pr_landing(&old.id, old.generation, now)
+            .unwrap());
+        let generation = retries[0].generation;
+        assert!(store
+            .claim_pr_landing(
+                &old.id,
+                generation,
+                &claim,
+                now - time::Duration::minutes(1)
+            )
+            .unwrap()
+            .is_some());
+        assert!(store
+            .claim_pr_landing(
+                &old.id,
+                generation,
+                &claim,
+                now - time::Duration::minutes(1)
+            )
+            .unwrap()
+            .is_none());
+    }
+}

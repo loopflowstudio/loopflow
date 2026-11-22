@@ -197,7 +197,7 @@ def main() -> None:
             "-framework",
             "ServiceManagement",
             str(source),
-            str(ROOT / "rust/loopflow/src/installation/registration.m"),
+            str(ROOT / "rust/loopflow-execution/src/installation/registration.m"),
             "-o",
             str(executable),
         )

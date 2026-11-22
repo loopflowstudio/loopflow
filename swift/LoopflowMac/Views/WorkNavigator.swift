@@ -32,21 +32,21 @@ struct WorkNavigator: View {
         return filter == .working ? scope : "\(scope) · \(filter.rawValue)"
     }
 
-    /// Nil while the list loads: the work status above already says so, and an empty list is not yet known.
+    /// Nil until the list is read: the work status above says it is loading, and
+    /// a failed read is the Notice's.
     private var emptyListText: String? {
         switch model.navigation.sidebarScope {
         case .dashboard(let id):
             return model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard"
         case .repository, .wave:
-            if model.taskListReading.isLoading { return nil }
-            if model.taskListReading.errorMessage != nil { return "Task list unavailable" }
+            if model.taskListReading.value == nil { return nil }
             if case .wave = model.navigation.sidebarScope { return "No working Tasks in this Wave" }
             return "No working Tasks in this list"
         }
     }
 
     private var rowOrder: [WorkReference] {
-        (model.sidebarTaskIDs + model.sidebarAutonomousTaskIDs).map { .task(id: $0) }
+        model.sidebarTaskIDs.map { .task(id: $0) }
             + model.visibleRoadmaps.map { .wave(id: $0.wave.id) }
     }
 
@@ -60,13 +60,8 @@ struct WorkNavigator: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let status = model.workStatus.message {
-                WorkReadStatus(model: model, status: status)
-            }
-            if let error = model.dashboardError ?? model.selectionPlans.errorMessage,
-               ![model.roadmap.errorMessage, model.taskListReading.errorMessage, model.sessions.errorMessage]
-                .compactMap({ $0 }).contains(error) {
-                Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
+            if let status = model.workStatus.progress {
+                WorkReadStatus(status: status)
             }
             // The repository tops the sidebar; a selected Wave moves up under it.
             VStack(alignment: .leading, spacing: 5) {
@@ -96,14 +91,16 @@ struct WorkNavigator: View {
                             .font(Typography.body(12))
                             .foregroundStyle(palette.textSecondary).padding(10)
                     }
-                    autonomousSection
                     if let selection = model.selection, selection.kind == .task,
-                       !(taskIDs + model.sidebarAutonomousTaskIDs).contains(where: { model.isSelected(.task(id: $0)) }) {
+                       !taskIDs.contains(where: { model.isSelected(.task(id: $0)) }) {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Open Task is outside this list")
                             Button("Show working tasks") {
-                                model.navigation.sidebarFilter = .working
-                                model.navigation.sidebarWaveID = nil
+                                Perf.userAction(Perf.hierarchyInteraction, scenario: "sidebar_working", id: "outline:\(WorkNavigation.SidebarFilter.working.rawValue)",
+                                                repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                                    model.navigation.sidebarFilter = .working
+                                    model.navigation.sidebarWaveID = nil
+                                }
                             }
                         }.font(Typography.body(11)).padding(10)
                     }
@@ -134,12 +131,14 @@ struct WorkNavigator: View {
         }
         .onChange(of: rowOrder.isEmpty, initial: true) { _, empty in
             guard !empty else { return }
-            Perf.endAfterCommit(Perf.coldStart, id: "launch")
             let source = model.showsSavedWork ? "saved" : "fresh"
             DispatchQueue.main.async { LaunchJournal.home.mark(.usable, ["source": source]) }
         }
-        .onChange(of: model.navigation.sidebarFilter) { _, _ in
-            Perf.endAfterCommit(Perf.hierarchyInteraction, id: "outline")
+        .onChange(of: model.sidebarTaskIDs) { before, after in
+            Perf.rowsChanged(from: before, to: after, owner: model.navigation.performanceOwner)
+        }
+        .onChange(of: model.navigation.sidebarFilter) { _, filter in
+            Perf.stateObserved(Perf.hierarchyInteraction, id: "outline:\(filter.rawValue)", owner: model.navigation.performanceOwner)
         }
         .onChange(of: model.navigation.sidebarFocusRequested, initial: true) { _, requested in
             guard requested else { return }
@@ -150,7 +149,9 @@ struct WorkNavigator: View {
         }
         .onKeyPress(.return) {
             guard let focusedWork else { return .ignored }
-            model.select(focusedWork)
+            Perf.userAction(Perf.taskWorkspaceReady, scenario: focusedWork.kind == .task ? "task" : "wave",
+                            id: focusedWork.id, repository: model.repoPath, liveSessions: model.liveSessionCount,
+                            owner: model.navigation.performanceOwner) { model.select(focusedWork) }
             return .handled
         }
         .renderFlash()
@@ -196,13 +197,13 @@ struct WorkNavigator: View {
         let state: SidebarSelection = pressedScope == scope || model.navigation.destination == .work(reference) ? .shown
             : model.navigation.sidebarScope == scope ? .containing : .none
         return Button {
-            // The click darkens the row first; it moves once that has landed.
-            guard !reduceMotion else { model.select(reference); return }
-            withAnimation(.easeOut(duration: 0.12)) { pressedScope = scope }
-            Task {
-                try? await Task.sleep(for: .milliseconds(120))
+            Perf.userAction(Perf.taskWorkspaceReady, scenario: "wave", id: reference?.id ?? "repository",
+                            repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                // Select in the click; the pressed highlight animates over the selected row.
                 model.select(reference)
-                pressedScope = nil
+                guard !reduceMotion else { return }
+                withAnimation(.easeOut(duration: 0.12)) { pressedScope = scope }
+                withAnimation(.easeOut(duration: 0.12).delay(0.12)) { pressedScope = nil }
             }
         } label: {
             HStack {
@@ -212,7 +213,7 @@ struct WorkNavigator: View {
                 if let unavailableReason {
                     Image(systemName: "exclamationmark.triangle").help(unavailableReason)
                 } else {
-                    Text("\(count)").font(Typography.code(10)).help("\(count) working or autonomous Tasks")
+                    Text("\(count)").font(Typography.code(10)).help("\(count) working Tasks")
                 }
             }.font(Typography.body(13)).padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -222,37 +223,17 @@ struct WorkNavigator: View {
                 .contentShape(RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain)
             .modifier(FocusedWork(focus: $focusedWork, reference: reference))
-            .accessibilityLabel("\(name), \(count) working or autonomous Tasks")
+            .accessibilityLabel("\(name), \(count) working Tasks")
             .accessibilityIdentifier("work-wave-\(reference?.id ?? "repository")")
             .matchedGeometryEffect(id: scope, in: scopeTitle)
     }
 
-    /// Shipping Tasks run to merge without anyone; they sit below, quieter, under a heading.
-    @ViewBuilder private var autonomousSection: some View {
-        let ids = model.sidebarAutonomousTaskIDs
-        if !ids.isEmpty {
-            HStack {
-                Text("Autonomous")
-                Spacer()
-                Text("\(ids.count)").font(Typography.code(10))
-            }
-            .font(Typography.strong(12)).foregroundStyle(palette.textSecondary)
-            .padding(.horizontal, 10).padding(.top, 14).padding(.bottom, 2)
-            .help("Shipping: running to merge with nothing left for a person to do")
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("work-autonomous-heading")
-            ForEach(ids, id: \.self) { id in
-                taskRow(id, slotHint: nil, quiet: true)
-            }
-        }
-    }
-
-    private func taskRow(_ id: String, slotHint: String?, quiet: Bool = false) -> some View {
+    private func taskRow(_ id: String, slotHint: String?) -> some View {
         let found = model.task(id: id)
         let selected = model.isSelected(.task(id: id))
-        let muted = quiet || model.selection?.kind == .wave && found?.wave?.wave.id != model.selection?.id
+        let muted = model.selection?.kind == .wave && found?.wave?.wave.id != model.selection?.id
         let sessions = model.taskSessions(id)
-        let status = SessionProgramStatus(sessions: sessions, unavailable: model.sessions.errorMessage)
+        let status = SessionProgramStatus(sessions: sessions, unavailable: model.sessions.failure)
         let presentation = model.taskPresentation(id: id)
         let title = presentation.title
         // Rows slide under the pointer while scrolling. Only the ⌘N hint reads the
@@ -275,7 +256,12 @@ struct WorkNavigator: View {
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .foregroundStyle(selected ? palette.workSelectedText : muted ? palette.textSecondary : palette.text)
         .background {
-            Button { model.select(.task(id: id)) } label: {
+            Button {
+                Perf.userAction(Perf.taskWorkspaceReady, scenario: "task", id: id,
+                                repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                    model.select(.task(id: id))
+                }
+            } label: {
                 SidebarSelectionShape(state: selected ? .shown : .none)
                     .contentShape(Rectangle())
             }.buttonStyle(.plain).focused($focusedWork, equals: .task(id: id)).accessibilityLabel(title)
@@ -307,9 +293,7 @@ struct WorkNavigator: View {
                            waitingForDetails: Bool, slotHint: String?, task: RoadmapTask?,
                            status: SessionProgramStatus, selected: Bool, hover: HoverFlag) -> some View {
         let detail: (text: String, help: String)?
-        if let shipping = task?.shipping {
-            detail = ("\(shipping.label) · \(shipping.reason)", preview.help)
-        } else if task?.task.description.isEmpty == false || preview.age != nil {
+        if task?.task.description.isEmpty == false || preview.age != nil {
             detail = (preview.text, preview.help)
         } else if waitingForDetails {
             detail = ("Loading planning…", "Waiting for Task details")
@@ -323,7 +307,7 @@ struct WorkNavigator: View {
                     .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
                     .help(detail.help).allowsHitTesting(false)
             }
-            TaskRowMetadata(id: id, task: task, status: status, selected: selected,
+            TaskRowMetadata(id: id, task: task, status: status, auto: model.sidebarAutoTaskIDs.contains(id), selected: selected,
                 slotHint: slotHint,
                 showsSlotHint: model.navigation.showsSlotHints, hover: hover,
                 sourceAge: preview.age)
@@ -454,8 +438,7 @@ struct WorkBreadcrumbs: View {
 struct WorkMachineControl: View {
     let model: WorkModel
     let target: WorkMachineTarget
-    @State private var machines: [Machine] = []
-    @State private var error: String?
+    private var machines: [Machine] { model.machines.value ?? [] }
 
     var body: some View {
         let current = model.machine(of: target)
@@ -465,10 +448,9 @@ struct WorkMachineControl: View {
                     .disabled(id == current.id)
                     .accessibilityIdentifier("work-machine-" + id)
             }
-            if let error { Text(error) }
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: error == nil ? "desktopcomputer" : "exclamationmark.triangle")
+                Image(systemName: "desktopcomputer")
                 Text(current.id.map(name) ?? current.label ?? "Machine unknown").lineLimit(1)
             }
             .font(Typography.caption())
@@ -477,7 +459,7 @@ struct WorkMachineControl: View {
         .fixedSize()
         .help("Machine this Work runs on")
         .accessibilityIdentifier("work-machine")
-        .task(id: target) { await load() }
+        .task(id: target) { await model.loadMachines() }
     }
 
     /// This Machine first, then your registered Machines.
@@ -493,19 +475,12 @@ struct WorkMachineControl: View {
         return machines.first { $0.id == id }?.label ?? (current.id == id ? current.label : nil) ?? id
     }
 
-    private func load() async {
-        error = nil
-        // A newer load or a navigation cancels this one; that is not a failure to show.
-        do { machines = try await model.machines() }
-        catch is CancellationError {}
-        catch { self.error = error.localizedDescription }
-    }
-
+    /// A failure posts to the window that asked.
     private func use(_ id: String) async {
-        error = nil
+        let notices = model.navigation.notices
         do { try await model.useMachine(id, for: target) }
         catch is CancellationError {}
-        catch { self.error = error.localizedDescription }
+        catch { notices.post(Notice("Could not run on \(name(id)): \(error.localizedDescription)")) }
     }
 }
 
@@ -912,15 +887,8 @@ struct WorkTaskIdentity: View {
 }
 
 struct WorkReadStatus: View {
-    let model: WorkModel
     let status: String
     var body: some View {
-        HStack {
-            Text(status)
-            if case .failed = model.workStatus {
-                Button("Retry") { Task { await model.refresh() } }
-                    .accessibilityIdentifier("work-retry")
-            }
-        }.font(Typography.body(11)).padding(10).accessibilityIdentifier("work-status")
+        Text(status).font(Typography.body(11)).padding(10).accessibilityIdentifier("work-status")
     }
 }

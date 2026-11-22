@@ -174,7 +174,6 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
     monkeypatch.setattr(publish_release, "ROOT", tmp_path)
     monkeypatch.setattr(publish_release, "check_release_host", lambda: None)
     monkeypatch.setattr(publish_release, "_run", fake_run)
-    monkeypatch.setattr(publish_release, "_publish_crate", lambda: None)
     monkeypatch.setattr(publish_release, "_upload_dmg", lambda *args: None)
     appcasts: dict[str, str] = {}
     monkeypatch.setattr(publish_release, "_upload_appcast", appcasts.__setitem__)
@@ -221,7 +220,6 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
         "dmg_notarized",
         "website_candidate_verified",
         "github_draft_staged",
-        "crate_published",
         "versioned_dmg_uploaded",
         "preview_appcast_uploaded",
         "website_deployed",
@@ -311,7 +309,6 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sparkle_key)
             "https://downloads.loopflow.studio/Loopflow-1.2.3.dmg": b"notarized artifact",
             "https://downloads.loopflow.studio/Loopflow-latest.dmg": b"notarized artifact",
             "https://loopflow.studio/healthz": b'{"status":"ok","release":"v1.2.3"}',
-            "https://crates.io/api/v1/crates/loopflow/1.2.3": b'{"version":{"num":"1.2.3"}}',
             "github-latest": b"v1.2.3",
             "github-newest": b"v1.2.3",
         }
@@ -361,9 +358,6 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sparkle_key)
             {"status": "ok", "release": tag}, separators=(",", ":")
         ).encode()
 
-    def publish_crate() -> None:
-        remote["https://crates.io/api/v1/crates/loopflow/1.2.3"] = b'{"version":{"num":"1.2.3"}}'
-
     monkeypatch.setattr(publish_release, "_run", external_command)
     monkeypatch.setattr(
         publish_release,
@@ -380,7 +374,6 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sparkle_key)
         ),
     )
     monkeypatch.setattr(publish_release, "_deploy_website", deploy)
-    monkeypatch.setattr(publish_release, "_publish_crate", publish_crate)
     return remote, hashes
 
 
@@ -458,7 +451,6 @@ def test_reconcile_repairs_missing_publication_stages_from_exact_artifacts(
     remote, hashes = public_release
     expected = dict(remote)
     del remote["https://downloads.loopflow.studio/Loopflow-1.2.3.dmg"]
-    del remote["https://crates.io/api/v1/crates/loopflow/1.2.3"]
     remote["https://loopflow.studio/healthz"] = b'{"status":"ok","release":"v1.2.2"}'
     remote["https://downloads.loopflow.studio/Loopflow-latest.dmg"] = b"previous release"
     result = publish_release.verify_release("v1.2.3", repair=True)
@@ -466,7 +458,6 @@ def test_reconcile_repairs_missing_publication_stages_from_exact_artifacts(
     assert result.artifact_sha256 == hashes
     assert result.smoke_versions == {"lf": "lf 1.2.3", "lf-linux": "lf 1.2.3"}
     assert {
-        "crate_published",
         "versioned_dmg_uploaded",
         "website_deployed",
         "latest_dmg_uploaded",

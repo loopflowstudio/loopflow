@@ -58,7 +58,7 @@ final class MobileTaskCreationTests: XCTestCase {
         await model.submit()
         let original = try XCTUnwrap(model.draft.submission)
         let opening = await model.openTask()
-        XCTAssertEqual(opening?.task.work, client.task.work)
+        XCTAssertEqual(opening?.task.id, client.task.work.id)
         let restored = MobileTaskCreation(client: client, store: store)
         XCTAssertEqual(restored.draft.submission, original)
         XCTAssertEqual(restored.draft.outcome, model.draft.outcome)
@@ -67,6 +67,57 @@ final class MobileTaskCreationTests: XCTestCase {
         XCTAssertEqual(client.requests.count, 1)
         for _ in 0..<20 where client.presented.isEmpty { await Task.yield() }
         XCTAssertEqual(client.presented, [original.id], "Presenting the Task retires its saved creation")
+    }
+
+    func testStartOpensTheAnswersConversationWithoutAnotherRequest() async throws {
+        let client = try await CreationClient()
+        let receipts = try JSONDecoder().decode([TaskCreated].self, from: Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "tests/fixtures/dto/task_create_receipt.json")))
+        let created = try XCTUnwrap(receipts.first)
+        client.created = created
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let model = MobileTaskCreation(client: client, store: store)
+        await model.prepare()
+        model.editText("Open my conversation")
+        await model.submit()
+        let opened = await model.openTask()
+        let opening = try XCTUnwrap(opened)
+        XCTAssertEqual(client.log, ["task.create"], "Start sends the creation and reads nothing after it")
+        XCTAssertEqual(opening.task.id, created.receipt.task.id)
+        XCTAssertEqual(opening.task.primarySession, try XCTUnwrap(created.receipt.sessionId))
+        XCTAssertEqual(opening.task.title, created.receipt.task.title)
+        XCTAssertEqual(model.draft.outcome?.state, .started)
+        opening.presented()
+        XCTAssertNil(try store.load().submission)
+    }
+
+    func testFirstSendIsStartingAndRecoveryIsNot() async throws {
+        let client = try await CreationClient()
+        let store = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.url.deletingLastPathComponent()) }
+        let model = MobileTaskCreation(client: client, store: store)
+        await model.prepare()
+        model.editText("Start this")
+        client.delayReply = true
+        client.loseReply = true
+        let first = Task { await model.submit() }
+        for _ in 0..<200 where client.reply == nil { await Task.yield() }
+        XCTAssertTrue(model.starting, "The first send is starting a Task")
+        client.reply?.resume()
+        client.reply = nil
+        await first.value
+        XCTAssertFalse(model.starting)
+        XCTAssertNil(model.draft.outcome, "A lost answer leaves no outcome")
+        client.delayReply = true
+        let recovery = Task { await model.submit() }
+        for _ in 0..<200 where client.reply == nil { await Task.yield() }
+        XCTAssertTrue(model.busy)
+        XCTAssertFalse(model.starting, "Rechecking the same request is not starting one")
+        client.reply?.resume()
+        await recovery.value
+        XCTAssertEqual(client.log, ["task.create", "creation.get"])
     }
 
     func testLateAndRepeatedPresentationPreserveANewerDraft() async throws {
@@ -102,8 +153,10 @@ final class MobileTaskCreationTests: XCTestCase {
         model.editText("Cancel navigation, keep the created Task")
         await model.submit()
         let original = model.draft.submission
+        // After a restart the answer is gone; opening reads the Task.
+        let restored = MobileTaskCreation(client: client, store: store)
         client.delayRead = true
-        let reading = Task { await model.openTask() }
+        let reading = Task { await restored.openTask() }
         while client.readReply == nil { await Task.yield() }
         reading.cancel()
         client.readReply?.resume()
@@ -202,7 +255,7 @@ final class MobileTaskCreationTests: XCTestCase {
         XCTAssertEqual(client.requests, [original, original])
         XCTAssertEqual(restored.savedRequest(original.id)?.outcome?.state, .started)
         let opened = await restored.openTask(savedRequestID: original.id)
-        XCTAssertEqual(opened?.task.work, client.task.work)
+        XCTAssertEqual(opened?.task.id, client.task.work.id)
         opened?.presented()
         let remaining = try store.load()
         XCTAssertTrue(remaining.savedRequests.isEmpty)
@@ -235,7 +288,7 @@ final class MobileTaskCreationTests: XCTestCase {
         XCTAssertEqual(restored.draft.outcome?.taskId, client.task.work.id)
         XCTAssertNil(restored.draft.outcome?.receipt)
         let opened = await restored.openTask()
-        XCTAssertEqual(opened?.task.work, client.task.work)
+        XCTAssertEqual(opened?.task.id, client.task.work.id)
         XCTAssertEqual(client.requests.count, 1, "Opening the existing Task must not repeat creation")
     }
 
@@ -288,7 +341,7 @@ final class MobileTaskCreationTests: XCTestCase {
         try bytes.write(to: store.url)
         XCTAssertTrue(model.saveForLater())
         client.readUnavailable = true
-        let missing = await model.openTask(savedRequestID: original.id)
+        let missing = await MobileTaskCreation(client: client, store: store).openTask(savedRequestID: original.id)
         XCTAssertNil(missing)
         XCTAssertEqual(try store.load().savedRequests.first?.submission, original)
     }
@@ -358,7 +411,7 @@ final class MobileTaskCreationTests: XCTestCase {
         try detail.inspect().find(button: "Check status").tap()
         let deadline = Date().addingTimeInterval(2)
         while opened == nil && Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertEqual(opened?.task.work, client.task.work)
+        XCTAssertEqual(opened?.task.id, client.task.work.id)
         XCTAssertNotNil(model.savedRequest(id), "A read is not presentation")
         opened?.presented()
         XCTAssertEqual(model.draft.text, "An unrelated draft must remain here")
@@ -430,7 +483,7 @@ final class MobileTaskCreationTests: XCTestCase {
             await restored.submit()
             XCTAssertEqual(client.requests.count, 1)
             let opened = await restored.openTask()
-            XCTAssertEqual(opened?.task.work, client.task.work)
+            XCTAssertEqual(opened?.task.id, client.task.work.id)
         }
     }
 
@@ -558,10 +611,14 @@ private final class CreationClient: MobileTaskCreationClient {
     var repositories = [PortfolioRepo(path: "/work/first", error: nil), PortfolioRepo(path: "/work/second", error: nil)]
     var contextFailure: String?
     var presented: [UUID] = []
+    /// Start's answer; nil answers with the fixture reading's Task.
+    var created: TaskCreated?
+    /// Every request, by name, in order.
+    var log: [String] = []
 
     init() async throws {
         let url = try XCTUnwrap(Bundle(for: MobileTaskCreationTests.self).url(forResource: "task-reading", withExtension: "json"))
-        guard case .response(_, _, let result) = try ServerMessage(line: Data(contentsOf: url)) else {
+        guard case .response(_, _, let result, _) = try ServerMessage(line: Data(contentsOf: url)) else {
             throw RegistryQueryError("task-reading.json is not a response")
         }
         let plan = try result.decode(WorkViewPlan.self)
@@ -573,7 +630,19 @@ private final class CreationClient: MobileTaskCreationClient {
         return MobileCreationContext(machineID: machineID, name: "Development Mac", repositories: repositories)
     }
 
-    func createTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome {
+    func startTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskStart {
+        log.append("task.create")
+        let outcome = try await send(submission)
+        if let created { return MobileTaskStart(created) }
+        return MobileTaskStart(outcome: outcome, task: MobileTask(task))
+    }
+
+    func recoverTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome {
+        log.append("creation.get")
+        return try await send(submission)
+    }
+
+    private func send(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome {
         guard submission.machineID == machineID else { throw RegistryQueryError("Different Machine") }
         requests.append(submission)
         if delayReply {
@@ -584,14 +653,15 @@ private final class CreationClient: MobileTaskCreationClient {
         return try outcome ?? result("started")
     }
 
-    func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content {
+    func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> MobileTask {
+        log.append("task:\(taskID)")
         guard submission.machineID == machineID else { throw RegistryQueryError("Different Machine") }
         if readUnavailable { throw RegistryQueryError("Workspace not ready") }
         if delayRead {
             delayRead = false
             await withCheckedContinuation { readReply = $0 }
         }
-        return task
+        return MobileTask(task)
     }
 
     func taskPresented(_ submission: MobileTaskSubmission) async throws {

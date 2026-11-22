@@ -11,7 +11,7 @@ struct WorkPaletteRow: Identifiable, Equatable {
 
 extension WorkModel {
     var paletteIsStale: Bool {
-        roadmap.errorMessage != nil || sessions.errorMessage != nil || graphCatalog.errorMessage != nil
+        roadmap.failure != nil || sessions.failure != nil || graphCatalog.failure != nil
             || visibleRoadmaps.contains { $0.tasks.unavailableReason != nil || !$0.unavailableTasks.isEmpty }
     }
 
@@ -124,9 +124,9 @@ extension WorkModel {
             }
             rows = waves + tasks
         case .wave(let id):
-            rows = (wave(id: id)?.tasks.items ?? []).sorted { $0.task.rank < $1.task.rank }.map { task in
+            rows = (wave(id: id)?.tasks.items ?? []).map { task in
                 WorkPaletteRow(id: .task(task.id), title: task.task.name,
-                    detail: task.task.identifier + (task.runtime?.owner != nil ? "" : " · Not started"), key: task.task.identifier)
+                    detail: task.task.identifier + (task.awaitsStart ? " · Not started" : " · \(task.lifecycle.label.capitalized)"), key: task.task.identifier)
             }
         }
         guard !query.isEmpty else { return rows }
@@ -144,9 +144,11 @@ extension WorkModel {
         case .openRepository(let path): openRepository?(path, nil)
         case .wave(let id): openPaletteWave(id)
         case .task(let id):
-            Perf.$inputTrace.withValue(UUID().uuidString) {
+            Perf.userAction(Perf.taskWorkspaceReady, scenario: "task", id: id, repository: repoPath, liveSessions: liveSessionCount, owner: navigation.performanceOwner) {
+                Perf.$inputTrace.withValue(UUID().uuidString) {
                 Perf.agentInput("task_click", task: id, detail: "source=" + source)
                 Task { await openPaletteTask(id) }
+                }
             }
             // Opening the Task records it as recent once it resolves.
             return
@@ -194,7 +196,12 @@ struct WorkPalette: View {
             Divider()
             Picker("Sidebar shows", selection: Binding(
                 get: { model.navigation.sidebarFilter },
-                set: { model.navigation.sidebarFilter = $0 }
+                set: { value in
+                    Perf.userAction(Perf.hierarchyInteraction, scenario: "sidebar_\(value.rawValue)", id: "outline:\(value.rawValue)",
+                                    repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                        model.navigation.sidebarFilter = value
+                    }
+                }
             )) {
                 ForEach(WorkNavigation.SidebarFilter.allCases, id: \.self) { filter in
                     Text(filter.rawValue).tag(filter)
@@ -256,7 +263,6 @@ struct TaskLinkView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Open Task").font(Typography.sectionTitle(26))
-            if let error = model.taskLinkReading.errorMessage { Text(error) }
             if let result = model.taskLinkReading.value {
                 if result.tasks.items.isEmpty { Text("No exact Task found in available planning.") }
                 if let reason = result.tasks.unavailableReason { Text(reason) }
@@ -382,7 +388,7 @@ struct GraphCatalogInspector: View {
                     }
                 }
             }
-            if let error = sourceError ?? model.graphCatalog.errorMessage {
+            if let error = sourceError {
                 Text(error).foregroundStyle(palette.warning)
             }
             Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }
@@ -416,7 +422,7 @@ struct WorkflowCatalogInspector: View {
                     }
                 }
             }
-            if let error = sourceError ?? model.workflowCatalog.errorMessage {
+            if let error = sourceError {
                 Text(error).foregroundStyle(palette.warning)
             }
             Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }

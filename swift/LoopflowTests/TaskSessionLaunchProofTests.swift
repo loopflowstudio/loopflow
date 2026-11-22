@@ -87,7 +87,7 @@ struct TaskSessionLaunchProofTests {
         """#
         try script.write(to: helper, atomically: true, encoding: .utf8)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
-        try #require(try LocalWaveAgentLauncher.controlLfPath() == helper.path)
+        try #require(try LocalWaveAgentLauncher.machineLf().path == helper.path)
         try JSONSerialization.data(withJSONObject: ["worktree": checkout.path, "machine_id": fixtureMachineId]).write(
             to: directory.appendingPathComponent("receipt.json"))
 
@@ -176,14 +176,17 @@ struct TaskSessionLaunchProofTests {
             try Data().write(to: directory.appendingPathComponent("release"))
             try await wait { !origin.startingTaskSessions.contains("issue-review") }
             if mode != "success" {
-                #expect(model.navigation.taskSessionErrors.isEmpty)
-                let error = try #require(origin.taskSessionErrors["issue-review"])
+                #expect(model.navigation.notices.current?.key != "new-session-issue-review")
+                let notice = try #require(origin.notices.current)
+                #expect(notice.key == "new-session-issue-review")
+                #expect(notice.action?.title == "Try again")
+                let error = notice.text
                 #expect(error.contains(mode == "reject" ? "Preparation refused" : "missing or not executable"))
                 #expect(!fm.fileExists(atPath: directory.appendingPathComponent("conversation-args").path))
                 model.setRepoPath(repo)
                 #expect(workspace.multiplexer.layout == layout)
             } else {
-                #expect(origin.taskSessionErrors.isEmpty)
+                #expect(origin.notices.current?.key != "new-session-issue-review")
                 #expect(model.selection == .task(id: "issue-review"))
                 #expect(origin.preparedTaskWorktrees["issue-review"] == fixtureWorkspace(checkout.path))
                 let selectedKey = try #require(registry.selectedWork)

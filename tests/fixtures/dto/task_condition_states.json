@@ -11,13 +11,12 @@
       "completed_at": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -34,6 +33,7 @@
       "reason": "Task is ready to start"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -59,17 +59,20 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   "completed": {
     "task": {
@@ -83,13 +86,12 @@
       "completed_at": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -109,7 +111,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_completed",
+      "work_id": "completed",
       "status": "done",
       "completion_pending": null,
       "reason": "done",
@@ -130,6 +132,7 @@
       "reason": "Linear Task is complete"
     },
     "section": "done",
+    "owned_by_you": false,
     "actions": {
       "recommended": "no_action",
       "reason": "Task is completed"
@@ -267,7 +270,8 @@
           "started_at": 10,
           "completed_at": 20,
           "outcome": "ok",
-          "exit_code": 0
+          "exit_code": 0,
+          "error": null
         },
         {
           "lf_process_id": "00000002-0000-4000-8000-000000000000",
@@ -281,7 +285,8 @@
           "started_at": 20,
           "completed_at": 30,
           "outcome": "ok",
-          "exit_code": 0
+          "exit_code": 0,
+          "error": null
         },
         {
           "lf_process_id": "00000003-0000-4000-8000-000000000000",
@@ -295,7 +300,8 @@
           "started_at": 30,
           "completed_at": 40,
           "outcome": "ok",
-          "exit_code": 0
+          "exit_code": 0,
+          "error": null
         },
         {
           "lf_process_id": "00000004-0000-4000-8000-000000000000",
@@ -309,7 +315,8 @@
           "started_at": 40,
           "completed_at": 50,
           "outcome": "ok",
-          "exit_code": 0
+          "exit_code": 0,
+          "error": null
         },
         {
           "lf_process_id": "00000005-0000-4000-8000-000000000000",
@@ -323,7 +330,8 @@
           "started_at": 50,
           "completed_at": 60,
           "outcome": "ok",
-          "exit_code": 0
+          "exit_code": 0,
+          "error": null
         },
         {
           "lf_process_id": "00000006-0000-4000-8000-000000000000",
@@ -337,7 +345,8 @@
           "started_at": 60,
           "completed_at": null,
           "outcome": null,
-          "exit_code": null
+          "exit_code": null,
+          "error": null
         }
       ]
     },
@@ -345,17 +354,19 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": "Task is complete"
     },
-    "ship_control": {
-      "unavailable": "Task is complete"
-    },
-    "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "done",
+    "selection_states": [
+      "done"
+    ]
   },
   "stale": {
     "task": {
@@ -369,13 +380,12 @@
       "completed_at": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -395,7 +405,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_stale",
+      "work_id": "stale",
       "status": "moving",
       "completion_pending": "Linear calls Task LOO-1 complete while it is active on its workflow; `lf task move LOO-1 end --force` completes it here",
       "reason": "ready",
@@ -416,6 +426,7 @@
       "reason": "implementing"
     },
     "section": "working",
+    "owned_by_you": false,
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -605,17 +616,21 @@
       "state": "blocked",
       "reason": "Release target is unavailable",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "moving",
+    "selection_states": [
+      "open",
+      "moving",
+      "working"
+    ]
   },
   "unavailable": {
     "task": {
@@ -629,13 +644,12 @@
       "completed_at": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -655,7 +669,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_unavailable",
+      "work_id": "unavailable",
       "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
@@ -676,6 +690,7 @@
       "reason": "implementing"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -701,17 +716,21 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "open",
+      "unstarted",
+      "backlog"
+    ]
   },
   "user_wait": {
     "task": {
@@ -725,13 +744,12 @@
       "completed_at": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -751,7 +769,7 @@
       }
     },
     "runtime": {
-      "work_id": "task-user",
+      "work_id": "user",
       "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
@@ -772,6 +790,7 @@
       "reason": "choose the recovery boundary"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": "no_action",
       "reason": "Waiting for your answer"
@@ -962,17 +981,21 @@
       "state": "idle",
       "reason": "Waiting for your review at demo",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "open",
+      "unstarted",
+      "backlog"
+    ]
   },
   "dirty": {
     "task": {
@@ -986,13 +1009,12 @@
       "completed_at": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -1012,7 +1034,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_dirty",
+      "work_id": "dirty",
       "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
@@ -1033,6 +1055,7 @@
       "reason": "implementing"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -1058,17 +1081,21 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "open",
+      "unstarted",
+      "backlog"
+    ]
   },
   "authored_commits": {
     "task": {
@@ -1082,13 +1109,12 @@
       "completed_at": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -1108,7 +1134,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_commits",
+      "work_id": "commits",
       "status": "unstarted",
       "completion_pending": null,
       "reason": "ready",
@@ -1129,6 +1155,7 @@
       "reason": "merge pull request head head-commits on GitHub"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -1317,15 +1344,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -1354,6 +1379,12 @@
       "merge_commit": null,
       "abandoned_at": null
     },
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "open",
+      "unstarted",
+      "backlog"
+    ]
   }
 }

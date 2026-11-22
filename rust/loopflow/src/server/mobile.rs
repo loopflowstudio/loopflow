@@ -8,38 +8,15 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::client::Connection;
 use super::wire::{Operation, ServerOperation};
 use anyhow::{Context, Result};
 use fs2::FileExt;
+use loopflow_execution::machine::client::Connection;
 use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_rustls::{rustls, TlsAcceptor};
 
-/// A device's Tailscale identity, as `tailscale status` and `whois` report it.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
-pub struct TailscaleIdentity {
-    /// The device's Tailscale StableID.
-    pub node: String,
-    /// The Tailscale user ID that owns the device.
-    pub user: u64,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
-pub struct Configuration {
-    pub enabled: bool,
-    pub endpoint: String,
-    /// The Machine owner's identity: their other devices are admitted.
-    pub owner: TailscaleIdentity,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
-pub struct Status {
-    pub configuration: Option<Configuration>,
-    pub ready: bool,
-    pub error: Option<String>,
-}
+pub use loopflow_execution::machine::mobile::{Configuration, Status, TailscaleIdentity};
 
 pub fn status() -> Result<Status> {
     match Connection::open().and_then(|mut connection| {
@@ -77,21 +54,13 @@ fn service_is_stopped(error: &anyhow::Error) -> bool {
         })
 }
 
-impl Configuration {
-    pub(super) fn port(&self) -> Result<u16> {
-        reqwest::Url::parse(&self.endpoint)?
-            .port_or_known_default()
-            .context("Missing HTTPS port")
-    }
-}
-
 pub fn configured() -> Result<Option<Configuration>> {
-    let value = crate::config::files::read(&configuration_path())?;
+    let value = loopflow_execution::config::files::read(&configuration_path())?;
     configuration(&value)
 }
 
 fn configuration_path() -> PathBuf {
-    crate::store::lf_home_dir().join("mobile.yaml")
+    loopflow_execution::store::lf_home_dir().join("mobile.yaml")
 }
 
 fn configuration(value: &serde_yaml_ng::Value) -> Result<Option<Configuration>> {
@@ -104,14 +73,14 @@ fn configuration(value: &serde_yaml_ng::Value) -> Result<Option<Configuration>> 
 }
 
 pub(super) fn save(configuration: &Configuration) -> Result<()> {
-    crate::config::files::update(&configuration_path(), |value| {
+    loopflow_execution::config::files::update(&configuration_path(), |value| {
         *value = serde_yaml_ng::to_value(configuration)?;
         Ok(())
     })
 }
 
 fn lock() -> Result<fs::File> {
-    let home = crate::store::lf_home_dir();
+    let home = loopflow_execution::store::lf_home_dir();
     fs::create_dir_all(&home)?;
     let lock = fs::OpenOptions::new()
         .create(true)
@@ -139,7 +108,7 @@ pub fn enable() -> Result<Configuration> {
     let _lock = lock()?;
     let host = Host::discover()?;
     let owner = host.identity()?.0;
-    let value = crate::config::files::read(&configuration_path())?;
+    let value = loopflow_execution::config::files::read(&configuration_path())?;
     // Explicit setup replaces obsolete mobile settings; file read/parse errors
     // still surface instead of discarding an unreadable document.
     let previous = configuration(&value).ok().flatten();
@@ -153,12 +122,12 @@ pub fn enable() -> Result<Configuration> {
         endpoint: format!("https://{}:{port}", host.dns),
         owner,
     };
-    crate::installation::server::ensure()?;
+    loopflow_execution::installation::server::ensure()?;
     configure(Some(proposed))?.context("The Machine did not start its mobile listener")
 }
 
 pub(super) fn save_disabled() -> Result<Option<Configuration>> {
-    crate::config::files::update(&configuration_path(), |value| {
+    loopflow_execution::config::files::update(&configuration_path(), |value| {
         let mut saved = configuration(value).ok().flatten();
         if let Some(config) = &mut saved {
             config.enabled = false;
@@ -198,13 +167,14 @@ pub(super) struct Host {
 impl Host {
     pub(super) fn discover() -> Result<Self> {
         let mut candidates = Vec::new();
-        if let Some(binary) = crate::os_process::which_on_path(Path::new("tailscale")) {
+        if let Some(binary) = loopflow_execution::os_process::which_on_path(Path::new("tailscale"))
+        {
             candidates.push(binary);
         }
         #[cfg(target_os = "macos")]
         for directory in [
             PathBuf::from("/Applications"),
-            crate::installation::account_home()?.join("Applications"),
+            loopflow_execution::installation::account_home()?.join("Applications"),
         ] {
             let Ok(entries) = fs::read_dir(directory) else {
                 continue;
@@ -319,7 +289,7 @@ impl Host {
     }
 
     fn run(&self, args: &[&str]) -> Result<Vec<u8>> {
-        let output = crate::os_process::bounded_output(
+        let output = loopflow_execution::os_process::bounded_output(
             // The macOS app otherwise chooses GUI mode under launchd.
             Command::new(&self.binary)
                 .env("TAILSCALE_BE_CLI", "1")
@@ -369,7 +339,7 @@ fn owner_from_status(status: &Value) -> Result<TailscaleIdentity> {
 /// Present when this Machine also admits connections from itself, which is how
 /// an iOS Simulator on it arrives. Create it only on a Mac with one account.
 fn same_device_path() -> PathBuf {
-    crate::store::lf_home_dir().join("mobile-same-device")
+    loopflow_execution::store::lf_home_dir().join("mobile-same-device")
 }
 
 fn permits_peer(
@@ -449,9 +419,10 @@ mod tests {
 
     #[test]
     fn configuration_round_trips_the_approved_owner() {
-        let value: serde_json::Value =
-            serde_json::from_str(include_str!("../../tests/fixtures/dto/server/remote.json"))
-                .unwrap();
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/remote.json"
+        ))
+        .unwrap();
         let value = value["result"]["configuration"].clone();
         let config: Configuration = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(config.port().unwrap(), 8443);
@@ -462,7 +433,7 @@ mod tests {
 
     use super::super::remote::{manage, Control};
     use super::{configured, save, TailscaleIdentity};
-    use crate::lf::commands::graph::EnvVarGuard;
+    use loopflow_execution::config::environment::EnvVarGuard;
     use std::path::PathBuf;
     use std::sync::Arc;
 

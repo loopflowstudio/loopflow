@@ -7,11 +7,13 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use loopflow::git::{current_branch, worktree_remove};
-use loopflow::ops::{
+use loopflow_execution::git::{current_branch, worktree_remove};
+use loopflow_execution::ops::{
     commit_workflow, release_publish, release_tag, CommitOptions, NullProgress, OpsError,
 };
-use loopflow::work::task::{GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication};
+use loopflow_execution::work::task::{
+    GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,
+};
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 use support::{codex_app_server_script, EnvGuard};
@@ -845,7 +847,9 @@ fn surviving_release_notes_provider_retains_target_checkout_and_context() {
             let database = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
             let executor: i32 = database
                 .query_row(
-                    "SELECT p.pid FROM processes p JOIN session_events e ON e.lf_process_id=p.id WHERE e.kind='captured'",
+                    "SELECT s.attached_pid FROM agent_sessions s
+                     JOIN session_events e ON e.session_id=s.id AND e.lf_process_id=s.attached_lf_process_id
+                     WHERE e.kind='captured'",
                     [],
                     |row| row.get(0),
                 )
@@ -1282,7 +1286,7 @@ esac
                 git(&["checkout", "main"]);
                 git(&["branch", "-D", &branch]);
             }
-            let checkout = loopflow::git::worktrees::worktree_path(
+            let checkout = loopflow_execution::git::worktrees::worktree_path(
                 repo.path(),
                 branch.strip_prefix("jack/").unwrap(),
             );
@@ -1418,7 +1422,7 @@ fn source_creation_mismatch_preserves_surviving_hook_and_its_work() {
     let caller_branch = git(&["branch", "--show-current"]);
     let index = fs::read(repo.path().join(".git/index")).unwrap();
     let name = format!("verify-default-{source}");
-    let checkout = loopflow::git::worktrees::worktree_path(repo.path(), &name);
+    let checkout = loopflow_execution::git::worktrees::worktree_path(repo.path(), &name);
     let branch = format!("jack/{name}");
     let mutation = blocking_mutation(
         state.path(),
@@ -1856,7 +1860,7 @@ esac
     let head = git_output(&repo, &["rev-parse", "HEAD"]);
     let branch = format!(
         "{}/release-default-v0-9-2",
-        loopflow::naming::git_user(repo.path()).unwrap()
+        loopflow_execution::naming::git_user(repo.path()).unwrap()
     );
     git(
         &repo,

@@ -36,6 +36,23 @@ struct WorkspacePanesTests {
         return (workspace, view)
     }
 
+    @Test("A restored Dev board tile leaves its saved shell unmounted")
+    func devBoardRestoresShellWithoutMounting() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: location.machineId, opensUnvisitedWork: false)
+        let workspace = fixtureWork(registry, location)
+        let saved = MultiplexerStore(taskId: workspace.key.id)
+        let shell = try #require(saved.newShell(location: location))
+        workspace.multiplexer.restore(saved.paneLayout(files: nil, drafts: []), taskId: workspace.key.id)
+        registry.present(open: [workspace.key], shown: [workspace.key])
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Rendering cannot open work") }
+        let view = WorkspacePanesView(workspace: workspace, isFocused: true,
+            sessions: workspace.sessionStore(repoPath: location.worktree, query: query),
+            model: WorkModel(query: query, repoPath: location.worktree), onFocus: { _, _ in },
+            face: workspace.multiplexer.layout.pane(for: shell.id))
+        _ = try view.inspect().find(button: "Open shell")
+        #expect(try view.inspect().findAll(GhosttyTerminalView.self).isEmpty)
+    }
+
     @Test("A single visible Session keeps Refresh available")
     func singleSessionOffersRefresh() throws {
         let (workspace, view) = taskPanes()
@@ -44,6 +61,36 @@ struct WorkspacePanesTests {
         workspace.multiplexer.load(sessionId: record.id, location: location)
         #expect(workspace.multiplexer.visibleLayout?.allPanes.count == 1)
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-refresh-session").button()
+    }
+
+    @Test("Refresh addresses the Task’s repository rather than the last warm repository")
+    func recoveryAddressesRestoredTask() async throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: location.machineId)
+        let workspace = registry.workspace(for: .init(repository: "repo", kind: .task, id: "task-a"),
+            title: "Task A", location: location)
+        let record = try session("main")
+        let query = RegistryQuery { args, _ in
+            guard args == ["session", "resume", "main", "--prepare", "--json"] else {
+                throw RegistryQueryError("Unexpected refresh: \(args)")
+            }
+            return String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        }
+        let store = registry.sessionStore(repository: "repo", repoPath: location.worktree, query: query)
+        store.reconcile([record])
+        let previous = try #require(store.sessions.first?.launchId)
+        let other = registry.sessionStore(repository: "other", repoPath: "/tmp/other", query: query)
+        registry.openWarmConversations(store: other)
+        workspace.multiplexer.load(sessionId: record.id, location: location)
+        let action = try DesktopAction.named("refresh-session")
+        _ = try action.perform(DesktopActionContext(model: WorkModel(query: query), workspaces: registry,
+            workspace: workspace, pane: workspace.multiplexer.focusedPane))
+        let deadline = ContinuousClock.now + .seconds(3)
+        while store.sessions.first?.state != .prepared, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.sessions.first?.launchId != previous)
+        #expect(store.sessions.first?.state == .prepared)
+        #expect(other.sessions.isEmpty)
     }
 
     @Test("Toggling both tools away keeps conversation entry in the session pane")
@@ -223,10 +270,10 @@ struct WorkspacePanesTests {
         return (view, registry, workspace, task, query)
     }
 
-    @Test("A finished Task nobody owns reveals its conversation into visible panes")
+    @Test("A finished Task nobody owns shows its conversation in visible panes once presented")
     func finishedUnownedTaskRevealsIntoPanes() throws {
         let (view, registry, workspace, task, query) = try finishedTaskSurface(owned: false)
-        #expect(task.isCompleted && task.runtime?.owner == nil && task.conversationIntent == .reveal)
+        #expect(task.isCompleted && task.runtime?.owner == nil && !task.opensConversationAutomatically)
         #expect(throws: (any Error).self) { try view.inspect().find(WorkspacePanesView.self) }
         let history = try session("history")
         registry.sessionStore(repository: "repo", repoPath: task.task.repo, query: query).reconcile([history])

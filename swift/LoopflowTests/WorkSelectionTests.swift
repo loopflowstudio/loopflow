@@ -28,7 +28,7 @@ struct WorkSelectionTests {
     @Test func everyStateRustSendsDecodes() throws {
         let states = try JSONDecoder().decode(
             [WorkSelectionState].self, from: loadFixtureData("selection_states.json"))
-        #expect(states.contains(.working) && states.contains(.autonomous))
+        #expect(states.contains(.working) && states.contains(.auto))
     }
 
     @Test func queryPlansArriveFromTheirSubscription() throws {
@@ -58,24 +58,6 @@ struct WorkSelectionTests {
         #expect(try JSONSerialization.jsonObject(with: encoded) as? NSDictionary == JSONSerialization.jsonObject(with: bytes) as? NSDictionary)
     }
 
-    @Test func portablePaneRecordRetainsDraftAndZoomSeparatelyFromFocus() throws {
-        let bytes = try loadFixtureData("pane_layout.json")
-        let layout = try JSONDecoder().decode(WorkPaneLayout.self, from: bytes)
-        #expect(layout.drafts.first?.text == "unsaved edits")
-        #expect(layout.drafts.first?.baseContent == "base")
-        #expect(layout.focused == "pane-0")
-        #expect(layout.zoomed == "pane-2")
-        #expect(layout.hidden == ["pane-1"])
-        if case .split(_, _, _, let second) = layout.tree,
-           case .split(_, _, _, let browser) = second,
-           case .pane(_, .browser(_, let tabs, _)) = browser {
-            #expect(tabs.contains(.task(id: "task")))
-            #expect(tabs.contains(.changes(id: "changes-parent", comparison: .workingTree(base: "parent"))))
-        } else { Issue.record("Expected retained browser tools") }
-        let encoded = try JSONEncoder().encode(layout)
-        #expect(try JSONSerialization.jsonObject(with: encoded) as? NSDictionary == JSONSerialization.jsonObject(with: bytes) as? NSDictionary)
-    }
-
     @Test("A delivered Wave link selects that Wave in its repository window") @MainActor
     func deliveredWaveLinkSelectsWave() async throws {
         let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -97,25 +79,25 @@ func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content],
         selection: WorkSelection(id: owner.id, expression: owner.kind == .repository ? .repository : .wave(owner.id)), savedRevision: nil,
         resolution: WorkSelectionResolution(attention: [], members: refs, unavailable: []),
         arrangement: WorkArrangement(order: refs, hidden: [], mode: .auto),
-        projection: WorkArrangementProjection(visible: refs, suppressed: []), slots: slots, contents: members)
+        projection: WorkArrangementProjection(visible: refs, suppressed: []), slots: slots, contents: members, viewer: nil)
 }
 extension WorkModel {
     /// The sidebar's started list as the server reads it for `wave`: each Task with its states, in order.
     func applyStartedFixture(_ tasks: [(id: String, states: [WorkSelectionState])], wave: String? = nil, repository: String = "repo") {
         let members = tasks.map {
-            WorkViewPlan.Content(paneRevision: nil, face: nil, work: .init(repository: repository, kind: .task, id: $0.id), title: $0.id,
+            WorkViewPlan.Content(work: .init(repository: repository, kind: .task, id: $0.id), title: $0.id,
                 states: [.open] + $0.states, identifier: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
         }
         applyTaskList(fixtureViewPlan(owner: .init(repository: repository, kind: .repository, id: repository), members: members),
                       wave: wave, reason: "")
     }
 
-    func applyStartedFixture(working: [String], autonomous: [String] = [], wave: String? = nil, repository: String = "repo") {
-        applyStartedFixture(working.map { ($0, [.working]) } + autonomous.map { ($0, [.autonomous]) }, wave: wave, repository: repository)
+    func applyStartedFixture(working: [String], auto: [String] = [], wave: String? = nil, repository: String = "repo") {
+        applyStartedFixture(working.map { ($0, [.working]) } + auto.map { ($0, [.working, .auto]) }, wave: wave, repository: repository)
     }
 }
 
 func fixtureViewContent(work: WorkWorkspaceKey, title: String) -> WorkViewPlan.Content {
-    WorkViewPlan.Content(paneRevision: nil, face: nil, work: work, title: title,
+    WorkViewPlan.Content(work: work, title: title,
         states: [.open], identifier: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
 }

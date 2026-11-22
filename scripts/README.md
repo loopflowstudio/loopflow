@@ -11,10 +11,10 @@ LF_HOME="$(mktemp -d)" local-bin/lf wave list --json   # run a disposable experi
 uv run pytest python/tests/test_gate_bounded.py        # one Python behavior
 uv run python scripts/resource_envelope.py             # attribute local disk pressure
 uv run python scripts/check_architecture.py            # architecture owners and vocabulary
+uv run python scripts/due_removals.py                  # leaving store members and their drop dates
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
-uv run pytest python/tests/test_lifecycle_scorecard.py # scorecard behavior
-uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-check --samples 1  # needs lf-world built beside lf
+uv run python scripts/desktop_performance.py run --output /tmp/desktop-check --samples 1
 lf telemetry-daily                                     # maintainer report
 ```
 
@@ -26,9 +26,55 @@ Escalate from a focused behavior to affected suites when crossing a component
 boundary. CI and release own the full matrix. Run `scripts/test.py --all` only
 to reproduce a matrix failure or when release guidance requires it.
 
+## Developer build cache
+
+`scripts/dev-lf` calls `build_cache.py` before Cargo. Root inventory is derived
+from Git; other settings follow the Machine's default sccache file. The build selects it through `SCCACHE_CONF`; it takes effect after the shared
+server's normal idle exit. The script never restarts a server, shares a Cargo
+target or installs Machine configuration. An explicit cache configuration stays
+with its caller. See [build commands](testing.md#builds).
+
 ## Scheduled disk cleanup
 
 Reclaim disposable coding output with [opt-in hourly cleanup](disk-cleanup.md).
+
+## Store size and leaving members
+
+```bash
+$ uv run python scripts/model_size.py
+tables                         74
+columns                        645
+storage pub fns (non-test)     1029
+SQL call sites outside storage 35 in 8 files
+
+$ uv run python scripts/due_removals.py
+LOO-836  agent_sessions.work_source  drop after 2026-12-17  unstarted
+
+uv run python scripts/due_removals.py --start      # run each due, unstarted removal Task
+uv run python scripts/schema_page.py               # rewrite rust/loopflow-storage/SCHEMA.md
+uv run python scripts/schema_page.py --check       # what CI runs
+```
+
+`model_size.py` counts what a change adds to or removes from the model; paste
+its before and after into the PR. `due_removals.py` reads the `-- leaving:`
+marks in migrations ([migration rules](../rust/loopflow-storage/src/MIGRATIONS.md#leaving-marks))
+and prints every marked Task with the date its members may drop. A Task is due
+once its marking migration has been on `origin/main` for `STAGING_DAYS`.
+
+`--start` runs `lf task run <ID> -a claude` for each due Task whose
+`lf task status --json` is `unstarted`. It never restarts a started, done or
+abandoned Task, so running it again is safe. Without `--start` it only prints.
+
+Schedule it weekly on the Machine that runs your Tasks:
+
+```bash
+uv run python scripts/due_removals.py install      # weekly LaunchAgent, Monday 09:00
+uv run python scripts/due_removals.py uninstall
+```
+
+It is a LaunchAgent, not cron, so `lf task run` can reach the Keychain
+([scheduling](../docs/work.md#operate-a-wave)). Its output goes to
+`~/Library/Logs/loopflow-due-removals.log`. lf itself schedules nothing.
 
 ## Changed-aware runner
 
@@ -183,23 +229,6 @@ host-security pressure with the product result explicitly unproven. Remaining
 suites stay unstarted and recorded as `not_run`; rerun after the pressure clears.
 An ordinary product failure still allows independent suites to run.
 
-Read the same gate evidence through the daily operator graph:
-
-```bash
-lf telemetry-daily
-```
-
-The scorecard joins recorded Session usage and duration with Task PR landing and pre-land phase records. It
-prints aggregate values and coverage only—never commands, prompts, output, or
-task ids. Missing evidence is `UNKNOWN`, reported zero remains measured, and
-small samples stay `COLLECTING` until 20 observations support p95.
-
-“Recorded agent attempt → merge” includes earlier and unfinished captured inputs attributed
-to the exact PR. It is a lower bound on implementation time: unrecorded or
-standalone work is outside that cohort. Compare equivalent cohorts before
-attributing changes to an optimization. `scripts/performance-budgets.json`
-owns thresholds; complete samples without a threshold are `UNBUDGETED`.
-
 Path → suite mapping:
 
 | Changed | Suite | Runs |
@@ -313,7 +342,7 @@ tree: stale inventory fails both Python tests and Desktop packaging.
 `scripts/` contains runnable validation and demo scripts. Use these for branch validation and manual UI walkthroughs.
 
 ```bash
-uv run python scripts/loopflow-dev.py run-debug     # build and launch Loopflow (macOS)
+uv run python scripts/loopflow-dev.py run-debug     # open Loopflow Dev on the live Machine with logs (macOS)
 uv run python scripts/check_swift_multiplatform_boundaries.py  # Stage 01 boundary guardrails
 ```
 

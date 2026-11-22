@@ -113,7 +113,7 @@ fn session_rows_follow_their_provider_and_release_only_the_reader_on_eof_or_clos
     )
     .unwrap();
     // Membership comes from the recorded AgentProcess.
-    let agent = loopflow::id::LfProcessId::new();
+    let agent = loopflow_model::id::LfProcessId::new();
     db.execute(
         "INSERT INTO processes(id,trace_id,kind,agent_session_id,started_at,pid,os_started_at,
             agent_provider,agent_interactive,spawn_state)

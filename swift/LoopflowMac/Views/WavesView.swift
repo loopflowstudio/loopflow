@@ -74,6 +74,11 @@ struct WavesView: View {
         return allWaves.first { $0.id == selectedWaveId }
     }
 
+    private var capturesCreateSheet: Bool {
+        AppTestMode.current() == .mockWaves &&
+            ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_PRESENT_SHEET"] == "1"
+    }
+
     private var isAnyConnected: Bool {
         repoStates.values.contains { $0.isConnected }
     }
@@ -91,7 +96,9 @@ struct WavesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
-        .safeAreaInset(edge: .bottom) { CreationRecoveryView() }
+        .overlay(alignment: .bottom) { NoticeView(center: model.navigation.notices).zIndex(ZIndex.toast) }
+        .modifier(CreationNotices(notices: model.navigation.notices))
+        .answeringLostLines(model)
         .task { await model.keepWorkCurrent() }
         .task { await model.keepPlanningCurrent() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -138,6 +145,11 @@ struct WavesView: View {
                 onCancel: { isShowingCreate = false }
             )
             .environment(\.palette, palette)
+            .onAppear {
+                if capturesCreateSheet, let wave = selectedWave {
+                    fputs("Create sheet appeared over \(wave.name)\n", stderr)
+                }
+            }
         }
         .task {
             await refreshRepos()
@@ -372,6 +384,11 @@ struct WavesView: View {
                 }
             )
             .id(wave.id)
+            .task(id: wave.id) {
+                guard capturesCreateSheet else { return }
+                try? await Task.sleep(for: .milliseconds(1500))
+                if !Task.isCancelled { isShowingCreate = true }
+            }
         } else {
             RoadmapView(model: model, onOpenWave: openRoadmapWave, onOpenTask: openTask)
         }
@@ -473,7 +490,6 @@ struct WavesView: View {
                 state.applyConnectedWaves(waves, plans: plans)
             }
             selectRequestedWaveIfNeeded()
-            raiseCaptureSheetIfRequested()
         } catch {
             for state in repoStates.values {
                 state.markRefreshFailed()
@@ -496,20 +512,6 @@ struct WavesView: View {
         if selectedWaveId == nil,
            let selected = state.waves.first(where: { $0.name == MockWaveFixture.selectedWaveName }) {
             selectedWaveId = selected.id
-        }
-    }
-
-    /// Drive the sheet-presentation leg of the AttributeGraph zero-cycle
-    /// matrix headlessly: once a world's populated detail hierarchy has
-    /// settled, raise the create sheet over it — a genuine mid-session
-    /// presentation, not a cold-launch-with-sheet. Gated so ordinary renders
-    /// stay sheet-free. See scripts/check_attributegraph_cycles.sh --sheet.
-    private func raiseCaptureSheetIfRequested() {
-        guard ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_PRESENT_SHEET"] != nil,
-              !isShowingCreate else { return }
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            isShowingCreate = true
         }
     }
 

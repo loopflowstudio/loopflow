@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::context_block::{ContextDelivery, SessionIdentity};
+use loopflow_execution::context_block::{ContextDelivery, SessionIdentity};
 use loopflow_test_support::{env_lock, TestRepo};
 use serde_json::Value;
 
@@ -120,7 +120,7 @@ fn hook_refreshes_checkout_ancestors_and_scratch_without_replaying_the_request()
         assert!(!compact.contains(stale));
     }
     // Wave listings point to the real checkout files, not generated snapshots.
-    let marker = "Read the complete context listing and any files not preloaded below: ";
+    let marker = "The complete listing: ";
     let path = compact
         .split_once(marker)
         .unwrap()

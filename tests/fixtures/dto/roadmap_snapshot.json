@@ -72,7 +72,7 @@
         "state": "ok",
         "items": [
           {
-            "id": "proj-chapter-current",
+            "id": "proj-project-current",
             "slug": "loopflow-api",
             "name": "current",
             "status": "started",
@@ -93,17 +93,16 @@
               }
             ],
             "sync": {
-              "connected": false,
-              "changes": []
+              "actions": []
             },
-            "linear_id": "project-1"
+            "tracker_id": "project-1"
           }
         ],
         "truncated": false
       },
       "project_readiness": {
         "state": "ready",
-        "project_id": "proj-chapter-current",
+        "project_id": "proj-project-current",
         "observed_at": null,
         "pending_successor": null,
         "activation": null
@@ -165,17 +164,16 @@
           "completed_at": null,
           "due_date": null,
           "sync": {
-            "connected": false,
-            "changes": []
+            "actions": []
           },
-          "linear_id": null,
-          "acquisition": {
+          "tracker_id": null,
+          "tracker_state": {
             "state": "available",
-            "observed_at": null
+            "synced_at": null
           },
           "repo_id": "repo_00000000000040008000000000000001",
           "repo": "/src/loopflow",
-          "project_id": "proj-chapter-current",
+          "project_id": "proj-project-current",
           "wave_id": "wave-1"
         },
         "reference": {
@@ -191,8 +189,8 @@
           }
         },
         "runtime": {
-          "work_id": "ts_now00000000000000000000000000000",
-          "status": "shipping",
+          "work_id": "issue-now",
+          "status": "moving",
           "completion_pending": null,
           "reason": "ready",
           "updated_at": "2026-07-14T23:44:00Z",
@@ -204,6 +202,7 @@
           "reason": "ready"
         },
         "section": "backlog",
+        "owned_by_you": false,
         "actions": {
           "recommended": "run",
           "reason": "resume the parked Task"
@@ -392,21 +391,21 @@
           "state": "running",
           "reason": "Worker is running realign",
           "step": null,
-          "captured": null
+          "captured": null,
+          "died": null,
+          "outlook": null
         },
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": "Task is already shipping"
-        },
-        "shipping": {
-          "shipped_at": 1792600000,
-          "state": "landing",
-          "reason": "CI running on #1650"
-        },
         "pr": null,
-        "graph_source": null
+        "graph_source": null,
+        "lifecycle": "moving",
+        "selection_states": [
+          "moving",
+          "backlog",
+          "auto"
+        ]
       },
       {
         "task": {
@@ -420,17 +419,16 @@
           "completed_at": null,
           "due_date": null,
           "sync": {
-            "connected": false,
-            "changes": []
+            "actions": []
           },
-          "linear_id": null,
-          "acquisition": {
+          "tracker_id": null,
+          "tracker_state": {
             "state": "available",
-            "observed_at": null
+            "synced_at": null
           },
           "repo_id": "repo_00000000000040008000000000000001",
           "repo": "/src/loopflow",
-          "project_id": "proj-chapter-current",
+          "project_id": "proj-project-current",
           "wave_id": "wave-1"
         },
         "reference": {
@@ -446,7 +444,7 @@
           }
         },
         "runtime": {
-          "work_id": "ts_review00000000000000000000000000",
+          "work_id": "issue-review",
           "status": "unstarted",
           "completion_pending": null,
           "reason": "ready",
@@ -467,6 +465,7 @@
           "reason": "merge pull request head abc1234 on GitHub"
         },
         "section": "backlog",
+        "owned_by_you": false,
         "actions": {
           "recommended": "open_pr",
           "reason": "merge head abc1234 on GitHub"
@@ -657,15 +656,13 @@
           "state": "idle",
           "reason": "Waiting for your review at demo",
           "step": null,
-          "captured": null
+          "captured": null,
+          "died": null,
+          "outlook": null
         },
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": null
-        },
-        "shipping": null,
         "pr": {
           "id": "pr-review",
           "sequence": 1,
@@ -694,7 +691,13 @@
           "merge_commit": null,
           "abandoned_at": null
         },
-        "graph_source": null
+        "graph_source": null,
+        "lifecycle": "unstarted",
+        "selection_states": [
+          "open",
+          "unstarted",
+          "backlog"
+        ]
       },
       {
         "task": {
@@ -708,17 +711,16 @@
           "completed_at": null,
           "due_date": null,
           "sync": {
-            "connected": false,
-            "changes": []
+            "actions": []
           },
-          "linear_id": null,
-          "acquisition": {
+          "tracker_id": null,
+          "tracker_state": {
             "state": "available",
-            "observed_at": null
+            "synced_at": null
           },
           "repo_id": "repo_00000000000040008000000000000001",
           "repo": "/src/loopflow",
-          "project_id": "proj-chapter-current",
+          "project_id": "proj-project-current",
           "wave_id": "wave-1"
         },
         "reference": {
@@ -731,6 +733,7 @@
           "reason": "Task is ready to start"
         },
         "section": "backlog",
+        "owned_by_you": false,
         "actions": {
           "recommended": null,
           "reason": "Task is ready to start"
@@ -756,17 +759,20 @@
           "state": "idle",
           "reason": "No active execution",
           "step": null,
-          "captured": null
+          "captured": null,
+          "died": null,
+          "outlook": null
         },
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": null
-        },
-        "shipping": null,
         "pr": null,
-        "graph_source": null
+        "graph_source": null,
+        "lifecycle": "unstarted",
+        "selection_states": [
+          "unstarted",
+          "backlog"
+        ]
       },
       {
         "task": {
@@ -780,17 +786,16 @@
           "completed_at": null,
           "due_date": null,
           "sync": {
-            "connected": false,
-            "changes": []
+            "actions": []
           },
-          "linear_id": null,
-          "acquisition": {
+          "tracker_id": null,
+          "tracker_state": {
             "state": "available",
-            "observed_at": null
+            "synced_at": null
           },
           "repo_id": "repo_00000000000040008000000000000001",
           "repo": "/src/loopflow",
-          "project_id": "proj-chapter-current",
+          "project_id": "proj-project-current",
           "wave_id": "wave-1"
         },
         "reference": {
@@ -806,7 +811,7 @@
           }
         },
         "runtime": {
-          "work_id": "ts_later000000000000000000000000000",
+          "work_id": "issue-later",
           "status": "done",
           "completion_pending": null,
           "reason": "done",
@@ -827,6 +832,7 @@
           "reason": "Linear Task is complete"
         },
         "section": "done",
+        "owned_by_you": false,
         "actions": {
           "recommended": "no_action",
           "reason": "Task is completed"
@@ -852,17 +858,19 @@
           "state": "idle",
           "reason": "No active execution",
           "step": null,
-          "captured": null
+          "captured": null,
+          "died": null,
+          "outlook": null
         },
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": null
-        },
-        "shipping": null,
         "pr": null,
-        "graph_source": null
+        "graph_source": null,
+        "lifecycle": "done",
+        "selection_states": [
+          "done"
+        ]
       }
     ],
     "truncated": false

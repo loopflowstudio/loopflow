@@ -3,7 +3,7 @@ mod support;
 use std::ffi::OsString;
 use std::path::Path;
 
-use loopflow::store::{open_store, storage_config_from_env, StorageConfig};
+use loopflow_execution::store::{open_store, storage_config_from_env, StorageConfig};
 
 struct AmbientStorage {
     previous_lf_home: Option<OsString>,
@@ -41,6 +41,12 @@ fn open_test_store() {
 fn an_lf_child_inherits_no_way_to_the_developers_provider_homes() {
     let home = std::path::PathBuf::from(std::env::var_os("HOME").expect("test binary home"));
     assert!(home.starts_with(std::env::temp_dir()), "{}", home.display());
+    let lf_home = std::path::PathBuf::from(std::env::var_os("LF_HOME").expect("test Machine home"));
+    assert!(
+        lf_home.starts_with(std::env::temp_dir()),
+        "{}",
+        lf_home.display()
+    );
     assert_eq!(std::env::var_os("CODEX_HOME"), None);
     assert_eq!(std::env::var_os("CLAUDE_CONFIG_DIR"), None);
 }

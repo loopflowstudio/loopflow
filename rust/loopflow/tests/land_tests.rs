@@ -4,11 +4,11 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 
-use loopflow::git::worktrees::create_named_worktree;
-use loopflow::ops::{
+use loopflow_execution::git::worktrees::create_named_worktree;
+use loopflow_execution::ops::{
     arm as land, create_or_update_pr, submit, LandOptions, NullProgress, OpsError, PrOptions,
 };
-use loopflow::work::task::PrMergeMode;
+use loopflow_execution::work::task::PrMergeMode;
 use loopflow_test_support::TestRepo;
 use rusqlite::OptionalExtension;
 use support::{
@@ -203,8 +203,8 @@ fn initialize_landing_store(path: &std::path::Path) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     drop(
         runtime
-            .block_on(loopflow::store::open_ephemeral_store(
-                &loopflow::store::StorageConfig::sqlite(path.to_path_buf()),
+            .block_on(loopflow_execution::store::open_ephemeral_store(
+                &loopflow_execution::store::StorageConfig::sqlite(path.to_path_buf()),
             ))
             .unwrap(),
     );
@@ -517,7 +517,9 @@ fn final_preparation_keeps_published_history_and_merges_main_only_on_conflict() 
         }
         if conflicting {
             assert_ne!(repo.head_sha(), published_head);
-            assert!(loopflow::git::is_ancestor(repo.path(), &published_head, "HEAD").unwrap());
+            assert!(
+                loopflow_execution::git::is_ancestor(repo.path(), &published_head, "HEAD").unwrap()
+            );
             assert_eq!(
                 fs::read_to_string(repo.path().join("upstream.txt")).unwrap(),
                 "new upstream work"
@@ -606,7 +608,7 @@ fi
             Some(home.path()),
         );
         fs::create_dir_all(home.path().join(".lf")).unwrap();
-        support::managed_codex_account(&home.path().join(".lf"));
+        support::seed_store(&home.path().join(".lf"));
         let options = LandOptions {
             strict: true,
             local: false,
@@ -1582,7 +1584,7 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
         Some(home.path()),
     );
     fs::create_dir_all(home.path().join(".lf")).unwrap();
-    support::managed_codex_account(&home.path().join(".lf"));
+    support::seed_store(&home.path().join(".lf"));
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");
@@ -1788,21 +1790,20 @@ fn lf_pr_land_returns_before_a_later_check_observes_merge() {
         }
         let conn = rusqlite::Connection::open(&database).unwrap();
         let initial: Option<i64> = conn
-            .query_row(
-                "SELECT exit_code FROM processes WHERE parent_lf_process_id IS NULL",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT exit_code FROM graph_processes", [], |row| {
+                row.get(0)
+            })
             .optional()
-            .unwrap();
+            .unwrap()
+            .flatten();
         // A Graph stopped short of its end exits 3, which no caller retries.
-        // A direct land nothing references is forgotten at exit.
+        // A direct land records no Graph run.
         assert_eq!(initial, graph.then_some(3));
         let state: String = conn
             .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
             .unwrap();
         assert_eq!(state, "watching");
-        // A later check observes delivery; only a ship process repairs.
+        // A later check observes delivery; only a waiting landing repairs.
         let output = command().args(["pr", "reconcile"]).output().unwrap();
         assert!(
             output.status.success(),
@@ -1826,18 +1827,17 @@ fn lf_pr_land_returns_before_a_later_check_observes_merge() {
         assert_eq!(state, "merged");
         if graph {
             // The Graph stopped at its watched landing: the step's command
-            // handed off and returned, and its Graph process exited without running
+            // handed off and returned, and its Graph run exited without running
             // further steps. The merge resumes nothing.
-            let (step, graph_process): (i64, String) = conn
+            let exits: (i64, i64) = conn
                 .query_row(
-                    "SELECT step.exit_code,graph_process.outcome FROM processes step
-                     JOIN graph_process_steps recorded ON recorded.lf_process_id=step.id
-                     JOIN processes graph_process ON graph_process.id=recorded.graph_lf_process_id",
+                    "SELECT step.exit_code,run.exit_code FROM graph_process_steps step
+                     JOIN graph_processes run ON run.lf_process_id=step.graph_lf_process_id",
                     [],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .unwrap();
-            assert_eq!((step, graph_process.as_str()), (0, "failed"));
+            assert_eq!(exits, (0, 3));
         }
         assert!(
             !worktree.exists(),
@@ -1854,14 +1854,18 @@ fn persistent_submit_keeps_scratch_and_post_commit_edits() {
     let gh = gh_no_pr_script();
     let _env = EnvGuard::new(&[("gh", &gh)]);
     let repo = TestRepo::new();
-    let persistent = loopflow::git::worktrees::ensure_agent_worktree(
+    let persistent = loopflow_execution::git::worktrees::ensure_agent_worktree(
         repo.path(),
-        loopflow::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
+        loopflow_execution::git::worktrees::WorktreeSegment::parse("repo").unwrap(),
     )
     .unwrap();
     fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
-    loopflow::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Memory"))
-        .unwrap();
+    loopflow_execution::ops::commit_selected(
+        &persistent.path,
+        &["memory.md".into()],
+        Some("Memory"),
+    )
+    .unwrap();
     fs::create_dir_all(persistent.path.join("scratch/nested")).unwrap();
     fs::write(persistent.path.join("scratch/nested/plan.md"), "private\n").unwrap();
     fs::write(persistent.path.join("memory.md"), "next decision\n").unwrap();
@@ -2003,7 +2007,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         &launcher,
         if failed_startup {
             // The repair's `lf` is admitted, then fails before it opens a Session.
-            "#!/bin/sh\nif [ \"$4 $5\" = 'skill ci-fix' ]; then set -- \"$1\" \"$2\" \"$3\" skill absent-ci-fix \"$6\"; fi\nexec \"$LF_TEST_BIN\" \"$@\"\n"
+            "#!/bin/sh\nfor arg do shift; [ \"$prev $arg\" = 'skill ci-fix' ] && arg=absent-ci-fix; set -- \"$@\" \"$arg\"; prev=$arg; done\nexec \"$LF_TEST_BIN\" \"$@\"\n"
         } else {
             "#!/bin/sh\nexec \"$LF_TEST_BIN\" \"$@\"\n"
         },
@@ -2011,12 +2015,30 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     .unwrap();
     fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
     let fixture = register_task_with_pr(home.path(), &worktree, "waited-repair", &base);
-    support::managed_codex_account(home.path());
+    support::seed_store(home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    // The Task's own Session stays open in the checkout for the whole landing.
-    let session = loopflow::id::LfProcessId::new();
-    db.execute("INSERT INTO processes(id,trace_id,pid,cwd,command,started_at) VALUES(?1,?2,?3,?4,'task-session',?5)",
-        rusqlite::params![session, loopflow::id::TraceId::new(), std::process::id(), worktree.to_str().unwrap(), time::OffsetDateTime::now_utc().unix_timestamp()]).unwrap();
+    // The Task's own Session stays open in the checkout for the whole landing,
+    // its agent this live process.
+    let session = "session_waited_repair";
+    let agent = loopflow_execution::process::OsProcess::read(std::process::id())
+        .unwrap()
+        .unwrap();
+    db.execute(
+        "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,task_id,wave_id,
+             interactive,agent_process_id,agent_started_at,agent_pid,agent_os_started_at)
+         SELECT ?1,'Task','generated',?2,?3,1,t.id,p.wave_id,1,?5,?2,?6,?7
+         FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?4",
+        rusqlite::params![
+            session,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+            worktree.to_str().unwrap(),
+            fixture.task.id.as_str(),
+            loopflow_model::id::AgentProcessId::new().to_string(),
+            agent.pid,
+            agent.started_at
+        ],
+    )
+    .unwrap();
     let command = || {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
         for (name, _) in
@@ -2045,7 +2067,10 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
                 return;
             };
             let pids: Vec<i64> = db
-                .prepare("SELECT pid FROM processes WHERE completed_at IS NULL AND pid IS NOT NULL")
+                .prepare(
+                    "SELECT pid FROM graph_processes WHERE ended_at IS NULL AND pid IS NOT NULL
+                     UNION SELECT pid FROM graph_process_steps WHERE ended_at IS NULL AND pid IS NOT NULL",
+                )
                 .and_then(|mut rows| rows.query_map([], |row| row.get(0))?.collect())
                 .unwrap_or_default();
             for pid in pids {
@@ -2101,16 +2126,16 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         }
         (fs::read_to_string(&out).unwrap(), error)
     };
-    // The run's carrier: this process, or the bare run's Graph process's parent.
+    // The Graph run a bare run hands off, once it ends.
     let carrier_exit = || -> Option<i64> {
-        let graph = printed("running as Graph process ")?;
+        let graph = printed("running as Graph run ")?;
         db.query_row(
-            "SELECT c.exit_code FROM processes g JOIN processes c ON c.id=g.parent_lf_process_id
-             WHERE g.id=?1 AND c.completed_at IS NOT NULL",
+            "SELECT exit_code FROM graph_processes WHERE lf_process_id=?1 AND ended_at IS NOT NULL",
             [graph],
             |row| row.get(0),
         )
         .ok()
+        .flatten()
     };
     let wait_for = |reported: &str| {
         let deadline = Instant::now() + Duration::from_secs(60);
@@ -2152,7 +2177,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
             break code == 0;
         }
         if let Some(status) = waiter.0.try_wait().unwrap() {
-            if printed("running as Graph process ").is_none() {
+            if printed("running as Graph run ").is_none() {
                 break status.success();
             }
         }
@@ -2168,8 +2193,8 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     assert_eq!(fs::read_to_string(&launches).unwrap().lines().count(), 1);
     let session_open: bool = db
         .query_row(
-            "SELECT completed_at IS NULL FROM processes WHERE id=?1",
-            [&session],
+            "SELECT completed_at IS NULL FROM agent_sessions WHERE id=?1",
+            [session],
             |row| row.get(0),
         )
         .unwrap();
@@ -2220,7 +2245,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         .block_on(fixture.store.task_state(&fixture.task.id))
         .unwrap();
     assert_eq!(
-        state == loopflow::durable::TaskState::Done,
+        state == loopflow_execution::durable::TaskState::Done,
         destination == "end",
         "the Graph must settle completion before returning, without a status command"
     );
@@ -2573,7 +2598,7 @@ esac
         runtime
             .block_on(fixture.store.task_state(&fixture.task.id))
             .unwrap(),
-        loopflow::durable::TaskState::Done
+        loopflow_execution::durable::TaskState::Done
     );
     for args in [&["land"][..], &["land", "--wait-and-fix"]] {
         let output = command().args(args).output().unwrap();
@@ -2592,7 +2617,7 @@ esac
         .block_on(fixture.store.active_task_pr(&fixture.task.id))
         .unwrap()
         .unwrap();
-    assert_eq!(pr.phase(), loopflow::work::task::PrPhase::Merged);
+    assert_eq!(pr.phase(), loopflow_execution::work::task::PrPhase::Merged);
     assert_eq!(
         read_retirement().1,
         due_at,

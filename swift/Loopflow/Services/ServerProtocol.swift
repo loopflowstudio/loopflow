@@ -1,11 +1,13 @@
 import Foundation
 
-/// Revision 5 of the server protocol: one connection per client, a negotiated
+/// Revision 9 of the server protocol: one connection per client, a negotiated
 /// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
 /// carriers add no Work authority.
 public enum ServerProtocol {
-    public static let revision = 5
-    public static let minRevision = 5
+    public static let revision = 9
+    /// Revision 8 requires `sender` on `request` and `subscribe`; it keeps 7's
+    /// write revisions and request IDs, which pending changes rely on.
+    public static let minRevision = 8
     /// The largest control-connection message; larger ones travel by ticket.
     public static let maxMessage = 1024 * 1024
     /// The largest message a ticketed connection carries.
@@ -44,6 +46,41 @@ public struct ServerHello: Encodable, Sendable {
     private enum CodingKeys: String, CodingKey { case revision, client, minRevision = "min_revision" }
 }
 
+/// Each store domain's revision, by name: what a write advanced, or what a
+/// reading was read at. Mirrors Rust's `Revisions`.
+public struct Revisions: Codable, Equatable, Sendable {
+    public var domains: [String: Int64]
+
+    public init(_ domains: [String: Int64]) { self.domains = domains }
+
+    public init(from decoder: Decoder) throws {
+        domains = try decoder.singleValueContainer().decode([String: Int64].self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var box = encoder.singleValueContainer()
+        try box.encode(domains)
+    }
+
+    /// Whether a reading at `self` shows a write that advanced `answer`: it is
+    /// at or past every domain the write moved.
+    public func covers(_ answer: Revisions) -> Bool {
+        answer.domains.allSatisfy { domain, revision in (domains[domain] ?? 0) >= revision }
+    }
+}
+
+/// What a write answered: its result and the revisions it advanced.
+public struct ServerAnswer: Sendable {
+    public let result: RawJSON
+    /// Nil for reads and server operations.
+    public let revisions: Revisions?
+
+    public init(result: RawJSON, revisions: Revisions?) {
+        self.result = result
+        self.revisions = revisions
+    }
+}
+
 /// What a client branches on: the Rust `ErrorCode`'s wire names.
 public enum ServerErrorCode: String, Sendable, Equatable {
     case incompatible, invalid, conflict, unavailable, busy
@@ -57,11 +94,15 @@ public struct ServerError: LocalizedError, Sendable, Equatable {
     public let code: ServerErrorCode?
     public let message: String
     public let data: JSONValue
+    /// The domains a failed write advanced before it failed; nil when it
+    /// changed nothing, so the change was refused.
+    public let revisions: Revisions?
 
-    public init(code: String, message: String, data: JSONValue) {
+    public init(code: String, message: String, data: JSONValue, revisions: Revisions? = nil) {
         self.code = ServerErrorCode(rawValue: code)
         self.message = message
         self.data = data
+        self.revisions = revisions
     }
 
     /// Only `outcome_unknown` means the effect may have happened: read state
@@ -79,7 +120,8 @@ public enum ServerClientMessage: Encodable, Sendable {
     /// A pre-hello readiness probe; the server answers `status` and closes.
     case status
     /// `select` keeps only those dotted paths of a read's answer; nil keeps it whole.
-    case request(id: String, operation: ServerOperation, select: [String]?)
+    /// `requestID` names a write across connections: a repeat gets its first answer.
+    case request(id: String, operation: ServerOperation, select: [String]?, requestID: String?)
     /// A read with a subscription: a null `response`, then readings until cancelled.
     /// `select` is as for a request; a change outside it sends no reading.
     case subscribe(id: String, operation: ServedRead, select: [String]?, resume: String?)
@@ -92,7 +134,10 @@ public enum ServerClientMessage: Encodable, Sendable {
     /// The server answers `bridged`, and the connection then speaks the owner protocol.
     case attach(ticket: String)
 
-    private enum Keys: String, CodingKey { case type, id, operation, select, resume, checkpoint, ticket, revision, client, minRevision = "min_revision" }
+    private enum Keys: String, CodingKey {
+        case type, id, operation, select, resume, sender, checkpoint, ticket, revision, client
+        case minRevision = "min_revision", requestID = "request_id"
+    }
     public func encode(to encoder: Encoder) throws {
         var box = encoder.container(keyedBy: Keys.self)
         switch self {
@@ -102,17 +147,21 @@ public enum ServerClientMessage: Encodable, Sendable {
             try box.encode(hello.minRevision, forKey: .minRevision)
             try box.encode(hello.client, forKey: .client)
         case .status: try box.encode("status", forKey: .type)
-        case .request(let id, let operation, let select):
+        case .request(let id, let operation, let select, let requestID):
             try box.encode("request", forKey: .type)
             try box.encode(id, forKey: .id)
             try box.encode(operation, forKey: .operation)
             try box.encode(select, forKey: .select)
+            // Another Machine's `lf` names what it runs with; a client here never does.
+            try box.encodeNil(forKey: .sender)
+            try box.encode(requestID, forKey: .requestID)
         case .subscribe(let id, let operation, let select, let resume):
             try box.encode("subscribe", forKey: .type)
             try box.encode(id, forKey: .id)
             try box.encode(operation, forKey: .operation)
             try box.encode(select, forKey: .select)
             try box.encode(resume, forKey: .resume)
+            try box.encodeNil(forKey: .sender)
         case .checkpoint(let id, let checkpoint):
             try box.encode("checkpoint", forKey: .type)
             try box.encode(id, forKey: .id)
@@ -151,6 +200,9 @@ public struct MachineMobileStatus: Codable, Sendable {
 /// A read or write encodes its own `kind` and fields.
 public enum ServerOperation: Encodable, Sendable {
     case read(ServedRead)
+    case measuredRead(ServedRead)
+    case measuredWrite(ServedWrite)
+    case measuredSubmission(JSONValue)
     case command(ServedWrite)
     case config(ConfigOperation)
     /// The unchanged payload of a submitted creation; never arbitrary command replay.
@@ -173,11 +225,23 @@ public enum ServerOperation: Encodable, Sendable {
 
     private enum Keys: String, CodingKey {
         case kind, bytes, session, request, argv, cwd, env, rows, cols, placement, terminalID = "terminal_id"
-        case moment, delivery, adapter, callback, gap, printed, inbox
+        case moment, delivery, adapter, callback, gap, printed, inbox, query, change
     }
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .read(let query): try query.encode(to: encoder)
+        case .measuredRead(let query):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("performance.read", forKey: .kind)
+            try box.encode(query, forKey: .query)
+        case .measuredWrite(let change):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("performance.write", forKey: .kind)
+            try box.encode(change, forKey: .change)
+        case .measuredSubmission(let payload):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("performance.write", forKey: .kind)
+            try box.encode(payload, forKey: .change)
         case .command(let change): try change.encode(to: encoder)
         case .requestUpload(let bytes):
             var box = encoder.container(keyedBy: Keys.self)
@@ -307,8 +371,9 @@ public enum ServerMessage: Sendable {
     case welcome(ServerWelcome)
     case status(ServerStatus)
     /// What the request returned: a read's or write's value, or the ticket for
-    /// `session.attach`; null once a subscription is confirmed.
-    case response(id: String, traceID: String, result: RawJSON)
+    /// `session.attach`; null once a subscription is confirmed. `revisions` is
+    /// what a write advanced; nil for reads and server operations.
+    case response(id: String, traceID: String, result: RawJSON, revisions: Revisions?)
     /// The answer to `attach`: the connection now speaks the viewer protocol
     /// with this held terminal.
     case bridged(terminalID: String)
@@ -324,8 +389,9 @@ public enum ServerMessage: Sendable {
     /// `id` is nil before a request exists. An error for a subscription ends it.
     /// `code` is the Rust `ErrorCode`'s wire name: incompatible, invalid,
     /// not_found, conflict, unavailable, outcome_unknown or busy. `data` is
-    /// structured detail, `.null` when there is none.
-    case error(id: String?, code: String, message: String, data: JSONValue)
+    /// structured detail, `.null` when there is none. `revisions` is what a
+    /// failed write advanced first; nil when it changed nothing.
+    case error(id: String?, code: String, message: String, data: JSONValue, revisions: Revisions?)
 
     /// One message's line. The envelope is scanned, not parsed: a reading of
     /// hundreds of kilobytes is read once, by its consumer.
@@ -342,7 +408,9 @@ public enum ServerMessage: Sendable {
         switch try text("type") {
         case "welcome": self = .welcome(try JSONDecoder().decode(ServerWelcome.self, from: line))
         case "status": self = .status(try JSONDecoder().decode(ServerStatus.self, from: line))
-        case "response": self = .response(id: try text("id"), traceID: try text("trace_id"), result: try field("result"))
+        case "response":
+            self = .response(id: try text("id"), traceID: try text("trace_id"), result: try field("result"),
+                             revisions: try field("revisions").decode(Revisions?.self))
         case "bridged": self = .bridged(terminalID: try text("terminal_id"))
         case "reading": self = .reading(id: try text("id"), checkpoint: try text("checkpoint"), frame: try field("frame"))
         case "bulk": self = .bulk(id: try text("id"), ticket: try text("ticket"), bytes: try field("bytes").decode(Int.self))
@@ -353,7 +421,8 @@ public enum ServerMessage: Sendable {
         case "ended": self = .ended(id: try text("id"))
         case "error":
             self = .error(id: try fields["id"].flatMap { $0.isNull ? nil : try text("id") }, code: try text("code"),
-                          message: try text("message"), data: try field("data").decode(JSONValue.self))
+                          message: try text("message"), data: try field("data").decode(JSONValue.self),
+                          revisions: try field("revisions").decode(Revisions?.self))
         default: throw RegistryQueryError("Unsupported server message; update the client")
         }
     }

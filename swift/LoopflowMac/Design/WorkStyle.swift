@@ -126,40 +126,26 @@ struct WorkOutlineButtonStyle: ButtonStyle {
     }
 }
 
-/// Auto-Ship, the one green action: it hands the Task off to land on its own.
-struct WorkShipButtonStyle: ButtonStyle {
-    @Environment(\.palette) private var palette
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Typography.body(12.5).weight(.semibold))
-            .foregroundStyle(isEnabled ? palette.surface : palette.textTertiary)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isEnabled ? palette.success.opacity(configuration.isPressed ? 0.85 : 1) : palette.surfaceMuted)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 6))
-            .workFocusRing()
+/// Marks a Task whose auto setting is on, on its board card and sidebar row.
+struct AutoBadge: View {
+    var body: some View {
+        WorkChip(text: "Auto", tone: .done)
+            .help("Auto is on: the run takes the interactive steps and lands the Task")
+            .accessibilityLabel("Auto on")
     }
 }
 
 /// Collapsed heading for a demand-read Task section (Comments, Session history):
-/// chevron, caps title, optional count, and the read's progress or failure.
+/// chevron, caps title, optional count, and the read's progress.
 struct WorkDisclosureHeading: View {
     let title: String
     let count: Int?
     let expanded: Bool
     let inFlight: Bool
-    /// Present when the latest read failed; true when an earlier value remains.
-    let failure: Bool?
     let identifier: String
     let accessibilityLabel: String
     let help: String
     let toggle: () -> Void
-    let retry: () -> Void
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -188,18 +174,6 @@ struct WorkDisclosureHeading: View {
             .accessibilityIdentifier("\(identifier)-toggle")
             if inFlight {
                 ProgressView().controlSize(.mini)
-            } else if let hasLastGood = failure {
-                Text(hasLastGood ? "May be out of date" : "Unavailable")
-                    .font(Typography.strong(10.5))
-                    .foregroundStyle(WorkTone.warning.text(in: palette))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 1)
-                    .background(WorkTone.warning.fill(in: palette), in: RoundedRectangle(cornerRadius: 4))
-                    .accessibilityIdentifier("\(identifier)-stale")
-                Button("Retry", action: retry)
-                    .buttonStyle(WorkOutlineButtonStyle())
-                    .controlSize(.small)
-                    .accessibilityIdentifier("\(identifier)-retry")
             }
         }
     }
@@ -264,7 +238,8 @@ extension ProgramStatusState {
         case .blocked: .warning
         case .error: .failure
         case .done: .done
-        case .idle, .clear: .neutral
+        case .idle: .available
+        case .clear: .neutral
         }
     }
 }

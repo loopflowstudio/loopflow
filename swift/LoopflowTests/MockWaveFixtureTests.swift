@@ -4,9 +4,6 @@ import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
-/// The `mock-waves` UI-test fixture renders the states no data can produce —
-/// loading and error — over the stable list. Populated states render from an
-/// `lf-world` world in `live` mode.
 @Suite("Mock wave fixture")
 struct MockWaveFixtureTests {
     @Test("live UI-test mode keeps production registry reads")
@@ -31,25 +28,33 @@ struct MockWaveFixtureTests {
         #expect(byName["cadenza"]?.parentWaveId == "wave-1")  // future-ancestry indentation
     }
 
-    // Empty is the `empty-workspaces` mode and indentation is proven above.
-    // These cover the detail states the mock surface drives with
-    // `LOOPFLOW_UI_TEST_DETAIL_STATE`.
+    @Test("the empty-workspaces fixture decodes as current wire types")
+    @MainActor
+    func emptyWorkspacesDecode() throws {
+        #expect(try WorkFixture.emptyRoadmap().waves.isEmpty)
+        #expect(try WorkFixture.emptyWorkActivity().items.isEmpty)
+    }
+
+    @Test("the infrastructure plan keeps its current Project when live detail is unavailable")
+    func infrastructurePlan() {
+        let plan = MockWaveFixture.plans["wave-1"]
+        #expect(plan?.currentProject?.slug == "release-feedback")
+        #expect(plan?.currentProject?.krs.first?.text == "Every failed run has an owner")
+    }
 
     @Test("the loading detail state withholds the snapshot and keeps the loading affordance")
     func loadingDetailState() {
         let outcome = MockWaveFixture.detailReading(state: .loading)
         #expect(outcome.reading.snapshot == nil)
-        #expect(outcome.reading.errorMessage == nil)
         #expect(outcome.awaitingFirstRead)  // loading affordance stays on screen
     }
 
     @Test("the error detail state discards volatile detail under a framed footer")
     func errorDetailState() {
         let outcome = MockWaveFixture.detailReading(state: .error)
+        // The cached authored plan remains outside the reading; no stale
+        // operational evidence shows.
         #expect(outcome.reading.snapshot == nil)
-        // The cached authored plan remains outside the reading; the failure is
-        // framed as a quiet footer reason, never stale operational evidence.
-        #expect(outcome.reading.errorMessage == "Wave status unavailable: the local registry is unreachable")
         #expect(outcome.awaitingFirstRead == false)
     }
 

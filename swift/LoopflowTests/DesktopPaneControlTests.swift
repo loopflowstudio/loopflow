@@ -137,7 +137,7 @@ struct DesktopPaneControlTests {
                 resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
                 arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
                 projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
-                contents: ([a, b] + also).map { fixtureViewContent(work: $0, title: $0.id) })
+                contents: ([a, b] + also).map { fixtureViewContent(work: $0, title: $0.id) }, viewer: nil)
         }
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No execution allowed") }, repoPath: "/repo")
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
@@ -215,7 +215,7 @@ struct DesktopPaneControlTests {
             resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
             arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
             projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
-            contents: keys.map { fixtureViewContent(work: $0, title: $0.id) })
+            contents: keys.map { fixtureViewContent(work: $0, title: $0.id) }, viewer: nil)
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No execution allowed") }, repoPath: "/repo")
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         model.bindWorkspaces(registry, repository: repository)

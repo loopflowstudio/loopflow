@@ -7,10 +7,9 @@ title: Architecture
 
 Loopflow records commands, preserves agent conversations, and drives Graphs.
 Process records an lf command and its outcome; LfSession records a conversation; a Graph is one lf process
-and the step processes it starts. An agent runs in one of three places: in the
-command that launched it, in a terminal the Machine server's holder keeps, or
-under a detached Graph process. [What runs on a Machine](#what-runs-on-a-machine)
-is the whole process model.
+and the step processes it starts. [What runs on a Machine](#what-runs-on-a-machine)
+shows where chats, batches, work sessions and workers run and which processes
+keep them alive.
 
 This guide specifies the accepted model. The reference owns
 [cutover status](reference-cutover.md#cutover-status), the remaining work
@@ -29,8 +28,8 @@ lf implement
 
 That command discovers `implement`, assembles its context, chooses a provider,
 records its Process, reserves an LfSession, captures the input, then launches the
-provider. It needs no Wave, Task, or server process. The conversation persists
-after that command exits; a later command can connect to the same LfSession.
+provider. It needs no Wave, Task, or server process. The LfSession and its
+history survive the command, so a later command can reopen the conversation.
 
 ```text
 request
@@ -61,11 +60,11 @@ The implementation follows the same order as the diagram:
 | Stage | Concrete owner | Produces |
 | --- | --- | --- |
 | Parse and dispatch | [`lf/mod.rs`](../../rust/loopflow/src/lf/mod.rs) | One command and launch context |
-| Find the Skill | [`skills/catalog.rs`](../../rust/loopflow/src/skills/catalog.rs) | One selected Skill source |
-| Assemble context | [`prompt/mod.rs`](../../rust/loopflow/src/prompt/mod.rs) | System and task prompts |
-| Select credentials and route | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | Harness, account, model, credential |
-| Launch and normalize | [`harness/`](../../rust/loopflow/src/harness) | Provider output and usage events |
-| Record command and conversation evidence | [`journal/`](../../rust/loopflow/src/journal) and the store | Process completion, LfSession history and immutable payloads |
+| Find the Skill | [`skills/catalog.rs`](../../rust/loopflow-execution/src/skills/catalog.rs) | One selected Skill source |
+| Assemble context | [`prompt/mod.rs`](../../rust/loopflow-execution/src/prompt/mod.rs) | System and task prompts |
+| Select the model and harness | [`agent/mod.rs`](../../rust/loopflow-execution/src/agent/mod.rs) | Configured launch and headless fallback order |
+| Launch and normalize | [`harness/`](../../rust/loopflow-execution/src/harness) | Provider output and usage events |
+| Record command and conversation evidence | [`journal/`](../../rust/loopflow-execution/src/journal) and the store | Process completion, LfSession history and immutable payloads |
 
 [Follow the complete execution path →](execution.md)
 
@@ -98,7 +97,7 @@ one Skill run
 | Planning | Graph composition, Wave/Task Work, Steer, questions, review GraphSteps | [Planning](planning.md) |
 | Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](delivery.md) |
 | Machines | Execution destinations, Task ownership and SSH routing | [Machines and processes](machines.md) |
-| Terminals | Where an agent runs, held terminals, views, headless work | [Transport](../../rust/loopflow/src/transport/README.md) |
+| Terminals | Where an agent runs, held terminals, views, headless work | [Transport](../../rust/loopflow-execution/src/transport/README.md) |
 | Client access and installation | Server admission, registration/update and continuity across replacement | [Client API server](server.md) |
 | Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](data.md) |
 | Codebase | Source territories, public surfaces, processes, extension points | [Codebase map](codebase.md) |
@@ -162,45 +161,37 @@ still has agents, and a Graph process for each running Graph. Every other `lf`
 is a command that ends.
 
 ```text
-your terminal            lf <skill> ──────────────────────────► agent        here
+your terminal            lf <skill> ──────────────────────────► agent        chat
+script or pipe           lf -b <skill> ───────────────────────► agent        batch
 
 your terminal ─ view ─┐
-Desktop pane  ─ view ─┼─► Machine server ─► holder ─► PTY ─► agent or shell   held
+Desktop pane  ─ view ─┼─► Machine server ─► holder ─► PTY ─► agent or shell   work session or Desktop shell
 phone         ─ view ─┘         │
                                 └─ store, hooks, steers, Work reads and writes
 
-lf task run / lf ship / landing ─► Graph process ─► step lf ─► agent          detached
+lf task run / lf task auto on ──────────► Graph process ─► step lf ─► agent          worker
         │                                │
         └─ one startup line, then gone   └─ logs/graph-<id>.log
 ```
 
-A launch runs in exactly one of three places, chosen once in
-`transport::delegate`:
+Transport selects one of the [four launch kinds](../glossary.md#loopflows-words)
+before delegation. Managed launches report turns to the Machine server and
+require it at startup.
 
-| | Here | Held | Detached |
+| Launch | Reports turns | Where the agent runs | Examples |
 | --- | --- | --- | --- |
-| What | `lf <skill>`, `lf graph …`, any bare `-b` or piped run, every headless Graph step | Task, Wave and repository conversations; Desktop shells; a bare Session a Desktop pane or framed `lf --machine` view opens | Graph launches, landing watchers, `lf ship`, a `-b` or piped Work command |
-| Parent of the agent | The launching `lf`, in its caller's terminal or pipe | The holder, on a PTY | A step `lf` under the Graph process |
-| Ends with | Its caller | Its agent quitting, or its Task closing | Its Graph |
-| Seen through | The terminal it runs in | Any number of views, all live | Its log, `lf task status`, the Session's history |
-| Needs the server | No | Yes; it fails rather than fall back | To start, no |
+| Chat | No | In the caller's terminal, which owns its lifetime | `lf <skill>` at a terminal, including `lf research --task LOO-12` |
+| Batch | No | Headless under the caller, returning output to it | `lf -b <skill>` |
+| Work session | Yes | On a PTY in a holder, independent of its viewers | Task, Wave and repository conversations, or a conversation opened in a held terminal through Desktop or a framed `lf --machine` view |
+| Worker | Yes | Headless, with its lifetime set by the step or caller | Headless steps of `lf task run` or `lf task auto on`, landing's `ci-fix`, or a Discord Wave answer |
 
-Work decides between Here and the other two, except that a Desktop pane or
-framed `lf --machine` view holds a bare Session too: a command that names a
-Task or Wave, or reopens a Session bound to one, is Work, and a plain `lf`
-typed in a Task's checkout is not. A terminal decides between Held and Detached: Work
-someone views is held, Work nobody views is detached. Nothing wraps a headless
-run in a terminal, and nothing hosts a conversation in a process of its own.
+The checkout, `--task` and `LF_AS` supply Task attribution. Usage counts toward
+that Task, and hooks on every launch read the Session's steers from the store,
+including steers for that Task. Chats and batches use the launch's context;
+work sessions and workers also report boundaries so the server can refresh it.
 
-Detached is a place a launch runs. `lf session list` also prints `detached`
-as a Session state, meaning a held conversation no view is showing; the two
-are unrelated, and user docs keep the word for the Session state only.
-
-Hooks follow Work, not the place. A bare agent gets two, which print the
-context block at start and after compaction from files in the checkout. An
-agent launched for a Task or Wave (a held conversation, or a Graph step, which
-`lf task run` starts with `--task`) also reports turn and tool boundaries to
-the server and takes steers from it, so its launch starts the server first.
+Desktop Task shells use held terminals too. `lf session list` shows
+`detached` when a running conversation has no view.
 
 | Process | One per | Holds | Restarts |
 | --- | --- | --- | --- |
@@ -228,11 +219,11 @@ Conversations started by a build from before held terminals run under an
 starts one now, and nothing sweeps them. `lf resume` of one, or opening its
 Desktop pane, restarts it: lf ends that process by its verified pid and birth,
 waits for it to exit and resumes the thread from provider history where any
-resume of it would run: held for Work or a Desktop pane, in the terminal for a
-bare `lf resume`. One it cannot verify, or that does not exit, keeps running
+resume of it would run: in a held terminal for a work session, in the caller's
+terminal for a chat. One it cannot verify, or that does not exit, keeps running
 and the message names its pid.
 
-The [transport README](../../rust/loopflow/src/transport/README.md) owns the
+The [transport README](../../rust/loopflow-execution/src/transport/README.md) owns the
 holder and view protocols; the
 [server README](../../rust/loopflow/src/server/README.md) owns client
 operations and hook boundaries.
@@ -277,7 +268,7 @@ It does not centralize execution across Machines. Machine routing selects
 where commands run, the server admits clients, and installation owns server
 registration and updates. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
-definitions and memory. The planning provider (a Git ref or Linear) and GitHub
+definitions and memory. The tracker (Git, Linear or Asana) and GitHub
 keep shared planning and delivery truth. Readers join those sources; they do not replace them with a universal
 ledger.
 
@@ -305,8 +296,8 @@ Graph                          one lf process; cursor in its memory, graph in Gr
 | LfSession | An interactive or headless conversation across attachments and native reconnection | `agent_sessions`, subordinate history and provider-native conversation |
 | Running Graph | One Graph process and the steps it starts, including taskless execution | The Graph process and its child step processes in `processes` |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and, with Linear, Initiative membership |
-| Project | A Wave's plan, Tasks, KRs and targets | `projects` row, shared through the planning provider |
-| Task | A concrete change, investigation or document | `tasks`, the planning provider, Git and GitHub |
+| Project | A Wave’s Tasks, KRs and targets | `projects` row, shared through the tracker |
+| Task | A concrete change, investigation or document | `tasks`, the tracker, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
 | Machine | A machine's store, credentials and exact process authority | Machine identity and observed route |
 | Task ownership | Who works on a Task, on which Machine, or unowned | Append-only `task_ownership` log; each person's Machine-local Wave → Machine default places their unowned Work |
@@ -331,7 +322,7 @@ A delayed command from a replaced provider retains historical provenance; old
 Process parents are never rewritten. Causal ancestry grants no control authority.
 
 Every Graph started for a Task, by naming it or in its checkout, is part of its work.
-Only `lf task run` and `lf ship` advance the Task's captured graph position;
+Only `lf task run` and `lf task auto on` advance the Task's captured graph position;
 independent Graphs leave that position unchanged. Each launch starts a fresh
 Graph process.
 Taskless and Task-owned Graphs use the same Graph runner. The Graph process holds the compiled graph
@@ -403,7 +394,7 @@ lf wave status product
 `task run` places the Task and starts a fresh Graph process from its saved
 position, returning once the process registers. It stops at the next interactive
 step for review in the Task conversation. `-b` waits and runs those steps headless;
-`lf ship` approves continuation through delivery. A stopped process stays history.
+`lf task auto on` approves continuation through delivery. A stopped process stays history.
 A direct `lf --task ISSUE graph GRAPH` uses the same runner without moving the
 Task's graph position. Replanning keeps existing Task identity and execution.
 See [Task workflows](../orchestration.md#where-a-person-takes-part).
@@ -430,7 +421,7 @@ the behavior.
 | Graph semantics, Work state, Steer, questions, review GraphSteps and Task advancement | [Planning](planning.md) |
 | worktrees, commits, PR ranges, checks, or landing | [Delivery](delivery.md) |
 | remote execution, Task ownership, process control, promotion | [Machines and processes](machines.md) |
-| where an agent runs, held terminals, views, headless launches | [Transport](../../rust/loopflow/src/transport/README.md) |
+| where an agent runs, held terminals, views, headless launches | [Transport](../../rust/loopflow-execution/src/transport/README.md) |
 | client operations, hook boundaries, subscriptions | [Server](../../rust/loopflow/src/server/README.md) |
 | schema, files, projections, DTOs, or consistency | [Data and persistence](data.md) |
 | module ownership, APIs, binaries, routes, or code size | [Codebase map](codebase.md) |

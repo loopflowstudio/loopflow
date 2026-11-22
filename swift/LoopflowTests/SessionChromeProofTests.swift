@@ -107,13 +107,13 @@ struct SessionChromeProofTests {
         let surfaces = try terminals.map { try #require($0.surface) }
         let (roadmap, _) = try latestRoadmap()
         let record = try renameFixtureRecord("palette-session", title: "Retained conversation", source: "human",
-                                             work: .task(id: "ts_review00000000000000000000000000"))
+                                             work: .task(id: "issue-review"))
         let companion = try renameFixtureRecord("palette-companion", title: "Companion conversation", source: "human",
-                                                work: .task(id: "ts_review00000000000000000000000000"))
+                                                work: .task(id: "issue-review"))
         let records = try [record, companion].enumerated().map { index, record in
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
             value["state"] = "active"
-            value["actions"] = sessionActionFixture(state: "active")
+            value["action"] = sessionActionFixture(state: "active")
             if case .shell(let pane, _) = terminals[index].terminal { value["terminal_ids"] = [pane] }
             return value
         }
@@ -190,7 +190,8 @@ struct SessionChromeProofTests {
         var items = try #require(tasks["items"] as? [[String: Any]])
         let taskIndex = try #require(items.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-review" })
         items[taskIndex]["latest_graph_process"] = latest
-        items[taskIndex]["execution"] = ["state": "running", "reason": "Running", "step": NSNull(), "captured": NSNull()]
+        items[taskIndex]["execution"] = ["state": "running", "reason": "Running", "step": NSNull(), "captured": NSNull(),
+                                        "died": NSNull(), "outlook": NSNull()]
         tasks["items"] = items; plan["tasks"] = tasks
         return (String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self), invocation)
     }

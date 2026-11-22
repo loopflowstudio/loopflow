@@ -21,11 +21,11 @@ struct TaskHistoryFilter: Equatable {
 
     mutating func clearValidation() { validationMessage = nil }
 
-    func includes(_ task: TaskPlanningSnapshot, condition: TaskConditionSnapshot, now: Date) -> Bool {
-        if task.isCurrent(condition) { return true }
-        guard task.isSuccessful, showCompleted else { return false }
+    func includes(_ task: RoadmapTask, now: Date) -> Bool {
+        if !task.isCompleted || task.condition.unresolvedExecution { return true }
+        guard task.lifecycle == .done, showCompleted else { return false }
         if days == 0 { return true }
-        guard let timestamp = task.completedAt, let date = Self.completionDate(timestamp) else { return false }
+        guard let timestamp = task.task.completedAt, let date = Self.completionDate(timestamp) else { return false }
         return date <= now && date >= now.addingTimeInterval(-Double(days) * 86_400)
     }
 
@@ -60,11 +60,6 @@ struct ClosedTaskHistory {
         let ids = Set(open.map(\.id))
         return open + tasks.filter { !ids.contains($0.id) }
     }
-}
-
-extension TaskPlanningSnapshot {
-    /// Planned or started: not settled, or settled with execution still unresolved.
-    func isCurrent(_ condition: TaskConditionSnapshot) -> Bool { !isTerminal || condition.unresolvedExecution }
 }
 
 struct TaskHistoryControls: View {

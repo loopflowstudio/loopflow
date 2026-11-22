@@ -6,30 +6,32 @@ use std::collections::BTreeSet;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::harness::HarnessKind;
 use crate::lf::commands::WorkFilter;
-use crate::store::sqlite::SqliteStore;
-use crate::store::ProviderAccountId;
-use crate::transcript::summary::{summarize, RetentionSummary};
-use crate::transcript::{
-    self, Conversation, Located, Request, RequestSource, RetentionState, SessionTranscript, Source,
-    Turn, TurnItem,
+use loopflow_execution::store::ProviderAccountId;
+use loopflow_execution::transcript::summary::{summarize, RetentionSummary};
+use loopflow_execution::transcript::{
+    session_transcript, threads, Conversation, Located, RetentionState, SessionTranscript,
 };
+use loopflow_harness::transcript::{self, Request, RequestSource, Source, Turn, TurnItem};
+use loopflow_harness::HarnessKind;
+use loopflow_model::chat::types::{ConversationItem, Lifecycle};
+use loopflow_storage::sqlite::SqliteStore;
 
 const SNIPPET_CHARS: usize = 80;
-const ANSWER_CHARS: usize = 160;
 
 fn now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
 fn read_only_store() -> Result<Option<SqliteStore>> {
-    let database = crate::store::database_path_from_env()?;
+    let database = loopflow_execution::store::database_path_from_env()?;
     if !database.exists() {
         return Ok(None);
     }
-    Ok(Some(SqliteStore::open_processes_read_only(&database)?))
+    Ok(Some(SqliteStore::open_read_only(
+        &database,
+        loopflow_execution::store::token_key::encryption_key,
+    )?))
 }
 
 /// A Unix time as `YYYY-MM-DD HH:MM UTC`.
@@ -51,7 +53,7 @@ fn clip(text: &str, chars: usize) -> String {
 
 /// The Session's conversation, read from its providers.
 pub(crate) fn session(store: &SqliteStore, session: &str) -> Result<SessionTranscript> {
-    transcript::session_transcript(store, session, now())
+    session_transcript(store, session, now())
 }
 
 pub(crate) fn render(transcript: &SessionTranscript) -> String {
@@ -125,12 +127,7 @@ fn render_facts(out: &mut String, conversation: &Conversation) {
             .map(minute)
             .unwrap_or_else(|| "unknown time".into());
         let status = turn.status.as_deref().unwrap_or("unsettled");
-        let answer = turn
-            .final_answer
-            .as_deref()
-            .map(|answer| format!(" · final answer: \"{}\"", clip(answer, ANSWER_CHARS)))
-            .unwrap_or_default();
-        out.push_str(&format!("    {at} {status}{answer}\n"));
+        out.push_str(&format!("    {at} {status}\n"));
     }
 }
 
@@ -261,7 +258,11 @@ fn render_retention(summary: &RetentionSummary) -> String {
                 " · next removal after {}",
                 transcript::date(after)
             )),
-            None if harness.harness == HarnessKind::Claude.as_str() => {}
+            None if HarnessKind::parse(&harness.harness).is_some_and(|kind| {
+                transcript::ExpiryPolicy::read(kind, None)
+                    .after(0)
+                    .is_some()
+            }) => {}
             None => line.push_str(" · no provider expiry"),
         }
         out.push_str(&line);
@@ -348,7 +349,8 @@ pub(crate) fn search(
     json: bool,
 ) -> Result<()> {
     anyhow::ensure!(!query.trim().is_empty(), "Search text is empty");
-    let since = super::util::parse_since(since, time::OffsetDateTime::now_utc())?.unix_timestamp();
+    let since = loopflow_execution::output::parse_since(since, time::OffsetDateTime::now_utc())?
+        .unix_timestamp();
     let mut results = SearchResults {
         query: query.to_owned(),
         since,
@@ -366,7 +368,7 @@ pub(crate) fn search(
             .case_insensitive(true)
             .build()?;
         'sessions: for session in sessions {
-            for thread in transcript::threads(&store, &session)? {
+            for thread in threads(&store, &session)? {
                 let Ok((harness, Located::Found { source, .. })) = thread.located else {
                     continue;
                 };
@@ -485,7 +487,7 @@ mod tests {
             harness: harness.as_str().into(),
             agent_session: "thread-1".into(),
             account: None,
-            retention: transcript::Retention {
+            retention: loopflow_execution::transcript::Retention {
                 state: RetentionState::Facts,
                 path: None,
                 policy: transcript::ExpiryPolicy::read(harness, None),

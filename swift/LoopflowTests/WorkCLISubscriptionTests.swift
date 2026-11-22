@@ -31,13 +31,13 @@ struct WorkCLISubscriptionTests {
         do {
             try await eventually { model.task(id: id)?.task.task.name == "Before outage" }
             await server.stop()
-            try await eventually { model.roadmap.errorMessage != nil }
+            try await eventually { model.roadmap.failure != nil }
             #expect(model.task(id: id)?.task.task.name == "Before outage")
 
             _ = try await fixture.run(["task", "update", id, "--title", "Changed while offline"])
             _ = try await server.status()
             try await eventually {
-                model.roadmap.errorMessage == nil
+                model.roadmap.failure == nil
                     && model.task(id: id)?.task.task.name == "Changed while offline"
             }
             // Recovery must leave a live observation, not just refresh once.
@@ -45,7 +45,7 @@ struct WorkCLISubscriptionTests {
             try await eventually { model.task(id: id)?.task.task.name == "Changed after recovery" }
 
             await server.stop()
-            try await eventually { model.roadmap.errorMessage != nil }
+            try await eventually { model.roadmap.failure != nil }
             keeping.cancel()
             await keeping.value
             // Cancelling the window's reader must not reopen the replacement.
@@ -106,9 +106,7 @@ struct WorkCLISubscriptionTests {
         let session = try #require(store.sessions.first { $0.record.taskPrimary })
         #expect(session.state == .prepared)
         #expect(session.record.workspace?.identity == location)
-        #expect(session.launchArguments.contains("--start-if-free"))
-        #expect(workspace.conversationStart == nil)
-        #expect(await query.startOffer(refused: .reveal, issue: id, cwd: fixture.repo.path) == nil)
+        #expect(session.record.action != nil)
         let recorded = try await query.sessionPage(cwd: fixture.repo.path).entries
         #expect(recorded.filter(\.taskPrimary).map(\.id) == [session.id])
         #expect(recorded.filter { $0.primaryScope == "repository" }.count == 1)
@@ -152,11 +150,8 @@ struct WorkCLISubscriptionTests {
         let created = try await fixture.json(["task", "create", "--wave", waveName, "--title", "Arrives through CLI", "--json"])["task"] as! [String: Any]
         let id = try #require(created["id"] as? String)
         try await eventually { model.task(id: id) != nil }
-        // An unstarted Task waits in the board's Backlog, where it offers Start; the strip lists Working Tasks.
-        try await eventually {
-            WaveStandup(tasks: model.visibleTasks, closed: [], doneDays: 0, now: .now, github: [:], sessions: [:])
-                .backlog.contains { $0.id == id }
-        }
+        // An unstarted Task waits in the backlog, where it offers Start; the strip lists Working Tasks.
+        try await eventually { model.backlog(.repository).all.contains { $0.id == id } }
         #expect(!selectedPlanMembers(model).contains { $0.work.id == id })
         // `-b` would run `demo` headless; plain `task run` stops before it, needing no provider.
         _ = try await fixture.run(["task", "run", id])
@@ -176,9 +171,12 @@ struct WorkCLISubscriptionTests {
         let workspace = try #require(registry.selectedWork.flatMap(registry.retained))
         let task = try #require(model.task(id: id)?.task)
         let checkout = try #require(task.reference.workspace?.identity)
-        // Automatic opening prepares this Session; nothing mounts it, so no provider launches.
+        // The Wave board's tile or the warm opening fills this pane, whichever runs
+        // first, and only the opening selects its conversation. The mounted page
+        // selects the focused pane's Session; nothing mounts here, so the test does.
         try await eventually { workspace.multiplexer.sessionPane?.sessionId != nil }
         let sessionID = try #require(workspace.multiplexer.sessionPane?.sessionId)
+        model.navigation.selectedSessionId = sessionID
         #if canImport(GhosttyKit)
         let surfaceID = TerminalIdentity.session(sessionID, machineId: machineID)
         let surface = registry.surfaces.view(for: surfaceID)
@@ -278,14 +276,14 @@ struct WorkCLISubscriptionTests {
         let layout = workspace.multiplexer.layout
         _ = try await fixture.run(["wave", "create", "product", "--json"])
         let before = try #require(model.task(id: id)?.task)
-        await model.moveTask(before, toWave: "product")
-        #expect(model.navigation.taskRunDrafts[id]?.error == nil,
-                "\(model.peerPlanning.errorMessage ?? "") · \(model.workActivity.errorMessage ?? "")")
+        model.moveTask(before, toWave: "product")
+        #expect(model.navigation.notices.current == nil,
+                "\(model.repositoryPlan.failure ?? "") · \(model.workActivity.failure ?? "")")
         try await eventually { model.task(id: id)?.task.task.waveId != nil }
         #expect(model.visibleWork.standaloneTasks.isEmpty)
-        await model.moveTask(try #require(model.task(id: id)?.task), toWave: nil)
-        #expect(model.navigation.taskRunDrafts[id]?.error == nil,
-                "\(model.peerPlanning.errorMessage ?? "") · \(model.workActivity.errorMessage ?? "")")
+        model.moveTask(try #require(model.task(id: id)?.task), toWave: nil)
+        #expect(model.navigation.notices.current == nil,
+                "\(model.repositoryPlan.failure ?? "") · \(model.workActivity.failure ?? "")")
         try await eventually { model.visibleWork.standaloneTasks.count == 1 }
         #expect(model.selection == .task(id: id))
         #expect(registry.selectedWork == key)

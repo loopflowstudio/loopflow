@@ -1,190 +1,23 @@
-//! Scans the builtins directory and generates registration code so that
-//! adding a new .md or .yaml file is all you need — no manual HashMap insert.
-
-// Build registration only uses the portable projection.
-#[allow(dead_code)]
-#[path = "src/definition/name.rs"]
-mod definition_name;
-use definition_name::portable_name;
+//! Embed application provenance.
 
 use std::env;
-use std::fmt::Write as _;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use sha2::{Digest, Sha256};
-
-// Identities are shared with the runtime; ordering runs only here (and in the
-// runtime's tests).
-#[path = "src/store/migration_build.rs"]
-mod migration_build;
-#[allow(dead_code)]
-#[path = "src/store/migration_catalog.rs"]
-mod migration_catalog;
-#[path = "src/store/migration_schema.rs"]
-mod migration_schema;
-
-/// Category directories whose skill/graph names are registered flat (no prefix).
-/// Everything else is a namespaced category: public names carry a `<cat>-` prefix.
-/// Core categories share one flat namespace and must not collide with each other.
-/// Within a filename, `_` encodes a namespace separator (`wave_clarify.md`
-/// registers as `wave-clarify`); `-` remains a word separator.
-const CORE_CATEGORIES: &[&str] = &["task", "project", "wave", "ops"];
-
-/// Each ongoing conversation carries its scope's operating procedure inline:
-/// the registered session skill is its own file followed by the body of its
-/// operate skill. The operate skill stays registered on its own.
-const SESSION_OPERATE_PAIRS: &[(&str, &str)] = &[
-    ("repo-session", "repo-operate"),
-    ("wave-session", "wave-operate"),
-    ("task-session", "task-operate"),
-];
-
 fn main() {
-    println!("cargo:rerun-if-changed=src/installation/registration.m");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
-        cc::Build::new()
-            .file("src/installation/registration.m")
-            .flag("-fobjc-arc")
-            .compile("server_registration");
-        println!("cargo:rustc-link-lib=framework=ServiceManagement");
-        println!("cargo:rustc-link-lib=framework=Foundation");
-    }
-
-    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
-        println!("cargo:rerun-if-changed=src/journal/os_process/macos.c");
-        cc::Build::new()
-            .file("src/journal/os_process/macos.c")
-            .compile("loopflow_process_info");
-    }
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
-    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
-    link_ghostty_vt(&manifest_dir, &out_dir);
-    // Cargo verifies extracted archives under the checkout's target directory.
-    // That enclosing repository is not the archive's source tree.
-    let git_root = (!manifest_dir.join(".cargo_vcs_info.json").exists())
-        .then(|| {
-            manifest_dir
-                .ancestors()
-                .find(|ancestor| ancestor.join(".git").exists())
-                .map(Path::to_path_buf)
-        })
-        .flatten();
-    let unmerged = emit_migration_catalog(&manifest_dir, git_root.as_deref(), &out_dir);
+    let git_root = manifest_dir
+        .ancestors()
+        .find(|ancestor| ancestor.join(".git").exists())
+        .map(Path::to_path_buf);
+    let unmerged = env::var("DEP_LOOPFLOW_STORAGE_UNMERGED")
+        .expect("storage migration catalogue metadata")
+        .split(',')
+        .filter(|slug| !slug.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
     emit_build_provenance(&manifest_dir, git_root.as_deref(), &unmerged);
-    let builtins_dir = manifest_dir.join("src/builtins");
-
-    for (kind, extension) in [("skill", "md"), ("graph", "yaml")] {
-        generate_builtins(&builtins_dir, &out_dir, kind, extension);
-    }
-
-    // Re-run if any file in the builtins tree changes
-    println!("cargo:rerun-if-changed={}", builtins_dir.display());
-    for entry in walkdir(&builtins_dir) {
-        println!("cargo:rerun-if-changed={}", entry.display());
-    }
-}
-
-/// Generate `migrations.rs`, the ordered catalog, and the schema it builds;
-/// replaying every migration would cost each process that opens a store.
-/// Returns the slug migrations `origin/main` has not added.
-fn emit_migration_catalog(
-    manifest_dir: &Path,
-    git_root: Option<&Path>,
-    out_dir: &Path,
-) -> Vec<String> {
-    let directory = manifest_dir.join("src/store/migrations");
-    println!("cargo:rerun-if-changed={}", directory.display());
-    // A source snapshot without Git history (a container build) names the
-    // order origin/main gave its migrations, one slug per line.
-    println!("cargo:rerun-if-env-changed=LOOPFLOW_MIGRATION_ORDER");
-    let merged_order = match env::var_os("LOOPFLOW_MIGRATION_ORDER") {
-        Some(path) => {
-            println!("cargo:rerun-if-changed={}", Path::new(&path).display());
-            fs::read_to_string(&path)
-                .unwrap_or_else(|error| panic!("read LOOPFLOW_MIGRATION_ORDER: {error}"))
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .map(str::to_string)
-                .collect()
-        }
-        None => match git_root {
-            Some(root) => {
-                let root = root
-                    .canonicalize()
-                    .expect("canonicalize Loopflow source root");
-                let directory = directory
-                    .canonicalize()
-                    .expect("canonicalize migrations directory");
-                migration_build::merged_order(&root, &directory)
-            }
-            None => {
-                let path = manifest_dir.join("migration-order.txt");
-                println!("cargo:rerun-if-changed={}", path.display());
-                fs::read_to_string(path)
-                    .expect("read packaged migration order")
-                    .lines()
-                    .map(str::to_string)
-                    .collect()
-            }
-        },
-    };
-    let catalog = migration_build::order_catalog(&directory, &merged_order)
-        .unwrap_or_else(|error| panic!("order migrations: {error}"));
-    let connection = migration_build::apply_catalog(&catalog)
-        .unwrap_or_else(|error| panic!("apply migration catalog: {error}"));
-
-    let mut code = String::from("static MIGRATIONS: &[Migration] = &[\n");
-    for entry in &catalog {
-        let path = entry
-            .path
-            .canonicalize()
-            .unwrap_or_else(|error| panic!("canonicalize {}: {error}", entry.path.display()));
-        writeln!(
-            code,
-            "    Migration {{ version: {:?}, sql: include_str!({:?}), merged: {} }},",
-            entry.version,
-            path.to_string_lossy(),
-            entry.merged
-        )
-        .expect("write migration catalog");
-    }
-    code.push_str("];\n");
-    fs::write(out_dir.join("migrations.rs"), code).expect("write migration catalog");
-
-    let schema =
-        migration_schema::product_schema(&connection).expect("project catalog schema reference");
-    let json = serde_json::to_vec(&*schema).expect("serialize catalog schema reference");
-    fs::write(out_dir.join("canonical_schema.json"), json).expect("write catalog schema reference");
-    // Test processes each get an independent copy, including nextest's one-test
-    // processes. Replaying the catalog here keeps that cost out of every fixture.
-    let fixture = out_dir.join("test-store.db");
-    let _ = fs::remove_file(&fixture);
-    for (index, entry) in catalog.iter().enumerate() {
-        let sql = fs::read(&entry.path).expect("read fixture migration");
-        let checksum = format!("{:x}", Sha256::digest(&sql));
-        connection
-            .execute(
-                "INSERT INTO schema_migrations(version,applied_at,checksum) VALUES(?1,?2,?3)",
-                rusqlite::params![entry.version, index as i64, checksum],
-            )
-            .expect("record fixture migration");
-    }
-    connection
-        .execute(
-            "VACUUM INTO ?1",
-            [fixture.to_str().expect("UTF-8 build directory")],
-        )
-        .expect("write test store image");
-
-    catalog
-        .into_iter()
-        .filter(|entry| !entry.merged)
-        .map(|entry| entry.version)
-        .collect()
 }
 
 fn emit_build_provenance(manifest_dir: &Path, git_root: Option<&Path>, unmerged: &[String]) {
@@ -318,363 +151,65 @@ fn emit_build_provenance(manifest_dir: &Path, git_root: Option<&Path>, unmerged:
     println!("cargo:rustc-env=LOOPFLOW_VERSION_LINE={version_line}");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_BUILD_PROVENANCE");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_RELEASE_TAG");
-    println!(
-        "cargo:rerun-if-changed={}",
-        manifest_dir.join("src").display()
-    );
+    // Provenance describes the whole workspace, including an initial edit in a
+    // lower crate before any application file changes.
+    let sources = git_root.map_or_else(|| manifest_dir.join("src"), |root| root.join("rust"));
+    println!("cargo:rerun-if-changed={}", sources.display());
     if let Some(root) = git_root {
-        let mut git_paths = vec![
-            "HEAD".to_string(),
-            "refs/tags".into(),
-            "packed-refs".into(),
-            "refs/remotes/origin/main".into(),
-        ];
+        for input in ["Cargo.toml", "Cargo.lock"] {
+            println!("cargo:rerun-if-changed={}", root.join(input).display());
+        }
+    }
+    if let Some(root) = git_root {
+        let mut git_paths = vec!["HEAD".to_string(), "refs/tags".into(), "packed-refs".into()];
         if let Ok(output) = Command::new("git")
             .args(["symbolic-ref", "--quiet", "HEAD"])
             .current_dir(root)
             .output()
         {
             if output.status.success() {
-                git_paths.push(String::from_utf8_lossy(&output.stdout).trim().to_string());
-            }
-        }
-        for git_path in git_paths {
-            if let Ok(output) = Command::new("git")
-                .args(["rev-parse", "--git-path", &git_path])
-                .current_dir(root)
-                .output()
-            {
-                if output.status.success() {
-                    let path = String::from_utf8_lossy(&output.stdout);
-                    let path = Path::new(path.trim());
-                    let path = if path.is_absolute() {
-                        path.to_path_buf()
-                    } else {
-                        root.join(path)
-                    };
-                    // Missing inputs make every build dirty. A packed branch
-                    // needs its parent watched until a commit creates a loose ref.
-                    if git_path == "packed-refs" && !path.exists() {
-                        continue;
-                    }
-                    if let Some(path) = path.ancestors().find(|path| path.exists()) {
+                let reference = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                // A commit on a packed branch creates its loose ref. Watching
+                // the parent also sees every sibling branch; this checkout's
+                // branch reflog follows updates to just the selected ref.
+                let reflog = git_path(root, &format!("logs/{reference}"));
+                if let Some(reflog) = reflog.filter(|path| path.exists()) {
+                    println!("cargo:rerun-if-changed={}", reflog.display());
+                } else {
+                    // Repositories without a branch reflog still need to notice
+                    // their first loose ref, including an empty commit.
+                    if let Some(path) = git_path(root, &reference).and_then(|path| {
+                        path.ancestors()
+                            .find(|path| path.exists())
+                            .map(Path::to_path_buf)
+                    }) {
                         println!("cargo:rerun-if-changed={}", path.display());
                     }
                 }
+                git_paths.push(reference);
+            }
+        }
+        // Storage owns origin/main and propagates catalogue changes through
+        // its build metadata. Never broaden a missing input to shared refs.
+        for reference in git_paths {
+            if let Some(path) = git_path(root, &reference).filter(|path| path.exists()) {
+                println!("cargo:rerun-if-changed={}", path.display());
             }
         }
     }
 }
 
-/// Collect each kind once so registration, shortcuts and categories share names.
-fn generate_builtins(builtins_dir: &Path, out_dir: &Path, kind: &str, extension: &str) {
-    let mut entries = Vec::new();
-    let mut categories = std::collections::BTreeMap::<String, Vec<String>>::new();
-    if let Ok(cats) = fs::read_dir(builtins_dir) {
-        for cat in cats.flatten() {
-            let cat_path = cat.path();
-            let kind_dir = cat_path.join(kind);
-            if !kind_dir.is_dir() {
-                continue;
-            }
-            let cat_name = cat_path
-                .file_name()
-                .expect("dir has no name")
-                .to_string_lossy()
-                .to_string();
-            let is_core = CORE_CATEGORIES.contains(&cat_name.as_str());
-            let mut files: Vec<(String, PathBuf)> = Vec::new();
-            collect_files(&kind_dir, extension, &mut files);
-            for (stem, path) in files {
-                let stem = stem.replace('_', "/");
-                let name = if is_core {
-                    stem
-                } else {
-                    format!("{cat_name}/{stem}")
-                };
-                categories
-                    .entry(title_case(&cat_name))
-                    .or_default()
-                    .push(portable_name(&name));
-                entries.push((name, path));
-            }
-        }
-    }
-    if kind == "skill" {
-        compose_sessions(&mut entries, out_dir);
-    }
-    emit_map(
-        &mut entries,
-        &format!("BUILTIN_{}S", kind.to_uppercase()),
-        &out_dir.join(format!("builtin_{kind}s.rs")),
-    );
-    emit_category_map(
-        categories,
-        &format!("BUILTIN_{}_CATEGORIES", kind.to_uppercase()),
-        &out_dir.join(format!("builtin_{kind}_categories.rs")),
-    );
-}
-
-fn compose_sessions(entries: &mut [(String, PathBuf)], out_dir: &Path) {
-    let composed_dir = out_dir.join("composed_skills");
-    fs::create_dir_all(&composed_dir).expect("create composed skill directory");
-    for (session, operate) in SESSION_OPERATE_PAIRS {
-        let index = |name: &str| {
-            entries
-                .iter()
-                .position(|(entry, _)| portable_name(entry) == name)
-                .unwrap_or_else(|| panic!("builtin skill `{name}` is missing"))
-        };
-        let read = |path: &Path| {
-            fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
-        };
-        let session_index = index(session);
-        let composed = format!(
-            "{}\n# Operating procedure: `{operate}`\n\n{}",
-            read(&entries[session_index].1),
-            skill_body(&read(&entries[index(operate)].1))
-        );
-        let path = composed_dir.join(format!("{session}.md"));
-        fs::write(&path, composed).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
-        entries[session_index].1 = path;
-    }
-}
-
-fn skill_body(content: &str) -> &str {
-    let after_open = content
-        .strip_prefix("---")
-        .expect("operate skill opens with frontmatter");
-    let end = after_open
-        .find("\n---")
-        .expect("operate skill closes its frontmatter");
-    after_open[end + 4..].trim_start_matches('\n')
-}
-
-fn emit_map(entries: &mut [(String, PathBuf)], map_name: &str, out_path: &Path) {
-    let mut shortcuts = std::collections::BTreeMap::<String, Vec<String>>::new();
-    for (name, _) in entries.iter() {
-        if let Some((_, bare)) = name.rsplit_once('/') {
-            shortcuts
-                .entry(bare.into())
-                .or_default()
-                .push(portable_name(name));
-        }
-    }
-    for (name, _) in entries.iter_mut() {
-        *name = portable_name(name);
-    }
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
-
-    for pair in entries.windows(2) {
-        if pair[0].0 == pair[1].0 {
-            panic!(
-                "duplicate builtin key '{}' for '{}' and '{}'",
-                pair[0].0,
-                pair[0].1.display(),
-                pair[1].1.display()
-            );
-        }
-    }
-
-    let mut code = String::new();
-    writeln!(
-        code,
-        "static {map_name}: std::sync::LazyLock<std::collections::HashMap<&'static str, &'static str>> = std::sync::LazyLock::new(|| std::collections::HashMap::from(["
-    )
-    .expect("write to String");
-
-    for (name, path) in entries.iter() {
-        let abs = path
-            .canonicalize()
-            .unwrap_or_else(|e| panic!("canonicalize {}: {e}", path.display()));
-        let abs_str = abs.to_string_lossy().replace('\\', "/");
-        writeln!(code, "    ({name:?}, include_str!({abs_str:?})),").expect("write to String");
-    }
-
-    writeln!(code, "]));").expect("write to String");
-
-    writeln!(code, "static {map_name}_SHORTCUTS: &[(&str, &str)] = &[").expect("write shortcuts");
-    for (bare, names) in shortcuts {
-        if names.len() == 1 {
-            writeln!(code, "({bare:?}, {:?}),", names[0]).expect("write shortcut");
-        }
-    }
-    code.push_str("];\n");
-    fs::write(out_path, code).unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
-}
-
-fn emit_category_map(
-    mut categories: std::collections::BTreeMap<String, Vec<String>>,
-    map_name: &str,
-    out_path: &Path,
-) {
-    for names in categories.values_mut() {
-        names.sort();
-    }
-    let mut code = String::new();
-    writeln!(code, "pub const {map_name}: &[(&str, &[&str])] = &[").expect("write to String");
-    for (category, names) in &categories {
-        let item_list: Vec<String> = names.iter().map(|f| format!("\"{f}\"")).collect();
-        writeln!(code, "    (\"{category}\", &[{}]),", item_list.join(", "))
-            .expect("write to String");
-    }
-    writeln!(code, "];").expect("write to String");
-
-    fs::write(out_path, code).unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
-}
-
-fn title_case(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(c) => c.to_uppercase().to_string() + chars.as_str(),
-    }
-}
-
-/// Recursively collect source names, preserving folder hierarchy for shortcuts.
-fn collect_files(dir: &Path, extension: &str, entries: &mut Vec<(String, PathBuf)>) {
-    let Ok(read_dir) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in read_dir {
-        let Ok(entry) = entry else { continue };
-        let path = entry.path();
-        if path.is_dir() {
-            let mut children = Vec::new();
-            collect_files(&path, extension, &mut children);
-            let folder = path
-                .file_name()
-                .expect("directory has a name")
-                .to_string_lossy();
-            entries.extend(
-                children
-                    .into_iter()
-                    .map(|(name, source)| (format!("{folder}/{name}"), source)),
-            );
-        } else if path
-            .extension()
-            .is_some_and(|e| e == extension || (extension == "yaml" && e == "yml"))
-        {
-            let name = path
-                .file_stem()
-                .expect("file has no stem")
-                .to_string_lossy()
-                .to_string();
-            entries.push((name, path));
-        }
-    }
-}
-
-/// Walk a directory tree, returning all paths.
-fn walkdir(dir: &Path) -> Vec<PathBuf> {
-    let mut result = Vec::new();
-    let Ok(read_dir) = fs::read_dir(dir) else {
-        return result;
-    };
-    for entry in read_dir {
-        let Ok(entry) = entry else { continue };
-        let path = entry.path();
-        result.push(path.clone());
-        if path.is_dir() {
-            result.extend(walkdir(&path));
-        }
-    }
-    result
-}
-
-// --- libghostty-vt ---
-
-/// Link the prebuilt libghostty-vt archive for the build target. The pin file
-/// names the Ghostty revision, the artifact generation and each target's
-/// SHA-256; `scripts/loopflow-dev.py ghostty-vt-build` produces and publishes
-/// the archives. `LOOPFLOW_GHOSTTY_VT_DIR` names a directory holding a locally
-/// built `libghostty-vt.a` instead, for offline work or a Ghostty bump.
-fn link_ghostty_vt(manifest_dir: &Path, out_dir: &Path) {
-    let pin_path = manifest_dir.join("ghostty-vt.json");
-    println!("cargo:rerun-if-changed={}", pin_path.display());
-    println!("cargo:rerun-if-env-changed=LOOPFLOW_GHOSTTY_VT_DIR");
-    let pin: GhosttyVtPin =
-        serde_json::from_str(&fs::read_to_string(&pin_path).expect("ghostty-vt.json is readable"))
-            .expect("ghostty-vt.json is valid");
-    println!("cargo:rustc-env=LOOPFLOW_GHOSTTY_REVISION={}", pin.revision);
-    let lib_dir = match env::var_os("LOOPFLOW_GHOSTTY_VT_DIR") {
-        Some(dir) => {
-            let archive = PathBuf::from(dir).join("libghostty-vt.a");
-            println!("cargo:rerun-if-changed={}", archive.display());
-            // Zig also emits a dylib here. Apple's linker prefers it even for
-            // rustc's static request; search a directory containing only the archive.
-            let dir = out_dir.join("ghostty-vt-local");
-            fs::create_dir_all(&dir).expect("create local libghostty-vt directory");
-            fs::copy(&archive, dir.join("libghostty-vt.a"))
-                .unwrap_or_else(|error| panic!("copy {}: {error}", archive.display()));
-            dir
-        }
-        None => fetch_ghostty_vt(&pin, out_dir),
-    };
-    assert!(
-        lib_dir.join("libghostty-vt.a").is_file(),
-        "{} holds no libghostty-vt.a",
-        lib_dir.display()
-    );
-    println!("cargo:rustc-link-search=native={}", lib_dir.display());
-    println!("cargo:rustc-link-lib=static=ghostty-vt");
-}
-
-/// `ghostty-vt.json`: the Ghostty revision, the artifact generation (bumped
-/// when a patch or build flag changes) and each target's archive checksum.
-#[derive(serde::Deserialize)]
-struct GhosttyVtPin {
-    revision: String,
-    artifact: String,
-    base_url: String,
-    sha256: std::collections::BTreeMap<String, String>,
-}
-
-/// The published archive for this target, downloaded once per build directory.
-fn fetch_ghostty_vt(pin: &GhosttyVtPin, out_dir: &Path) -> PathBuf {
-    let target = env::var("TARGET").expect("TARGET not set");
-    let name = format!(
-        "libghostty-vt-{}-{}-{target}.tar.gz",
-        &pin.revision[..7],
-        pin.artifact
-    );
-    let expected = pin
-        .sha256
-        .get(&target)
-        .unwrap_or_else(|| panic!("ghostty-vt.json pins no SHA-256 for {target}"));
-    let dir = out_dir.join("ghostty-vt").join(&name);
-    let stamp = dir.join("sha256");
-    if fs::read_to_string(&stamp).is_ok_and(|pinned| pinned.trim() == expected) {
-        return dir;
-    }
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).expect("create libghostty-vt directory");
-    let archive = dir.join(&name);
-    let url = format!("{}/{name}", pin.base_url);
-    let status = Command::new("curl")
-        .args(["-fsSL", "--retry", "3", "-o"])
-        .arg(&archive)
-        .arg(&url)
-        .status()
-        .expect("run curl");
-    assert!(
-        status.success(),
-        "downloading {url} failed; set LOOPFLOW_GHOSTTY_VT_DIR to a local libghostty-vt build"
-    );
-    let bytes = fs::read(&archive).expect("read downloaded archive");
-    let digest = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(&bytes));
-    assert!(
-        &digest == expected,
-        "{name} has SHA-256 {digest}; ghostty-vt.json pins {expected}"
-    );
-    let status = Command::new("tar")
-        .arg("-xzf")
-        .arg(&archive)
-        .arg("-C")
-        .arg(&dir)
-        .status()
-        .expect("run tar");
-    assert!(status.success(), "extracting {name} failed");
-    fs::write(&stamp, expected).expect("record archive checksum");
-    dir
+fn git_path(root: &Path, reference: &str) -> Option<PathBuf> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--git-path", reference])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    let path = PathBuf::from(String::from_utf8(output.stdout).ok()?.trim());
+    Some(if path.is_absolute() {
+        path
+    } else {
+        root.join(path)
+    })
 }

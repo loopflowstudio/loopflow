@@ -137,7 +137,8 @@ struct MobileNewTaskView: View {
     private var actions: some View {
         VStack(spacing: 8) {
             if model.busy {
-                ProgressView(model.draft.submission == nil ? "Loading destinations…" : "Checking your Task…")
+                ProgressView(model.starting ? "Starting…"
+                    : model.draft.submission == nil ? "Loading destinations…" : "Checking your Task…")
                     .frame(minHeight: 44)
             } else if model.settled {
                 Button("Open Task") { action = Task { if let task = await model.openTask() { onOpen(task) } } }

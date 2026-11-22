@@ -35,7 +35,8 @@ struct TaskHistoryFilterTests {
             return row
         }
         if let index = rows.firstIndex(where: { ($0["task"] as? [String: Any])?["id"] as? String == "unresolved" }) {
-            rows[index]["runtime"] = ["work_id": "task-unresolved", "status": "moving", "reason": "Running", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "owner": ["person": "Jack Heart", "person_id": NSNull(), "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]] as [String: Any]
+            rows[index]["lifecycle"] = "moving"
+            rows[index]["runtime"] = ["work_id": "unresolved", "status": "moving", "reason": "Running", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "owner": ["person": "Jack Heart", "person_id": NSNull(), "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]] as [String: Any]
             var condition = try #require(rows[index]["condition"] as? [String: Any])
             condition["unresolved_execution"] = true
             rows[index]["condition"] = condition
@@ -53,8 +54,9 @@ struct TaskHistoryFilterTests {
         plan["completed"] = state == "completed"
         plan["completed_at"] = date.map { $0 as Any } ?? NSNull()
         row["task"] = plan
+        row["lifecycle"] = runtime ?? (state == "completed" ? "done" : ["canceled", "duplicate"].contains(state) ? "abandoned" : "unstarted")
         if let runtime {
-            row["runtime"] = ["work_id": "task", "status": runtime, "reason": "settled", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "owner": ["person": "Jack Heart", "person_id": NSNull(), "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]] as [String: Any]
+            row["runtime"] = ["work_id": try #require(plan["id"] as? String), "status": runtime, "reason": "settled", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "owner": ["person": "Jack Heart", "person_id": NSNull(), "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]] as [String: Any]
         }
         row["condition"] = ["state": missing ? "blocked" : "clear", "reason": "historical checkout", "observed_at": "2026-10-02T12:00:00Z", "evidence_age_secs": 0,
             "local_progress": ["state": missing ? "missing" : "not_applicable", "unsettled": missing, "dirty": NSNull(), "authored_commits": NSNull(), "recovery_required": missing, "reason": "checkout removed"],
@@ -63,7 +65,7 @@ struct TaskHistoryFilterTests {
     }
 
     private func visible(_ row: RoadmapTask, _ filter: TaskHistoryFilter) -> Bool {
-        filter.includes(row.task, condition: row.condition, now: now)
+        filter.includes(row, now: now)
     }
 
     @Test func closedPagesJoinOpenTasksOnceAndReachTheirRange() throws {
@@ -101,7 +103,7 @@ struct TaskHistoryFilterTests {
         for state in ["canceled", "duplicate"] {
             #expect(!visible(try task(state, date: nil), filter))
         }
-        #expect(visible(try task("unstarted", date: "2026-01-01T00:00:00Z", runtime: "abandoned"), TaskHistoryFilter()))
+        #expect(!visible(try task("unstarted", date: "2026-01-01T00:00:00Z", runtime: "abandoned"), TaskHistoryFilter()))
         #expect(visible(try task("unknown", date: nil), TaskHistoryFilter()))
     }
 
@@ -131,8 +133,8 @@ struct TaskHistoryFilterTests {
         let boundary = try task("completed", date: "2026-03-05T07:00:00-08:00")
         let before = try task("completed", date: "2026-03-05T06:59:59.9999-08:00")
         let springNow = ISO8601DateFormatter().date(from: "2026-03-12T08:00:00-07:00")!
-        #expect(filter.includes(boundary.task, condition: boundary.condition, now: springNow))
-        #expect(!filter.includes(before.task, condition: before.condition, now: springNow))
+        #expect(filter.includes(boundary, now: springNow))
+        #expect(!filter.includes(before, now: springNow))
     }
 
     @Test func inlineEditingAppliesCancelsAndRemembersRange() throws {
@@ -249,11 +251,11 @@ struct TaskHistoryFilterTests {
         let model = WorkModel(query: query)
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.wave.toWave()]), workActivity: .loading, repos: [])
         model.select(.wave(id: wave.wave.id))
-        let board = WaveStandupBoard(model: model, view: .wave(wave.wave.id))
-        #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-status").text().string()
-            == wave.wave.status.label.capitalized)
-        // Selecting a Wave never starts work; every current Task is on the board.
-        for task in wave.tasks.items where task.task.isCurrent(task.condition) && task.section != .done && task.section != .abandoned {
+        let board = BacklogView(model: model, view: .wave(wave.wave.id))
+        #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string()
+            == wave.wave.displayName)
+        // Selecting a Wave never starts work; every backlog Task is in its list.
+        for task in wave.tasks.items where task.section == .backlog {
             _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-row-\(task.id)")
         }
         #expect(model.selection == .wave(id: wave.wave.id))

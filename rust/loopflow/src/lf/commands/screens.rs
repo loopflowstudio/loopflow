@@ -9,10 +9,10 @@ use serde::{Deserialize, Serialize};
 use super::waves::{
     Evidence, NextMove, PrSnapshot, RoadmapSnapshot, RoadmapTask, TaskConditionState, TaskSummary,
 };
-use crate::durable::{GraphProcessDetail, TaskSection, TaskState};
-use crate::ops::human_session::{SessionRecord, SessionState};
-use crate::work::task::comment::TaskComments;
-use crate::work::task::{CiCheck, CiState};
+use loopflow_execution::durable::{GraphProcessDetail, TaskSection, TaskState};
+use loopflow_execution::ops::human_session::{SessionRecord, SessionState};
+use loopflow_model::comment::TaskComments;
+use loopflow_storage::work::task::{CiCheck, CiState};
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PlanBoard {
@@ -41,7 +41,7 @@ pub struct BoardPr {
 impl From<RoadmapTask> for PlanBoardTask {
     fn from(row: RoadmapTask) -> Self {
         Self {
-            state: super::waves::task_state(&row),
+            state: row.lifecycle,
             id: row.task.id,
             identifier: row.task.identifier,
             title: row.task.name,
@@ -163,20 +163,21 @@ pub fn board(
 }
 
 pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
-    let repo = crate::repo::working_directory_in(directory)?;
-    let store = crate::store::read_existing_registry()?
+    let repo = loopflow_execution::repo::working_directory_in(directory)?;
+    let store = loopflow_execution::store::read_existing_registry()?
         .map(Arc::new)
         .context("no Loopflow store exists on this Machine")?;
-    let id = match store
-        .sqlite
-        .resolve_task_id(issue, Some(&repo.to_string_lossy()))?
-    {
+    let id = match loopflow_execution::store::children::resolve_task_id(
+        &store.sqlite,
+        issue,
+        Some(&repo.to_string_lossy()),
+    )? {
         Some(id) => Some(id),
-        None => store.sqlite.resolve_task_id(issue, None)?,
+        None => loopflow_execution::store::children::resolve_task_id(&store.sqlite, issue, None)?,
     }
     .ok_or_else(|| {
-        crate::engine::Error::new(
-            crate::engine::ErrorCode::NotFound,
+        loopflow_execution::engine::Error::new(
+            loopflow_execution::engine::ErrorCode::NotFound,
             format!("Task {issue} is not registered"),
         )
         .with(serde_json::json!({ "issue": issue }))
@@ -186,17 +187,14 @@ pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
         .task(&id)?
         .context("Task is no longer recorded")?;
     let pane = tokio::runtime::Runtime::new()?.block_on(async {
-        let status = crate::ops::task::registered_task_status(&store, task).await?;
+        let status = loopflow_execution::ops::task::registered_task_status(&store, task).await?;
         super::waves::task_pane(&store, status).await
     })?;
     let row = pane.row.context("registered Task has no planning row")?;
     let current_session = store
         .sqlite
         .task_primary(&id)?
-        .map(|session| {
-            let capacity = crate::provider_account::LaunchCapacity::read(&store.sqlite)?;
-            crate::ops::human_session::listed(&store, session.id.as_str(), &capacity)
-        })
+        .map(|session| loopflow_execution::ops::human_session::listed(&store, session.id.as_str()))
         .transpose()?
         .flatten();
     let checks = pane
@@ -216,7 +214,7 @@ pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
         })
         .transpose()?;
     Ok(TaskDetail {
-        state: super::waves::task_state(&row),
+        state: row.lifecycle,
         section: row.section,
         task: row.task,
         pr: row.pr,
@@ -228,13 +226,12 @@ pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
 }
 
 pub fn session_card(id: &str) -> Result<SessionCard> {
-    let store = crate::store::read_existing_registry()?
+    let store = loopflow_execution::store::read_existing_registry()?
         .map(Arc::new)
         .context("no Loopflow store exists on this Machine")?;
-    let capacity = crate::provider_account::LaunchCapacity::read(&store.sqlite)?;
-    let session = crate::ops::human_session::listed(&store, id, &capacity)?.ok_or_else(|| {
-        crate::engine::Error::new(
-            crate::engine::ErrorCode::NotFound,
+    let session = loopflow_execution::ops::human_session::listed(&store, id)?.ok_or_else(|| {
+        loopflow_execution::engine::Error::new(
+            loopflow_execution::engine::ErrorCode::NotFound,
             format!("Session {id} is not recorded"),
         )
         .with(serde_json::json!({ "id": id }))
@@ -243,7 +240,10 @@ pub fn session_card(id: &str) -> Result<SessionCard> {
 }
 
 pub fn print(read: super::read::Read) -> Result<()> {
-    println!("{}", super::subscribe::selected_answer(&read.read()?)?);
+    println!(
+        "{}",
+        loopflow_execution::read_stream::selected_answer(&read.read()?)?
+    );
     Ok(())
 }
 
@@ -251,7 +251,7 @@ pub fn print(read: super::read::Read) -> Result<()> {
 mod tests {
     use super::{PlanBoard, SessionCard, SessionLiveness, TaskDetail};
     use crate::lf::commands::waves::{Evidence, RoadmapSnapshot};
-    use crate::ops::human_session::{SessionRecord, SessionState};
+    use loopflow_execution::ops::human_session::{SessionRecord, SessionState};
 
     #[test]
     fn board_keeps_sections_and_waiting_without_runtime_payload() {
@@ -341,7 +341,7 @@ mod tests {
         let mut live = session;
         live.state = SessionState::Active;
         live.terminal_ids = vec!["rex:pane".into()];
-        live.preview = Some(crate::session::SessionPreview {
+        live.preview = Some(loopflow_execution::session::SessionPreview {
             provider_thread: "thread".into(),
             provider_turn: "turn".into(),
             observed_at: 42,

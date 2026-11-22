@@ -17,10 +17,10 @@ printf '{"hookSpecificOutput":{"additionalContext":"%s"}}' "$(cat '${contextFile
     instructions: "FIXED_ADDITION",
   };
   const source = readFileSync(new URL(
-    "../../../rust/loopflow/src/harness/context_opencode.js", import.meta.url,
+    "../../../rust/loopflow-execution/src/harness/context_opencode.js", import.meta.url,
   ), "utf8");
   const server = readFileSync(new URL(
-    "../../../rust/loopflow/src/harness/server_connection.js", import.meta.url,
+    "../../../rust/loopflow-execution/src/harness/server_connection.js", import.meta.url,
   ), "utf8");
   const path = join(root, "plugin.mjs");
   writeFileSync(path, `const spec = ${JSON.stringify(spec)}; const delivery = 'fixture';\n${server}\n${source}`);

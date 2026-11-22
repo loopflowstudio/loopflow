@@ -16,7 +16,7 @@ enum RegistryQueryLocal {
             let answer = try await CreationSubmissions.shared.submit(change, requestID: requestID)
             do {
                 switch change {
-                case .taskCreate: _ = try RegistryQuery.decode(TaskCreateReceipt.self, from: answer)
+                case .taskCreate: _ = try RegistryQuery.decode(TaskCreated.self, from: answer)
                 case .sessionNew: _ = try RegistryQuery.decode(SessionRecord.self, from: answer)
                 default: break
                 }
@@ -24,6 +24,8 @@ enum RegistryQueryLocal {
             } catch { throw SubmittedCreationError(requestID: requestID, cause: error) }
         default: return try await ServerClient.write(change)
         }
+    }, change: { change, requestID in
+        try await ServerClient.change(change, requestID: requestID)
     }, watchFiles: { args, cwd in
         // Only a remote Task's files: `lf --machine … task watch-files` over SSH.
         try await Task.detached(priority: .userInitiated) {
@@ -47,7 +49,7 @@ enum RegistryQueryLocal {
                 name: "Task history", process: process, frameLimit: 32 * 1024 * 1024, silence: nil,
                 configurationChanged: { try ReaderLaunchConfiguration.current() != configuration },
                 decode: { $0 })
-            return LineSubscription(lines: reader.frames, send: reader.send, cancel: reader.cancel)
+            return LineSubscription(lines: reader.frames, send: reader.send, cancel: reader.cancel, unreadable: { nil })
         }.value
     }, subscribeWork: {
         try WorkSubscriptions.observe { ServerClient.subscribe($0) }
@@ -71,7 +73,7 @@ private struct ReaderLaunchConfiguration: Equatable {
     let files: [String]
 
     static func current() throws -> Self {
-        let helper = try LocalWaveAgentLauncher.controlLfPath()
+        let helper = try LocalWaveAgentLauncher.machineLf().path
         let install = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".lf-machine/install")
         let paths = [URL(fileURLWithPath: helper),

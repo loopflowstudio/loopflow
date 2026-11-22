@@ -145,8 +145,6 @@ struct WorkCacheTests {
         #expect(registry.retained(selected)?.conversationClosed == closed)
         #expect(registry.retained(selected)?.presented == !closed)
         #expect(registry.retained(other)?.presented == true)
-        // Saved unstarted and shipping Tasks are not working: they reveal history only.
-        #expect(store.preparedTaskConversations.allSatisfy { $0.launchArguments.contains("--reveal-existing") })
         registry.prepareForQuit()
     }
 
@@ -188,25 +186,62 @@ struct WorkCacheTests {
         await spin { store.preparedTaskConversations.count < limit }
         #expect(store.preparedTaskConversations.count == limit)
         #expect(Set(await source.preparedTasks) == Set(expected))
-        #expect(store.sessions.filter { $0.state == .prepared }.allSatisfy { $0.launchArguments.contains("--start-if-free") })
+        #expect(store.sessions.filter { $0.state == .prepared }.allSatisfy { $0.launchArguments == ["lf", "session", "resume", $0.id] })
         model.openWarmConversations()
         #expect(registry.recentTasks.count == SessionsWorkspaceRegistry.warmConversationLimit)
         if closed { #expect(registry.retained(closedKey) == nil) }
         registry.prepareForQuit()
     }
 
-    @Test("A failed load Start shows its failure, never a Start offer")
+    @Test("Restoring Dev Work waits for a visit, then prepares only that Task")
+    func devRestoresWithoutOpeningTerminals() async throws {
+        let source = try Source()
+        let cache = WorkCache(directory: try temporaryDirectory())
+        let previous = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
+        previous.confirmMachine("home-a")
+        await previous.refresh()
+        previous.select(.task(id: "issue-review"))
+        cache.flush()
+
+        let repository = "repo_" + UUID().uuidString.lowercased()
+        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository)") }
+        let model = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
+        model.confirmMachine("home-a")
+        let registry = SessionsWorkspaceRegistry(localMachineId: "home-a", opensUnvisitedWork: false)
+        defer { registry.prepareForQuit() }
+        model.bindWorkspaces(registry, repository: repository)
+        await source.setLocationFailure(nil)
+        await model.refresh()
+        let selected = try #require(registry.selectedWork)
+        let workspace = try #require(registry.retained(selected))
+        #expect(selected.kind == .task)
+        #expect(registry.recentTasks.count > 1)
+        #expect(registry.warmPrimaries.count > 1)
+        #expect(!model.conversationIsOpening(workspace))
+        #expect(registry.preparationCount == 0)
+        #expect(await source.preparedTasks.isEmpty)
+        #expect(await source.preparedPrimaries.isEmpty)
+
+        model.select(.task(id: "issue-review"))
+        let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
+        await spin { registry.preparationCount > 0 }
+        #expect(await source.preparedTasks == [selected.id])
+        #expect(await source.preparedPrimaries.isEmpty)
+        #expect(store.sessions.filter { $0.state == .prepared }.map(\.launchArguments) ==
+                [["lf", "session", "resume", "conversation-" + selected.id]])
+    }
+
+    @Test("A failed load opening shows its failure")
     func failedPrefetchKeepsItsReason() async throws {
         let source = try Source()
         await source.setPreparationFailure("Claude account unavailable")
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
-        let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
+        let (registry, _) = try await loadWorkingTasks(from: source, repository: repository)
         let key = WorkWorkspaceKey(repository: repository, kind: .task, id: Prefetch.newestOwned)
         await spin { registry.retained(key)?.conversationError == nil }
         let workspace = try #require(registry.retained(key))
         #expect(workspace.conversationError == "Claude account unavailable")
-        #expect(workspace.conversationStart == nil)
         registry.prepareForQuit()
     }
 
@@ -255,92 +290,6 @@ struct WorkCacheTests {
         workspace.conversationClosed = true
         #expect(!model.conversationIsOpening(workspace))
         await source.releasePreparations()
-        registry.prepareForQuit()
-    }
-
-    @Test("A started Task replaces its refused reveal with an automatic Start")
-    func startedTaskLeavesRefusedReveal() async throws {
-        let source = try Source()
-        let repository = "repo_" + UUID().uuidString
-        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
-        let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
-        await spin { await source.preparedTasks.count < SessionsWorkspaceRegistry.warmConversationLimit }
-        await spin { registry.preparationCount > 0 }
-        await source.setPreparationFailure("No provider history")
-        let id = Prefetch.unstarted
-        let workspace = registry.open(WorkWorkspaceKey(repository: repository, kind: .task, id: id), title: "Refused", location: nil)
-        model.openWarmConversations()
-        await spin { workspace.conversationError == nil }
-        #expect(workspace.conversationError == "No provider history")
-        #expect(workspace.conversationStart != nil)
-        #expect(!model.conversationIsOpening(workspace))
-
-        await source.setPreparationFailure(nil)
-        try await source.startTask(id)
-        await model.refresh()
-        await spin { await !source.preparedTasks.contains(id) }
-        await spin { workspace.openingConversation }
-        #expect(await source.preparedTasks.contains(id))
-        #expect(workspace.conversationError == nil)
-        #expect(workspace.conversationStart == nil)
-        registry.prepareForQuit()
-    }
-
-    @Test("A reveal refused after its Task started leaves no offer and starts")
-    func supersededRefusalDoesNotLand() async throws {
-        let source = try Source()
-        let repository = "repo_" + UUID().uuidString
-        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
-        let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
-        await spin { await source.preparedTasks.count < SessionsWorkspaceRegistry.warmConversationLimit }
-        await spin { registry.preparationCount > 0 }
-        let id = Prefetch.unstarted
-        await source.hold(["session", "resume"])
-        let workspace = registry.open(WorkWorkspaceKey(repository: repository, kind: .task, id: id), title: "Refused", location: nil)
-        model.openWarmConversations()
-        await source.waitForHeldRead()
-        #expect(workspace.conversationIntent == .reveal)
-
-        await source.setPreparationFailure("No provider history", once: true)
-        try await source.startTask(id)
-        await model.refresh()
-        #expect(workspace.conversationIntent == .start)
-        await source.release()
-        await spin { await !source.preparedTasks.contains(id) }
-        await spin { workspace.openingConversation }
-        #expect(await source.preparedTasks.contains(id))
-        #expect(workspace.conversationError == nil)
-        #expect(workspace.conversationStart == nil)
-        registry.prepareForQuit()
-    }
-
-    @Test("A link's reveal refused after its Task started leaves no offer and starts")
-    func supersededLinkRefusalDoesNotLand() async throws {
-        let source = try Source()
-        let repository = "repo_" + UUID().uuidString
-        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
-        let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
-        await spin { await source.preparedTasks.count < SessionsWorkspaceRegistry.warmConversationLimit }
-        await spin { registry.preparationCount > 0 }
-        let id = Prefetch.unstarted
-        await source.hold(["session", "resume"])
-        let opening = Task { await model.openTaskLink(TaskLink(issue: Prefetch.unstarted.uppercased(), repo: Self.repo, conversation: true)) }
-        await source.waitForHeldRead()
-        let workspace = try #require(registry.retained(WorkWorkspaceKey(repository: repository, kind: .task, id: id)))
-        #expect(workspace.conversationIntent == .reveal)
-
-        await source.setPreparationFailure("No provider history", once: true)
-        try await source.startTask(id)
-        await model.refresh()
-        #expect(workspace.conversationIntent == .start)
-        await source.release()
-        await opening.value
-        await spin { await !source.preparedTasks.contains(id) }
-        await spin { registry.preparationCount > 0 }
-        #expect(await source.preparedTasks.contains(id))
-        #expect(workspace.conversationError == nil)
-        #expect(workspace.conversationStart == nil)
-        #expect(model.taskOpening == nil)
         registry.prepareForQuit()
     }
 
@@ -397,7 +346,7 @@ struct WorkCacheTests {
                                        pane: pane.id, incarnation: pane.incarnation, tab: nil)
         _ = try DesktopAction.perform(DesktopActionRequest("focus", at: target), model: model, workspaces: registry)
         await spin { await !source.preparedTasks.contains(cold) }
-        #expect(await source.preparedFlags[cold] == "--start-if-free")
+        #expect(await source.preparedTasks.contains(cold))
         registry.prepareForQuit()
     }
 
@@ -441,7 +390,7 @@ struct WorkCacheTests {
             let tile = try #require(registry.retained(key(id)))
             await spin { tile.multiplexer.pane(forSessionId: "conversation-" + id) == nil }
             #expect(tile.multiplexer.pane(forSessionId: "conversation-" + id) != nil)
-            #expect(tile.conversationIntent == .start)
+            #expect(tile.opensConversationAutomatically)
         }
         // An unstarted Task has no conversation to open; its tile offers Start instead.
         let unstartedTile = try #require(registry.retained(key(unstarted)))
@@ -460,7 +409,7 @@ struct WorkCacheTests {
         await source.holdPreparations()
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
-        let (registry, model) = try await loadWorkingTasks(from: source, repository: repository)
+        let (registry, _) = try await loadWorkingTasks(from: source, repository: repository)
         await spin { await source.preparedTasks.count < 2 }
         let id = try #require(await source.preparedTasks.first)
         let workspace = try #require(registry.retained(WorkWorkspaceKey(repository: repository, kind: .task, id: id)))
@@ -518,10 +467,10 @@ struct WorkCacheTests {
         let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
         let primaries = ["primary-repository", "primary-wave:wave-1"]
         await spin { store.sessions.filter({ primaries.contains($0.id) && $0.state == .prepared }).count < 2 }
-        #expect(store.sessions.filter { primaries.contains($0.id) }.allSatisfy { $0.state == .prepared && $0.launchArguments.contains("--start-if-free") })
+        #expect(store.sessions.filter { primaries.contains($0.id) }.allSatisfy { $0.state == .prepared && $0.launchArguments == ["lf", "session", "resume", $0.id] })
         for key in [repositoryKey, wave] {
             let workspace = try #require(registry.retained(key))
-            #expect(workspace.conversationIntent == .start)
+            #expect(workspace.opensConversationAutomatically)
             #expect(workspace.conversationError == nil)
             #expect(workspace.multiplexer.sessionPane?.sessionId?.hasPrefix("primary-") == true)
         }
@@ -606,7 +555,7 @@ struct WorkCacheTests {
         #expect(conditions.allSatisfy { $0.state == .unknown && $0.reason == WorkCache.savedReason })
         let session = try #require(returning.sessions.value?.first)
         #expect(session.state == .unknown)
-        #expect(session.actions.map(\.kind) == [.open])
+        #expect(session.action != nil)
         returning.select(.task(id: task.id))
         returning.navigation.selectedSessionId = session.id
         let inspection = returning.inspectDesktop(repository: "plan", window: UUID(), workspaces: SessionsWorkspaceRegistry())
@@ -614,7 +563,7 @@ struct WorkCacheTests {
         #expect(inspection.task?.actions == nil)
         #expect(inspection.task?.runControl == nil)
         #expect(inspection.session?.reading == "saved")
-        #expect(inspection.session?.actions == nil)
+        #expect(inspection.session?.action == nil)
     }
 
     @Test("A failed refresh keeps the saved workspace under one truthful status")
@@ -633,8 +582,10 @@ struct WorkCacheTests {
         #expect(returning.roadmap.value != nil)
         #expect(returning.sessions.value?.isEmpty == false)
         let navigator = WorkNavigator(model: returning, onOpenSession: { _ in })
+        // The Notice says the read failed; the sidebar keeps no status of its own.
         let status = try navigator.inspect().findAll(where: { (try? $0.accessibilityIdentifier()) == "work-status" })
-        #expect(status.count == 1)
+        #expect(status.isEmpty)
+        #expect(returning.navigation.notices.current?.text.hasSuffix("couldn't be read: offline") == true)
 
         await source.recover()
         await returning.refresh()
@@ -800,10 +751,10 @@ struct WorkCacheTests {
 
         // `/src/loopflow` is no repository here, so only the saved workspace can scope the window.
         let unknown = WorkModel(query: source.query, launchCandidates: [Self.repo],
-                                  cache: WorkCache(directory: try temporaryDirectory()))
+                                  cache: WorkCache(directory: try temporaryDirectory()), paneLayouts: nil)
         #expect(unknown.repoPath == nil)
         let returning = WorkModel(query: source.query, launchCandidates: ["/src/missing", Self.repo],
-                                    cache: WorkCache(directory: directory))
+                                    cache: WorkCache(directory: directory), paneLayouts: nil)
         #expect(returning.repoPath == Self.repo)
         #expect(returning.sessions.value?.isEmpty == false)
 
@@ -856,15 +807,15 @@ private extension SessionsStore {
     var preparedTaskConversations: [SessionItem] { sessions.filter { $0.state == .prepared && $0.record.taskPrimary } }
 }
 
-/// `populateWorkingTasks` rows: `owned` working Tasks, oldest first, then shipping,
-/// done, abandoned and unstarted Tasks, then a started Task nobody owns.
+/// `populateWorkingTasks` rows: `owned` working Tasks, oldest first, then done,
+/// abandoned and unstarted Tasks, then a started Task nobody owns.
 @MainActor
 private enum Prefetch {
     /// Five more working Tasks than the warm bound.
     static let owned = SessionsWorkspaceRegistry.warmConversationLimit + 4
     static let newestOwned = "prefetch-\(owned - 1)"
-    static let unstarted = "prefetch-\(owned + 3)"
-    static let unowned = "prefetch-\(owned + 4)"
+    static let unstarted = "prefetch-\(owned + 2)"
+    static let unowned = "prefetch-\(owned + 3)"
     static let working = (0..<owned).map { "prefetch-\($0)" } + [unowned]
 }
 
@@ -874,9 +825,7 @@ private actor Source {
     private var failed = false
     private var locationFailure: String? = "Location unavailable"
     private var preparationFailure: String?
-    private var failsOnce = false
     private(set) var preparedTasks: [String] = []
-    private(set) var preparedFlags: [String: String] = [:]
     /// Repository and Wave primaries prepared on load: "repository" or "wave:<id>".
     private(set) var preparedPrimaries: [String] = []
     private var holding: [String]?
@@ -922,7 +871,7 @@ private actor Source {
         var inventory = wire["tasks"] as! [String: Any]
         let template = (inventory["items"] as! [[String: Any]])[0]
         // The newest row is a started Task nobody owns; it opens like any working Task.
-        let states = (0..<owned).map { ["idle", "active", "moving"][$0 % 3] } + ["shipping", "done", "abandoned", "unstarted", "idle"]
+        let states = (0..<owned).map { ["idle", "active", "moving"][$0 % 3] } + ["done", "abandoned", "unstarted", "idle"]
         inventory["items"] = states.enumerated().map { index, state in
             var row = template
             var task = row["task"] as! [String: Any]
@@ -931,6 +880,7 @@ private actor Source {
             row["task"] = task
             var runtime = row["runtime"] as! [String: Any]
             runtime["work_id"] = "prefetch-\(index)"
+            row["lifecycle"] = state
             runtime["status"] = state
             runtime["updated_at"] = String(format: "2026-11-04T10:00:%02dZ", index)
             runtime["owner"] = index == states.count - 1 ? NSNull() : [
@@ -945,10 +895,7 @@ private actor Source {
     }
 
     func setLocationFailure(_ reason: String?) { locationFailure = reason }
-    func setPreparationFailure(_ reason: String?, once: Bool = false) {
-        preparationFailure = reason
-        failsOnce = once
-    }
+    func setPreparationFailure(_ reason: String?) { preparationFailure = reason }
 
     /// The Task's checkout was placed: it is now idle, a working Task.
     func startTask(_ id: String) throws {
@@ -960,6 +907,7 @@ private actor Source {
             var runtime = item["runtime"] as! [String: Any]
             runtime["status"] = "idle"
             item["runtime"] = runtime
+            item["lifecycle"] = "idle"
             return item
         }
         wire["tasks"] = inventory
@@ -976,6 +924,7 @@ private actor Source {
                 var runtime = item["runtime"] as! [String: Any]
                 runtime["status"] = "done"
                 item["runtime"] = runtime
+                item["lifecycle"] = "done"
                 return item
             }
             return inventory
@@ -1021,13 +970,11 @@ private actor Source {
                 repositoryID: args[3], taskID: command[2], machineID: location.machineId, observedAt: 1,
                 location: .recorded(taskID: command[2], checkout: location.worktree + (locationFailure == nil ? "" : "/moved")))]), as: UTF8.self)
         }
-        if command.starts(with: ["session", "resume"]), command.contains("--explain") { return taskConversationStartOfferFixture() }
         if command.starts(with: ["session", "resume"]), let preparationFailure {
-            if failsOnce { self.preparationFailure = nil }
             throw RegistryQueryError(preparationFailure)
         }
-        let openFlag = ["--start-if-free", "--reveal-existing"].first(where: command.contains)
-        if command.starts(with: ["session", "resume"]), let openFlag, !command.contains("--task") {
+        let prepares = command.starts(with: ["session", "resume"]) && command.contains("--prepare")
+        if prepares, !command.contains("--task") {
             // A repository or Wave primary: Rust places it in the scope's own checkout.
             let wave = command.firstIndex(of: "--wave").map { command[$0 + 1] }
             let snapshot = try RegistryQuery.decode(RoadmapSnapshot.self, from: roadmap)
@@ -1042,12 +989,12 @@ private actor Source {
             record["task_primary"] = false
             record["workspace"] = ["machine_id": "home-a", "worktree": "/src/loopflow." + (wave ?? "repo"), "task_id": NSNull()]
             record["state"] = "closed"
-            record["actions"] = sessionActionFixture(state: "closed")
-            record["open_argv"] = ["lf", "session", "resume", "primary-" + scope, openFlag]
+            record["action"] = sessionActionFixture(state: "closed")
+            record["open_argv"] = ["lf", "session", "resume", "primary-" + scope]
             preparedPrimaries.append(scope)
             return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)
         }
-        if command.starts(with: ["session", "resume"]), let openFlag {
+        if prepares {
             let id = command[try #require(command.firstIndex(of: "--task")) + 1]
             let snapshot = try RegistryQuery.decode(RoadmapSnapshot.self, from: roadmap)
             let task = try #require(snapshot.tasks.items.first { $0.runtime?.workId == id })
@@ -1059,10 +1006,9 @@ private actor Source {
             record["task_primary"] = true
             record["workspace"] = ["machine_id": location.machineId, "worktree": location.worktree, "task_id": id]
             record["state"] = "closed"
-            record["actions"] = sessionActionFixture(state: "closed")
-            record["open_argv"] = ["lf", "session", "resume", "conversation-" + id, openFlag]
+            record["action"] = sessionActionFixture(state: "closed")
+            record["open_argv"] = ["lf", "session", "resume", "conversation-" + id]
             preparedTasks.append(id)
-            preparedFlags[id] = openFlag
             if preparationsHeld {
                 await withCheckedContinuation { preparationWaiters.append($0) }
             }

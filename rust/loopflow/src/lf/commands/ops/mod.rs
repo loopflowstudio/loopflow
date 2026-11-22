@@ -1,44 +1,33 @@
-use crate::agent::{run_agent, ProcessConfig};
-use crate::config::{load_config_or_default, Config};
-use crate::git::worktree_name::WorktreeName;
-use crate::git::worktrees::{
+use crate::lf::{PrCommand, ReleaseCommand, WtCommand};
+use anyhow::{anyhow, Result};
+use loopflow_execution::git::current_branch;
+use loopflow_execution::git::worktree_name::WorktreeName;
+use loopflow_execution::git::worktrees::{
     diff_shortstats, list_worktrees, list_worktrees_timed, main_repo_root, prune_worktrees,
     sibling_worktree_name, sibling_worktree_name_with_main, PullRequestState, WorktreeOwnership,
     WorktreePruneReport,
 };
-use crate::git::{current_branch, get_default_branch};
-use crate::graph::load_skill;
-use crate::lf::commands::util::find_repo_root;
-use crate::lf::output::{column_width, Colors};
-use crate::lf::{PrCommand, ReleaseCommand, WtCommand};
-use crate::naming::git_user;
-use crate::ops::branch_prune::{
+use loopflow_execution::naming::git_user;
+use loopflow_execution::ops::branch_prune::{
     prune_branches, BranchCopy, EntryStatus as BranchPruneStatus, TaskBranches,
 };
-use crate::ops::OpsError;
-use crate::ops::{
-    abort_sync_after_authorization, abort_sync_for_resolution, continue_sync_after_authorization,
-    continue_sync_for_resolution, current_pr, plan_sync, preview_release_notes, recover_sync,
-    release_bump, release_check, release_issues, release_notes, release_promote, release_publish,
-    release_regress, release_status, release_tag, sync_class_name, sync_strategy_name,
-    sync_with_plan, Progress, SyncOptions,
+use loopflow_execution::ops::{
+    current_pr, preview_release_notes, release_bump, release_check, release_issues, release_notes,
+    release_promote, release_publish, release_regress, release_status, release_tag, Progress,
 };
-use crate::prompt::process::prepare_process_prompt;
-use crate::prompt::process::ContextSourceOverrides;
-use crate::prompt::process::ProcessPromptInput;
-use crate::prompt::Surface;
-use crate::skills::sync_skills;
-use crate::skills::SkillSyncOptions;
-use anyhow::{anyhow, Result};
+use loopflow_execution::output::{column_width, Colors};
+use loopflow_execution::repo::find_repo_root;
+use loopflow_execution::skills::sync_skills;
+use loopflow_execution::skills::SkillSyncOptions;
+use loopflow_execution::work::wave::context::planning_wave;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Instant;
 
 mod review;
 
 pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
-    use crate::engine::pr as engine;
+    use loopflow_execution::engine::pr as engine;
     let progress = CliProgress;
     let repo_root = find_repo_root()?;
     let land_input = |strict: &bool,
@@ -114,7 +103,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
             // The PR exists — print it before presenting so a failed
             // review-surface launch fails only `pr open` and never hides the PR.
             print_published(&published, *json)?;
-            crate::ops::present_pr_review(&published.url).map_err(|err| {
+            loopflow_execution::ops::present_pr_review(&published.url).map_err(|err| {
                 anyhow!(
                     "PR available at {} but opening it for review failed: {err}",
                     published.url
@@ -208,7 +197,10 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
 }
 
 /// Print the PR's state and URL; the raw URL when GitHub state wasn't re-read.
-fn print_published(published: &crate::engine::pr::Published, json: bool) -> Result<()> {
+fn print_published(
+    published: &loopflow_execution::engine::pr::Published,
+    json: bool,
+) -> Result<()> {
     if json {
         return print_json(published);
     }
@@ -310,9 +302,14 @@ impl Progress for CliProgress {
     }
 }
 
-pub fn run_sync(input: &crate::engine::checkout::SyncInput<'_>, json: bool) -> Result<()> {
-    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
-    let outcome = crate::engine::checkout::carry_sync(&repo_root, input, &CliProgress)?;
+pub fn run_sync(
+    input: &loopflow_execution::engine::checkout::SyncInput<'_>,
+    json: bool,
+) -> Result<()> {
+    let repo_root =
+        loopflow_execution::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
+    let outcome =
+        loopflow_execution::engine::checkout::carry_sync(&repo_root, input, &CliProgress)?;
     if json {
         println!("{}", serde_json::to_string(&outcome)?);
     } else {
@@ -323,308 +320,6 @@ pub fn run_sync(input: &crate::engine::checkout::SyncInput<'_>, json: bool) -> R
 
 /// `lf sync` in `repo_root`. A sync that moves the branch first announces
 /// itself to the launcher that started it detached, if one did.
-pub(crate) fn run_sync_in(
-    repo_root: &Path,
-    input: &crate::engine::checkout::SyncInput<'_>,
-    progress: &impl Progress,
-) -> Result<crate::engine::checkout::Sync> {
-    use crate::engine::checkout::Sync;
-    let crate::engine::checkout::SyncInput {
-        onto,
-        preview: plan_only,
-        manual,
-        continue_sync,
-        abort,
-        adopt,
-    } = *input;
-    if onto.is_some() && (continue_sync || abort) {
-        return Err(anyhow!(
-            "a sync target cannot be combined with --continue or --abort"
-        ));
-    }
-    if adopt && !(continue_sync || abort) {
-        return Err(anyhow!(
-            "--adopt is only valid with `lf sync --continue` or `lf sync --abort`"
-        ));
-    }
-    if continue_sync {
-        if adopt {
-            continue_sync_after_authorization(repo_root, true, || {
-                crate::ops::task::record_task_pr_repair(
-                    repo_root,
-                    crate::work::task::TaskPrRepairKind::ManualGitRepair,
-                )
-                .map(|_| ())
-            })?;
-        } else {
-            continue_sync_for_resolution(repo_root, false)?;
-        }
-        return Ok(Sync::Finished {
-            message: "Sync complete; branch remains local.".into(),
-        });
-    }
-    if abort {
-        if adopt {
-            abort_sync_after_authorization(repo_root, true, || {
-                crate::ops::task::record_task_pr_repair(
-                    repo_root,
-                    crate::work::task::TaskPrRepairKind::ManualGitRepair,
-                )
-                .map(|_| ())
-            })?;
-        } else {
-            abort_sync_for_resolution(repo_root, false)?;
-        }
-        return Ok(Sync::Finished {
-            message: "Sync aborted.".into(),
-        });
-    }
-    if !plan_only {
-        crate::engine::launch::carry(
-            "checkout.sync",
-            format!("sync onto {}", onto.unwrap_or("the branch it follows")),
-        )?;
-    }
-    let started = Instant::now();
-    let default = get_default_branch(repo_root)?;
-    let upstream = crate::git::integration_base(repo_root)?;
-    let on_main = current_branch(repo_root)?.as_deref() == Some(&default);
-    if !plan_only && (onto.is_none() || (on_main && onto == Some(upstream.as_str()))) {
-        crate::ops::checkout::refresh_main(repo_root, progress)?;
-        if on_main && onto.is_none_or(|target| target == upstream) {
-            return Ok(Sync::Finished {
-                message: "Main is current; unpublished commits and edits remain local.".into(),
-            });
-        }
-    }
-    // An explicit default branch detaches the child using its recorded fork;
-    // ordinary sync continues to follow the live parent.
-    let stacked = if on_main {
-        None
-    } else {
-        crate::ops::task::task_stack(repo_root)?
-    };
-    let detach =
-        stacked.is_some() && onto.is_some_and(|target| target == default || target == upstream);
-    if stacked.is_some() && onto.is_some() && !detach {
-        return Err(anyhow!(
-            "use the default branch to detach this Task, or omit the target to sync its parent"
-        ));
-    }
-    let stacked_onto = stacked
-        .as_ref()
-        .and_then(|stacked| stacked.parent_branch.as_ref())
-        .map(|branch| format!("origin/{branch}"));
-    let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
-    let default_target = if on_main { &upstream } else { &default };
-    let target = if detach {
-        upstream.as_str()
-    } else {
-        stacked_onto.as_deref().or(onto).unwrap_or(default_target)
-    };
-    if !plan_only {
-        crate::git::fetch_tracking_ref(repo_root, target)?;
-    }
-    // Classify against the tree holding the caller's edits. The plan that
-    // runs is the one the metric records.
-    let mut plan = plan_sync(repo_root, Some(target), fork_base.clone())?;
-    if plan_only {
-        return Ok(Sync::Planned { plan });
-    }
-    // Checkpoint ordinary edits so their conflicts reach the merge resolver,
-    // rather than surfacing during stash restoration after the resolver is gone.
-    // The checkpoint moves HEAD, so plan again against it.
-    if !manual
-        && !on_main
-        && matches!(plan.strategy, crate::ops::SyncStrategy::MergeTarget)
-        && crate::git::intervention_state(repo_root)?.is_none()
-        && checkpoint_uncommitted_work(repo_root, &plan.base_ref, progress)?
-    {
-        plan = plan_sync(repo_root, Some(target), fork_base.clone())?;
-    }
-    let options = SyncOptions {
-        onto: plan.base_ref.clone(),
-        push: !manual && !on_main,
-        fork_base,
-    };
-    let avoidable = is_avoidable_sync_class(&plan.class);
-    let (verification, agent_launched) = if manual {
-        (sync_with_plan(repo_root, &options, &plan, progress)?, false)
-    } else {
-        let recovery_config = load_config_or_default(Some(repo_root));
-        crate::ops::checkout::with_preserved_edits(repo_root, || {
-            match sync_with_plan(repo_root, &options, &plan, progress) {
-                Ok(verification) => Ok((verification, false)),
-                Err(OpsError::SyncConflict {
-                    onto,
-                    detail,
-                    recovery,
-                }) => Ok((
-                    resolve_sync_conflict(
-                        repo_root,
-                        &onto,
-                        &detail,
-                        recovery,
-                        avoidable,
-                        progress,
-                        &recovery_config,
-                    )
-                    .map_err(|error| OpsError::Message(error.to_string()))?,
-                    true,
-                )),
-                Err(err) => Err(err),
-            }
-        })?
-    };
-    if manual {
-        return Ok(Sync::Finished {
-            message: format!(
-                "Synced onto {}; the sync and edits remain local.",
-                plan.base_ref
-            ),
-        });
-    }
-    record_ops_metric(
-        repo_root,
-        serde_json::json!({
-            "op": "sync",
-            "branch": plan.branch,
-            "base_ref": plan.base_ref,
-            "class": sync_class_name(&plan.class),
-            "strategy": sync_strategy_name(&plan.strategy),
-            "unique_commits": verification.unique_commits,
-            "changed_files": plan.changed_files.len(),
-            "protected": matches!(plan.class, crate::ops::SyncClass::Protected),
-            "scratch_stashed": plan.scratch_stashed,
-            "agent_launched": agent_launched,
-            "duration_ms": started.elapsed().as_millis(),
-            "exit_status": "ok",
-        }),
-    );
-    Ok(Sync::Finished {
-        message: format!("Synced onto {}.", plan.base_ref),
-    })
-}
-
-/// Checkpoint ordinary edits while retaining telemetry's staged and working contents.
-fn checkpoint_uncommitted_work(repo: &Path, base: &str, progress: &impl Progress) -> Result<bool> {
-    // A literal `.lf/tmp` prefix makes Git reject the pathspec when ignored.
-    // Use the same rooted glob when staging and refreshing the real index.
-    const EXCLUDE_TELEMETRY: &str = ":(exclude,top,glob)[.]lf/tmp/**";
-    crate::git::git_stdout(repo, &["add", "-A", "--", ":/", EXCLUDE_TELEMETRY])?;
-    // Start from the staged tree so explicitly staged ignored user files survive.
-    // Excluding telemetry from `add` alone cannot exclude already-staged entries.
-    let staged_tree = crate::git::git_stdout(repo, &["write-tree"])?;
-    let directory = tempfile::tempdir()?;
-    let index = directory.path().join("index");
-    let inherit_index = |command: &mut Command| {
-        command.env("GIT_INDEX_FILE", &index);
-    };
-    let run = |args: &[&str]| crate::git::git_stdout_inheriting(repo, args, &inherit_index);
-    run(&["read-tree", staged_tree.trim()])?;
-    run(&["reset", "-q", "HEAD", "--", ":(top,glob)[.]lf/tmp/**"])?;
-    // Filenames can consist entirely of whitespace.
-    if run(&["diff", "--cached", "--name-only"])?.is_empty() {
-        return Ok(false);
-    }
-    progress.status("Committing uncommitted edits before merging...");
-    crate::git::commit(
-        repo,
-        &format!("Checkpoint edits before syncing onto {base}"),
-        &inherit_index,
-    )?;
-    // Refresh only committed paths; the merge's existing preservation wrapper
-    // carries the remaining telemetry through the merge with its index intact.
-    crate::git::git_stdout(
-        repo,
-        &["reset", "-q", "HEAD", "--", ":/", EXCLUDE_TELEMETRY],
-    )
-    .map_err(|error| anyhow!("checkpoint saved; index refresh failed: {error}"))?;
-    Ok(true)
-}
-
-/// Hand a conflicted sync to exactly one recovery agent under the owning
-/// operation's scoped ids. The agent continues the existing sequencer; the
-/// caller keeps ownership and performs verification and the single push.
-fn resolve_sync_conflict(
-    repo_root: &Path,
-    onto: &str,
-    detail: &str,
-    recovery: Option<Box<crate::ops::SyncRecovery>>,
-    avoidable: bool,
-    progress: &impl Progress,
-    config: &Config,
-) -> Result<crate::ops::SyncVerification> {
-    let recovery =
-        recovery.ok_or_else(|| anyhow!("sync conflict has no owned recovery operation"))?;
-    let context = format!(
-        "<lf:sync-conflict>\nSync onto: {onto}\n{detail}\nContinue the existing owned sequencer; do not start another sync or push.\n</lf:sync-conflict>"
-    );
-    if avoidable {
-        crate::ops::task::record_task_pr_repair(
-            repo_root,
-            crate::work::task::TaskPrRepairKind::AvoidableRebaseAgent,
-        )?;
-    }
-    progress.status("Launching sync agent to resolve conflicts...");
-    Ok(recover_sync(*recovery, || {
-        process_skill_agent(repo_root, "sync-conflicts", Some(&context), config)
-            .map_err(|error| OpsError::Message(error.to_string()))
-    })?)
-}
-
-fn is_avoidable_sync_class(class: &crate::ops::SyncClass) -> bool {
-    matches!(
-        class,
-        crate::ops::SyncClass::StaleEmpty | crate::ops::SyncClass::ScratchOnly
-    )
-}
-
-#[cfg(test)]
-mod sync_performance_tests {
-    use super::is_avoidable_sync_class;
-    use crate::ops::SyncClass;
-
-    #[test]
-    fn disposable_sync_classes_make_an_agent_launch_a_repair_incident() {
-        assert!(is_avoidable_sync_class(&SyncClass::StaleEmpty));
-        assert!(is_avoidable_sync_class(&SyncClass::ScratchOnly));
-        assert!(!is_avoidable_sync_class(&SyncClass::CleanAuthored));
-        assert!(!is_avoidable_sync_class(&SyncClass::Protected));
-    }
-}
-
-/// Run a PR-mutating op; on a sync conflict, launch the sync agent to
-/// resolve it and retry once. A second conflict is a real error.
-pub(crate) fn with_sync_retry<T>(
-    repo_root: &Path,
-    label: &str,
-    progress: &impl Progress,
-    op: impl Fn(&Path, bool) -> Result<T, OpsError>,
-) -> Result<T> {
-    match op(repo_root, false) {
-        Ok(value) => Ok(value),
-        Err(OpsError::SyncConflict {
-            onto,
-            detail,
-            recovery,
-        }) => {
-            resolve_sync_conflict(
-                repo_root,
-                &onto,
-                &detail,
-                recovery,
-                false,
-                progress,
-                &load_config_or_default(Some(repo_root)),
-            )?;
-            progress.status(&format!("Retrying {label} after sync..."));
-            op(repo_root, true).map_err(Into::into)
-        }
-        Err(err) => Err(err.into()),
-    }
-}
-
 fn pr_status(repo_root: &Path) -> Result<()> {
     match current_pr(repo_root)? {
         Some(pr) => {
@@ -673,7 +368,7 @@ pub fn run_commit(
     json: bool,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let committed = crate::engine::checkout::commit(
+    let committed = loopflow_execution::engine::checkout::commit(
         &repo_root,
         message,
         push,
@@ -688,16 +383,29 @@ pub fn run_commit(
     Ok(())
 }
 
-pub(crate) fn planning_wave(
-    repo: &std::path::Path,
-    explicit: Option<&str>,
-) -> Result<Option<String>> {
-    use crate::work::wave::context::WaveResolveError;
-    match crate::work::wave::context::resolve_managed_wave_sync(Some(repo), explicit) {
-        Ok(wave) => Ok(Some(wave.slug().to_string())),
-        Err(WaveResolveError::NoContext) => Ok(None),
-        Err(error) => Err(error.into()),
+/// A step commit runs under a skill run or a Graph, whose stdout carries the
+/// answer, so its progress goes to stderr.
+struct StepCommitProgress;
+
+impl Progress for StepCommitProgress {
+    fn status(&self, msg: &str) {
+        eprintln!("{msg}");
     }
+
+    fn error(&self, msg: &str) {
+        eprintln!("{msg}");
+    }
+
+    fn confirm(&self, _msg: &str) -> bool {
+        false
+    }
+}
+
+/// `lf commit --step <skill>`: everything a finished skill step left, as one commit.
+pub fn run_step_commit(step: &str, agent_override: Option<&str>) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    loopflow_execution::ops::commit_step(&repo_root, step, agent_override, &StepCommitProgress)?;
+    Ok(())
 }
 
 pub fn connect_wave(
@@ -708,7 +416,7 @@ pub fn connect_wave(
     team_name: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let results = crate::engine::wave::planning_connect(
+    let results = loopflow_execution::engine::wave::planning_connect(
         repo_root,
         wave,
         all,
@@ -737,7 +445,9 @@ pub fn connect_wave(
             "{}: Linear Initiative {} ({initiative_state}){team_state}",
             result.wave, result.initiative_id
         );
-        if let crate::ops::wave_lifecycle::AuthoredFiles::Uncommitted { reason } = &result.files {
+        if let loopflow_execution::ops::wave_lifecycle::AuthoredFiles::Uncommitted { reason } =
+            &result.files
+        {
             println!(
                 ".lf/wave/{} is not committed on the main checkout: {reason}",
                 result.wave
@@ -751,7 +461,6 @@ pub fn sync_planning(
     repo: &std::path::Path,
     wave: Option<&str>,
     all: bool,
-    plan: bool,
     json: bool,
 ) -> Result<()> {
     let wave = if all {
@@ -759,9 +468,9 @@ pub fn sync_planning(
     } else {
         planning_wave(repo, wave)?
     };
-    let result = crate::ops::linear::refresh(
+    let result = loopflow_execution::ops::linear::refresh(
         repo,
-        &crate::ops::linear::LinearSyncOptions { wave, plan },
+        &loopflow_execution::ops::linear::LinearSyncOptions { wave },
         &CliProgress,
     )?;
     if json {
@@ -780,7 +489,7 @@ pub fn sync_planning(
 /// What `lf wave sync` refreshed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanningRefresh {
-    /// Git planning: the repository's whole plan.
+    /// No tracker: the repository's whole plan, from the hub.
     Repository,
     /// One Wave, from its Linear Initiative.
     Wave(String),
@@ -798,29 +507,30 @@ impl PlanningRefresh {
 }
 
 /// Refresh shared planning before `wave status --sync` reads it: the Wave from
-/// Linear, or the repository's Git planning ref, whose exchange is per repository.
+/// Linear, or without a tracker the repository's plan by each carrier it has.
 pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<PlanningRefresh> {
-    let repo = crate::repo::working_directory_in(directory)?;
-    if crate::lf::commands::plan::plans_through_git(&repo)? {
-        crate::lf::commands::plan::refresh(&repo)?;
+    let repo = loopflow_execution::repo::working_directory_in(directory)?;
+    if !loopflow_execution::ops::tracker::connected(&repo.to_string_lossy()) {
+        crate::lf::commands::tracker::refresh(&repo)?;
         return Ok(PlanningRefresh::Repository);
     }
     let wave =
         planning_wave(&repo, wave)?.ok_or_else(|| anyhow::anyhow!("Select a Wave to refresh"))?;
-    if crate::ops::linear::read_initiative(&repo, &wave).is_none() {
+    if loopflow_execution::ops::linear::read_initiative(&repo, &wave).is_none() {
         return Ok(PlanningRefresh::Unconnected(wave));
     }
     // The Team delta brings changes and comments in and pending saves go out,
     // so a save left by an outage is delivered on the next refresh.
-    if let Err(error) = crate::ops::planning_sync::refresh_directory(&repo) {
+    if let Err(error) = loopflow_execution::ops::planning_sync::refresh_directory(&repo) {
         tracing::debug!(%error, "planning delivery pending before refresh");
     }
-    tokio::runtime::Runtime::new()?.block_on(crate::ops::linear::refresh_wave(&repo, &wave))?;
+    tokio::runtime::Runtime::new()?
+        .block_on(loopflow_execution::ops::linear::refresh_wave(&repo, &wave))?;
     Ok(PlanningRefresh::Wave(wave))
 }
 
 pub fn reteam(repo: &std::path::Path, apply: bool, json: bool) -> Result<()> {
-    let result = crate::engine::wave::planning_reteam(repo, apply, &CliProgress)?;
+    let result = loopflow_execution::engine::wave::planning_reteam(repo, apply, &CliProgress)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else {
@@ -829,7 +539,7 @@ pub fn reteam(repo: &std::path::Path, apply: bool, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn print_pm_reteam_result(result: &crate::ops::linear::LinearReteamResult) {
+fn print_pm_reteam_result(result: &loopflow_execution::ops::linear::LinearReteamResult) {
     let verb = if result.applied { "moved" } else { "will move" };
     println!(
         "repository {} (waves: {}) → team {} ({}-*){}",
@@ -882,7 +592,7 @@ fn print_pm_reteam_result(result: &crate::ops::linear::LinearReteamResult) {
     }
 }
 
-fn print_pm_sync_result(result: &crate::ops::linear::LinearSyncResult) {
+fn print_pm_sync_result(result: &loopflow_execution::ops::linear::LinearSyncResult) {
     if result.actions.is_empty() && result.diagnostics.is_empty() {
         println!("PM state matches local waves and projects");
         return;
@@ -901,7 +611,7 @@ fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
 
     if changes.commits.is_empty() {
         eprintln!("No commits in the target area since the last tag.");
-        return Err(crate::process::CommandExit(1).into());
+        return Err(loopflow_execution::process::CommandExit(1).into());
     }
 
     let is_tty = std::io::stdout().is_terminal();
@@ -936,30 +646,34 @@ fn release_run_cmd(
     progress: &impl Progress,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let outcome =
-        crate::engine::repo::carry_release(&repo_root, version_input, target_name, progress)?;
+    let outcome = loopflow_execution::engine::repo::carry_release(
+        &repo_root,
+        version_input,
+        target_name,
+        progress,
+    )?;
     if json {
         println!("{}", serde_json::to_string(&outcome)?);
         return Ok(());
     }
     match outcome {
-        crate::ops::ReleaseRunOutcome::NoChanges {
+        loopflow_execution::ops::ReleaseRunOutcome::NoChanges {
             target, latest_tag, ..
         } => {
             let latest = latest_tag.as_deref().unwrap_or("(none)");
             println!("No release ({target}): no merged PRs since {latest}");
         }
-        crate::ops::ReleaseRunOutcome::Released(receipt) => {
+        loopflow_execution::ops::ReleaseRunOutcome::Released(receipt) => {
             print_release_receipt("Released", &receipt);
         }
-        crate::ops::ReleaseRunOutcome::Resumed(receipt) => {
+        loopflow_execution::ops::ReleaseRunOutcome::Resumed(receipt) => {
             print_release_receipt("Resumed", &receipt);
         }
     }
     Ok(())
 }
 
-fn print_release_receipt(action: &str, receipt: &crate::ops::ReleaseReceipt) {
+fn print_release_receipt(action: &str, receipt: &loopflow_execution::ops::ReleaseReceipt) {
     println!("{action} {} ({})", receipt.tag, receipt.target);
     println!("Commit: {}", receipt.commit);
     if let Some(url) = receipt.workflow_url.as_deref() {
@@ -1124,18 +838,7 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
     }
 
     match status.notes_status {
-        Some(crate::ops::ReleaseNotesStatus::Narrative) => {
-            println!("Release notes: narrative / gate safe");
-        }
-        Some(crate::ops::ReleaseNotesStatus::Degraded(reason)) => {
-            println!("Release notes: degraded ({reason}) / gate safe");
-        }
-        Some(crate::ops::ReleaseNotesStatus::Missing) => {
-            println!("Release notes: missing / gate unsafe");
-        }
-        Some(crate::ops::ReleaseNotesStatus::Legacy) => {
-            println!("Release notes: legacy / gate status unknown");
-        }
+        Some(status) => println!("Release notes: {status}"),
         None => println!("Release notes: (no release tag)"),
     }
 
@@ -1155,7 +858,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
             json,
         } => {
             let repo_root = find_repo_root()?;
-            let checkout = crate::engine::checkout::create(
+            let checkout = loopflow_execution::engine::checkout::create(
                 &repo_root,
                 name,
                 *plan,
@@ -1203,9 +906,9 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
 fn print_checkout(
     name: &str,
     persistent: bool,
-    checkout: &crate::engine::checkout::Checkout,
+    checkout: &loopflow_execution::engine::checkout::Checkout,
 ) -> Result<()> {
-    use crate::git::worktrees::PlacementStrategy;
+    use loopflow_execution::git::worktrees::PlacementStrategy;
     if !checkout.created {
         println!("branch: {}", checkout.branch);
         if let Some(base) = &checkout.base {
@@ -1244,8 +947,8 @@ fn print_checkout(
 
 /// Local ops telemetry lives under the git-ignored `.lf/tmp/` tree so read-only
 /// operations (`sync --plan`, status, dispatch) never dirty a tracked
-/// worktree. Single source of truth: `crate::ops::telemetry`.
-use crate::ops::telemetry::record_ops_metric;
+/// worktree. Single source of truth: `loopflow_execution::ops::telemetry`.
+use loopflow_execution::ops::telemetry::record_ops_metric;
 
 fn wt_switch(name: &str) -> Result<()> {
     cd_directive(&resolve_worktree(name)?)
@@ -1301,7 +1004,8 @@ fn cd_directive(path: &Path) -> Result<()> {
 }
 
 fn wt_timing(json: bool) -> Result<()> {
-    let report = crate::ops::wt_timing::report(&crate::store::lf_home_dir())?;
+    let report =
+        loopflow_execution::ops::wt_timing::report(&loopflow_execution::store::lf_home_dir())?;
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());
@@ -1311,7 +1015,7 @@ fn wt_timing(json: bool) -> Result<()> {
         return Ok(());
     }
     let seconds = |ms: u64| format!("{:.2}s", ms as f64 / 1000.0);
-    let phase = |spread: Option<crate::ops::wt_timing::Spread>| {
+    let phase = |spread: Option<loopflow_execution::ops::wt_timing::Spread>| {
         spread.map_or_else(
             || "-".to_string(),
             |spread| format!("{} / {}", seconds(spread.median), seconds(spread.p95)),
@@ -1333,19 +1037,14 @@ fn wt_timing(json: bool) -> Result<()> {
             seconds(group.total_ms.max)
         );
         println!(
-            "  median / p95:  startup {}   local git {}   remote {}   receipts {}",
+            "  median / p95:  startup {}   local git {}   remote {}",
             phase(Some(group.startup_ms)),
             phase(group.local_git_ms),
-            phase(group.remote_ms),
-            phase(group.receipt_ms)
+            phase(group.remote_ms)
         );
         println!(
-            "  failed {}   interrupted {}   remote timed out {}   remote unavailable {}   receipts unrecorded {}",
-            group.failed,
-            group.interrupted,
-            group.remote_timed_out,
-            group.remote_unavailable,
-            group.receipts_unrecorded
+            "  failed {}   interrupted {}   remote timed out {}   remote unavailable {}",
+            group.failed, group.interrupted, group.remote_timed_out, group.remote_unavailable
         );
     }
     println!(
@@ -1361,17 +1060,20 @@ fn wt_timing(json: bool) -> Result<()> {
 fn wt_list(json: bool, sync: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
-    crate::ops::wt_timing::begin(&main_repo, json, sync);
+    loopflow_execution::ops::wt_timing::begin(&main_repo, json, sync);
     // `wt list` is an inspection surface and stays side-effect free by default:
     // merge/fresh flags reflect the last-synced main. `--sync` is the explicit,
     // self-owned mutation that fetches origin and integrates main first — a
     // read never fetches, resets, or stashes the canonical checkout behind the
     // user's back.
     if sync {
-        crate::ops::checkout::refresh_main(&main_repo, &crate::ops::NullProgress)?;
+        loopflow_execution::ops::checkout::refresh_main(
+            &main_repo,
+            &loopflow_execution::ops::NullProgress,
+        )?;
     }
     let listing = list_worktrees_timed(&main_repo)?;
-    crate::ops::wt_timing::listed(&listing);
+    loopflow_execution::ops::wt_timing::listed(&listing);
     let (default_branch, worktrees) = (listing.default_branch, listing.worktrees);
 
     if json {
@@ -1514,7 +1216,7 @@ fn wt_list(json: bool, sync: bool) -> Result<()> {
 }
 
 fn wt_delete(name: &str, force: bool) -> Result<()> {
-    crate::ops::wt::delete_worktree(&find_repo_root()?, name, force, &CliProgress)?;
+    loopflow_execution::ops::wt::delete_worktree(&find_repo_root()?, name, force, &CliProgress)?;
     println!("Deleted {name}");
     Ok(())
 }
@@ -1560,11 +1262,11 @@ fn wt_prune_builds(
             .checked_mul(3600)
             .ok_or_else(|| anyhow!("retention hours overflow"))?,
     );
-    let report = crate::git::build_cleanup::prune_builds(
+    let report = loopflow_execution::git::build_cleanup::prune_builds(
         &main,
         &repo,
         &registries,
-        crate::git::build_cleanup::BuildCleanupPolicy {
+        loopflow_execution::git::build_cleanup::BuildCleanupPolicy {
             retention,
             maximum_roots,
             maximum_bytes,
@@ -1597,8 +1299,8 @@ fn wt_prune_builds(
 /// Registries whose completed Task ownership authorizes build-output cleanup.
 /// This path never opens a registry for writes or advances its frontier.
 pub(crate) fn build_cleanup_registries() -> Vec<PathBuf> {
-    let selected = crate::store::default_db_path();
-    let production = crate::store::production_database_path();
+    let selected = loopflow_execution::store::default_db_path();
+    let production = loopflow_execution::store::production_database_path();
     // A missing or unreadable selected registry is unknown, not permission
     // to rely exclusively on another Home's completed ownership.
     let mut registries = vec![selected.clone()];
@@ -1618,7 +1320,7 @@ pub(crate) fn prune_repo_worktrees(
     dry_run: bool,
 ) -> Result<WorktreePruneReport> {
     if !dry_run {
-        crate::ops::checkout::refresh_main(main_repo, &CliProgress)?;
+        loopflow_execution::ops::checkout::refresh_main(main_repo, &CliProgress)?;
     }
     Ok(prune_worktrees(
         main_repo,
@@ -1653,7 +1355,7 @@ fn print_prune_report(report: &WorktreePruneReport, all: bool, dry_run: bool) {
         Some(branch) => format!("{branch}  {}", path.display()),
         None => path.display().to_string(),
     };
-    let with_saved = |target: &crate::git::worktrees::WorktreePruneTarget| {
+    let with_saved = |target: &loopflow_execution::git::worktrees::WorktreePruneTarget| {
         let mut detail = target.reason.to_string();
         if target.source_changes > 0 {
             detail.push_str(&format!("; {} source changes", target.source_changes));
@@ -1756,27 +1458,32 @@ fn wt_prune_branches(dry_run: bool) -> Result<()> {
 /// mutates machine-wide state, so an unreadable registry stops it.
 fn task_ownership() -> Result<WorktreeOwnership> {
     let mut ownership = WorktreeOwnership {
-        process_paths: crate::git::build_cleanup::running_paths()?,
+        process_paths: loopflow_execution::git::build_cleanup::running_paths()?,
         ..WorktreeOwnership::default()
     };
     let mut named = Vec::new();
     let runtime = tokio::runtime::Runtime::new()?;
-    match runtime.block_on(crate::store::open_existing_store()) {
+    match runtime.block_on(loopflow_execution::store::open_existing_store()) {
         Ok(Some(store)) => {
             let tasks = runtime
                 .block_on(store.list_tasks(None))
                 .map_err(|error| anyhow!("cannot verify Task ownership before pruning: {error}"))?;
-            let local = store.sqlite.local_machine()?.id;
+            let local = loopflow_execution::store::machines::local_machine(&store.sqlite)?.id;
             for task in tasks {
                 let work = runtime
-                    .block_on(store.work_for_child(&crate::child::ChildRef::Task(task.id.clone())))
+                    .block_on(
+                        store.work_for_child(&loopflow_storage::child::ChildRef::Task(
+                            task.id.clone(),
+                        )),
+                    )
                     .map_err(|error| anyhow!("cannot resolve Task Work: {error}"))?;
                 let status = runtime
                     .block_on(store.work_status(&work))
                     .map_err(|error| anyhow!("cannot read Task Work status: {error}"))?;
                 let open = !matches!(
                     status,
-                    crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
+                    loopflow_model::durable::WorkStatus::Done
+                        | loopflow_model::durable::WorkStatus::Abandoned
                 );
                 let prs = runtime
                     .block_on(store.task_prs(&task.id))
@@ -1785,7 +1492,10 @@ fn task_ownership() -> Result<WorktreeOwnership> {
                 named.extend(prs.into_iter().map(|pr| (pr.branch, open)));
                 // A move pushed the branch before handing the Task off.
                 let elsewhere = if open {
-                    let owned = store.sqlite.task_ownership(&task.id)?;
+                    let owned = loopflow_execution::store::ownership::task_ownership(
+                        &store.sqlite,
+                        &task.id,
+                    )?;
                     owned.owner_elsewhere(&local).map(|machine| machine.name())
                 } else {
                     None
@@ -1818,21 +1528,23 @@ fn task_ownership() -> Result<WorktreeOwnership> {
     // An explicit experiment owns its own registry, but pruning is
     // machine-wide mutation. Read the release registry without migrations so
     // `cargo run -- lf wt prune` cannot erase release-owned Tasks' work.
-    let production = crate::store::production_database_path();
+    let production = loopflow_execution::store::production_database_path();
     if production.exists() {
-        let unreadable = |error: crate::store::StoreError| {
+        let unreadable = |error: loopflow_execution::store::StoreError| {
             anyhow!(
                 "cannot verify Task ownership from {} before pruning: {error}",
                 production.display()
             )
         };
-        for path in
-            crate::store::read_nonterminal_task_worktrees(&production).map_err(unreadable)?
+        for path in loopflow_execution::store::read_nonterminal_task_worktrees(&production)
+            .map_err(unreadable)?
         {
             ownership.finished_checkouts.remove(&path);
             ownership.unfinished_checkouts.entry(path).or_insert(None);
         }
-        named.extend(crate::store::read_task_branches(&production).map_err(unreadable)?);
+        named.extend(
+            loopflow_execution::store::read_task_branches(&production).map_err(unreadable)?,
+        );
     }
     let TaskBranches { live, finished } = named.into_iter().collect();
     ownership.live_branches = live;
@@ -1841,7 +1553,7 @@ fn task_ownership() -> Result<WorktreeOwnership> {
 }
 
 fn pr_checks(repo_root: &Path, watch: bool, logs: bool, required: bool, json: bool) -> Result<()> {
-    use crate::engine::pr::ChecksState;
+    use loopflow_execution::engine::pr::ChecksState;
     if watch {
         // gh streams the watch to the terminal; the served read has no watch.
         let branch = current_branch(repo_root)?.ok_or_else(|| anyhow!("not on a branch"))?;
@@ -1856,11 +1568,11 @@ fn pr_checks(repo_root: &Path, watch: bool, logs: bool, required: bool, json: bo
         return if status.success() {
             Ok(())
         } else {
-            Err(crate::process::CommandExit(status.code().unwrap_or(1) as u8).into())
+            Err(loopflow_execution::process::CommandExit(status.code().unwrap_or(1) as u8).into())
         };
     }
-    let checks =
-        crate::engine::pr::checks(repo_root, required).map_err(crate::engine::pr::exit_of)?;
+    let checks = loopflow_execution::engine::pr::checks(repo_root, required)
+        .map_err(loopflow_execution::engine::pr::exit_of)?;
     if json {
         print_json(&checks)?;
     } else {
@@ -1870,13 +1582,13 @@ fn pr_checks(repo_root: &Path, watch: bool, logs: bool, required: bool, json: bo
         ChecksState::Passing => Ok(()),
         ChecksState::Pending => {
             eprintln!("CI checks are pending.");
-            Err(crate::process::CommandExit(checks.exit_code()).into())
+            Err(loopflow_execution::process::CommandExit(checks.exit_code()).into())
         }
         ChecksState::Failing => {
             if logs {
                 print_failed_check_logs(repo_root, &checks.branch)?;
             }
-            Err(crate::process::CommandExit(checks.exit_code()).into())
+            Err(loopflow_execution::process::CommandExit(checks.exit_code()).into())
         }
     }
 }
@@ -2013,101 +1725,6 @@ fn write_shell_directive(command: &str) -> Result<bool> {
     use std::io::Write;
     writeln!(file, "{}", command)?;
     Ok(true)
-}
-
-// ==========================================================================
-// Skill agent fallback
-// ==========================================================================
-
-/// Launch an agent with a named skill when an ops command needs judgment.
-///
-/// Used when mechanical operations hit a situation that requires agent
-/// reasoning — e.g., sync conflicts that need conflict resolution.
-fn process_skill_agent(
-    repo_root: &Path,
-    skill_name: &str,
-    context: Option<&str>,
-    config: &Config,
-) -> Result<()> {
-    let skill = load_skill(skill_name, repo_root)?;
-
-    let message = context.map(|value| value.to_string());
-    let prepared = prepare_process_prompt(
-        config,
-        ProcessPromptInput {
-            repo_root: repo_root.to_path_buf(),
-            skill: Some(skill_name.to_string()),
-            resolved_skill: Some(skill),
-            surface: Surface::Headless,
-            message,
-            source_overrides: ContextSourceOverrides {
-                // Sync conflicts already name the affected paths in `context`.
-                // Embedding every authored file here makes the task prompt grow
-                // with the branch and can exceed the OS argument limit before
-                // the resolver starts. The agent has the repository as its cwd
-                // and can inspect the conflict in place.
-                diff_files: Some(false),
-                diff: Some(false),
-                ..Default::default()
-            },
-            ..ProcessPromptInput::default()
-        },
-    )?;
-
-    let agent = prepared.config.agent()?;
-    let (provider, model) = crate::config::parse_agent(agent);
-    let cwd = prepared
-        .config
-        .cwd
-        .clone()
-        .unwrap_or_else(|| repo_root.to_path_buf());
-    let context = crate::trace::PreparedTurnContext::from_prompts(
-        &crate::agent::system_prompt_with_structured_replies(&prepared.config),
-        &prepared.config.task_prompt,
-    );
-    let capture = crate::session_record::SessionRecorder::begin_with_context(
-        crate::session_record::SessionCaptureSpec {
-            harness: provider,
-            model,
-            surface: "headless".to_string(),
-            cwd,
-            repo: Some(repo_root.to_path_buf()),
-            worktree: Some(repo_root.to_path_buf()),
-            skill: Some(skill_name.to_string()),
-            subjects: Vec::new(),
-            graph: crate::session_record::SessionGraphMembership::Independent,
-            work: None,
-        },
-        &context,
-        Some(crate::session_record::AgentProcessRequest::from_prepared(
-            &prepared.config,
-        )?),
-    )
-    .map(crate::process::LfProcessRuntime::new)?;
-
-    let launch = prepared.config;
-    let process = ProcessConfig {
-        auto: true,
-        stream: true,
-        runtime: Some(capture.clone()),
-        ..Default::default()
-    };
-
-    let result = run_agent(&launch, &process);
-    let outcome = match &result {
-        Ok(result) if result.exit_code == 0 => "completed",
-        Ok(_) | Err(_) => "failed",
-    };
-    capture.finish(outcome)?;
-    let result = result?;
-    if result.exit_code != 0 {
-        return Err(anyhow!(
-            "agent exited with code {} while resolving {}",
-            result.exit_code,
-            skill_name,
-        ));
-    }
-    Ok(())
 }
 
 // ==========================================================================

@@ -1,7 +1,5 @@
 use crate::support;
-use loopflow::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
 use loopflow_test_support::TestRepo;
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -41,7 +39,7 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
 const CODEX_NATIVE: &str = concat!(
     "#!/bin/sh\nexec /usr/bin/python3 '",
     env!("CARGO_MANIFEST_DIR"),
-    "/tests/support/native_codex.py' \"$@\"\n"
+    "/../loopflow-execution/tests/support/native_codex.py' \"$@\"\n"
 );
 
 #[test]
@@ -49,10 +47,10 @@ fn bad_config_lines_do_not_stop_graph_commands() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(&[], Some(home.path()));
-    let preferences = "# default_agent: claude:fable\ndefault_agent: codex\nfuture: {enabled: true}\nbroken: [do-not-print-this-value\nclaude: {model: opus, future: true}\nyolo: perhaps\nskills: {implement: {agent: 'claude:fable', future: true}}\n";
+    let preferences = "# default_agent: claude:fable\ndefault_agent: codex\nfuture: {enabled: true}\nbroken: [do-not-print-this-value\nclaude: {model: opus, future: true}\nyolo: perhaps\nskills: {implement: {agent: 'claude:fable', future: true}}\naccount: {claude: [saved]}\naccounts: {claude: {saved: {login_email: saved@example.com}}}\n";
     fs::write(home.path().join("config.yaml"), preferences).unwrap();
     for args in [
-        vec!["--context", "graph", "auto"],
+        vec!["--context", "graph", "code"],
         vec!["config", "settings", "--skill", "implement", "--json"],
     ] {
         let output = command(repo.path(), home.path(), &args).output().unwrap();
@@ -75,6 +73,8 @@ fn bad_config_lines_do_not_stop_graph_commands() {
             "{warnings}"
         );
         assert!(!warnings.contains("do-not-print-this-value"), "{warnings}");
+        // The released lf still reads its account preferences from this file.
+        assert!(!warnings.contains("skipping account"), "{warnings}");
         if args[0] == "config" {
             let settings: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
             assert_eq!(settings[0]["settings"]["agent"]["value"], "claude:fable");
@@ -99,7 +99,7 @@ fn bad_config_lines_do_not_stop_graph_commands() {
     )
     .unwrap();
     assert!(
-        command(repo.path(), home.path(), &["--context", "graph", "auto"])
+        command(repo.path(), home.path(), &["--context", "graph", "code"])
             .output()
             .unwrap()
             .status
@@ -107,7 +107,7 @@ fn bad_config_lines_do_not_stop_graph_commands() {
     );
     for args in [
         vec!["set", "--global", "yolo", "perhaps"],
-        vec!["--setting", "yolo=perhaps", "--context", "graph", "auto"],
+        vec!["--setting", "yolo=perhaps", "--context", "graph", "code"],
     ] {
         assert!(!command(repo.path(), home.path(), &args)
             .output()
@@ -149,22 +149,16 @@ fn explicit_graph_selection_stays_with_steps_and_child_commands_choose_their_own
             (
                 "claude",
                 r#"#!/usr/bin/python3
-import glob
 import json
 import os
-import shutil
 import subprocess
 import sys
 
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
-# The login the shared home carries: the stand-in Keychain on macOS, else its file.
-stores = glob.glob(os.path.join(os.path.dirname(shutil.which('security')), 'keychain', '*'))
-stores.append(os.path.join(os.environ['CLAUDE_CONFIG_DIR'], '.credentials.json'))
-login = next((text for text in (open(path).read() for path in stores if os.path.isfile(path)) if 'claudeAiOauth' in text), None)
 with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
-    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR'), 'claude_login': login}) + '\n')
+    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR')}) + '\n')
 message = json.loads(sys.stdin.readline())
 message['session_id'] = 'agent-fixture'
 print(json.dumps(message), flush=True)
@@ -190,8 +184,8 @@ for line in sys.stdin:
         "agent-proof",
         &repo.head_sha(),
     );
-    connect_fixture_claude(home.path(), &registered.store);
-    support::managed_codex_account(home.path());
+
+    support::seed_store(home.path());
 
     for (path, content) in [
         (".lf/skills/first.md", "---\nagent: codex\n---\nFirst step."),
@@ -220,8 +214,7 @@ for line in sys.stdin:
     }
     repo.stage_all();
     repo.commit("Define agent selection fixtures");
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     support::select_wave_graph(
         repo.path(),
         &store,
@@ -299,19 +292,12 @@ for line in sys.stdin:
             args.windows(2).any(|pair| pair == ["--model", "sonnet"]),
             "{launch}"
         );
-        // Every step ran in the shared home, signed in as the routed account.
+        // Every step uses the configured native home.
         assert_eq!(
             received["claude_home"].as_str().map(Path::new),
             std::env::var_os("CLAUDE_CONFIG_DIR")
                 .as_deref()
                 .map(Path::new)
-        );
-        assert!(
-            received["claude_login"]
-                .as_str()
-                .unwrap()
-                .contains("fixture-only"),
-            "{launch}"
         );
     }
 
@@ -352,44 +338,6 @@ for line in sys.stdin:
     assert_eq!(models, ["haiku", "sonnet"]);
 }
 
-fn connect_fixture_claude(home: &Path, store: &loopflow::store::Store) {
-    let name = "fixture";
-    let account_home = home.join("accounts/claude").join(name);
-    fs::create_dir_all(&account_home).unwrap();
-    let account_home = account_home.canonicalize().unwrap();
-    let credential =
-        r#"{"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000}}"#;
-    fs::write(account_home.join(".credentials.json"), credential).unwrap();
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(store.upsert_provider_account(&ProviderAccount {
-            provider: "claude".into(),
-            account_id: ProviderAccountId::parse(name).unwrap(),
-            home: Some(account_home),
-            login_email: Some(
-                loopflow::profile::EmailAddress::parse(&format!("{name}@example.com")).unwrap(),
-            ),
-            observed_email: Some(format!("{name}@example.com")),
-            observed_subject: Some(name.into()),
-            observed_credential_digest: Some(format!(
-                "{:x}",
-                Sha256::digest(credential.as_bytes())
-            )),
-            observed_plan: None,
-            credential_state: CredentialState::Connected,
-            routing_state: RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        }))
-        .unwrap();
-}
-
 // Record the preferences and documents actually delivered across the provider
 // boundary. No installed provider, credentials, or network participates.
 const CLAUDE_SETTINGS: &str = r#"#!/usr/bin/python3
@@ -422,6 +370,7 @@ if '--json-schema' in sys.argv:
         decision = 'advance' if marker.exists() else 'iterate'
         marker.touch()
         result['structured_output'] = {'decision': decision, 'summary': 'One repeat proves selection', 'reason': None}
+keep_claude_turn(message, result['result'], result.get('structured_output'))
 print(json.dumps(result), flush=True)
 for line in sys.stdin:
     pass
@@ -471,9 +420,9 @@ fn assert_launch_settings(launch: &serde_json::Value, inspected: &serde_json::Va
         settings["chrome"]["value"] == true,
         "{launch}\n{settings}"
     );
-    // Claude's documented headless floor bypasses prompts independently of yolo.
-    // Explicit false is observable here through chrome and cleared documents;
-    // terminal yolo negation has separate native launch/resume coverage.
+    // A headless run never asks, whatever yolo says. Explicit false is
+    // observable here through chrome and cleared documents; attended yolo
+    // negation has separate native launch/resume coverage.
     assert!(args.contains(&serde_json::json!("--dangerously-skip-permissions")));
     let mut expected = settings["context.docs"]["value"]
         .as_array()
@@ -505,16 +454,19 @@ fn exercise_live_occurrence_preferences(overrides: bool) {
     let _server =
         loopflow_test_support::MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
     let _env = support::EnvGuard::with_home(
-        &[("claude", CLAUDE_SETTINGS), ("gh", "#!/bin/sh\nexit 1\n")],
+        &[
+            ("claude", support::claude_stand_in(CLAUDE_SETTINGS).as_str()),
+            ("gh", "#!/bin/sh\nexit 1\n"),
+        ],
         Some(home.path()),
     );
     let store = tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(loopflow::store::open_ephemeral_store(
-            &loopflow::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
+        .block_on(loopflow_execution::store::open_ephemeral_store(
+            &loopflow_execution::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .unwrap();
-    connect_fixture_claude(home.path(), &store);
+
     for (path, content) in [
         (".lf/config.yaml", "agent: claude:repo\nyolo: true\nchrome: true\ndocs: [repo.txt]\ncontext: [context.txt]\ndiff: false\ndiff_files: false\n"),
         (".lf/skills/probe.md", "---\nagent: claude:skill\ndocs: [skill.txt]\n---\nReport the selected settings."),
@@ -669,8 +621,8 @@ graphs:
         launch_pair(&[], None, false)[0]["settings"]["agent"]["value"],
         "claude:edited-repo"
     );
-    let wave = loopflow::work::wave::Wave::new(
-        loopflow::id::WaveId::new(),
+    let wave = loopflow_execution::work::wave::Wave::new(
+        loopflow_model::id::WaveId::new(),
         "settings".into(),
         repo.path().canonicalize().unwrap().display().to_string(),
     );
@@ -745,16 +697,14 @@ fn choices_and_fallbacks_agree_in_inspection_runtime_and_exported_recipes() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(
-        &[("claude", CLAUDE_SETTINGS), ("gh", "#!/bin/sh\nexit 1\n")],
+        &[
+            ("claude", support::claude_stand_in(CLAUDE_SETTINGS).as_str()),
+            ("gh", "#!/bin/sh\nexit 1\n"),
+        ],
         Some(home.path()),
     );
-    let store = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(loopflow::store::open_ephemeral_store(
-            &loopflow::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
-        ))
-        .unwrap();
-    connect_fixture_claude(home.path(), &store);
+    support::seed_store(home.path());
+
     repo.create_file(".lf/config.yaml", "diff: false\ndiff_files: false\n");
     repo.create_file(
         ".lf/skills/probe.md",
@@ -898,6 +848,10 @@ assert '--input-format' not in args, 'Task worker wrongly selected Claude'
 assert not os.environ.get('LF_AGENT_OVERRIDE'), 'Session choice escaped to child policy'
 if 'SETTINGS_TASK' not in os.environ:
     sys.exit(0)  # a Task conversation checkout started in the background, not a launch under test
+if '--session-id' in args:
+    project = Path(os.environ['CLAUDE_CONFIG_DIR']) / 'projects' / 'fixture'
+    project.mkdir(parents=True, exist_ok=True)
+    (project / (args[args.index('--session-id')+1] + '.jsonl')).write_text('{}\n')
 home = Path(os.environ['LF_HOME'])
 db = sqlite3.connect(home / 'loopflow.db')
 def run(*args):
@@ -911,13 +865,12 @@ def run(*args):
 
 def worker(task):
     text = run('task', 'run', task, 'proof', '--from', 'implement')
-    graph = text.split('running as Graph process ')[1].split()[0]
-    carrier = db.execute('SELECT parent_lf_process_id FROM processes WHERE id=?', (graph,)).fetchone()[0]
+    graph = text.split('running as Graph run ')[1].split()[0]
     deadline = time.monotonic() + 90
     while True:
-        done, code = db.execute('SELECT completed_at, exit_code FROM processes WHERE id=?', (carrier,)).fetchone()
+        done, code = db.execute('SELECT ended_at, exit_code FROM graph_processes WHERE lf_process_id=?', (graph,)).fetchone()
         if done:
-            assert code == 0, text + '\n' + str(list(db.execute('SELECT error FROM processes WHERE parent_lf_process_id=?', (carrier,))))
+            assert code == 0, text + '\n' + str(list(db.execute('SELECT error FROM graph_process_steps WHERE graph_lf_process_id=?', (graph,))))
             return
         if time.monotonic() > deadline:
             raise TimeoutError(text)
@@ -957,18 +910,13 @@ with (home / 'session-children.jsonl').open('a') as output:
         .output()
         .unwrap();
     assert!(pushed.status.success());
-    let store = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(loopflow::store::open_ephemeral_store(
-            &loopflow::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
-        ))
-        .unwrap();
+    support::seed_store(home.path());
     let _checkouts = TaskCheckouts {
         home: home.path(),
         repo: repo.path(),
     };
-    connect_fixture_claude(home.path(), &store);
-    support::managed_codex_account(home.path());
+
+    support::seed_store(home.path());
     write_preferences(
         home.path(),
         "agent: claude\nskills: {implement: {agent: codex}}\n",
@@ -1073,16 +1021,14 @@ fn explicit_graph_agent_reaches_composed_routers_and_repeated_steps() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(
-        &[("claude", CLAUDE_SETTINGS), ("gh", "#!/bin/sh\nexit 1\n")],
+        &[
+            ("claude", support::claude_stand_in(CLAUDE_SETTINGS).as_str()),
+            ("gh", "#!/bin/sh\nexit 1\n"),
+        ],
         Some(home.path()),
     );
-    let store = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(loopflow::store::open_ephemeral_store(
-            &loopflow::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
-        ))
-        .unwrap();
-    connect_fixture_claude(home.path(), &store);
+    support::seed_store(home.path());
+
     repo.create_file(
         ".lf/config.yaml",
         "agent: codex\ndiff: false\ndiff_files: false\n",
@@ -1093,7 +1039,7 @@ fn explicit_graph_agent_reaches_composed_routers_and_repeated_steps() {
     );
     repo.create_file(
         ".lf/graphs/inner.yaml",
-        "- step: {name: probe, id: work, agent: codex}\n- loop: work\n",
+        "- loop:\n    - step: {name: probe, id: work, agent: codex}\n    - loop-or-next\n",
     );
     repo.create_file(".lf/graphs/routed.yaml", "- xor:\n    paths:\n      selected:\n        graph: inner\n        description: Run and repeat\n      skipped:\n        description: Skip\n");
     success(command(
@@ -1178,12 +1124,12 @@ fn cli_destinations_save_the_declaration_used_by_preparation_and_unset() {
         }
         args.extend(["config", "show", "--skill", "probe", "--json"]);
         let inspection: serde_json::Value = serde_json::from_slice(&run(&args).stdout).unwrap();
-        let config = loopflow::config::load_wave_config(Some(&child), wave)
+        let config = loopflow_execution::config::load_wave_config(Some(&child), wave)
             .unwrap()
             .unwrap();
-        let prepared = loopflow::prompt::process::prepare_process_prompt(
+        let prepared = loopflow_execution::prompt::process::prepare_process_prompt(
             &config,
-            loopflow::prompt::process::ProcessPromptInput {
+            loopflow_execution::prompt::process::ProcessPromptInput {
                 repo_root: child.clone(),
                 skill: Some("probe".into()),
                 wave: wave.map(str::to_owned),
@@ -1191,7 +1137,7 @@ fn cli_destinations_save_the_declaration_used_by_preparation_and_unset() {
             },
         )
         .unwrap();
-        assert_eq!(prepared.config.agent().unwrap(), expected);
+        assert_eq!(prepared.config.agent.to_string(), expected);
         assert_eq!(prepared.config.chrome, wave.is_some().then_some(true));
         assert_eq!(inspection[0]["settings"]["agent"]["value"], expected);
     };
@@ -1260,14 +1206,14 @@ fn context_namespace_agrees_across_files_flags_and_preparation() {
         args.extend(["config", "show", "--skill", "context-proof", "--json"]);
         serde_json::from_slice::<serde_json::Value>(&run(&args).stdout).unwrap()
     };
-    let config = loopflow::config::load_config(Some(repo.path()))
+    let config = loopflow_execution::config::load_config(Some(repo.path()))
         .unwrap()
         .unwrap();
-    let skill = loopflow::graph::load_skill("context-proof", repo.path()).unwrap();
-    let resolved = loopflow::config::settings::resolve(&config, Some(&skill)).unwrap();
-    let prepared = loopflow::prompt::process::prepare_process_prompt(
+    let skill = loopflow_execution::graph::load_skill("context-proof", repo.path()).unwrap();
+    let resolved = loopflow_execution::config::settings::resolve(&config, Some(&skill)).unwrap();
+    let prepared = loopflow_execution::prompt::process::prepare_process_prompt(
         &config,
-        loopflow::prompt::process::ProcessPromptInput {
+        loopflow_execution::prompt::process::ProcessPromptInput {
             repo_root: repo.path().into(),
             skill: Some("context-proof".into()),
             ..Default::default()
@@ -1314,7 +1260,7 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     let home = tempfile::tempdir().unwrap();
     fs::write(
         home.path().join("config.yaml"),
-        "default_agent: codex\nmachine: workstation\naccount:\n  claude: [work]\ntheme: light\nuser:\n  name: Test User\n",
+        "default_agent: codex\nmachine: workstation\nauth_browsers: {linear: {default: [Work]}}\ntheme: light\nuser:\n  name: Test User\n",
     )
     .unwrap();
     repo.create_file(".lf/skills/config-table-proof.md", "Inspect settings.\n");
@@ -1350,7 +1296,7 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     let machines = &table[positions[1]..positions[2]];
     assert!(machines.contains("machine.tasks") && machines.contains("workstation"));
     let accounts = &table[positions[2]..positions[3]];
-    assert!(accounts.contains("account.claude") && accounts.contains("work"));
+    assert!(accounts.contains("auth_browsers") && accounts.contains("Work"));
     assert!(table.contains("SETTING") && table.contains("VALUE") && table.contains("FROM"));
     assert!(
         table.contains("claude") && table.contains("Shared project · skill config-table-proof")
@@ -1468,15 +1414,16 @@ fn automatic_agent_selection_requires_exactly_one_installed_harness() {
     };
 
     unresolved();
-    for harness in ["claude", "codex", "opencode", "pi"] {
-        install(harness);
+    for harness in loopflow_harness::HarnessKind::ALL {
+        let program = harness.as_str();
+        install(program);
         let agent = inspect();
-        assert_eq!(agent["value"], harness);
+        assert_eq!(agent["value"], harness.as_str());
         assert_eq!(
             agent["candidates"][0]["locator"],
             "PATH (only installed harness)"
         );
-        fs::remove_file(bin.path().join(harness)).unwrap();
+        fs::remove_file(bin.path().join(program)).unwrap();
     }
     install("claude");
     install("codex");

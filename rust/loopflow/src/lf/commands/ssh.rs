@@ -1,16 +1,16 @@
 //! Run a command on an added machine using credentials resident there.
 //! Login transfers are separate foreground commands; this script contains no secrets.
 
-use crate::durable::TaskExecutionRoute;
 use crate::lf::Cli;
-use crate::ops::task::remote::TaskSource;
-use crate::provider_account::selection::AccountSelection;
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use clap::Parser;
+use loopflow_execution::durable::TaskExecutionRoute;
+use loopflow_execution::machine::connection::resolve_target;
+use loopflow_execution::machine::ssh::{build_preamble, request, EXPECTED_MACHINE_ID_ENV};
+use loopflow_execution::machine::ssh::{run_ssh, ssh_argv};
+use loopflow_execution::ops::human_session::SessionRecord;
+use loopflow_model::durable::Machine;
 use std::io::IsTerminal;
-use std::process::{Command, Stdio};
-
-pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 
 /// Whether `lf --machine <target> <args>` runs on this Machine: the target is
 /// this Machine, or the command is `task move X --machine <target>` and this
@@ -18,12 +18,12 @@ pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 /// carries on and a sent move delivers what was sent; forwarded, the target
 /// would see a move from a Machine the forwarded personal settings do not name.
 pub fn runs_here(target: &str, lf_args: &[String]) -> anyhow::Result<bool> {
-    let Some(store) = crate::store::read_existing_registry()? else {
+    let Some(store) = loopflow_execution::store::read_existing_registry()? else {
         return Ok(false);
     };
     let store = &store.sqlite;
-    let target = crate::ops::task_ownership::resolve_machine(store, target)?;
-    if target == store.local_machine()?.id {
+    let target = loopflow_execution::ops::task_ownership::resolve_machine(store, target)?;
+    if target == loopflow_execution::store::machines::local_machine(store)?.id {
         return Ok(true);
     }
     let Ok(cli) = parse_remote_command(lf_args) else {
@@ -40,7 +40,7 @@ pub fn runs_here(target: &str, lf_args: &[String]) -> anyhow::Result<bool> {
     else {
         return Ok(false);
     };
-    if crate::ops::task_ownership::resolve_machine(store, machine)? != target {
+    if loopflow_execution::ops::task_ownership::resolve_machine(store, machine)? != target {
         return Ok(false);
     }
     let Some(task) = store.task_by_issue(issue)? else {
@@ -76,7 +76,7 @@ pub(super) fn run_with_io(
     lf_args: &[String],
     task_route: Option<TaskExecutionRoute>,
     directory: &std::path::Path,
-    mut io: Option<&mut super::mutation::CommandIo<'_>>,
+    mut io: Option<&mut loopflow_execution::command::CommandIo<'_>>,
 ) -> anyhow::Result<()> {
     let preview = cli.context
         || cli.explain
@@ -117,20 +117,34 @@ pub(super) fn run_with_io(
             cmd: crate::lf::WaveCommand::Show { .. }
         })
     );
+    // Only a command that may start an agent carries `forward`; a named value
+    // this Machine cannot supply stops it before any SSH. Session viewers are
+    // started by the destination's server, which carries nothing.
+    let launching = cli.may_launch_agent() && !resident_operation;
+    let forwarded = (!preview && launching)
+        .then(|| loopflow_execution::machine::forward::read(directory))
+        .transpose()?;
     let runtime = tokio::runtime::Runtime::new()?;
     if let Some(id) = super::work_route::resumed_session(cli).filter(|_| !preview) {
         // Resuming a Session that lives here, or moved elsewhere, moves it (or its Task) there first.
-        super::session_move::move_session(id, target, forward_agent)?;
+        loopflow_execution::ops::session_move::move_session(
+            id,
+            target,
+            forward_agent,
+            super::write::run_task,
+        )?;
     }
     let source = if preview || resident_operation {
         None
     } else {
-        runtime.block_on(resolve_task_source(cli.task.as_deref(), directory))?
+        runtime.block_on(loopflow_execution::machine::task::resolve_task_source(
+            cli.task.as_deref(),
+            directory,
+        ))?
     };
     let target = if preview || resident_operation {
-        let store = crate::store::read_existing_registry()?
-            .ok_or_else(|| anyhow!("Machine unavailable: local registry is absent"))?;
-        runtime.block_on(super::machine::find_machine(&store, target))?
+        runtime
+            .block_on(loopflow_execution::machine::connection::find_registered_machine(target))?
     } else {
         runtime.block_on(resolve_target(target, forward_agent))?
     };
@@ -155,7 +169,12 @@ pub(super) fn run_with_io(
                 target.id
             ));
         };
-        super::session_move::move_task(task, target.id.as_str(), None)?;
+        loopflow_execution::ops::session_move::move_task(
+            task,
+            target.id.as_str(),
+            None,
+            super::write::run_task,
+        )?;
     }
     // A Machine names no checkout: the destination resolves the repository's
     // own checkout from its identity. A path/name stays the caller's selection.
@@ -166,51 +185,20 @@ pub(super) fn run_with_io(
     {
         Some(repository) => Some(repository),
         None if cli.repo.is_some() => None,
-        None => current_repository(directory)?,
+        None => loopflow_execution::machine::task::current_repository(directory)?,
     };
-    // Preview forwards only authored selectors. Account lookup and connection
-    // belong to launch, on neither side of this read. The target launches in
-    // its own shared home.
-    let selection = if preview || resident_operation {
-        None
-    } else {
-        Some(
-            runtime
-                .block_on(super::machine_credentials::prepare_launch(
-                    &target,
-                    &AccountSelection::from_env()?,
-                    cli,
-                ))?
-                .env_value()?,
-        )
-    };
-    let source_json = source.as_ref().map(serde_json::to_string).transpose()?;
-    let user_name = crate::config::participant_name_in(directory)?.unwrap_or_default();
-    let origin = runtime.block_on(super::machine::local_machine())?;
-    let profile = crate::config::remote::outgoing(Some(directory), origin.id.as_str())?;
-    let profile = serde_json::to_string(&profile)?;
-    let mut extra_env = vec![
-        (crate::config::remote::PROFILE_ENV, profile.as_str()),
-        (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
-        (crate::config::USER_NAME_ENV, user_name.as_str()),
-    ];
-    if let Some(selection) = selection.as_deref() {
-        extra_env.push((
-            crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
-            selection,
-        ));
-    }
-    let agent = std::env::var(crate::config::AGENT_OVERRIDE_ENV).ok();
-    if let Some(agent) = agent.as_deref() {
-        extra_env.push((crate::config::AGENT_OVERRIDE_ENV, agent));
-    }
-    let settings = std::env::var("LF_SETTINGS").ok();
-    if let Some(settings) = settings.as_deref() {
-        extra_env.push(("LF_SETTINGS", settings));
-    }
-    if let Some(source) = source_json.as_deref() {
-        extra_env.push((crate::lf::TASK_SOURCE_ENV, source));
-    }
+    // A plain command reads what it runs with from its environment.
+    let mut environment =
+        loopflow_execution::machine::wire::Selection::capture(directory, source.clone())?
+            .environment(&loopflow_execution::machine::wire::Secrets::default())?;
+    environment.push((
+        loopflow_execution::machine::ssh::EXPECTED_MACHINE_ID_ENV.into(),
+        target.id.to_string(),
+    ));
+    let mut extra_env: Vec<(&str, &str)> = environment
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
     let mut cmd = vec!["lf".to_string()];
     if cli.repository.is_none() {
         if let Some(repository) = &repository {
@@ -220,7 +208,13 @@ pub(super) fn run_with_io(
     cmd.extend(if preview {
         lf_args.to_vec()
     } else {
-        resident_args(lf_args, cli, routed, source.as_ref())
+        loopflow_execution::machine::task::resident_args(
+            lf_args,
+            cli.task.as_ref(),
+            cli.repo.is_some(),
+            routed,
+            source.as_ref(),
+        )
     });
     if matches!(
         &cli.command,
@@ -240,9 +234,11 @@ pub(super) fn run_with_io(
         }) if !preview => Some(connection),
         _ => None,
     };
-    let replace = connection.is_none_or(|connection| {
-        connection.intent() == crate::lf::commands::write::SessionOpenIntent::Resume
-    });
+    let unfocused = connection.is_some_and(|connection| connection.unfocused);
+    if unfocused {
+        // The destination bridges bytes. The local relay owns this option.
+        cmd.retain(|arg| arg != "--unfocused");
+    }
     // Only a person at a terminal views the remote Session; scripts and pipes
     // keep the plain SSH command, whose stdin reaches the provider directly.
     let attended = !cli.batch && std::io::stdin().is_terminal();
@@ -257,30 +253,14 @@ pub(super) fn run_with_io(
             cmd.push("--json".into());
         }
         let bytes = runtime.block_on(request(&target, &cmd[1..], None))?;
-        let mut record: crate::ops::human_session::SessionRecord = serde_json::from_slice(&bytes)?;
-        anyhow::ensure!(
-            record
-                .workspace
-                .as_ref()
-                .is_some_and(|workspace| workspace.machine_id == target.id),
-            "Session reply does not belong to the addressed Machine"
-        );
-        if !record.open_argv.is_empty() {
-            let script = build_preamble(
-                &record.open_argv,
-                &[
-                    (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
-                    (crate::transport::STREAM_ENV, "1"),
-                ],
-            );
-            record.open_argv = ssh_argv(&target.route, forward_agent, &script)?;
-        }
+        let record = serde_json::from_slice(&bytes)?;
         if !connection.prepare {
+            let record = viewed_remotely(record, &target, forward_agent)?;
             anyhow::ensure!(
                 !record.open_argv.is_empty(),
                 "Session has no viewer launch command"
             );
-            crate::transport::relay_over(&record.open_argv, replace)?;
+            loopflow_execution::transport::relay_over(&record.open_argv, unfocused)?;
             // Read the returned Session without repeating New/fork or starting
             // another provider. JSON belongs after the terminal has returned.
             let bytes = runtime.block_on(request(
@@ -297,22 +277,7 @@ pub(super) fn run_with_io(
             output(&mut io, &String::from_utf8(bytes)?)?;
             return Ok(());
         }
-        if !record.open_argv.is_empty() {
-            record.open_argv.splice(
-                0..0,
-                [
-                    std::env::current_exe()?.to_string_lossy().into_owned(),
-                    "session".into(),
-                    "attach".into(),
-                    "--".into(),
-                ],
-            );
-        }
-        if !replace && !record.open_argv.is_empty() {
-            record
-                .open_argv
-                .splice(0..0, ["/usr/bin/env".into(), "LF_RELAY_IF_FREE=1".into()]);
-        }
+        let record = prepared_remotely(record, &target, forward_agent)?;
         if connection.json || cli.json {
             output(&mut io, &format!("{}\n", serde_json::to_string(&record)?))?;
         } else {
@@ -336,20 +301,101 @@ pub(super) fn run_with_io(
                 }) if !args.close
             ));
     if viewer {
-        extra_env.push((crate::transport::STREAM_ENV, "1"));
+        extra_env.push((loopflow_execution::transport::STREAM_ENV, "1"));
     }
-    let preamble = build_preamble(&cmd, &extra_env);
+    let mut preamble = build_preamble(&cmd, &extra_env);
+    if let Some(forwarded) = &forwarded {
+        let mut stderr = std::io::stderr();
+        let notices: &mut dyn std::io::Write = match io.as_mut() {
+            Some(io) => &mut *io.error,
+            None => &mut stderr,
+        };
+        if let Some(file) =
+            loopflow_execution::machine::forward::deliver(&target, forwarded, notices)?
+        {
+            preamble = loopflow_execution::machine::forward::sourced(&file, &preamble);
+        }
+    }
     match io {
-        Some(io) => run_ssh_io(&target.route, forward_agent, &preamble, cli, io),
-        None if viewer => crate::transport::relay_over(
+        Some(io) => {
+            let reads_input = matches!(
+                &cli.command,
+                Some(crate::lf::Commands::Task {
+                    cmd: crate::lf::TaskCommand::Save { .. }
+                        | crate::lf::TaskCommand::Create {
+                            request: None,
+                            notes: None,
+                            ..
+                        },
+                })
+            );
+            loopflow_execution::machine::ssh::run_ssh_io(
+                &target.route,
+                forward_agent,
+                &preamble,
+                reads_input,
+                io,
+            )
+        }
+        None if viewer => loopflow_execution::transport::relay_over(
             &ssh_argv(&target.route, forward_agent, &preamble)?,
-            replace,
+            unfocused,
         ),
         None => run_ssh(&target.route, forward_agent, &preamble),
     }
 }
 
-fn output(io: &mut Option<&mut super::mutation::CommandIo<'_>>, text: &str) -> anyhow::Result<()> {
+/// A Session `target` prepared, its viewer command reaching it over SSH.
+fn viewed_remotely(
+    mut record: SessionRecord,
+    target: &Machine,
+    forward_agent: bool,
+) -> anyhow::Result<SessionRecord> {
+    anyhow::ensure!(
+        record
+            .workspace
+            .as_ref()
+            .is_some_and(|workspace| workspace.machine_id == target.id),
+        "Session reply does not belong to the addressed Machine"
+    );
+    if !record.open_argv.is_empty() {
+        let script = build_preamble(
+            &record.open_argv,
+            &[
+                (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
+                (loopflow_execution::transport::STREAM_ENV, "1"),
+            ],
+        );
+        record.open_argv = ssh_argv(&target.route, forward_agent, &script)?;
+    }
+    Ok(record)
+}
+
+/// A Session `target` prepared, opened from here through `lf session attach`.
+pub(super) fn prepared_remotely(
+    record: SessionRecord,
+    target: &Machine,
+    forward_agent: bool,
+) -> anyhow::Result<SessionRecord> {
+    let mut record = viewed_remotely(record, target, forward_agent)?;
+    if !record.open_argv.is_empty() {
+        record.open_argv.splice(
+            0..0,
+            [
+                std::env::current_exe()?.to_string_lossy().into_owned(),
+                "session".into(),
+                "attach".into(),
+                "--".into(),
+            ],
+        );
+    }
+    Ok(record)
+}
+
+fn output(
+    io: &mut Option<&mut loopflow_execution::command::CommandIo<'_>>,
+    text: &str,
+) -> anyhow::Result<()> {
     match io {
         Some(io) => io.output.write_all(text.as_bytes())?,
         None => {
@@ -358,154 +404,6 @@ fn output(io: &mut Option<&mut super::mutation::CommandIo<'_>>, text: &str) -> a
         }
     }
     Ok(())
-}
-
-fn run_ssh_io(
-    dest: &str,
-    forward_agent: bool,
-    preamble: &str,
-    cli: &Cli,
-    io: &mut super::mutation::CommandIo<'_>,
-) -> anyhow::Result<()> {
-    use std::io::Write;
-    let args = ssh_argv(dest, forward_agent, preamble)?;
-    let mut input = Vec::new();
-    let reads_input = matches!(
-        &cli.command,
-        Some(crate::lf::Commands::Task {
-            cmd: crate::lf::TaskCommand::Save { .. }
-                | crate::lf::TaskCommand::Create {
-                    request: None,
-                    notes: None,
-                    ..
-                },
-        }) | Some(crate::lf::Commands::Desktop {
-            cmd: crate::lf::DesktopCommand::Layout { save: true, .. },
-        })
-    );
-    if reads_input {
-        io.input.read_to_end(&mut input)?;
-    }
-    let mut child = Command::new(&args[0])
-        .args(&args[1..])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let mut stdin = child.stdin.take().expect("piped SSH stdin");
-    // Drain output while sending large drafts: either pipe can fill first.
-    let output = std::thread::scope(|scope| {
-        let sending = scope.spawn(move || stdin.write_all(&input));
-        let output = child.wait_with_output()?;
-        let sent = sending.join().expect("SSH input writer panicked");
-        if output.status.success() {
-            sent?;
-        }
-        Ok::<_, std::io::Error>(output)
-    })?;
-    io.output.write_all(&output.stdout)?;
-    io.error.write_all(&output.stderr)?;
-    command_result(dest, output.status.code())
-}
-
-fn resident_args(
-    args: &[String],
-    cli: &Cli,
-    routed: bool,
-    source: Option<&TaskSource>,
-) -> Vec<String> {
-    // Automatic Work routing carries the resolved plan, not a path on this Machine.
-    let task_flag = cli.task.as_ref().map(|task| format!("--task={task}"));
-    let mut remove_repo = routed && cli.repo.is_some();
-    let mut remaining = cli.account.len() + cli.only_account.len();
-    let mut result = Vec::new();
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        if arg == "--" {
-            result.push(arg.clone());
-            result.extend(iter.cloned());
-            break;
-        }
-        if remove_repo && arg == "--repo" {
-            iter.next();
-            remove_repo = false;
-        } else if remove_repo && arg.starts_with("--repo=") {
-            remove_repo = false;
-        } else if remaining > 0 && matches!(arg.as_str(), "--account" | "--only-account") {
-            iter.next();
-            remaining -= 1;
-        } else if remaining > 0
-            && (arg.starts_with("--account=") || arg.starts_with("--only-account="))
-        {
-            remaining -= 1;
-        } else if let Some(source) = source.filter(|_| {
-            (arg == "--task" && iter.as_slice().first() == cli.task.as_ref())
-                || task_flag.as_ref() == Some(arg)
-        }) {
-            // Linear mappings resolve independently retained Task IDs on the target.
-            if arg == "--task" {
-                iter.next();
-            }
-            result.push(format!(
-                "--task={}",
-                source
-                    .issue_id
-                    .as_deref()
-                    .unwrap_or(source.task_id.as_str())
-            ));
-        } else {
-            result.push(arg.clone());
-        }
-    }
-    result
-}
-
-async fn resolve_task_source(
-    selector: Option<&str>,
-    directory: &std::path::Path,
-) -> anyhow::Result<Option<TaskSource>> {
-    let Some(selector) = selector else {
-        return Ok(None);
-    };
-    let Some(store) = crate::store::open_existing_store().await? else {
-        return Ok(None);
-    };
-    // Validate pushed code before any planning I/O can hide missing source work.
-    let source = TaskSource::resolve(&store, selector).await?;
-    let repo = match store.get_task_by_issue(selector).await? {
-        Some(task) => Some(crate::ops::task::repository_for_task(&store, &task)?),
-        None => crate::repo::discover_repo_root(directory).ok().flatten(),
-    };
-    if let Some(repo) = repo {
-        if crate::ops::planning_client::connected(&repo.to_string_lossy()) {
-            if let Some(task) = store.get_task_by_issue(selector).await? {
-                if let Err(error) = crate::ops::planning_export::sync_export(
-                    &store,
-                    &repo,
-                    &crate::durable::WorkRef::Task(task.id),
-                )
-                .await
-                {
-                    tracing::warn!(%error,"Linear publication pending; remote resolution uses retained planning");
-                }
-            }
-            let source = TaskSource::resolve(&store, selector).await?;
-            if source
-                .as_ref()
-                .is_some_and(|source| source.issue_id.is_none())
-            {
-                return Err(anyhow!("Task {selector} is saved locally but has not reached Linear; retry after planning synchronization"));
-            }
-            return Ok(source);
-        }
-        if let Err(error) =
-            crate::ops::planning_sync::publish_repository(&store, &repo.to_string_lossy()).await
-        {
-            tracing::warn!(%error,"Git planning publication pending; remote resolution uses retained planning");
-        }
-    }
-
-    Ok(source)
 }
 
 pub fn parse_remote_command(lf_args: &[String]) -> anyhow::Result<Cli> {
@@ -532,247 +430,14 @@ pub fn parse_remote_command(lf_args: &[String]) -> anyhow::Result<Cli> {
     }
 }
 
-pub(super) async fn resolve_target(
-    target: &str,
-    forward_agent: bool,
-) -> anyhow::Result<crate::durable::Machine> {
-    let store = crate::store::open_existing_store()
-        .await?
-        .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
-    let machine = super::machine::find_machine(&store, target).await?;
-    if machine.id == store.sqlite.local_machine()?.id {
-        return Ok(machine);
-    }
-    let probe = super::machine::probe(&machine.route, forward_agent).await?;
-    super::machine::report_version(&machine.route, &probe.version);
-    let reached = probe.id?;
-    if reached != machine.id {
-        return Err(anyhow!(
-            "remote machine identity changed: expected {}, reached {reached}; remove and add the connection again",
-            machine.id
-        ));
-    }
-    Ok(machine)
-}
-
-fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
-    let mut lines = vec![super::machine::REMOTE_PATH.to_string()];
-    for (name, value) in extra_env {
-        lines.push(format!("export {name}={}", sh_quote(value)));
-    }
-    lines.push(format!(
-        "exec {}",
-        cmd.iter()
-            .map(|arg| sh_quote(arg))
-            .collect::<Vec<_>>()
-            .join(" ")
-    ));
-    lines.join("\n") + "\n"
-}
-
-/// The caller's repository by identity; `None` outside a repository or before
-/// `lf repo`, when the destination runs in its home directory.
-fn current_repository(
-    directory: &std::path::Path,
-) -> anyhow::Result<Option<crate::durable::RepositoryId>> {
-    let Some(repo) = crate::repository::CanonicalRepo::containing(directory)? else {
-        return Ok(None);
-    };
-    let Some(store) = crate::store::read_existing_registry()? else {
-        return Ok(None);
-    };
-    Ok(store.sqlite.repository_id(&repo.to_string())?)
-}
-
-/// POSIX single-quote escaping: wrap in `'…'`, and render any embedded single
-/// quote as `'\''`. Safe for arbitrary bytes including secrets.
-pub(super) fn sh_quote(value: &str) -> String {
-    let mut quoted = String::with_capacity(value.len() + 2);
-    quoted.push('\'');
-    for ch in value.chars() {
-        if ch == '\'' {
-            quoted.push_str("'\\''");
-        } else {
-            quoted.push(ch);
-        }
-    }
-    quoted.push('\'');
-    quoted
-}
-
-/// Classify an ssh exit code. `255` is ssh's reserved transport-error code;
-/// `None` means death by signal — both are connection-phase failures, distinct
-/// from a real remote command code we must propagate.
-fn command_result(dest: &str, code: Option<i32>) -> anyhow::Result<()> {
-    match code {
-        Some(0) => Ok(()),
-        Some(255) | None => Err(super::machine::transport_failure(
-            dest,
-            "SSH transport closed; see the SSH error above",
-        )),
-        Some(code) => Err(crate::process::CommandExit(
-            u8::try_from(code).expect("SSH command exit status fits a byte"),
-        )
-        .into()),
-    }
-}
-
-/// Carry the script as an argument: stdin belongs to file drafts or terminal input.
-fn ssh_argv(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<Vec<String>> {
-    let args = crate::machine_route::bounded_ssh_args(dest, forward_agent)?;
-    let mut argv = vec!["ssh".into()];
-    argv.extend(args);
-    argv.push(preamble.into());
-    Ok(argv)
-}
-
-fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()> {
-    let mut argv = ssh_argv(dest, forward_agent, preamble)?;
-    if std::io::stdin().is_terminal() {
-        for arg in &mut argv {
-            if arg == "-T" {
-                *arg = "-t".into();
-            }
-        }
-    }
-    let status = Command::new(&argv[0])
-        .args(&argv[1..])
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .context("ssh did not complete")?;
-    command_result(dest, status.code())
-}
-
-/// One bounded request through the ordinary SSH envelope, with `input` on its
-/// stdin. No probes, credentials, provider launch or local fallback; callers
-/// validate the request-bound reply. A request carrying input (a moved
-/// conversation) may check out its branch there, so it waits longer.
-pub(crate) async fn request(
-    machine: &crate::durable::Machine,
-    args: &[String],
-    input: Option<&[u8]>,
-) -> anyhow::Result<Vec<u8>> {
-    use tokio::io::AsyncWriteExt;
-    let cmd = std::iter::once("lf".to_string())
-        .chain(args.iter().cloned())
-        .collect::<Vec<_>>();
-    let preamble = build_preamble(&cmd, &[(EXPECTED_MACHINE_ID_ENV, machine.id.as_str())]);
-    let mut command = tokio::process::Command::new("ssh");
-    command
-        .args(crate::machine_route::bounded_ssh_args(
-            &machine.route,
-            false,
-        )?)
-        .arg(preamble)
-        .stdin(if input.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    let bound = std::time::Duration::from_secs(if input.is_some() { 300 } else { 20 });
-    let exchange = async {
-        let mut child = command.spawn()?;
-        if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
-            stdin.write_all(input).await?;
-        }
-        child.wait_with_output().await
-    };
-    let output = tokio::time::timeout(bound, exchange)
-        .await
-        .context("Machine command unavailable: peer timed out")??;
-    anyhow::ensure!(
-        output.status.success(),
-        "Machine command unavailable: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
-    );
-    Ok(output.stdout)
-}
-
 #[cfg(test)]
 mod dispatch_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::{build_preamble, command_result, parse_remote_command, resident_args};
+    use super::parse_remote_command;
+    use loopflow_execution::machine::task::resident_args;
 
-    #[test]
-    fn repository_addressed_transport_preserves_arguments_in_the_home_directory() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let bin = dir.path().join(".local/bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        let lf = bin.join("lf");
-        std::fs::write(&lf, "#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$@\"\n").unwrap();
-        std::fs::set_permissions(&lf, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let script = build_preamble(
-            &[
-                "lf".into(),
-                "--repo-id".into(),
-                "repo_exact".into(),
-                "--task".into(),
-                "task_exact".into(),
-                ":".into(),
-                "literal 'draft'; $(false)".into(),
-            ],
-            &[("LF_EXPECTED_MACHINE_ID", "home_fixture")],
-        );
-        let output = std::process::Command::new("/bin/bash")
-            .args(["-c", &script])
-            .env_clear()
-            .env("HOME", dir.path())
-            .env("PATH", "/usr/bin:/bin")
-            .current_dir(dir.path())
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-        let text = String::from_utf8(output.stdout).unwrap();
-        let lines = text.lines().collect::<Vec<_>>();
-        assert_eq!(
-            lines[0],
-            dir.path().canonicalize().unwrap().to_str().unwrap()
-        );
-        assert_eq!(
-            &lines[1..],
-            &[
-                "--repo-id",
-                "repo_exact",
-                "--task",
-                "task_exact",
-                ":",
-                "literal 'draft'; $(false)"
-            ]
-        );
-    }
-
-    #[test]
-    fn remote_preferences_cannot_relax_the_resident_account_restriction() {
-        let args = ["--account", "person@", "skill", "implement"].map(str::to_string);
-        assert_eq!(
-            resident_args(&args, &parse_remote_command(&args).unwrap(), false, None),
-            ["skill", "implement"]
-        );
-    }
-    #[test]
-    fn remote_prompt_preserves_literal_account_flags() {
-        let args = [
-            "--only-account=codex=person@",
-            "skill",
-            "implement",
-            "--",
-            "--shared",
-            "--account=other@",
-        ]
-        .map(str::to_string);
-        assert_eq!(
-            resident_args(&args, &parse_remote_command(&args).unwrap(), false, None),
-            ["skill", "implement", "--", "--shared", "--account=other@"]
-        );
-    }
     #[test]
     fn repository_paths_stay_on_explicit_machine_but_not_automatic_work_routes() {
         for selection in [vec!["--repo", "~/src/remote"], vec!["--repo=~/src/remote"]] {
@@ -782,54 +447,13 @@ mod tests {
             ]);
             let args = args.into_iter().map(str::to_owned).collect::<Vec<_>>();
             let cli = parse_remote_command(&args).unwrap();
-            assert_eq!(resident_args(&args, &cli, false, None), args);
             assert_eq!(
-                resident_args(&args, &cli, true, None),
-                ["--task", "LOO-427", "skill", "debug", "--", "--repo", "literal"]
+                resident_args(&args, cli.task.as_ref(), cli.repo.is_some(), false, None),
+                args
             );
-        }
-    }
-
-    #[test]
-    fn ssh_args_bound_the_connection() {
-        let args = crate::machine_route::bounded_ssh_args("jack@mini-heart", false).unwrap();
-        // Primary hang killer: never block on an interactive prompt.
-        assert!(args.iter().any(|a| a == "BatchMode=yes"));
-        // Connect handshake and stalled-session bounds.
-        assert!(args.iter().any(|a| a == "ConnectTimeout=10"));
-        assert!(args.iter().any(|a| a == "ServerAliveInterval=10"));
-        assert!(args.iter().any(|a| a == "ServerAliveCountMax=3"));
-        assert_eq!(args.last().unwrap(), "jack@mini-heart");
-        // Agent forwarding stays opt-in; OpenSSH parses destination ports.
-        assert!(!args.iter().any(|a| a == "-A"));
-        assert!(!args.iter().any(|a| a == "-p"));
-    }
-
-    #[test]
-    fn ssh_args_opt_in_agent_forwarding() {
-        let args = crate::machine_route::bounded_ssh_args("host", true).unwrap();
-        assert_eq!(args.first().unwrap(), "-A");
-    }
-
-    #[test]
-    fn command_result_preserves_remote_exit_codes_and_reports_transport_failure() {
-        assert!(command_result("mini", Some(0)).is_ok());
-        for code in [Some(255), None] {
-            let error = command_result("mini", code).unwrap_err();
-            assert!(error
-                .downcast_ref::<crate::process::CommandExit>()
-                .is_none());
-            assert!(error.to_string().contains("unreachable"));
-            assert!(error.to_string().contains("mini"));
-        }
-        for code in [1, 42, 254] {
-            let error = command_result("mini", Some(code)).unwrap_err();
             assert_eq!(
-                error
-                    .downcast_ref::<crate::process::CommandExit>()
-                    .unwrap()
-                    .0,
-                code as u8
+                resident_args(&args, cli.task.as_ref(), cli.repo.is_some(), true, None),
+                ["--task", "LOO-427", "skill", "debug", "--", "--repo", "literal"]
             );
         }
     }

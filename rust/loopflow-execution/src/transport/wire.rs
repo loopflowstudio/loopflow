@@ -1,0 +1,689 @@
+//! What crosses a viewer connection: length-prefixed frames, JSON requests and
+//! replies, and events riding inside the terminal stream as nonce-tagged APC
+//! sequences. A held terminal's viewer counts PTY bytes: its out frames are
+//! exactly the PTY's output, a position frame says where a snapshot or a
+//! skipped stretch leaves it, and lf's own reports and events travel in aside
+//! frames it writes but does not count.
+
+use std::io;
+
+use serde::{Deserialize, Serialize};
+
+/// The largest stream frame a host emits.
+pub const CHUNK: usize = 64 * 1024;
+/// The largest payload either side accepts.
+pub(super) const MAX_PAYLOAD: usize = 4 * 1024 * 1024;
+/// Events may span stream frames, up to the transport's payload limit.
+const MAX_EVENT: usize = MAX_PAYLOAD;
+const HEADER: usize = 5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Tag {
+    /// JSON answering one request.
+    Reply = 0x01,
+    /// The terminal's snapshot, in whatever format the host has.
+    Snapshot = 0x02,
+    /// Stream 1: PTY output, or stdout for a piped command.
+    Out = 0x03,
+    /// Stream 2: stderr for a piped command.
+    Err = 0x04,
+    /// A held terminal's PTY position the stream stands at now, eight bytes
+    /// big-endian.
+    Position = 0x05,
+    /// Bytes for the viewer's terminal that are not the PTY's output: lf's
+    /// reports and events. Never counted as a position.
+    Aside = 0x06,
+    /// Final JSON close reason, outside the counted terminal stream.
+    Close = 0x07,
+    /// JSON carrying an `id`.
+    Request = 0x11,
+    /// Keystrokes from an attached connection.
+    Input = 0x12,
+}
+
+impl Tag {
+    /// The tag carrying stream `stream`: 1 is out, 2 is err.
+    pub fn stream(stream: u8) -> Self {
+        if stream == 2 {
+            Self::Err
+        } else {
+            Self::Out
+        }
+    }
+
+    fn parse(byte: u8) -> Option<Self> {
+        Some(match byte {
+            0x01 => Self::Reply,
+            0x02 => Self::Snapshot,
+            0x03 => Self::Out,
+            0x04 => Self::Err,
+            0x05 => Self::Position,
+            0x06 => Self::Aside,
+            0x07 => Self::Close,
+            0x11 => Self::Request,
+            0x12 => Self::Input,
+            _ => return None,
+        })
+    }
+}
+
+/// Append `payload` as one frame.
+pub fn encode(tag: Tag, payload: &[u8], into: &mut impl Extend<u8>) {
+    into.extend([tag as u8]);
+    into.extend((payload.len() as u32).to_be_bytes());
+    into.extend(payload.iter().copied());
+}
+
+/// A position frame's payload.
+pub fn position(at: u64) -> [u8; 8] {
+    at.to_be_bytes()
+}
+
+/// The position a position frame carries.
+pub(super) fn parse_position(payload: &[u8]) -> io::Result<u64> {
+    let bytes: [u8; 8] = payload
+        .try_into()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "position frame is not 8 bytes"))?;
+    Ok(u64::from_be_bytes(bytes))
+}
+
+pub fn frame(tag: Tag, payload: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(HEADER + payload.len());
+    encode(tag, payload, &mut bytes);
+    bytes
+}
+
+/// Reassemble frames from a byte stream.
+#[derive(Debug, Default)]
+pub(super) struct Decoder {
+    buffer: Vec<u8>,
+}
+
+impl Decoder {
+    pub fn extend(&mut self, bytes: &[u8]) {
+        self.buffer.extend_from_slice(bytes);
+    }
+
+    pub fn next(&mut self) -> io::Result<Option<(Tag, Vec<u8>)>> {
+        if self.buffer.len() < HEADER {
+            return Ok(None);
+        }
+        let tag = Tag::parse(self.buffer[0])
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "unknown transport frame"))?;
+        let length = u32::from_be_bytes(
+            self.buffer[1..HEADER]
+                .try_into()
+                .expect("header holds four length bytes"),
+        ) as usize;
+        if length > MAX_PAYLOAD {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "transport frame too large",
+            ));
+        }
+        if self.buffer.len() < HEADER + length {
+            return Ok(None);
+        }
+        let payload = self.buffer[HEADER..HEADER + length].to_vec();
+        self.buffer.drain(..HEADER + length);
+        Ok(Some((tag, payload)))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Requests and replies
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CloseReason {
+    /// The terminal attachment moved to a replacement. Reattach by Session.
+    Replaced,
+    /// Execution finished. Stop automatic reattachment.
+    Finished,
+    /// Cleanup ended this terminal. Deliberate resume remains available.
+    Retired,
+}
+
+/// The last frame before an orderly terminal disconnect. No stream offset
+/// transfers to a replacement terminal.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Close {
+    pub reason: CloseReason,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Incoming {
+    pub id: u64,
+    #[serde(flatten)]
+    pub request: Request,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Request {
+    /// Every attached view may type. The view that most recently received
+    /// focus or input sizes and colors the terminal.
+    Attach {
+        rows: u16,
+        cols: u16,
+        /// Omitted by older viewers, whose attach takes the size.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        focused: Option<bool>,
+        /// How this viewer is named to others when it sizes the terminal.
+        name: Option<String>,
+        /// A held terminal's PTY position this viewer's screen already shows.
+        /// The stream continues from there with no snapshot, or begins with
+        /// one when the holder's ring no longer reaches back that far. Relays
+        /// from before positions leave it out.
+        from: Option<u64>,
+    },
+    Resize {
+        rows: u16,
+        cols: u16,
+    },
+    /// Cleanup is ending this execution; deliver the reason and retain its
+    /// final screen. The held terminal ends on it.
+    CloseNotice {
+        text: String,
+    },
+    /// The view's terminal gained or lost focus (DEC mode 1004). Gaining it
+    /// gives this view the size; the agent hears it only if it asked for focus
+    /// reports itself.
+    Focus {
+        focused: bool,
+    },
+    /// Remember this viewer's colors; relay them while it sizes the terminal.
+    Theme {
+        theme: serde_json::Value,
+    },
+    /// The viewer is closing on purpose; keep nothing for it.
+    Leave,
+    DetachViewers {
+        key: String,
+    },
+    /// An OSC 7501 program status for `program`, relayed to every viewer.
+    Status {
+        key: String,
+        program: String,
+        state: loopflow_model::program_status::State,
+        progress: Option<u8>,
+    },
+    Directory {
+        key: String,
+        cwd: std::path::PathBuf,
+    },
+    /// The direct child's native client began. `exit` replaces the client's own
+    /// exit text; a detaching viewer prints `detach`.
+    NativeStarted {
+        key: String,
+        exit: String,
+        detach: String,
+    },
+    /// The native client exited; acknowledged once its exit line is delivered.
+    NativeEnded {
+        key: String,
+    },
+    /// What a viewer can type, shown when it attaches and while the
+    /// registering connection stays open.
+    InputHint {
+        key: String,
+        hint: String,
+    },
+    /// Whether some view is attached and the native client is ready for it.
+    /// On an attached connection this also refreshes the viewer's liveness.
+    Controlled {
+        /// A viewer acknowledges Return on its existing heartbeat protocol.
+        /// A holder from an earlier build ignores it.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ready: Option<String>,
+    },
+    /// Transfer the direct child's exit recording to its host before exec.
+    ExitRecord {
+        key: String,
+        pid: u32,
+        record: Box<crate::harness::native_exit::NativeExit>,
+    },
+    /// Cancel that transfer when exec fails.
+    DropExitRecord {
+        key: String,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(super) struct Outgoing {
+    /// The request this answers.
+    pub answers: u64,
+    /// The last event queued on this viewer's stream when the reply was computed.
+    pub seq: u64,
+    #[serde(flatten)]
+    pub reply: Reply,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Reply {
+    Attached {
+        viewer: String,
+        nonce: String,
+        terminal: bool,
+        owner: Option<String>,
+    },
+    Busy,
+    Controlled {
+        /// Some view is attached.
+        viewed: bool,
+        /// None means a holder from an earlier build cannot report native readiness.
+        ready: Option<bool>,
+    },
+    NativeEnded,
+    Accepted,
+}
+
+// ---------------------------------------------------------------------------
+// In-band events
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Event {
+    /// Validated display evidence from the host's terminal parser. No action authority.
+    ProgramStatus {
+        status: loopflow_model::program_status::Records,
+    },
+    Resize {
+        rows: u16,
+        cols: u16,
+    },
+    Theme {
+        theme: serde_json::Value,
+    },
+    /// Who sizes and colors the terminal now: the view that most recently
+    /// attached, typed or gained focus. `held` is whether the recipient does.
+    Owner {
+        viewer: Option<String>,
+        name: Option<String>,
+        held: bool,
+    },
+    ChildExited {
+        code: u8,
+    },
+    Detached,
+    Hint {
+        text: String,
+    },
+    /// How a viewer that detaches can return.
+    Return {
+        detach: String,
+    },
+    /// The execution's directory. Hosts read a terminal's foreground process as
+    /// well as its reports, so the viewer enters it: host and viewer share a
+    /// Machine, and the two sources must not disagree.
+    Directory {
+        cwd: std::path::PathBuf,
+    },
+    /// A viewer that attached from a position has caught up: what follows is
+    /// the live stream, and its terminal's answers to replayed queries are over.
+    Live,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Sequenced {
+    seq: u64,
+    #[serde(flatten)]
+    event: Event,
+}
+
+fn prefix(nonce: &str) -> Vec<u8> {
+    format!("\x1b_lf1;{nonce};").into_bytes()
+}
+
+/// `event` as the APC sequence a viewer holding `nonce` recognizes.
+pub fn event(nonce: &str, seq: u64, event: Event) -> Vec<u8> {
+    let mut bytes = prefix(nonce);
+    bytes.extend(serde_json::to_vec(&Sequenced { seq, event }).expect("events serialize"));
+    bytes.extend(b"\x1b\\");
+    bytes
+}
+
+/// One stretch of a scanned stream: program bytes or one of our events.
+#[derive(Debug, PartialEq)]
+pub(super) enum Piece {
+    Bytes(Vec<u8>),
+    Event(u64, Event),
+}
+
+/// Separate a viewer's events from program output, across frame boundaries.
+#[derive(Debug)]
+pub(super) struct Scanner {
+    prefix: Vec<u8>,
+    /// Bytes that may begin or continue one of our events.
+    held: Vec<u8>,
+}
+
+impl Scanner {
+    pub fn new(nonce: &str) -> Self {
+        Self {
+            prefix: prefix(nonce),
+            held: Vec::new(),
+        }
+    }
+
+    /// Recognize events by `nonce` from here on. Bytes held as a possible
+    /// event are scanned again under it.
+    pub fn renonce(&mut self, nonce: &str) {
+        self.prefix = prefix(nonce);
+    }
+
+    pub fn scan(&mut self, bytes: &[u8]) -> Vec<Piece> {
+        let mut data = std::mem::take(&mut self.held);
+        data.extend_from_slice(bytes);
+        let mut pieces = Vec::new();
+        let mut text = Vec::new();
+        let mut i = 0;
+        while i < data.len() {
+            if data[i] != 0x1b {
+                text.push(data[i]);
+                i += 1;
+                continue;
+            }
+            let rest = &data[i..];
+            let common = rest.len().min(self.prefix.len());
+            if rest[..common] != self.prefix[..common] {
+                text.push(0x1b);
+                i += 1;
+                continue;
+            }
+            if rest.len() < self.prefix.len() {
+                self.held = rest.to_vec();
+                break;
+            }
+            let body = &rest[self.prefix.len()..];
+            match body.windows(2).position(|w| w == b"\x1b\\") {
+                Some(end) if self.prefix.len() + end + 2 <= MAX_EVENT => {
+                    if let Ok(Sequenced { seq, event }) = serde_json::from_slice(&body[..end]) {
+                        if !text.is_empty() {
+                            pieces.push(Piece::Bytes(std::mem::take(&mut text)));
+                        }
+                        pieces.push(Piece::Event(seq, event));
+                    } else {
+                        text.extend_from_slice(&rest[..self.prefix.len() + end + 2]);
+                    }
+                    i += self.prefix.len() + end + 2;
+                }
+                None if rest.len() <= MAX_EVENT => {
+                    self.held = rest.to_vec();
+                    break;
+                }
+                _ => {
+                    text.push(0x1b);
+                    i += 1;
+                }
+            }
+        }
+        if !text.is_empty() {
+            pieces.push(Piece::Bytes(text));
+        }
+        pieces
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use super::{
+        encode, event, frame, Decoder, Event, Incoming, Piece, Request, Scanner, Tag, MAX_PAYLOAD,
+    };
+
+    #[test]
+    fn mobile_observer_fixture_is_the_actual_owner_stream() {
+        let mut bytes = frame(
+            Tag::Reply,
+            &serde_json::to_vec(&super::Outgoing {
+                answers: 1,
+                seq: 0,
+                reply: super::Reply::Attached {
+                    viewer: "mobile-viewer".into(),
+                    nonce: "fixture-nonce".into(),
+                    terminal: true,
+                    owner: Some("desktop-viewer".into()),
+                },
+            })
+            .unwrap(),
+        );
+        bytes.extend(frame(Tag::Snapshot, b"\x1b[?2004h\x1b[2J\x1b[HHello "));
+        bytes.extend(frame(Tag::Snapshot, b"from a retained Session\r\n> "));
+        let resize = event(
+            "fixture-nonce",
+            1,
+            Event::Resize {
+                rows: 40,
+                cols: 120,
+            },
+        );
+        bytes.extend(frame(Tag::Out, &resize[..12]));
+        let mut tail = resize[12..].to_vec();
+        tail.extend(event(
+            "fixture-nonce",
+            2,
+            Event::Owner {
+                viewer: Some("desktop-viewer".into()),
+                name: Some("Desktop".into()),
+                held: false,
+            },
+        ));
+        tail.extend(b"live\r\n");
+        tail.extend(event("other-nonce", 3, Event::Live));
+        bytes.extend(frame(Tag::Out, &tail));
+        assert_eq!(
+            bytes,
+            include_bytes!("../../../../tests/fixtures/dto/owner/observer.bin")
+        );
+    }
+
+    #[test]
+    fn mobile_directory_fixture_keeps_owner_event_sequence() {
+        let mut bytes = frame(
+            Tag::Out,
+            &event(
+                "fixture-nonce",
+                3,
+                Event::Directory {
+                    cwd: "/src/project".into(),
+                },
+            ),
+        );
+        bytes.extend(frame(
+            Tag::Out,
+            &event(
+                "fixture-nonce",
+                4,
+                Event::Owner {
+                    viewer: Some("mobile-viewer".into()),
+                    name: None,
+                    held: true,
+                },
+            ),
+        ));
+        assert_eq!(
+            bytes,
+            include_bytes!("../../../../tests/fixtures/dto/owner/directory.bin")
+        );
+    }
+
+    #[test]
+    fn mobile_status_fixture_uses_shared_validated_records() {
+        let records = loopflow_model::program_status::Records {
+            seen: true,
+            records: vec![loopflow_model::program_status::Report {
+                state: loopflow_model::program_status::State::Blocked,
+                id: Some("provider".into()),
+                kind: Some(loopflow_model::program_status::Kind::Permission),
+                progress: None,
+                app: Some("codex".into()),
+                title: None,
+                msg: Some("Needs a decision".into()),
+            }],
+        };
+        assert!(records.validate());
+        let mut bytes = frame(
+            Tag::Out,
+            &event("fixture-nonce", 3, Event::ProgramStatus { status: records }),
+        );
+        bytes.extend(frame(
+            Tag::Out,
+            &event(
+                "fixture-nonce",
+                4,
+                Event::ProgramStatus {
+                    status: loopflow_model::program_status::Records {
+                        seen: true,
+                        records: vec![],
+                    },
+                },
+            ),
+        ));
+        assert_eq!(
+            bytes,
+            include_bytes!("../../../../tests/fixtures/dto/owner/program-status.bin")
+        );
+    }
+
+    #[test]
+    fn a_maximum_frame_can_share_a_read_with_the_next_frame() {
+        let payload = vec![b'x'; MAX_PAYLOAD];
+        let mut bytes = frame(Tag::Input, &payload);
+        bytes.extend(frame(Tag::Input, b"next"));
+        let mut decoder = Decoder::default();
+        let mut decoded = Vec::new();
+        for chunk in bytes.chunks(8192) {
+            decoder.extend(chunk);
+            while let Some(frame) = decoder.next().unwrap() {
+                decoded.push(frame);
+            }
+        }
+        assert_eq!(
+            decoded,
+            vec![(Tag::Input, payload), (Tag::Input, b"next".to_vec())]
+        );
+    }
+
+    #[test]
+    fn an_oversized_frame_is_rejected_before_receiving_its_payload() {
+        let mut decoder = Decoder::default();
+        decoder.extend(&[Tag::Input as u8]);
+        decoder.extend(&((MAX_PAYLOAD + 1) as u32).to_be_bytes());
+        assert_eq!(
+            decoder.next().unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn frames_round_trip_across_split_reads() {
+        let mut wire = VecDeque::new();
+        encode(Tag::Out, b"hello", &mut wire);
+        encode(Tag::Err, b"", &mut wire);
+        let wire: Vec<u8> = wire.into();
+        let mut decoder = Decoder::default();
+        decoder.extend(&wire[..3]);
+        assert!(decoder.next().unwrap().is_none());
+        decoder.extend(&wire[3..]);
+        assert_eq!(decoder.next().unwrap(), Some((Tag::Out, b"hello".to_vec())));
+        assert_eq!(decoder.next().unwrap(), Some((Tag::Err, Vec::new())));
+        assert!(decoder.next().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_status_report_keeps_its_request_id_and_program_apart() {
+        let sent = Incoming {
+            id: 7,
+            request: Request::Status {
+                key: "k".into(),
+                program: "lf/abc/step".into(),
+                state: loopflow_model::program_status::State::Working,
+                progress: Some(40),
+            },
+        };
+        let json = serde_json::to_vec(&sent).unwrap();
+        let received: Incoming = serde_json::from_slice(&json).unwrap();
+        assert_eq!(received.id, 7);
+        let Request::Status {
+            program, progress, ..
+        } = received.request
+        else {
+            panic!("{received:?}");
+        };
+        assert_eq!(program, "lf/abc/step");
+        assert_eq!(progress, Some(40));
+    }
+
+    #[test]
+    fn events_are_recognized_only_with_the_viewers_nonce() {
+        let resize = Event::Resize {
+            rows: 40,
+            cols: 120,
+        };
+        let ours = event("a1b2", 7, resize.clone());
+        let theirs = event("ffff", 7, resize.clone());
+        let mut scanner = Scanner::new("a1b2");
+        let mut stream = b"before".to_vec();
+        stream.extend(&ours);
+        stream.extend(&theirs);
+        stream.extend(b"after\x1b_lf1;a1b2;not json\x1b\\");
+        let pieces = scanner.scan(&stream);
+        assert_eq!(pieces[0], Piece::Bytes(b"before".to_vec()));
+        assert_eq!(pieces[1], Piece::Event(7, resize));
+        let Piece::Bytes(tail) = &pieces[2] else {
+            panic!("{pieces:?}");
+        };
+        assert!(tail.starts_with(&theirs), "{tail:?}");
+        assert!(tail.ends_with(b"not json\x1b\\"), "{tail:?}");
+        assert_eq!(pieces.len(), 3);
+    }
+
+    #[test]
+    fn an_event_split_across_frames_is_reassembled() {
+        let exit = Event::ChildExited { code: 3 };
+        let bytes = event("0123456789abcdef", 1, exit.clone());
+        let mut scanner = Scanner::new("0123456789abcdef");
+        let mut pieces = Vec::new();
+        for byte in &bytes {
+            pieces.extend(scanner.scan(&[*byte]));
+        }
+        assert_eq!(pieces, vec![Piece::Event(1, exit)]);
+        assert_eq!(
+            scanner.scan(b"\x1b[0m"),
+            vec![Piece::Bytes(b"\x1b[0m".to_vec())]
+        );
+    }
+
+    #[test]
+    fn a_large_event_is_independent_of_read_boundaries() {
+        let theme = Event::Theme {
+            theme: serde_json::json!({"palette": "x".repeat(2 * super::CHUNK)}),
+        };
+        let bytes = event("0123456789abcdef", 1, theme.clone());
+        let expected = vec![Piece::Event(1, theme)];
+        assert_eq!(Scanner::new("0123456789abcdef").scan(&bytes), expected);
+        let mut scanner = Scanner::new("0123456789abcdef");
+        let pieces: Vec<_> = bytes
+            .chunks(8192)
+            .flat_map(|chunk| scanner.scan(chunk))
+            .collect();
+        assert!(
+            pieces == expected,
+            "a fragmented event must not become terminal output"
+        );
+    }
+
+    #[test]
+    fn a_program_escape_that_merely_starts_like_a_prefix_is_passed_through() {
+        let mut scanner = Scanner::new("abcd");
+        assert_eq!(scanner.scan(b"\x1b_l"), vec![]);
+        assert_eq!(
+            scanner.scan(b"x\x1b\\done"),
+            vec![Piece::Bytes(b"\x1b_lx\x1b\\done".to_vec())]
+        );
+    }
+}

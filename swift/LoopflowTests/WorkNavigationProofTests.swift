@@ -32,7 +32,7 @@ struct WorkNavigationProofTests {
             planning["completed"] = false
             task["task"] = planning
             var runtime = try #require(task["runtime"] as? [String: Any])
-            runtime["work_id"] = "scroll-work-\(index)"
+            runtime["work_id"] = "scroll-task-\(index)"
             runtime["owner"] = ["person": "Jack Heart", "person_id": NSNull(), "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]
             task["runtime"] = runtime
             return task
@@ -127,12 +127,12 @@ struct WorkNavigationProofTests {
         let surfaces = try terminals.map { try #require($0.surface) }
         let shells = workspace.multiplexer.layout.allPanes.map(\.id)
         let layout = workspace.multiplexer.layout
-        let task = WorkReference.task(id: "ts_review00000000000000000000000000")
+        let task = WorkReference.task(id: "issue-review")
         let named = try NamedSessionSource(records: JSONSerialization.data(withJSONObject: ["first", "second"].enumerated().map { index, id in
             let record = try renameFixtureRecord(id, title: index == 0 ? "review-design" : "lyric-cadenza", work: task)
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
             value["state"] = "active"
-            value["actions"] = sessionActionFixture(state: "active")
+            value["action"] = sessionActionFixture(state: "active")
             value["terminal_ids"] = [shells[index]]
             value["wave_id"] = "wave-1"
             value["open_argv"] = ["must-not-launch"]
@@ -149,7 +149,8 @@ struct WorkNavigationProofTests {
         var items = try #require(tasks["items"] as? [[String: Any]])
         let taskIndex = try #require(items.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-review" })
         items[taskIndex]["latest_graph_process"] = latest
-        items[taskIndex]["execution"] = ["state": "running", "reason": "Running", "step": NSNull(), "captured": NSNull()]
+        items[taskIndex]["execution"] = ["state": "running", "reason": "Running", "step": NSNull(), "captured": NSNull(),
+                                        "died": NSNull(), "outlook": NSNull()]
         tasks["items"] = items; plan["tasks"] = tasks
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self)
         let planning = RoadmapSource(roadmap)
@@ -215,7 +216,7 @@ struct WorkNavigationProofTests {
             #expect(workspace.multiplexer.layout == layout)
             #expect(window.firstResponder === terminals[1])
             if failing {
-                guard case .unavailable(_, let reason) = model.sessions else {
+                guard let reason = model.sessions.failure else {
                     Issue.record("Failed page lost its unavailable state")
                     return
                 }
@@ -332,12 +333,11 @@ struct WorkNavigationProofTests {
         model.navigation.renaming?.text = "Second conversation"
         await named.rejectNextRename()
         try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename-save").button().tap()
-        // The save starts asynchronously; wait for the refusal itself.
-        for _ in 0..<10 where model.navigation.renaming?.error == nil { try await settle(window) }
-        #expect(model.navigation.renaming?.text == "Second conversation")
-        #expect(model.navigation.renaming?.error == "Rename refused")
+        // The name shows in the click; the refusal restores it and says why.
+        #expect(model.navigation.renaming == nil)
+        for _ in 0..<10 where !model.pendingChanges.changes.isEmpty { try await settle(window) }
+        #expect(model.navigation.notices.current?.text == "lyric-cadenza couldn't be renamed: Rename refused")
         #expect(model.sessions.value?.first { $0.id == "second" }?.title == "lyric-cadenza")
-        model.cancelSessionRename()
 
         try clickTerminal(0)
         try await settle(window)
@@ -345,8 +345,7 @@ struct WorkNavigationProofTests {
         model.navigation.renaming?.text = "Pinned rename target"
         await named.holdNextRename()
         try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename-save").button().tap()
-        try await settle(window)
-        #expect(model.navigation.renaming?.submitting == true)
+        #expect(model.sessions.value?.first { $0.id == "first" }?.title == "Pinned rename target")
         try clickTerminal(1)
         try await settle(window)
         #expect(model.navigation.selectedSessionId == "second")
@@ -355,7 +354,7 @@ struct WorkNavigationProofTests {
         #expect(model.navigation.selectedSessionId == "second")
         #expect(window.firstResponder === terminals[2])
         await named.releaseRename()
-        for _ in 0..<10 where model.navigation.renaming != nil { try await settle(window) }
+        for _ in 0..<10 where !model.pendingChanges.changes.isEmpty { try await settle(window) }
         #expect(model.sessions.value?.first { $0.id == "first" }?.title == "Pinned rename target")
         #expect(model.sessions.value?.first { $0.id == "second" }?.title == "lyric-cadenza")
         #expect(model.navigation.selectedSessionId == "second")
@@ -435,7 +434,7 @@ struct WorkNavigationProofTests {
             records.append([
                 "id": "row-\(index)", "run_id": "row-\(index)", "interactive": true, "work": NSNull(),
                 "title": "Conversation \(index)", "detail": "Local shell", "cwd": path,
-                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "blocked": false, "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn": NSNull(), "raw": false, "terminal_ids": [shell],
+                "state": "active", "work_path": NSNull(), "action": sessionActionFixture(state: "active"), "blocked": false, "title_source": "generated", "ended": NSNull(), "start": NSNull(), "outlook": NSNull(), "status_line": NSNull(), "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn": NSNull(), "raw": false, "terminal_ids": [shell],
                 "open_argv": ["must-not-launch"],
             ])
         }
@@ -585,14 +584,14 @@ struct WorkNavigationProofTests {
         )), at: "/src/loopflow"), as: UTF8.self)
         let records = """
         [{"id":"navigation-split", "run_id": "navigation-split", "interactive": true,
-          "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
+          "work":{"kind":"task","id":"issue-review"},
           "title":"Navigation proof","detail":"Local cat PTY","cwd":"/tmp",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"blocked": false, "title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": ["ts_review00000000000000000000000000"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","work_path":null,"action":\(sessionActionFixtureJSON(state: "active")),"blocked": false, "title_source":"generated","ended": null, "start": null, "outlook": null, "status_line": null, "task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": ["issue-review"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         let otherRecords = """
         [{"id":"context-session", "run_id": "context-session", "interactive": true,"work":null,
           "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"blocked": false, "title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["lf","session","resume","context-session"]}]
+          "state":"active","work_path":null,"action":\(sessionActionFixtureJSON(state: "active")),"blocked": false, "title_source":"generated","ended": null, "start": null, "outlook": null, "status_line": null, "task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["lf","session","resume","context-session"]}]
         """
         let query = RegistryQuery { args, cwd in
             switch args.first {

@@ -3,6 +3,18 @@ import Foundation
 public enum ProgramStatusState: String, Codable, Sendable, Hashable {
     case idle, working, done, blocked, error, clear
 
+    /// Conversation activity wording; wire values remain the program's claims.
+    public var label: String {
+        switch self {
+        case .idle: "Available"
+        case .working: "Busy"
+        case .done: "Done"
+        case .blocked: "Blocked"
+        case .error: "Error"
+        case .clear: "Clear"
+        }
+    }
+
     /// Attention order for summaries within a terminal or across Sessions.
     /// Clear removes records; it is never a summary state.
     public static let summaryOrder: [Self] = [.blocked, .error, .working, .done, .idle]
@@ -34,7 +46,7 @@ public struct ProgramStatusReport: Codable, Sendable, Hashable {
     }
 
     public var displayText: String {
-        var parts = [state.rawValue.capitalized]
+        var parts = [state.label]
         if state == .blocked, let kind { parts.append(kind.rawValue.capitalized) }
         if let progress { parts.append("\(progress)%") }
         if let msg, !msg.isEmpty { parts.append(Self.displaySafe(msg)) }

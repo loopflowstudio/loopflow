@@ -1,6 +1,6 @@
 import Foundation
 
-/// A frame's first byte on an owner connection, as `rust/loopflow/src/transport/wire.rs` names it.
+/// A frame's first byte on an owner connection, as `rust/loopflow-execution/src/transport/wire.rs` names it.
 public enum OwnerTag: UInt8, Sendable {
     case reply = 0x01, snapshot = 0x02, out = 0x03, err = 0x04
     case request = 0x11, input = 0x12
@@ -11,7 +11,9 @@ public enum TerminalEvent: Sendable {
     case geometry(columns: Int, rows: Int)
     case snapshot(Data)
     case output(Data)
-    case control(input: Bool, geometry: Bool)
+    /// Whether this view sizes the terminal. Every attached view may type;
+    /// a focused attachment, input or focus-in takes the size.
+    case sizing(Bool)
     case programStatus(ProgramStatusRecords)
     case ended
     case disconnected(String)
@@ -35,8 +37,7 @@ public struct OwnerStream: Sendable {
     private var sequence: UInt64 = 0
     private var viewer: String?
     public private(set) var ready = false
-    public private(set) var inputControl = false
-    public private(set) var geometryControl = false
+    public private(set) var sizing = false
     public private(set) var ended = false
     private var awaiting: UInt64?
     private var awaitingHeartbeat: UInt64?
@@ -122,10 +123,7 @@ public struct OwnerStream: Sendable {
             sequence = reply.sequence
             pendingScreen = Data()
             ready = false
-            inputControl = attachment.token != nil
-            geometryControl = attachment.owner == attachment.viewer
-        case .busy:
-            events.append(.control(input: inputControl, geometry: geometryControl))
+            sizing = attachment.owner == attachment.viewer
         case .accepted, .controlled, .nativeEnded:
             throw RegistryQueryError("Unexpected Session attachment response")
         }
@@ -147,28 +145,23 @@ public struct OwnerStream: Sendable {
                 events.append(.snapshot(screen))
                 pendingScreen = nil
                 ready = true
-                events.append(.control(input: inputControl, geometry: geometryControl))
+                events.append(.sizing(sizing))
             }
         case .owner(let id, _, let held):
             // Another device taking the size is an ordinary handoff, not a fault.
-            geometryControl = held && id == viewer
-            if ready { events.append(.control(input: inputControl, geometry: geometryControl)) }
-        case .control(let held):
-            inputControl = held
-            if ready { events.append(.control(input: held, geometry: geometryControl)) }
+            sizing = held && id == viewer
+            if ready { events.append(.sizing(sizing)) }
         case .childExited:
             ended = true
-            inputControl = false
-            geometryControl = false
+            sizing = false
             events.append(.ended)
         case .programStatus(let status):
             events.append(.programStatus(status))
         case .detached:
             ended = true
-            inputControl = false
-            geometryControl = false
+            sizing = false
             events.append(.disconnected("This Session attachment was closed"))
-        case .theme, .hint, .returnToSession, .directory:
+        case .theme, .hint, .returnToSession, .directory, .live:
             // These carry presentation hints, never commands for the phone to run.
             break
         }
@@ -183,11 +176,10 @@ public struct OwnerStream: Sendable {
         return result
     }
 
-    /// Take input and geometry at `rows` × `columns`, replacing an earlier attachment.
+    /// Attach at `rows` × `columns`; attaching makes this view size the terminal.
     public static func attachRequest(id: UInt64, columns: Int, rows: Int, name: String) throws -> Data {
         try frame(.request, body: JSONEncoder().encode(AttachRequest(
-            id: id, kind: "attach", control: true, replace: true, own: "take",
-            rows: rows, cols: columns, name: name, moved: nil)))
+            id: id, kind: "attach", rows: rows, cols: columns, name: name, focused: true)))
     }
 
     public static func resizeRequest(id: UInt64, columns: Int, rows: Int) throws -> Data {
@@ -200,13 +192,10 @@ public struct OwnerStream: Sendable {
 private struct AttachRequest: Encodable {
     let id: UInt64
     let kind: String
-    let control: Bool
-    let replace: Bool
-    let own: String
     let rows: Int
     let cols: Int
-    let name: String?
-    let moved: String?
+    let name: String
+    let focused: Bool
 }
 
 private struct ResizeRequest: Encodable {
@@ -224,23 +213,18 @@ private struct HeartbeatRequest: Encodable {
 private struct OwnerAttachment: Decodable {
     let viewer: String
     let nonce: String
-    let token: String?
     let terminal: Bool
     let owner: String?
-
-    enum CodingKeys: String, CodingKey {
-        case viewer, nonce, token, terminal, owner
-    }
 }
 
 private struct OwnerReply: Decodable {
     enum Value {
-        case attached(OwnerAttachment), busy, accepted, controlled(Bool), nativeEnded
+        case attached(OwnerAttachment), accepted, controlled(viewed: Bool), nativeEnded
     }
     let answers: UInt64
     let sequence: UInt64
     let value: Value
-    enum Keys: String, CodingKey { case answers, seq, kind, held }
+    enum Keys: String, CodingKey { case answers, seq, kind, viewed }
 
     init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Keys.self)
@@ -248,9 +232,8 @@ private struct OwnerReply: Decodable {
         sequence = try box.decode(UInt64.self, forKey: .seq)
         switch try box.decode(String.self, forKey: .kind) {
         case "attached": value = .attached(try OwnerAttachment(from: decoder))
-        case "busy": value = .busy
         case "accepted": value = .accepted
-        case "controlled": value = .controlled(try box.decode(Bool.self, forKey: .held))
+        case "controlled": value = .controlled(viewed: try box.decode(Bool.self, forKey: .viewed))
         case "native_ended": value = .nativeEnded
         default: throw RegistryQueryError("Update Loopflow to read this Session response")
         }
@@ -264,8 +247,7 @@ private struct OwnerEvent: Decodable {
         case directory(String)
         case programStatus(ProgramStatusRecords)
         case owner(viewer: String?, name: String?, held: Bool)
-        case control(held: Bool)
-        case childExited(UInt8), detached, hint(String), returnToSession(String)
+        case childExited(UInt8), detached, hint(String), returnToSession(String), live
     }
     let sequence: UInt64
     let value: Value
@@ -280,11 +262,11 @@ private struct OwnerEvent: Decodable {
         case "directory": value = .directory(try box.decode(String.self, forKey: .cwd))
         case "program_status": value = .programStatus(try box.decode(ProgramStatusRecords.self, forKey: .status))
         case "owner": value = .owner(viewer: try box.decodeIfPresent(String.self, forKey: .viewer), name: try box.decodeIfPresent(String.self, forKey: .name), held: try box.decode(Bool.self, forKey: .held))
-        case "control": value = .control(held: try box.decode(Bool.self, forKey: .held))
         case "child_exited": value = .childExited(try box.decode(UInt8.self, forKey: .code))
         case "detached": value = .detached
         case "hint": value = .hint(try box.decode(String.self, forKey: .text))
         case "return": value = .returnToSession(try box.decode(String.self, forKey: .detach))
+        case "live": value = .live
         default: throw RegistryQueryError("Update Loopflow to read this Session event")
         }
     }

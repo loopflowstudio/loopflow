@@ -15,8 +15,9 @@ struct ProjectReadinessView: View {
         guard let readiness else { return nil }
         if let error = readiness.activation?.error { return error }
         if let activation = readiness.activation {
+            // An activation whose lf died unended reads `unknown` with no end.
+            if let outcome = activation.outcome, outcome != "succeeded" { return "Project activation \(outcome)." }
             if activation.completedAt == nil { return "Project activation has no recorded outcome yet." }
-            if activation.outcome != "succeeded" { return "Project activation \(activation.outcome ?? "outcome unknown")." }
         }
         switch readiness.state {
         case .ready: return nil

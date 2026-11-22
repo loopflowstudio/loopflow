@@ -114,10 +114,10 @@ struct MultiplexerStoreTests {
         store.newShell(location: here, focus: false)
         store.showBrowser(.graphLog, location: here, focus: false)
         store.close("shell")
-        let saved = store.paneLayout(work: work, revision: 3, files: nil, drafts: [])
+        let saved = store.paneLayout(files: nil, drafts: [])
         let restored = MultiplexerStore(taskId: work.id)
-        restored.restore(saved)
-        #expect(restored.paneLayout(work: work, revision: 3, files: nil, drafts: []) == saved)
+        restored.restore(saved, taskId: work.id)
+        #expect(restored.paneLayout(files: nil, drafts: []) == saved)
         #expect(restored.collapsedPaneIds == ["shell"])
         #expect(restored.browserPane?.content.selectedBrowserTab == .graphLog)
     }

@@ -2,8 +2,9 @@ import Loopflow
 import SwiftUI
 
 /// ⌘N: your words, where the Task lives and the workflow it takes up, drawn as
-/// its steps with yours named. Start runs `lf task create REQUEST --run` and
-/// opens the Task's conversation.
+/// its steps with yours named. Start closes the sheet into the Task's
+/// conversation and runs `lf task create REQUEST --run`. File runs it without
+/// `--run`: the Task lands in that backlog, selected, and nothing starts.
 struct NewTaskSheet: View {
     let model: WorkModel
     @Environment(\.palette) private var palette
@@ -13,9 +14,10 @@ struct NewTaskSheet: View {
     @State private var waveID: String?
     /// A graph other than the scope's default; nil takes up the default.
     @State private var graph: String?
-    @State private var creating = false
-    @State private var error: String?
     @State private var choosingWorkflow = false
+    @State private var filing = false
+    /// Why File was refused; the sheet stays open with your words.
+    @State private var fileError: String?
     @FocusState private var focused: Bool
 
     init(model: WorkModel) {
@@ -58,20 +60,25 @@ struct NewTaskSheet: View {
                 if let workflow {
                     WorkflowSteps(workflow: workflow).accessibilityIdentifier("new-task-steps")
                 }
-                if let error {
-                    Text(error).font(Typography.body(12)).foregroundStyle(palette.warning)
-                        .textSelection(.enabled).accessibilityIdentifier("new-task-error")
-                }
             }
             .padding(22)
             Divider()
             HStack(spacing: 10) {
+                if let fileError {
+                    Text("Not filed · \(fileError)").font(Typography.body(12)).foregroundStyle(palette.warning)
+                        .lineLimit(2).textSelection(.enabled).accessibilityIdentifier("new-task-file-error")
+                }
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
                     .keyboardShortcut(.cancelAction)
+                Button(filing ? "Filing…" : "File") { file() }
+                    .buttonStyle(WorkOutlineButtonStyle())
+                    .disabled(trimmed.isEmpty || filing)
+                    .help("Put it in \(scopeName)'s backlog without starting it")
+                    .accessibilityIdentifier("new-task-file")
                 Button { create() } label: {
-                    Text(creating ? "Starting…" : "Start  ⌘↩")
+                    Text("Start  ⌘↩")
                         .font(Typography.strong(13))
                         .padding(.horizontal, 15).padding(.vertical, 7)
                         .foregroundStyle(palette.accentText)
@@ -79,8 +86,8 @@ struct NewTaskSheet: View {
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(trimmed.isEmpty || creating)
-                .opacity(trimmed.isEmpty || creating ? 0.45 : 1)
+                .disabled(trimmed.isEmpty)
+                .opacity(trimmed.isEmpty ? 0.45 : 1)
                 .accessibilityIdentifier("new-task-create")
             }
             .padding(.horizontal, 22).padding(.vertical, 12)
@@ -114,7 +121,7 @@ struct NewTaskSheet: View {
             .buttonStyle(.plain).fixedSize()
             .accessibilityIdentifier("new-task-workflow")
             .popover(isPresented: $choosingWorkflow, arrowEdge: .bottom) {
-                WorkflowChooser(catalog: catalog, defaultName: reported?.name,
+                WorkflowChooser(flows: StartFlows(model.graphCatalog.value ?? []), defaultName: reported?.name,
                                 defaultPhrase: reported.map { Self.defaultPhrase($0, scope: scopeName) },
                                 scope: scopeName, chosen: chosen) { name in
                     graph = name == reported?.name ? nil : name
@@ -150,13 +157,19 @@ struct NewTaskSheet: View {
     private var scopeName: String { wave?.displayName ?? repositoryName }
 
     private func create() {
-        creating = true
-        error = nil
-        let (request, wave, graph) = (trimmed, wave, graph)
+        StartingTaskView.start(model: model, request: trimmed, wave: wave, graph: graph)
+    }
+
+    /// File it unstarted. The sheet waits for Rust's answer, so a refusal keeps your words.
+    private func file() {
+        filing = true
+        fileError = nil
         Task {
-            defer { creating = false }
-            do { try await model.createTask(request: request, wave: wave, graph: graph) }
-            catch { self.error = error.localizedDescription }
+            do {
+                try await model.fileTask(request: trimmed, wave: wave, graph: graph)
+                if model.navigation.palette == .newTask { model.navigation.palette = nil }
+            } catch { fileError = error.localizedDescription }
+            filing = false
         }
     }
 
@@ -225,9 +238,10 @@ struct WorkflowSteps: View {
     }
 }
 
-/// Every workflow in the catalog, searchable; the scope's default first.
+/// The workflows a Task can start on, searchable, laid out as Start's menu is:
+/// each with what starting it commits you to and its first sentence.
 private struct WorkflowChooser: View {
-    let catalog: [WorkflowCatalogEntry]
+    let flows: StartFlows
     let defaultName: String?
     let defaultPhrase: String?
     let scope: String
@@ -236,12 +250,15 @@ private struct WorkflowChooser: View {
     @Environment(\.palette) private var palette
     @State private var query = ""
 
-    private var matches: [WorkflowCatalogEntry] {
+    private func matches(_ flows: [StartFlow]) -> [StartFlow] {
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
-        return catalog.filter { needle.isEmpty || $0.name.lowercased().contains(needle) }
+        return flows.filter { needle.isEmpty || $0.name.lowercased().contains(needle) }
+            .sorted { ($0.name == defaultName ? 0 : 1, $0.name) < ($1.name == defaultName ? 0 : 1, $1.name) }
     }
 
     var body: some View {
+        let sections = [(nil, matches(flows.stopping)), ("Run without stopping", matches(flows.unattended)),
+                        ("More", matches(flows.more))]
         VStack(alignment: .leading, spacing: 0) {
             if let defaultName {
                 Text("New Tasks in \(scope) run \(defaultName). Pick another for this Task only.")
@@ -252,13 +269,12 @@ private struct WorkflowChooser: View {
             }
             TextField("Find a workflow", text: $query)
                 .textFieldStyle(.plain).font(Typography.body(13)).padding(10)
-                .onSubmit { if let first = matches.first { choose(first.name) } }
+                .onSubmit { if let first = sections.flatMap(\.1).first { choose(first.name) } }
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    section("Built in", matches.filter { $0.source == nil })
-                    section("This repository", matches.filter { $0.source != nil })
-                    if matches.isEmpty {
+                    ForEach(sections, id: \.0) { title, flows in section(title, flows) }
+                    if sections.allSatisfy(\.1.isEmpty) {
                         Text("No workflow matches").font(Typography.body(12.5)).foregroundStyle(palette.textSecondary).padding(9)
                     }
                 }.padding(4)
@@ -268,27 +284,83 @@ private struct WorkflowChooser: View {
         .frame(width: 340)
     }
 
-    @ViewBuilder private func section(_ title: String, _ entries: [WorkflowCatalogEntry]) -> some View {
-        if !entries.isEmpty {
-            Text(title).font(Typography.strong(12.5)).foregroundStyle(palette.textSecondary)
-                .padding(.horizontal, 9).padding(.top, 8).padding(.bottom, 2)
-            ForEach(entries.sorted { ($0.name == defaultName ? 0 : 1, $0.name) < ($1.name == defaultName ? 0 : 1, $1.name) }) { entry in
-                Button { choose(entry.name) } label: {
-                    VStack(alignment: .leading, spacing: 6) {
+    @ViewBuilder private func section(_ title: String?, _ flows: [StartFlow]) -> some View {
+        if !flows.isEmpty {
+            if let title {
+                Text(title).font(Typography.strong(12.5)).foregroundStyle(palette.textSecondary)
+                    .padding(.horizontal, 9).padding(.top, 8).padding(.bottom, 2)
+            }
+            ForEach(flows) { flow in
+                Button { choose(flow.name) } label: {
+                    VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
-                            Text(entry.name).font(Typography.strong(13))
-                            if entry.name == defaultName, let defaultPhrase { Text(defaultPhrase).foregroundStyle(palette.textSecondary) }
-                            if entry.name == chosen { Image(systemName: "checkmark").foregroundStyle(palette.emphasisInk) }
+                            Text(flow.name).font(Typography.strong(13))
+                            Text(flow.consequence).foregroundStyle(palette.textSecondary)
+                            if flow.name == defaultName, let defaultPhrase { Text("· \(defaultPhrase)").foregroundStyle(palette.textSecondary) }
+                            if flow.name == chosen { Image(systemName: "checkmark").foregroundStyle(palette.emphasisInk) }
                         }.font(Typography.body(11.5))
-                        if let workflow = entry.workflow { WorkflowSteps(workflow: workflow).scaleEffect(0.9, anchor: .leading) }
+                        if let summary = flow.summary {
+                            Text(summary).font(Typography.body(11.5)).foregroundStyle(palette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     .padding(9)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(RoundedRectangle(cornerRadius: 7))
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("new-task-workflow-\(entry.name)")
+                .accessibilityIdentifier("new-task-workflow-\(flow.name)")
             }
         }
+    }
+}
+
+/// A New Task between the click and its installed conversation: the words you
+/// typed, and the failure if the request could not be filed.
+struct StartingTaskView: View {
+    let model: WorkModel
+    let starting: StartingTask
+    @Environment(\.palette) private var palette
+
+    /// The sheet closes at once; the answer opens the Task's conversation.
+    @MainActor
+    static func start(model: WorkModel, request: String, wave: WaveSnapshot?, graph: String?) {
+        let owner = model.navigation.performanceOwner
+        let requestID = UUID().uuidString
+        Perf.userAction(.startTask, scenario: "new_task_to_typing", id: requestID, repository: model.repoPath,
+                        machine: model.machineKind, liveSessions: model.liveSessionCount, owner: owner) {
+            Perf.acknowledged(.startTask, id: requestID, owner: owner)
+            if model.navigation.palette == .newTask { model.navigation.palette = nil }
+            Task {
+                do { try await model.createTask(request: request, wave: wave, graph: graph, requestID: requestID) }
+                catch { Perf.finish(.startTask, id: requestID, owner: owner, outcome: .failed) }
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ScrollView {
+                Text(starting.request)
+                    .font(Typography.body(15))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let error = starting.error {
+                Text(error).font(Typography.body(12)).foregroundStyle(palette.warning)
+                    .textSelection(.enabled).accessibilityIdentifier("new-task-error")
+                HStack {
+                    Button("Try again") {
+                        Self.start(model: model, request: starting.request, wave: starting.wave, graph: starting.graph)
+                    }
+                    Button("Discard") { model.navigation.startingTask = nil }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(palette.background)
+        .accessibilityIdentifier("starting-task-conversation")
     }
 }

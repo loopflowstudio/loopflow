@@ -85,13 +85,17 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
         ),
     ]:
         subprocess.run(["git", *args], cwd=repo, env=env, check=True, capture_output=True)
-    # The released fixture provider reads its released variable; the candidate
-    # provider reads only the new capture context. No compatibility reader ships.
-    provider_source = (ROOT / "rust/loopflow/tests/support/opencode_server.py").read_text()
+    # Each lf gets the OpenCode stand-in from its own source: the release drives
+    # a private `opencode serve`, the candidate runs `opencode run`.
+    released_source = subprocess.run(
+        ["git", "show", "v0.13.3:rust/loopflow/tests/support/opencode_server.py"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
     provider = bin_dir / "opencode"
-    provider.write_text(
-        provider_source.replace("__WAIT__", "False").replace("LF_CAPTURE_KEY", "LF_RUN_ID")
-    )
+    provider.write_text(released_source.replace("__WAIT__", "False"))
     provider.chmod(0o755)
     tmux = bin_dir / "tmux"
     tmux.write_text('#!/bin/sh\nif [ "$1" = has-session ]; then exit 1; fi\nexit 0\n')
@@ -133,14 +137,15 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
         ).fetchone()
     review_env = {
         **env,
-        "LF_RUN_ID": review_capture,
+        "LF_EXECUTION_ID": review_capture,
         "LF_HUMAN_SESSION": json.dumps({"kind": "standalone_graph", "id": review}),
     }
     _command(prior, review_env, repo, "session", "ready", "Keep this released feedback")
     with sqlite3.connect(database) as db:
         history = db.execute("SELECT * FROM session_events ORDER BY seq").fetchall()
     before_reads = _captures(home)
-    provider.write_text(provider_source.replace("__WAIT__", "False"))
+    candidate_source = (ROOT / "rust/loopflow-execution/tests/support/opencode_cli.py").read_text()
+    provider.write_text(candidate_source.replace("__WAIT__", "False"))
     # Pin nested commands as well as the explicit public operations.
     (bin_dir / "lf").symlink_to(candidate)
     listed = json.loads(
@@ -216,7 +221,8 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
             if opened.poll() is None:
                 opened.kill()
                 opened.wait()
-    provider.write_text(provider_source.replace("__WAIT__", "False"))
+    candidate_source = (ROOT / "rust/loopflow-execution/tests/support/opencode_cli.py").read_text()
+    provider.write_text(candidate_source.replace("__WAIT__", "False"))
     _command(candidate, env, repo, "graph", "resume", graph)
     with sqlite3.connect(database) as db:
         assert (

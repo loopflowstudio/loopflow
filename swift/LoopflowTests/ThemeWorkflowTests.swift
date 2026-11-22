@@ -59,10 +59,13 @@ struct ThemeWorkflowTests {
             #expect(appearance.current.mode == .system)
             try view.inspect().find(button: "Apply").tap()
             let deadline = ContinuousClock.now + .seconds(10)
-            while appearance.chooserOpen, ContinuousClock.now < deadline {
+            // Apply closes the chooser, then reads the saved choice back; the
+            // applied theme is in effect once that read ends.
+            while appearance.chooserOpen || appearance.saving, ContinuousClock.now < deadline {
                 try await Task.sleep(for: .milliseconds(10))
             }
             #expect(!appearance.chooserOpen)
+            #expect(!appearance.saving)
             let savedTheme1 = try await ThemeConfig.read(paths.config, location: location)
             #expect(savedTheme1 == "light:Celadon,dark:Night Owl")
             #expect(appearance.effectiveTheme.name == "Celadon")

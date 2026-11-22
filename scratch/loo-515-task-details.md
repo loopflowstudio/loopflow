@@ -413,6 +413,13 @@ the list is reread. The window's "N files above · Show" button where Jack's
 pasted order said jumps "between windows" is the chosen form; whether
 scrolling up to it reads as a wall is for the screen.
 
+Thirteenth pass, November 21, over the repair at `969f707c90`: nothing to
+change. `change_counts` and `diff_snapshot` both build their arguments with
+`comparison_diff_args`, and the untracked files' `--no-index` patch takes the
+same `PINNED_PATCH_FLAGS`; an untracked file's count is `untracked_changes`,
+one addition. A step's read replaces the counts with its own comparison's,
+since `showStep` clears `changes` and `refreshChanges` reads the step.
+
 ## Remaining
 
 - Demo/review on screen (below). November 21 showed the tab strip, the Diff

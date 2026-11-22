@@ -96,7 +96,7 @@ lf task file c9fbcb swift/LoopflowMac/SyntaxColors.swift --at parent --json | jq
 # text / true / A committed version is read-only.
 lf task file c9fbcb swift/LoopflowMac/SyntaxColors.swift --json | jq -r .state      # missing
 lf task file c9fbcb swift/LoopflowMac/dmg-background.png --json | jq -r '.state, (.data|length > 0)'   # binary / true
-cd swift && swift test --filter 'GrammarTests|MarkdownRedlineTests|TaskFileSnapshot'
+cd swift && swift test --filter 'GrammarTests|MarkdownRedlineTests|TaskFilesTests'   # TaskFilesTests holds the DTO fixture's Swift cases
 ```
 
 `GrammarTests` asserts, per language, that a fixture line yields the captures a person would see (a Rust `fn` name is `function`, a Swift `struct` name is `type`, a Python docstring row read from the whole file is `string` while its hunk-only parse is not), and that every bundled theme's inks are at 4.5:1 on surface and both row fills. `MarkdownRedlineTests` asserts block pairing and word marks on a heading edit, an inserted paragraph, a deleted list item and a paragraph rewritten past `ReviewSegment.edit`'s threshold (struck and filled, not paired). A store test opens a skipped run in a step comparison and gets the head commit's lines. The DTO fixture tests cover `binary` with `data` in Rust and Swift.
@@ -121,9 +121,9 @@ What it taught:
 
 **Built November 21 (slice 4, `02431969d6`):** `MarkdownRedline` (blocks anchored by `LongestCommon` after trimming shared ends, runs between anchors paired in order; a same-kind pair `ReviewWords.edit` accepts is one changed block), `ReviewWords` (one ordered word edit, removed before added; `ReviewSegment.edit` derives from it), `MarkdownBlocks.Row` shared by Files and the redline, `ReviewRendering`/`ReviewRendered` in `ReviewRenderedView.swift` (Markdown as redline or two columns by the layout picker; SVG through `TaskImage` from its text; HTML as two `TaskHTMLView`s at the pane's height), **Source**/**Rendered** in the file header (`TaskFilesStore.sourceFiles`), a failed side read falling back to the line Diff with Retry. `MarkdownRedlineTests` (heading edit, inserted paragraph, deleted list item with renumbering, rewrite past the threshold, inline style kept, added document) pass with `GrammarTests` and `TaskFilesTests`.
 
-**Built November 21 (slice 5, steered: `b5037958e5`, `c3815a9b16`):** the stepper no longer shows a count that climbs while files read ("4/12 files", "2 of …"; `theChangeCountWaitsForEveryFile`); scrollbar marks are neutral ticks merged within 6 pt, accent only on the current change (`ReviewMark.kind` deleted; `denseChangeMarksMergeIntoTicks`); Dockerfile, Make, just, INI, Objective-C, C# and Zig grammars, pinned with notices, queries in `Grammars/` (28 grammars, 27 languages; `GrammarTests` 27 fixtures pass; `test_third_party.py` passes).
+**Built November 21 (slice 5, steered: `b5037958e5`, `c3815a9b16`):** the stepper no longer shows a count that climbs while files read ("4/12 files", "2 of …"; `theChangeCountWaitsForEveryFile`); Dockerfile, Make, just, INI, Objective-C, C# and Zig grammars, pinned with notices, queries in `Grammars/` (28 grammars, 27 languages; `GrammarTests` 27 fixtures pass; `test_third_party.py` passes).
 
-The 28-grammar archive is hosted with the checksum in `Package.swift`. The parent branch subsequently removed the scrollbar marks.
+Slice 5 also reworked the scrollbar marks; the parent branch then deleted them (merged in `bc192e4194`), so none remain. The 28-grammar archive is hosted: `TreeSitterGrammars-f9a0593.xcframework.zip` on bin.loopflow.studio hashes to `Package.swift`'s checksum (checked November 21, after the merge, when `GrammarTests` and `MarkdownRedlineTests` passed again).
 
 Checks left for gate: `documented_commands::` (swift/README.md's language list changed), CI's Swift build.
 

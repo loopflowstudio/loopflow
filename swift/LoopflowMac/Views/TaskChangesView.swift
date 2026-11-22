@@ -59,7 +59,6 @@ struct TaskChangesView: View {
                     .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
                     // Over the stream, so showing or hiding it moves no line.
                     .overlay(alignment: .top) { enclosingBar }
-                    .overlay(alignment: .trailing) { ChangeMarks(store: store, layout: store.layout(width: width), jump: land) }
                 }
             }
             .overlay(alignment: .leading) {
@@ -448,13 +447,6 @@ struct TaskChangesView: View {
         }
     }
 
-    /// Land on a change a mark beside the scrollbar names.
-    private func land(_ mark: ReviewMark) {
-        if store.focusedPath != nil { store.focusedPath = mark.path }
-        withAnimation(.easeOut(duration: 0.15)) { store[place: .changes] = .init(anchor: mark.id, current: mark.id) }
-        store.noteInteraction()
-    }
-
     private func toggleFocus() {
         if store.focusedPath != nil {
             store.focusedPath = nil
@@ -545,74 +537,6 @@ struct TaskChangesView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
-    }
-}
-
-/// A quiet mark beside the scrollbar for every change in the stream, at its
-/// place counted in rows. Marks within a few points of a tick merge into it,
-/// so a long diff reads as ticks rather than a bar; only the current change takes the
-/// accent, and a commented file adds a dot. Click one to land on its change.
-struct ChangeMarks: View {
-    let store: TaskFilesStore
-    let layout: TaskFilesStore.ReviewLayout
-    let jump: (ReviewMark) -> Void
-    @Environment(\.palette) private var palette
-
-    /// Marks closer than this to a tick, in points, draw as that tick.
-    static let merge: CGFloat = 6
-
-    var body: some View {
-        if let review = store.shownReview {
-            let files = store.focusedPath.map { path in review.files.filter { $0.path == path } } ?? review.files
-            let marks = ReviewDiff(files: files).marks(layout: layout, collapsed: store.isViewed)
-            let commented = Set(store.comments.map(\.selection.path))
-            let current = store[place: .changes].current
-            GeometryReader { proxy in
-                let height = max(proxy.size.height - 8, 0)
-                ForEach(Self.merged(marks, height: height), id: \.first.id) { group in
-                    let isCurrent = group.marks.contains { $0.id == current }
-                    Button { jump(group.first) } label: {
-                        RoundedRectangle(cornerRadius: 1)
-                            .fill(isCurrent ? palette.accent : palette.textTertiary.opacity(0.55))
-                            .frame(width: 4, height: 3)
-                            .frame(width: 10)
-                            .overlay(alignment: .topLeading) {
-                                if group.marks.contains(where: { commented.contains($0.path) }) {
-                                    Circle().fill(palette.accent).frame(width: 3, height: 3)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help((group.first.path as NSString).lastPathComponent)
-                    .position(x: proxy.size.width - 5, y: 4 + group.y)
-                }
-            }
-            .frame(width: 10)
-            .accessibilityHidden(true)
-        }
-    }
-
-    /// One tick: the marks it stands for, in stream order, and where it sits.
-    struct Group {
-        let marks: [ReviewMark]
-        let y: CGFloat
-        var first: ReviewMark { marks[0] }
-    }
-
-    /// Marks in stream order, each joining the tick above it when it lands
-    /// within `merge` points of it.
-    static func merged(_ marks: [ReviewMark], height: CGFloat) -> [Group] {
-        var groups: [Group] = []
-        for mark in marks {
-            let y = mark.position * height
-            if let group = groups.last, y - group.y < merge {
-                groups[groups.count - 1] = Group(marks: group.marks + [mark], y: group.y)
-            } else {
-                groups.append(Group(marks: [mark], y: y))
-            }
-        }
-        return groups
     }
 }
 

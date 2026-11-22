@@ -123,9 +123,9 @@ What it taught:
 
 **Built November 21 (slice 5, steered: `b5037958e5`, `c3815a9b16`):** the stepper no longer shows a count that climbs while files read ("4/12 files", "2 of …"; `theChangeCountWaitsForEveryFile`); scrollbar marks are neutral ticks merged within 6 pt, accent only on the current change (`ReviewMark.kind` deleted; `denseChangeMarksMergeIntoTicks`); Dockerfile, Make, just, INI, Objective-C, C# and Zig grammars, pinned with notices, queries in `Grammars/` (28 grammars, 27 languages; `GrammarTests` 27 fixtures pass; `test_third_party.py` passes).
 
-**Open:** `TreeSitterGrammars-f9a0593.xcframework.zip` needs uploading to `bin` (`scratch/questions.md`); `Package.swift` points at it, so until then SwiftPM can't resolve and a local build needs `path: ".build/local/TreeSitterGrammars.xcframework"` swapped in by hand.
+The 28-grammar archive is hosted with the checksum in `Package.swift`. The parent branch subsequently removed the scrollbar marks.
 
-Checks left for gate: `documented_commands::` (swift/README.md's language list changed), CI's Swift build once the zip is up.
+Checks left for gate: `documented_commands::` (swift/README.md's language list changed), CI's Swift build.
 
 Remaining: none of the slices. Demo checks for qa: `scratch/plan.md` rendered and redlined in the Dev build, Side by side in two columns, Source showing the line Diff; `scratch/explore.html` as two pages; a step's skipped lines.
 

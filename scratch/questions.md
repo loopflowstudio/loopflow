@@ -71,7 +71,6 @@
 
 # c9fbcb Diff v2
 
-- **Needs uploading:** `swift/.build/upload/TreeSitterGrammars-f9a0593.xcframework.zip` (28 grammars, SwiftPM checksum `f9a05932806a5288ce4e3f8cefbd4aa2b2a8a02f58564e6a928639d46890828e`) to `https://bin.loopflow.studio/TreeSitterGrammars-f9a0593.xcframework.zip`. `Package.swift` already points there, so CI's Swift and Xcode builds resolve once it is up. R2 uploads of this artifact: "yeah you can upload it to r2 thats fine" (Jack Heart, November 21). `TreeSitterGrammars-615f7a1` (21 grammars) stays hosted and unused; on November 21 the edge still answered GET with the 404 it cached before that upload (HEAD 200).
 - 2026-11-21 kickoff (headless): grammars can't come from SwiftPM (five grammar manifests drop `scanner.c` under the manifest sandbox; SQL commits no `parser.c`) and the generated C is ~134 MB, so the plan ships them as a prebuilt `TreeSitterGrammars.xcframework` like GhosttyKit.
 - Measured: the grammars add ~22 MB of arm64 code to a 129 MB app (the explore page guessed 8–15 MB).
 - Chosen for review: `lf task file --at <rev>` (not `--base`); a new `image` file state with base64 `data` up to 16 MB; the exact capture-to-ANSI table; Files Read shows images.

@@ -490,3 +490,25 @@ Steer, November 21: "ok grammar highlighitng and rendered diffs can be a single 
 - **Wrap long lines** in the … menu, which is now always shown; off, each line keeps one row and ends in "…".
 
 Chosen while building, reversible: steps are consecutive runs (a second `implement` after `gate` is a second step); wrap off truncates instead of scrolling sideways (the November 21 width repairs ruled out a row wider than the pane); marks count rows, not measured heights, so wrapped lines and comments put them slightly off; viewed does not outlive the app.
+
+## Next for implement — Diff demo, November 21 evening
+
+Jack, on the branch build:
+
+> "i dont like how the # of changes increases as it loads more files. it should know up front"
+
+> "teh right hand red/green bar is too much, drop it" — done in cfc6c89cc5 (marks, `ReviewMark`, test and README line removed).
+
+> "scrolling seems choppy, should we be paginating this thing more? its more important that its fast to jump via the siebar than that no pagination"
+
+1. The change count ("N changes", "2 of N") is right from the first frame and never grows as patches load. `task.changes` already lists every file; carry each file's change count there (one value, computed in Rust from the patch: contiguous runs of changed lines, matching the client's stops, including how moved blocks count) or otherwise know it before the patches arrive.
+2. Scrolling is smooth on a large change (this PR's own Diff is the test). Paginate if that's what it takes: jumping to any file from the sidebar must be instant, and that matters more than one continuous stream.
+
+Order for item 2, as pasted by Jack:
+
+> Pagination would bound both costs. Fixing the first is cheaper and keeps the single stream you read from top to bottom. In order:
+> 1. Profile one slow Task in Instruments to confirm where the time goes.
+> 2. Draw every line as its own lazy row, so a long change is built only as it scrolls into view.
+> 3. If it's still slow, paginate by file. The stream shows a window of files around where you are, and the sidebar, j/k and the marks jump between windows.
+
+(The marks are gone since cfc6c89cc5; the sidebar and stepping are what jump.)

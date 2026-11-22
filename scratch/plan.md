@@ -29,16 +29,18 @@ vocabulary, held by `TaskStatusTests`. Still to change:
 
 - 43 lines in `swift/LoopflowiOS` pass a literal padding, spacing or radius
   (`MobileNewTaskView` 18, `SessionView` 10, `MachineConnectionView` 5,
-  `TaskWorkspaceView` 5, `MobileRepositoryPicker` 3, one each in
-  `TaskListView` and `MachineCodeScanner`), and 4 in `swift/Loopflow/Services/Notice.swift`.
+  `TaskWorkspaceView` 6, `MobileRepositoryPicker` 3, `MachineCodeScanner`
+  1; three of them are `spacing: 0`), and 4 in `swift/Loopflow/Services/Notice.swift`.
   `TypographyDisciplineTests` does not scan for them yet, though
   `swift/LoopflowiOS/README.md` says it does.
 - The terminal reads `Typography.terminalSize` but lacks the Mac's
   `adjust-cell-height = 10%` (`GhosttyManager.swift:132`).
 - The Session state "unavailable" has no "Changes" button of its own.
-- Comments still say "Auto on and Auto off" (`TaskListView.swift:86`,
-  `Loopflow/Services/PendingChanges.swift:107`); they follow the Notice
-  wording once the open question below is answered.
+- The shared comment at `Loopflow/Services/PendingChanges.swift:107` still
+  says "Auto on and Auto off", the Mac's Notice wording
+  (`LoopflowMac/WorkModel.swift:2698`). Open choice, not blocking: the Mac's
+  Notice becomes "Auto-Ship requested", or the two surfaces keep different
+  words for one request (`scratch/questions.md`).
 - Nothing has been looked at in the Simulator.
 
 ## Design

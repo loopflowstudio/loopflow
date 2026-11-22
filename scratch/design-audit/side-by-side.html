@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Website, before and after the rules</title>
+<style>
+  :root { --ink: #1a1a1a; --soft: #555; --rule: #e0ddd8; --wine: #9B1A4A; --bg: #fafaf8; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 16px/1.55 -apple-system, "Inter", sans-serif; padding: 48px 32px 96px; }
+  main { max-width: 1760px; margin: 0 auto; }
+  h1 { font: 400 40px/1.1 Georgia, serif; }
+  h2 { font: 400 26px/1.2 Georgia, serif; margin-top: 64px; }
+  p { max-width: 70ch; margin-top: 12px; }
+  .lede { font-size: 18px; }
+  table { border-collapse: collapse; margin-top: 24px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 8px 32px 8px 0; border-bottom: 1px solid var(--rule); font-weight: 400; }
+  th { color: var(--soft); }
+  td:nth-child(n+2) { text-align: right; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }
+  .pair.narrow { grid-template-columns: 390px 390px; }
+  figure { margin: 0; }
+  figcaption { color: var(--soft); font-size: 14px; margin-bottom: 8px; }
+  img { display: block; width: 100%; border: 1px solid var(--rule); background: #fff; }
+  ul { margin: 16px 0 0; padding-left: 20px; max-width: 80ch; }
+  li { margin-top: 6px; }
+  li b { font-weight: 600; }
+  .kept { color: var(--soft); }
+  a { color: inherit; }
+  a:focus-visible { outline: 2px solid var(--wine); outline-offset: 2px; }
+  @media (max-width: 900px) { .pair, .pair.narrow { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+<h1>Website, before and after the rules</h1>
+<p class="lede">Same fonts (Instrument Serif, Inter, JetBrains Mono), same burgundy and wine, same sections, same words, same pictures. Only DESIGN.md's rules were applied: named steps for size, space, radius and color; no uppercase labels; mono only for commands; things side by side share an edge.</p>
+<p>Before is <code>main</code>. After is this checkout's <code>website/</code>. Click an image for full size. The website suite passes (73).</p>
+
+<table>
+  <tr><th>Homepage and studio styles</th><th>Before</th><th>After</th></tr>
+  <tr><td>Distinct font sizes</td><td>24</td><td>9</td></tr>
+  <tr><td>Uppercase label rules</td><td>11</td><td>0</td></tr>
+  <tr><td>Colors written as raw hex</td><td>42</td><td>18</td></tr>
+  <tr><td>Lines of CSS (whole file)</td><td>1,661</td><td>1,529</td></tr>
+</table>
+
+<h2>Hero</h2>
+<div class="pair">
+  <figure><figcaption>Before</figcaption><a href="pairs/home-0-before.png"><img src="pairs/home-0-before.png" alt="Homepage hero before"></a></figure>
+  <figure><figcaption>After</figcaption><a href="pairs/home-0-after.png"><img src="pairs/home-0-after.png" alt="Homepage hero after"></a></figure>
+</div>
+<ul>
+  <li><b>"OR THE CLI", "YOUR AGENTS", "LOOPFLOW FOR MAC", "COMING SOON"</b> were tracked mono capitals. They are sentence case in Inter.</li>
+  <li><b>Download button and install command</b> were 44 and 54 tall. Both are 44, on one centre line.</li>
+  <li><b>The two window headers</b> ("etude") were different heights, so their rules did not line up across the gap. They share one height.</li>
+  <li><b>The "needs you" rows</b> lost the wine stripe down the side; they keep the wine border and the wine status word.</li>
+  <li><b>The green "running" dots</b> no longer pulse.</li>
+  <li><b>Initials</b> in the avatars were 9px mono; they are 12px Inter in a slightly larger circle.</li>
+  <li><b>Small text</b> inside the windows was 10 to 11.5px in four sizes. It is 12px.</li>
+  <li class="kept">Left as it was: the rotating word, the two drawn windows and their "Coming soon" stamps and stripe wash. DESIGN.md argues against all three, but removing them changes what the page is, not how tidy it is.</li>
+</ul>
+
+<h2>Waves and tasks</h2>
+<div class="pair">
+  <figure><figcaption>Before</figcaption><a href="pairs/home-900-before.png"><img src="pairs/home-900-before.png" alt="Second section before"></a></figure>
+  <figure><figcaption>After</figcaption><a href="pairs/home-900-after.png"><img src="pairs/home-900-after.png" alt="Second section after"></a></figure>
+</div>
+<ul>
+  <li><b>"START" and "END"</b> in the workflow lines are lower case at the same size as the steps between them.</li>
+  <li><b>The two captions</b> under the card and the terminal were inset 4px from the boxes above them. They share the boxes' left edge.</li>
+  <li><b>Body greys</b> (#333, #444, #3a3532) are one text color.</li>
+  <li><b>Card and terminal corners</b> were 10 and 8. Both are 8.</li>
+</ul>
+
+<h2>The CLI</h2>
+<div class="pair">
+  <figure><figcaption>Before</figcaption><a href="pairs/home-1800-before.png"><img src="pairs/home-1800-before.png" alt="CLI section before"></a></figure>
+  <figure><figcaption>After</figcaption><a href="pairs/home-1800-after.png"><img src="pairs/home-1800-after.png" alt="CLI section after"></a></figure>
+</div>
+<ul>
+  <li><b>The Sessions and Runs terminals</b> started at different heights because the paragraphs above them differ by a line. They start on one line.</li>
+  <li><b>The link rows</b> ("Tasks and Waves", "The CLI") were 12px mono. They are Inter.</li>
+  <li><b>Terminal text</b> was 12, 12.5 and 13.5px in different blocks. It is 12 or 13.</li>
+</ul>
+
+<h2>Works with and the close</h2>
+<div class="pair">
+  <figure><figcaption>Before</figcaption><a href="pairs/home-2700-before.png"><img src="pairs/home-2700-before.png" alt="Works with before"></a></figure>
+  <figure><figcaption>After</figcaption><a href="pairs/home-2700-after.png"><img src="pairs/home-2700-after.png" alt="Works with after"></a></figure>
+</div>
+<ul>
+  <li><b>"WORKS WITH"</b> is sentence case.</li>
+  <li><b>The five descriptions</b> floated at different distances under their names. Each sits directly under its name.</li>
+  <li><b>The gap before "Scale together."</b> was two paddings stacked (about 170px). It is one section gap.</li>
+</ul>
+
+<h2>Studio page</h2>
+<div class="pair">
+  <figure><figcaption>Before</figcaption><a href="pairs/studio-0-before.png"><img src="pairs/studio-0-before.png" alt="Studio page before"></a></figure>
+  <figure><figcaption>After</figcaption><a href="pairs/studio-0-after.png"><img src="pairs/studio-0-after.png" alt="Studio page after"></a></figure>
+</div>
+<ul>
+  <li><b>Row labels and statuses</b> ("THE TOOL WE BUILD WITH", "AVAILABLE TODAY") are sentence case in Inter.</li>
+  <li><b>The headline</b> uses the same display step as the homepage (60 at most; it was 80 here and 60 there).</li>
+</ul>
+
+<h2>Docs</h2>
+<div class="pair">
+  <figure><figcaption>Before</figcaption><a href="pairs/docs-0-before.png"><img src="pairs/docs-0-before.png" alt="Docs before"></a></figure>
+  <figure><figcaption>After</figcaption><a href="pairs/docs-0-after.png"><img src="pairs/docs-0-after.png" alt="Docs after"></a></figure>
+</div>
+<ul>
+  <li><b>Sidebar groups, "On this page", the breadcrumb and table heads</b> were 11px mono capitals. They are 12px Inter in sentence case.</li>
+  <li class="kept">Left as it was: the docs' own navigation bar, palette and type ramp. Making the docs share the homepage's bar and steps is the next pass.</li>
+</ul>
+
+<h2>Phone</h2>
+<div class="pair narrow">
+  <figure><figcaption>Before</figcaption><a href="pairs/homem-0-before.png"><img src="pairs/homem-0-before.png" alt="Phone before"></a></figure>
+  <figure><figcaption>After</figcaption><a href="pairs/homem-0-after.png"><img src="pairs/homem-0-after.png" alt="Phone after"></a></figure>
+</div>
+
+<h2>Not done in this pass</h2>
+<ul>
+  <li>The stylesheet still has rules that override each other, some with <code>!important</code>. The values are on the scale; the structure is not yet simple.</li>
+  <li>18 raw colors remain: the tints and shadows of the rotating chip and the windows, and the four avatar colors.</li>
+  <li>Link arrows ("↗") and middle-dot lists are unchanged, since they are copy.</li>
+</ul>
+</main>
+</body>
+</html>

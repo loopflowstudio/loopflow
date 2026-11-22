@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tide · Loopflow for Mac exploration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* Time runs left to right, the workflow rises. Agents make the water climb;
+     a flat wine line is time spent waiting on you; a loop is a wave. */
+  :root {
+    --ground: #f6f8f7; --ink: #10222e; --soft: #51626b; --rule: #cbd5d8; --water: #d3e2e6; --wash: #e9efef; --wine: #8a1b3d;
+    --t-title: 25px; --t-text: 16px; --t-meta: 14px; --t-small: 12px;
+    --term-bg: #0f1b23; --term-fg: #e8eef0; --term-dim: #8fa0a8; --term-acc: #f2a7bd;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #e4e7e7; color: var(--ink); font: var(--t-text)/1.35 "Newsreader", Georgia, serif; }
+  .note { font: 13px/1.4 -apple-system, sans-serif; color: #666; background: #f4f4f4; padding: 8px 24px; display: flex; gap: 20px; }
+  .note a { color: inherit; } .note b { color: #222; font-weight: 600; }
+  .what { font: 13px/1.4 -apple-system, sans-serif; color: #666; width: 1280px; margin: 40px auto 12px; }
+  a:focus-visible, button:focus-visible, textarea:focus-visible { outline: 2px solid var(--wine); outline-offset: 2px; }
+  .id { font: var(--t-small)/1 "JetBrains Mono", ui-monospace, monospace; color: var(--soft); }
+  svg { display: block; }
+  svg text { font-family: "Newsreader", Georgia, serif; }
+  .w-fill { fill: var(--water); } .w-top { fill: none; stroke: var(--ink); stroke-width: 1.25; }
+  .w-you { stroke: var(--wine); stroke-width: 4; stroke-linecap: butt; }
+  .w-you.plan { stroke-dasharray: 5 4; stroke-width: 3; }
+  .w-base, .w-grid { stroke: var(--rule); stroke-width: 1; } .w-now { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 2 3; }
+
+  .win { width: 1280px; height: 800px; margin: 0 auto; background: var(--ground); border: 1px solid #a9b2b5; border-radius: 10px; overflow: hidden; display: grid; grid-template-columns: 380px minmax(0, 1fr); grid-template-rows: 44px minmax(0, 1fr); }
+  .bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-bottom: 1px solid var(--rule); }
+  .lights { display: flex; gap: 8px; } .lights span { width: 12px; height: 12px; border-radius: 50%; border: 1px solid #9aa5a9; }
+  .jump { display: flex; gap: 10px; align-items: baseline; }
+  .jump button { font: inherit; background: none; border: 0; color: inherit; cursor: pointer; }
+  .jump button:last-child { font-weight: 600; } .jump span { color: var(--soft); }
+
+  .side { border-right: 1px solid var(--rule); display: flex; flex-direction: column; }
+  .hours { padding: 10px 24px 4px; }
+  .task { padding: 9px 24px 8px; border-top: 1px solid var(--rule); }
+  .task.sel { background: var(--wash); }
+  .task .t { line-height: 1.25; } .task.sel .t { font-weight: 600; }
+  .task .t .id { margin-right: 10px; }
+  .task svg { margin-top: 4px; }
+  .task .st { font-size: var(--t-meta); color: var(--soft); margin-top: 5px; }
+  .task .st.you { color: var(--wine); font-weight: 600; }
+  .task.off .t { color: var(--soft); }
+
+  .main { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-width: 0; }
+  .title { padding: 22px 32px 6px; }
+  .title h1 { font-size: var(--t-title); font-weight: 400; line-height: 1.2; max-width: 30em; }
+  .title p { color: var(--soft); font-style: italic; margin-top: 4px; }
+  .chart { padding: 0 26px 6px 32px; }
+  .term { margin: 0; background: var(--term-bg); color: var(--term-fg); padding: 16px 24px; font: 13px/20px "JetBrains Mono", ui-monospace, monospace; white-space: pre; overflow: hidden; }
+  .term .p { color: var(--term-dim); } .term b { color: var(--term-acc); font-weight: 500; } .term .cur { background: var(--term-fg); }
+
+  .sheet { width: 720px; margin: 0 auto 80px; background: var(--ground); border: 1px solid var(--ink); padding: 26px 28px 20px; }
+  .sheet h2 { font-size: var(--t-title); font-weight: 400; }
+  .sheet textarea { display: block; width: 100%; height: 84px; margin-top: 12px; border: 0; border-bottom: 1px solid var(--rule); background: none; resize: none; font: inherit; font-size: 20px; line-height: 1.4; color: var(--ink); }
+  .sheet svg { margin-top: 18px; }
+  .sheet .waits { font-size: var(--t-meta); color: var(--wine); margin-top: 6px; }
+  .sheet .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; }
+  .sheet u { text-decoration-thickness: 1px; text-underline-offset: 4px; }
+  .sheet button { font: inherit; font-weight: 600; background: var(--ink); color: var(--ground); border: 0; height: 40px; padding: 0 24px; cursor: pointer; }
+</style>
+</head>
+<body>
+<p class="note"><b>Tide</b><a href="desktop.html">Desktop directions</a><a href="ledger.html">Ledger</a><a href="stations.html">Stations</a><a href="index.html">Earlier directions</a></p>
+<p class="what">Loopflow for Mac. Each Task is its own water level through the day: agents make it climb, a flat wine line is time it spent waiting on you, and a loop shows as a wave. The sidebar shares one clock.</p>
+<div class="win">
+  <div class="bar"><div class="lights"><span></span><span></span><span></span></div>
+    <div class="jump"><button>loopflow</button><span>›</span><button>desktop</button><span>›</span><button>LOO-515</button></div></div>
+
+  <div class="side" aria-label="Tasks">
+    <div class="hours" aria-hidden="true"><svg id="hours"></svg></div>
+    <div class="task sel"><p class="t"><span class="id">LOO-515</span>Make Task PR, file-browser and brief views useful beside the conversation</p><svg data-task="515"></svg><p class="st you">Waiting on you since 12:07. Review the change.</p></div>
+    <div class="task"><p class="t"><span class="id">LOO-910</span>Keep Desktop scrolling responsive under build load</p><svg data-task="910"></svg><p class="st you">Waiting on you since 11:40. Choose what to build.</p></div>
+    <div class="task"><p class="t"><span class="id">LOO-912</span>Keep interrupted terminal pastes from swallowing Session input</p><svg data-task="912"></svg><p class="st">Codex is building.</p></div>
+    <div class="task"><p class="t"><span class="id">LOO-941</span>Sidebar rows stop clipping the Task ID and status</p><svg data-task="941"></svg><p class="st">Claude is planning.</p></div>
+    <div class="task off"><p class="t"><span class="id">LOO-903</span>Redesign backlog management so choosing the next work feels clear</p><p class="st">Not started.</p></div>
+    <div class="task off"><p class="t"><span class="id">LOO-938</span>Keep one plan at every size</p><svg data-task="938"></svg><p class="st">Landed as #1983 at 10:40.</p></div>
+  </div>
+
+  <div class="main">
+    <div class="title"><h1>Make Task PR, file-browser and brief views useful beside the conversation</h1><p>LOO-515, the feature workflow, with Claude. Pull request #1949. Of 3 hours 21 minutes, 1 hour 31 waited on you.</p></div>
+    <div class="chart"><svg id="big" role="img" aria-label="LOO-515 through the morning: explore until 10:02, plan, build, human-review at 11:05, back to build at 11:20, human-review again since 12:07."></svg></div>
+<pre class="term" tabindex="0" aria-label="The Task's conversation"><span class="p">⏺</span> The review page is ready: <u>scratch/review/index.html</u>
+
+  Changed since your last pass
+    PR pane keeps its scroll position while the conversation streams
+    File browser opens at the Task's worktree, not the repository root
+    Brief view wraps long titles instead of clipping them
+
+  Checks
+    swift build LoopflowMac        <b>ok</b>   48.2s
+    WorkPaneLayoutTests            <b>ok</b>   12 passed
+    mounted terminal frame checks  <span class="p">not run here, needs a display</span>
+
+  Two things to look at before I deliver:
+    1. The PR pane takes 38% of the split. Wider hides the conversation at 1280.
+    2. The brief view shows the plan first, then the brief. Swap them?
+
+<span class="p">&gt;</span> <span class="cur"> </span></pre>
+  </div>
+</div>
+
+<p class="what">New Task. Before it starts you see the shape it will take and where it will wait for you.</p>
+<div class="sheet">
+  <h2>What do you want?</h2>
+  <textarea aria-label="What do you want?">Sidebar rows stop clipping the Task ID and status</textarea>
+  <svg id="plan" aria-hidden="true"></svg>
+  <p class="waits">It will wait for you three times: to choose what to build, to review the change, to check it on main.</p>
+  <p class="foot"><span>In <u>loopflow</u>, as <u>feature</u>, with <u>Claude</u>.</span><button>Start</button></p>
+</div>
+
+<script>
+// A Task's day: [minute it entered the step, step level 1..6, waits on you].
+var NOW = 751, T0 = 530, T1 = 800;
+var STEPS = ['explore', 'plan', 'build', 'human-review', 'deliver', 'verify'];
+var TASKS = {
+  515: { segs: [[550,1,1],[602,2,0],[620,3,0],[665,4,1],[680,3,0],[727,4,1]] },
+  910: { segs: [[700,1,1]] },
+  912: { segs: [[600,1,1],[612,2,0],[640,3,0]] },
+  941: { segs: [[715,1,1],[728,2,0]] },
+  938: { segs: [[535,1,1],[548,2,0],[560,3,0],[598,4,1],[610,5,0],[628,6,1],[640,6,0]], end: 640 }
+};
+var NS = 'http://www.w3.org/2000/svg';
+function el(svg, name, attrs, text) {
+  var n = document.createElementNS(NS, name);
+  for (var k in attrs) n.setAttribute(k, attrs[k]);
+  if (text) n.textContent = text;
+  svg.appendChild(n); return n;
+}
+function draw(svg, task, o) {
+  var W = o.w, H = o.h, L = o.left || 0, B = o.bottom || 0, top = o.top || 4, bend = o.bend;
+  svg.setAttribute('width', W); svg.setAttribute('height', H); svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  var base = H - B, rise = (base - top) / 6;
+  var x = function (t) { return L + (t - T0) / (T1 - T0) * (W - L); };
+  var y = function (l) { return base - l * rise; };
+  if (o.axes) {
+    STEPS.forEach(function (s, i) {
+      el(svg, 'line', { x1: L, x2: W, y1: y(i + 1), y2: y(i + 1), 'class': 'w-grid' });
+      el(svg, 'text', { x: L - 12, y: y(i + 1) + 4, 'text-anchor': 'end', 'font-size': 14, fill: (i === 0 || i === 3 || i === 5) ? '#8a1b3d' : '#10222e' }, s);
+    });
+    [[540,'9:00'],[600,'10:00'],[660,'11:00'],[720,'12:00'],[780,'1:00']].forEach(function (h) {
+      el(svg, 'line', { x1: x(h[0]), x2: x(h[0]), y1: base, y2: base + 5, 'class': 'w-base' });
+      el(svg, 'text', { x: x(h[0]), y: base + 20, 'text-anchor': 'middle', 'font-size': 13, 'font-style': 'italic', fill: '#51626b' }, h[1]);
+    });
+  }
+  el(svg, 'line', { x1: L, x2: W, y1: base, y2: base, 'class': 'w-base' });
+  var segs = task.segs, end = task.end || o.end || NOW;
+  var d = 'M' + x(segs[0][0]) + ',' + base, cur = base, flats = [];
+  segs.forEach(function (s, i) {
+    var xs = x(s[0]), ys = y(s[1]), xe = x(i + 1 < segs.length ? segs[i + 1][0] : end);
+    d += ' C' + (xs + bend / 2) + ',' + cur + ' ' + (xs + bend / 2) + ',' + ys + ' ' + (xs + bend) + ',' + ys + ' H' + xe;
+    if (s[2]) flats.push([xs + bend, xe, ys]);
+    cur = ys;
+  });
+  el(svg, 'path', { d: d + ' V' + base + ' Z', 'class': 'w-fill' });
+  el(svg, 'path', { d: d, 'class': 'w-top' });
+  flats.forEach(function (f) { el(svg, 'line', { x1: f[0], x2: f[1], y1: f[2], y2: f[2], 'class': 'w-you' + (o.plan ? ' plan' : '') }); });
+  if (!task.end && !o.plan) el(svg, 'line', { x1: x(NOW), x2: x(NOW), y1: top - 2, y2: base, 'class': 'w-now' });
+  return { x: x, y: y, base: base };
+}
+document.querySelectorAll('svg[data-task]').forEach(function (svg) {
+  draw(svg, TASKS[svg.dataset.task], { w: 332, h: 30, bend: 5 });
+});
+var big = document.getElementById('big');
+var g = draw(big, TASKS[515], { w: 842, h: 236, left: 112, bottom: 28, top: 22, bend: 12, axes: true });
+[[556, 1, 'you chose the second sketch, 52 minutes', -9],
+ [680, 4, 'you asked for a wider PR pane, 15 minutes', -9, 'end'],
+ [684, 3, 'back to build: a second wave', 18],
+ [730, 4, 'waiting on you since 12:07', -9]].forEach(function (a) {
+  el(big, 'text', { x: g.x(a[0]), y: g.y(a[1]) + a[3], 'text-anchor': a[4] || 'start', 'font-size': 14, 'font-style': a[3] > 0 ? 'italic' : 'normal', fill: a[3] > 0 ? '#10222e' : '#8a1b3d' }, a[2]);
+});
+el(big, 'text', { x: g.x(NOW) + 6, y: g.base - 8, 'font-size': 13, 'font-style': 'italic', fill: '#51626b' }, 'now, 12:31');
+var hrs = document.getElementById('hours'); hrs.setAttribute('width', 332); hrs.setAttribute('height', 16);
+[[540,'9'],[600,'10'],[660,'11'],[720,'12'],[780,'1']].forEach(function (h) {
+  el(hrs, 'text', { x: (h[0] - T0) / (T1 - T0) * 332, y: 12, 'text-anchor': 'middle', 'font-size': 12, 'font-style': 'italic', fill: '#51626b' }, h[1]);
+});
+T0 = 0; T1 = 100;
+draw(document.getElementById('plan'), { segs: [[2,1,1],[18,2,0],[30,3,0],[50,4,1],[66,5,0],[78,6,1]] }, { w: 664, h: 70, bend: 10, end: 96, plan: true });
+</script>
+</body>
+</html>

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Website in the new font set</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Old+Standard+TT:ital,wght@0,400;0,700;1,400&family=Atkinson+Hyperlegible+Next:ital,wght@0,200..800;1,200..800&family=Spline+Sans+Mono:wght@300..700&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: #1a1a1a; --soft: #555; --rule: #d9d4cc; --wine: #9B1A4A; --bg: #fdfbf7; }
+  * { box-sizing: border-box; margin: 0; }
+  h1, h2, h4 { font-variant-ligatures: no-common-ligatures; letter-spacing: -.03em; }
+  body { background: var(--bg); color: var(--ink); font: 16px/1.55 "Atkinson Hyperlegible Next", -apple-system, sans-serif; padding: 48px 32px 96px; }
+  main { max-width: 1760px; margin: 0 auto; }
+  h1 { font: 400 40px/1.1 "Old Standard TT", Georgia, serif; }
+  h2 { font: 400 28px/1.2 "Old Standard TT", Georgia, serif; margin-top: 64px; }
+  p { max-width: 72ch; margin-top: 12px; }
+  .lede { font-size: 18px; }
+  code { font: 14px "Spline Sans Mono", ui-monospace, monospace; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }
+  .pair.narrow { grid-template-columns: 390px 390px; }
+  figure { margin: 0; }
+  figcaption { color: var(--soft); font-size: 14px; margin-bottom: 8px; }
+  img { display: block; width: 100%; border: 1px solid var(--rule); background: #fff; }
+  ul { margin: 16px 0 0; padding-left: 20px; max-width: 80ch; }
+  li { margin-top: 6px; }
+  li b { font-weight: 600; }
+  a { color: inherit; }
+  a:focus-visible { outline: 2px solid var(--wine); outline-offset: 2px; }
+  nav { margin-top: 16px; display: flex; gap: 24px; flex-wrap: wrap; }
+  @media (max-width: 900px) { body { padding: 32px 16px 64px; } .pair, .pair.narrow { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+<h1>Website in the new font set</h1>
+<p class="lede">Old Standard for headlines, Atkinson Hyperlegible Next for everything you read or press, Spline Sans Mono for commands. Layout, colors, words and pictures are the tidied site, unchanged.</p>
+<p>Left is the tidied site in its current fonts (Instrument Serif, Inter, JetBrains Mono). Right is the same site with the three fonts swapped. Click an image for full size. This page is set in the new fonts too.</p>
+<nav><a href="elements.html">Three variations of each UI element</a><a href="side-by-side.html">The earlier before and after</a></nav>
+
+<h2>What changed besides the font names</h2>
+<ul>
+  <li><b>Headlines are one step smaller.</b> Old Standard is wider than Instrument Serif, so the largest headline is 54px, not 60, and second-level headings are 38px, not 42. Tracking stays tight (−3.5% and −2.5%), and line breaks are balanced.</li>
+  <li><b>No serif under 24px.</b> The wave names inside the team window ("Runs", "Evals", "Machines") were 18px serif; they are 16px Atkinson semibold. The italic serif line under each docs title is Atkinson, upright.</li>
+  <li><b>Nothing else.</b> Sizes, spacing and colors are the same steps as before.</li>
+</ul>
+
+<h2>Hero</h2>
+<div class="pair">
+  <figure><figcaption>Current fonts</figcaption><a href="fonts/home-0-now.png"><img src="fonts/home-0-now.png" alt="Hero in current fonts"></a></figure>
+  <figure><figcaption>New set</figcaption><a href="fonts/home-0-new.png"><img src="fonts/home-0-new.png" alt="Hero in the new set"></a></figure>
+</div>
+
+<h2>Waves and tasks</h2>
+<div class="pair">
+  <figure><figcaption>Current fonts</figcaption><a href="fonts/home-900-now.png"><img src="fonts/home-900-now.png" alt="Second section in current fonts"></a></figure>
+  <figure><figcaption>New set</figcaption><a href="fonts/home-900-new.png"><img src="fonts/home-900-new.png" alt="Second section in the new set"></a></figure>
+</div>
+
+<h2>The CLI</h2>
+<div class="pair">
+  <figure><figcaption>Current fonts</figcaption><a href="fonts/home-1800-now.png"><img src="fonts/home-1800-now.png" alt="CLI section in current fonts"></a></figure>
+  <figure><figcaption>New set</figcaption><a href="fonts/home-1800-new.png"><img src="fonts/home-1800-new.png" alt="CLI section in the new set"></a></figure>
+</div>
+
+<h2>Works with and the close</h2>
+<div class="pair">
+  <figure><figcaption>Current fonts</figcaption><a href="fonts/home-2700-now.png"><img src="fonts/home-2700-now.png" alt="Works with in current fonts"></a></figure>
+  <figure><figcaption>New set</figcaption><a href="fonts/home-2700-new.png"><img src="fonts/home-2700-new.png" alt="Works with in the new set"></a></figure>
+</div>
+
+<h2>Studio page</h2>
+<div class="pair">
+  <figure><figcaption>Current fonts</figcaption><a href="fonts/studio-0-now.png"><img src="fonts/studio-0-now.png" alt="Studio in current fonts"></a></figure>
+  <figure><figcaption>New set</figcaption><a href="fonts/studio-0-new.png"><img src="fonts/studio-0-new.png" alt="Studio in the new set"></a></figure>
+</div>
+
+<h2>Docs</h2>
+<div class="pair">
+  <figure><figcaption>Current fonts</figcaption><a href="fonts/docs-0-now.png"><img src="fonts/docs-0-now.png" alt="Docs in current fonts"></a></figure>
+  <figure><figcaption>New set</figcaption><a href="fonts/docs-0-new.png"><img src="fonts/docs-0-new.png" alt="Docs in the new set"></a></figure>
+</div>
+
+<h2>Download page</h2>
+<div class="pair">
+  <figure><figcaption>Current fonts</figcaption><a href="fonts/download-0-now.png"><img src="fonts/download-0-now.png" alt="Download in current fonts"></a></figure>
+  <figure><figcaption>New set</figcaption><a href="fonts/download-0-new.png"><img src="fonts/download-0-new.png" alt="Download in the new set"></a></figure>
+</div>
+
+<h2>Phone</h2>
+<div class="pair narrow">
+  <figure><figcaption>Current fonts</figcaption><a href="fonts/homem-0-now.png"><img src="fonts/homem-0-now.png" alt="Phone in current fonts"></a></figure>
+  <figure><figcaption>New set</figcaption><a href="fonts/homem-0-new.png"><img src="fonts/homem-0-new.png" alt="Phone in the new set"></a></figure>
+</div>
+</main>
+</body>
+</html>

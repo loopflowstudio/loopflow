@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loopflow design languages</title>
+<style>
+ body{margin:0;background:#fbfaf9;color:#1b1718;font:17px/1.55 -apple-system,"Helvetica Neue",sans-serif}
+ main{max-width:980px;margin:0 auto;padding:56px 24px 96px}
+ h1{font-size:36px;line-height:1.15;margin:0 0 12px} h2{font-size:22px;margin:0 0 6px} h2 a{color:inherit}
+ p{max-width:68ch;margin:0 0 12px} .soft{color:#5d5557}
+ section{border-top:1px solid #ddd6d3;padding:28px 0}
+ table{border-collapse:collapse;width:100%;font-size:15px;margin-top:8px} th,td{text-align:left;vertical-align:top;padding:9px 16px 9px 0;border-bottom:1px solid #ddd6d3} th{font-weight:600}
+ a:focus-visible{outline:2px solid #8a1b3d;outline-offset:3px}
+</style></head><body><main>
+<h1>Three design languages, pushed as far as they go</h1>
+<p>Each page shows the same four things with the same Tasks: the homepage first screen, the Task row, the workflow line and New Task. They are meant to be too much. The point is to find which ideas survive being pulled back.</p>
+
+<p><a href="desktop.html">Three further directions, shown on the Mac app: Ledger, Stations, Tide.</a></p>
+<section><h2><a href="score.html">Score</a></h2>
+<p>Tasks are parts in a score and steps are bars. A step that waits for you is a fermata; a loop is a repeat sign with its count; a landed Task ends on a final barline. One engraving face, black ink, and red only for what is yours.</p>
+<p class="soft">Carries: a single mark for "yours" that needs no legend once learned; a Task list that reads as one picture. Risk: costume, and notation nobody asked to learn.</p></section>
+
+<section><h2><a href="terminal.html">Terminal-native</a></h2>
+<p>One monospace, one size, on the character grid, in the reader's own terminal colors. The Task row is the line <code>lf task status</code> prints, so the Mac sidebar, the phone and the shell show the same thing. The workflow is box-drawing text that pastes into a pull request.</p>
+<p class="soft">Carries: one row design on every surface; theme for free. Risk: it looks like other developer tools unless the spacing is exceptional. Use the theme switch at the top.</p></section>
+
+<section><h2><a href="panel.html">Instrument panel</a></h2>
+<p>A rack with one strip per Task: a lamp, a written label, a five-segment ladder. Red means you and nothing else is red. A step that is yours is drawn as an open switch in the signal chain.</p>
+<p class="soft">Carries: the loudest possible "needs you", and the quietest everything else. Risk: a control room, and dark-with-one-accent is a common generated look.</p></section>
+
+<section><h2>Pulling back toward Wine and ink</h2>
+<p>Wine and ink is what Desktop already does well: burgundy as the one owned color, warm charcoal terminals, a humanist sans, almost no shadow. These are the ideas from each direction that could land there without the costume.</p>
+<table>
+<tr><th>From</th><th>Idea worth keeping</th><th>In Wine and ink it becomes</th></tr>
+<tr><td>Score</td><td>One glyph that means "this step is yours"</td><td>A hold mark on the step, in burgundy, used on Mac, phone, site and in <code>lf</code> output. Replaces the stripe, the dot and the lens.</td></tr>
+<tr><td>Score</td><td>The Task list as one aligned picture</td><td>Step positions line up down the sidebar, so a column of holds is visible at a glance.</td></tr>
+<tr><td>Score</td><td>Burgundy only for what is yours</td><td>Burgundy stops being the heading color and the title bar color and starts meaning one thing.</td></tr>
+<tr><td>Terminal</td><td>The same row everywhere</td><td>One row spec: ID, title, steps, now. Four fields, none clipped.</td></tr>
+<tr><td>Terminal</td><td>Structure from columns and blank lines</td><td>Fewer bordered panes inside the Mac window.</td></tr>
+<tr><td>Terminal</td><td>A workflow you can paste</td><td><code>lf graph show</code> prints the same drawing the app shows.</td></tr>
+<tr><td>Panel</td><td>Loud only when it is your turn</td><td>Everything else in the app drops to two inks; the Auto-Ship green goes.</td></tr>
+<tr><td>Panel</td><td>The title as a written label</td><td>The Task title is the one typographic object in a row; everything else is quieter.</td></tr>
+<tr><td>Panel</td><td>Segmented choices in New Task</td><td>Keeps the sentence ("In loopflow, as feature, with Claude") and makes each word a visible choice.</td></tr>
+</table></section>
+</main></body></html>

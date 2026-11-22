@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three elements, three ways each</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Old+Standard+TT:ital,wght@0,400;0,700;1,400&family=Atkinson+Hyperlegible+Next:ital,wght@0,200..800;1,200..800&family=Spline+Sans+Mono:wght@300..700&display=swap" rel="stylesheet">
+<style>
+  /* Wine means "yours" and nothing else. Green means an agent is working. Everything else is ink on paper. */
+  :root {
+    --paper: #fdfbf7; --surface: #ffffff; --ink: #1a1a1a; --soft: #5d5754; --rule: #d9d4cc; --track: #e6e0d7;
+    --yours: #9B1A4A; --yours-wash: #f8e9ee; --run: #1f6b36; --fill: #1a1a1a; --on-fill: #ffffff;
+    --serif: "Old Standard TT", Georgia, serif;
+    --sans: "Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, sans-serif;
+    --mono: "Spline Sans Mono", ui-monospace, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper: #1c1718; --surface: #241d1f; --ink: #efe9e6; --soft: #aca29e; --rule: #3f3638; --track: #3a3133;
+      --yours: #f2a7bd; --yours-wash: #3a2229; --run: #8fd0a2; --fill: #efe9e6; --on-fill: #1c1718; }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  h1, h2, h4 { font-variant-ligatures: no-common-ligatures; letter-spacing: -.03em; }
+  body { background: var(--paper); color: var(--ink); font: 16px/1.5 var(--sans); padding: 48px 32px 96px; }
+  main { max-width: 1560px; margin: 0 auto; }
+  h1 { font: 400 40px/1.1 var(--serif); }
+  h2 { font: 400 30px/1.15 var(--serif); margin-top: 80px; }
+  h3 { font: 600 16px/1.3 var(--sans); }
+  p { max-width: 70ch; }
+  .lede { font-size: 18px; margin-top: 12px; }
+  .job { margin-top: 8px; color: var(--soft); }
+  nav { margin-top: 16px; display: flex; gap: 24px; flex-wrap: wrap; }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--yours); outline-offset: 2px; }
+  .three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; margin-top: 32px; align-items: start; }
+  .three.wide { grid-template-columns: minmax(0, 1fr); gap: 48px; }
+  .v { min-width: 0; }
+  .v > .frame { margin-top: 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 16px; overflow-x: auto; }
+  .v dl { margin-top: 12px; display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 14px; }
+  .v dt { color: var(--soft); }
+  .mono { font-family: var(--mono); }
+  .soft { color: var(--soft); }
+  .yours { color: var(--yours); }
+  @media (max-width: 1100px) { .three { grid-template-columns: 1fr; } }
+  @media (max-width: 600px) { body { padding: 32px 16px 64px; } h1 { font-size: 32px; } h2 { font-size: 26px; } }
+
+  /* Task row A: track */
+  .rowA { list-style: none; padding: 0; }
+  .rowA li { padding: 12px 0; border-top: 1px solid var(--rule); display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; align-items: center; }
+  .rowA li:first-child { border-top: 0; padding-top: 0; } .rowA li:last-child { padding-bottom: 0; }
+  .rowA b { font-weight: 600; font-size: 14px; grid-column: 1 / -1; }
+  .rowA span { font-size: 13px; color: var(--soft); }
+  .rowA .yours { color: var(--yours); }
+  .track { display: flex; gap: 3px; }
+  .track i { width: 18px; height: 4px; border-radius: 2px; background: var(--track); }
+  .track i.d { background: var(--soft); } .track i.r { background: var(--run); } .track i.y { background: var(--yours); }
+
+  /* Task row B: sentence */
+  .rowB { list-style: none; padding: 0; }
+  .rowB li { padding: 12px 0; border-top: 1px solid var(--rule); }
+  .rowB li:first-child { border-top: 0; padding-top: 0; } .rowB li:last-child { padding-bottom: 0; }
+  .rowB b { display: block; font-weight: 600; font-size: 14px; }
+  .rowB span { display: block; font-size: 13px; color: var(--soft); margin-top: 2px; }
+  .rowB .yours { color: var(--yours); }
+  .rowB .count { font-size: 13px; padding-bottom: 12px; }
+
+  /* Task row C: two columns */
+  .rowC { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .rowC th { text-align: left; font-weight: 400; color: var(--soft); padding: 0 12px 8px 0; }
+  .rowC td { padding: 10px 12px 10px 0; border-top: 1px solid var(--rule); vertical-align: top; }
+  .rowC td:first-child { font-weight: 600; font-size: 14px; width: 46%; }
+  .rowC th:last-child, .rowC td:last-child { padding-right: 0; }
+  .rowC tfoot td { font-weight: 400; font-size: 13px; }
+
+  /* Workflow A: line with return paths */
+  .wfA { display: grid; grid-template-columns: repeat(6, minmax(104px, 1fr)); row-gap: 0; min-width: 660px; font-size: 14px; }
+  .wfA .s { position: relative; text-align: center; padding: 0 4px; }
+  .wfA .s::before { content: ""; position: absolute; left: 0; right: 0; top: 15px; height: 1px; background: var(--rule); }
+  .wfA .s:first-child::before { left: 50%; } .wfA .s.last::before { right: 50%; }
+  .wfA .s span { position: relative; display: inline-block; padding: 4px 12px; border-radius: 16px; background: var(--surface); border: 1px solid var(--rule); line-height: 22px; }
+  .wfA .s.y span { background: var(--yours); border-color: var(--yours); color: var(--surface); font-weight: 600; }
+  .wfA .s small { display: block; font-size: 13px; color: var(--soft); margin-top: 6px; min-height: 20px; }
+  .wfA .s.y small { color: var(--yours); }
+  .wfA .back { margin: 4px 52px 0; height: 14px; border: 1px solid var(--soft); border-top: 0; border-radius: 0 0 8px 8px; position: relative; }
+  .wfA .back::before { content: ""; position: absolute; left: -5px; top: -2px; border: 5px solid transparent; border-top: 0; border-bottom: 7px solid var(--soft); }
+  .wfA .in { grid-column: 3 / 5; } .wfA .out { grid-column: 3 / 7; }
+  .wfA .cap { font-size: 13px; color: var(--soft); text-align: center; margin-top: 4px; }
+
+  /* Workflow B: outline */
+  .wfB, .wfB ol { list-style: none; padding: 0; }
+  .wfB { font-size: 14px; max-width: 420px; }
+  .wfB li { margin-top: 8px; } .wfB > li:first-child { margin-top: 0; }
+  .wfB .step { display: flex; justify-content: space-between; gap: 16px; }
+  .wfB .step b { font-weight: 400; }
+  .wfB .step.y b { font-weight: 600; color: var(--yours); }
+  .wfB .step.y span { color: var(--yours); }
+  .wfB .rep { color: var(--soft); font-size: 13px; }
+  .wfB ol ol, .wfB > li > ol { margin: 8px 0 0 6px; padding-left: 16px; border-left: 1px solid var(--rule); }
+
+  /* Workflow C: sentence */
+  .wfC p { font-size: 17px; line-height: 1.6; max-width: 46ch; }
+  .wfC b { font-weight: 600; color: var(--yours); }
+  .wfC pre { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--rule); font: 13px/1.7 var(--mono); white-space: pre-wrap; color: var(--soft); }
+  .wfC pre b { font-weight: 500; }
+
+  /* New Task, shared */
+  .nt label.q, .nt legend.q { display: block; font: 400 28px/1.15 var(--serif); padding: 0; }
+  .nt textarea, .nt input[type=text] { display: block; width: 100%; margin-top: 12px; padding: 12px; border: 1px solid var(--rule); border-radius: 8px; background: var(--paper); color: var(--ink); font: 16px/1.5 var(--sans); resize: vertical; }
+  .nt .go { min-height: 44px; padding: 0 20px; border: 0; border-radius: 8px; background: var(--fill); color: var(--on-fill); font: 600 15px var(--sans); cursor: pointer; }
+  .nt .foot { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: center; justify-content: space-between; }
+  .ntA .say { font-size: 15px; line-height: 2; }
+  .ntA select { font: 600 15px var(--sans); color: var(--ink); background: none; border: 0; border-bottom: 1px solid var(--soft); border-radius: 0; padding: 2px 2px; cursor: pointer; }
+  .ntB fieldset { border: 0; padding: 0; margin-top: 16px; display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 8px; }
+  .ntB legend { float: left; font-size: 14px; color: var(--soft); padding: 0; width: 96px; }
+  .ntB .seg { display: flex; flex-wrap: wrap; gap: 0; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; width: max-content; max-width: 100%; }
+  .ntB .seg label { position: relative; }
+  .ntB .seg input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+  .ntB .seg span { display: block; padding: 8px 14px; font-size: 14px; border-right: 1px solid var(--rule); }
+  .ntB .seg label:last-child span { border-right: 0; }
+  .ntB .seg input:checked + span { background: var(--fill); color: var(--on-fill); font-weight: 600; }
+  .ntB .seg input:focus-visible + span { outline: 2px solid var(--yours); outline-offset: -2px; }
+  .ntB .when { margin: 8px 0 0 104px; font-size: 13px; color: var(--yours); }
+  .ntC input[type=text] { font-size: 18px; padding: 14px 12px; }
+  .ntC .cmd { margin-top: 12px; font: 13px/1.6 var(--mono); color: var(--soft); overflow-wrap: anywhere; }
+  .ntC .set { font-size: 14px; color: var(--soft); }
+  .ntC .set button { font: inherit; color: var(--ink); background: none; border: 0; padding: 0; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  @media (max-width: 600px) { .ntB fieldset { grid-template-columns: 1fr; } .ntB .when { margin-left: 0; } }
+</style>
+</head>
+<body>
+<main>
+<h1>Three elements, three ways each</h1>
+<p class="lede">The Task row, the workflow line and New Task, each drawn three ways in Old Standard, Atkinson Hyperlegible Next and Spline Sans Mono. Wine marks what is yours and nothing else. Green marks an agent at work.</p>
+<p class="job">The steps are the real <span class="mono">feature</span> Graph: explore, plan, build, human-review, deliver, verify. The website's workflow card still shows older step names.</p>
+<nav><a href="fonts.html">The website in this font set</a></nav>
+
+<h2>The Task row</h2>
+<p class="job">It has to answer two questions at a glance: does this need me, and if not, is it moving.</p>
+<div class="three">
+  <section class="v">
+    <h3>A. Track</h3>
+    <div class="frame"><ul class="rowA">
+      <li><b>Make Task PR and brief views useful</b><span class="yours">Review the change, since 12:07</span><span class="track" aria-label="Step 4 of 6, yours"><i class="d"></i><i class="d"></i><i class="d"></i><i class="y"></i><i></i><i></i></span></li>
+      <li><b>Keep interrupted pastes out of Session input</b><span>Codex, building</span><span class="track" aria-label="Step 3 of 6, running"><i class="d"></i><i class="d"></i><i class="r"></i><i></i><i></i><i></i></span></li>
+      <li><b>Keep scrolling responsive under build load</b><span class="yours">Choose what to build, since 11:40</span><span class="track" aria-label="Step 1 of 6, yours"><i class="y"></i><i></i><i></i><i></i><i></i><i></i></span></li>
+      <li><b>Keep one plan at every size</b><span>Landed, #1983</span><span class="track" aria-label="All 6 steps done"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i></span></li>
+    </ul></div>
+    <dl><dt>Good at</dt><dd>Where each Task is in its workflow. Down a list, the wine segments form a column you can scan.</dd><dt>Costs</dt><dd>The track assumes a straight line; a Task on its third trip through a loop looks the same as its first.</dd></dl>
+  </section>
+  <section class="v">
+    <h3>B. Sentence</h3>
+    <div class="frame"><ul class="rowB">
+      <li class="count yours">2 are waiting for you</li>
+      <li><b>Make Task PR and brief views useful</b><span class="yours">Review the change. Waiting since 12:07.</span></li>
+      <li><b>Keep scrolling responsive under build load</b><span class="yours">Choose what to build. Waiting since 11:40.</span></li>
+      <li><b>Keep interrupted pastes out of Session input</b><span>Codex is building, third of six steps.</span></li>
+      <li><b>Keep one plan at every size</b><span>Landed as #1983.</span></li>
+    </ul></div>
+    <dl><dt>Good at</dt><dd>Needs no legend. Yours sort to the top under a count. The same sentence can be printed by <span class="mono">lf task status</span> and read aloud by the phone.</dd><dt>Costs</dt><dd>No picture of progress. Long sentences wrap in a narrow sidebar.</dd></dl>
+  </section>
+  <section class="v">
+    <h3>C. Theirs and yours</h3>
+    <div class="frame"><table class="rowC">
+      <thead><tr><th>Task</th><th>Agent</th><th>You</th></tr></thead>
+      <tbody>
+        <tr><td>Make Task PR and brief views useful</td><td class="soft">Waiting</td><td class="yours">Review the change<br>since 12:07</td></tr>
+        <tr><td>Keep interrupted pastes out of Session input</td><td>Codex, building</td><td></td></tr>
+        <tr><td>Keep scrolling responsive under build load</td><td class="soft">Waiting</td><td class="yours">Choose what to build<br>since 11:40</td></tr>
+        <tr><td>Keep one plan at every size</td><td class="soft">Landed, #1983</td><td></td></tr>
+      </tbody>
+      <tfoot><tr><td colspan="2">Waiting for you</td><td class="yours">2</td></tr></tfoot>
+    </table></div>
+    <dl><dt>Good at</dt><dd>The right column is empty unless you owe something, so an empty column means you are free. This is Ledger's idea without the paper.</dd><dt>Costs</dt><dd>Needs width: fine in the main pane, tight in a sidebar or on a phone.</dd></dl>
+  </section>
+</div>
+
+<h2>The workflow line</h2>
+<p class="job">It has to show the order of steps, which ones stop for you, and what repeats.</p>
+<div class="three wide">
+  <section class="v">
+    <h3>A. Line with return paths</h3>
+    <div class="frame"><div class="wfA">
+      <div class="s y"><span>explore</span><small>you choose</small></div>
+      <div class="s"><span>plan</span><small></small></div>
+      <div class="s"><span>build</span><small></small></div>
+      <div class="s y"><span>human-review</span><small>you review</small></div>
+      <div class="s"><span>deliver</span><small></small></div>
+      <div class="s y last"><span>verify</span><small>you try it</small></div>
+      <div class="in"><div class="back"></div><p class="cap">back to build until you approve</p></div>
+      <div class="out"><div class="back"></div><p class="cap">back to build if verify finds a problem</p></div>
+    </div></div>
+    <dl><dt>Good at</dt><dd>One picture: three wine stops, two paths back. Works in the app and on the website.</dd><dt>Costs</dt><dd>Needs about 660px. Nested loops stack downward, so a third level would get tall.</dd></dl>
+  </section>
+  <div class="three" style="margin-top:0">
+  <section class="v">
+    <h3>B. Outline</h3>
+    <div class="frame"><ol class="wfB">
+      <li class="step y"><b>explore</b><span>you choose</span></li>
+      <li class="step"><b>plan</b></li>
+      <li><span class="rep">Repeat if verify finds a problem</span>
+        <ol>
+          <li><span class="rep">Repeat until you approve</span>
+            <ol>
+              <li class="step"><b>build</b></li>
+              <li class="step y"><b>human-review</b><span>you review</span></li>
+            </ol>
+          </li>
+          <li class="step"><b>deliver</b></li>
+          <li class="step y"><b>verify</b><span>you try it</span></li>
+        </ol>
+      </li>
+    </ol></div>
+    <dl><dt>Good at</dt><dd>Fits a sidebar or a phone. Nesting is indentation, which everyone already reads. It mirrors how the Graph file is written.</dd><dt>Costs</dt><dd>Tall. Less of a picture, more of a list.</dd></dl>
+  </section>
+  <section class="v">
+    <h3>C. Sentence</h3>
+    <div class="frame wfC">
+      <p><b>You choose</b> what to build. The agent plans, then builds until <b>you approve</b> the review. It delivers, and <b>you try it</b>; a problem sends it back to build.</p>
+      <pre>explore<b class="yours">*</b> → plan → [ [ build → human-review<b class="yours">*</b> ] → deliver → verify<b class="yours">*</b> ]
+<b class="yours">*</b> stops for you   [ ] repeats</pre>
+    </div>
+    <dl><dt>Good at</dt><dd>Explains a workflow to someone who has never seen one. The one-line form pastes into a pull request or a terminal unchanged.</dd><dt>Costs</dt><dd>The sentence has to be written per Graph, or generated well. Not scannable across several workflows.</dd></dl>
+  </section>
+  <section class="v">
+    <h3>How they combine</h3>
+    <div class="frame" style="border-style:dashed;background:none"><p style="font-size:14px">These are not exclusive. A is the picture for the Task page and the website, B is the same Graph in a narrow column, and C's one-line form is what <span class="mono">lf graph show</span> could print. One Graph, three widths.</p></div>
+  </section>
+  </div>
+</div>
+
+<h2>New Task</h2>
+<p class="job">It has to take one sentence from you and start, without making you fill in a form. These three work: type and change the choices.</p>
+<div class="three">
+  <section class="v">
+    <h3>A. Sentence</h3>
+    <form class="frame nt ntA" onsubmit="return false">
+      <label class="q" for="a-t">What do you want?</label>
+      <textarea id="a-t" rows="3">Sidebar rows stop clipping the Task ID and status</textarea>
+      <div class="foot">
+        <p class="say">In <select aria-label="Repository"><option>loopflow</option><option>manabot</option><option>kata</option></select>, as a <select aria-label="Workflow"><option>feature</option><option>code</option><option>research</option></select>, with <select aria-label="Agent"><option>Claude</option><option>Codex</option><option>OpenCode</option><option>Pi</option></select>.</p>
+        <button class="go" type="submit">Start</button>
+      </div>
+    </form>
+    <dl><dt>Good at</dt><dd>Reads as one thought. The defaults are visible and each is one click to change.</dd><dt>Costs</dt><dd>You can't see the other choices without opening a menu.</dd></dl>
+  </section>
+  <section class="v">
+    <h3>B. Choices shown</h3>
+    <form class="frame nt ntB" onsubmit="return false">
+      <label class="q" for="b-t">What do you want?</label>
+      <textarea id="b-t" rows="2">Sidebar rows stop clipping the Task ID and status</textarea>
+      <fieldset><legend>Repository</legend><div class="seg"><label><input type="radio" name="b-r" checked><span>loopflow</span></label><label><input type="radio" name="b-r"><span>manabot</span></label><label><input type="radio" name="b-r"><span>kata</span></label></div></fieldset>
+      <fieldset><legend>Workflow</legend><div class="seg" id="b-w"><label><input type="radio" name="b-w" value="feature" checked><span>feature</span></label><label><input type="radio" name="b-w" value="code"><span>code</span></label><label><input type="radio" name="b-w" value="research"><span>research</span></label></div></fieldset>
+      <p class="when" id="b-when" aria-live="polite">You'll be needed three times: to choose, to review, to try it.</p>
+      <fieldset><legend>Agent</legend><div class="seg"><label><input type="radio" name="b-a" checked><span>Claude</span></label><label><input type="radio" name="b-a"><span>Codex</span></label><label><input type="radio" name="b-a"><span>OpenCode</span></label><label><input type="radio" name="b-a"><span>Pi</span></label></div></fieldset>
+      <div class="foot"><span></span><button class="go" type="submit">Start</button></div>
+    </form>
+    <dl><dt>Good at</dt><dd>Every option is on screen. Picking a workflow says in wine how often it will stop for you, before you commit.</dd><dt>Costs</dt><dd>Looks like a form. A long repository list needs another control.</dd></dl>
+  </section>
+  <section class="v">
+    <h3>C. One line</h3>
+    <form class="frame nt ntC" onsubmit="return false">
+      <label class="q" for="c-t">What do you want?</label>
+      <input id="c-t" type="text" value="Sidebar rows stop clipping the Task ID and status">
+      <p class="cmd" id="c-cmd" aria-live="polite"></p>
+      <div class="foot">
+        <p class="set">loopflow, feature, Claude. <button type="button">Change</button></p>
+        <button class="go" type="submit">Start</button>
+      </div>
+    </form>
+    <dl><dt>Good at</dt><dd>Fastest. Shows the command it will run as you type, so the app teaches the CLI.</dd><dt>Costs</dt><dd>Choices are a click away and easy to forget. One line discourages a longer description.</dd></dl>
+  </section>
+</div>
+</main>
+<script>
+  var when = { feature: "You'll be needed three times: to choose, to review, to try it.", code: "You'll be needed twice: to review, to try it.", research: "You'll be needed once per round, to read the findings." };
+  document.getElementById("b-w").addEventListener("change", function (e) { document.getElementById("b-when").textContent = when[e.target.value]; });
+  var input = document.getElementById("c-t"), cmd = document.getElementById("c-cmd");
+  function show() { cmd.textContent = "$ lf task create '" + input.value.replace(/'/g, "'\\''") + "' --run"; }
+  input.addEventListener("input", show); show();
+</script>
+</body>
+</html>

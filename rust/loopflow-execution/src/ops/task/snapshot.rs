@@ -307,19 +307,22 @@ fn change_counts(workspace: TaskComparison<'_>) -> OpsResult<BTreeMap<String, u6
     )?))
 }
 
-/// `git diff` over the comparison, pinned against Machine configuration
-/// (`diff.renames`, `diff.noprefix`, `diff.mnemonicPrefix`, external drivers)
-/// so the counts and the Diff read the same patch. Pathspecs follow.
+/// Patch flags pinned against Machine configuration (`color.diff`, external
+/// drivers, `diff.noprefix`, `diff.mnemonicPrefix`), so the counts and the Diff
+/// read the same patch.
+const PINNED_PATCH_FLAGS: [&str; 4] = [
+    "--no-color",
+    "--no-ext-diff",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+];
+
+/// `git diff` over the comparison, renames found whatever `diff.renames` says.
+/// Pathspecs follow.
 fn comparison_diff_args<'a>(workspace: TaskComparison<'a>) -> Vec<&'a str> {
-    let mut args = vec![
-        "diff",
-        "--no-color",
-        "--no-ext-diff",
-        "--find-renames",
-        "--src-prefix=a/",
-        "--dst-prefix=b/",
-        workspace.base_commit,
-    ];
+    let mut args = vec!["diff", "--find-renames"];
+    args.extend(PINNED_PATCH_FLAGS);
+    args.push(workspace.base_commit);
     args.extend(workspace.head_commit);
     args.push("--");
     args
@@ -490,16 +493,11 @@ pub(super) fn diff_snapshot(
         let output = crate::observe::git(
             workspace.checkout.worktree,
             &[
-                "diff",
-                "--no-index",
-                "--no-color",
-                "--no-ext-diff",
-                "--src-prefix=a/",
-                "--dst-prefix=b/",
-                "--",
-                "/dev/null",
-                &path,
-            ],
+                &["diff", "--no-index"][..],
+                &PINNED_PATCH_FLAGS,
+                &["--", "/dev/null", &path],
+            ]
+            .concat(),
         )
         .map_err(|error| task_error(format!("failed to diff untracked file {path}: {error}")))?;
         if !output.status.success() && output.status.code() != Some(1) {

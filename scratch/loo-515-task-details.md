@@ -523,6 +523,8 @@ Measured (November 21 evening, `DiffScrollMeasurement`, this Task's Diff with no
 
 Check (November 21 evening): `cargo test -p loopflow-execution --lib task_changes_` 2, `dto_fixtures::` 49, `server::schema::tests::` 8, `documented_commands::` 4 passed; `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests|DTOFixtureTests|RegistryQueryTests'` 135 passed. Gate/CI: clippy, the full Swift suite (the FSEvents tests `commitInLinkedWorktreeRereadsTheComparison` and `ignoredWritesFromReadsNeverScheduleAnotherRead` failed earlier under a busy `fseventsd`), `global_commands`. Demo: scrolling and jumps on screen.
 
+Check (November 21 night, shared `PINNED_PATCH_FLAGS` for counts, the Diff and untracked files): `cargo test -p loopflow-execution --lib ops::task::` 65 passed, `cargo clippy -p loopflow-execution --all-targets` clean. Gate: `ReviewDiffTests`.
+
 ## Diff polish, November 21 — built
 
 Steer, November 21: "ok grammar highlighitng and rendered diffs can be a single v2 task"; items 1 and 2 leave LOO-515 for Task c9fbcb ("Diff v2"), `SyntaxColors.swift` stays as it is. Built here, unseen on screen:

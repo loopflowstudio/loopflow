@@ -68,3 +68,11 @@
 - 2026-11-21 realign (headless): the plan now lists New code as the default layout and the Diff polish among what the demo must see; Jack's November 21 quotes moved into Decisions; the v2 Task is c9fbcb. Product memory notes New code as Jack's reading. No checks run; nothing in code disagreed.
 - 2026-11-21 concept review, tenth pass (headless), over the Diff polish: one repair for implement, in the plan under "Tenth pass". The step menu read every commit from base to head, merges included; on this branch 10 of 54 entries were `Merge <sha>`, one comparing 1,624 files of main's work. Chosen by the review, not by Jack, reversible: steps walk `--first-parent --no-merges` with each commit's parent, and a merge ends a run. Left for the screen: non-`lf` commits each stand alone (44 entries here). The five demo questions are unchanged and unanswered.
 - 2026-11-21 concept review, eleventh pass (headless), over the first-parent step repair: nothing to change. The five demo questions are unchanged and unanswered; whether the 23 non-`lf` commits standing alone fold together is still for the screen. `scratch/concept-review.html` is still the sixth pass's page.
+
+## 3d4350 kickoff (2026-11-21, headless)
+
+- Assumed: iPhone keeps its current sizes in a private `MobileType` (new faces only); mapping it onto the Mac ramp would shrink its text. Passed over: `#if os(iOS)` sizes in `Typography`. Reversible.
+- Assumed: sidebar rows show no status start time ("Blocked since 12:07" in the prototype); program status reports carry none. The row accepts one when a later change records it.
+- Assumed: Ghostty's `font-family` loads after the person's config (it appends, so loading it in `loopflowConfig` first would beat their family). They keep theirs first and get Spline Sans Mono as a fallback.
+- Assumed: `GraphCompositionView` stays as the Graph-definition drawing; only renderers of a Task's position merge into the workflow line, and `WorkflowDiagram` is deleted.
+- Open: DESIGN.md exists only on cfadc6's unpublished branch; its pointer and "Tokens today" edits wait for cfadc6 on main. Both branches edit `GhosttyManager.loopflowConfig`.

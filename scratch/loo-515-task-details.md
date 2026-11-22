@@ -11,8 +11,8 @@ The step-by-step account this file replaced: `ade953f915:scratch/loo-515-task-de
 Status: built, the tour skill and the two diff settings included. Seen on
 screen November 21, in Loopflow Dev; the repairs for what that showed (width,
 file bar, syntax colors, the per-file read, the long-line cut, Retry, rows
-that take the pane's width) and the polish under "Diff polish" are built and unseen.
-The Diff polish (below) and the New code layout are built and unseen too.
+that take the pane's width), the New code layout, the Diff polish (below), the
+count up front and the windowed stream are built and unseen.
 PR #1949 is open; its head follows this branch.
 
 ## What exists
@@ -354,9 +354,8 @@ Retry; a change and a long line share one id (`ReviewLine.id(in:)`); the
 toolbar's four forms give up layout, then order and tour, then Focus, as
 `swift/README.md` says. Two things are called cut and stay two: a long line
 (Show brings the rest) and a file past 1 MB (nothing does until Task 4556d0).
-Noticed, left as chosen: while files are still being read the title counts
-only the changes read so far, and the number waiting is in the reading mark's
-tooltip. The five questions under Remaining are unchanged and unanswered.
+Noticed then, replaced since by the count up front: while files were still
+being read the title counted only the changes read so far. The five questions under Remaining are unchanged and unanswered.
 
 Tenth pass, November 21, over the Diff polish at `9fdfc72f79`: one repair
 for implement. A step is a Graph step's own commits (Jack: "steps do commits,
@@ -398,7 +397,7 @@ against the merge, so a step never carries main's or a synced Task's work.
   live conversation, the tour with Write tour / Update tour and its behind
   notice, By group under this repository's `diff_groups`, and Always hidden's
   layers and save against a running server; New code with its old-line
-  folds, the step menu, change marks, Viewed, the enclosing declaration,
+  folds, the step menu, Viewed, the enclosing declaration,
   copy without markers and Wrap long lines; the count whole from the first
   frame, scrolling and sidebar jumps on this PR's Diff, "N files above · Show".
 - Open, for the person at the demo:
@@ -497,19 +496,16 @@ files:
 
 Measured (November 21 evening, `DiffScrollMeasurement`, this Task's Diff with nothing hidden, 76 files, 600 × 900 pt): before, scroll frames of 40 pt median 4.6 ms, p95 12.1, 5/300 over 16.7 ms, sidebar jumps median 245 ms, max 1,102 ms. Separating anchor from current alone: about the same. Lazy line rows: p95 9.7, 2/300, jumps median 109, max 1,524 (the farthest). With the window: jumps median 92, max 119 ms; "files above" 350 ms; first frame 92 → 51 ms. A per-line syntax span cache was tried and dropped: jumps draw unseen lines, so it never hit. Jumps keep ~90 ms of drawing a new screen of rows; whether that reads as instant is for the screen.
 
-Check (November 21 evening): `cargo test -p loopflow-execution --lib task_changes_` 2 passed; `dto_fixtures::` 49, `server::schema::tests::` 8, `documented_commands::` 4 passed; schema fixture regenerated; `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests|DTOFixtureTests|RegistryQueryTests'` 135 passed. Gate/CI: clippy, the full Swift suite. Demo: scrolling and jumps on screen.
-
-Check (November 21, polish): `swift build --build-tests` then `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests'` → 60 tests, 58 passed; `commitInLinkedWorktreeRereadsTheComparison` and `ignoredWritesFromReadsNeverScheduleAnotherRead` (FSEvents) failed with `fseventsd` at 100% CPU, the documented trap — gate reruns them. `DTOFixtureTests|ServerProtocolTests|RegistryQueryTests` → 98 passed. Rust: `cargo test -p loopflow-execution --lib task_files_compare_net_parent_head` ok, `server::schema::tests::` 8 passed, `--test integration dto_fixtures::` 49 passed, `documented_commands::` 4 passed (after `git fetch --unshallow`; the shallow clone could not order migrations). Gate/CI: clippy, the full swift suite, `global_commands`. Demo: the pane on screen.
+Check (November 21 evening): `cargo test -p loopflow-execution --lib task_changes_` 2, `dto_fixtures::` 49, `server::schema::tests::` 8, `documented_commands::` 4 passed; `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests|DTOFixtureTests|RegistryQueryTests'` 135 passed. Gate/CI: clippy, the full Swift suite (the FSEvents tests `commitInLinkedWorktreeRereadsTheComparison` and `ignoredWritesFromReadsNeverScheduleAnotherRead` failed earlier under a busy `fseventsd`), `global_commands`. Demo: scrolling and jumps on screen.
 
 ## Diff polish, November 21 — built
 
 Steer, November 21: "ok grammar highlighitng and rendered diffs can be a single v2 task"; items 1 and 2 leave LOO-515 for Task c9fbcb ("Diff v2"), `SyntaxColors.swift` stays as it is. Built here, unseen on screen:
 
-- **Diff per step.** `lf task changes` carries `commits` (`{sha, subject}`, base to head, oldest first; `TaskCommit` in Rust and Swift, fixtures and schema updated). `ReviewStep.steps` reads a run of `lf <step>:` subjects as one step, any other commit alone. A menu under the title ("Whole Task · N steps") picks one; `showStep` compares `.branch(base: parent of its first, head: its last)` and the stream reads anew. Steps come only from the whole Task's read. A pane tab change returns to the whole Task.
-- **Change marks** (`ChangeMarks`, `ReviewDiff.marks`): one mark per change beside the scrollbar, placed by counting the rows the stream draws in the current layout; green added, red removed, accent both, quiet moved; a dot for a file with comments. Click lands on the change.
+- **Diff per step.** `lf task changes` carries `commits` (`{sha, parent, subject}`, first-parent, no merges, oldest first; `TaskCommit` in Rust and Swift, fixtures and schema updated). `ReviewStep.steps` reads a run of one `lf <step>:` prefix as one step when each commit's parent is the step's head, any other commit alone; a step's base is its first commit's parent. A menu under the title ("Whole Task · N steps") picks one; `showStep` compares `.branch(base: parent of its first, head: its last)` and the stream reads anew. Steps come only from the whole Task's read. A pane tab change returns to the whole Task.
 - **Copy without + and −.** The marker is not selectable; each line's context menu copies the line, the selected lines, or the side's shown code (`ReviewSelection.side`).
 - **Viewed** per file: checkbox in the file title and bar; folds the file to its header, sidebar "12 / 60 viewed" and a check per row, stepping passes over it; `ReviewFile.fingerprint` clears it when the file's lines change. In memory only.
 - **Enclosing declaration** under the file bar, overlaid on the stream (`ReviewFile.enclosing`): the nearest shown line above the top row that opens a function or type (or a Markdown heading), else git's hunk declaration.
 - **Wrap long lines** in the … menu, which is now always shown; off, each line keeps one row and ends in "…".
 
-Chosen while building, reversible: steps are consecutive runs (a second `implement` after `gate` is a second step); wrap off truncates instead of scrolling sideways (the November 21 width repairs ruled out a row wider than the pane); marks count rows, not measured heights, so wrapped lines and comments put them slightly off; viewed does not outlive the app.
+Chosen while building, reversible: steps are consecutive runs (a second `implement` after `gate` is a second step); wrap off truncates instead of scrolling sideways (the November 21 width repairs ruled out a row wider than the pane); viewed does not outlive the app.

@@ -29,10 +29,6 @@ app, rt = fast_app(
         NotStr(
             '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">'
         ),
-        Link(
-            rel="stylesheet",
-            href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap",
-        ),
         Link(rel="stylesheet", href=f"/static/style.css?v={STYLE_VERSION}"),
     ),
 )
@@ -1225,7 +1221,19 @@ def _healthz_handler(request):
     return JSONResponse({"status": "ok", "release": RELEASE_TAG})
 
 
+def _font_handler(request):
+    # The portable architecture page loads these cross-origin.
+    return FileResponse(
+        STATIC_DIR / "fonts" / request.path_params["name"],
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=31536000, immutable",
+        },
+    )
+
+
 # Insert machine-readable routes at the beginning to avoid the static handler
+app.routes.insert(0, Route("/static/fonts/{name}", _font_handler, methods=["GET"]))
 app.routes.insert(0, Route("/llms.txt", _llms_txt_handler, methods=["GET"]))
 app.routes.insert(0, Route("/llms-full.txt", _llms_full_txt_handler, methods=["GET"]))
 app.routes.insert(0, Route("/sitemap.xml", _sitemap_handler, methods=["GET"]))

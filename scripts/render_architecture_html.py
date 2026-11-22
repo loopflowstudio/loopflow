@@ -35,7 +35,7 @@ def render_html() -> str:
             (WEBSITE / "static" / "style.css").read_text(),
             (ROOT / "docs" / "dev" / "architecture.css").read_text(),
         )
-    )
+    ).replace("url(/static/", f"url({site.BASE_URL}/static/")
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -45,7 +45,6 @@ def render_html() -> str:
   <meta name="robots" content="noindex,nofollow">
   <title>Architecture — Loopflow Developer Architecture</title>
   <link rel="icon" href="{site.BASE_URL}/static/logo.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
   <style>
 {css}
   </style>

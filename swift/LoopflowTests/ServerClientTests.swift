@@ -371,7 +371,7 @@ struct ServerClientTests {
             return true
         }
         #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).decode(String.self) == big)
-        let output = try await ServerClient.configuration(.configTheme(path: "/unused", value: big), location: peer.location)
+        let output = try await ServerClient.configuration(.configTheme(value: big), location: peer.location)
         #expect(String(decoding: output, as: UTF8.self) == "\(big.utf8.count)")
     }
 

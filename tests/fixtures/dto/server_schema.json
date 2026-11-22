@@ -18595,13 +18595,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "Appearance's theme file at `path`: set to `value`, or read when null.\nDesktop owns its Apply/Cancel transaction; no CLI spells it.",
+          "description": "The Machine's `theme:` choice: set to `value`, or read when null.\nDesktop owns its Apply/Cancel transaction and the phone reads it; no\nCLI spells it.",
           "properties": {
             "kind": {
               "const": "config.theme",
-              "type": "string"
-            },
-            "path": {
               "type": "string"
             },
             "value": {
@@ -18613,7 +18610,6 @@
           },
           "required": [
             "kind",
-            "path",
             "value"
           ],
           "type": "object",

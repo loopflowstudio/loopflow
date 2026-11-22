@@ -297,8 +297,8 @@ public enum ConfigOperation: Encodable, Sendable {
     /// `value` is YAML.
     case configSet(destination: JSONValue, key: String, value: String)
     case configUnset(destination: JSONValue, key: String)
-    /// Appearance's theme file: set to `value`, or read when nil.
-    case configTheme(path: String, value: String?)
+    /// The serving Machine's `theme:`: set to `value` (YAML), or read when nil.
+    case configTheme(value: String?)
 
     public func encode(to encoder: Encoder) throws {
         try tagged.encode(to: encoder, tag: "kind")
@@ -315,8 +315,8 @@ public enum ConfigOperation: Encodable, Sendable {
             TaggedFields("config.set", ["destination": destination, "key": key, "value": value])
         case .configUnset(let destination, let key):
             TaggedFields("config.unset", ["destination": destination, "key": key])
-        case .configTheme(let path, let value):
-            TaggedFields("config.theme", ["path": path, "value": value])
+        case .configTheme(let value):
+            TaggedFields("config.theme", ["value": value])
         }
     }
 }

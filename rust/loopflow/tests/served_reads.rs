@@ -127,11 +127,7 @@ fn configuration_edits_use_the_server_without_work_processes() {
     .unwrap_err();
     assert!(refused.message.contains("does not apply"), "{refused:?}");
     assert!(!repo.path().join(".lf/config.yaml").exists());
-    let theme = request(Operation::Write(Write::ConfigTheme {
-        path: home.path().join("config.yaml"),
-        value: None,
-    }))
-    .unwrap();
+    let theme = request(Operation::Write(Write::ConfigTheme { value: None })).unwrap();
     assert_eq!(theme["value"], "Hearth");
     assert_eq!(fs::read(&database).unwrap(), before);
 }

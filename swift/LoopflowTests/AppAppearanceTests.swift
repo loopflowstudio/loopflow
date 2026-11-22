@@ -11,8 +11,7 @@ import ViewInspector
 struct AppAppearanceTests {
     @Test("The window modifier follows preview, Cancel and Apply", arguments: ThemeFixture.allCases)
     func windowModifier(theme: ThemeFixture) async throws {
-        try await withThemeServer { location in
-            let paths = ThemePaths.temporary()
+        try await withThemeServer { location, paths in
             let appearance = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
             let applied: AppearanceMode = theme == .dark ? .light : .dark
             await appearance.applyMode(applied)
@@ -56,7 +55,7 @@ struct NativeAppAppearanceTests {
     @Test("Native controls and the custom palette follow the same window appearance",
           arguments: ["system", "light", "dark"], [ColorScheme.light, .dark])
     func paletteFollowsWindow(mode: String, system: ColorScheme) async throws {
-        try await withThemeServer { location in
+        try await withThemeServer { location, _ in
             _ = NSApplication.shared
             var observed: (ColorScheme, Color)?
             let appearance = await AppearanceStore.loaded(paths: .temporary(), systemDark: system == .dark, location: location)

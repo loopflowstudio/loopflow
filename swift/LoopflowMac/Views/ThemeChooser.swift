@@ -49,8 +49,10 @@ struct ThemeChooser: View {
                 if editing, appearance.selectedSource == .yours {
                     Button("Done Editing") { editing = false }
                 }
-                DisclosureGroup("Advanced") {
-                    Text(appearance.paths.config.path).font(Typography.mono).textSelection(.enabled)
+                if let config = appearance.configPath {
+                    DisclosureGroup("Advanced") {
+                        Text(config).font(Typography.mono).textSelection(.enabled)
+                    }
                 }
                 Spacer()
                 Button("Cancel") { appearance.cancel() }.disabled(appearance.saving).keyboardShortcut(.cancelAction)

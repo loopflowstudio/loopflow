@@ -47,8 +47,7 @@ struct ThemeWorkflowTests {
     }
 
     @Test func chooserFiltersEachSideToItsAppearanceAndWritesTheChoice() async throws {
-        try await withThemeServer { location in
-            let paths = ThemePaths.temporary()
+        try await withThemeServer { location, paths in
             let appearance = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
             appearance.beginPreview()
             let view = ThemeChooser(appearance: appearance)
@@ -93,7 +92,7 @@ struct ThemeWorkflowTests {
             }
             #expect(!appearance.chooserOpen)
             #expect(!appearance.saving)
-            let savedTheme1 = try await ThemeConfig.read(paths.config, location: location)
+            let savedTheme1 = try await savedTheme(location)
             #expect(savedTheme1 == "light:Fjord Light,dark:Harbor")
             #expect(appearance.effectiveTheme.name == "Fjord Light")
             appearance.setSystemDark(true)

@@ -1,9 +1,8 @@
 import Foundation
 import Loopflow
 
-/// Where themes and the `theme:` choice live. Loopflow writes only `themes` and the config's `theme:` line.
+/// Where theme files live; Loopflow writes only `themes`. The `theme:` choice is the server's.
 struct ThemePaths: Equatable {
-    var config: URL
     var themes: URL
     var ghostty: URL?
 
@@ -14,8 +13,7 @@ struct ThemePaths: Equatable {
             ?? home.appendingPathComponent(".lf", isDirectory: true)
         let xdg = environment["XDG_CONFIG_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
             ?? home.appendingPathComponent(".config", isDirectory: true)
-        return Self(config: lf.appendingPathComponent("config.yaml"),
-                    themes: lf.appendingPathComponent("themes", isDirectory: true),
+        return Self(themes: lf.appendingPathComponent("themes", isDirectory: true),
                     ghostty: xdg.appendingPathComponent("ghostty/themes", isDirectory: true))
     }
 }
@@ -77,41 +75,5 @@ struct ThemeLibrary {
         if yours[name] != nil { return .yours }
         if isBuiltin(name) { return .builtin }
         return ghostty[name] == nil ? nil : .ghostty
-    }
-}
-
-/// `theme:` in `~/.lf/config.yaml`, in Ghostty's value syntax: `light:A,dark:B` or one name.
-enum ThemeConfig {
-    enum Value: Equatable {
-        case single(String)
-        case pair(light: String?, dark: String?)
-    }
-
-    static func parse(_ text: String) -> Value? {
-        let text = text.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return nil }
-        var light: String?, dark: String?
-        for part in text.split(separator: ",") {
-            let pair = part.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            switch (pair.first, pair.count) {
-            case ("light", 2): light = pair[1]
-            case ("dark", 2): dark = pair[1]
-            default: return .single(text)
-            }
-        }
-        return .pair(light: light, dark: dark)
-    }
-
-    /// Read and edit the same typed declaration as the CLI through the server.
-    static func read(_ url: URL, location: ServerLocation = .shared) async throws -> String? {
-        let data = try await ServerClient.configuration(.configTheme(path: url.path, value: nil), location: location)
-        let result = try JSONDecoder().decode(ConfigurationFileValue.self, from: data)
-        guard case .string(let value) = result.value else { return nil }
-        return value
-    }
-
-    static func write(_ value: String, to url: URL, location: ServerLocation = .shared) async throws {
-        let encoded = String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
-        _ = try await ServerClient.configuration(.configTheme(path: url.path, value: encoded), location: location)
     }
 }

@@ -52,6 +52,8 @@ final class AppearanceStore {
     @ObservationIgnored private var observation: NSKeyValueObservation?
     @ObservationIgnored private var watcher: Timer?
     @ObservationIgnored private var fingerprint: [String] = []
+    /// Where the server keeps `theme:`, as its last answer said.
+    private(set) var configPath: String?
 
     init(paths: ThemePaths, systemDark: Bool? = nil, watches: Bool = false, location: ServerLocation = .shared,
          publish: @escaping (ThemeDefinition, String) throws -> Void = { _, _ in }) {
@@ -73,7 +75,6 @@ final class AppearanceStore {
         }
         if watches {
             Task { await reload() }
-            fingerprint = currentFingerprint()
             watcher = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
                 Task { @MainActor [weak self] in await self?.reloadIfChanged() }
             }
@@ -117,9 +118,10 @@ final class AppearanceStore {
         library = ThemeLibrary.load(paths)
         var problems = library.problems
         let raw: String?
-        do { raw = try await ThemeConfig.read(paths.config, location: location) }
+        do { raw = try await readChoice() }
         catch { if reading == generation { notice = error.localizedDescription }; return }
         guard reading == generation else { return }
+        fingerprint = currentFingerprint()
         switch selection(from: raw) {
         case let .success(choice): selection = choice
         case let .failure(error): problems.insert(error.message, at: 0)
@@ -132,8 +134,8 @@ final class AppearanceStore {
     }
 
     private func selection(from raw: String?) -> Result<AppearanceSelection, ThemeError> {
-        guard let raw, let value = ThemeConfig.parse(raw) else { return .success(AppearanceSelection()) }
-        let config = paths.config.path
+        guard let raw, let value = ThemeChoice.parse(raw) else { return .success(AppearanceSelection()) }
+        let config = configPath ?? "~/.lf/config.yaml"
         func unknown(_ name: String) -> ThemeError {
             ThemeError("No theme named “\(name)”: keeping \(effectiveTheme.name). Fix theme: in \(config) with a built-in name or a file in \(paths.themes.path).")
         }
@@ -155,7 +157,8 @@ final class AppearanceStore {
     }
 
     private func currentFingerprint() -> [String] {
-        let files = [paths.config] + [paths.themes, paths.ghostty].compactMap { $0 }.flatMap { (try? ThemeFile.directory($0)) ?? [] }
+        let config = configPath.map { [URL(fileURLWithPath: $0)] } ?? []
+        let files = config + [paths.themes, paths.ghostty].compactMap { $0 }.flatMap { (try? ThemeFile.directory($0)) ?? [] }
         return files.map { url in
             let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
             return "\(url.path)|\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)|\(values?.fileSize ?? -1)"
@@ -167,6 +170,23 @@ final class AppearanceStore {
         guard latest != fingerprint else { return }
         fingerprint = latest
         await reload()
+    }
+
+    /// The server's `theme:` text, read or written as the CLI's typed declaration.
+    private func readChoice() async throws -> String? {
+        try declared(await ServerClient.configuration(.configTheme(value: nil), location: location))
+    }
+
+    private func writeChoice(_ value: String) async throws {
+        let encoded = String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
+        _ = try declared(await ServerClient.configuration(.configTheme(value: encoded), location: location))
+    }
+
+    private func declared(_ answer: Data) throws -> String? {
+        let declaration = try JSONDecoder().decode(ConfigurationFileValue.self, from: answer)
+        configPath = declaration.path
+        guard case .string(let value) = declaration.value else { return nil }
+        return value
     }
 
     // MARK: Preview
@@ -265,7 +285,7 @@ final class AppearanceStore {
         var choice = selection
         choice.mode = mode
         do {
-            try await ThemeConfig.write(choice.configValue, to: paths.config, location: location)
+            try await writeChoice(choice.configValue)
             selection = choice
             draft = nil
             update(resolved(selection, in: library))
@@ -287,7 +307,7 @@ final class AppearanceStore {
                     try FileManager.default.removeItem(at: url)
                 }
             }
-            try await ThemeConfig.write(draft.selection.configValue, to: paths.config, location: location)
+            try await writeChoice(draft.selection.configValue)
         } catch { notice = error.localizedDescription; return }
         selection = draft.selection
         self.draft = nil

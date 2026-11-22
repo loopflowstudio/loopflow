@@ -26,6 +26,15 @@ impl Operation {
             Self::Write(_) | Self::Measured(MeasuredOperation::Write { .. })
         )
     }
+
+    /// The directory a command names, whose repository it reads or changes.
+    pub(super) fn directory(&mut self) -> Option<std::path::PathBuf> {
+        match self {
+            Self::Read(read) => read.directory_mut().cloned(),
+            Self::Write(write) => write.directory_mut().cloned(),
+            Self::Server(_) | Self::Measured(_) => None,
+        }
+    }
 }
 
 /// The ordinary operation and its per-request work receipt in one response.
@@ -116,8 +125,10 @@ mod tests {
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/upload.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/ticket.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_run.json"),
-            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_ship.json"),
-            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_hold.json"),
+            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on.json"),
+            include_str!(
+                "../../../loopflow-execution/tests/fixtures/dto/server/task_auto_off.json"
+            ),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_steer.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_report.json"),
             include_str!(

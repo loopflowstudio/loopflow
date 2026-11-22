@@ -258,22 +258,40 @@ pub fn explain_task_checkout(
 /// server, which records it. Every launch then reads its own news from the
 /// store, in this process: the Session's unread steers and what changed on its
 /// Tasks. The context block comes from checkout files.
+/// `harness` names the provider whose hook this is; it reads the callback and
+/// shapes the reply. A hook that names none sends Claude's shape.
 pub fn emit_block(
     delivery: Option<&std::path::Path>,
     moment: loopflow_execution::context_block::ContextMoment,
+    harness: Option<loopflow_harness::HarnessKind>,
 ) -> Result<()> {
     use crate::server::wire::BoundaryMoment;
-    use loopflow_execution::context_block::ContextMoment;
-    let input = read_callback()?;
-    if input.get("agent_id").is_some_and(|id| !id.is_null()) {
+    use loopflow_execution::context_block::{reported_thread_path, ContextMoment};
+    use loopflow_execution::harness::HookCallback;
+    let harness = loopflow_execution::harness::launcher(
+        harness.unwrap_or(loopflow_harness::HarnessKind::Claude),
+    );
+    let raw = read_callback()?;
+    let thread_file = delivery_path(delivery, &raw)
+        .ok()
+        .map(|path| reported_thread_path(&path));
+    let callback = harness.hook_callback(raw, moment, thread_file.as_deref());
+    let Some(HookCallback {
+        moment,
+        payload: input,
+        prompt,
+    }) = callback
+    else {
         return Ok(());
-    }
+    };
     let (path, delivery) = load_delivery(delivery, &input)?;
-    // lf asks only a bare Codex launch for its thread, by creating the file
-    // beside its delivery. Writing it opens no store; a failed write only
-    // leaves the conversation unresumable.
+    // A launch whose provider names the conversation keeps it in the thread
+    // file beside its delivery. A bare Codex launch creates the file to ask,
+    // and the start callback fills it here; Antigravity's `hook_callback`
+    // keeps it on the conversation the person is in. Writing it opens no store; a failed write
+    // only leaves the conversation unresumable.
     if moment == ContextMoment::Start {
-        let reported = loopflow_execution::context_block::reported_thread_path(&path);
+        let reported = reported_thread_path(&path);
         if let (Some(thread), true) = (input["session_id"].as_str(), reported.exists()) {
             if let Err(error) = std::fs::write(&reported, thread) {
                 tracing::warn!(%error, "cannot keep the provider's thread for resume");
@@ -318,6 +336,18 @@ pub fn emit_block(
         }
         _ => false,
     };
+    // The start was also the prompt: the server marks the turn working.
+    if prompt && held.is_some() {
+        let mut opening = input.clone();
+        opening["hook_event_name"] = "UserPromptSubmit".into();
+        ask_server(
+            &path,
+            &delivery.home,
+            BoundaryMoment::Tool,
+            held.as_ref(),
+            &opening,
+        );
+    }
     if moment == ContextMoment::Stop {
         return Ok(());
     }
@@ -353,9 +383,7 @@ pub fn emit_block(
         _ => prefix,
     };
     let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
-    let output = serde_json::json!({"hookSpecificOutput": {
-        "hookEventName": event, "additionalContext": text,
-    }});
+    let output = harness.hook_reply(event, &text);
     write_output(format!("{output}\n").as_bytes())?;
     // Printed first: a hook that dies between the two leaves a claim that
     // lapses, and a steer that arrives twice beats one that never arrives.
@@ -524,10 +552,19 @@ fn load_delivery(
     std::path::PathBuf,
     loopflow_execution::context_block::ContextDelivery,
 )> {
+    let path = delivery_path(path, input)?;
+    let delivery = loopflow_execution::context_block::ContextDelivery::load(&path)?;
+    Ok((path, delivery))
+}
+
+/// The delivery file a callback names.
+fn delivery_path(
+    path: Option<&std::path::Path>,
+    input: &serde_json::Value,
+) -> Result<std::path::PathBuf> {
     // A Codex conversation's own binding wins over its app-server's launch
     // file, which a conversation started there later falls back to.
-    let path = path
-        .map(std::path::Path::to_path_buf)
+    path.map(std::path::Path::to_path_buf)
         .or_else(|| {
             input["session_id"]
                 .as_str()
@@ -545,9 +582,7 @@ fn load_delivery(
         })
         .ok_or_else(|| {
             anyhow::anyhow!("Provider callback has no launch context or native session binding")
-        })?;
-    let delivery = loopflow_execution::context_block::ContextDelivery::load(&path)?;
-    Ok((path, delivery))
+        })
 }
 
 /// A stalled provider cannot retain the takeover fence through an unread pipe.

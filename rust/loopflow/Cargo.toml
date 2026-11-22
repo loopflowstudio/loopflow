@@ -21,10 +21,6 @@ path = "src/bin/lf.rs"
 name = "lf-prompt"
 path = "src/bin/lf-prompt.rs"
 
-[[bin]]
-name = "lf-world"
-path = "src/bin/lf-world.rs"
-
 # Keep dedicated proof entrypoints and process-global environment fixtures separate.
 [[test]]
 name = "integration"
@@ -67,10 +63,6 @@ name = "discovery_tests"
 path = "tests/discovery_tests.rs"
 
 [[test]]
-name = "two_people"
-path = "tests/two_people.rs"
-
-[[test]]
 name = "golden_prompt"
 path = "tests/golden_prompt.rs"
 
@@ -101,6 +93,7 @@ path = "tests/session_launch_contract.rs"
 # --- Core dependencies ---
 [dependencies]
 loopflow-execution = { path = "../loopflow-execution" }
+loopflow-harness = { path = "../loopflow-harness" }
 loopflow-definitions = { path = "../loopflow-definitions" }
 loopflow-storage = { path = "../loopflow-storage" }
 loopflow-model = { path = "../loopflow-model" }

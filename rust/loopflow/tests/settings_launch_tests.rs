@@ -50,7 +50,7 @@ fn bad_config_lines_do_not_stop_graph_commands() {
     let preferences = "# default_agent: claude:fable\ndefault_agent: codex\nfuture: {enabled: true}\nbroken: [do-not-print-this-value\nclaude: {model: opus, future: true}\nyolo: perhaps\nskills: {implement: {agent: 'claude:fable', future: true}}\naccount: {claude: [saved]}\naccounts: {claude: {saved: {login_email: saved@example.com}}}\n";
     fs::write(home.path().join("config.yaml"), preferences).unwrap();
     for args in [
-        vec!["--context", "graph", "auto"],
+        vec!["--context", "graph", "code"],
         vec!["config", "settings", "--skill", "implement", "--json"],
     ] {
         let output = command(repo.path(), home.path(), &args).output().unwrap();
@@ -99,7 +99,7 @@ fn bad_config_lines_do_not_stop_graph_commands() {
     )
     .unwrap();
     assert!(
-        command(repo.path(), home.path(), &["--context", "graph", "auto"])
+        command(repo.path(), home.path(), &["--context", "graph", "code"])
             .output()
             .unwrap()
             .status
@@ -107,7 +107,7 @@ fn bad_config_lines_do_not_stop_graph_commands() {
     );
     for args in [
         vec!["set", "--global", "yolo", "perhaps"],
-        vec!["--setting", "yolo=perhaps", "--context", "graph", "auto"],
+        vec!["--setting", "yolo=perhaps", "--context", "graph", "code"],
     ] {
         assert!(!command(repo.path(), home.path(), &args)
             .output()
@@ -420,9 +420,9 @@ fn assert_launch_settings(launch: &serde_json::Value, inspected: &serde_json::Va
         settings["chrome"]["value"] == true,
         "{launch}\n{settings}"
     );
-    // Claude's documented headless floor bypasses prompts independently of yolo.
-    // Explicit false is observable here through chrome and cleared documents;
-    // terminal yolo negation has separate native launch/resume coverage.
+    // A headless run never asks, whatever yolo says. Explicit false is
+    // observable here through chrome and cleared documents; attended yolo
+    // negation has separate native launch/resume coverage.
     assert!(args.contains(&serde_json::json!("--dangerously-skip-permissions")));
     let mut expected = settings["context.docs"]["value"]
         .as_array()
@@ -1414,15 +1414,16 @@ fn automatic_agent_selection_requires_exactly_one_installed_harness() {
     };
 
     unresolved();
-    for harness in ["claude", "codex", "opencode", "pi"] {
-        install(harness);
+    for harness in loopflow_harness::HarnessKind::ALL {
+        let program = harness.as_str();
+        install(program);
         let agent = inspect();
-        assert_eq!(agent["value"], harness);
+        assert_eq!(agent["value"], harness.as_str());
         assert_eq!(
             agent["candidates"][0]["locator"],
             "PATH (only installed harness)"
         );
-        fs::remove_file(bin.path().join(harness)).unwrap();
+        fs::remove_file(bin.path().join(program)).unwrap();
     }
     install("claude");
     install("codex");

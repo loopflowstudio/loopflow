@@ -312,6 +312,60 @@
         }
       ]
     },
+    "Auto": {
+      "description": "The Task's auto mark: its state, when it was set and who set it.",
+      "properties": {
+        "at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "by": {
+          "$ref": "#/$defs/Starter"
+        },
+        "state": {
+          "$ref": "#/$defs/AutoState"
+        }
+      },
+      "required": [
+        "state",
+        "at",
+        "by"
+      ],
+      "type": "object"
+    },
+    "AutoOff": {
+      "additionalProperties": false,
+      "description": "What `task.auto.off` turned off.",
+      "properties": {
+        "issue": {
+          "type": "string"
+        },
+        "was_on": {
+          "description": "Auto was on before this.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "issue",
+        "was_on"
+      ],
+      "type": "object"
+    },
+    "AutoState": {
+      "description": "Auto, a setting on the Task: whether its interactive steps run headless,\nstanding in for the person, and whether its landing may merge.",
+      "oneOf": [
+        {
+          "const": "on",
+          "description": "`lf task auto on` or an `auto: on` configuration turned it on.",
+          "type": "string"
+        },
+        {
+          "const": "off",
+          "description": "`lf task auto off` turned it off; `-b` leaves it off.",
+          "type": "string"
+        }
+      ]
+    },
     "BoardPr": {
       "properties": {
         "url": {
@@ -1423,6 +1477,26 @@
       ],
       "type": "object"
     },
+    "ConfigLayer": {
+      "description": "The configuration a default came from, as `lf task status` names it.",
+      "oneOf": [
+        {
+          "const": "wave",
+          "description": "The Task's Wave's `config.yaml`, or a personal setting for that Wave.",
+          "type": "string"
+        },
+        {
+          "const": "repository",
+          "description": "The repository's `.lf/config.yaml`.",
+          "type": "string"
+        },
+        {
+          "const": "personal",
+          "description": "Personal configuration.",
+          "type": "string"
+        }
+      ]
+    },
     "ConfigSource": {
       "description": "Authority is independent of the declaration's scope and target.",
       "enum": [
@@ -2453,97 +2527,60 @@
       ],
       "type": "object"
     },
-    "GitDestination": {
-      "description": "Local routing and import evidence. Endpoints are deliberately not displayed:\nGit URLs can contain credentials. A checkpoint is not publication evidence.",
+    "GitCarrier": {
+      "description": "Git's line: `Plan: Git origin, failing since Nov 18 14:02, 3 unsent.`",
       "properties": {
-        "active": {
-          "type": "boolean"
+        "error": {
+          "description": "Why the last exchange failed, while it still fails.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "conflicts": {
+        "failing_since": {
+          "description": "When the carrier stopped working (Unix seconds), while it still does not.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "not_taken": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NotTaken"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the carrier's last read brought that this Machine could not\nwrite, and reads again at each exchange. `null` when it took\neverything."
+        },
+        "records": {
+          "description": "The first of them in change order: a Task's identifier, `wave <name>`,\n`project <name>` or `comment <id>`.",
           "items": {
-            "$ref": "#/$defs/GitDestinationConflict"
+            "type": "string"
           },
           "type": "array"
         },
-        "fetch_error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "fetched_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "id": {
+        "remote": {
+          "description": "The remote's name.",
           "type": "string"
         },
-        "imported_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "pending_local": {
-          "type": "boolean"
-        },
-        "publication_error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "publication_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "publication_state": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reference": {
-          "type": "string"
-        },
-        "selected_records": {
-          "format": "uint64",
+        "unsent": {
+          "description": "How many records changed here the carrier has not taken.",
+          "format": "uint",
           "minimum": 0,
           "type": "integer"
         }
       },
       "required": [
-        "id",
-        "reference",
-        "active",
-        "selected_records",
-        "imported_revision",
-        "fetched_revision",
-        "fetch_error",
-        "publication_revision",
-        "publication_state",
-        "publication_error",
-        "pending_local",
-        "conflicts"
-      ],
-      "type": "object"
-    },
-    "GitDestinationConflict": {
-      "properties": {
-        "reason": {
-          "type": "string"
-        },
-        "target": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "target",
-        "reason"
+        "remote",
+        "unsent",
+        "records",
+        "error",
+        "failing_since",
+        "not_taken"
       ],
       "type": "object"
     },
@@ -2754,8 +2791,26 @@
             }
           ]
         },
+        "description": {
+          "description": "Its `description:` line; `None` when the file has none or does not load.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "included_by": {
+          "description": "The Graphs that include this one with `graph:`, by name. Empty for a\nGraph people start with; a piece of other Graphs names them here.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "name": {
           "type": "string"
+        },
+        "runs": {
+          "$ref": "#/$defs/GraphSubject",
+          "description": "What it runs for: a Task, or a Wave's own operation."
         },
         "source": {
           "description": "The repository file that defines it; `None` for a builtin.",
@@ -2774,10 +2829,13 @@
       },
       "required": [
         "name",
+        "description",
         "source",
         "compiled",
         "composition",
-        "unavailable"
+        "unavailable",
+        "included_by",
+        "runs"
       ],
       "type": "object"
     },
@@ -3204,6 +3262,14 @@
       ],
       "type": "object"
     },
+    "GraphSubject": {
+      "description": "What a Graph is started on.",
+      "enum": [
+        "task",
+        "wave"
+      ],
+      "type": "string"
+    },
     "HarnessRetention": {
       "properties": {
         "facts": {
@@ -3286,24 +3352,6 @@
       ],
       "type": "object"
     },
-    "Hold": {
-      "additionalProperties": false,
-      "description": "What `task.hold` withdrew.",
-      "properties": {
-        "issue": {
-          "type": "string"
-        },
-        "stopped": {
-          "description": "A run was shipping the Task; otherwise only the stop was saved.",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "issue",
-        "stopped"
-      ],
-      "type": "object"
-    },
     "HomeRetention": {
       "properties": {
         "harness": {
@@ -3327,6 +3375,63 @@
         "home",
         "policy",
         "transcripts"
+      ],
+      "type": "object"
+    },
+    "HubCarrier": {
+      "description": "The hub's line: `Hub mini, failing since Nov 18 14:02, 2 unsent.`",
+      "properties": {
+        "error": {
+          "description": "Why the last exchange failed, while it still fails.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failing_since": {
+          "description": "When the carrier stopped working (Unix seconds), while it still does not.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "machine": {
+          "description": "The hub's name.",
+          "type": "string"
+        },
+        "not_taken": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NotTaken"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the carrier's last read brought that this Machine could not\nwrite, and reads again at each exchange. `null` when it took\neverything."
+        },
+        "records": {
+          "description": "The first of them in change order: a Task's identifier, `wave <name>`,\n`project <name>` or `comment <id>`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unsent": {
+          "description": "How many records changed here the carrier has not taken.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "machine",
+        "unsent",
+        "records",
+        "error",
+        "failing_since",
+        "not_taken"
       ],
       "type": "object"
     },
@@ -3889,6 +3994,10 @@
           },
           "type": "array"
         },
+        "hub": {
+          "description": "This Machine exchanges its plan with it (`lf machine hub`).",
+          "type": "boolean"
+        },
         "id": {
           "type": "string"
         },
@@ -3919,6 +4028,7 @@
         "created_at",
         "observed_at",
         "defaults",
+        "hub",
         "tasks"
       ],
       "type": "object"
@@ -4712,6 +4822,25 @@
       ],
       "type": "string"
     },
+    "NotTaken": {
+      "properties": {
+        "count": {
+          "description": "How many records.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "description": "Why the first was not, and what to do about it when something can be\ndone: `wave design from mini has the name of a Wave here; …`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "count",
+        "reason"
+      ],
+      "type": "object"
+    },
     "Observation": {
       "description": "Freshness of the GitHub observation behind the Task's returned PR state.\nThe durable attempt metadata lives on `TaskPr`; this derived view tells one\ncaller whether it read GitHub, reused a recent reading, or opened a degraded\ncircuit while preserving the cached PR fields.",
       "oneOf": [
@@ -5122,6 +5251,22 @@
       ],
       "type": "string"
     },
+    "PlanApplied": {
+      "additionalProperties": false,
+      "description": "What `plan.apply` answers.",
+      "properties": {
+        "not_taken": {
+          "description": "How many of the records could not be written here (a Wave whose name\na Wave here holds, and what hangs from it). The sender keeps them\nunsent and sends them again.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "not_taken"
+      ],
+      "type": "object"
+    },
     "PlanBoard": {
       "properties": {
         "generated_at": {
@@ -5183,6 +5328,65 @@
         "state",
         "pr",
         "waiting_on"
+      ],
+      "type": "object"
+    },
+    "PlanCarriers": {
+      "description": "The ways a plan without a tracker reaches other Machines. Every Machine\nholds the whole plan; with none of these it stays on this one.",
+      "properties": {
+        "git": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GitCarrier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The repository's remote; `null` without one."
+        },
+        "hub": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HubCarrier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Machine `lf machine hub` names; `null` without one."
+        }
+      },
+      "required": [
+        "git",
+        "hub"
+      ],
+      "type": "object"
+    },
+    "PlanChanges": {
+      "additionalProperties": false,
+      "description": "What `plan.changes` answers.",
+      "properties": {
+        "more": {
+          "description": "More changes follow `seq`; read again from it.",
+          "type": "boolean"
+        },
+        "records": {
+          "items": {
+            "$ref": "#/$defs/Untyped"
+          },
+          "type": "array"
+        },
+        "seq": {
+          "description": "The watermark to read from next.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "records",
+        "seq",
+        "more"
       ],
       "type": "object"
     },
@@ -8241,6 +8445,10 @@
         "next_move": {
           "$ref": "#/$defs/NextMove"
         },
+        "owned_by_you": {
+          "description": "Whether its owner is you; `false` when nobody owns it.",
+          "type": "boolean"
+        },
         "pr": {
           "anyOf": [
             {
@@ -8278,19 +8486,6 @@
           "type": "array",
           "uniqueItems": true
         },
-        "ship_control": {
-          "$ref": "#/$defs/TaskRunControl"
-        },
-        "shipping": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ShippingSnapshot"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "task": {
           "$ref": "#/$defs/TaskSummary"
         }
@@ -8309,10 +8504,30 @@
         "latest_graph_process",
         "execution",
         "run_control",
-        "ship_control",
-        "shipping",
         "pr",
-        "section"
+        "section",
+        "owned_by_you"
+      ],
+      "type": "object"
+    },
+    "RunDied": {
+      "description": "A Task run's carrier died while the run was at a step.",
+      "properties": {
+        "at": {
+          "description": "RFC 3339; `null` when nobody recorded the death.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "at_step": {
+          "description": "The step the run reached, where it starts again.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "at_step",
+        "at"
       ],
       "type": "object"
     },
@@ -8623,9 +8838,7 @@
             "idle",
             "active",
             "moving",
-            "shipping",
             "working",
-            "autonomous",
             "done"
           ],
           "type": "string"
@@ -8648,6 +8861,11 @@
         {
           "const": "backlog",
           "description": "Board axis: the Task's `TaskSection`.",
+          "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "Setting axis: the open Task's auto setting is on.",
           "type": "string"
         }
       ]
@@ -9448,6 +9666,63 @@
             "steers": null,
             "update": null,
             "waiting": false
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "The hub's side of a plan exchange: take in another Machine's stamped\nrecords of `repository`'s plan, in one transaction. Each field is\nwritten only when its stamp is newer than the one held here, so\nrepeating it changes nothing.",
+          "properties": {
+            "kind": {
+              "const": "plan.apply",
+              "type": "string"
+            },
+            "records": {
+              "items": {
+                "$ref": "#/$defs/Untyped"
+              },
+              "type": "array"
+            },
+            "repository": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "repository",
+            "records"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/PlanApplied"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Each Wave, Project, Task and comment of `repository`'s plan here that\nchanged after the watermark `since`, whole, every field with its stamp;\nnull reads the whole plan.",
+          "properties": {
+            "kind": {
+              "const": "plan.changes",
+              "type": "string"
+            },
+            "repository": {
+              "type": "string"
+            },
+            "since": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "repository",
+            "since"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/PlanChanges"
           }
         }
       ]
@@ -10654,56 +10929,6 @@
       ],
       "type": "object"
     },
-    "ShipMark": {
-      "description": "When someone approved or stopped Auto-Ship, and who.",
-      "properties": {
-        "at": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "by": {
-          "$ref": "#/$defs/Starter"
-        }
-      },
-      "required": [
-        "at",
-        "by"
-      ],
-      "type": "object"
-    },
-    "ShippingSnapshot": {
-      "description": "What a shipping Task is doing, derived from its ship process, its state\nand its landing. Nothing here waits on a person.",
-      "properties": {
-        "reason": {
-          "description": "One line saying what is happening.",
-          "type": "string"
-        },
-        "shipped_at": {
-          "description": "When the Task was handed off.",
-          "format": "int64",
-          "type": "integer"
-        },
-        "state": {
-          "$ref": "#/$defs/ShippingState"
-        }
-      },
-      "required": [
-        "shipped_at",
-        "state",
-        "reason"
-      ],
-      "type": "object"
-    },
-    "ShippingState": {
-      "enum": [
-        "building",
-        "landing",
-        "repairing",
-        "restarting",
-        "unassigned"
-      ],
-      "type": "string"
-    },
     "Skipped": {
       "properties": {
         "id": {
@@ -10922,6 +11147,23 @@
             "id",
             "name",
             "requester"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A configured default set it: `auto: on`. Only an auto mark names one.",
+          "properties": {
+            "kind": {
+              "const": "config",
+              "type": "string"
+            },
+            "layer": {
+              "$ref": "#/$defs/ConfigLayer"
+            }
+          },
+          "required": [
+            "kind",
+            "layer"
           ],
           "type": "object"
         }
@@ -12732,6 +12974,28 @@
             "null"
           ]
         },
+        "died": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunDied"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where the run's carrier (`lf task run`) died before the run stopped;\n`null` for a run that runs, stopped on its own, or never started."
+        },
+        "outlook": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionOutlook"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What happens next to a run that died, as this Machine reads it: the\nserver here starts it again at `at`, or leaves it to `command` for\n`reason`. `null` unless `died` says it did."
+        },
         "reason": {
           "type": "string"
         },
@@ -12750,7 +13014,9 @@
         "state",
         "reason",
         "step",
-        "captured"
+        "captured",
+        "died",
+        "outlook"
       ],
       "type": "object"
     },
@@ -13102,6 +13368,14 @@
             "null"
           ]
         },
+        "order": {
+          "description": "Where the entry sorts in the Task's log on every Machine, from its\nwriter's plan clock. Absent with Linear or Asana, whose comment order\ndecides, and from entries written before claims were first-wins.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "person": {
           "type": [
             "string",
@@ -13117,6 +13391,13 @@
         },
         "person_key": {
           "description": "The person's stable key; names are display only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "seen": {
+          "description": "The entry in effect when this one was written, or this entry itself\nwhen there was none. Present exactly when `order` is. A claim whose\nwriter had not seen the claim holding the Task loses to it.",
           "type": [
             "string",
             "null"
@@ -13143,7 +13424,9 @@
         "machine_id",
         "machine_label",
         "writer_machine_id",
-        "at"
+        "at",
+        "order",
+        "seen"
       ],
       "type": "object"
     },
@@ -13480,13 +13763,13 @@
                 "null"
               ]
             },
+            "merges": {
+              "description": "The run may merge the PR: auto is on, or no interactive step is\nleft ahead, and nobody turned auto off.",
+              "type": "boolean"
+            },
             "run": {
               "description": "The graph and where the run set out: `code from implement`.",
               "type": "string"
-            },
-            "ships": {
-              "description": "No interactive step is left ahead: Auto-Ship is approved and the\nrun may merge the PR.",
-              "type": "boolean"
             },
             "state": {
               "const": "running",
@@ -13497,7 +13780,7 @@
             "state",
             "issue",
             "run",
-            "ships",
+            "merges",
             "graph_process",
             "log"
           ],
@@ -13629,11 +13912,6 @@
           "const": "working",
           "description": "Someone's idle, active or moving Task.",
           "type": "string"
-        },
-        {
-          "const": "autonomous",
-          "description": "Someone's shipping Task, running to merge with nothing left for a person.",
-          "type": "string"
         }
       ]
     },
@@ -13673,85 +13951,21 @@
       ],
       "type": "object"
     },
-    "TaskShip": {
-      "description": "What `task.ship` set going.",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "description": "Auto-Ship is approved and `process` ships the Task to `end`.",
-          "properties": {
-            "issue": {
-              "type": "string"
-            },
-            "lf_process_id": {
-              "$ref": "#/$defs/LfProcessId"
-            },
-            "log": {
-              "description": "The ship's output once its launcher lets go; null under `-b`.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "state": {
-              "const": "shipping",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state",
-            "issue",
-            "lf_process_id",
-            "log"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Another live process already ships it.",
-          "properties": {
-            "issue": {
-              "type": "string"
-            },
-            "lf_process_id": {
-              "$ref": "#/$defs/LfProcessId"
-            },
-            "state": {
-              "const": "already_shipping",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state",
-            "issue",
-            "lf_process_id"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The Task already stands at `end`.",
-          "properties": {
-            "issue": {
-              "type": "string"
-            },
-            "state": {
-              "const": "at_end",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state",
-            "issue"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "TaskSnapshot": {
       "properties": {
         "actions": {
           "$ref": "#/$defs/TaskActionModel"
+        },
+        "auto": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Auto"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Task's auto setting: on, off, and who set it when;\n`null` when nobody has."
         },
         "base_commit": {
           "type": [
@@ -13844,28 +14058,6 @@
         "repo_id": {
           "type": "string"
         },
-        "ship_approval": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ShipMark"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Who approved Auto-Ship and when, while the Task is approved."
-        },
-        "ship_stop": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ShipMark"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "The stop that keeps a run from approving Auto-Ship, until `lf ship`."
-        },
         "stack_parent": {
           "anyOf": [
             {
@@ -13955,8 +14147,7 @@
         "observation",
         "actions",
         "started_by",
-        "ship_approval",
-        "ship_stop",
+        "auto",
         "stack_parent"
       ],
       "type": "object"
@@ -13988,7 +14179,7 @@
       "type": "object"
     },
     "TaskState": {
-      "description": "A Task's state, derived from its checkout, Graph position, whether a\nGraph runs for it and the Auto-Ship approval. Completion and abandonment\nare durable; the open states follow what the Task is doing now. Whether\nanyone owns it is ownership, not state.",
+      "description": "A Task's state, derived from its checkout, Graph position, whether a\nGraph runs for it. Completion and abandonment\nare durable; the open states follow what the Task is doing now. Whether\nanyone owns it is ownership, not state.",
       "oneOf": [
         {
           "enum": [
@@ -14003,7 +14194,7 @@
         },
         {
           "const": "idle",
-          "description": "A checkout, no Graph running and not at an interactive step: before its first run,\nafter a stopped one, or shipping whose ship process exited.",
+          "description": "A checkout, no Graph running and not at an interactive step: before its first run,\nor after a stopped one.",
           "type": "string"
         },
         {
@@ -14013,12 +14204,7 @@
         },
         {
           "const": "moving",
-          "description": "A Graph runs for it with an interactive step still ahead that will stop for a person.",
-          "type": "string"
-        },
-        {
-          "const": "shipping",
-          "description": "A Graph runs for it and no interactive step ahead will stop it: none remain, or\nAuto-Ship approved stand-ins at the rest. It finishes on its own to merge.",
+          "description": "A Graph runs for it. Its auto setting says whether the run stands in\nat interactive steps or stops there for a person.",
           "type": "string"
         },
         {
@@ -14335,9 +14521,8 @@
       "type": "object"
     },
     "TrackerKind": {
-      "description": "Where a planning change goes: Git's journal, or a queued tracker.",
+      "description": "The tracker a queued planning change goes to.",
       "enum": [
-        "git",
         "linear",
         "asana"
       ],
@@ -14364,29 +14549,37 @@
       "type": "object"
     },
     "TrackerStatus": {
-      "description": "What `repo.tracker` answers: the tracker, for Git its destinations with\ntheir import and publication evidence, and every open and lost tracker\naction.",
+      "description": "What `repo.tracker` answers: the tracker, or for a repository without\none how its plan travels, and every open and lost tracker action.",
       "properties": {
         "actions": {
-          "description": "What the tracker has yet to confirm (open: `queued`, `sent`), in send\norder, and each value it kept over a local one (lost: `conflicted`)\nuntil it is answered. On Git, only lost values: Git keeps no queue.",
+          "description": "What the tracker has yet to confirm (open: `queued`, `sent`), in send\norder, and each value it kept over a local one (lost: `conflicted`)\nuntil it is answered.",
           "items": {
             "$ref": "#/$defs/TrackerActionStatus"
           },
           "type": "array"
         },
-        "destinations": {
-          "items": {
-            "$ref": "#/$defs/GitDestination"
-          },
-          "type": "array"
+        "plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanCarriers"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How a plan without a tracker travels; `null` with a tracker."
         },
         "tracker": {
-          "description": "`git`, `linear` or `asana`.",
-          "type": "string"
+          "description": "`linear` or `asana`; `null` when the plan is in Loopflow's store.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "tracker",
-        "destinations",
+        "plan",
         "actions"
       ],
       "type": "object"
@@ -14993,6 +15186,10 @@
         "agent": {
           "$ref": "#/$defs/SetupValue"
         },
+        "auto": {
+          "$ref": "#/$defs/SetupValue",
+          "description": "`on` when the Wave's Tasks turn auto on as they take up their Graph."
+        },
         "graph": {
           "$ref": "#/$defs/SetupValue"
         },
@@ -15014,6 +15211,7 @@
       },
       "required": [
         "graph",
+        "auto",
         "agent",
         "skill_agents",
         "tasks_machine",
@@ -15705,7 +15903,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task edit <issue> --notes=<notes>`.",
+          "description": "`lf task edit <issue> [--notes=<notes>] [--rank=<rank>]`: a new brief,\na new position in its Project, or both.",
           "properties": {
             "directory": {
               "type": "string"
@@ -15718,14 +15916,26 @@
               "type": "string"
             },
             "notes": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rank": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             }
           },
           "required": [
             "kind",
             "directory",
             "issue",
-            "notes"
+            "notes",
+            "rank"
           ],
           "type": "object",
           "x-result": {
@@ -15809,7 +16019,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started\ndetached: the Graph process it started, or where the Task now waits.\n`approve` is `-b`: every step headless to `end`, approving Auto-Ship.",
+          "description": "`lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started\ndetached: the Graph process it started, or where the Task now waits.\n`approve` is `-b`: every step headless to `end`; it writes no auto.",
           "examples": [
             {
               "agent": "claude",
@@ -15871,19 +16081,19 @@
             "graph_process": "85c31c1e-850c-4821-878d-55527b6dba46",
             "issue": "LOO-1",
             "log": "/Users/maya/.lf/logs/graph-85c31c1e-850c-4821-878d-55527b6dba46.log",
+            "merges": false,
             "run": "code from implement",
-            "ships": false,
             "state": "running"
           }
         },
         {
           "additionalProperties": false,
-          "description": "`lf --task <issue> ship --json`, started detached: approves Auto-Ship.",
+          "description": "`lf task auto on <issue> --json`, started detached: turns auto on and returns the run, as\n`task.run` does. Nothing else turns auto on.",
           "examples": [
             {
               "directory": "/repo",
               "issue": "LOO-1",
-              "kind": "task.ship"
+              "kind": "task.auto.on"
             }
           ],
           "properties": {
@@ -15894,7 +16104,7 @@
               "type": "string"
             },
             "kind": {
-              "const": "task.ship",
+              "const": "task.auto.on",
               "type": "string"
             }
           },
@@ -15905,29 +16115,31 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/TaskShip"
+            "$ref": "#/$defs/TaskRun"
           },
           "x-result-example": {
+            "graph_process": "85c31c1e-850c-4821-878d-55527b6dba46",
             "issue": "LOO-1",
-            "lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
-            "log": "/Users/maya/.lf/logs/ship-LOO-1.log",
-            "state": "shipping"
+            "log": "/Users/maya/.lf/logs/graph-85c31c1e-850c-4821-878d-55527b6dba46.log",
+            "merges": true,
+            "run": "code from ship-review",
+            "state": "running"
           }
         },
         {
           "additionalProperties": false,
-          "description": "`lf task hold <issue> --json`: withdraws the Task's Auto-Ship approval.",
+          "description": "`lf task auto off <issue> --json`: turns the Task's auto setting off.",
           "examples": [
             {
               "directory": "/repo",
               "issue": "LOO-1",
-              "kind": "task.hold",
+              "kind": "task.auto.off",
               "reason": null
             },
             {
               "directory": "/laptop/repo",
               "issue": "LOO-1",
-              "kind": "task.hold",
+              "kind": "task.auto.off",
               "reason": null
             }
           ],
@@ -15939,11 +16151,11 @@
               "type": "string"
             },
             "kind": {
-              "const": "task.hold",
+              "const": "task.auto.off",
               "type": "string"
             },
             "reason": {
-              "description": "Why, as `--reason` records it.",
+              "description": "Why, saved as a comment on the Task.",
               "type": [
                 "string",
                 "null"
@@ -15958,11 +16170,11 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/Hold"
+            "$ref": "#/$defs/AutoOff"
           },
           "x-result-example": {
             "issue": "LOO-1",
-            "stopped": true
+            "was_on": true
           }
         },
         {
@@ -18222,7 +18434,7 @@
   ],
   "title": "Loopflow server protocol",
   "x-min-revision": 8,
-  "x-revision": 8,
+  "x-revision": 9,
   "x-terminal-close": {
     "payload": {
       "$ref": "#/$defs/Close"

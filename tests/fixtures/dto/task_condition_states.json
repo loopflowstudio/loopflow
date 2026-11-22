@@ -33,6 +33,7 @@
       "reason": "Task is ready to start"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -58,15 +59,13 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -133,6 +132,7 @@
       "reason": "Linear Task is complete"
     },
     "section": "done",
+    "owned_by_you": false,
     "actions": {
       "recommended": "no_action",
       "reason": "Task is completed"
@@ -354,15 +354,13 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": "Task is complete"
     },
-    "ship_control": {
-      "unavailable": "Task is complete"
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
@@ -428,6 +426,7 @@
       "reason": "implementing"
     },
     "section": "working",
+    "owned_by_you": false,
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -617,15 +616,13 @@
       "state": "blocked",
       "reason": "Release target is unavailable",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "moving",
@@ -693,6 +690,7 @@
       "reason": "implementing"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -718,15 +716,13 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -794,6 +790,7 @@
       "reason": "choose the recovery boundary"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": "no_action",
       "reason": "Waiting for your answer"
@@ -984,15 +981,13 @@
       "state": "idle",
       "reason": "Waiting for your review at demo",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -1060,6 +1055,7 @@
       "reason": "implementing"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -1085,15 +1081,13 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -1161,6 +1155,7 @@
       "reason": "merge pull request head head-commits on GitHub"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -1349,15 +1344,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,

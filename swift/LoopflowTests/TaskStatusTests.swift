@@ -11,7 +11,7 @@ struct TaskStatusTests {
         #expect(content([.working, .busy, .blocked]).status.label == "Blocked")
         #expect(content([.working, .busy, .available]).status.label == "Running")
         #expect(content([.working, .available]).status.label == "Ready")
-        #expect(content([.autonomous, .shipping]).status.label == "Shipping")
+        #expect(content([.working, .auto]).status.label == "Open")
         #expect(content([.working]).status.label == "Open")
     }
 

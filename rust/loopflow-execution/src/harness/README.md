@@ -1,8 +1,13 @@
 # Harnesses
 
-Each provider (`claude.rs`, `codex.rs`, `opencode.rs`, `pi.rs`) gets launched,
+Each provider (`claude.rs`, `codex.rs`, `opencode.rs`, `pi.rs`,
+`antigravity.rs`) gets launched,
 observed and recorded here. The provider owns the conversation; lf adds context
 at turn boundaries, interjects through hooks and records what happened.
+
+What a provider writes is read one crate down: the stream decoders and
+transcript readers are [`loopflow-harness`](../../../loopflow-harness/README.md),
+which knows nothing of the store or of launching.
 
 ## One launch type per harness
 
@@ -17,7 +22,7 @@ let launch = Launch {
 };
 ```
 
-Native and headless launches share `Launch` and the same per-harness `Harness`.
+Native and headless launches share `Launch` and the same per-harness `Launcher`.
 `native_session::run` opens and waits for a native client; `drive::run` drives
 one headless provider turn. Native results retain the provider's OS exit status;
 headless results retain answer text and typed turn failures for retry policy.
@@ -39,12 +44,24 @@ Each harness file answers the rest:
 
 | method | answers |
 |---|---|
-| `capabilities()` | who names the thread, initial prompt on resume, failure classification, native skills, turn limit, output schema, respawn after crash, install hint |
+| `capabilities()` | who names the thread, initial prompt on resume, native skills, turn limit, output schema, respawn after crash, install hint |
+| `classify_failure(code, message)` | what an error its decoder reported means for the run: next agent, retry, or nothing lf acts on |
+| `hook_callback(payload, declared, thread_file)` | what a hook callback from its provider means: the moment, and whether the conversation is one a person's input reached; Antigravity keeps the thread file on the conversation the person is in |
+| `hook_reply(event, text)` | the reply that puts text in front of the model, in the provider's shape |
 | `open(&Launch)` | native interactive client: argv, hook and title flags |
 | `driver(&Launch, events, approval)` | headless stream `Driver`: start, input, interrupt, stop |
+| `recognizes(&OsProcess)` | whether a running process is this client: Claude checks its executable path, Pi its arguments |
 
-`HarnessKind::harness()` is the only harness dispatch. Core launch and transcript
-code reads capabilities or asks the harness for policy.
+Each harness is one unit struct (`loopflow_harness::Claude`, `Codex`,
+`OpenCode`, `Pi`, `Antigravity`) seen two ways, and those are the only harness dispatch:
+
+```rust
+kind.harness()            // &dyn loopflow_harness::Harness: what the client writes, and where
+harness::launcher(kind)   // &dyn Launcher: the above, plus launching and anything that reads the store or the process table
+```
+
+`Launcher` has `Harness` as its supertrait, so `Launch.harness` answers both.
+Core launch and transcript code reads capabilities or asks the harness for policy.
 That policy includes input recency, live process ownership and saved-turn detail.
 A harness whose server may host other conversations validates it before the
 shared AgentProcess close path signals the recorded process group.
@@ -59,6 +76,7 @@ An interactive client may `exec` into a held terminal.
 | Codex chat | `codex`, prompt in argv | provider (start hook) |
 | Codex work session | `codex --remote` after lf opens the app-server thread | provider |
 | OpenCode | `opencode --standalone`, prompt in `--prompt` | lf (`--session ses_…`) |
+| Antigravity | `agy`, prompt in `-i`; its command sandbox does not reach `~/.lf`, so under `yolo: false` the first `lf` command stops at "Run this command?" | provider (hook callbacks; follows `/new`, `/fork`, `/resume`) |
 
 `cargo test -p loopflow-execution --lib harness::launch_matrix -- --nocapture`
 runs every harness as a chat, work session, batch and worker against stand-in provider scripts, and prints each cell's argv, hook ownership, wait mechanism and recorded thread.
@@ -72,28 +90,43 @@ starts no OpenCode server. The context plugin, loaded through
 `OPENCODE_CONFIG_CONTENT`, supplies instructions, context, steers between tools
 and, for a work session or worker, turn reports to the Machine server.
 
+A headless Antigravity turn is one `agy --input-format stream-json
+--output-format stream-json` process: one message on stdin, one JSON line per
+step, and an exit that settles the turn. Each later turn is another run with
+`--conversation`. Instructions and hooks ride in a folder of the launch's own
+under `.lf/prompts/`, handed over with `--add-dir`; nothing is written to
+`~/.gemini`. Its one hook, before every model call, is the start, the prompt
+and the after-a-tool boundary. A subagent runs the same hooks under its own
+conversation id with an empty `lastUserInput`, and lf answers only a
+conversation a person's input reached. `/new`, `/fork` and `/resume` in the
+terminal continue the same `agy` under another id: its first model call
+rewrites the launch's thread file and is a start. In a
+worktree lf created, the terminal is trusted for that session through
+`--settings`, so the folder dialog does not stop the launch.
+
 ## What a Task step does on each harness
 
-`lf task run LOO-12 -a <harness>` runs a step the same way on all four. Each
+`lf task run LOO-12 -a <harness>` runs a step the same way on all five. Each
 row names the test that shows it; "no" is a gap with its owner.
 
-| a Task step | Claude | Codex | OpenCode | Pi | test |
-|---|---|---|---|---|---|
-| starts as a worker, settles, records its answer and native thread; the Graph advances | yes | yes | yes | yes | `task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness` |
-| records its usage in the Task's history | yes | yes | yes | yes | same test; `transcript::facts::tests::a_pi_turn_loopflow_recorded_takes_the_session_files_usage` |
-| receives the step's context | yes | yes | yes | yes | same test; `harness::context::tests::` |
-| hears a steer sent while it runs, after its next tool | yes | yes | yes | yes | same test; `harness::context::tests::` |
-| runs as `yolo` in its Task's checkout | yes | yes | yes | yes | `harness::launch_matrix` |
-| is passed over when its CLI is not installed, or named once when it was the only choice | yes | yes | yes | yes | `task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again` |
-| fails the turn, with the question as its reason, when it asks one and nobody is there; the run stops after that one attempt | no: not read (Task 48edb9) | no: not read (Task 48edb9) | yes | yes | `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step` |
-| stops on `lf task interrupt` with its turn recorded interrupted; the next `lf task run` starts the step again | yes | yes | yes | yes | `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_claude_and_codex`, `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_opencode_and_pi` |
-| moves to the next agent on a usage limit | yes | yes | no: failures unclassified (LOO-518) | no: failures unclassified (Task 98edc6) | `agent::tests::` fallthrough tests |
-| as an idle work session, hears a steer | yes | yes | no: next turn only (Task 540073) | no: next turn only (Task 540073) | `server::wake::tests::` |
+| a Task step | Claude | Codex | OpenCode | Pi | Antigravity | test |
+|---|---|---|---|---|---|---|
+| starts as a worker, settles, records its answer and native thread; the Graph advances | yes | yes | yes | yes | yes | `task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness` |
+| records its usage in the Task's history | yes | yes | yes | yes | yes | same test; `transcript::facts::tests::a_pi_turn_loopflow_recorded_takes_the_session_files_usage`; `transcript::antigravity::tests::` |
+| receives the step's context | yes | yes | yes | yes | yes | same test; `harness::context::tests::`; `harness::antigravity::tests::` |
+| hears a steer sent while it runs, after its next tool | yes | yes | yes | yes | yes | same test; `harness::context::tests::`; `harness::antigravity::tests::` |
+| never asks permission, whatever `yolo` says | yes | yes | yes | yes | yes | `harness::launch_matrix` |
+| is passed over when its CLI is not installed, or named once when it was the only choice | yes | yes | yes | yes | yes | `task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again` |
+| fails the turn, with the question as its reason, when it asks one and nobody is there; the run stops after that one attempt | no: not read (Task 48edb9) | no: not read (Task 48edb9) | yes | yes | no: not read (Task 48edb9) | `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step` |
+| stops on `lf task interrupt` with its turn recorded interrupted; the next `lf task run` starts the step again | yes | yes | yes | yes | yes | `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_claude_and_codex`, `…_on_opencode_and_pi`, `…_on_antigravity` |
+| moves to the next agent on a usage limit, a revoked login or a model the provider does not serve | yes | yes | yes | yes | yes | `harness::conformance_tests::each_harness_classifies_its_own_refusals`; `agent::tests::` fallthrough tests |
+| as an idle work session, hears a steer | yes | yes | no: next turn only (Task 540073) | no: next turn only (Task 540073) | no: next turn only (Task 540073) | `server::wake::tests::` |
 
 Context and steers reach every harness the same way: it runs
 `lf __context-block` when the conversation starts and after each tool. Claude
-and Codex run it as a declared hook; OpenCode's plugin and Pi's extension start
-it themselves. In the worker test each stand-in makes those two calls around
+and Codex run it as a declared hook, as does Antigravity (before every model
+call, gated by a script so a call with no steer waiting starts no lf);
+OpenCode's plugin and Pi's extension start it themselves. In the worker test each stand-in makes those two calls around
 one tool (`tests/support/tool_turn.py`) while `lf steer` runs in between, and
 reads back the block naming its Session and Task, then the steer. The plugin
 and the extension themselves run under Node in `harness::context::tests::`.
@@ -103,22 +136,30 @@ plugin sends every steer it has heard with each later request.
 
 lf reads usage from each provider's transcript. Pi's session file uses its own
 entry ids, so lf joins an unmatched Pi entry to the recorded turn whose
-timestamps cover it. The usage then appears in `lf history usage --task`.
+timestamps cover it. Antigravity's turn is named for the step index its stream
+and its transcript share. The usage then appears in `lf history usage --task`.
 
 `opencode run --auto` cancels a question itself and tells the model to go on
 with assumptions; lf fails the turn at that tool call and stops the run. Pi
 opens an extension dialog, and lf fails the turn there. Both record the turn
 with the error code `unanswered_question` and the question. `lf task run` stops
 on it after one attempt, and it and `lf task status` print the question and the
-`lf steer` that answers it; the next run's conversation hears that steer. lf does not read a headless Claude's or Codex's
-question: no decoder fails a turn on one, and none has been recorded.
+`lf steer` that answers it; the next run's conversation hears that steer. lf does not read a headless Claude's, Codex's or
+Antigravity's question: no decoder fails a turn on one, and none has been recorded.
 
-On all four harnesses, `lf task interrupt` ends the worker with exit 130,
+On all five harnesses, `lf task interrupt` ends the worker with exit 130,
 records its turn as interrupted, and leaves the Graph at that step. The next
 `lf task run` starts the step in a new conversation.
 
-A "no" for OpenCode or Pi means the step stops with the provider's error (limits)
-or the steer waits for the next turn (idle wake); neither loses work.
+A "no" for OpenCode, Pi or Antigravity means the steer waits for the next turn (idle wake);
+no work is lost.
+
+Each harness's decoder reports a provider failure as an error event, and
+`drive::run` asks that harness what it means (`classify_failure`), once, at the
+event. The gravest answer of a failed turn (revoked login, spent quota,
+unserved model, then transient) is the result's `failure`; the retry policy
+reads that and never the error text. Claude and Codex leave transient failures
+to lf; OpenCode, Pi and Antigravity retry their own, so theirs answer `None`.
 
 A skill keeps one `LfProcess` across successive provider `AgentProcess` instances.
 Its shared `LfProcessRuntime` in [`process/runtime.rs`](../process/runtime.rs)

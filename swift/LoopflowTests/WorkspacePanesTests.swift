@@ -36,6 +36,23 @@ struct WorkspacePanesTests {
         return (workspace, view)
     }
 
+    @Test("A restored Dev board tile leaves its saved shell unmounted")
+    func devBoardRestoresShellWithoutMounting() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: location.machineId, opensUnvisitedWork: false)
+        let workspace = fixtureWork(registry, location)
+        let saved = MultiplexerStore(taskId: workspace.key.id)
+        let shell = try #require(saved.newShell(location: location))
+        workspace.multiplexer.restore(saved.paneLayout(files: nil, drafts: []), taskId: workspace.key.id)
+        registry.present(open: [workspace.key], shown: [workspace.key])
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Rendering cannot open work") }
+        let view = WorkspacePanesView(workspace: workspace, isFocused: true,
+            sessions: workspace.sessionStore(repoPath: location.worktree, query: query),
+            model: WorkModel(query: query, repoPath: location.worktree), onFocus: { _, _ in },
+            face: workspace.multiplexer.layout.pane(for: shell.id))
+        _ = try view.inspect().find(button: "Open shell")
+        #expect(try view.inspect().findAll(GhosttyTerminalView.self).isEmpty)
+    }
+
     @Test("A single visible Session keeps Refresh available")
     func singleSessionOffersRefresh() throws {
         let (workspace, view) = taskPanes()

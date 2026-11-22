@@ -31,7 +31,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Fact | Owner |
 | --- | --- |
 | Authored goals, memory, Skills, Graphs and code | Repository files and Git |
-| Saved planning | Local Task and Project rows, exchanged through a Git planning ref or a connected Linear or Asana tracker |
+| Saved planning | Each Machine's Wave, Project and Task rows, one stamp per field; carried between Machines by Git plan refs and a hub, or mirrored to a connected Linear or Asana tracker |
 | Commits, PR heads, checks and merge | Git and GitHub |
 | Actual lf command process, causal parent and observed command outcome | `processes` while it runs or a current record names it; history and turns name it for 30 days after it finished |
 | The provider's OS process, its served Session, original parent and current attachment | AgentProcess rows in `processes` |
@@ -44,7 +44,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | A Graph's identity, state and step results | Its Graph process and child step processes in `processes` |
 | A Graph's name, launched graph, the Task it started for and each step's node | GraphProcess: `graph_processes` and `graph_process_steps`, appended by the Graph process |
 | A Task's graph and the step it stands at | `task_graphs`, one row per Task updated in place; written only by `lf task run` and its child Graph process |
-| A Task's state: unstarted, idle, active, moving, shipping, done | Read from its checkout, `task_graphs` step, running Graph and Auto-Ship approval; never stored. `tasks.abandoned_at` is the one mark beside it |
+| A Task's state: unstarted, idle, active, moving, done | Read from its checkout, `task_graphs` step and its running Graph; never stored, and never read from the auto setting. `tasks.abandoned_at` is the one mark beside it |
 | Large captured prompts, transcripts and output | Immutable or append-only payloads referenced by their owning records |
 | Credentials and provider-native conversation files | The execution Machine and its native client |
 | Current local liveness | OS process evidence matched to exact recorded PID/start identity |

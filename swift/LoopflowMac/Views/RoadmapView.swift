@@ -83,7 +83,7 @@ struct RoadmapView: View {
         VStack(spacing: 0) {
             header
             if repoPath != nil {
-                GitDestinationsView(reading: model.gitDestinations)
+                RepositoryPlanView(reading: model.repositoryPlan)
                     .padding(.horizontal, Spacing.xl)
                     .padding(.bottom, Spacing.sm)
             }
@@ -511,7 +511,7 @@ extension TaskSection {
     func color(in palette: LoopflowPalette) -> Color {
         switch self {
         case .working: palette.accent
-        case .backlog, .autonomous, .done, .abandoned: palette.textTertiary
+        case .backlog, .done, .abandoned: palette.textTertiary
         }
     }
 }

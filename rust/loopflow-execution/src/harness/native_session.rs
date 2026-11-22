@@ -28,14 +28,13 @@ pub struct NativeClient {
 
 impl NativeClient {
     pub(crate) fn new(launch: &Launch<'_>) -> Result<Self> {
-        let program = launch.harness.kind().as_str();
         let cwd = launch
             .config
             .cwd
             .clone()
             .map(Ok)
             .unwrap_or_else(std::env::current_dir)?;
-        let mut process = Command::new(program);
+        let mut process = Command::new(launch.harness.kind().as_str());
         crate::agent::remove_caller_session_env(&mut process);
         process
             .current_dir(&cwd)
@@ -69,7 +68,7 @@ pub fn launch_session(
     context_file: Option<&Path>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<NativeOutcome> {
-    let harness = config.agent.harness.harness();
+    let harness = super::launcher(config.agent.harness);
     let cwd = config
         .cwd
         .clone()
@@ -123,8 +122,8 @@ pub fn resume_session_with_env(
         .session_for_artifact(artifact_key)?
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
     let mut config =
-        crate::agent::resolve_session_config(&session, serde_yaml_ng::Value::Null, None, false)?;
-    let harness = config.agent.harness.harness();
+        crate::agent::resolve_session_config(&session, serde_yaml_ng::Value::Null, None)?;
+    let harness = super::launcher(config.agent.harness);
     anyhow::ensure!(
         session.provider.as_deref() == Some(harness.kind().as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",
@@ -256,7 +255,7 @@ impl NativeOutcome {
 
     /// The status a bare launch exits with: the provider's own, as its shell
     /// would see it alone. lf names a failure the person did not cause.
-    pub(crate) fn bare_exit_code(&self, kind: super::HarnessKind) -> u8 {
+    pub(crate) fn bare_exit_code(&self, kind: loopflow_harness::HarnessKind) -> u8 {
         let program = kind.as_str();
         if !self.status.success() && !self.interrupted {
             eprintln!("{program} exited with {}", self.status);
@@ -269,7 +268,7 @@ impl NativeOutcome {
     /// conversation can have another client.
     pub fn result(
         &self,
-        harness: super::HarnessKind,
+        harness: loopflow_harness::HarnessKind,
         resuming: bool,
         kind: LaunchKind,
     ) -> Result<()> {
@@ -481,13 +480,6 @@ pub fn run(
     launch_lock: Option<File>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<NativeOutcome> {
-    let cwd = launch
-        .config
-        .cwd
-        .clone()
-        .map(Ok)
-        .unwrap_or_else(std::env::current_dir)?;
-    let _planning_sync = crate::ops::planning_sync::PlanningSync::start_for_directory(&cwd)?;
     let harness = launch.harness;
     let program = harness.kind().as_str();
     let mut progress = crate::startup::Startup::new(format!("Preparing {program}"));
@@ -541,7 +533,7 @@ fn run_client(
         .get(crate::session_record::CAPTURE_KEY_ENV)
         .map(|key| crate::session_record::capture_dir(key))
         .transpose()?;
-    if let (Some(provider), Some(thread)) = (launch.harness.kind().provider(), agent_session) {
+    if let (Some(provider), Some(thread)) = (launch.harness.provider(), agent_session) {
         crate::transcript::adopt_native(provider, thread)?;
     }
     progress.stage(format!("Opening {program} terminal"));
@@ -550,25 +542,6 @@ fn run_client(
     let title = &mut client.title;
     // Only an explicit remote connection is a client of a surviving AgentProcess.
     let owned = client.remote.is_none().then_some(&attachment);
-    // Refused before the provider conversation is recorded, so the next launch
-    // starts it fresh instead of resuming one that never ran. A Session's
-    // first launch (`lf resume` starting a repository conversation) names no
-    // Work on its command line; its recorded Session does.
-    if launch.kind.is_managed() {
-        crate::harness::agent_process::require_server()?;
-    }
-    // A provider whose CLI is not on `PATH` never starts either; Claude
-    // answers `--resume` of a conversation it never wrote with "No
-    // conversation found", and the Session could not be opened again.
-    if crate::os_process::which_command(process).is_none() {
-        if let Some(owner) = owned {
-            crate::harness::agent_process::record_missing_provider(process, owner)?;
-        }
-        bail!(missing_agent_message(launch.harness.kind()));
-    }
-    // The receipt names this opening; the provider's own `lf` commands are
-    // not openings, and a failing one must not log as one.
-    process.env_remove(crate::transport::OPEN_RECEIPT_ENV);
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(capture_dir, agent_session, None)?;
     }
@@ -585,6 +558,12 @@ fn run_client(
     if crate::transport::current().is_some() {
         // Hand the wait to the execution owner and become the provider, or its
         // client: no launcher sits beside the agent holding the heap that built it.
+        // Becoming the provider leaves nobody to say it failed, and the
+        // announcement below tells the viewer, and an `lf open` behind it, that
+        // the provider started. Refuse first what exec would.
+        if crate::os_process::which_command(process).is_none() {
+            return Err(anyhow!(missing_agent_message(launch.harness.kind())));
+        }
         if let Some(capture) = capture {
             capture.observe_provider(agent_session.cloned());
         }
@@ -711,7 +690,7 @@ fn run_client(
     });
     if let (Some(path), Some(capture_dir)) = (&reported_thread, capture_dir.as_deref()) {
         if let Err(error) = record_reported_thread(path, capture_dir) {
-            tracing::warn!(%error, "Codex reported no conversation; it cannot be resumed");
+            tracing::warn!(%error, "{program} reported no conversation; it cannot be resumed");
         }
     }
     let moved = lost.then(|| departure(&attachment)).flatten();
@@ -911,7 +890,7 @@ mod tests {
             };
             let launch = Launch {
                 config: &config,
-                harness: super::super::HarnessKind::Claude.harness(),
+                harness: crate::harness::launcher(loopflow_harness::HarnessKind::Claude),
                 kind: LaunchKind::Batch,
                 recording: &recording,
                 start: Start::New,
@@ -970,7 +949,7 @@ mod tests {
         )
         .and_then(|outcome| {
             outcome.result(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 false,
                 LaunchKind::Batch,
             )
@@ -1205,7 +1184,7 @@ mod tests {
         let result = native_fixture("/bin/sleep", vec!["10".into()], home, &BTreeMap::new())
             .and_then(|outcome| {
                 outcome.result(
-                    crate::harness::HarnessKind::Claude,
+                    loopflow_harness::HarnessKind::Claude,
                     false,
                     LaunchKind::Batch,
                 )
@@ -1322,7 +1301,7 @@ mod tests {
             };
             let launch = Launch {
                 config: &config,
-                harness: super::super::HarnessKind::Claude.harness(),
+                harness: crate::harness::launcher(loopflow_harness::HarnessKind::Claude),
                 kind: LaunchKind::Batch,
                 recording: &recording,
                 start: Start::New,
@@ -1408,7 +1387,7 @@ mod tests {
             };
             let launch = Launch {
                 config: &config,
-                harness: super::super::HarnessKind::Claude.harness(),
+                harness: crate::harness::launcher(loopflow_harness::HarnessKind::Claude),
                 kind: LaunchKind::Batch,
                 recording: &recording,
                 start: Start::New,
@@ -1552,7 +1531,7 @@ mod tests {
             .unwrap();
         let mut command = Command::new(&codex);
         crate::provider_auth::apply_provider_env_to_command(
-            crate::harness::HarnessKind::Codex,
+            loopflow_harness::HarnessKind::Codex,
             &mut command,
         );
         assert!(command.status().unwrap().success());

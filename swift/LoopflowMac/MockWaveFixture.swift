@@ -3,26 +3,15 @@ import Foundation
 import Loopflow
 
 /// Fixture data for the `mock-waves` UI-test mode (`AppTestMode.mockWaves`).
-///
-/// It bypasses the `lf` registry so the two states no data can produce render
-/// deterministically: `loading` (before the first read) and `error` (a failed
-/// read under the cached plan). Populated states, metrics included, render
-/// from an `lf-world` world through the real registry in `live` mode.
-///
-/// Never referenced outside `AppTestMode`; production reads only `lf`.
 enum MockWaveFixture {
     /// A path that need not exist: `mock-waves` gates off the on-disk authored
     /// scan, so nothing reads this directory.
     static let repoPath = "/src/loopflow"
 
-    /// The Wave whose detail hierarchy is populated from `detailJSON`.
-    static let detailWaveName = "infrastructure"
-
     /// The Wave the detail pane opens to. `LOOPFLOW_UI_TEST_SELECT_BRANCH`
     /// overrides it so a screenshot run can target a specific list state.
     static var selectedWaveName: String {
-        let env = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_SELECT_BRANCH"]
-        return (env?.isEmpty == false ? env : nil) ?? detailWaveName
+        AppTestMode.selectBranch ?? "infrastructure"
     }
 
     /// Which detail-pane state the selected Wave renders: `loading` holds the
@@ -40,50 +29,40 @@ enum MockWaveFixture {
         return raw.flatMap(DetailState.init(rawValue:)) ?? .loading
     }
 
-    /// The stable list, one Wave per lens state: green (a live body), red
-    /// (stopped with active work), black (off and clean), plus a child Wave
-    /// (parent set) to exercise future-ancestry row indentation.
-    static var waves: [Wave] {
-        [
-            Wave(id: "wave-1", name: "infrastructure", repo: repoPath,
-                 status: .ready,
-                 activeTasks: 1),
-            Wave(id: "wave-2", name: "intelligence", repo: repoPath, status: .ready,
-                 activeTasks: 2),
-            Wave(id: "wave-3", name: "feedback", repo: repoPath, status: .ready,
-                 activeTasks: 0),
-            Wave(id: "wave-4", name: "cadenza", repo: repoPath,
-                 status: .ready,
-                 activeTasks: 0, parentWaveId: "wave-1"),
-        ]
-    }
+    private static let portfolio: [(wave: Wave, objective: String)] = [
+        (Wave(id: "wave-1", name: "infrastructure", repo: repoPath, status: .ready, activeTasks: 1),
+         "Make releases boring."),
+        (Wave(id: "wave-2", name: "intelligence", repo: repoPath, status: .ready, activeTasks: 2),
+         "Loopflow gets sharper from its own evidence."),
+        (Wave(id: "wave-3", name: "feedback", repo: repoPath, status: .ready, activeTasks: 0),
+         "Every failure becomes one focused piece of work."),
+        (Wave(id: "wave-4", name: "cadenza", repo: repoPath, status: .ready, activeTasks: 0, parentWaveId: "wave-1"),
+         "Keep the wave's rhythm honest."),
+    ]
 
-    /// An objective per Wave, so a plan-only pane (any non-`infrastructure`
-    /// selection) still leads with prose. `infrastructure` also gets its
-    /// objective from `detailJSON`'s `wave.goal` via `workMap`.
-    static var plans: [String: WavePlan] {
-        var result: [String: WavePlan] = [:]
-        for wave in waves {
-            result[wave.id] = WavePlan(objective: objective(for: wave.name), projects: wave.name == detailWaveName ? (selectedWaveDetail()?.projects ?? .unavailable(reason: "Fixture missing")) : .available(items: [], truncated: false))
+    static let waves = portfolio.map(\.wave)
+
+    static let plans = Dictionary(uniqueKeysWithValues: portfolio.map { wave, objective in
+        let projects: WorkEvidence<ProjectPlanningSnapshot> = wave.name == "infrastructure"
+            ? infrastructureProjects : .available(items: [], truncated: false)
+        return (wave.id, WavePlan(objective: objective, projects: projects))
+    })
+
+    private static let infrastructureProjects: WorkEvidence<ProjectPlanningSnapshot> = {
+        let json = #"""
+            {
+              "id": "project-1", "tracker_id": null, "sync": {"actions": []},
+              "slug": "release-feedback", "name": "current", "status": "started", "current": true,
+              "metric_targets": [], "krs": [{"text": "Every failed run has an owner", "holds": false}]
+            }
+            """#
+        do {
+            let project = try JSONDecoder().decode(ProjectPlanningSnapshot.self, from: Data(json.utf8))
+            return .available(items: [project], truncated: false)
+        } catch {
+            return .unavailable(reason: error.localizedDescription)
         }
-        return result
-    }
-
-    private static func objective(for name: String) -> String {
-        switch name {
-        case "infrastructure": return "Make releases boring."
-        case "intelligence": return "Loopflow gets sharper from its own evidence."
-        case "feedback": return "Every failure becomes one focused piece of work."
-        case "cadenza": return "Keep the wave's rhythm honest."
-        default: return ""
-        }
-    }
-
-    /// The selected Wave's populated detail, decoded from the same wire shape
-    /// `lf wave status --json` emits (the round-tripped `wave_detail.json` fixture).
-    static func selectedWaveDetail() -> WaveDetailSnapshot? {
-        try? JSONDecoder().decode(WaveDetailSnapshot.self, from: Data(detailJSON.utf8))
-    }
+    }()
 
     /// The detail reading a `mock-waves` capture renders in the given state,
     /// plus whether the pane still awaits its first live read (the loading
@@ -92,244 +71,5 @@ enum MockWaveFixture {
     static func detailReading(state: DetailState) -> (reading: WaveDetailReading, awaitingFirstRead: Bool) {
         (WaveDetailReading(), state == .loading)
     }
-
-    static let detailJSON = #"""
-        {
-          "project_readiness": {
-            "state": "ready",
-            "project_id": "project-1",
-            "observed_at": null,
-            "pending_successor": null,
-            "activation": null
-          },
-          "wave": {
-            "id": "wave-1",
-            "name": "infrastructure",
-            "status": "ready",
-            "goal": "Make releases boring.",
-            "repo": "/src/loopflow",
-            "active_tasks": 1,
-            "created_at": "2026-07-01T00:00:00Z",
-            "parent_wave_id": null,
-            "retired_at": null,
-            "superseded_by_wave_id": null,
-            "retirement_reason": null,
-            "machine": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "ssh://jack@mini-heart",
-              "created_at": "2026-07-01T00:00:00Z",
-              "observed_at": "2026-07-17T00:00:00Z"
-            }
-          },
-          "metric_portfolio": {"metrics": [], "contract_issues": []},
-          "history": {
-            "state": "ok",
-            "truncated": false,
-            "items": [
-              {
-                "repo": "/src/loopflow",
-                "worktree": "/src/loopflow.task",
-                "skill": "task/pursue",
-                "usage": {
-                  "streams": 1,
-                  "final_streams": 1,
-                  "gaps": 0,
-                  "input_tokens": 12000,
-                  "output_tokens": 3000,
-                  "total_input_tokens": 12000,
-                  "peak_input_tokens": 10000,
-                  "context_window_tokens": 200000,
-                  "reasoning_tokens": 1000,
-                  "cache_read_tokens": 8000,
-                  "cache_write_tokens": 500,
-                  "cost_usd": 0.42
-                },
-                "evidence_gaps": 0,
-                "harness": "codex",
-                "model": "gpt-5",
-                "surface": "headless",
-                "first_provider_attempt_at": 1784052010,
-                "task_pr_id": "pr_33333333333333333333333333333333",
-                "session_id": "run_00000000000000000000000000000001",
-                "providers": [],
-                "task_id": "task_22222222222222222222222222222222",
-                "wave_id": "11111111-1111-4111-8111-111111111111",
-                "task_identifier": "INF-123",
-                "wave_name": "infrastructure",
-                "work_source": null,
-                "artifact_key": "run_00000000000000000000000000000001",
-                "captured": 12,
-                "caller_artifact_key": null,
-                "observed_at": 1784052000,
-                "recorded_outcome": "completed",
-                "recorded_at": 1784052600
-              }
-            ]
-          },
-          "projects": {
-            "state": "ok",
-            "items": [
-              {
-                "id": "project-1",
-                "tracker_id": null,
-                "sync": {"actions": []},
-                "slug": "release-feedback",
-                "name": "current",
-                "workflow": "incident",
-                "status": "started", "current": true,
-                "metric_targets": [],
-                "krs": [
-                  {
-                    "text": "Every failed run has an owner",
-                    "holds": false
-                  }
-                ]
-              }
-            ],
-            "truncated": false
-          },
-          "tasks": {
-            "state": "ok",
-            "items": [
-              {
-                "task": {
-                  "repo_id": "repo_00000000000040008000000000000001",
-                  "repo": "/src/loopflow",
-                  "project_id": "project-1",
-                  "wave_id": "wave-1",
-                  "id": "issue-1",
-                  "identifier": "INF-123",
-                  "name": "Surface nightly failures",
-                  "description": "Surface one focused failure.",
-                  "rank": 1,
-                  "state": "unstarted", "completed_at": null, "due_date": null, "tracker_state": {"state": "available", "synced_at": null}, "tracker_id": null, "sync": {"actions": []},
-                  "assignee": "user-1"
-                },
-                "reference": {
-                  "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
-                  "workspace": {
-                    "slug": "infrastructure-task",
-                    "branch": "jack/infrastructure.task.20260713_1200", "base_commit": "fixture-base",
-                    "worktree": "/src/loopflow.infrastructure.task"
-                  }
-                },
-                "runtime": {
-                  "work_id": "ts_22222222222222222222222222222222",
-                  "status": "ready",
-                  "reason": "ready",
-                  "updated_at": "2026-07-13T19:00:00Z",
-                  "provider": "codex",
-                  "owner": {"person": "Jack Heart", "person_id": null, "machine": {"id": null, "label": null}}
-                },
-                "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},
-                "ship_control":{"unavailable":null},"shipping":null,
-                "next_move": {
-                  "owner": "user",
-                  "reason": "merge pull request head 333333333333 on GitHub"
-                },
-                "condition": {
-                  "state": "waiting",
-                  "reason": "merge pull request head 333333333333 on GitHub",
-                  "observed_at": "2026-07-13T21:00:00Z",
-                  "evidence_age_secs": 7200,
-                  "local_progress": {
-                    "state": "observed",
-                    "unsettled": true,
-                    "dirty": false,
-                    "authored_commits": true,
-                    "recovery_required": false,
-                    "reason": null
-                  },
-                  "unresolved_execution": true
-                },
-                "actions": {
-                  "recommended": "open_pr",
-                  "reason": "merge head 333333333333 on GitHub"
-                },
-                "pr": {
-                    "id": "pr_33333333333333333333333333333333",
-                    "sequence": 1,
-                    "slug": "infrastructure-task",
-                    "branch": "jack/infrastructure.task.20260713_1200",
-                    "base_commit": "1111111111111111111111111111111111111111",
-                    "phase": "open",
-                    "empty": false,
-                    "publication": {
-                      "requested_at": "2026-07-13T18:45:00Z",
-                      "presentation": {
-                        "title": "Ship infrastructure task",
-                        "body": "Explains the intent and proof for this head.",
-                        "head_sha": "3333333333333333333333333333333333333333"
-                      },
-                      "github": {
-                        "number": 912,
-                        "url": "https://github.com/loopflowstudio/loopflow/pull/912"
-                      },
-                      "merge": {
-                        "mode": "user",
-                        "requested_at": "2026-07-13T18:46:00Z",
-                        "head_sha": "3333333333333333333333333333333333333333",
-                        "after_merge": "complete_task",
-                        "next_slug": null
-                      }
-                    },
-                    "merge_commit": null,
-                    "abandoned_at": null
-                  },
-                "section": "working"
-              },
-              {
-                "task": {
-                  "repo_id": "repo_00000000000040008000000000000001",
-                  "repo": "/src/loopflow",
-                  "project_id": "project-1",
-                  "wave_id": "wave-1",
-                  "id": "issue-2",
-                  "identifier": "INF-124",
-                  "name": "Classify publish failures",
-                  "description": "",
-                  "rank": 2,
-                  "state": "unstarted", "completed_at": null, "due_date": null, "tracker_state": {"state": "available", "synced_at": null}, "tracker_id": null, "sync": {"actions": []},
-                  "assignee": null
-                },
-                "reference": {
-                  "issue_url": null,
-                  "workspace": null
-                },
-                "runtime": null,
-                "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},
-                "ship_control":{"unavailable":null},"shipping":null,
-                "next_move": {
-                  "owner": "wave",
-                  "reason": "Task is ready to start"
-                },
-                "condition": {
-                  "state": "clear",
-                  "reason": "Task is ready to start",
-                  "observed_at": "2026-07-13T21:00:00Z",
-                  "evidence_age_secs": null,
-                  "local_progress": {
-                    "state": "not_applicable",
-                    "unsettled": false,
-                    "dirty": null,
-                    "authored_commits": null,
-                    "recovery_required": null,
-                    "reason": null
-                  },
-                  "unresolved_execution": false
-                },
-                "actions": {
-                  "recommended": null,
-                  "reason": "Task is ready to start"
-                },
-                "pr": null,
-                "section": "backlog"
-              }
-            ],
-            "truncated": false
-          },
-          "unavailable_tasks": []
-        }
-        """#
 }
 #endif

@@ -23,8 +23,9 @@ remembered.
 
 **Name the step that waits.** At an interactive step the Task waits here for a
 person; say which, and what they decide there. In `code`, the first is
-`human-review` after `build`: they read one page built from what the run
-produced, and their answer sends the change back to `build` or on to delivery.
+`ship-review` after `build`: they read one page saying what ships and what
+was left outside it, decide what happens to each finding, and their answer
+sends the change back to `build` or on to delivery.
 `lf task run <issue>` continues once they have answered.
 
 **End a turn when the Task has its disposition.** Merge alone is not done.
@@ -38,7 +39,7 @@ The Task's Graphs keep running on their own, and settled progress arrives here
 as posts while the conversation is open.
 
 **A post is an observation, not direction.** Report it briefly, name each
-changed run by its id, and leave review and shipping state as they are. Don't
+changed run by its id, and leave review and the auto setting as they are. Don't
 promise follow-ups for when the conversation is closed.
 
 **Wait, don't poll.** Within a turn, `lf task wait <issue> --until submitted`

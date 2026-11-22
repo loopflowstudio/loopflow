@@ -14,19 +14,19 @@ public struct TaskWork: Codable, Sendable, Equatable {
 }
 
 /// `lf task status`'s recorded execution: the Task's work, who started its
-/// latest Graph, and who approved or stopped Auto-Ship.
+/// latest Graph, and its auto setting.
 public struct TaskExecution: Decodable, Sendable, Equatable {
     public let work: TaskWork
     public let startedBy: Starter?
-    public let shipApproval: ShipMark?
-    /// Keeps a run from approving Auto-Ship and waits it at its landing step, until `lf ship`.
-    public let shipStop: ShipMark?
+    /// On: the run stands in at interactive steps. Off: it waits at its
+    /// landing step until `lf task auto on`. `nil` when nobody set it.
+    public let auto: Auto?
     /// The Task this one is stacked on; `nil` when it builds on the default branch.
     public let stackParent: TaskStackParent?
 
     enum CodingKeys: String, CodingKey {
         case work
-        case startedBy = "started_by", shipApproval = "ship_approval", shipStop = "ship_stop"
+        case startedBy = "started_by", auto
         case stackParent = "stack_parent"
     }
 
@@ -34,8 +34,7 @@ public struct TaskExecution: Decodable, Sendable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         work = try container.decode(TaskWork.self, forKey: .work)
         startedBy = try container.decode(Starter?.self, forKey: .startedBy)
-        shipApproval = try container.decode(ShipMark?.self, forKey: .shipApproval)
-        shipStop = try container.decode(ShipMark?.self, forKey: .shipStop)
+        auto = try container.decode(Auto?.self, forKey: .auto)
         stackParent = try container.decode(TaskStackParent?.self, forKey: .stackParent)
     }
 }
@@ -66,8 +65,10 @@ public enum Starter: Decodable, Sendable, Hashable {
     /// `nil` when no participant is configured or the chain is missing rows.
     case person(name: String?)
     case session(id: String, name: String?, requester: String?)
+    /// A configured default set it (`auto: on`): "wave", "repository" or "personal".
+    case config(layer: String)
 
-    private enum CodingKeys: String, CodingKey { case kind, name, id, requester }
+    private enum CodingKeys: String, CodingKey { case kind, name, id, requester, layer }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -79,6 +80,7 @@ public enum Starter: Decodable, Sendable, Hashable {
                 name: try container.decode(String?.self, forKey: .name),
                 requester: try container.decode(String?.self, forKey: .requester)
             )
+        case "config": self = .config(layer: try container.decode(String.self, forKey: .layer))
         case let kind:
             throw DecodingError.dataCorruptedError(
                 forKey: .kind, in: container, debugDescription: "unknown starter '\(kind)'"
@@ -92,12 +94,16 @@ public enum Starter: Decodable, Sendable, Hashable {
         case .person(let name): name ?? "attribution unresolved"
         case .session(let id, let name, let requester):
             (name.map { "Session \"\($0)\"" } ?? "Session \(id)") + (requester.map { " for \($0)" } ?? "")
+        case .config(let layer): "\(layer) config"
         }
     }
 }
 
-/// When someone approved or stopped Auto-Ship, and who.
-public struct ShipMark: Decodable, Sendable, Hashable {
+/// The Task's auto setting: on or off, when, and who set it.
+public struct Auto: Decodable, Sendable, Hashable {
+    public enum State: String, Decodable, Sendable, Hashable { case on, off }
+
+    public let state: State
     public let at: Int64
     public let by: Starter
 }

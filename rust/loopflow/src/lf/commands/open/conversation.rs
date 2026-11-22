@@ -265,15 +265,6 @@ pub(super) fn resolve(target: &mut Resolved, prepare: bool) -> Result<()> {
             }
         };
         let session = store.session(&id).await?.context("Session not found")?;
-        target.agent = match &session.provider {
-            Some(provider) => Some(
-                session
-                    .model
-                    .as_ref()
-                    .map_or_else(|| provider.clone(), |model| format!("{provider}:{model}")),
-            ),
-            None => loopflow_execution::config::agent_override(),
-        };
         if prepare && session.provider.is_none() {
             loopflow_execution::config::load_wave_config(
                 Some(&session.cwd),
@@ -288,17 +279,9 @@ pub(super) fn resolve(target: &mut Resolved, prepare: bool) -> Result<()> {
     })
 }
 
-/// The `PATH` a conversation started in a host pane resolves commands on.
-fn conversation_path() -> String {
-    crate::server::supervised_path(
-        &std::env::var("PATH").unwrap_or_default(),
-        &dirs::home_dir().unwrap_or_default(),
-    )
-}
-
-/// A launch-scoped acknowledgement, removed after its caller settles. The
-/// transport writes it only after the native conversation is ready for input.
-/// A failed child leaves its error visible and reports failure through this file.
+/// A launch-scoped receipt, removed after its caller settles. The transport
+/// writes "attached" once the native conversation has started, or the error
+/// that stopped it; a failed child also leaves that error on screen.
 #[derive(Debug)]
 pub(super) struct Attachment {
     directory: tempfile::TempDir,
@@ -346,10 +329,6 @@ exit "$result""#.into(),
             loopflow_execution::transport::OPEN_RECEIPT_ENV,
             self.path().display()
         ));
-        // A host's server started by launchd keeps launchd's `PATH`, which
-        // holds no provider CLI. The conversation resolves them as this caller
-        // does, and as a terminal does when the caller's own `PATH` is as bare.
-        argv.push(format!("PATH={}", conversation_path()));
         argv.extend(command);
         argv
     }
@@ -357,15 +336,17 @@ exit "$result""#.into(),
         match self.wait(Duration::from_secs(30)) {
             Ok(()) => receipt.status = OpenStatus::Usable,
             Err(error) => {
+                let reason = format!("{error:#}");
                 tracing::warn!(
                     url = receipt.url,
                     destination = receipt.destination.as_deref().unwrap_or_default(),
-                    error = format!("{error:#}"),
-                    "lf open: the conversation did not attach; its pane shows why"
+                    error = %reason,
+                    "lf open: the conversation did not attach"
                 );
                 receipt.status = OpenStatus::Failed;
                 receipt.reason = Some(format!(
-                    "{error:#}; see the destination for diagnostics and retry the same command"
+                    "{}; retry the same command",
+                    reason.trim_end().trim_end_matches('.')
                 ));
             }
         }
@@ -456,28 +437,41 @@ mod tests {
     }
 
     #[test]
-    fn conversation_resolves_commands_on_the_callers_path_not_the_hosts() {
-        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+    fn conversation_keeps_the_hosts_path_not_the_callers() {
+        let attachment = Attachment::new().unwrap();
+        let argv = attachment.argv(vec!["lf".into(), "session".into(), "resume".into()]);
+        assert!(!argv.iter().any(|arg| arg.starts_with("PATH=")), "{argv:?}");
+    }
+
+    #[test]
+    fn a_failed_opening_reports_the_conversations_own_reason() {
         let attachment = Attachment::new().unwrap();
         let argv = attachment.argv(vec![
             "/bin/sh".into(),
             "-c".into(),
-            r#"printf %s "$PATH"; printf attached > "$LF_OPEN_RECEIPT""#.into(),
+            r#"printf "'claude' is not installed." > "$LF_OPEN_RECEIPT"; exit 1"#.into(),
         ]);
         let output = Command::new(&argv[0])
             .args(&argv[1..])
-            .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
             .stdin(std::process::Stdio::null())
             .output()
             .unwrap();
-        assert!(output.status.success(), "{output:?}");
-        let path = String::from_utf8_lossy(&output.stdout).into_owned();
-        assert!(path.ends_with(&std::env::var("PATH").unwrap()), "{path}");
-        let local = dirs::home_dir().unwrap().join(".local/bin");
-        assert!(
-            path.split(':')
-                .any(|entry| entry == local.to_str().unwrap()),
-            "{path}"
+        assert_eq!(output.status.code(), Some(1));
+        let mut receipt = super::OpenReceipt {
+            label: "LOO-1".into(),
+            url: String::new(),
+            host: None,
+            destination: None,
+            container: None,
+            status: super::OpenStatus::Usable,
+            reason: None,
+            fallback_argv: Vec::new(),
+        };
+        attachment.settle(&mut receipt);
+        assert_eq!(receipt.status, super::OpenStatus::Failed);
+        assert_eq!(
+            receipt.reason.as_deref(),
+            Some("'claude' is not installed; retry the same command")
         );
     }
 

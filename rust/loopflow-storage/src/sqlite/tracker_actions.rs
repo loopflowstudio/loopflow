@@ -976,55 +976,6 @@ pub(crate) fn attach_in(
     Ok(())
 }
 
-/// A historical filing recorded its creation intent but no attempt boundary:
-/// it may have reached Linear, so its `create` is sent with the reply
-/// unknown and its values are the intent's, never today's Task.
-pub(crate) fn retain_filing_create_in(
-    conn: &Connection,
-    task: &TaskId,
-    baseline: &[WorkValue],
-) -> StoreResult<()> {
-    let id = insert(
-        conn,
-        &ActionOwner::Task(task.clone()),
-        ActionKind::Create,
-        None,
-        &serde_json::to_value(baseline)?,
-        None,
-        TrackerKind::Linear,
-    )?;
-    conn.execute(
-        "UPDATE tracker_actions SET phase='sent',sent_at=?2,
-         error='Historical creation outcome is unknown; awaiting exact tracker readback'
-         WHERE id=?1",
-        params![id, now_unix()],
-    )?;
-    Ok(())
-}
-
-/// A follow-up relation a historical filing recorded, unless it was confirmed:
-/// a `link` on the source Task, held until both Tasks have tracker objects. Its
-/// id is the relation's, which Linear keeps, so recording it twice queues it once.
-pub(crate) fn retain_relation_in(
-    conn: &Connection,
-    source: &TaskId,
-    relation: &str,
-    target: &str,
-) -> StoreResult<()> {
-    conn.execute(
-        "INSERT OR IGNORE INTO tracker_actions(id,task_id,subject,kind,value_json,phase,tracker)
-         SELECT lower(?2),?1,'relation:'||lower(?2),'link',json_object('target',t.id),'queued','linear'
-         FROM tasks t WHERE (t.id=?3 OR t.external_issue_id=?3 OR t.id='task_'||replace(lower(?3),'-',''))
-            AND t.planning_deleted_at IS NULL
-            AND NOT EXISTS(SELECT 1 FROM task_events c WHERE c.task_id=?1
-                AND json_extract(c.kind_json,'$.kind')='follow_through_relation_confirmed'
-                AND json_extract(c.kind_json,'$.relation_id')=lower(?2))
-         LIMIT 1",
-        params![source.as_str(), relation, target],
-    )?;
-    Ok(())
-}
-
 /// Unbound local Projects, then Tasks, in `repo` with no live `create`.
 fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<ActionOwner>> {
     let mut query = conn.prepare_cached(
@@ -1138,7 +1089,9 @@ impl SqliteStore {
 
     /// Show the Task's pull request in its tracker: `state` is what the PR
     /// line says (Open, Merged, Abandoned). Returns the action id, or `None`
-    /// when no tracker carries the Task. A later state replaces an unsent one.
+    /// when no tracker carries the Task. A later state replaces an unsent one;
+    /// the same state again is the action that already carries it, sent or
+    /// not, so a push or refresh with nothing new to say queues nothing.
     pub fn enqueue_pr_link(
         &self,
         task: &TaskId,
@@ -1149,6 +1102,23 @@ impl SqliteStore {
     ) -> StoreResult<Option<String>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let subject = format!("{PR}{url}");
+        let latest: Option<(String, String)> = tx
+            .query_row(
+                "SELECT id, value_json FROM tracker_actions
+                 WHERE task_id=?1 AND subject=?2 AND kind='link'
+                   AND phase IN ('queued','sent','confirmed')
+                 ORDER BY seq DESC LIMIT 1",
+                params![task.as_str(), subject],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if let Some((id, carried)) = latest {
+            let carried: Value = serde_json::from_str(&carried)?;
+            if carried["number"] == number && carried["state"] == state {
+                return Ok(Some(id));
+            }
+        }
         let value = serde_json::json!({
             "number": number,
             "state": state,
@@ -1158,7 +1128,7 @@ impl SqliteStore {
             &tx,
             &ActionOwner::Task(task.clone()),
             ActionKind::Link,
-            Some(&format!("{PR}{url}")),
+            Some(&subject),
             &value,
             None,
         )?;
@@ -1531,6 +1501,43 @@ mod tests {
         let action = &store.tracker_actions_for(&ActionOwner::Task(task)).unwrap()[0];
         assert_eq!(action.phase, ActionPhase::Conflicted);
         assert_eq!(action.conflict, Some(json!("theirs")));
+    }
+
+    #[test]
+    fn a_pr_link_is_queued_once_per_state() {
+        const URL: &str = "https://github.com/acme/repo/pull/7";
+        let (_dir, store) = store();
+        let task = task(&store, true);
+        let link = |state: &str| {
+            store
+                .enqueue_pr_link(&task, URL, 7, state, None)
+                .unwrap()
+                .unwrap()
+        };
+
+        // Waiting to be sent, then shown: each refresh is the same action.
+        let open = link("Open");
+        assert_eq!(link("Open"), open);
+        store
+            .resolve_tracker_action(
+                &open,
+                &Resolution::Confirmed {
+                    revision: None,
+                    remote_id: Some("att-1".into()),
+                },
+            )
+            .unwrap();
+        assert_eq!(link("Open"), open);
+        assert!(store
+            .unconfirmed_tracker_actions("/repo")
+            .unwrap()
+            .is_empty());
+
+        let merged = link("Merged");
+        assert_ne!(merged, open);
+        assert_eq!(link("Merged"), merged);
+        let actions = store.tracker_actions_for(&ActionOwner::Task(task)).unwrap();
+        assert_eq!(actions.len(), 2);
     }
 }
 

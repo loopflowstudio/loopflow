@@ -9,7 +9,17 @@ import ViewInspector
 @Suite("Sessions store")
 @MainActor
 struct SessionsStoreTests {
-    @Test("Provider switching keeps the Session and prepares an explicit provider launch", arguments: ["claude", "codex", "opencode", "pi"])
+    @Test("Prepared SSH panes use the server’s local relay command")
+    func sshPaneUsesPreparedCommand() throws {
+        var record = try #require(records([session(id: "remote", state: "closed")]).first)
+        let ssh = ["--", "ssh", "peer", "lf session attach remote"]
+        record.openArgv = ["/bin/lf", "session", "attach"] + ssh
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in "" })
+        store.reconcile([record])
+        #expect(item(store, "remote")?.launchArguments == record.openArgv)
+    }
+
+    @Test("Provider switching keeps the Session and prepares an explicit provider launch", arguments: ["claude", "codex", "opencode", "pi", "agy"])
     func switchingProviderKeepsSession(agent: String) async throws {
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
             session(id: "main", state: "closed")

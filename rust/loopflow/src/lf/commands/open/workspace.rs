@@ -514,10 +514,7 @@ fn started(content: &ViewContent) -> bool {
     content.states.iter().any(|state| {
         matches!(
             state,
-            SelectionState::Idle
-                | SelectionState::Active
-                | SelectionState::Moving
-                | SelectionState::Shipping
+            SelectionState::Idle | SelectionState::Active | SelectionState::Moving
         )
     })
 }

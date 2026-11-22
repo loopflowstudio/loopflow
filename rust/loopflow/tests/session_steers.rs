@@ -42,32 +42,30 @@ fn launch_startup_proof_through(
     }
     let provider = bin.join("claude");
     fs::write(&provider, support::claude_stand_in(r#"#!/usr/bin/python3
-import fcntl, hashlib, json, os, pathlib, select, shlex, subprocess, sys
+import json, os, pathlib, shlex, subprocess, sys
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
 home = pathlib.Path(os.environ['LF_HOME'])
 sys.stderr = open(home / 'provider-errors', 'w', buffering=1)
 caller = json.loads(os.environ['LF_AGENT_CALLER'])
-lock = home / 'loopflow.session-locks' / hashlib.sha256(caller['session_id'].encode()).hexdigest()
-# Force a hook/input overlap without draining a byte of the combined seed.
-assert select.select([sys.stdin], [], [], 5)[0], 'no initial input'
-with open(lock, 'r+') as fence:
-    fcntl.flock(fence, fcntl.LOCK_SH)
-    settings = json.load(open(sys.argv[sys.argv.index('--settings') + 1]))
-    hook = settings['hooks']['SessionStart'][0]['hooks'][0]['command']
-    arguments = shlex.split(hook)
-    assert 'LF_PROVIDER_CONTEXT' not in os.environ
-    assert 'Stop' not in settings['hooks'], list(settings['hooks'])
-    commands = [h['command'].split()[-1] for group in settings['hooks']['SessionStart'] for h in group['hooks']]
-    assert commands == ['start', 'compact'], commands
-    output = subprocess.check_output(hook, shell=True, input=json.dumps({'session_id': 'startup-native', 'hook_event_name': 'SessionStart', 'source': 'startup'}).encode())
-    context_text = json.loads(output)['hookSpecificOutput']['additionalContext']
-    assert len(context_text.encode()) <= 10000
-    if (home / 'expect-steer').exists():
-        assert 'STARTUP_DIRECTION' in context_text
-        assert '[excerpt; full source above]' in context_text
-    (home / 'startup-complete').touch()
+# Drain both messages before launching hooks so hook latency cannot block the seed write.
+context = json.loads(sys.stdin.readline())
+query = json.loads(sys.stdin.readline())
+settings = json.load(open(sys.argv[sys.argv.index('--settings') + 1]))
+hook = settings['hooks']['SessionStart'][0]['hooks'][0]['command']
+arguments = shlex.split(hook)
+assert 'LF_PROVIDER_CONTEXT' not in os.environ
+assert 'Stop' not in settings['hooks'], list(settings['hooks'])
+commands = [h['command'].split()[-1] for group in settings['hooks']['SessionStart'] for h in group['hooks']]
+assert commands == ['start', 'compact'], commands
+output = subprocess.check_output(hook, shell=True, input=json.dumps({'session_id': 'startup-native', 'hook_event_name': 'SessionStart', 'source': 'startup'}).encode())
+context_text = json.loads(output)['hookSpecificOutput']['additionalContext']
+assert len(context_text.encode()) <= 10000
+if (home / 'expect-steer').exists():
+    assert 'STARTUP_DIRECTION' in context_text
+    assert '[excerpt; full source above]' in context_text
+(home / 'startup-complete').touch()
 # A bare launch's tool hook reads its steers from the store, with no server.
 adapter = json.loads(os.environ['LF_BARE_STEER'])
 assert adapter['agent_process_id'] == caller['agent_process_id']
@@ -83,8 +81,6 @@ subprocess.check_call([arguments[2], 'steer', caller['session_id'], 'BARE_DIRECT
 steered = json.loads(after_tool())['hookSpecificOutput']
 assert steered['hookEventName'] == 'PostToolUse' and 'BARE_DIRECTION' in steered['additionalContext'], steered
 assert after_tool() == '', 'the steer arrived twice'
-context = json.loads(sys.stdin.readline())
-query = json.loads(sys.stdin.readline())
 assert context['shouldQuery'] is False
 expected = (home / 'clipboard').read_text()
 assert expected in context['message']['content'], 'incomplete non-query context'

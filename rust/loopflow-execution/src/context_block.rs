@@ -284,6 +284,32 @@ impl ContextDelivery {
         Ok(())
     }
 
+    /// The command a provider hook runs, up to the moment it declares.
+    pub(crate) fn hook_command(&self) -> anyhow::Result<String> {
+        let executable = crate::os_process::resolve_lf_binary()?;
+        Ok(format!(
+            "env LF_HOME={} {} __context-block --moment",
+            crate::os_process::shell_escape(&self.home.to_string_lossy()),
+            crate::os_process::shell_escape(&executable.to_string_lossy()),
+        ))
+    }
+
+    /// Shell that exits 0 when no steer can be waiting for this conversation,
+    /// so a hook starts lf only for new steering: the seen marker is newer
+    /// than every marker a steer for it touches. dash's -nt is false when the
+    /// second file is missing, so test existence first.
+    pub(crate) fn steer_gate(&self) -> String {
+        format!(
+            "s=\"${seen}\"; [ -n \"$s\" ] || exit 0; n() {{ [ ! -e \"$1\" ] || [ \"$s\" -nt \"$1\" ]; }}; [ -e \"$s\" ] && n {latest} && n \"${session}\" && n \"${task}\" && exit 0;",
+            seen = crate::steer::STEER_SEEN_ENV,
+            latest = crate::os_process::shell_escape(
+                &loopflow_storage::steer_markers::latest_marker(&self.home).to_string_lossy()
+            ),
+            session = crate::steer::STEER_SESSION_ENV,
+            task = crate::steer::STEER_TASK_ENV,
+        )
+    }
+
     /// The provider hooks of one launch. Every launch prints its context
     /// block at session start and after a compaction, and reads its own
     /// steers and Task update from the store after a tool call and at a
@@ -293,25 +319,10 @@ impl ContextDelivery {
         &self,
         kind: crate::harness::LaunchKind,
     ) -> anyhow::Result<serde_json::Value> {
-        let executable = crate::os_process::resolve_lf_binary()?;
-        let quote = |path: &Path| crate::os_process::shell_escape(&path.to_string_lossy());
-        let command = format!(
-            "env LF_HOME={} {} __context-block --moment",
-            quote(&self.home),
-            quote(&executable),
-        );
+        let command = self.hook_command()?;
+        let gate = self.steer_gate();
         let context = |moment: &str| serde_json::json!({"type":"command","command":format!("{command} {moment}"),"timeout":30});
         let hook = |command: String| serde_json::json!([{"hooks":[{"type":"command","command":command,"timeout":10}]}]);
-        // Start lf only for new steering: skip while the seen marker is newer
-        // than every marker a steer for this conversation touches. dash's -nt
-        // is false when the second file is missing, so test existence first.
-        let gate = format!(
-            "s=\"${seen}\"; [ -n \"$s\" ] || exit 0; n() {{ [ ! -e \"$1\" ] || [ \"$s\" -nt \"$1\" ]; }}; [ -e \"$s\" ] && n {latest} && n \"${session}\" && n \"${task}\" && exit 0;",
-            seen = crate::steer::STEER_SEEN_ENV,
-            latest = quote(&loopflow_storage::steer_markers::latest_marker(&self.home)),
-            session = crate::steer::STEER_SESSION_ENV,
-            task = crate::steer::STEER_TASK_ENV,
-        );
         let start = serde_json::json!([
             {"matcher": "startup|resume|clear", "hooks": [context("start")]},
             {"matcher": "compact", "hooks": [context("compact")]},

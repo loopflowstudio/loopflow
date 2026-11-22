@@ -1,16 +1,32 @@
 # Loopflow for macOS
 
-```bash
-uv run python scripts/loopflow-dev.py run          # build and launch
-uv run python scripts/loopflow-dev.py install      # install without launching
-uv run python scripts/loopflow-dev.py run-debug    # launch with logs visible
-uv run python scripts/loopflow-dev.py test         # run Swift tests
+With [Loopflow installed](../docs/getting-started.md#install), run this from
+the repository root after a Swift edit.
+
+```console
+$ uv run python scripts/loopflow-dev.py run
+Opening the Machine.
 ```
 
-The development app runs its bundled CLI on the main Machine's store, which it
-reads but never migrates. Only an install advances the store's schema:
-`lf install --dev` for a green main build, `lf install` for your stream's release.
-With a private `LF_HOME`, an explicit `LF_BIN` selects the CLI instead.
+The command builds the checkout's Swift app and opens
+**Loopflow Dev** beside Loopflow, using the installed server and `lf`. Both
+apps show your live Waves, Tasks and Sessions. A Task edited in either app
+updates in the other. Open the same running Session in a terminal and in Dev
+to see its output and type into it from either view.
+
+Each run quits the previous **Loopflow Dev** and opens this checkout's build.
+The running server and Sessions keep going. Use `run-debug` to see app
+logs as it runs.
+
+Dev waits until you visit a Task, Wave, or repository to open its terminals.
+On launch, even the restored selection shows a placeholder. Opening Dev beside
+release Desktop leaves the running Session at its current size.
+
+If the branch needs server features that your installation lacks, the affected
+read or action reports the mismatch. The rest of the window keeps working
+when both builds can connect. Test branch changes to `lf` on a
+[private Machine](../docs/dev/machines.md#one-main-machine).
+
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
@@ -33,6 +49,15 @@ reading, or stays empty, and the Notice goes when a read succeeds. A Task withou
 If no name is known, the failed row says
 **Task unavailable**. Desktop reconnects automatically. A successful replacement
 updates the rows, retaining the selected workspace, panes and drafts.
+When the app and the server are different builds and a read arrives that the
+app can't decode, the Notice for that part names both and where decoding
+stopped, and `lf install` brings them together. The other parts stay current:
+
+```
+The plan couldn't be read: This Loopflow (0.16.0+3500440e9) can't read what the server (0.16.0+21d541a87) sent. (missing owned_by_you at body.tasks.0)
+```
+
+**The Machine is away** means only that the connection is down.
 Repeated identical Session errors leave the displayed reading unchanged; failed
 per-Wave or truncated replacements keep previously readable planning, including
 its saved copy. Delete the cache file to start from **Loading workspace…**.
@@ -68,8 +93,8 @@ yourself, call `/usr/bin/log`, since zsh's builtin `log` shadows it:
 Working Tasks lists owned, started, unfinished Tasks, on any Machine this store
 records, in the repository's shared Task order. It is the
 repository's built-in query, so opening a Task neither adds nor reorders it.
-Click a Wave to scope the sidebar to its Working Tasks and subwaves; its board's
-Backlog keeps the unstarted ones. **‹ Repo** returns to Working Tasks. Unstarted Tasks
+Click a Wave to scope the sidebar to its Working Tasks and subwaves; its backlog
+keeps the open work nobody is running. **‹ Repo** returns to Working Tasks. Unstarted Tasks
 open their brief beside **Start**, which runs the Task's Workflow; opening alone
 starts nothing. Waves follow Tasks in the same scrolling sidebar, with counts
 from the planning inventory.
@@ -154,12 +179,12 @@ Desktop quits. Reopening a known repository shows retained content immediately,
 even while repository resolution waits or fails. Errors remain visible; new Task
 links wait for resolution before delivery. Unknown repositories need an initial lookup.
 
-Every conversation a window can select opens on load, before any selection and
-with no saved recent visits: the repository's, each Wave's and every claimed
-working Task's (idle, active or moving). Selecting any of them shows opening, the
-live conversation, or a failure with **Retry**; never a **No session** or **Open** gate. Load opens the
-selected Work first, then visible tiles, then the repository and Waves, then
-recent working Tasks, two preparations at a time; initial rendering does not wait.
+Release Desktop opens conversations on load for the repository, each Wave, and
+every claimed working Task (idle, active or moving), even on a first visit.
+Selecting one shows its opening progress, the live conversation, or a failure
+with **Retry**. Desktop prepares two conversations at a time, starting with the
+selected Work, then visible tiles, the repository and Waves, and recent working
+Tasks. The window renders while they open.
 A prepared conversation starts its provider at once, before any pane shows it;
 selecting the Work shows the running terminal. One **Opening… Input paused**
 reading remains through preparation, attachment and native input readiness. The
@@ -192,9 +217,12 @@ Every opening is `lf resume`: a held terminal gains a view, an ended Session res
 from its history, and a provider running in a native client lf can't share is taken
 over, ending that client. A pane's button carries Rust's label for which it will do
 (**Reconnect**, **Open here**, **Take over**, **Try again**, **Start conversation**).
-A held terminal takes any number of views and every view types, so a draft typed
-in one shows in the others. The view that most recently attached, typed or gained
-focus sets the terminal's size; when it leaves, the next most recent live view does.
+Every view of a held terminal can type into the same draft. Desktop runs the
+server’s command with `LF_RELAY_FOCUSED=0` in the pane environment. Older CLIs
+can run the same command. With a relay and holder that support initial focus,
+a background pane leaves the terminal’s size and colors alone. Typing in a pane
+takes ownership, as does focusing it before the first key. When the owner
+closes, the most recently used live view takes over.
 Close and eviction discard late opening results.
 
 Finite CLI requests time out after 30 seconds. Canceling preparation ends only
@@ -290,13 +318,14 @@ Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
 their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
 Source and license notices ship offline with the catalogue.
 
-**Auto-Ship** hands a Task off; it leaves Working tasks and its ship process lands it.
-It sits at the right end of the Workflow bar under the jump bar, beside the Task's
-stages as dots (click them for each stage) and what is running now. While the
-handoff exists, the same spot holds Stop Auto-Ship, including while it is
-restarting or waiting for assignment. Clicking it raises the Notice
-"LOO-5 Auto-Ship requested · Undo"; Undo is Stop Auto-Ship.
-Open a Dashboard with `state:shipping` to watch Tasks executing autonomously.
+The **Auto** toggle turns a Task's auto setting on and runs it, as `lf task auto on`
+does: its run stands in at each interactive step and lands the PR. It sits at
+the right end of the Workflow bar under the jump bar, beside the Task's stages
+as dots (click them for each stage) and what is running now. Turning it on
+raises the Notice "LOO-5 Auto on requested · Undo"; Undo is auto off, the same
+as switching the toggle off (`lf task auto off`). While auto is on, the Task's
+board card and sidebar row carry an Auto badge.
+Open a Dashboard with `state:auto` to watch those Tasks.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool
@@ -339,7 +368,7 @@ local uncommitted edits stay in Files.
 
 Open **•••** or press Command-/ for the selected Task’s actions. Row context
 menus use the same actions for the clicked Task. Command-T adds a shell tab. The main Session's menu switches between **Claude**,
-**Codex**, and **OpenCode**, continuing the same Session with its history.
+**Codex**, **OpenCode**, **Pi** and **Antigravity**, continuing the same Session with its history.
 **Refresh session** reconnects the pane to that conversation, including after a
 failed launch or stale connection. It keeps the provider's history and running
 process, and takes over a conversation a native client holds. The control
@@ -803,20 +832,11 @@ offline. Matching source and rebuild instructions ship inside the app under
 
 ## Build system
 
-`./dev` uses Swift Package Manager and installs to a stable application path
-so macOS permissions survive rebuilds. The app queries `lf` directly and starts
-only the selected Wave's `lf wave` process; it has no machine-wide service or
-remote-connection mode.
-
-The dev app supplies its bundled helper through `LF_BIN` and embedded shell PATH.
-Main-Machine commands forward to installed lf; new Sessions and agent children
-use its stable entry. Private-Home launches retain the bundled helper selection.
-Existing providers keep their environment when reattached.
-
-`run` and `run-debug` check `config repo --json` through that helper before
-launching. This checks repository registration, not all Desktop actions. Schema
-compatibility is checked by the store; ordinary commands cannot migrate the main
-database. Private `LF_HOME` experiments remain disposable and explicit.
+The launcher builds with Swift Package Manager and uses a stable bundle at
+`~/Applications/Loopflow Dev.app` so macOS permissions survive rebuilds.
+The launcher clears the calling shell's `LF_*` variables. Dev looks up
+`~/.local/bin/lf`, or `$LF_INSTALL_DIR/lf` when the app itself has a custom
+installation directory in its environment. Swift edits need only a Swift build.
 
 The installed app updates itself (`AppUpdater`, Sparkle), including a custom
 location reached by the public `lf` entry or selected by `LF_APPLICATIONS_DIR`. It
@@ -826,9 +846,9 @@ appcast), never check for updates.
 
 | Command | What it does |
 | --- | --- |
-| `uv run python scripts/loopflow-dev.py run` | Build and launch |
-| `uv run python scripts/loopflow-dev.py install` | Build and install without launching |
-| `uv run python scripts/loopflow-dev.py run-debug` | Build and run with stdout |
+| `uv run python scripts/loopflow-dev.py run` | Build and open Loopflow Dev on the live Machine |
+| `uv run python scripts/loopflow-dev.py install` | Build and install Loopflow Dev without launching |
+| `uv run python scripts/loopflow-dev.py run-debug` | Build and open Loopflow Dev with logs visible |
 | `uv run python scripts/loopflow-dev.py build` | Build only |
 | `uv run python scripts/loopflow-dev.py ghostty-build` | Rebuild the pinned patched GhosttyKit and emit its SwiftPM artifact/checksum |
 | `uv run python scripts/loopflow-dev.py test` | Run unit tests |
@@ -1089,7 +1109,7 @@ name (the `lf desktop` verb), title, arguments, default keys and `perform`.
 the Desktop socket look actions up there; nothing else mutates navigation or panes.
 Keys and menus act on the shown workspace's focused pane; a socket request names an
 exact window and pane, and `lf desktop` resolves those from one inspection (see the
-[CLI examples](../docs/surfaces.md#drive-desktop-from-a-script)).
+[CLI examples](../docs/surfaces.md#script-desktop)).
 
 `DesktopServer` (`LoopflowMac/DesktopServer.swift`) binds
 `$LF_HOME/run/desktop/<bundle-id>.sock` at launch (0700 directory, 0600 socket,

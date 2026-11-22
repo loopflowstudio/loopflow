@@ -33,11 +33,11 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::harness::HarnessKind;
 use crate::provider_auth::credential_socket::{
     AuthStartResponse, CredentialSocketClient, CredentialSocketError,
 };
 use crate::store::{CredentialType, ProviderToken, SharedStore};
+use loopflow_harness::HarnessKind;
 
 const AUTH_URL_TIMEOUT: Duration = Duration::from_secs(20);
 const AUTH_URL_POLL_INTERVAL: Duration = Duration::from_millis(200);

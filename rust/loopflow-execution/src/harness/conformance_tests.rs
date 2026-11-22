@@ -1,25 +1,19 @@
 use crate::process::attachment;
-use std::fs;
-use std::path::Path;
 
 use serde_json::Value;
 
-use super::claude_decode::ClaudeDecoder;
-use super::codex_decode::{rpc_error, CodexDecoder};
-use super::fact::{Decoded, ProviderFact, ProviderTurn};
 use super::fact_writer::FactWriter;
-use super::opencode_decode::Turn;
+use loopflow_harness::claude_decode::ClaudeDecoder;
+use loopflow_harness::codex_decode::{rpc_error, CodexDecoder};
+use loopflow_harness::fact::{self, Decoded, ProviderFact, ProviderTurn};
+use loopflow_harness::opencode_decode::Turn;
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use loopflow_model::id::AgentSessionId;
 
 fn read_trace_lines(file_name: &str) -> Vec<String> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src/harness/testdata")
-        .join(file_name);
-    fs::read_to_string(path)
-        .expect("trace file should exist")
-        .lines()
-        .map(ToString::to_string)
+    fact::trace(file_name)
+        .iter()
+        .map(Value::to_string)
         .collect()
 }
 
@@ -388,7 +382,7 @@ fn opencode_run_preserves_output_and_tools_and_leaves_usage_to_the_transcript() 
         .into(),
     ];
     let mut run = Turn::new(turn);
-    for line in super::fact::trace("opencode_run.jsonl") {
+    for line in fact::trace("opencode_run.jsonl") {
         decoded.extend(run.event(&line));
     }
     decoded.extend(run.finish(true, false));
@@ -419,4 +413,79 @@ fn opencode_run_preserves_output_and_tools_and_leaves_usage_to_the_transcript() 
         .unwrap()
         .usage;
     assert_eq!(usage.input_tokens, None);
+}
+
+/// Each harness reads its own provider's refusal, as the provider worded it.
+#[test]
+fn each_harness_classifies_its_own_refusals() {
+    use super::HarnessKind::{Antigravity, Claude, Codex, OpenCode, Pi};
+    use crate::agent::AgentFailure::{CredentialInvalidated, ModelUnavailable, UsageLimit};
+    for (harness, code, message, failure) in [
+        // `~/.lf/runs/6c/6c7c…/opencode.stderr.log`.
+        (
+            OpenCode,
+            "opencode_error",
+            "Insufficient balance. This request is pay-as-you-go, billed to OpenCode Models credits. Top up at https://opencode.ai/console/billing?credits=1.",
+            UsageLimit,
+        ),
+        // `opencode run -m opencode/no-such-model-xyz`, 2.0.32.
+        (
+            OpenCode,
+            "opencode_error",
+            "Model unavailable: opencode/no-such-model-xyz",
+            ModelUnavailable,
+        ),
+        (Pi, "pi_error", "Your refresh token was revoked", CredentialInvalidated),
+        // `agy` 1.5.13, signed out and with an unknown `--model`.
+        (
+            Antigravity,
+            "agy_error",
+            "authentication failed or timed out",
+            CredentialInvalidated,
+        ),
+        (
+            Antigravity,
+            "agy_error",
+            "Error: authentication required. Run 'agy' to log in, then retry.",
+            CredentialInvalidated,
+        ),
+        (
+            Antigravity,
+            "agy_error",
+            "invalid model selection (--model \"no-such-model-xyz\" --effort \"\"): model no-such-model-xyz is not recognized as a known model or custom model in settings",
+            ModelUnavailable,
+        ),
+        // From the binary's strings; no quota refusal has been seen live.
+        (
+            Antigravity,
+            "agy_error",
+            "You have exhausted your quota on this model.",
+            UsageLimit,
+        ),
+        (Antigravity, "agy_error", "RESOURCE_EXHAUSTED", UsageLimit),
+        (Claude, "provider_rate_limited", "rejected: seven_day", UsageLimit),
+        (Codex, "provider_model_unavailable", "", ModelUnavailable),
+    ] {
+        assert_eq!(
+            super::launcher(harness).classify_failure(code, message),
+            Some(failure),
+            "{harness:?}: {message}"
+        );
+    }
+}
+
+/// Claude and Codex leave a transient failure to lf; the others retry their own.
+#[test]
+fn a_transient_failure_is_lfs_to_retry_only_where_the_provider_does_not() {
+    use loopflow_harness::HarnessKind;
+    for harness in HarnessKind::ALL {
+        let retried = super::launcher(harness)
+            .classify_failure("fixture_error", "connection reset")
+            .is_some();
+        assert_eq!(
+            retried,
+            matches!(harness, HarnessKind::Claude | HarnessKind::Codex),
+            "{harness:?}"
+        );
+    }
 }

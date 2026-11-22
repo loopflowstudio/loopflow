@@ -4,11 +4,18 @@ use std::io::IsTerminal;
 use std::process::{Command, Stdio};
 
 pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
-// Non-interactive SSH skips shell profiles, including the npm prefix.
-pub const REMOTE_PATH: &str = "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; if command -v npm >/dev/null 2>&1; then PATH=\"$PATH:$(npm config get prefix 2>/dev/null)/bin\"; fi";
+/// Shell that finds `lf` and npm-installed providers before lf can repair its
+/// own `PATH`: non-interactive SSH skips shell profiles.
+pub fn remote_path() -> String {
+    let dirs = crate::os_process::tool_dirs(std::path::Path::new("$HOME"));
+    format!(
+        "export PATH=\"$PATH:{}\"; if command -v npm >/dev/null 2>&1; then PATH=\"$PATH:$(npm config get prefix 2>/dev/null)/bin\"; fi",
+        dirs.join(":")
+    )
+}
 
 pub fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
-    let mut lines = vec![REMOTE_PATH.to_string()];
+    let mut lines = vec![remote_path()];
     for (name, value) in extra_env {
         lines.push(format!("export {name}={}", sh_quote(value)));
     }
@@ -195,7 +202,7 @@ impl Drop for Pipe {
 }
 
 /// `mini runs lf 0.15.2, which cannot take this operation; update it with …`.
-fn outdated(machine: &loopflow_model::durable::Machine) -> String {
+pub(crate) fn outdated(machine: &loopflow_model::durable::Machine) -> String {
     let name = machine.label.as_deref().unwrap_or(machine.route.as_str());
     let update = super::connection::update_command(&machine.route);
     let version = tokio::runtime::Runtime::new()

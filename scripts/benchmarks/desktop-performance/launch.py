@@ -188,7 +188,6 @@ def launch(app: Path, home: Path, repo: Path, scenario: str, timeout: float) -> 
     log.write_text("")
     env = {
         "LF_HOME": str(home),
-        "LF_DB_PATH": str(home / "loopflow.db"),
         "LF_BENCH_LOG": str(log),
         "LF_BENCH_LF": _lf(),
         "LF_BENCH_FAIL": spec["fail"],

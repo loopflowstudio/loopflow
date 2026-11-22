@@ -95,7 +95,8 @@ struct LoopflowApp: App {
                 // A capture opens its target window from a window that stays:
                 // the launch view hands off to a repository window, and opening
                 // another window during that hand-off aborts in AttributeGraph.
-                if let workspace {
+                // A window restored from another Machine takes the launch path.
+                if let workspace = workspace?.opened() {
                     RepositoryWorkspaceView(workspace: workspace, portfolioService: portfolioService,
                                             workspaces: workspaces,
                                             query: registryQuery, router: taskLinks,

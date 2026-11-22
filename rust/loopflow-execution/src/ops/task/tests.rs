@@ -154,7 +154,7 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
         .block_on(fixture.store.sync_task_placement(
             &pr.task_id,
             &pr.base_commit,
-            false,
+            pr.parent_pr_id.as_ref(),
             pr.updated_at,
         ))
         .unwrap();
@@ -553,6 +553,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
             adopted.path(),
             None,
             None,
+            false,
             |_| false,
         )
         .unwrap_err();
@@ -595,6 +596,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
         adopted.path(),
         None,
         None,
+        false,
         |_| false
     )
     .is_ok());

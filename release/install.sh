@@ -236,10 +236,19 @@ main() {
     fi
   }
 
+  download_asset() {
+    printf 'Downloading %s…\n' "${1##*/}" >&2
+    if [ -t 2 ]; then
+      curl -fL --progress-bar -o "$2" "$1"
+    else
+      curl -fsSL -o "$2" "$1"
+    fi
+  }
+
   archive_name="lf-$target.tar.gz"
   url="$release_base/$archive_name"
   tarball="$tmpdir/$archive_name"
-  if ! curl -fsSL "$url" -o "$tarball"; then
+  if ! download_asset "$url" "$tarball"; then
     echo "Download failed: $url" >&2
     echo "No release found for version '$version' ($target)." >&2
     exit 1
@@ -267,7 +276,7 @@ main() {
     fi
     dmg_name="Loopflow.dmg"
     dmg="$tmpdir/$dmg_name"
-    if ! curl -fsSL "$release_base/$dmg_name" -o "$dmg"; then
+    if ! download_asset "$release_base/$dmg_name" "$dmg"; then
       echo "Download failed: $release_base/$dmg_name" >&2
       exit 1
     fi

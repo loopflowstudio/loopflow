@@ -3,16 +3,6 @@ use serde::{Deserialize, Serialize};
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::{AgentSessionId, LfSessionId, WaveId};
 
-/// The code of a turn that failed on a question nobody was there to answer.
-/// `lf task run` stops on it: another attempt would only ask again.
-pub const UNANSWERED_QUESTION: &str = "unanswered_question";
-
-/// The error a turn records when lf, not the provider, ends it: a `code`
-/// callers match on and the `message` people read.
-pub fn turn_error(code: &str, message: &str) -> serde_json::Value {
-    serde_json::json!({"code": code, "message": message})
-}
-
 /// Attribution captured before a native request, never from its delayed reply.
 /// This is observation context, not a capability to write to the provider.
 #[derive(Debug, Clone, PartialEq, Eq)]

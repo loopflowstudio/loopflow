@@ -25,12 +25,12 @@ struct TaskWorkspaceView: View {
         feed.shownRepositories.lazy.flatMap(\.tasks).first { $0.work.id == task.id }
     }
 
-    /// Start a Task not started, Auto-Ship a Working one, stop an Autonomous one.
+    /// Start a Task not started; otherwise turn its auto setting on or off.
     @ViewBuilder private var action: some View {
         if let row {
-            if row.states.contains(.autonomous) {
-                Button("Stop Auto-Ship", systemImage: "pause.circle") {
-                    feed.request("Stop Auto-Ship", row) { .taskHold(directory: $0, issue: $1) }
+            if row.states.contains(.auto) {
+                Button("Auto off", systemImage: "pause.circle") {
+                    feed.request("Auto off", row) { .taskAutoOff(directory: $0, issue: $1) }
                 }
             } else if row.states.contains(.unstarted) {
                 Button("Start", systemImage: "play.fill") {
@@ -39,8 +39,8 @@ struct TaskWorkspaceView: View {
                     }
                 }
             } else if row.states.contains(.working) {
-                Button("Auto-Ship", systemImage: "paperplane") {
-                    feed.request("Auto-Ship", row) { .taskShip(directory: $0, issue: $1) }
+                Button("Auto on", systemImage: "paperplane") {
+                    feed.request("Auto on", row) { .taskAutoOn(directory: $0, issue: $1) }
                 }
             }
         }

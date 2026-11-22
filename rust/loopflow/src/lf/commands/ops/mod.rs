@@ -489,7 +489,7 @@ pub fn sync_planning(
 /// What `lf wave sync` refreshed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanningRefresh {
-    /// Git planning: the repository's whole plan.
+    /// No tracker: the repository's whole plan, from the hub.
     Repository,
     /// One Wave, from its Linear Initiative.
     Wave(String),
@@ -507,10 +507,10 @@ impl PlanningRefresh {
 }
 
 /// Refresh shared planning before `wave status --sync` reads it: the Wave from
-/// Linear, or the repository's Git planning ref, whose exchange is per repository.
+/// Linear, or without a tracker the repository's plan by each carrier it has.
 pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<PlanningRefresh> {
     let repo = loopflow_execution::repo::working_directory_in(directory)?;
-    if crate::lf::commands::tracker::plans_through_git(&repo)? {
+    if !loopflow_execution::ops::tracker::connected(&repo.to_string_lossy()) {
         crate::lf::commands::tracker::refresh(&repo)?;
         return Ok(PlanningRefresh::Repository);
     }

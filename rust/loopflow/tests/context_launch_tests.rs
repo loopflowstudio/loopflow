@@ -397,7 +397,7 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
         &[
             (
                 ".lf/config.yaml",
-                "diff: false\ndiff_files: false\npaste: false\n",
+                "yolo: false\ndiff: false\ndiff_files: false\npaste: false\n",
             ),
             (".lf/skills/probe.md", &body),
         ],

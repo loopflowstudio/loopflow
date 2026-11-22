@@ -29,6 +29,8 @@ pub struct SetupValue {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WaveSetup {
     pub graph: SetupValue,
+    /// `on` when the Wave's Tasks turn auto on as they take up their Graph.
+    pub auto: SetupValue,
     pub agent: SetupValue,
     /// Agent by skill name, for every skill some layer names.
     pub skill_agents: BTreeMap<String, SetupValue>,
@@ -49,6 +51,7 @@ pub async fn read_wave_setup(
         crate::config::resolved_with(Some(checkout), Some(checkout), Some(wave.slug()), &outside)?;
     Ok(WaveSetup {
         graph: effective_setting(&resolved, "graph"),
+        auto: effective_setting(&resolved, "auto"),
         agent: effective_setting(&resolved, "agent"),
         skill_agents: skill_agents(checkout, wave.slug(), &outside)?,
         tasks_machine: machine(store, wave, MachineSetting::Tasks)?,

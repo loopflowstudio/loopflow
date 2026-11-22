@@ -270,7 +270,7 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     repo.create_file(".lf/wave/infra/GOAL.md", "Keep it boring.\n");
     repo.create_file(
         ".lf/wave/infra/config.yaml",
-        "graph: code\nagent: claude\nskills:\n  probe: {agent: claude:opus}\n",
+        "graph: code\nauto: on\nagent: claude\nskills:\n  probe: {agent: claude:opus}\n",
     );
     repo.create_file(".lf/wave/research/GOAL.md", "Find out.\n");
     repo.create_file(".lf/wave/research/config.yaml", "agent: codex:o3\n");
@@ -320,6 +320,8 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     let infra = setup("infra");
     assert_eq!(infra["graph"]["value"], "code");
     assert_eq!(infra["graph"]["source"], "repository");
+    assert_eq!(infra["auto"]["value"], "on");
+    assert_eq!(infra["auto"]["scope"], "wave");
     assert_eq!(infra["agent"]["value"], "claude");
     assert_eq!(infra["skill_agents"]["probe"]["value"], "claude:opus");
     assert_eq!(infra["tasks_machine"]["value"], here.as_str());

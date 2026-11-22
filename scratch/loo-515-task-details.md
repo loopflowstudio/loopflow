@@ -387,6 +387,28 @@ change. `--no-merges` leaves every listed commit one parent, so `%P` is that
 parent (48 commits here, none with two); a commit after a merge compares
 against the merge, so a step never carries main's or a synced Task's work.
 
+Twelfth pass, November 21, over the count up front and the window at
+`2d2f33f6c1`: one repair for implement. The plan says the count is read "from
+the same default-context patch the stream parses"; it is a second `git diff`
+with its own flags. `change_counts` passes `--find-renames` and
+`--src-prefix=a/ --dst-prefix=b/`; `diff_snapshot`, which serves each file's
+`lf task diff --path`, passes neither, so a Machine with `diff.renames=false`,
+`diff.noprefix` or `diff.mnemonicPrefix` reads a different patch from the one
+counted. A renamed and edited file then counts its edits in the title and
+steps through one whole-file addition, and the stepper never reaches its
+total. Direction: one function builds the comparison's diff arguments and both
+reads use it; a test parses the per-file patch of the count fixture in Swift
+and finds the stops `lf task changes` counted. The stop rule itself agrees:
+both start a change after an unchanged line or a hunk header and on a removal
+after additions, and a move is two stops on each side.
+
+Left as built: the title counts every shown file, Viewed ones included, while
+the stepper's total leaves Viewed files out ("2 of 4" under "6 changes"); a
+file read from a later live update keeps the count from the file list until
+the list is reread. The window's "N files above · Show" button where Jack's
+pasted order said jumps "between windows" is the chosen form; whether
+scrolling up to it reads as a wall is for the screen.
+
 ## Remaining
 
 - Demo/review on screen (below). November 21 showed the tab strip, the Diff

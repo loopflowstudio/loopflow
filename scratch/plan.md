@@ -1,6 +1,6 @@
 # 50f7f9: review the bundled themes
 
-Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. Round 3's concept review found two leftovers of the per-side picker; round 4 removed them: `previewTheme` and `importTheme` share one assignment that takes the side from the theme's own colors, `showPicker` is gone and `picker` is `previewSide`. Round 4 QA passed. Concept review round 4 shaped the steer's iPhone and website pieces; implement built them and round 5 QA passed them, with one open Desktop glitch. Concept review round 5 sends one change back to implement (the notice split, below); then ship-review.
+Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. Round 3's concept review found two leftovers of the per-side picker; round 4 removed them: `previewTheme` and `importTheme` share one assignment that takes the side from the theme's own colors, `showPicker` is gone and `picker` is `previewSide`. Round 4 QA passed. Concept review round 4 shaped the steer's iPhone and website pieces; implement built them and round 5 QA passed them, with one open Desktop glitch. Concept review round 5 sent one change back to implement (the notice split); round 6 built it. Next: ship-review.
 
 ## What people said
 
@@ -39,6 +39,8 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 - 2026-11-22, compress round 5: `swift test … 'ThemeTests|ThemeWorkflowTests|AppAppearanceTests|ServerProtocolTests'` 53 passed; `test_ios.py` `MachineThemeTests` 3 passed; `theme_catalogue.py --check` and `test_theme_catalogue.py` passed.
 
 - 2026-11-22, QA round 5 (`scratch/qa.html`): site crawl, 73 pages, no contrast or Pico-blue failures after fixing the Company focus ring; phone on a simulator paired with a private branch Machine: Fig Leaf/Fig by appearance, single name, unknown name, no name, Machine away, sheets; Desktop on the private Machine, screen locked: launch read, live edit, served write, unknown-name path. Open: light cards missing from Choose Theme while the unknown-name notice is up (R5.10); version skew both ways (R5.7, R5.9).
+
+- 2026-11-22, implement round 6: `swift test … 'AppAppearanceTests|ServerClientTests'` 25 passed, including `failedRead` and both cases of `aRequestTheServerCannotParseNamesBothBuilds`. Not run: the Dev app against the live 0.16.0 server (ship-review), clippy (gate).
 
 ## Demo
 

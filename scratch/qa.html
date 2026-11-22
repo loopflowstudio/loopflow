@@ -20,6 +20,12 @@
 <p>Opened from <code>file://</code> at both widths: no overflow, no errors, and no broken relative links. After the stylesheet fix, <code>scripts/render_architecture_html.py --check</code> reported it stale. I regenerated it, and the check passes now.</p>
 <img src="qa/d-devindex-top.png">
 
+<h2>5. After the concept-review cleanup (deleted pages, cut selectors)</h2>
+<p>Crawled every internal link from 17 entry routes with Playwright: 84 pages, all 200, no console errors. <code>/design</code>, <code>/colors</code>, <code>/fonts</code> answer 404, and neither <code>sitemap.xml</code> nor <code>llms.txt</code> lists them. No rendered page uses a deleted class (<code>.btn-secondary</code>, <code>.btn-group</code>, <code>.page-hero</code>, <code>.next-steps*</code>). <code>render_architecture_html.py</code> leaves <code>docs/dev/index.html</code> unchanged.</p>
+<p>Keyboard focus on <code>/download</code>, branch against main's stylesheet: the Install button's ring was burgundy on wine on main and is near-black now; the copy button's ring is identical on both.</p>
+<div class="row"><figure><img src="qa/focus-btn-primary-main.png"><figcaption>Install focus, main</figcaption></figure><figure><img src="qa/focus-btn-primary-branch.png"><figcaption>Install focus, branch</figcaption></figure><figure><img src="qa/focus-copy-btn-branch.png"><figcaption>Copy focus, branch (= main)</figcaption></figure></div>
+<img src="qa/m-download-after-cleanup.png" style="max-width:390px">
+
 <h2>Checks</h2>
 <ul><li><code>uv run --no-sync pytest tests/</code> in <code>website/</code>: 73 passed (after the regenerate)</li>
 <li><code>render_architecture_html.py --check</code>: passes</li></ul>
@@ -28,6 +34,6 @@
 <ul><li>Mac app terminal rendering with the new defaults (ligatures off, thicker strokes, taller cells): the key names are valid, but nobody has looked at the result. It needs a Desktop build: gate/CI builds it, and the look needs a person.</li></ul>
 
 <h2>Still wrong, worst first</h2>
-<ol><li><code>/design</code>, <code>/colors</code>, <code>/fonts</code> (<code>website/internal_pages.py</code>) are a second, older design system shown as live routes: Cormorant, Lato and Playfair "current selections". Nothing links to them, and they contradict <code>DESIGN.md</code>. Main has them too. Deleting them is a product call; it is noted in <code>scratch/questions.md</code>.</li>
-<li><code>/colors</code> and <code>/fonts</code> overflow on a phone (29px and 145px). Main does the same, and the cause is their inline styles.</li></ol>
-<div class="row"><figure><img src="qa/m-fonts.png"><figcaption>/fonts, phone</figcaption></figure><figure><img src="qa/m-colors.png"><figcaption>/colors, phone</figcaption></figure></div>
+<ol><li>Focused buttons on <code>/download</code> show a thin light-blue ring inside the burgundy outline. Main shows it too; it is outside this change.</li>
+<li>The deleted routes fall through to Starlette's bare "404 Not Found" text rather than a site page. Same as any unknown URL on main.</li></ol>
+</body></html>

@@ -1,17 +1,11 @@
 :root {
     --burgundy: #722f37;
-    --burgundy-hover: #8b3d47;
     --wine: #9B1A4A;
     --wine-hover: #b42058;
-    --info: #0ab3cc;
     --text: #1a1a1a;
     --text-secondary: #555555;
     --bg: #ffffff;
-    --bg-subtle: #f8f8f8;
     --border: #e5e5e5;
-    --green: #16a34a;
-    --yellow: #92400e;
-    --orange: #c2410c;
 
     --font-serif: 'Instrument Serif', Georgia, serif;
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;

@@ -90,7 +90,8 @@ One component for each of these, on every surface that shows it:
 `design/prototypes/` holds the reference for layout and wording until the
 code matches: `desktop.html` and `desktop-more.html` (Loopflow for Mac, live,
 in all 24 themes), `elements.html` (the Task row, workflow line and New Task
-three ways each) and `website-fonts.*.patch` (the website in these faces).
+three ways each) and `website-fonts.patch` (the website in these faces;
+`git apply` it).
 Delete a prototype when its screens ship.
 
 ## What we avoid

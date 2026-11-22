@@ -16,4 +16,4 @@
 
 Nothing in this Task. Moving the Mac app and website code onto the `DESIGN.md` language belongs to the design Tasks stacked on this one.
 
-`scratch/design-audit/` and `scratch/design-explore/` are exploration pages; several link to the copies of the prototypes kept beside them, so they stay until gate clears scratch.
+`scratch/design-audit/` and `scratch/design-explore/` are exploration pages; they link into `design/prototypes/` and stay until gate clears scratch.

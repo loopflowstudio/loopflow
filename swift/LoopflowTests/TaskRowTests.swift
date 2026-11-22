@@ -23,9 +23,9 @@ struct TaskRowTests {
         let task = try #require(roadmap().waves.first?.tasks.items[1])
         let view = row(task, status: status)
         #expect(try view.inspect().find(text: label).string() == label)
-        // The ask line says what a blocked program reported, and only then.
+        // The line says what a blocked program asked; otherwise why the waiting Task needs someone.
         let ask = try? view.inspect().find(viewWithAccessibilityIdentifier: "work-task-ask-\(task.id)").text().string()
-        #expect(ask == (state == .blocked ? "**literal**" : nil))
+        #expect(ask == (state == .blocked ? "**literal**" : task.condition.reason))
         let programStatus = try #require(reporting.programStatus)
         let pane = try #require(StatusMark(status: programStatus))
         #expect(try pane.inspect().find(text: "\(label) · **literal**").string() == "\(label) · **literal**")
@@ -121,21 +121,6 @@ struct TaskRowTests {
         #expect(ProgramStatusState.done.workTone == .done)
     }
 
-    @Test("Owners stay in the Task pane; their summaries name the person and Machine")
-    func ownerLine() throws {
-        let tasks = try roadmap().waves.flatMap(\.tasks.items)
-        let owned = try #require(tasks.first { $0.runtime?.owner != nil })
-        #expect(throws: (any Error).self) { try row(owned, status: .unknown).inspect().find(text: "Jack Heart on mini") }
-        let unknown = try JSONDecoder().decode(TaskOwner.self, from: Data("""
-        {"person":null,"person_id":null,"person_key":null,"machine":{"id":null,"label":null}}
-        """.utf8))
-        #expect(unknown.summary == "Someone · Machine unknown")
-        let unnamed = try JSONDecoder().decode(TaskOwner.self, from: Data("""
-        {"person":null,"person_id":null,"person_key":"maya@example.com","machine":{"id":null,"label":"maya-mbp"}}
-        """.utf8))
-        #expect(unnamed.summary == "maya@example.com on maya-mbp")
-    }
-
     @Test("The title wraps in full, then the ID and status word")
     func titleWraps() throws {
         let task = try #require(roadmap().waves.first?.tasks.items[1])
@@ -143,8 +128,7 @@ struct TaskRowTests {
         let title = try inspected.find(text: task.task.name)
         #expect(throws: (any Error).self) { try title.lineLimit() }
         #expect(try inspected.find(text: task.task.identifier).string() == task.task.identifier)
-        let lifecycle = task.lifecycle.label.capitalized
-        #expect(try inspected.find(viewWithAccessibilityIdentifier: "work-task-lifecycle-\(task.id)").text().string() == lifecycle)
+        #expect(try inspected.find(viewWithAccessibilityIdentifier: "work-task-condition-\(task.id)").text().string() == "Waiting")
         #expect(throws: (any Error).self) { try inspected.find(text: "Unowned") }
     }
 

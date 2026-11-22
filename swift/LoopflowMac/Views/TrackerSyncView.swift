@@ -26,7 +26,7 @@ struct TrackerSyncView: View {
                             .accessibilityIdentifier("tracker-use-mine-\(action.id)")
                     }
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(LoopflowButtonStyle())
                 .font(Typography.text)
             }
         }

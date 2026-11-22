@@ -22,7 +22,7 @@ struct TitleBar: View {
     }
 
     private func trail(showWave: Bool) -> some View {
-        HStack(alignment: .center, spacing: 6) {
+        HStack(alignment: .center, spacing: Spacing.xs) {
             target("sidebar.left", help: "Toggle sidebar") { model.navigation.toggleNavigator() }
             target("chevron.left", help: "Back") { model.goBack() }
                 .disabled(model.navigation.backStack.isEmpty)
@@ -47,10 +47,10 @@ struct TitleBar: View {
             // A Dashboard opened through `lf desktop` names itself; Back returns to it.
             case .saved(let id):
                 Text(model.dashboard(id)?.name ?? id).lineLimit(1).fixedSize()
-                if model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
+                if model.breadcrumb?.task != nil { Text("/").foregroundStyle(palette.titlebarSecondaryText) }
             case .workingTasks:
                 Text(WorkNavigation.workingTasksTitle).lineLimit(1).fixedSize()
-                if model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
+                if model.breadcrumb?.task != nil { Text("/").foregroundStyle(palette.titlebarSecondaryText) }
             case .wave, .repository, nil: EmptyView()
             }
             if let view = model.navigation.waveView, let zoomed = model.zoomedPart(in: view) {
@@ -59,8 +59,10 @@ struct TitleBar: View {
             if let task = model.breadcrumb?.task {
                 let presentation = model.taskPresentation(id: task.task.id)
                 WorkTaskIdentity(presentation: presentation)
-                if presentation.context == nil {
-                    Text(TaskHeading(task: task.task).state).foregroundStyle(.secondary).fixedSize()
+                // The word its sidebar row shows.
+                if presentation.context == nil,
+                   let word = TaskRowStatus(task: task.task, status: model.programStatus(task: task.task.id)).word {
+                    Text(verbatim: word).foregroundStyle(palette.titlebarSecondaryText).fixedSize()
                         .accessibilityIdentifier("task-heading-state")
                 }
                 if let workspace = model.shownWorkspace, workspace.key.kind == .task, workspace.key.id == task.task.id {
@@ -75,7 +77,7 @@ struct TitleBar: View {
                 WorkTaskIdentity(presentation: model.taskPresentation(id: selection.id))
             }
             if let target = model.machineTarget {
-                WorkMachineControl(model: model, target: target).padding(.leading, 6)
+                WorkMachineControl(model: model, target: target).padding(.leading, Spacing.xs)
             }
         }
     }
@@ -87,7 +89,7 @@ struct TitleBar: View {
     }
 
     private func waveCrumb(_ id: String, name: String) -> some View {
-        HStack(alignment: .center, spacing: 6) {
+        HStack(alignment: .center, spacing: Spacing.xs) {
             Button(name) {
                 if model.navigation.waveView == .wave(id) { model.setZoomed(nil, in: .wave(id)) }
                 model.select(.wave(id: id))

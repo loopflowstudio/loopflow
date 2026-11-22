@@ -77,13 +77,15 @@ public enum Typography {
     /// A document's first heading; the text typed in New Task.
     public static let lede = step(sansStrongFace, mac: 17, iPhone: 20, .title3)
     /// Everything else.
-    public static let text = step(sansFace, mac: 13, iPhone: 17, .body)
+    public static let text = step(sansFace, mac: textSize, iPhone: 17, .body)
     /// The selected row's title, a pane's name.
-    public static let textStrong = step(sansStrongFace, mac: 13, iPhone: 17, .body)
+    public static let textStrong = step(sansStrongFace, mac: textSize, iPhone: 17, .body)
     /// Counts, times, secondary facts.
     public static let meta = step(sansFace, mac: 11, iPhone: 13, .footnote)
     /// Inline IDs, paths, commands.
     public static let mono = step(monoFace, mac: 12, iPhone: 14, .subheadline)
+    /// The Mac text step in points for AppKit fields.
+    public static let textSize: CGFloat = 13
     /// Ghostty's `font-size` default; the person's configuration replaces it on the Mac.
     #if os(iOS)
     public static let terminalSize: CGFloat = 12
@@ -209,7 +211,7 @@ private struct KeyboardFocusRing: ViewModifier {
         content.overlay {
             RoundedRectangle(cornerRadius: cornerRadius)
                 .strokeBorder(palette.keyboardFocus, lineWidth: 2)
-                .padding(-3)
+                .padding(-Spacing.xs)
                 .opacity(isFocused ? 1 : 0)
                 .allowsHitTesting(false)
         }

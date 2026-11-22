@@ -1627,13 +1627,13 @@ struct SessionsContentView: View {
         }
         .popover(isPresented: Binding(get: { actionTaskID != nil }, set: { if !$0 { actionTaskID = nil } })) {
             if let id = actionTaskID, let found = model.task(id: id) {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
                     TaskActionItems(model: model, task: found.task, wave: found.wave?.wave,
                         work: model.taskWork[id].value,
                         newConversation: {
                             model.newTaskSession(id, open: newTaskSession)
                         }, openSession: openSession)
-                }.padding(12).onExitCommand { actionTaskID = nil }
+                }.padding(Spacing.md).onExitCommand { actionTaskID = nil }
             }
         }
         .overlay {
@@ -1723,7 +1723,7 @@ struct SessionsContentView: View {
             if let error = entry.persistenceError {
                 FailureLine("Layout not saved.", machine: error) {
                     Button("Reload saved intent") { Task { await entry.loadPaneIntent() } }
-                }.padding(8)
+                }.padding(Spacing.sm)
             }
             if terminals, let task, active {
                 missingCheckout
@@ -1767,7 +1767,7 @@ struct SessionsContentView: View {
                     if navigation.showsActivity { WorkActivityView(model: model).frame(minWidth: 230, maxWidth: 360) }
                 }
             } else {
-                Button("Open \(entry.title)") { model.select(key.reference) }
+                Button("Open \(entry.title)") { model.select(key.reference) }.buttonStyle(LoopflowButtonStyle())
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -1805,12 +1805,12 @@ struct SessionsContentView: View {
                     Text("Recorded checkout is missing. This Task is \(task.task.lifecycle.label); it cannot be restored.")
                 } else {
                     Text("Recorded checkout is missing")
-                    Button("Restore checkout") { prepareTaskWorkspace() }
+                    Button("Restore checkout") { prepareTaskWorkspace() }.buttonStyle(LoopflowButtonStyle())
                 }
                 Spacer()
             }
             .font(Typography.meta).foregroundStyle(palette.textSecondary)
-            .padding(.horizontal, 14).padding(.vertical, 6)
+            .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.xs)
             .accessibilityIdentifier("work-missing-checkout")
         }
     }

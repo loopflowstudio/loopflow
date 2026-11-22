@@ -119,6 +119,7 @@ struct ConversationPlaceholder: View {
 /// Opening keeps available history readable until the terminal takes its place.
 struct SessionOpeningView: View {
     let screen: String?
+    @Environment(\.palette) private var palette
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -131,7 +132,7 @@ struct SessionOpeningView: View {
                 }
             }
             ProgressView(ServerConnectionReading.openingTitle)
-                .controlSize(.small).padding(8).background(.background)
+                .controlSize(.small).padding(Spacing.sm).background(palette.background)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -321,7 +322,7 @@ struct ProviderTransitionRow: View {
             .foregroundStyle(theme.palette.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, PaneGeometry.inset)
-            .padding(.vertical, 4)
+            .padding(.vertical, Spacing.xs)
             .help("Observed at " + Date(timeIntervalSince1970: TimeInterval(transition.observedAt)).formatted())
     }
 }
@@ -413,7 +414,7 @@ struct SessionPaneView: View {
 
     /// Program identity and a Close control on hover; zoom stays in the context menu.
     private var strip: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.sm) {
             Menu {
                 paneContentChoices
             } label: {
@@ -484,7 +485,7 @@ struct SessionPaneView: View {
             // Every pane zooms and hides on hover; the breadcrumb zooms out and the
             // view header's Show… brings a hidden pane back.
             HoverRevealed(flag: hover) {
-                HStack(spacing: 2) {
+                HStack(spacing: Spacing.xxs) {
                     let zoomed = store.zoomedPaneId == pane.id
                     stripButton(zoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                                 label: zoomed ? "Zoom out" : "Zoom pane", id: "pane-zoom",
@@ -685,11 +686,11 @@ struct SessionPaneView: View {
     @ViewBuilder private var shellTabs: some View {
         if case .shell(let tabs, let selected) = pane.content {
             ScrollView(.horizontal) {
-                HStack(spacing: 4) {
+                HStack(spacing: Spacing.xs) {
                     ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
                         Button("\(index + 1)") { store.selectShell(tab.id) }
                             .accessibilityLabel("Shell \(index + 1)")
-                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .padding(.horizontal, Spacing.xs).padding(.vertical, Spacing.xxs)
                             .background(tab.id == selected ? theme.palette.surfaceElement : .clear,
                                         in: RoundedRectangle(cornerRadius: CornerRadius.control))
                     }
@@ -708,7 +709,7 @@ struct SessionPaneView: View {
             let task = model.task(id: taskId)?.task
             let files = try? workspace.files(for: pane.content, task: task, query: sessions.query)
             ScrollView(.horizontal) {
-                HStack(spacing: 4) {
+                HStack(spacing: Spacing.xs) {
                     if let files {
                         ForEach(task == nil ? [.changes, .files] : TaskFilesStore.Page.allCases, id: \.self) { page in
                             browserTab(page.rawValue,
@@ -736,7 +737,7 @@ struct SessionPaneView: View {
             .lineLimit(1)
             .fontWeight(selected ? .semibold : .regular)
             .foregroundStyle(selected ? theme.palette.text : theme.palette.textSecondary)
-            .padding(.horizontal, 7).padding(.vertical, 3)
+            .padding(.horizontal, Spacing.sm).padding(.vertical, Spacing.xxs)
             .background(selected ? theme.palette.surfaceElement : .clear, in: RoundedRectangle(cornerRadius: CornerRadius.control))
             .accessibilityIdentifier("browser-tab-\(id)")
             .accessibilityAddTraits(selected ? .isSelected : [])
@@ -830,7 +831,7 @@ struct SessionPaneView: View {
                 case .task:
                     if let task = model.task(id: taskId)?.task {
                         ScrollView {
-                            VStack(alignment: .leading, spacing: 12) {
+                            VStack(alignment: .leading, spacing: Spacing.md) {
                                 Text(task.task.name).font(Typography.textStrong)
                                 TaskPlanningFactsView(task: task)
                                 TaskWorkflowHeader(model: model, task: task, work: model.taskWork[taskId])
@@ -838,7 +839,7 @@ struct SessionPaneView: View {
                                 TaskWorkView(model: model, task: task)
                                 GraphProcessLog(model: model, taskId: taskId, location: location,
                                     execution: execution, query: sessions.query, showsPosition: false)
-                            }.padding(14)
+                            }.padding(Spacing.md)
                         }.textSelection(.enabled)
                     } else { EmptyState(title: "Task is unavailable") }
                 case .url(let id, let url):
@@ -899,9 +900,7 @@ struct SessionPaneView: View {
                     Task { @MainActor in await sessions.select(item.id) }
                 }
             }
-            .buttonStyle(.bordered)
-            .tint(theme.palette.text)
-            .foregroundStyle(theme.palette.text)
+            .buttonStyle(LoopflowButtonStyle())
             .help(action.help)
             .accessibilityIdentifier("session-open-here-\(item.id)")
         }

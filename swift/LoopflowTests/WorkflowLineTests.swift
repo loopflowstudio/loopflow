@@ -45,6 +45,16 @@ struct WorkflowLineTests {
         #expect(try line.inspect().find(text: sentence).string() == sentence)
     }
 
+    @Test("A dashboard tile's line is the sentence alone")
+    func sentenceOnly() throws {
+        let sentence = "build is running implement. You are next needed at ship-review."
+        let line = WorkflowLine(graph: graph(run(running: true), current: 1, sentence: sentence), auto: false,
+                                sentenceOnly: true)
+        #expect(try line.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-live").text().string() == sentence)
+        #expect(throws: (any Error).self) { try line.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name") }
+        #expect(throws: (any Error).self) { try line.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-step-0") }
+    }
+
     @Test("Stopped: the step it stopped in waits")
     func stopped() {
         let line = WorkflowLine(graph: graph(run(running: false), current: 1,

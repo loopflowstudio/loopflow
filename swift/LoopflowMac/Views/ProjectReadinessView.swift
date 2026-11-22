@@ -49,7 +49,7 @@ struct ProjectReadinessView: View {
     }
 
     @ViewBuilder private var retryButton: some View {
-        if readiness?.state != .terminal { Button("Retry Project preparation", action: retry) }
+        if readiness?.state != .terminal { Button("Retry Project preparation", action: retry).buttonStyle(LoopflowButtonStyle()) }
     }
 }
 #endif

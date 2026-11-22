@@ -35,14 +35,30 @@ enum TaskBrief {
         return headings.count >= 2 ? headings : []
     }
 
-    /// "Moving, at build." then why: the state word, the top-level step the
-    /// workflow bar makes strong, the reason in one sentence.
-    static func state(runtime: String?, graph: TaskGraph?, reason: String) -> (lead: String, reason: String) {
-        let word = (runtime ?? "unstarted").capitalized
+    /// "Waiting, at demo." then why: the word the Task's row says with no
+    /// program reporting, the top-level step the workflow bar makes strong, the
+    /// next move's reason in one sentence. A Task that needs nobody gives no
+    /// reason when the next move only repeats its condition's ("ready").
+    static func state(_ task: RoadmapTask, graph: TaskGraph?) -> (lead: String, reason: String) {
+        let word = TaskRowStatus(task: task).word ?? ""
         let step = graph.flatMap { graph in graph.currentStep.map { graph.steps[$0].name } }
         let lead = step.map { "\(word), at \($0)." } ?? "\(word)."
-        let why = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        let why = task.nextMove.reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        if task.need == nil, why == task.condition.reason { return (lead, "") }
         return (lead, why.isEmpty || why.hasSuffix(".") ? why : why + ".")
+    }
+
+    /// What the Task's row says it needs, under the word the row would show
+    /// with no program reporting: "Blocked: reason". Nil when the state line
+    /// above already ends with that reason.
+    static func need(_ task: RoadmapTask) -> String? {
+        let standing = TaskRowStatus(task: task)
+        func bare(_ text: String) -> String {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.hasSuffix(".") ? String(trimmed.dropLast()) : trimmed
+        }
+        guard let line = standing.line, bare(line) != bare(task.nextMove.reason) else { return nil }
+        return standing.source == .condition ? "\(standing.word ?? ""): \(line)" : line
     }
 
     /// Names separated by commas, each a link, so a narrow pane wraps the list.
@@ -77,7 +93,7 @@ struct TaskBriefView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: Spacing.md) {
                     Text(task.task.name).serif(.title).foregroundStyle(palette.text)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
@@ -98,7 +114,7 @@ struct TaskBriefView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14).textSelection(.enabled)
+                .padding(Spacing.md).textSelection(.enabled)
             }
             .scrollPosition($position)
             .onScrollGeometryChange(for: CGPoint.self, of: \.contentOffset) { _, offset in store.briefOffset = offset }
@@ -118,15 +134,15 @@ struct TaskBriefView: View {
     }
 
     private var status: some View {
-        let state = TaskBrief.state(runtime: task.runtime?.status.label, graph: graph, reason: task.nextMove.reason)
-        return VStack(alignment: .leading, spacing: 4) {
+        let state = TaskBrief.state(task, graph: graph)
+        return VStack(alignment: .leading, spacing: Spacing.xs) {
             let lead = Text(state.lead).font(Typography.textStrong).foregroundStyle(palette.text)
             let reason = Text(state.reason.isEmpty ? "" : " " + state.reason).font(Typography.text).foregroundStyle(palette.textSecondary)
             Text("\(lead)\(reason)")
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("brief-state")
-            if task.condition.state != .clear {
-                Text("\(task.condition.state.rawValue.capitalized): \(task.condition.reason)")
+            if let need = TaskBrief.need(task) {
+                Text(verbatim: need)
                     .font(Typography.text).foregroundStyle(palette.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }

@@ -127,7 +127,7 @@ struct DesktopHeadlessTests {
         await model.loadGraphCatalog()
         let entry = try #require(model.graphCatalog.value?.first { $0.name == "code" })
         let view = WorkflowCatalogInspector(entry: entry, model: model)
-        #expect(try view.inspect().find(text: "builtin Workflow").string() == "builtin Workflow")
+        #expect(try view.inspect().find(text: "Built-in Workflow").string() == "Built-in Workflow")
         _ = try view.inspect().find(text: "You take part at demo.")
         _ = try view.inspect().find(button: "Customize")
     }
@@ -343,7 +343,7 @@ struct DesktopHeadlessTests {
         let builtin = view("feature")
         _ = try builtin.inspect().find(text: "pursue")
         _ = try builtin.inspect().find(text: "You take part at demo.")
-        _ = try builtin.inspect().find(text: "builtin Workflow")
+        _ = try builtin.inspect().find(text: "Built-in Workflow")
         _ = try builtin.inspect().find(button: "Customize")
         let invalid = view("broken")
         _ = try invalid.inspect().find(ViewType.Text.self) { try $0.string().contains("failed to load skill") }

@@ -1,4 +1,5 @@
 #if os(macOS)
+import Loopflow
 import SwiftUI
 import WebKit
 
@@ -42,20 +43,21 @@ private struct BrowserPageControls: View {
     @State private var canGoBack = false
     @State private var canGoForward = false
     @State private var address = ""
+    @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             Button { page.goBack() } label: { Image(systemName: "chevron.left") }
                 .disabled(!canGoBack).help("Back").accessibilityIdentifier("browser-back")
             Button { page.goForward() } label: { Image(systemName: "chevron.right") }
                 .disabled(!canGoForward).help("Forward").accessibilityIdentifier("browser-forward")
             Button { page.reload() } label: { Image(systemName: "arrow.clockwise") }
                 .help("Reload").accessibilityIdentifier("browser-reload")
-            Text(address).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+            Text(address).lineLimit(1).truncationMode(.middle).foregroundStyle(palette.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.borderless)
-        .padding(.horizontal, 6).padding(.vertical, 3)
+        .buttonStyle(LoopflowButtonStyle())
+        .padding(.horizontal, Spacing.xs).padding(.vertical, Spacing.xxs)
         .onReceive(page.publisher(for: \.canGoBack)) { canGoBack = $0 }
         .onReceive(page.publisher(for: \.canGoForward)) { canGoForward = $0 }
         .onReceive(page.publisher(for: \.url)) { address = $0?.absoluteString ?? "" }

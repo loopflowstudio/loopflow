@@ -13,11 +13,11 @@ struct ProjectHistoryView: View {
     @State private var loaded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
             HStack {
                 Text("\(wave) · Projects").font(Typography.textStrong)
                 Spacer()
-                Button("Done") { dismiss() }
+                Button("Done") { dismiss() }.buttonStyle(LoopflowButtonStyle())
             }
             if let error { FailureLine("Projects did not load.", machine: error) }
             if !loaded { ProgressView("Reading Projects…") }
@@ -29,7 +29,7 @@ struct ProjectHistoryView: View {
             }
             ScrollView {
                 if let project = projects.first(where: { $0.id == selected }) {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: Spacing.md) {
                         TrackerSyncView(sync: project.sync, repo: repo)
                         ForEach(project.krs) { kr in
                             Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "circle")
@@ -38,7 +38,7 @@ struct ProjectHistoryView: View {
                 }
             }
         }
-        .padding(24).frame(minWidth: 500, minHeight: 420)
+        .padding(Spacing.xxl).frame(minWidth: 500, minHeight: 420)
         .task {
             do {
                 let status = try await RegistryQueryLocal.shared.status(wave: wave, cwd: repo)

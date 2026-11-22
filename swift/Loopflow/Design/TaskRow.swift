@@ -4,9 +4,9 @@ import SwiftUI
 /// `ProgramStatusState.label` for what the conversation reports and
 /// `TaskState.label` for the lifecycle.
 public struct TaskRowStatus: Equatable, Sendable {
-    enum Source: Sendable { case program, lifecycle }
+    public enum Source: Sendable { case program, condition, lifecycle }
 
-    let source: Source
+    public let source: Source
     /// Nil draws an info mark that carries `detail`.
     public let word: String?
     /// Nil sets the word in the row's secondary ink.
@@ -15,6 +15,10 @@ public struct TaskRowStatus: Equatable, Sendable {
     public let detail: String?
     /// What a blocked conversation is asking, in its own words.
     public let ask: String?
+    private var reason: String?
+
+    /// What the Task needs, with the program's own words first.
+    public var line: String? { ask ?? reason }
 
     /// What the Task's conversation reports. `inferred` marks a word taken
     /// from the Session's availability when no program reported.
@@ -41,9 +45,28 @@ public struct TaskRowStatus: Equatable, Sendable {
     }
 }
 
+extension TaskRowStatus {
+    /// Where a Task stands: what its program reports when one does, else what
+    /// it needs, else its lifecycle. Whatever the word, a Task that needs
+    /// someone keeps the reason as its line.
+    public init(task: RoadmapTask, program: TaskRowStatus? = nil) {
+        let need = task.need
+        if let program {
+            self = program
+        } else if let need, need != .unknown {
+            self.init(source: .condition, word: need.title, tone: .warning, detail: task.condition.reason, ask: nil)
+        } else if task.lifecycle == .done && task.task.completedAt == nil {
+            self.init(source: .lifecycle, word: "Done, date unavailable", tone: nil, detail: nil, ask: nil)
+        } else {
+            self = .lifecycle(task.lifecycle)
+        }
+        if need != nil, !task.condition.reason.isEmpty { reason = task.condition.reason }
+    }
+}
+
 /// The one Task row: the title in full, then the ID and the status word (what
-/// its conversation reports, else its lifecycle). A blocked row adds one line
-/// saying what was asked. No stripe, no border, no summary; selection is the
+/// its conversation reports, else its condition or lifecycle). A Task that needs
+/// someone adds one line saying why. No stripe, no border, no summary; selection is the
 /// host's fill.
 public struct TaskRow<Trailing: View>: View {
     let id: String
@@ -104,8 +127,8 @@ public struct TaskRow<Trailing: View>: View {
             .font(Typography.meta)
             .foregroundStyle(secondary)
             .lineLimit(1)
-            if let ask = status?.ask {
-                Text(verbatim: ask)
+            if let line = status?.line {
+                Text(verbatim: line)
                     .font(Typography.text)
                     .foregroundStyle(secondary)
                     .lineLimit(2)
@@ -118,19 +141,29 @@ public struct TaskRow<Trailing: View>: View {
         .frame(maxWidth: .infinity, minHeight: HitTarget.control, alignment: .leading)
     }
 
+    /// The whole row opens the Task; the ID's link stays above the target.
+    public func opening(_ action: @escaping () -> Void) -> some View {
+        background {
+            Button(action: action) { Color.clear.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .accessibilityLabel(title)
+                .accessibilityIdentifier("task-row-open-\(id)")
+        }
+    }
+
     @ViewBuilder private func word(_ status: TaskRowStatus) -> some View {
         let detail = status.detail ?? ""
         if let word = status.word {
             switch status.source {
             case .lifecycle:
                 Text(verbatim: word).accessibilityIdentifier("work-task-lifecycle-\(id)")
-            case .program:
+            case .program, .condition:
                 Text(verbatim: word)
                     .fontWeight(selected && status.tone != nil ? .semibold : nil)
                     .foregroundStyle(selected ? palette.workSelectedText : status.tone?.ink(in: palette) ?? secondary)
                     .help(Text(verbatim: detail))
                     .accessibilityHint(Text(verbatim: detail))
-                    .accessibilityIdentifier("work-program-status-\(id)")
+                    .accessibilityIdentifier(status.source == .condition ? "work-task-condition-\(id)" : "work-program-status-\(id)")
             }
         } else {
             Image(systemName: "info.circle")

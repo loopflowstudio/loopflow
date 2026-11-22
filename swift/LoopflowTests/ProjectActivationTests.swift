@@ -78,7 +78,8 @@ struct ProjectActivationTests {
                 plan: WavePlan(objective: "Retained objective")),
             repoPath: wave.repo, streamed: nil,
             isProjectActivationPending: model.isProjectActivationPending(id: wave.id),
-            transportError: model.projectCommandErrors[wave.id], onActivateProject: {}, onClose: {}, onOpenTask: { _ in }) }
+            transportError: model.projectCommandErrors[wave.id], onActivateProject: {}, onClose: {}, onOpenTask: { _ in },
+            onTaskAction: { _, _ in }, onOpenWorktree: { _ in }) }
         let portfolioPending = try? portfolio.inspect().find(text: "Preparing Project…").string()
         let retainedObjective = try? portfolio.inspect().find(text: "Retained objective").string()
         await response.finish()

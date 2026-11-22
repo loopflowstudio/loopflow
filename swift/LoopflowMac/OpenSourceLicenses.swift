@@ -1,23 +1,26 @@
 import AppKit
+import Loopflow
 import SwiftUI
 
 struct AboutLoopflowView: View {
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: Spacing.md) {
             Image(nsImage: NSApplication.shared.applicationIconImage)
                 .resizable()
                 .frame(width: 64, height: 64)
                 .accessibilityHidden(true)
             Text("Loopflow").serif(.title)
             Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.textSecondary)
             Button("Open Source Licenses") {
                 openWindow(id: "open-source-licenses")
             }
+            .buttonStyle(LoopflowButtonStyle())
         }
-        .padding(32)
+        .padding(Spacing.xxxl)
         .frame(width: 280)
     }
 }

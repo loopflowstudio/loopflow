@@ -29,6 +29,23 @@ struct ThemeWorkflowTests {
         #expect(appearance.selectedTheme.palette.definition == ThemeDefinition.builtins.first { $0.name == "Linen" }?.palette.definition)
     }
 
+    @Test func theSampleShowsThePreviewedThemeWhereItsColorsLand() throws {
+        let appearance = AppearanceStore(paths: .temporary(), systemDark: false)
+        appearance.beginPreview()
+        let chooser = ThemeChooser(appearance: appearance)
+        func sample() throws -> [String] {
+            try chooser.inspect().find(viewWithAccessibilityIdentifier: "appearance-sample")
+                .findAll(ViewType.Text.self).map { try $0.string() }
+        }
+        #expect(try sample() == [
+            "loopflow", "Selected Work", "Blocked since 12:07",
+            "Working", "Available", "Blocked", "Failed", "Passed", "$ lf task status LOO-515",
+        ])
+        #expect(try chooser.inspect().find(ThemeSample.self).actualView().theme.name == "Loopflow Light")
+        try chooser.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Linen").button().tap()
+        #expect(try chooser.inspect().find(ThemeSample.self).actualView().theme.name == "Linen")
+    }
+
     @Test func chooserFiltersEachPickerToItsAppearanceAndWritesTheChoice() async throws {
         try await withThemeServer { location in
             let paths = ThemePaths.temporary()

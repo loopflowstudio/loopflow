@@ -2265,6 +2265,11 @@ final class WorkModel {
         return (sessions.value ?? []).filter { $0.names(task: id) }
     }
 
+    /// What a Task's programs report, for its row and the title bar.
+    func programStatus(task id: String) -> SessionProgramStatus {
+        SessionProgramStatus(sessions: taskSessions(id), unavailable: sessions.failure)
+    }
+
     /// ⌘N: the Nth Task row on screen.
     func selectSidebarTask(slot: Int) {
         let ids = sidebarTaskIDs

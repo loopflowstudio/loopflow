@@ -142,7 +142,7 @@ struct WorkspaceOpeningFeedback: View {
                 }
             } else {
                 Text("No pending workspace requests")
-                Button("Close") { dismiss() }
+                Button("Close") { dismiss() }.buttonStyle(LoopflowButtonStyle())
             }
         }
         .padding()

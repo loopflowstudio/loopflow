@@ -14,6 +14,7 @@ public struct WorkflowLine: View {
     public let sentence: String?
     /// The Task's auto setting is on: its run takes the interactive steps.
     let auto: Bool
+    let sentenceOnly: Bool
     @Environment(\.palette) private var palette
 
     /// How a step reads against where the Task stands.
@@ -27,12 +28,13 @@ public struct WorkflowLine: View {
 
     /// A Task's Graph. `setup` stands in for the sentence before the run has
     /// started, such as setup's reason for not starting it yet.
-    public init(graph: TaskGraph, auto: Bool, setup: String? = nil) {
+    public init(graph: TaskGraph, auto: Bool, setup: String? = nil, sentenceOnly: Bool = false) {
         name = graph.name
         steps = graph.steps
         tones = Self.tones(graph)
         sentence = if graph.position == .at(step: TaskGraph.start), let setup { setup } else { graph.sentence }
         self.auto = auto
+        self.sentenceOnly = sentenceOnly
     }
 
     /// The workflow an unstarted Task takes up, in its bar: the name, and the
@@ -43,6 +45,7 @@ public struct WorkflowLine: View {
         tones = Array(repeating: .ahead, count: steps.count)
         sentence = nil
         auto = false
+        sentenceOnly = false
     }
 
     /// A workflow where its name is already said: the steps, wrapping, and
@@ -53,6 +56,7 @@ public struct WorkflowLine: View {
         tones = Array(repeating: .ahead, count: outline.steps.count)
         sentence = outline.sentence
         auto = false
+        sentenceOnly = false
     }
 
     public static func tones(_ graph: TaskGraph) -> [Tone] {
@@ -68,7 +72,9 @@ public struct WorkflowLine: View {
 
     public var body: some View {
         Group {
-            if let name {
+            if sentenceOnly, let sentence {
+                sentenceText(sentence)
+            } else if let name {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: Spacing.md) {
                         nameText(name)
@@ -108,7 +114,7 @@ public struct WorkflowLine: View {
 
     private var stepViews: some View {
         ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
-            HStack(spacing: 2) {
+            HStack(spacing: Spacing.xxs) {
                 if step.interactive {
                     Image(systemName: "person.fill").font(Typography.meta)
                         .accessibilityLabel("you take part")

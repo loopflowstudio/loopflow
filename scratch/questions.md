@@ -8,3 +8,5 @@
 - Round 2: `ThemeSample` is deleted rather than kept beside the cards. What it showed that no card does: a terminal line and the secondary text on the selected row.
 - Round 2: the chosen card is a 2 pt ring in the window's focus color instead of the old selection fill and edge. Passed over: both.
 - Round 2: `ThemeDefinition.retired` has no removal date; it is the sentence a person with an old setting sees, not a file-shape fallback. No removal Task filed.
+
+- QA round 2: the third-party inventory went stale a second time (a README edit after the refresh) and only the bundle build noticed. Not added: a `test_third_party.py` case calling `third_party.check()`, which would catch it in CI but also fail every PR that bumps `Cargo.lock` without a refresh.

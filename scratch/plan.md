@@ -22,15 +22,17 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 - `uv run pytest python/tests/test_theme_catalogue.py`: passed. `documented_commands::`: 4 passed.
 - All 26 cards rendered offscreen with `ImageRenderer`: `scratch/qa/cards.png`.
 - Round 1 Dev app QA, both defaults plus two files without a bar, with the screen locked: passed (`scratch/qa.html`).
-- Not run here: `test_third_party.py` (gate); Dev app chooser, editor Title bar row, a key window's bar (ship-review, unlocked display).
+- Round 2 Dev app QA, screen locked: retired-name notice, both sides' cards, Fig preview and Fig applied (via `lf set`): passed after top-aligning the grid rows and refreshing the third-party inventory (`scratch/qa.html`).
+- `test_third_party.py`: 9 passed.
+- Not run here: Apply clicked in the chooser, the editor's Title bar row, a key window's bar, the selected Appearance toolbar tab in dark mode (ship-review, unlocked display).
 
 ## Demo
 
-Dev app → Settings → Choose Theme: 26 cards in their own colors, pairs side by side. Click Fig and the window turns plum with lime; Fig Leaf is the light half. A settings file naming Gruvbox Dark opens in Loopflow Dark, and a sentence says why.
+Dev app → Settings → Choose Theme: 13 cards per side in their own colors, both sides in System mode. Click Fig and the window turns plum with lime; Fig Leaf is the light half. A settings file naming Gruvbox Dark opens in Loopflow Dark, and a sentence says why.
 
 ## Remaining
 
-- Ship-review: the Dev app look above.
+- Ship-review: the Dev app look above, on an unlocked display.
 
 ## Left outside this Task
 

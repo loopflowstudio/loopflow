@@ -241,7 +241,10 @@ them. Nothing here needs WindowServer focus.
   `lf --task <id> desktop do details page=brief` switches the Task pane. A tile
   shows its workflow sentence only after its Task was visited in that window.
   `lf desktop do new-task` opens the New Task sheet, and `snap` lists a sheet
-  as its own untitled window. Apply in Choose Theme answers a doubled click.
+  as its own untitled window. Apply in Choose Theme answered a doubled click
+  once and no click at all in a later run (no `config.theme` write in the
+  server log); set the theme with `lf set --global theme` to see it applied.
+  Card clicks in the chooser preview reliably.
 - Opening a Task changes it: a link to an unstarted Task places its checkout
   (the server then calls it `idle`), and opening a Task whose worktree was
   moved away puts the worktree back. Read `lf plan list --json` for what a

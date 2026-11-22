@@ -9,7 +9,55 @@ code{background:#f3f1ee;padding:0 .25em;border-radius:3px}
 table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.3rem .6rem;text-align:left}
 .ok{color:#256b2a}.bad{color:#9a2a2a}
 </style>
-<h1>QA: the two defaults and the title bar role</h1>
+<h1>Round 2: 13 families and the card chooser</h1>
+<p>Branch Dev app as an isolated bundle (<code>com.loopflow.mac.qath2.dev</code>) on a private Machine (<code>/tmp/lfq2</code>, branch <code>lf server run</code>, a git-planned repository with one Task), production mode, driven by <code>.lf/qa/QAHook.swift</code>. The screen was locked (CGSSessionScreenIsLocked 1, idle 2 h+). Run 2026-11-22 at 4c9120dff4.</p>
+
+<h2>R2.1 Packaging — broken again, fixed</h2>
+<p>The bundle build stopped at <code>third_party.py package</code>: "Third-party inputs changed". Round 2's last edit to <code>swift/Loopflow/Themes/README.md</code> came after the inventory refresh. Fixed with <code>third_party.py refresh</code> (one hash). Still nothing runs <code>third_party.py check</code> before a build; see questions.</p>
+
+<h2>R2.2 A settings file naming a retired theme: <code>theme: Gruvbox Dark</code></h2>
+<p>Opens in Loopflow Dark with the sentence and a Choose Theme… button above the window.</p>
+<img src="qa/r2-notice.png">
+
+<h2>R2.3 Choose Theme, Dark mode — rows misaligned, fixed</h2>
+<p>13 dark cards, each in its own colors, the chosen card ringed. The Customize button under the chosen card made that grid cell taller and the row centred every card on it: the chosen card sat about 14 pt above its neighbours (before, below). The retired-name sentence repeats at the bottom until a theme is previewed.</p>
+<img src="qa/r2-dark-before.png">
+<p>Clicking Fig previews plum with lime across the whole chooser and moves the ring.</p>
+<img src="qa/r2-fig-preview.png">
+<p><b>Fix:</b> the grid's items are top-aligned (<code>GridItem(..., alignment: .top)</code> in <code>ThemeChooser.swift</code>); the Customize button now hangs below its card without moving the row.</p>
+
+<h2>R2.4 Fig applied</h2>
+<p>Apply answered no synthesized click this run (no <code>config.theme</code> write reached the server, five tries, single and paired), so Fig was set with <code>lf set --global theme Fig</code>. The running window turned plum with a plum bar and lime headings, and the notice went away.</p>
+<img src="qa/r2-fig-applied.png">
+
+<h2>R2.5 System mode, <code>light:Fig Leaf,dark:Fig</code>, after the fix</h2>
+<p>Light themes first, each family's light half; the chosen Fig Leaf card's row lines up with its neighbours.</p>
+<img src="qa/r2-system-after.png">
+
+<h2>R2.6 Customize</h2>
+<p>Opens the editor on Fig Leaf with "Apply writes …/themes/Fig Leaf". Its groups don't open under synthesized clicks, so the Title bar row was not seen.</p>
+<img src="qa/r2-editor.png">
+
+<h2>Round 2: what works</h2>
+<ul>
+<li>Retired name → Loopflow Dark with its sentence; the setting stays until changed.</li>
+<li>Choose Theme shows each side's 13 cards in their own colors; a click previews the whole window.</li>
+<li>Fig and Fig Leaf both load and paint the window, bar included.</li>
+<li>The Dev bundle packages again.</li>
+</ul>
+<h2>Round 2: not reached</h2>
+<ul>
+<li>Apply from the chooser (synthesized clicks never reached it); the CLI path wrote the same setting.</li>
+<li>The editor's Title bar row; a key window's bar; hover on cards. All need an unlocked display.</li>
+<li>In a dark-mode frame capture the selected "Appearance" toolbar tab drew as a solid white block; the light capture drew it normally. Possibly the non-key capture, not the app; needs a look on screen.</li>
+</ul>
+<h2>Round 2: still wrong, worst first</h2>
+<ul>
+<li>The third-party inventory goes stale on any catalogue or README edit and only a bundle build notices.</li>
+<li>The plan's demo says "pairs side by side"; the chooser shows a side's 13 cards, and System mode shows light then dark sections. Pairs sit together only in name order within the light or dark grid.</li>
+</ul>
+
+<h1>Round 1: the two defaults and the title bar role</h1>
 <p>Branch Dev app as an isolated bundle (<code>com.loopflow.mac.qath.dev</code>) on a private Machine (<code>/tmp/lf-qa-th</code>, branch <code>lf server run</code>, a git-planned repository with two Tasks), production mode, driven by <code>.lf/qa/QAHook.swift</code>. The screen was locked, so captures are the app's own frame views. Run 2026-11-22.</p>
 
 <h2>1. Packaging the app — broken, fixed</h2>

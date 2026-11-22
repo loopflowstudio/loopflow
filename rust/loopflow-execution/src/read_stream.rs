@@ -1122,11 +1122,7 @@ mod tests {
             crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         // No checked-in `.lf/config.yaml`: the personal file is the only layer.
         let repo = loopflow_test_support::TestRepo::new();
-        std::fs::write(
-            repo.path().join(crate::config::files::PRIVATE_FILE),
-            "agent: pi\n",
-        )
-        .unwrap();
+        repo.create_file(crate::config::files::PRIVATE_FILE, "agent: pi\n");
         let checkout = home.path().join("task");
         let agent = || {
             let config = crate::config::load_wave_config(Some(&checkout), None).unwrap();
@@ -1158,11 +1154,7 @@ mod tests {
         let _home =
             crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
-        std::fs::write(
-            repo.path().join(crate::config::files::PRIVATE_FILE),
-            "agent: pi\n",
-        )
-        .unwrap();
+        repo.create_file(crate::config::files::PRIVATE_FILE, "agent: pi\n");
         let removed = home.path().join("removed");
 
         let agent =

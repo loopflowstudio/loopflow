@@ -59,11 +59,11 @@ All five steps are built. What each one settled:
 4. **Words and prototype.** `desktop-themes.js` restates the catalogue again and carries `titlebar`; `.titlebar` and the Choose Theme sample bar paint `var(--titlebar)`. The `swift/README.md` example had comments after values, which `ThemeFile` rejects; they are on their own lines now.
 5. **Page rebuilt.** The 24 sections read the files as they are; "Before" under the two defaults is the base commit.
 
-Left: the Dev app looked at in both defaults.
+Nothing remains to build. Left for ship-review: the Dev app looked at in both defaults (needs a display).
 
-## Docs written ahead
+## Docs
 
-`swift/README.md` (Appearance: Loopflow Dark's description, `loopflow-titlebar` in the theme file example, a paragraph on the title bar role, its fallback and the editor's **Title bar** row) and `swift/Loopflow/Themes/README.md` (Dark's description, the role in the example, the fallback rule). They describe the finished behavior; step 4's README work is checking them against the code, not writing them. The Themes README example now shows Flexoki Light's real pair (`#847032`, `#685827`); if the Swift rule gives a different bar, the example follows the file.
+`swift/README.md` (Appearance) and `swift/Loopflow/Themes/README.md` describe the new Loopflow Dark, `loopflow-titlebar`, its fallback and the editor's **Title bar** row. The Themes README example is Flexoki Light's real pair (`#847032`, `#685827`), matching the file.
 
 ## Acceptance check at gate
 

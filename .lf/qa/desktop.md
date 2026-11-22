@@ -153,9 +153,15 @@ works while the screen is locked. Pair it with a private Machine (separate
 `HOME`, `LF_HOME`, a disposable repository with `planning: {provider: git,
 personal: true}`, `lf set --global default_agent claude`, a stand-in `claude`
 on `PATH`) running the branch `lf server run`. A repository Graph whose
-`cmd: help graph` step an `LF_BIN` wrapper turns into `sleep 1800` holds the
-Task "running" at that step; killing the `sleep` moves it to the next
-interactive step ("Waiting for you at …").
+`cmd: help graph` step an `LF_BIN` wrapper turns into
+`while [ ! -f <dir>/go ]; do sleep 1; done; exit 0` holds the Task "running"
+at that step; `touch <dir>/go` moves it to the next interactive step
+("Waiting for you at …"). Killing a held step fails it, and `lf task run`
+starts it again. Put the held step in a sub-Graph (`- graph: make`, with
+`.lf/graphs/make.yaml`) so the bar's top-level step differs from the running
+concrete step. Run the wrapper and `lf` through a script that does
+`exec env -i HOME=… LF_HOME=… LF_BIN=… PATH=… "$@"`: zsh does not split a
+`$E` variable into words.
 
 - Launch the isolated bundle with `env -i HOME=$HOME PATH=/usr/bin:/bin open -n
   --env LF_HOME=… --env LF_BIN=… --env LOOPFLOW_UI_TEST_MODE=live --env
@@ -169,8 +175,10 @@ interactive step ("Waiting for you at …").
   `DesktopServer` only when `AppTestMode.current()` is nil). To switch the
   Task pane's tab, move that `DesktopServer.start()` line out of the `if`
   for the local build only, then `lf --task <id> desktop do details
-  page=brief|diff` (no `--task` fails with "No Task selected"). Revert
-  before committing.
+  page=brief|diff` (no `--task` fails with "No Task selected"). The Task
+  page ("Task & workflow") opens only from the pane's menu; for a capture,
+  point the `graph-log` action in `DesktopActions.swift` at `show(.task, …)`
+  and run `desktop do graph-log`. Revert both before committing.
 - Theme: write `theme: "Loopflow Light"` (or a file name in
   `$LF_HOME/themes/`, the imported-theme case) to `$LF_HOME/config.yaml`
   before launch.

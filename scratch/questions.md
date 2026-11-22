@@ -94,3 +94,7 @@
   sentence as the lead (it is already in the bar above).
 - Chosen: the Task page's `GraphProcessLog` drops its position line under
   `TaskWorkflowHeader`; the standalone Graph-log pane keeps it.
+
+## QA second pass (2026-11-22, headless)
+
+- Waiting at an interactive step, the Brief reads "Active, at ship-review. ready." then "Waiting: ready": `task.reason` and the condition reason are the bare status word. Left as Rust wording; a real conversation with hooks may report better. Alternative: the Brief drops the condition line when it repeats the reason.

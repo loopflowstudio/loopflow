@@ -71,11 +71,35 @@ struct TaskWorkspaceView: View {
         }
     }
 
-    /// One entry of "Task actions".
+    /// One entry of "Task actions": its name in the menu and the Notice, and the write it sends.
     enum Action: Equatable {
         /// `lf task run`, under the name the Graph gives it: "Start" or "Run".
         case run(String)
         case autoShip, stopAutoShip
+
+        var label: String {
+            switch self {
+            case .run(let label): label
+            case .autoShip: "Auto-Ship"
+            case .stopAutoShip: "Stop Auto-Ship"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .run: "play.fill"
+            case .autoShip: "paperplane"
+            case .stopAutoShip: "pause.circle"
+            }
+        }
+
+        func write(directory: String, issue: String) -> ServedWrite {
+            switch self {
+            case .run: .taskRun(directory: directory, issue: issue, graph: nil, from: nil, agent: nil, approve: false)
+            case .autoShip: .taskAutoOn(directory: directory, issue: issue)
+            case .stopAutoShip: .taskAutoOff(directory: directory, issue: issue)
+            }
+        }
     }
 
     /// What "Task actions" offers: the step that moves the Task from where its
@@ -104,22 +128,9 @@ struct TaskWorkspaceView: View {
             let actions = Self.actions(graph: graph, states: row.states, issue: row.identifier ?? row.work.id)
             if !actions.isEmpty {
                 Menu("Task actions", systemImage: "ellipsis.circle") {
-                    ForEach(actions.indices, id: \.self) { index in
-                        switch actions[index] {
-                        case .run(let label):
-                            Button(label, systemImage: "play.fill") {
-                                feed.request(label, row) {
-                                    .taskRun(directory: $0, issue: $1, graph: nil, from: nil, agent: nil, approve: false)
-                                }
-                            }
-                        case .autoShip:
-                            Button("Auto-Ship", systemImage: "paperplane") {
-                                feed.request("Auto-Ship", row) { .taskAutoOn(directory: $0, issue: $1) }
-                            }
-                        case .stopAutoShip:
-                            Button("Stop Auto-Ship", systemImage: "pause.circle") {
-                                feed.request("Stop Auto-Ship", row) { .taskAutoOff(directory: $0, issue: $1) }
-                            }
+                    ForEach(actions, id: \.label) { action in
+                        Button(action.label, systemImage: action.symbol) {
+                            feed.request(action.label, row, action.write)
                         }
                     }
                 }

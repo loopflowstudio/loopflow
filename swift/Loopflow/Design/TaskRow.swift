@@ -4,7 +4,7 @@ import SwiftUI
 /// `ProgramStatusState.label` for what the conversation reports and
 /// `TaskState.label` for the lifecycle.
 public struct TaskRowStatus: Equatable, Sendable {
-    enum Source: Sendable { case program, lifecycle, unread }
+    enum Source: Sendable { case program, lifecycle }
 
     let source: Source
     /// Nil draws an info mark that carries `detail`.
@@ -37,7 +37,7 @@ public struct TaskRowStatus: Equatable, Sendable {
 
     /// The status could not be read; `reason` says why.
     public static func unread(_ reason: String) -> TaskRowStatus {
-        TaskRowStatus(source: .unread, word: nil, tone: nil, detail: reason, ask: nil)
+        TaskRowStatus(source: .program, word: nil, tone: nil, detail: reason, ask: nil)
     }
 }
 
@@ -124,7 +124,7 @@ public struct TaskRow<Trailing: View>: View {
             switch status.source {
             case .lifecycle:
                 Text(verbatim: word).accessibilityIdentifier("work-task-lifecycle-\(id)")
-            case .program, .unread:
+            case .program:
                 Text(verbatim: word)
                     .fontWeight(selected && status.tone != nil ? .semibold : nil)
                     .foregroundStyle(selected ? palette.workSelectedText : status.tone?.ink(in: palette) ?? secondary)

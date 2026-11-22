@@ -10,28 +10,23 @@ struct TypographyDisciplineTests {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
 
-    private static let rules: [(pattern: String, reason: String, outsideDesignOnly: Bool)] = [
-        (#"(Font)?\.custom\("#, "a face chosen outside Design/", true),
-        (#"\.system\("#, "a system font", false),
-        (#"\.font\(\.(largeTitle|title|title2|title3|headline|subheadline|body|callout|footnote|caption|caption2)\b"#, "a system text style", false),
-        (#"Typography\.\w+\("#, "a sized Typography call", false),
-    ]
+    private typealias Rule = (pattern: String, reason: String, outsideDesignOnly: Bool)
 
-    @Test("Loopflow, LoopflowMac and LoopflowiOS set every font from the ramp")
-    func everyFontComesFromTheRamp() throws {
+    /// Every line of Swift under `directories` that matches a rule, comments aside.
+    private static func violations(in directories: [String], _ rules: [Rule]) throws -> [String] {
         var violations: [String] = []
-        for directory in ["Loopflow", "LoopflowMac", "LoopflowiOS"] {
-            let root = Self.swiftRoot.appendingPathComponent(directory)
+        for directory in directories {
+            let root = swiftRoot.appendingPathComponent(directory)
             let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)?
                 .compactMap { $0 as? URL }
                 .filter { $0.pathExtension == "swift" } ?? []
             for file in files {
-                let relative = String(file.path.dropFirst(Self.swiftRoot.path.count + 1))
+                let relative = String(file.path.dropFirst(swiftRoot.path.count + 1))
                 let inDesign = relative.contains("/Design/")
                 let lines = try String(contentsOf: file, encoding: .utf8).components(separatedBy: "\n")
                 for (index, line) in lines.enumerated() {
                     let code = line.components(separatedBy: "//").first ?? line
-                    for rule in Self.rules where !(rule.outsideDesignOnly && inDesign) {
+                    for rule in rules where !(rule.outsideDesignOnly && inDesign) {
                         if code.range(of: rule.pattern, options: .regularExpression) != nil {
                             violations.append("\(relative):\(index + 1): \(rule.reason): \(line.trimmingCharacters(in: .whitespaces))")
                         }
@@ -39,30 +34,30 @@ struct TypographyDisciplineTests {
                 }
             }
         }
+        return violations
+    }
+
+    @Test("Loopflow, LoopflowMac and LoopflowiOS set every font from the ramp")
+    func everyFontComesFromTheRamp() throws {
+        let violations = try Self.violations(in: ["Loopflow", "LoopflowMac", "LoopflowiOS"], [
+            (#"(Font)?\.custom\("#, "a face chosen outside Design/", true),
+            (#"\.system\("#, "a system font", false),
+            (#"\.font\(\.(largeTitle|title|title2|title3|headline|subheadline|body|callout|footnote|caption|caption2)\b"#, "a system text style", false),
+            (#"Typography\.\w+\("#, "a sized Typography call", false),
+        ])
         #expect(violations.isEmpty, "\(violations.joined(separator: "\n"))")
     }
 
     /// `spacing: 0` passes: it says "no gap", which is not a step on the scale.
     @Test("LoopflowiOS draws buttons, states and spacing from the shared design")
     func thePhoneUsesTheSharedButtonStateViewAndSteps() throws {
-        let rules = [
-            (#"\.borderedProminent"#, "a hand-made primary button; use LoopflowButtonStyle(.accent)"),
-            (#"ContentUnavailableView"#, "a stock empty view; use StateView"),
-            (#"padding\((\.\w+, *)?\d|EdgeInsets\([^)]*\d"#, "a literal padding; use a Spacing step"),
-            (#"spacing: *[1-9]"#, "a literal spacing; use a Spacing step"),
-            (#"ornerRadius: *\d"#, "a literal radius; use a CornerRadius step"),
-        ]
-        var violations: [String] = []
-        let root = Self.swiftRoot.appendingPathComponent("LoopflowiOS")
-        for name in try FileManager.default.contentsOfDirectory(atPath: root.path) where name.hasSuffix(".swift") {
-            let lines = try String(contentsOf: root.appendingPathComponent(name), encoding: .utf8).components(separatedBy: "\n")
-            for (index, line) in lines.enumerated() {
-                let code = line.components(separatedBy: "//").first ?? line
-                for (pattern, reason) in rules where code.range(of: pattern, options: .regularExpression) != nil {
-                    violations.append("LoopflowiOS/\(name):\(index + 1): \(reason)")
-                }
-            }
-        }
+        let violations = try Self.violations(in: ["LoopflowiOS"], [
+            (#"\.borderedProminent"#, "a hand-made primary button; use LoopflowButtonStyle(.accent)", false),
+            (#"ContentUnavailableView"#, "a stock empty view; use StateView", false),
+            (#"padding\((\.\w+, *)?\d|EdgeInsets\([^)]*\d"#, "a literal padding; use a Spacing step", false),
+            (#"spacing: *[1-9]"#, "a literal spacing; use a Spacing step", false),
+            (#"ornerRadius: *\d"#, "a literal radius; use a CornerRadius step", false),
+        ])
         #expect(violations.isEmpty, "\(violations.joined(separator: "\n"))")
     }
 }

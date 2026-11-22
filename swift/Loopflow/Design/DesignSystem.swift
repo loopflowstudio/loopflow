@@ -75,43 +75,30 @@ public enum Typography {
     public static let monoFace = "SplineSansMono-Regular"
 
     /// A document's first heading; the text typed in New Task.
-    public static let lede = step(sansStrongFace, Size.lede, .title3)
+    public static let lede = step(sansStrongFace, mac: 17, iPhone: 20, .title3)
     /// Everything else.
-    public static let text = step(sansFace, Size.text, .body)
+    public static let text = step(sansFace, mac: 13, iPhone: 17, .body)
     /// The selected row's title, a pane's name.
-    public static let textStrong = step(sansStrongFace, Size.text, .body)
+    public static let textStrong = step(sansStrongFace, mac: 13, iPhone: 17, .body)
     /// Counts, times, secondary facts.
-    public static let meta = step(sansFace, Size.meta, .footnote)
+    public static let meta = step(sansFace, mac: 11, iPhone: 13, .footnote)
     /// Inline IDs, paths, commands.
-    public static let mono = step(monoFace, Size.mono, .subheadline)
+    public static let mono = step(monoFace, mac: 12, iPhone: 14, .subheadline)
     /// Ghostty's `font-size` default; the person's configuration replaces it on the Mac.
-    public static let terminalSize = Size.terminal
-
     #if os(iOS)
-    private enum Size {
-        static let lede: CGFloat = 20
-        static let text: CGFloat = 17
-        static let meta: CGFloat = 13
-        static let mono: CGFloat = 14
-        static let terminal: CGFloat = 12
-    }
-
-    private static func step(_ face: String, _ size: CGFloat, _ style: Font.TextStyle) -> Font {
-        .custom(face, size: size, relativeTo: style)
-    }
+    public static let terminalSize: CGFloat = 12
     #else
-    private enum Size {
-        static let lede: CGFloat = 17
-        static let text: CGFloat = 13
-        static let meta: CGFloat = 11
-        static let mono: CGFloat = 12
-        static let terminal: CGFloat = 13
-    }
-
-    private static func step(_ face: String, _ size: CGFloat, _: Font.TextStyle) -> Font {
-        .custom(face, fixedSize: size)
-    }
+    public static let terminalSize: CGFloat = 13
     #endif
+
+    /// A sans or mono step: fixed on the Mac, following Dynamic Type's `style` on iPhone.
+    private static func step(_ face: String, mac: CGFloat, iPhone: CGFloat, _ style: Font.TextStyle) -> Font {
+        #if os(iOS)
+        .custom(face, size: iPhone, relativeTo: style)
+        #else
+        .custom(face, fixedSize: mac)
+        #endif
+    }
 }
 
 /// The two serif steps. They are not `Font` values: serif is set only through

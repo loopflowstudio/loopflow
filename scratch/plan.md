@@ -216,8 +216,8 @@ you, then the sentence; `ViewThatFits` drops to the sentence alone. Swift
 reads no step names to place the Task. While setup has not started the run
 (`task.setupPosition`, Rust's execution reason), that reason stands in for
 the "Not started." sentence, as it does today. It replaces `TaskWorkflowBar.dots/cells/stages/live/position`,
-`WorkflowDiagram` (deleted; `WorkPalette`'s preview uses the line built from
-a definition, no position), `TaskRunPosition`, and `positionLabel` in
+`WorkflowDiagram` (deleted; the Workflow catalog shows `WorkflowSteps`, since
+a definition has no top-level labels on the wire), `TaskRunPosition`, and `positionLabel` in
 `TaskWorkflowHeader`. `GraphCompositionView`/`GraphDiagram` stay: they draw a
 Graph's definition with loops and positions no Task. Fixtures:
 `tests/fixtures/dto/{task_work,task_lifecycle,task_overview,server_schema}.json`

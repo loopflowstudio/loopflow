@@ -91,7 +91,7 @@ final class TaskFeed {
     }
 
     /// The repository on the Machine whose reading listed `task`.
-    func directory(of task: WorkViewPlan.Content) -> String? {
+    private func directory(of task: WorkViewPlan.Content) -> String? {
         repositories.first { $0.tasks.contains { $0.work == task.work } }?.path
     }
 

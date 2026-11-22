@@ -271,3 +271,16 @@ Made in concept review after slice 5 with nobody present. The page is
 - **The Backlog fold is left as its own Task**, not filed. Passed over:
   changing `TaskListView.sections` here, which is list behavior the brief
   does not ask for.
+
+Made in ship review with nobody present. The page is
+`scratch/ship-review.html`; its six numbered questions are unanswered.
+
+- **Went on to delivery.** Every "Done when" line was driven on a Simulator
+  or is held by a test; nothing promised is missing.
+- **Filed 3e95bc** (Backlog, Done and a search list their Tasks on iPhone)
+  and **d5be39** (the row's status written once in Rust). Both unstarted.
+- **Not filed, not changed:** the Notice over the Reply field; "Available"
+  in dark; the Mac's states on `StateView` (DESIGN.md's pointer and 8b92c6).
+- `scratch/tour.yaml` now names f99d849334; the order is unchanged.
+- PR #2017's publish run shows `macos` and `tests-result` skipped; gate reads
+  that. Not run here.

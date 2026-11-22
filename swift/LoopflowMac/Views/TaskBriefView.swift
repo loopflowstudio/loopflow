@@ -35,9 +35,11 @@ enum TaskBrief {
         return headings.count >= 2 ? headings : []
     }
 
-    /// "Moving, at build." then why: the state word, its step, the reason in one sentence.
-    static func state(runtime: String?, step: String?, reason: String) -> (lead: String, reason: String) {
+    /// "Moving, at build." then why: the state word, the top-level step the
+    /// workflow bar makes strong, the reason in one sentence.
+    static func state(runtime: String?, graph: TaskGraph?, reason: String) -> (lead: String, reason: String) {
         let word = (runtime ?? "unstarted").capitalized
+        let step = graph.flatMap { graph in graph.currentStep.map { graph.steps[$0].name } }
         let lead = step.map { "\(word), at \($0)." } ?? "\(word)."
         let why = reason.trimmingCharacters(in: .whitespacesAndNewlines)
         return (lead, why.isEmpty || why.hasSuffix(".") ? why : why + ".")
@@ -65,6 +67,7 @@ enum TaskBrief {
 struct TaskBriefView: View {
     @Bindable var store: TaskFilesStore
     let task: RoadmapTask
+    let graph: TaskGraph?
     @Environment(\.palette) private var palette
     @State private var position = ScrollPosition()
     @State private var updated = false
@@ -115,7 +118,7 @@ struct TaskBriefView: View {
     }
 
     private var status: some View {
-        let state = TaskBrief.state(runtime: task.runtime?.status.label, step: task.execution?.step, reason: task.nextMove.reason)
+        let state = TaskBrief.state(runtime: task.runtime?.status.label, graph: graph, reason: task.nextMove.reason)
         return VStack(alignment: .leading, spacing: 4) {
             let lead = Text(state.lead).font(Typography.textStrong).foregroundStyle(palette.text)
             let reason = Text(state.reason.isEmpty ? "" : " " + state.reason).font(Typography.text).foregroundStyle(palette.textSecondary)

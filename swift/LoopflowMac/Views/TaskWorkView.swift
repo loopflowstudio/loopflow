@@ -389,6 +389,8 @@ struct GraphProcessLog: View {
     var execution: TaskLocationObservation? = nil
     var query: RegistryQuery = RegistryQueryLocal.shared
     var openFiles: (() -> Void)? = nil
+    /// The Task page prints the sentence in its workflow header above.
+    var showsPosition = true
     @State private var captured: WorkFrame.TaskPart?
     @State private var error: String?
     @State private var refresh = 0
@@ -407,11 +409,11 @@ struct GraphProcessLog: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    if let work {
+                    if showsPosition, let work {
                         Text(work.graph?.sentence ?? (readsWindow ? task?.execution : captured?.row?.execution)?.reason
                              ?? "No workflow selected")
                             .accessibilityIdentifier("task-run-position")
-                    } else {
+                    } else if showsPosition {
                         Text(task?.setupPosition ?? "Reading workflow…")
                     }
                     Spacer()

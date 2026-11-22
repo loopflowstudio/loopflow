@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import Testing
+@testable import Loopflow
 @testable import LoopflowMac
 
 @Suite("Task brief")
@@ -25,11 +26,19 @@ struct TaskBriefTests {
         #expect(TaskBrief.related(in: "", excluding: "LOO-515").isEmpty)
     }
 
-    @Test func stateAndReasonAreOneSentence() {
-        let state = TaskBrief.state(runtime: "moving", step: "build", reason: "The loop chose another pass on the concept review")
+    @Test func stateNamesTheTopLevelStepTheBarMakesStrong() {
+        let steps: [TaskGraph.Step] = [.init(name: "plan", interactive: false), .init(name: "build", interactive: false),
+                                       .init(name: "ship-review", interactive: true)]
+        let building = TaskGraph(name: "code", interactiveSteps: [],
+            position: .run(step: "plan", at: "implement", lfProcessId: "p", running: true),
+            steps: steps, currentStep: 1, sentence: "build is running implement.")
+        let state = TaskBrief.state(runtime: "moving", graph: building, reason: "The loop chose another pass on the concept review")
         #expect(state.lead == "Moving, at build.")
         #expect(state.reason == "The loop chose another pass on the concept review.")
-        #expect(TaskBrief.state(runtime: nil, step: nil, reason: "").lead == "Unstarted.")
+        let unstarted = TaskGraph(name: "code", interactiveSteps: [], position: .at(step: TaskGraph.start),
+            steps: steps, currentStep: nil, sentence: "Not started.")
+        #expect(TaskBrief.state(runtime: nil, graph: unstarted, reason: "").lead == "Unstarted.")
+        #expect(TaskBrief.state(runtime: nil, graph: nil, reason: "").lead == "Unstarted.")
     }
 
     @Test func relatedTasksAndOutlineAreCommaSeparatedLinks() throws {

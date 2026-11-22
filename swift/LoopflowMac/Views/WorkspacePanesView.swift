@@ -899,7 +899,7 @@ struct SessionPaneView: View {
                     switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
                     case .success(let files):
                         TaskFilesView(store: files, checkoutBase: task?.reference.workspace?.baseCommit, task: task,
-                            isFocused: isFocused, addToConversation: conversationInput())
+                            graph: task.flatMap { model.taskWork[$0.id].value?.graph }, isFocused: isFocused, addToConversation: conversationInput())
                             .task(id: pane.content.selectedBrowserTab?.id) {
                                 // A tab names its own comparison, never one Graph step's.
                                 files.showStep(nil)
@@ -927,7 +927,7 @@ struct SessionPaneView: View {
                                 MarkdownBlocks(source: task.task.description).equatable()
                                 TaskWorkView(model: model, task: task)
                                 GraphProcessLog(model: model, taskId: taskId, location: location,
-                                    execution: execution, query: sessions.query)
+                                    execution: execution, query: sessions.query, showsPosition: false)
                             }.padding(14)
                         }.textSelection(.enabled)
                     } else { Text("Task is unavailable") }

@@ -228,6 +228,13 @@ struct DesktopHeadlessTests {
         // Any Graph process is one line that opens to its id, its launched graph,
         // where it stands and every step it started.
         let log = GraphProcessLog(model: model, taskId: task.id, location: task.reference.workspace?.identity)
+        #expect(try log.inspect().find(viewWithAccessibilityIdentifier: "task-run-position").text().string()
+            == shown.graph?.sentence)
+        // The Task page's workflow header already says it; its log does not repeat it.
+        let pageLog = GraphProcessLog(model: model, taskId: task.id, location: task.reference.workspace?.identity,
+                                      showsPosition: false)
+        #expect(throws: (any Error).self) { try pageLog.inspect().find(viewWithAccessibilityIdentifier: "task-run-position") }
+        #expect(throws: (any Error).self) { try pageLog.inspect().find(text: try #require(shown.graph?.sentence)) }
         let graph = try #require(shown.graphProcesses.first)
         #expect(throws: (any Error).self) {
             try log.inspect().find(viewWithAccessibilityIdentifier: "graph-process-status-\(graph.id)")

@@ -14,6 +14,8 @@ struct TaskFilesView: View {
     /// The recorded base moves with a store commit, not a file.
     let checkoutBase: String?
     var task: RoadmapTask? = nil
+    /// Where the Task stands, for the Brief's lead.
+    var graph: TaskGraph? = nil
     var isFocused = true
     /// Types into the Task conversation without sending.
     var addToConversation: ((String) -> Bool)? = nil
@@ -32,7 +34,7 @@ struct TaskFilesView: View {
         VStack(spacing: 0) {
             switch page {
             case .brief:
-                if let task { TaskBriefView(store: store, task: task) }
+                if let task { TaskBriefView(store: store, task: task, graph: graph) }
             case .changes:
                 TaskChangesView(store: store, task: task, isFocused: isFocused, addToConversation: addToConversation)
             case .files:

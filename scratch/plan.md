@@ -469,6 +469,10 @@ only because it hands in `"build"`.
 - `swift/README.md:389`'s example already reads "Moving, at build."; it
   stays true.
 - Check: `scripts/test_desktop.sh --filter 'TaskBriefTests|DesktopHeadlessTests'`.
+- Built 2026-11-22: `TaskBrief.state(runtime:graph:reason:)`; the graph reaches
+  the Brief through `TaskFilesView.graph` from `model.taskWork`. The Task page
+  test checks `GraphProcessLog(showsPosition: false)` beside the default log,
+  not the mounted page. Check above passed (20 tests). Left: gate and QA.
 
 Outside this Task: `TaskExecutionSnapshot.reason` can carry a raw step UUID
 ("Step c9b373a4-… is running help graph."), shared with `lf task status`.

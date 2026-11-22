@@ -323,6 +323,34 @@ impl CapturedGraph {
             })
             .collect()
     }
+
+    /// Its top-level steps as a person reads them, consecutive repeats
+    /// collapsed, with the index in them of each top-level place. A composed
+    /// step reads as the graph it came from.
+    fn workflow(&self) -> (Vec<WorkflowStep>, Vec<u32>) {
+        let mut steps: Vec<WorkflowStep> = Vec::new();
+        let mut indices = Vec::with_capacity(self.steps.len());
+        for (index, step) in self.steps.iter().enumerate() {
+            let sources = match step {
+                ConcreteStep::Skill(skill) => &skill.sources,
+                ConcreteStep::Command(command) => &command.sources,
+                ConcreteStep::Xor(branch) => &branch.sources,
+            };
+            let name = sources.get(1).cloned().unwrap_or_else(|| {
+                self.step_name(&Place {
+                    path: Vec::new(),
+                    index,
+                })
+            });
+            let interactive = matches!(step, ConcreteStep::Skill(skill) if skill.interactive);
+            match steps.last_mut() {
+                Some(last) if last.name == name => last.interactive |= interactive,
+                _ => steps.push(WorkflowStep { name, interactive }),
+            }
+            indices.push(u32::try_from(steps.len() - 1).expect("a graph has few steps"));
+        }
+        (steps, indices)
+    }
 }
 
 /// A step where a person takes part.
@@ -340,6 +368,23 @@ pub struct TaskGraph {
     pub name: String,
     pub interactive_steps: Vec<InteractiveStep>,
     pub position: TaskGraphPosition,
+    /// The Graph's top-level steps in order, as the workflow line shows them.
+    pub steps: Vec<WorkflowStep>,
+    /// The index in `steps` of the step the Task stands in; null at `start`
+    /// and at `end`.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub current_step: Option<u32>,
+    /// Where the Task stands, in one sentence: "build is running implement.
+    /// You are next needed at ship-review."
+    pub sentence: String,
+}
+
+/// One top-level step of a Task's Graph.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkflowStep {
+    pub name: String,
+    /// A person takes part in it.
+    pub interactive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -360,7 +405,97 @@ pub enum TaskGraphPosition {
     },
 }
 
+/// A Task's run as its Graph row holds it.
+#[derive(Debug, Clone)]
+pub struct TaskGraphRun<'a> {
+    pub cursor: &'a ExecutionCursor,
+    pub lf_process_id: String,
+    pub running: bool,
+}
+
 impl TaskGraph {
+    /// Where the Task stands on `graph`: waiting at `step`, or carried on from
+    /// it by `run`. `auto` on names auto, not a person, as the next to take part.
+    pub fn read(
+        graph: &CapturedGraph,
+        step: String,
+        run: Option<TaskGraphRun<'_>>,
+        auto: Option<AutoState>,
+    ) -> Self {
+        let (steps, indices) = graph.workflow();
+        let top = |place: &Place| {
+            let index = place.path.first().map_or(place.index, |(index, _)| *index);
+            indices[index]
+        };
+        let (position, current_step, sentence) = match run {
+            None => {
+                let place = match step.as_str() {
+                    START | END => None,
+                    step => graph.interactive_step(step).or_else(|| graph.find(step)),
+                };
+                let sentence = match step.as_str() {
+                    START => "Not started.".to_owned(),
+                    END => "At its end.".to_owned(),
+                    step if graph.interactive_step(step).is_some() => {
+                        format!("Waiting for you at {step}.")
+                    }
+                    step => format!("Waiting at {step}."),
+                };
+                (
+                    TaskGraphPosition::At { step },
+                    place.as_ref().map(top),
+                    sentence,
+                )
+            }
+            Some(run) => {
+                let place = graph.place_of(run.cursor);
+                let at = place
+                    .as_ref()
+                    .map_or_else(|| step.clone(), |place| graph.step_name(place));
+                let current = place.as_ref().map(top);
+                let label = current.map_or(at.as_str(), |index| &steps[index as usize].name);
+                let sentence = if !run.running {
+                    format!("Stopped at {label}. `lf task run` starts it again.")
+                } else {
+                    let running = if label == at {
+                        format!("{label} is running.")
+                    } else {
+                        format!("{label} is running {at}.")
+                    };
+                    let next = place
+                        .as_ref()
+                        .and_then(|place| graph.after(place))
+                        .and_then(|place| graph.next_interactive(&place));
+                    match (next, auto) {
+                        (None, _) => running,
+                        (Some(next), Some(AutoState::On)) => {
+                            format!("{running} Auto stands in next at {next}.")
+                        }
+                        (Some(next), _) => format!("{running} You are next needed at {next}."),
+                    }
+                };
+                (
+                    TaskGraphPosition::Run {
+                        step,
+                        at,
+                        lf_process_id: run.lf_process_id,
+                        running: run.running,
+                    },
+                    current,
+                    sentence,
+                )
+            }
+        };
+        Self {
+            name: graph.name.clone(),
+            interactive_steps: graph.interactive_summary(),
+            position,
+            steps,
+            current_step,
+            sentence,
+        }
+    }
+
     /// Where the Task waits, or the step its run left.
     pub fn step(&self) -> &str {
         match &self.position {
@@ -390,18 +525,6 @@ impl TaskGraph {
         let interactive = self.interactive_steps.iter().any(|s| &s.name == step);
         (!ends && !interactive).then(|| crate::ops::task::auto::landing_wait(step, off, issue))
     }
-
-    /// One line for text status.
-    pub fn summary(&self) -> String {
-        let name = &self.name;
-        match &self.position {
-            TaskGraphPosition::At { step } => format!("Graph {name}: at {step}"),
-            TaskGraphPosition::Run { at, running, .. } => format!(
-                "Graph {name}: {} at {at}",
-                if *running { "running" } else { "stopped" }
-            ),
-        }
-    }
 }
 
 /// Name the committed file a teammate's graph selection needs.
@@ -421,7 +544,7 @@ pub(crate) fn validate_graph_name(name: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CapturedGraph, TaskGraph, TaskGraphPosition};
+    use super::{CapturedGraph, TaskGraph, TaskGraphRun};
     use loopflow_storage::sqlite::{Auto, AutoState};
 
     fn write(repo: &std::path::Path, path: &str, content: &str) {
@@ -503,11 +626,7 @@ mod tests {
         let graph = CapturedGraph::load("feature", repo.path())
             .unwrap()
             .unwrap();
-        let at = |step: &str| TaskGraph {
-            name: graph.name.clone(),
-            interactive_steps: graph.interactive_summary(),
-            position: TaskGraphPosition::At { step: step.into() },
-        };
+        let at = |step: &str| TaskGraph::read(&graph, step.into(), None, None);
         let mark = |state| Auto {
             state,
             at: 0,
@@ -527,5 +646,101 @@ mod tests {
         );
         assert_eq!(at("ship-review").waiting_to_land(Some(&off), "INF-1"), None);
         assert_eq!(at("end").waiting_to_land(Some(&off), "INF-1"), None);
+    }
+
+    #[test]
+    fn the_workflow_line_names_top_level_steps_and_where_the_task_stands() {
+        let repo = tempfile::tempdir().unwrap();
+        let graph = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
+        let read = |step: &str, run: Option<(&str, bool)>, auto| {
+            let cursor = run.map(|(at, _)| graph.find(at).unwrap().cursor());
+            TaskGraph::read(
+                &graph,
+                step.into(),
+                cursor
+                    .as_ref()
+                    .zip(run)
+                    .map(|(cursor, (_, running))| TaskGraphRun {
+                        cursor,
+                        lf_process_id: "lfp_1".into(),
+                        running,
+                    }),
+                auto,
+            )
+        };
+        let start = read("start", None, None);
+        let steps: Vec<_> = start
+            .steps
+            .iter()
+            .map(|step| (step.name.as_str(), step.interactive))
+            .collect();
+        assert_eq!(
+            steps,
+            [
+                ("plan", false),
+                ("build", false),
+                ("ship-review", true),
+                ("deliver", false),
+                ("verify", true)
+            ]
+        );
+        assert_eq!(
+            (start.current_step, start.sentence.as_str()),
+            (None, "Not started.")
+        );
+        let end = read("end", None, None);
+        assert_eq!(
+            (end.current_step, end.sentence.as_str()),
+            (None, "At its end.")
+        );
+
+        let implement = read("plan", Some(("implement", true)), None);
+        assert_eq!(implement.current_step, Some(1));
+        assert_eq!(
+            implement.sentence,
+            "build is running implement. You are next needed at ship-review."
+        );
+        let auto = read("plan", Some(("implement", true)), Some(AutoState::On));
+        assert_eq!(
+            auto.sentence,
+            "build is running implement. Auto stands in next at ship-review."
+        );
+        let stopped = read("plan", Some(("implement", false)), None);
+        assert_eq!(
+            stopped.sentence,
+            "Stopped at build. `lf task run` starts it again."
+        );
+        let review = read("ship-review", None, None);
+        assert_eq!(review.current_step, Some(2));
+        assert_eq!(review.sentence, "Waiting for you at ship-review.");
+    }
+
+    #[test]
+    fn a_step_two_parts_share_is_placed_by_the_cursor_not_its_name() {
+        let repo = tempfile::tempdir().unwrap();
+        let graph = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
+        let mut seen = Vec::new();
+        super::walk(&graph.steps, &[], &mut |place, _| {
+            if graph.step_name(&place) == "concept-review" {
+                seen.push(place.cursor());
+            }
+        });
+        let labels: Vec<_> = seen
+            .iter()
+            .map(|cursor| {
+                let line = TaskGraph::read(
+                    &graph,
+                    "plan".into(),
+                    Some(TaskGraphRun {
+                        cursor,
+                        lf_process_id: "lfp_1".into(),
+                        running: true,
+                    }),
+                    None,
+                );
+                line.steps[line.current_step.unwrap() as usize].name.clone()
+            })
+            .collect();
+        assert_eq!(labels, ["plan", "build"]);
     }
 }

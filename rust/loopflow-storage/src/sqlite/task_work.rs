@@ -178,6 +178,8 @@ pub struct SavedTaskGraphRow {
     pub graph: String,
     pub step: String,
     pub run: Option<(String, crate::graph_process::TaskCarrier)>,
+    /// The Task's auto state, which names who takes part next.
+    pub auto: Option<AutoState>,
 }
 
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
@@ -223,7 +225,13 @@ fn task_graph_row(
         return Ok(None);
     };
     let run = start.zip(carrier);
-    Ok(Some(SavedTaskGraphRow { graph, step, run }))
+    let auto = auto_in(conn, task)?.map(|mark| mark.state);
+    Ok(Some(SavedTaskGraphRow {
+        graph,
+        step,
+        run,
+        auto,
+    }))
 }
 
 /// Put the Task on a run from `cursor`, carried by `by` as it started at

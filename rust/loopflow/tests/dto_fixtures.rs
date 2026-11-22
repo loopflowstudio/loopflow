@@ -345,6 +345,9 @@ fn task_detail_says_each_fact_once() {
         detail.task.graph.as_ref().unwrap().step.as_deref(),
         Some("demo")
     );
+    let graph = detail.graph.as_ref().unwrap();
+    assert_eq!(graph.current_step, Some(2));
+    assert_eq!(graph.sentence, "Waiting for you at demo.");
     let conversation = detail
         .sessions
         .iter()
@@ -528,6 +531,25 @@ fn task_work_preserves_sessions_graph_runs_and_graph() {
     );
     assert_eq!(graph.step(), "review-design");
     assert!(graph.waiting_step().is_none());
+    let line: Vec<_> = graph
+        .steps
+        .iter()
+        .map(|step| (step.name.as_str(), step.interactive))
+        .collect();
+    assert_eq!(
+        line,
+        [
+            ("plan", false),
+            ("review-design", true),
+            ("build", false),
+            ("demo", true)
+        ]
+    );
+    assert_eq!(graph.current_step, Some(2));
+    assert_eq!(
+        graph.sentence,
+        "build is running implement. You are next needed at demo."
+    );
     assert_eq!(
         serde_json::to_value(work).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()

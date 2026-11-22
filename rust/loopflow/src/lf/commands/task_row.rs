@@ -63,6 +63,10 @@ pub struct TaskDetail {
     /// starts again when it dies; `null` before the Task has one.
     #[serde(deserialize_with = "Option::deserialize")]
     pub conversation: Option<loopflow_model::id::LfSessionId>,
+    /// The Graph the Task took up and where it stands on it, as the workflow
+    /// line reads it; `null` before it takes one up.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub graph: Option<loopflow_execution::task_graph::TaskGraph>,
     pub graph_processes: Vec<TaskGraphRow>,
     pub comments: Option<TaskThread>,
     /// What the Task's run came to, written when it completed or was

@@ -1228,12 +1228,12 @@ pub(crate) async fn task_detail(
         .task
         .ok_or_else(|| anyhow!("this Task is not registered in Loopflow"))?;
     let row = task_row(store, &task).await?;
-    let mut sessions = Vec::new();
-    for session in status
+    let (overview_sessions, graph) = status
         .overview
-        .map(|overview| overview.sessions)
-        .unwrap_or_default()
-    {
+        .map(|overview| (overview.sessions, overview.graph))
+        .unwrap_or_default();
+    let mut sessions = Vec::new();
+    for session in overview_sessions {
         if let Some(record) =
             loopflow_execution::ops::human_session::listed(store, session.id.as_str())?
         {
@@ -1260,6 +1260,7 @@ pub(crate) async fn task_detail(
             .and_then(|execution| execution.stack_parent),
         task: TaskNames::read(Some(store)).await?.row(row),
         sessions,
+        graph,
         graph_processes: status
             .graph_processes
             .into_iter()

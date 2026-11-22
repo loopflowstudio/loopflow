@@ -330,3 +330,17 @@ Made at the fifth qa, with nobody present; the page is `scratch/qa.html`.
     comparison reloads, or give it a way to dismiss?
 82. Of the three buttons in 79, "OK" was seen in the neutral style; "Reload
     saved intent" and "Retry Project preparation" were not reached.
+
+Made at the concept review of the built change, fifth pass, with nobody
+present; the page is `scratch/concept-review.html`.
+
+83. Settles 81: the skipped-lines failure is held with its file's opened
+    rows and drawn above that file's lines (slice 9). As one store-wide
+    value it showed under another file in Files' Diff and stayed for good
+    after choosing a step's commits. Passed over: clearing it on reload; a
+    dismiss button.
+84. It reads "Skipped lines did not load." with no path and has no Retry:
+    the row that failed is still there to press.
+85. 78 stays open and outside this change: `desktop.css`'s `.app.state`
+    uses the Mac's inks, and the phone's were not compared with a phone
+    prototype here.

@@ -10,9 +10,11 @@ Slices 1 to 8 are built and were looked at in the Dev app
 (`scratch/qa.html`, five runs). The fifth saw slice 8's two diff-stream
 failures and fixed one thing: a file read called off by a newer reload was
 recorded as "File not read." (questions 80).
-**Next:** the gate checks and one look at "Not started." on an unlocked
-display (questions 48). Nothing is left to build. Seen and left: the
-skipped-lines failure outlives its cause (questions 81).
+**Next:** slice 9, the last thing to build: a file's skipped-lines failure
+is held with that file's opened rows and drawn above its lines (the fifth
+as-built concept review, `scratch/concept-review.html`; settles questions
+81). Then the gate checks and one look at "Not started." on an unlocked
+display (questions 48).
 
 The sync with main (6197582ea4) moved `LoopflowButtonStyle`, `StatusMark`,
 `TaskRow` and `WorkflowLine` to `swift/Loopflow/Design/` and brought the
@@ -660,6 +662,44 @@ demo: not headless; qa or demo runs it.
      `scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|BacklogViewTests|TaskFilesTests'`.
      Dev app: the failed file shows in the Diff tab with the server
      stopped (`scratch/qa.html`, fourth run, item 2); qa looks.
+
+9. **A file's skipped-lines failure lives with the file. Not built.** Swift
+   only, two files and a test. Slice 8 left `TaskFilesStore.gapError` one
+   `Failure?` for the whole store beside `openedGaps[path]`. So the line is
+   drawn first in the stream, screens from the row that was pressed; Files'
+   Diff of `b.swift` shows "Skipped lines of a.swift did not load."; and
+   `showStep`, a reread file (`accept`) and a file leaving the comparison
+   (`loadReview`) drop the opened rows and keep the failure. After
+   `showStep` to a step's commits `canOpenGaps` is false, so nothing on
+   screen clears it.
+   - `TaskFileDocument.swift`: `openedGaps`' value becomes one small record
+     per file: the rows opened by hunk header, and the Machine's message
+     from the last open that failed. `openGap` sets the message on a
+     failure and clears it on a success, for that path. The four places
+     that drop a file's opened rows (`showStep`, `loadReview`, `accept`,
+     the Files Diff reparse near `:1583`) stay as they are and now drop the
+     failure with them. `gapError` goes. `opened(_:)` reads the rows as
+     before.
+   - `ReviewStreamView.swift`: the line at the top of `body` goes. Inside
+     the branch that draws a file's blocks (so a viewed file folds it
+     away), above the blocks:
+     `FailureLine("Skipped lines did not load.", machine:).reviewNoticeInset()`.
+     No path in the sentence, since the file's header is above it; no
+     Retry, since the row that failed is still there to press.
+   - Stays: a failure whose cause went away with nothing else changing
+     stays until a row in that file is pressed, as "File not read." stays
+     until its Retry (questions 81's case).
+   - Passed over: clearing the store-wide value on reload (still drawn away
+     from its file and under another's); a dismiss button (a new action).
+   - Check: one store test beside `TaskFilesTests.swift:1132`. An open
+     that fails records the message for `a.swift` and nothing for another
+     path; `showStep` clears it. The existing `#expect(store.gapError ==
+     nil)` reads the file's record. Then
+     `scripts/test_desktop.sh --filter 'TaskFilesTests|EmptyStateTests|TypographyDisciplineTests'`.
+     Dev app: a `chmod 000` file with a skipped-lines row, as the fifth run
+     did; qa looks.
+   - This closes the diff stream. The review after it reads only this
+     slice's two files.
 
 Outside this change, on the page for whoever wants it: a stopped Graph's
 reason is one string on the wire, so the Machine's part of "kickoff:

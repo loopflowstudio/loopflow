@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<title>Concept review, fourth pass as built: empty and failed states (923677)</title>
+<title>Concept review, fifth pass as built: empty and failed states (923677)</title>
 <style>
   :root { --bg:#f8f6f1; --ink:#1f1b18; --soft:#6a625b; --line:#d9d2c7; --card:#fffdf9; --accent:#6d2b35;
           --yes:#2f6b3f; --no:#a23a2a; --new:#8a5a00; --newbg:#fbf1d8; --mono: ui-monospace, Menlo, monospace; }
@@ -26,49 +26,56 @@
   .win { background:var(--card); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
   .win.proposed { border:2px dashed var(--new); }
   .cap { padding:8px 12px; border-bottom:1px solid var(--line); font-weight:600; }
-  .pane { padding:16px; }
-  .warn { color:var(--new); }
+  .pane { padding:14px 16px; }
+  .hdr { background:var(--bg); border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+         padding:5px 16px; font:13px var(--mono); margin:10px -16px 8px; }
+  .gap { color:var(--soft); font-size:13px; margin:6px 0; }
+  .bad { color:var(--no); font-weight:600; }
   ol.q > li { margin:14px 0; } ol.q ol { list-style:lower-alpha; margin-top:4px; }
   .taken { color:var(--yes); font-weight:600; }
 </style>
 <h1>Nothing there, or something failed: do the product's concepts and the code's line up?</h1>
-<p class="soft">Task 923677, fourth review of the built change. The branch at <code>ebdd99744a</code> against its base
-<code>fd90d7e6ad</code>, read with the four Dev app runs in <code>scratch/qa.html</code>. The third as-built page is in
-git at <code>3e64ef7c07</code>.</p>
+<p class="soft">Task 923677, fifth review of the built change. The branch at <code>109fde7783</code> against its base
+<code>c4de2038fd</code>, read with the five Dev app runs in <code>scratch/qa.html</code>. The fourth as-built page is
+in git at <code>f2981e13ce</code>.</p>
 
 <p><b>The area taken.</b> What Loopflow for Mac shows before work is running and when a read or write fails: the New
 Task sheet, a filed Task that has not started, a pane with nothing in it, a list with nothing in it, and a failure,
-whether it fills a pane or sits beside content that stays. All seven slices in it.</p>
+whether it fills a pane or sits beside content that stays. All eight slices in it.</p>
 
-<p><b>Since the last pass.</b> It planned five failures as <code>FailureLine</code>s. Slice 7 built them; the fourth
-Dev app run saw four on a real failure and fixed four things it met: the line stacks in a narrow pane, a failed
-conversation is said once, the Changes pane's failed comparison is the line, and the Dashboard's sits at the leading
-edge. 167 view tests passed after them. <code>FailureLine</code> is at 33 sites, <code>EmptyState</code> at 22,
-<code>.emptyLine()</code> at 18. The three forms hold, and so does everything about New Task and the unstarted Task.
-What is left is in one place: the diff stream.</p>
+<p><b>Since the last pass.</b> It planned the diff stream's two failures as <code>FailureLine</code>s over one
+<code>Failure</code> value. Slice 8 built that; the fifth Dev app run saw both on a real unreadable file, light and
+dark, and fixed a called-off read being drawn as a failure. 86 view tests passed after it. <code>FailureLine</code>
+is at 35 sites, <code>EmptyState</code> at 22, <code>.emptyLine()</code> at 17. The forms hold. That run also left
+one thing it saw (questions 81): the skipped-lines failure stays after its cause is gone. Reading why is this pass's
+one finding.</p>
 
 <p><span class="yes">yes</span> lines up &nbsp; <span class="no">no</span> does not &nbsp;
 <span class="new">proposed</span> not in the code yet; dashed boxes are proposed too</p>
 
 <h2>One interaction, walked in the built app</h2>
-<p>Someone opens a Task's Changes with the Machine going away under them.</p>
+<p>Someone reads a Task's Changes and presses a row of skipped lines in <code>a.swift</code>, far down the stream.</p>
 <table>
   <tr><th>What they see</th><th>Where it comes from</th><th></th></tr>
-  <tr><td>The comparison fails: “<b>Comparison unavailable.</b>” and the reason in mono, where the count was.</td>
-      <td><code>TaskChangesView</code>, <code>FailureLine</code> over <code>store.changesError</code>.</td>
-      <td class="yes">yes</td></tr>
-  <tr><td>The sidebar's hidden paths fail to save: “<b>Hidden paths were not saved.</b>” and the message, stacked in
-      the 236 pt column.</td>
-      <td><code>HiddenPathsFailure</code>, <code>FailureLine</code>.</td><td class="yes">yes</td></tr>
-  <tr><td>One file in the stream fails to read: “Could not be read: connection refused.” in the secondary ink, the
-      face of “No textual changes.”, with a small Retry.</td>
-      <td><code>FileNote.failed</code> through <code>ReviewNotice</code>, <code>ReviewStreamView.swift:64</code>.</td>
-      <td class="no">no</td></tr>
-  <tr><td>They press a gap to show skipped lines and it fails: “Skipped lines of a.swift unavailable: …” in the same
-      face.</td>
-      <td><code>store.gapError</code>, one string, <code>ReviewStreamView.swift:24</code>.</td><td class="no">no</td></tr>
-  <tr><td>Recovery: Retry reads the file and the note goes; the next gap that opens clears the other.</td>
-      <td>The store's own state, unchanged.</td><td class="yes">yes</td></tr>
+  <tr><td>The read fails. “<b>Skipped lines of a.swift did not load.</b>” and the message appear at the top of the
+      stream, which may be screens above the row they pressed.</td>
+      <td><code>store.gapError</code>, one <code>Failure?</code> for the whole store, drawn first in
+      <code>ReviewStream.body</code>.</td><td class="no">no</td></tr>
+  <tr><td>They open Files and the Diff of <code>b.swift</code>. The line about <code>a.swift</code> is at its
+      top.</td>
+      <td>Both readers draw the same stream over the same store.</td><td class="no">no</td></tr>
+  <tr><td>They pick one step's commits to compare. Skipped-lines rows can no longer be pressed there; the line
+      stays, and nothing on screen clears it.</td>
+      <td><code>showStep</code> empties <code>openedGaps</code> and leaves <code>gapError</code>;
+      <code>canOpenGaps</code> is false with a head commit.</td><td class="no">no</td></tr>
+  <tr><td><code>a.swift</code> changes on disk and its lines are read again. The opened rows close; the line about
+      them stays.</td>
+      <td><code>accept</code> drops <code>openedGaps[path]</code> only.</td><td class="no">no</td></tr>
+  <tr><td>Recovery: only a skipped-lines row that opens, in any file, clears it.</td>
+      <td><code>openGap</code>'s success branch.</td><td class="no">no</td></tr>
+  <tr><td>Beside it, a file whose read failed: “<b>File not read.</b>”, the message and Retry under that file, gone
+      when it is read.</td>
+      <td><code>fileNotes[path]</code>, <code>ReviewFileNote</code>.</td><td class="yes">yes</td></tr>
 </table>
 
 <h2>Product concepts and code concepts</h2>
@@ -80,103 +87,110 @@ What is left is in one place: the diff stream.</p>
   <tr><td>Whose default the workflow is</td>
       <td><code>workflowChoice</code>, <code>workflowSelection</code></td><td class="yes">yes</td><td></td></tr>
   <tr><td>A pane with nothing in it, or one that did not open</td>
-      <td><code>EmptyState</code>; no <code>ContentUnavailableView</code>, and a test fails on a new one</td>
-      <td class="yes">yes</td><td></td></tr>
+      <td><code>EmptyState</code> on the Mac; no <code>ContentUnavailableView</code>, and a test fails on a new
+      one</td><td class="yes">yes</td><td></td></tr>
+  <tr><td>The same state on the phone</td>
+      <td><code>StateView</code>, in the shared <code>Design/</code> since the sync with main</td>
+      <td class="no">no</td>
+      <td>One idea under two names, in two inks. Outside this change; see below.</td></tr>
   <tr><td>A list with nothing in it</td><td><code>.emptyLine()</code></td><td class="yes">yes</td><td></td></tr>
   <tr><td>An empty repository</td><td><code>repositoryIsEmpty</code>, <code>NoPlannedWork</code></td>
       <td class="yes">yes</td><td></td></tr>
-  <tr><td>A conversation that failed to open</td>
-      <td>The pane's <code>EmptyState</code>, or the line above the panes when no pane says it
-      (<code>ConversationPlaceholder.namesFailure</code>)</td><td class="yes">yes</td>
-      <td>Said once now. <code>namesFailure</code> repeats the placeholder's two conditions beside it in the same
-      type; a third condition would be the time to make them one.</td></tr>
   <tr><td>Something failed beside what I am looking at</td>
-      <td><code>FailureLine</code> at 33 sites; two in the diff stream drawn as notes</td><td class="no">no</td>
-      <td>One name for two ideas: <code>ReviewNotice</code> is both “No textual changes.” and a failed read with
-      Retry. The plan lists the file's note among the failures; slice 6 passed it by, and the third pass's sweep,
-      which looked for the warning ink, could not see a failure drawn in the secondary ink.</td></tr>
-  <tr><td>The failure a pane keeps until the next try</td>
-      <td><code>BacklogNotice.failed(what, machine:)</code>, <code>HiddenPathsFailure(what, machine)</code>, and
-      strings with the words baked in (<code>gapError</code>, <code>FileNote.failed</code>,
-      <code>closed.error</code>)</td><td class="no">no</td>
-      <td>One idea under two types and three string shapes. A baked string cannot be split again:
-      the Wave page reads “Completed Tasks did not load. Completed Tasks unavailable: …”.</td></tr>
+      <td><code>FailureLine</code> over a <code>Failure</code> (what, machine) at 35 sites</td>
+      <td class="yes">yes</td><td></td></tr>
+  <tr><td>A file the diff could not read</td>
+      <td><code>fileNotes[path] = .failed</code>: kept with the file, drawn under it, cleared by its Retry and by
+      the next read</td><td class="yes">yes</td><td></td></tr>
+  <tr><td>Skipped lines that did not open</td>
+      <td><code>gapError</code>, one value for the store, beside <code>openedGaps[path]</code></td>
+      <td class="no">no</td>
+      <td>A failure about one file's rows, held by nobody in particular. It is drawn away from the rows, shown under
+      another file's name in the other reader, and outlives the comparison it was about. Its sentence names the path
+      only because the line is not where the file is.</td></tr>
   <tr><td>An action that did not go through, said in passing</td>
-      <td><code>Notice</code> posted to the window (“Could not change pane: …”)</td><td class="yes">yes</td>
-      <td>A different thing: nothing stays on screen to sit beside. Not in this change.</td></tr>
-  <tr><td>What I typed is not valid yet</td>
-      <td>Text in the warning or failure ink under the field</td><td class="yes">yes</td>
-      <td>Nothing was asked of the Machine. Stays.</td></tr>
+      <td><code>Notice</code> posted to the window</td><td class="yes">yes</td>
+      <td>A different thing. Not in this change.</td></tr>
   <tr><td>A Graph that stopped, and why</td><td>Rust's position line, one string</td><td class="no">no</td>
       <td>Outside this change: the wire carries one sentence.</td></tr>
 </table>
 
-<h2>The biggest mismatch: the diff stream's two failures read as notes</h2>
+<h2>The biggest mismatch: a file's failure that the file does not hold</h2>
 <div class="pair">
-  <div class="win"><div class="cap">Built: a file the diff could not read</div>
-    <div class="pane"><span class="soft">Could not be read: connection refused.</span> <u class="soft">Retry</u></div></div>
-  <div class="win proposed"><div class="cap">Proposed</div>
-    <div class="pane"><b style="color:var(--no)">File not read.</b> <code>connection refused</code> &nbsp;[Retry]</div></div>
+  <div class="win"><div class="cap">Built: Files, Diff of b.swift, after a.swift's rows failed in Changes</div>
+    <div class="pane">
+      <span class="bad">Skipped lines of a.swift did not load.</span> <code>connection refused</code>
+      <div class="hdr">b.swift</div>
+      <div class="gap">↕ 40 unchanged lines</div>
+      <code>+ let b = 2</code>
+    </div></div>
+  <div class="win proposed"><div class="cap">Proposed: the line is under a.swift, and only there</div>
+    <div class="pane">
+      <div class="hdr" style="margin-top:0">a.swift</div>
+      <span class="bad">Skipped lines did not load.</span> <code>connection refused</code>
+      <div class="gap">↕ 40 unchanged lines</div>
+      <code>+ let a = 1</code>
+    </div></div>
 </div>
-<div class="pair">
-  <div class="win"><div class="cap">Built: the Wave page, completed Tasks that did not load</div>
-    <div class="pane"><b style="color:var(--no)">Completed Tasks did not load.</b>
-      <code>Completed Tasks unavailable: request timed out</code></div></div>
-  <div class="win proposed"><div class="cap">Proposed</div>
-    <div class="pane"><b style="color:var(--no)">Completed Tasks did not load.</b> <code>request timed out</code></div></div>
-</div>
-<p><span class="new">proposed</span> Slice 8 in <code>scratch/plan.md</code>, three sites and one value:</p>
+<p><span class="new">proposed</span> Slice 9 in <code>scratch/plan.md</code>. One record, one draw site:</p>
 <table>
-  <tr><th>Site</th><th>Today</th><th>After</th></tr>
-  <tr><td><code>ReviewStreamView.swift:64</code></td><td>“Could not be read: …” as a <code>ReviewNotice</code>, small
-      Retry</td>
-      <td><code>FailureLine("File not read.", machine: reason) { Retry }</code>; <code>.cut</code> stays a note</td></tr>
-  <tr><td><code>ReviewStreamView.swift:24</code></td><td>“Skipped lines of a.swift unavailable: …” as a note</td>
-      <td><code>FailureLine("Skipped lines of a.swift did not load.", machine: …)</code></td></tr>
-  <tr><td><code>WaveDetailPane.swift:179</code></td><td>the message stored with “Completed Tasks unavailable:” in
-      front of it</td><td>the message alone</td></tr>
-  <tr><td><code>Design/EmptyState.swift</code></td><td><code>BacklogNotice.failed(String, machine:)</code>,
-      <code>HiddenPathsFailure</code></td>
-      <td>one <code>Failure</code> (what, machine) that <code>FailureLine</code> draws; the backlog's notice, the
-      hidden paths and the gap hold it; <code>HiddenPathsFailure</code> goes</td></tr>
+  <tr><th></th><th>Built</th><th>After</th></tr>
+  <tr><td>Held</td>
+      <td><code>openedGaps: [path: [header: lines]]</code> and <code>gapError: Failure?</code>, two lifetimes</td>
+      <td>one value per file: the rows opened and the Machine's message from the last open that failed. Whatever
+      drops a file's opened rows drops its failure, with no line of code naming it</td></tr>
+  <tr><td>Drawn</td><td>first in the stream, in both readers</td>
+      <td>above that file's lines, where “File not read.” is drawn below them</td></tr>
+  <tr><td>Reads</td><td>“Skipped lines of a.swift did not load.”</td><td>“Skipped lines did not load.”</td></tr>
+  <tr><td>Goes</td><td></td><td><code>gapError</code></td></tr>
 </table>
 <table>
   <tr><th>Tested on</th><th>What happens</th></tr>
-  <tr><td>Normal path</td><td>“No textual changes.”, “Binary file.”, “Cut at 1 MB.” read as they do now.</td></tr>
-  <tr><td>Failure</td><td>What failed in the failure ink, the message in mono, Retry in the line.</td></tr>
-  <tr><td>Recovery</td><td>Retry reads the file and the line goes, as the note does now.</td></tr>
-  <tr><td>Counterexample kept</td><td>The stream is the widest pane; in a narrow split the line stacks, which
-      slice 7's fourth run added.</td></tr>
-  <tr><td>Counterexample kept</td><td>The Files pane's “Latest read failed.” over “Live file observation
-      unavailable: …” keeps its prefix: one stored string carries two different failures there, and the prefix is
-      what tells them apart (questions 54).</td></tr>
-  <tr><td>Counterexample that stops the sweep</td><td>Each pass has found fewer (13, 5, 2). After slice 8 the
-      failures not drawn as a line are named and stay: window notices, an icon's help where a line has no room, a
-      file's save message, form checks. The next pass looks only at what slice 8 changed.</td></tr>
+  <tr><td>Normal path</td><td>A row opens; nothing else changes.</td></tr>
+  <tr><td>Failure</td><td>The line under the file's header, in the failure ink with the message in mono.</td></tr>
+  <tr><td>Recovery</td><td>Pressing a row in that file again is the retry, and an open that works clears the line.
+      It also goes when the file's lines are read again, when the file leaves the comparison, and when another
+      comparison is chosen: the four places the opened rows already go.</td></tr>
+  <tr><td>Counterexample kept</td><td>Questions 81's case: the file is readable again and nothing else changed. The
+      line stays until a row in that file is pressed, as “File not read.” stays until its Retry. It is now beside
+      the row that retries it.</td></tr>
+  <tr><td>Counterexample kept</td><td>A file marked viewed is folded to its header; its line is folded with it.</td></tr>
+  <tr><td>Passed over</td><td>Clearing the store-wide value on every reload: the line would still be drawn away
+      from its file and under another's, and a file watch would take it away while it is being read. A dismiss
+      button: a new action for a failure that already has a retry.</td></tr>
 </table>
 
 <h2>Outside this change</h2>
 <ul>
+  <li><b>One state, two components.</b> The phone's <code>StateView</code> draws its title in the text ink and its
+      sentence in the secondary ink; the Mac's <code>EmptyState</code> draws the emphasis ink and the text ink, as
+      <code>desktop.css</code>'s <code>.app.state</code> does. Folding them changes one platform's screens, and
+      which ink is right is a choice for whoever looks at both (questions 78). Its own Task: <code>EmptyState</code>'s
+      full form draws <code>StateView</code> and adds the Machine's message and the dashboard's one line.</li>
   <li>A new Task's Files pane pointing at the repository after Start: Task ea8659.</li>
   <li>A Start the Machine refused going to creation recovery's notice, not to “Not started.”: its own Task.</li>
   <li>A stopped Graph's reason in mono: Rust would send what stopped and the Machine's message as two fields.</li>
-  <li>Dashboard tiles about 185 pt wide cutting their header (questions 70): not from this change.</li>
+  <li>Dashboard tiles about 185 pt wide cutting their header (questions 70).</li>
 </ul>
 
 <h2>Questions</h2>
 <p class="soft">Each was decided with nobody present; the choice taken is marked. “2b” is a complete answer.</p>
 <ol class="q">
-  <li>The diff stream's failed file and failed gap (questions 69):
-    <ol><li><span class="taken">Taken:</span> draw both as <code>FailureLine</code>s in this change (slice 8).</li>
-      <li>Ship as built and take the file's note off the plan's list.</li></ol></li>
-  <li>The failure a pane keeps, held as two small types and three strings:
-    <ol><li><span class="taken">Taken:</span> one <code>Failure</code> value beside <code>FailureLine</code>; the
-        fourth compress left two types alone, and a third holder is what changes that.</li>
-      <li>A third small type for the gap, each next to its pane.</li></ol></li>
-  <li>When the sweep ends:
-    <ol><li><span class="taken">Taken:</span> with slice 8. What stays drawn another way is named above.</li>
-      <li>Keep reading every stored error string each pass.</li></ol></li>
-  <li><code>namesFailure</code> repeating the placeholder's conditions:
-    <ol><li><span class="taken">Taken:</span> leave it; two conditions in one type, covered by the fourth run.</li>
-      <li>One value the placeholder and the line above both read.</li></ol></li>
+  <li>The skipped-lines failure (questions 81):
+    <ol><li><span class="taken">Taken:</span> hold it with the file's opened rows and draw it above that file's
+        lines (slice 9).</li>
+      <li>Keep one value for the store and clear it when the comparison reloads.</li>
+      <li>Ship as built.</li></ol></li>
+  <li>Its sentence:
+    <ol><li><span class="taken">Taken:</span> “Skipped lines did not load.”, since the file's header is above
+        it.</li>
+      <li>Keep the path in it.</li></ol></li>
+  <li>A Retry button in that line:
+    <ol><li><span class="taken">Taken:</span> none; the row that failed is still there to press.</li>
+      <li>Remember which row failed and give the line a Retry.</li></ol></li>
+  <li><code>StateView</code> and <code>EmptyState</code>:
+    <ol><li><span class="taken">Taken:</span> apart in this change; its own Task, with the ink chosen by someone
+        looking at both platforms.</li>
+      <li>Fold them here, with the Mac's ink on the phone.</li>
+      <li>Fold them here, with the phone's ink on the Mac.</li></ol></li>
 </ol>

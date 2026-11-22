@@ -30,3 +30,5 @@
 - Implement round 5: old `--bg` (white) maps to `--background` for the page and docs hero and `--surface` for cards, buttons and table cells; `--rule-strong` maps to `--border-active` (darker than before).
 
 - QA round 5: `config.theme` lost `path` without a protocol revision bump, so a branch client and a 0.16.0 server refuse each other's request (both say revision 9). Left as is: the repo adds and reshapes operations without bumps, the phone falls back quietly and Desktop recovers when the server matches. Passed over: bumping to revision 10 (every new client would refuse every old server), or Desktop naming "update the server" for this error.
+
+- Concept review round 5: a failed `config.theme` read gets its own banner value without Choose Theme…, and a request the server can't parse names both builds ("Update the older one.") in `ServerLink`. Overrides QA round 5's "left as is" for Desktop only. Passed over: a revision bump (nothing would branch on it without a compat path), naming `lf install` (wrong when the client is the older side). The phone stays quiet.

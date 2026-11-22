@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<title>Concept review: themes, round 4 — the phone and the website</title>
+<title>Concept review: themes, round 5 — the theme choice across Mac, phone and site, built</title>
 <style>
 :root { color-scheme: light dark; --bg:#faf8f5; --fg:#2a2624; --muted:#5f5752; --line:#e6dfd6; --card:#fffdf9; --yes:#31633e; --no:#a02e25; --prop:#24579e; --accent:#722f37; }
 @media (prefers-color-scheme: dark) { :root { --bg:#2b2d30; --fg:#e6e2dc; --muted:#a8a29b; --line:#45474b; --card:#323437; --yes:#8fcf9a; --no:#f0a39a; --prop:#9cc2ee; --accent:#e7a3ad; } }
@@ -19,89 +19,63 @@ pre { background:var(--bg); border:1px solid var(--line); border-radius:6px; pad
 .swatches { display:flex; gap:4px; flex-wrap:wrap; margin:.4rem 0 } .swatches span { width:28px; height:20px; border-radius:3px; border:1px solid var(--line) }
 ol.q li { margin:.6rem 0 }
 </style></head><body>
-
-<h1>Themes with the phone and the website in them: do the concepts line up?</h1>
-<p class="muted">Area taken: the theme choice as a whole, now that steer f4ce64ed (“make sure to make ipgone app respecy themes and the website he in loopflow light”) puts two more surfaces on it. Round 4 left the Mac chooser with nothing to change (one assignment, side from the theme's colors). The open question is where “the chosen theme” lives once it is read by something other than the Mac app, and what the website is relative to the catalogue. Branch against base <code>621fb0926d</code>, HEAD <code>54bab27109</code>.</p>
+<h1>The theme choice, built across three surfaces: do the concepts line up?</h1>
+<p class="muted">Area taken: the whole theme choice as PR #2020 now stands against main: the catalogue, the chooser, <code>theme:</code> as one Machine fact read through <code>config.theme {value}</code>, the phone drawing its Machine's theme, and the site generated from Loopflow Light. Round 4's page asked where the choice lives; this page reviews what was built from that answer, with QA round 5 (<code>scratch/qa.html</code>, R5.1–R5.10) in it.</p>
 
 <h2>One interaction, walked</h2>
-<p><b>Normal, as it should be.</b> On the Mac, Choose Theme → Fig, Apply. Config now says <code>theme: light:Fig Leaf,dark:Fig</code>. On the phone, open Loopflow at night: Task list, workspace and terminal in plum and lime. In daylight: Fig Leaf.</p>
-<p><b>Today.</b> The phone ignores all of it. Three views each compute <code>colorScheme == .dark ? .dark : .light</code> (<code>LoopflowiOSApp.swift:61</code>, <code>MachineConnectionView.swift:81</code>, <code>TaskListView.swift:209</code>), and the pickers receive whichever was computed. The website is a third, hand-kept palette: <code>--wine #9B1A4A</code> for buttons next to <code>--burgundy #722f37</code>, a dark terminal block, warm paper greys that match neither default.</p>
-<p><b>Failure.</b> Config names <code>Personal</code>, a file in the Mac's <code>~/.lf/themes</code>. The phone ships only the 26 built-ins. It draws the Loopflow default for that side; nothing breaks, the phone and Mac differ.</p>
-<p><b>Recovery.</b> Choosing a built-in on the Mac; the phone picks it up the next time it comes to the foreground. Before the phone has ever reached a Machine (pairing screen), it draws the Loopflow pair.</p>
+<p><b>Normal.</b> On the Mac, Choose Theme → Fig, Apply. The server writes <code>theme: Fig</code>. The window turns plum; the phone draws Fig the next time it comes forward (R5.4). Works.</p>
+<p><b>Failure: a name nobody ships.</b> <code>theme: Verdigris</code>. Desktop: “No theme named “Verdigris”: keeping Fig Leaf. Fix theme: in …/config.yaml …” and a <b>Choose Theme…</b> button (R5.8). The button fixes it. The phone draws Loopflow's pair (R5.5). Works.</p>
+<p><b>Failure: the server can't answer the question.</b> The Dev app against a 0.16.0 server, which is what #2007 (“Run Loopflow Dev on the live Machine”) makes the normal Dev setup until this ships. Desktop keeps the last good theme and shows <code>config.theme: missing field `path`</code> with the same <b>Choose Theme…</b> button (R5.9). Choosing a theme sends the same request and fails the same way. Nothing on screen says which side to update.</p>
+<p><b>Recovery.</b> Running the branch server: the next file change clears it (R5.9). Nobody would know to do that from the message.</p>
 
 <h2>Product concepts and code concepts</h2>
 <table>
 <tr><th>What a person knows</th><th>What the code has</th><th>Match</th><th>Note</th></tr>
-<tr><td>A theme: a name, light or dark</td><td><code>ThemeDefinition</code>, <code>ThemeFile</code> in the shared <code>Loopflow</code> module</td><td class="yes">yes</td><td>Already decodes on iOS; the 26 built-ins are in the shared bundle.</td></tr>
-<tr><td>“My theme” — the choice, one per Machine</td><td><code>theme:</code> in the Machine's <code>~/.lf/config.yaml</code>, read by <code>config.theme {path, value}</code></td><td class="no">no</td><td>The served read takes a <em>client-supplied path</em>. Desktop passes its own idea of the config file; the phone has none. One Machine fact, addressed as an arbitrary file.</td></tr>
-<tr><td>Light and dark follow my appearance</td><td><code>ThemeConfig.parse</code> + <code>AppearanceSelection.isDark</code>, both in <code>LoopflowMac</code></td><td class="no">no</td><td>The meaning of a <code>theme:</code> value lives in the Mac target. The phone would have to write a second parser.</td></tr>
-<tr><td>The phone's colors</td><td>three private <code>colorScheme ? .dark : .light</code> computations</td><td class="no">no</td><td>One idea, three owners, none of them the choice.</td></tr>
-<tr><td>The phone's terminal</td><td><code>GhosttySurface.apply(theme)</code></td><td class="yes">yes</td><td>Already takes a theme; it just gets the wrong one.</td></tr>
-<tr><td>The website is Loopflow Light</td><td>~60 hand-written hex values in <code>website/static/style.css</code></td><td class="no">no</td><td>Two names for the accent (<code>--wine</code>, <code>--burgundy</code>) and two for paper (<code>--bg</code>, <code>--paper-warm</code>); none trace to a role.</td></tr>
-<tr><td>The catalogue is one source</td><td><code>scripts/theme_catalogue.py</code> writes theme files and the prototype JS, <code>--check</code> for drift</td><td class="yes">yes</td><td>The natural writer for the site's colors too.</td></tr>
+<tr><td>A theme: a name, light or dark, its own colors</td><td><code>ThemeDefinition</code>, <code>ThemeFile</code>, 26 catalogue files from <code>scripts/theme_catalogue.py</code></td><td class="yes">yes</td><td>One writer; <code>--check</code> catches drift.</td></tr>
+<tr><td>My theme: one choice per Machine</td><td><code>theme:</code> in the serving Machine's config, <code>config.theme {value}</code></td><td class="yes">yes</td><td>No client-supplied path; Desktop and phone ask the same question (R5.3, R5.8).</td></tr>
+<tr><td>What <code>light:A,dark:B</code> means</td><td><code>ThemeChoice</code> in the shared module</td><td class="yes">yes</td><td>One parser, both apps.</td></tr>
+<tr><td>Picking one: scan cards, click, Apply</td><td><code>ThemeCard</code> grid; <code>previewTheme</code>/<code>importTheme</code> share one assignment, side from the theme's colors</td><td class="yes">yes</td><td>Unchanged since round 4. R5.10 (light cards missing with a notice up) is a rendering question for an unlocked display, not a model one: nothing in <code>ThemeChooser.body</code> reads <code>notice</code> before the grid.</td></tr>
+<tr><td>The title bar</td><td><code>loopflow-titlebar</code> role; derived fallback mirrored in the generator</td><td class="yes">yes</td><td></td></tr>
+<tr><td>The site is Loopflow Light</td><td><code>website/static/theme.css</code> written by the catalogue script; <code>style.css</code> holds no color</td><td class="yes">yes</td><td>73 pages, no failures (R5.1).</td></tr>
+<tr><td>“My theme needs fixing” (Choose Theme helps)</td><td rowspan="2"><code>AppearanceStore.notice</code>, one <code>String?</code>; the window banner always adds <b>Choose Theme…</b> (<code>LoopflowApp.swift:341</code>)</td><td class="no" rowspan="2">no</td><td rowspan="2"><b>One name for two ideas.</b> <code>reload()</code> writes a library problem, an unknown name and a failed server read into the same field. The banner offers the one action that helps the first and can't help the second.</td></tr>
+<tr><td>“This Loopflow and its server disagree” (update one of them)</td></tr>
+<tr><td>Two builds disagree</td><td><code>ServerLink.unreadable</code>: “This Loopflow (X) can't read what the server (Y) sent.”</td><td class="no">half</td><td>The sentence exists for a reply the client can't decode. The other direction, a request the server can't parse, comes back as the server's raw serde text (R5.7, R5.9). Both sides still say revision 9, so the handshake can't tell.</td></tr>
 </table>
 
 <div class="big">
-<h2 style="margin-top:.4rem">Biggest mismatch: the choice is a Machine fact addressed as a file path</h2>
-<p>Everything on the phone follows from where the choice lives. It lives in one place already, the Machine's config, and Desktop already reads it through the Machine's server. But the read is <code>config.theme { path, value }</code>: whoever asks names the file. A phone can't name a Mac path, and a second variant without one would be a second way to ask the same question.</p>
-<p><b>Recommendation:</b> drop <code>path</code>. <code>config.theme { value }</code> reads or writes <code>theme:</code> in the serving Machine's own config. Desktop and the phone make the same request over the same connection. A parameter that could disagree with the Machine goes away; nothing is added.</p>
+<h2 style="margin-top:.4rem">Biggest mismatch: a notice that can't tell a bad choice from a server that didn't answer</h2>
+<p>This change made the theme a question Desktop asks its server. That added a failure the old file read never had: the server can refuse the question. The store still has one slot for “something is wrong with your theme”, and the banner's one button assumes the person's choice is at fault.</p>
+<p><b>Recommendation (made for review):</b> split the slot by who can fix it. <code>notice</code> keeps what Choose Theme fixes (unknown names, unreadable files). A failed read becomes its own value, shown in the banner without the button. When the server rejects the request's shape, <code>ServerLink</code> names both builds, the mirror of <code>unreadable</code>: “The server (0.16.0) can't read what this Loopflow (0.17.0-dev) asked. Update the older one.” No revision bump and no fallback request shape: the repo carries no old-version support, it says which side to update.</p>
+<p class="muted">Passed over: bumping the revision (the client sends <code>min_revision 8</code>, so it wouldn't refuse old servers, but nothing would then branch on it without a compat path); quiet fallback to Loopflow's pair on Desktop as on the phone (Desktop would then draw the wrong theme with no word why).</p>
 </div>
 
 <h2>Before and after</h2>
 <div class="cmp">
-<div class="win"><h3>Before</h3>
-<pre>// Mac
-ThemeConfig.read(paths.config)   // LoopflowMac
-  → config.theme {path:"/Users/…/.lf/config.yaml"}
-AppearanceSelection.isDark(...)  // LoopflowMac
+<div class="win"><h3>Before <span class="muted">(existing)</span></h3>
+<pre>[ config.theme: missing field `path`  (Choose Theme…) ]
 
-// iPhone, three times
-colorScheme == .dark ? .dark : .light
-
-/* website */
---wine:#9B1A4A; --burgundy:#722f37; --bg:#fff; …</pre></div>
+[ No theme named “Verdigris”: keeping Fig Leaf.
+  Fix theme: in …/config.yaml …       (Choose Theme…) ]</pre>
+<p class="muted">Same banner, same button, for both.</p></div>
 <div class="win prop"><h3>After <span class="tag">proposed</span></h3>
-<pre>// Loopflow (shared)
-ThemeChoice.parse("light:Fig Leaf,dark:Fig")
-choice.theme(dark: Bool, resolve:) → ThemeDefinition
+<pre>[ The server (0.16.0) can't read what this
+  Loopflow (0.17.0-dev) asked. Update the older one. ]
 
-// both apps
-config.theme {value: null}   // the Machine's own theme:
-
-// iPhone, once, at the root
-.environment(\.theme, choice.theme(dark: colorScheme == .dark))
-
-/* website/static/theme.css, generated from Loopflow Light */
---background:#faf8f5; --accent:#722f37; --terminal-background:#faf8f5; …</pre></div>
+[ No theme named “Verdigris”: keeping Fig Leaf.
+  Fix theme: in …/config.yaml …       (Choose Theme…) ]</pre>
+<p class="muted">The button only where it helps.</p></div>
 </div>
 
-<h2>Choices made for review</h2>
-<table>
-<tr><th>Choice</th><th>Made</th><th>Passed over</th></tr>
-<tr><td>Where the phone's theme comes from</td><td>The Machine's <code>theme:</code>, read on connect and on foreground; the last value kept per Machine so launch doesn't flash the default.</td><td>A phone-only chooser (a second choice that drifts from the Mac's); a live subscription (no one switches themes often enough).</td></tr>
-<tr><td>A single name (<code>theme: Fig</code>, Mac in Dark mode)</td><td>Means the same on the phone: Fig, whatever the phone's appearance. One value, one meaning, as on the Mac and in Ghostty.</td><td>Following the phone's appearance with the Loopflow default on the unnamed side — the steer's summary leaned this way, Jack's words don't say it.</td></tr>
-<tr><td>A name the phone doesn't ship (your file, a Ghostty theme)</td><td>The Loopflow default for that side.</td><td>Serving theme file text from the Machine: needs Rust to repeat Desktop's resolution order (yours, built-ins, Ghostty). A separate outcome.</td></tr>
-<tr><td>Website tokens</td><td>A generated <code>website/static/theme.css</code> with role-named variables; <code>style.css</code> keeps type and spacing and derives its tints with <code>color-mix()</code> from roles. <code>--wine</code>, <code>--burgundy</code>, <code>--bg</code>, <code>--paper-warm*</code>, <code>--term-*</code> are deleted.</td><td>Splicing a marked block into <code>style.css</code> (a file both hand-edited and generated).</td></tr>
-<tr><td>Website terminal block</td><td>Loopflow Light's terminal: light paper, dark ink, ANSI from its palette. The drawings' avatars take ANSI 4, 3 and 2.</td><td>Keeping the dark block: “the website be in loopflow light”.</td></tr>
-</table>
-
-<p>Loopflow Light's roles, the website's whole color source:</p>
-<div class="swatches">
-<span style="background:#faf8f5" title="background"></span><span style="background:#fffdf9" title="surface"></span><span style="background:#f3eee7" title="surface-muted"></span><span style="background:#ece6dd" title="surface-element"></span><span style="background:#e6dfd6" title="border"></span><span style="background:#d6ccc0" title="border-strong"></span><span style="background:#2a2624" title="text"></span><span style="background:#5f5752" title="text-secondary"></span><span style="background:#722f37" title="accent"></span><span style="background:#5e2630" title="accent-hover"></span><span style="background:#4c1f27" title="accent-pressed"></span><span style="background:#2f629f" title="working"></span><span style="background:#386c48" title="success"></span><span style="background:#7f5a19" title="warning"></span><span style="background:#a64038" title="failure"></span>
-</div>
-
-<h2>Counterexamples kept</h2>
+<h2>What stays as it is</h2>
 <ul>
-<li>A Desktop connected to a remote Machine reads that Machine's <code>theme:</code> but its local <code>~/.lf/themes</code>. Same as today; dropping <code>path</code> doesn't change it.</li>
-<li>Theme tests point <code>ThemePaths.config</code> at a temp file. After the change the fixture server's <code>LF_HOME</code> is that temp root instead; <code>ThemePaths</code> loses <code>config</code>.</li>
-<li>The phone before any Machine: Loopflow pair. Not a theme choice, nothing to read.</li>
+<li>The phone against an old server keeps Loopflow's pair silently (R5.7). It is unshipped, and a quiet fallback is right for a surface that only draws.</li>
+<li>R5.10 and R4.5 go to ship-review on an unlocked display, as planned.</li>
 </ul>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>Single-name config on the phone: <b>a</b> that theme always, as on the Mac (built) · <b>b</b> the phone's appearance picks, Loopflow default on the unnamed side.</li>
-<li>Your own theme files on the phone: <b>a</b> Loopflow default for now (built) · <b>b</b> the Machine serves theme text in this Task.</li>
-<li>Website terminal block: <b>a</b> Loopflow Light's light terminal (built) · <b>b</b> keep a dark block, from Loopflow Dark's terminal colors.</li>
-<li><code>config.theme</code>: <b>a</b> drop <code>path</code>, the Machine's own config (built) · <b>b</b> keep <code>path</code> for Desktop and let the phone omit it.</li>
+<li>The skew sentence: (a) “Update the older one.” as proposed; (b) name the command, <code>lf install</code>, which only fits when the server is the older side; (c) no sentence, only drop the button.</li>
+<li>Where the sentence lives: (a) <code>ServerLink</code>, for every request the server can't parse, as proposed; (b) only in <code>AppearanceStore</code> for <code>config.theme</code>.</li>
+<li>The phone against an old server: (a) silent, as now; (b) the same sentence in its “Machine is away” line.</li>
 </ol>
 </body></html>

@@ -1,6 +1,6 @@
 # 50f7f9: review the bundled themes
 
-Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. Round 3's concept review found two leftovers of the per-side picker; round 4 removed them: `previewTheme` and `importTheme` share one assignment that takes the side from the theme's own colors, `showPicker` is gone and `picker` is `previewSide`. Round 4 QA passed. Concept review round 4 shaped the steer's iPhone and website pieces; implement built them and round 5 QA passed them, with one open Desktop glitch; then ship-review.
+Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. Round 3's concept review found two leftovers of the per-side picker; round 4 removed them: `previewTheme` and `importTheme` share one assignment that takes the side from the theme's own colors, `showPicker` is gone and `picker` is `previewSide`. Round 4 QA passed. Concept review round 4 shaped the steer's iPhone and website pieces; implement built them and round 5 QA passed them, with one open Desktop glitch. Concept review round 5 sends one change back to implement (the notice split, below); then ship-review.
 
 ## What people said
 
@@ -52,7 +52,16 @@ Concept review round 4 made the theme choice one Machine fact (`theme:` in the s
 - **The phone draws its Machine's theme** (`44d891ba7a`). `MachineTheme` (`swift/LoopflowiOS/MachineTheme.swift`) reads `config.theme` from `TaskListView` on connect and on return to the foreground, keeps each Machine's last answer in UserDefaults (`theme-<machineID>`), and `MachineConnectionView` sets `\.theme`, `\.palette` and `\.colorScheme` once. The views' `theme:` parameters and the three `colorScheme` computations are gone.
 - **loopflow.studio is Loopflow Light** (`f7e16f2686`). `scripts/theme_catalogue.py` writes `website/static/theme.css`; `style.css` has no color of its own. The page background is `--background`, cards `--surface`; the light terminal blocks got a `--border` edge because Light's terminal background is the page background.
 
-Next: **ship-review.** The Dev app on an unlocked display (Import panel, Apply/Cancel, the editor's Title bar row, a key window's bar, a dark import from the light section, Choose Theme with an unknown-name notice up: are the light cards there?), the phone in Fig on a simulator against a Machine whose `theme:` is `light:Fig Leaf,dark:Fig`, and the site (`scratch/qa/home.png`, `scratch/qa/docs.png` are headless renders).
+Concept review round 5 (`scratch/concept-review.html`) found one mismatch in what was built: `AppearanceStore.notice` holds both what Choose Theme fixes (an unknown name, an unreadable file) and a failed server read, and the window banner (`LoopflowApp.swift:341`) offers **Choose Theme…** for both. Against a 0.16.0 server, the Dev app's normal setup since #2007, Desktop shows `config.theme: missing field \`path\`` and a button that sends the same failing request (R5.9).
+
+Next: **implement round 6**, this one change:
+
+- **Split the notice by who fixes it.** `notice` keeps library problems and the unknown-name sentence. A failed `readChoice`/`writeChoice` goes into its own value (`readFailure`), shown in the same banner without **Choose Theme…**; a successful read clears it. Delete nothing else.
+- **Name both builds when the server can't parse a request.** In `ServerLink`, a server error for a request it couldn't decode (find the code the Rust server sends for a `ServerOperation` that fails to deserialize) becomes "The server (\(welcome.build)) can't read what this Loopflow (\(endpoint.client.version)) asked. Update the older one.", beside `unreadable`. No revision bump, no second request shape.
+- **Test:** an `AppearanceStoreTests`/`AppAppearanceTests` case where the read throws: the last good theme stays, `notice` is nil, `readFailure` holds the sentence; a `ServerClientTests` case where the server answers a request with the parse error and the thrown message names both builds. Break either and the test fails.
+- The phone keeps its quiet fallback (R5.7).
+
+Then **ship-review.** The Dev app on an unlocked display (Import panel, Apply/Cancel, the editor's Title bar row, a key window's bar, a dark import from the light section, Choose Theme with an unknown-name notice up: are the light cards there?), the Dev app against the live 0.16.0 server (the skew sentence, no button), the phone in Fig on a simulator against a Machine whose `theme:` is `light:Fig Leaf,dark:Fig`, and the site (`scratch/qa/home.png`, `scratch/qa/docs.png` are headless renders).
 
 ## Left outside this Task
 

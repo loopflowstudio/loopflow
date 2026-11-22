@@ -29,26 +29,39 @@ Primary text passes everywhere (4.80+), because those 11 accents all sit at OKLC
 
 So the bar is stated per theme, like every other color:
 
-- `PaletteDefinition` gains `titlebar`; `ThemeFile`'s key table gains `("titlebar", \.titlebar)`; `ThemeEditor` gains a "Title bar" row.
-- `GhosttyThemeMapping` derives it for theme files that omit it, with today's rule (accent in light, accent mixed 65% into the ground in dark). The `isDark ?` branch leaves `LoopflowPalette`; `titlebarBackground` reads the role, and `titlebarColorScheme` picks white or black against the bar, not against the accent.
-- Catalogue: Loopflow Dark states `#722f37`, Light's own bar (white 9.65:1, secondary 5.85:1, 1.4:1 against `#2b2d30`: it separates by hue, as Light's does by value). The other 11 dark files state the value they compute today, so nothing moves. Light files state their accent, except the five below.
+- `PaletteDefinition` gains `titlebar`; `ThemeFile`'s key table gains `("titlebar", \.titlebar)`; `ThemeEditor` gains a "Title bar" row under "Actions and focus".
+- One rule fills a missing bar, `GhosttyThemeMapping.titlebar(accent:background:dark:)`: today's color (accent in light, accent mixed 65% into the ground in dark), then darkened toward black, same hue, until the 72% text reaches 4.5:1 (toward white when the bar's text is black). `palette(_:)` uses it for its own result. `ThemeFile.parse` calls it again **after** the file's stated roles and `loopflow-appearance` are applied, when the file has no `loopflow-titlebar`: a theme saved by the editor before this change states its accent, and its bar must come from that accent, not from ANSI 4.
+- The `isDark ?` branch leaves `LoopflowPalette`; `titlebarBackground` reads the role, and `titlebarColorScheme` picks white or black against the bar, not against the accent. The 0.72 is named once and read by `titlebarSecondaryText`, the rule and the check.
+- `PaletteDefinition.readabilityErrors` checks title bar text and its 72% level on the bar at 4.5:1. That is the gate a built-in passes to load.
+- Catalogue: Loopflow Dark states `#722f37`, Light's own bar (white 9.65:1, secondary 5.85:1, 1.4:1 against `#2b2d30`: it separates by hue, as Light's does by value). It is the one theme the rule does not serve (the rule gives `#4c3237`). The other 23 state what the rule gives: for 18 that is the color they paint today, for the five below a darker one.
 - Passed over: `#8a3a44` (Dark's button fill) as the bar; secondary text is 4.78:1, and the two defaults would no longer share one bar.
+- Passed over: "today's bar exactly" as the fallback. Under it the derived fixture `747474/FFFFFF` gets bar `#717478`, secondary text 3.29:1, and step 2's own test fails; so does every light import whose accent lands at the mapping's 4.5:1 floor.
 
-This also answers step 3's title bar failures without touching buttons. Secondary text on a light theme's accent bar: Catppuccin Latte 3.37, Gruvbox Light 3.35, Flexoki Light 3.36, Linen 4.15, Noctis Lilac 4.35. Each states a bar darkened from its accent, same hue, until 72% white reaches 4.5:1 (white on the bar about 6.6:1). Their accents and buttons stay.
+The same rule answers step 3's title bar failures without touching buttons, and moves no other built-in (measured with `audit.py`'s functions, 1/255 steps toward black, threshold 4.52):
+
+| theme | bar today | secondary | rule gives | secondary |
+|---|---|---|---|---|
+| Catppuccin Latte | `#7d705c` | 3.37 | `#635849` | 4.52 |
+| Gruvbox Light | `#836f58` | 3.35 | `#675745` | 4.52 |
+| Flexoki Light | `#847032` | 3.36 | `#685827` | 4.53 |
+| Linen | `#4c665b` | 4.15 | `#465e54` | 4.57 |
+| Noctis Lilac | `#5a50a8` | 4.35 | `#574da3` | 4.52 |
+
+Their accents and buttons stay. The files state what the Swift rule produces; if it differs from this table by a rounding step, the Swift value wins.
 
 ## Build
 
 Slices, each run before the next.
 
 1. **The two defaults, tested.** Write `changes(before, after)` for both into `swift/Loopflow/Themes/Catalogue/Loopflow Light` and `Loopflow Dark` (every role and ANSI 0–15 stays stated), then `swift test --package-path swift --filter 'WorkPaletteTests|TerminalColorTests|ThemeTests'`. This is the slice that can prove the plan wrong: the proposals were settled by `audit.py`, and the Swift suites also check inks `audit.py` has no name for (`linkInk`, `linkHover`, `actionInk`, `selectionEdge`, terminal `readabilityErrors`). If a derived ink fails, adjust the value in `proposals.py` and regenerate; the files are never hand-tuned away from the script.
-2. **`loopflow-titlebar`** as above, in all 24 files, with a `WorkPaletteTests` expectation that title bar text and its 72% secondary reach 4.5:1 on the bar in every built-in and in the five derived fixtures. No test reads the title bar today. `audit.py`'s `derived()` reads the role so the page agrees with the app.
+2. **`loopflow-titlebar`** as above, in all 24 files. Tests: `WorkPaletteTests`' contrast test (24 built-ins and the five derived fixtures) expects title bar text and its 72% level to reach 4.5:1 on the bar, through the real palette; `ThemeTests` expects `ThemeDefinition.light` and `.dark` to state the same bar, and a file that states an accent and no `loopflow-titlebar` to get its bar from that accent. No test reads the title bar today. `audit.py`'s `derived()` reads the role so the page agrees with the app.
 3. **Unreadable roles elsewhere:** code on a changed word in Catppuccin Latte and Solarized Dark diffs. Nothing else in the other 22.
 4. **Words and prototype.** `swift/Loopflow/Themes/README.md` ("the original slate with bronze") and `swift/README.md:308` ("slate with warm bronze") describe the old Dark; both gain the title bar role where they list roles. `design/prototypes/desktop-themes.js` carries every theme's values by hand and gets the new ones plus `titlebar`; `desktop.css:83` paints `.titlebar` with `var(--accent)` and moves to the new variable (the prototype never had the dark mix, so its dark bars are wrong today).
 5. `python3 -I scratch/theme-audit/build.py`, so "Now" on the page shows what shipped.
 
 ## Acceptance check at gate
 
-`swift test --package-path swift --filter 'WorkPaletteTests|TerminalColorTests|ThemeTests'` passes, including the new title bar expectation across 24 built-ins. Rebuilt page: Loopflow Light and Loopflow Dark list no text pair under 4.5:1 and no title bar finding in any theme.
+`swift test --package-path swift --filter 'WorkPaletteTests|TerminalColorTests|ThemeTests'` passes, including the new title bar expectation across 24 built-ins. Rebuilt page: Loopflow Light and Loopflow Dark list no text pair under 4.5:1 and no title bar finding in any theme. `scratch/concept-review.html` holds the model review and its four questions.
 
 ## Demo
 
@@ -56,7 +69,7 @@ Dev app, system in dark mode, fresh settings: burgundy title bar over blue-grey,
 
 ## Absent and error states
 
-A personal theme file without `loopflow-titlebar` gets today's bar exactly. A saved custom theme from before this change decodes the same way, through the mapping.
+A personal theme file without `loopflow-titlebar` gets its bar from its own accent, ground and appearance: today's color where the second text level reads, a darker one where it does not. A saved custom theme from before this change decodes the same way. Once the editor saves a theme the bar is stated, and changing "Button" no longer moves it, as with hover and pressed.
 
 ## What goes
 
@@ -78,7 +91,9 @@ Catalogue-wide findings that are one rule in `GhosttyThemeMapping` repeated acro
 - secondary and tertiary text one color in 5;
 - ANSI under 3:1 in 10;
 - whether 24 is the right number (the page argues 16);
-- what to take from Rex (generate roles instead of freezing them, a cursor in the accent color).
+- what to take from Rex (generate roles instead of freezing them, a cursor in the accent color);
+- separate diff roles (`diff-added`, `diff-removed`), so a chip fill and a diff line stop sharing one color;
+- generating `design/prototypes/desktop-themes.js` from `Catalogue/` instead of restating 24 themes by hand.
 
 ## Rex direction (steer 54d66633)
 

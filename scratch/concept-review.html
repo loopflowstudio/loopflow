@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Concept review: what a theme is, and the title bar</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root { color-scheme: light dark; --bg:#faf8f5; --fg:#2a2624; --dim:#5f5752; --line:#e0d8cd; --card:#fffdf9; --yes:#2f6b45; --no:#a23a2c; --new:#722f37; --newbg:#f6e9ea; }
+@media (prefers-color-scheme: dark) { :root { --bg:#232527; --fg:#f1eee8; --dim:#b9b5ae; --line:#45474a; --card:#2b2d30; --yes:#9fcbaa; --no:#eba391; --new:#eba8ac; --newbg:#3a2a2d; } }
+body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 -apple-system, system-ui, sans-serif; }
+main { max-width:1020px; margin:0 auto; padding:32px 24px 80px; }
+h1 { font:600 26px/1.2 Georgia, serif; margin:0 0 8px; }
+h2 { font:600 19px/1.3 Georgia, serif; margin:44px 0 10px; }
+h3 { font-size:15px; margin:22px 0 6px; }
+p { margin:8px 0; max-width:74ch; }
+code { font:13px ui-monospace, Menlo, monospace; }
+table { border-collapse:collapse; width:100%; margin:12px 0; font-size:14px; }
+th, td { text-align:left; vertical-align:top; padding:8px 10px; border-bottom:1px solid var(--line); }
+th { font-weight:600; color:var(--dim); }
+.yes { color:var(--yes); font-weight:600; } .no { color:var(--no); font-weight:600; }
+.new { background:var(--newbg); color:var(--new); border-radius:4px; padding:1px 6px; font-size:12px; font-weight:600; white-space:nowrap; }
+.row { display:flex; gap:16px; flex-wrap:wrap; margin:12px 0; }
+.win { flex:1 1 300px; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+.bar { padding:9px 14px; font-weight:600; font-size:13px; display:flex; gap:10px; }
+.bar span { opacity:.72; font-weight:400; }
+.body { padding:14px; font-size:13px; }
+.body b { font-family:Georgia, serif; font-size:16px; display:block; margin-bottom:4px; }
+.btn { display:inline-block; margin-top:10px; padding:3px 12px; border-radius:4px; font-size:13px; }
+.cap { font-size:13px; color:var(--dim); padding:8px 14px; border-top:1px solid var(--line); background:var(--card); }
+.sw { display:inline-block; width:150px; padding:6px 10px; border-radius:4px; font-size:12px; color:#fff; }
+.sw span { opacity:.72; }
+pre { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 14px; overflow:auto; font:13px/1.45 ui-monospace, Menlo, monospace; }
+.two { display:grid; grid-template-columns:1fr 1fr; gap:16px; } @media (max-width:760px) { .two { grid-template-columns:1fr; } }
+ol.q > li { margin:14px 0; } ol.q ol { list-style:lower-alpha; margin-top:4px; }
+.big { border-left:3px solid var(--new); padding:4px 0 4px 16px; margin:16px 0; }
+</style>
+<main>
+<h1>What a theme is, and where the title bar fits</h1>
+<p>Area taken: the theme as a whole, as it stands with this Task's plan in it. That is the theme file and its roles, how missing roles are filled in, what the app paints from them, the editor, and the two defaults as a pair. The plan's one model change is a new role for the title bar, so that is where the review goes deepest. Nothing is built yet; no code changed here. Things marked <span class="new">proposed</span> do not exist.</p>
+
+<h2>One interaction, walked</h2>
+<p>A person opens Loopflow with the Mac in dark mode. The first color they see is the title bar. In Loopflow Light it is burgundy <code>#722f37</code>, the brand. In Loopflow Dark today it is <code>#443036</code>, a brown-grey, over a slate window with bronze headings. The file says <code>loopflow-accent = #722f37</code>; no line in the file says what the bar is. It is computed when it is painted.</p>
+<div class="row">
+  <div class="win"><div class="bar" style="background:#722f37;color:#fff">loopflow <span>› review-the-bundled</span></div>
+    <div class="body" style="background:#faf8f5;color:#2a2624"><b style="color:#722f37">Review the bundled themes</b>build is running. You are next needed at human-review.<br><span class="btn" style="background:#722f37;color:#faf8f5">Open</span></div>
+    <div class="cap">Loopflow Light. Bar, heading and button are one color.</div></div>
+  <div class="win"><div class="bar" style="background:#443036;color:#fff">loopflow <span>› review-the-bundled</span></div>
+    <div class="body" style="background:#2b3036;color:#f5f1ea"><b style="color:#cebfa9">Review the bundled themes</b>build is running. You are next needed at human-review.<br><span class="btn" style="background:#722f37;color:#faf8f5">Open</span></div>
+    <div class="cap">Loopflow Dark today. Three colors: bar <code>#443036</code>, heading <code>#cebfa9</code>, button <code>#722f37</code>.</div></div>
+  <div class="win"><div class="bar" style="background:#722f37;color:#fff">loopflow <span>› review-the-bundled</span></div>
+    <div class="body" style="background:#2b2d30;color:#f5f1ea"><b style="color:#eba8ac">Review the bundled themes</b>build is running. You are next needed at human-review.<br><span class="btn" style="background:#8a3a44;color:#faf8f5">Open</span></div>
+    <div class="cap"><span class="new">proposed</span> Loopflow Dark (B2). The bar is Light's bar, stated in the file.</div></div>
+</div>
+<p><b>Failure.</b> They try a light Ghostty theme, or Catppuccin Latte. The path in the title bar has two text levels; the second is 72% white. On Latte's bar that is 3.37:1. Nothing checks it: <code>readabilityErrors</code>, which refuses to load a built-in with unreadable text, has never heard of the title bar, and neither has any test.</p>
+<p><b>Recovery.</b> They open the editor to fix it. There is no "Title bar" row. The only handle is "Button", which moves the button with it.</p>
+
+<h2>Do the product's concepts and the code's line up?</h2>
+<table>
+<tr><th style="width:23%">What a person knows</th><th style="width:33%">What the code has</th><th style="width:7%">Match</th><th>What is wrong</th></tr>
+<tr><td>A theme: a name, light or dark, one file I can copy into Ghostty</td><td><code>ThemeDefinition</code>, <code>ThemeFile</code>; Ghostty keys plus <code>loopflow-</code> roles</td><td class="yes">yes</td><td></td></tr>
+<tr><td>Dropping in a Ghostty theme gives me a whole app theme</td><td><code>GhosttyThemeMapping.palette</code>, run once when the file is read</td><td class="yes">yes</td><td>One place where colors are worked out from other colors. Keep it the only one.</td></tr>
+<tr><td>The title bar</td><td><code>LoopflowPalette.titlebarBackground</code>: accent in light, accent mixed 65% into the ground in dark. Text color chosen from <code>accent</code>, not from the bar it sits on.</td><td class="no">no</td><td>The most visible color in the window has no name in the theme. It is the only color worked out at paint time with a light/dark branch, and the only text pair nothing checks.</td></tr>
+<tr><td>The theme's color (burgundy)</td><td><code>accent</code> (button), <code>accentInk</code> (focus, emphasized actions), <code>emphasisInk</code> (headings), the bar</td><td class="no">no, by values</td><td>Four roles carry it and nothing says they belong together. Loopflow Dark today puts three hues in them. B2 lines the values up; a test should hold the pair to one bar.</td></tr>
+<tr><td>Button, hover, pressed</td><td><code>accent</code>, <code>accentHover</code>, <code>accentPressed</code>, <code>accentText</code></td><td class="yes">yes</td><td>22 of 24 files state exactly accent +12% and +24% black; all 24 state <code>#faf8f5</code> for the text. Frozen formulas, harmless.</td></tr>
+<tr><td>Status: working, blocked, available, error, done, stopped</td><td>six <code>ThemeTone</code>s, ink and fill</td><td class="yes">yes</td><td></td></tr>
+<tr><td>Added and removed lines in a Diff</td><td>the success and failure chip fills</td><td class="no">no</td><td>One name for two ideas. A fill quiet enough for a chip is too quiet to tell an added line from a removed one, in all 24. This work makes the two defaults' fills serve both; the role split is a separate outcome.</td></tr>
+<tr><td>A selected file or option</td><td><code>selectionFill</code> at an opacity</td><td class="no">no, by values</td><td>All 24 files state it as <code>surface</code>, so it tints nothing. The two defaults get a real tint in this work.</td></tr>
+<tr><td>The selected Task row</td><td><code>workSelectedFill</code> and its two texts</td><td class="yes">yes</td><td></td></tr>
+<tr><td>The terminal's colors</td><td><code>TerminalPalette</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>Loopflow Light and Dark are one theme in two modes</td><td>two files; <code>ThemeDefinition.light</code> and <code>.dark</code> by name</td><td class="no">no</td><td>The relation lives in a scratch script. After this work the shared thing is one hex written twice, and no test would fail if they drifted.</td></tr>
+<tr><td>Editing a color</td><td><code>ThemeEditor</code> rows over <code>PaletteDefinition</code> key paths</td><td class="yes">yes, except the bar</td><td>Every painted color has a row but one.</td></tr>
+</table>
+
+<h2>The biggest mismatch: the title bar</h2>
+<div class="big">
+<p>The plan's answer holds: make the bar a role, <code>loopflow-titlebar</code>, stated in the file like every other color and derived at import when a file leaves it out. The measurements in the plan rule out the alternative (no single mix gives Dark a burgundy bar and keeps the other eleven readable), and after this work the bar differs from the accent in 17 of 24 themes, so a separate name is the true one.</p>
+<p>Three things in the plan do not survive being walked through, and are changed.</p>
+</div>
+
+<h3>1. The fallback must run after the file's own roles</h3>
+<p>The plan derives a missing bar inside <code>GhosttyThemeMapping.palette(terminal)</code>. That function sees only terminal colors; its accent comes from ANSI 4. <code>ThemeFile.parse</code> applies the file's stated roles afterwards. A theme saved by the editor before this change states its accent and has no <code>loopflow-titlebar</code>, so its bar would come from ANSI 4, not from its accent. A green-button custom theme would wake up with a blue-grey bar. The same goes for <code>loopflow-appearance</code>.</p>
+<div class="two">
+<pre>// plan as written
+var palette = GhosttyThemeMapping.palette(terminal)
+// titlebar already fixed here, from ANSI 4
+palette.isDark = dark
+for role in appRoles { …stated roles… }</pre>
+<pre>// <b>proposed</b>
+var palette = GhosttyThemeMapping.palette(terminal)
+palette.isDark = dark
+for role in appRoles { …stated roles… }
+if roles["loopflow-titlebar"] == nil {
+    palette.titlebar = GhosttyThemeMapping.titlebar(
+        accent: palette.accent,
+        background: palette.background, dark: dark)
+}</pre>
+</div>
+
+<h3>2. One rule for the fallback, and it is the rule behind the five fixes</h3>
+<p>The plan keeps "today's bar exactly" for files without the role, and separately hand-darkens five light built-ins, and adds a test that the bar's text reaches 4.5:1 "in every built-in and in the five derived fixtures". Those three cannot all be true. Under today's rule the fixture <code>747474/FFFFFF</code> gets bar <code>#717478</code>, secondary text 3.29:1: the new test fails on the rule the plan promised to keep. Every light import whose accent lands at the mapping's floor has the same unreadable path today.</p>
+<p>One rule covers all of it: start from today's color, then darken (same hue) until the 72% text reaches 4.5:1. Measured with the audit's functions:</p>
+<table>
+<tr><th>Theme</th><th>Today</th><th>Secondary text</th><th><span class="new">proposed</span> rule gives</th><th>Secondary text</th></tr>
+<tr><td>19 built-ins, incl. all 12 dark</td><td colspan="2">already 5.14:1 or better</td><td colspan="2">the same color, zero steps</td></tr>
+<tr><td>Catppuccin Latte</td><td><span class="sw" style="background:#7d705c">path <span>› child</span></span></td><td>3.37</td><td><span class="sw" style="background:#635849">path <span>› child</span></span></td><td>4.52</td></tr>
+<tr><td>Gruvbox Light</td><td><span class="sw" style="background:#836f58">path <span>› child</span></span></td><td>3.35</td><td><span class="sw" style="background:#675745">path <span>› child</span></span></td><td>4.52</td></tr>
+<tr><td>Flexoki Light</td><td><span class="sw" style="background:#847032">path <span>› child</span></span></td><td>3.36</td><td><span class="sw" style="background:#685827">path <span>› child</span></span></td><td>4.53</td></tr>
+<tr><td>Linen</td><td><span class="sw" style="background:#4c665b">path <span>› child</span></span></td><td>4.15</td><td><span class="sw" style="background:#465e54">path <span>› child</span></span></td><td>4.57</td></tr>
+<tr><td>Noctis Lilac</td><td><span class="sw" style="background:#5a50a8">path <span>› child</span></span></td><td>4.35</td><td><span class="sw" style="background:#574da3">path <span>› child</span></span></td><td>4.52</td></tr>
+<tr><td>fixture <code>747474/FFFFFF</code></td><td><span class="sw" style="background:#717478">path <span>› child</span></span></td><td>3.29</td><td><span class="sw" style="background:#585a5d">path <span>› child</span></span></td><td>4.52</td></tr>
+</table>
+<p>The rule moves exactly the five themes the plan names and no others. So the five files state what the shipped rule produces, not values from a scratch script, and a person's light Ghostty import gets a readable path too. What changes on purpose: a personal theme whose derived bar was unreadable gets a darker bar after the update. One that read fine keeps its bar.</p>
+<p>Loopflow Dark is the one theme the rule does not serve (it would give <code>#4c3237</code>), which is what the stated role is for: <code>loopflow-titlebar = #722f37</code>.</p>
+
+<h3>3. The check belongs where the other text checks are</h3>
+<p><code>PaletteDefinition.readabilityErrors</code> is the one predicate for "this theme's text can be read"; a built-in that fails it does not load. Title bar text and its 72% level join it, with the 0.72 named once and read by both the check and <code>titlebarSecondaryText</code>. <code>WorkPaletteTests</code> then covers the derived fixtures through the real palette. And one expectation holds the pair together: <code>ThemeDefinition.light</code> and <code>.dark</code> state the same bar. Break "Dark looks like Light's sibling" in your head and today nothing fails; with this, something does.</p>
+
+<h3>Before and after</h3>
+<div class="two">
+<pre>// today, BrandColors.swift
+var titlebarColorScheme: ColorScheme {
+    definition.accent.prefersLightText ? .dark : .light }
+var titlebarBackground: Color {
+    (isDark ? definition.accent.mixed(
+        with: definition.background, amount: 0.65)
+      : definition.accent).color }
+// readabilityErrors: no title bar
+// ThemeEditor: no row
+// theme file: no line</pre>
+<pre>// <b>proposed</b>
+struct PaletteDefinition { … var titlebar: ThemeRGB }
+var titlebarColorScheme: ColorScheme {
+    definition.titlebar.prefersLightText ? .dark : .light }
+var titlebarBackground: Color { definition.titlebar.color }
+// GhosttyThemeMapping.titlebar(accent:background:dark:)
+//   today's color, darkened until 72% text reads
+// readabilityErrors: title bar text, secondary text
+// ThemeEditor: "Title bar"
+// theme file: loopflow-titlebar = #722f37</pre>
+</div>
+
+<h3>Tested on three paths</h3>
+<table>
+<tr><th style="width:18%">Path</th><th>What happens</th></tr>
+<tr><td>Normal</td><td>Fresh install, dark mode: burgundy bar from the file. Switch to Light: the same bar. The other 11 dark and 7 light built-ins paint the color they paint today.</td></tr>
+<tr><td>Failure</td><td>A light Ghostty theme with a pale blue ANSI 4 is imported. Its bar derives after its roles and is darkened until the path reads. A built-in edited to an unreadable bar fails to load, like any other unreadable role.</td></tr>
+<tr><td>Recovery</td><td>A custom theme saved last month has no <code>loopflow-titlebar</code>. It gets a bar from its own accent. The person opens the editor, picks "Title bar", and the file states it from then on.</td></tr>
+<tr><td>Counterexample kept</td><td>In a custom theme, changing "Button" no longer moves the bar once the file states one; the editor writes every role. Hover and pressed already behave this way. See question 2.</td></tr>
+</table>
+
+<h2>Outside this work</h2>
+<p>Each of these is its own outcome; none is needed for the two defaults to be right.</p>
+<ul>
+<li><b>A diff role.</b> <code>diff-added</code> and <code>diff-removed</code> tints, separate from chip fills. Takes two roles, a mapping rule, and 24 files.</li>
+<li><b>Roles that are formulas.</b> Hover, pressed, button text, and now the bar in 23 of 24 files are a rule's output written down. A theme could state seeds and exceptions only. That changes what a built-in file is, and the "state every role" rule with it.</li>
+<li><b>The prototype's second catalogue.</b> <code>design/prototypes/desktop-themes.js</code> restates all 24 themes by hand under different names (<code>keyboard-focus</code>, <code>waiting</code>). This work updates it by hand once more; generating it from <code>Catalogue/</code> would end that.</li>
+</ul>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>A personal theme that leaves out the title bar:
+  <ol><li>gets today's color, darkened only if its second text level is unreadable (chosen for review);</li>
+  <li>gets today's color exactly, readable or not, and the five built-ins are fixed by hand.</li></ol></li>
+<li>In the editor, when a custom theme's "Button" changes:
+  <ol><li>the bar stays where it is, like hover and pressed (chosen; what the stated role means);</li>
+  <li>the bar follows until the person has set "Title bar" themselves, which needs the editor to leave unstated roles out of the file.</li></ol></li>
+<li>Loopflow Dark's bar:
+  <ol><li><code>#722f37</code>, Light's own, 1.4:1 against the window, separated by hue (chosen);</li>
+  <li><code>#8a3a44</code>, Dark's button fill, a little more separation, secondary text 4.78:1, and the pair no longer shares one bar.</li></ol></li>
+<li>The five light built-ins whose bars get darker (Catppuccin Latte, Gruvbox Light, Flexoki Light, Linen, Noctis Lilac):
+  <ol><li>darken them, as above (chosen);</li>
+  <li>leave them at 3.35 to 4.35:1, and exempt the title bar's second text level from the 4.5:1 rule.</li></ol></li>
+</ol>
+</main>
+</html>

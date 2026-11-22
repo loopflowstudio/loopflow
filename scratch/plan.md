@@ -537,8 +537,7 @@ demo: not headless; qa or demo runs it.
      whichever it can reach; a `FailureLine` is one `HStack`, so a long
      message in the 380 pt bind sheet is the one to look at first.
    - Checks: `scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|RemoveWaveSheetTests|RenameWaveSheetTests|WorkNavigationTests|ProjectActivationTests|emptyListStates'`
-     passed (70 tests in 7 suites) before the `WaveDetailPane.swift:248`
-     edit; `swift build` after it.
+     passed at 3c4b0d4025, after the last edit (70 tests in 7 suites).
 
 Outside this change, on the page for whoever wants it: a stopped Graph's
 reason is one string on the wire, so the Machine's part of "kickoff:

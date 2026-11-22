@@ -18,8 +18,8 @@ use loopflow_storage::sqlite::tracker_actions::{
 };
 use loopflow_storage::work::edit::WorkValue;
 
-use super::{message, value, values, Sent, Tracker};
-use crate::ops::OpsResult;
+use super::{message, value, values, Sent, Tracker, TrackerError};
+use crate::ops::{OpsError, OpsResult};
 use crate::store::Store;
 
 /// The shortest wait between looks for one lost reply.
@@ -98,6 +98,8 @@ pub(crate) async fn drain_repository(
     };
     let tracker = match tracker {
         Ok(tracker) => tracker,
+        // A pause belongs to the Home, not to each action: their own errors stay.
+        Err(OpsError::Tracker(TrackerError::RateLimited { .. })) => return Ok(Pass::default()),
         // Offline or signed out: the queue keeps every action and says why.
         Err(error) => {
             for action in &actions {

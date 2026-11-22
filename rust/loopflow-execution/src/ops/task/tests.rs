@@ -1025,21 +1025,22 @@ fn task_changes_offer_first_parent_commits_without_merges() {
             .trim()
             .to_string()
     };
-    let identity = ["-c", "user.name=Test", "-c", "user.email=test@example.com"];
     let commit = |file: &str, subject: &str| {
         std::fs::write(repo.path().join(file), subject).unwrap();
         git(&["add", "."]);
-        git(&[identity.as_slice(), &["commit", "-qm", subject]].concat());
+        git(&["commit", "-qm", subject]);
         git(&["rev-parse", "HEAD"])
     };
     git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.name", "Test"]);
+    git(&["config", "user.email", "test@example.com"]);
     let base = commit("base.txt", "base");
     git(&["checkout", "-qb", "task"]);
     let before = commit("task.txt", "lf implement: before");
     git(&["checkout", "-q", "main"]);
     commit("main.txt", "main moves on");
     git(&["checkout", "-q", "task"]);
-    git(&[identity.as_slice(), &["merge", "-q", "--no-edit", "main"]].concat());
+    git(&["merge", "-q", "--no-edit", "main"]);
     let merge = git(&["rev-parse", "HEAD"]);
     let after = commit("task.txt", "lf implement: after");
     let id = TaskId::new();

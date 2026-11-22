@@ -258,12 +258,10 @@ pub(super) fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskC
     .lines()
     .filter_map(|line| {
         let mut fields = line.splitn(3, '\u{1f}');
-        let (sha, parent, subject) = (fields.next()?, fields.next()?, fields.next()?);
-        // A root commit has no parent to compare against; it is no step.
-        (!parent.is_empty()).then(|| TaskCommit {
-            sha: sha.to_string(),
-            parent: parent.to_string(),
-            subject: subject.to_string(),
+        Some(TaskCommit {
+            sha: fields.next()?.to_string(),
+            parent: fields.next()?.to_string(),
+            subject: fields.next()?.to_string(),
         })
     })
     .collect();

@@ -59,7 +59,6 @@ struct TaskChangesView: View {
                     .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
                     // Over the stream, so showing or hiding it moves no line.
                     .overlay(alignment: .top) { enclosingBar }
-                    .overlay(alignment: .trailing) { ChangeMarks(store: store, layout: store.layout(width: width), jump: land) }
                 }
             }
             .overlay(alignment: .leading) {
@@ -448,13 +447,6 @@ struct TaskChangesView: View {
         }
     }
 
-    /// Land on a change a mark beside the scrollbar names.
-    private func land(_ mark: ReviewMark) {
-        if store.focusedPath != nil { store.focusedPath = mark.path }
-        withAnimation(.easeOut(duration: 0.15)) { store[place: .changes] = .init(anchor: mark.id, current: mark.id) }
-        store.noteInteraction()
-    }
-
     private func toggleFocus() {
         if store.focusedPath != nil {
             store.focusedPath = nil
@@ -545,56 +537,6 @@ struct TaskChangesView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
-    }
-}
-
-/// A mark beside the scrollbar for every change in the stream, at its place
-/// counted in rows: green added, red removed, the accent for both, quiet for a
-/// move; comments add a dot. Click one to land on its change.
-private struct ChangeMarks: View {
-    let store: TaskFilesStore
-    let layout: TaskFilesStore.ReviewLayout
-    let jump: (ReviewMark) -> Void
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        if let review = store.shownReview {
-            let files = store.focusedPath.map { path in review.files.filter { $0.path == path } } ?? review.files
-            let marks = ReviewDiff(files: files).marks(layout: layout, collapsed: store.isViewed)
-            let commented = Set(store.comments.map(\.selection.path))
-            // Each commented file's dot sits on its first mark.
-            var seen = Set<String>()
-            let dotted = Set(marks.filter { commented.contains($0.path) && seen.insert($0.path).inserted }.map(\.id))
-            GeometryReader { proxy in
-                ForEach(marks, id: \.id) { mark in
-                    Button { jump(mark) } label: {
-                        RoundedRectangle(cornerRadius: 1).fill(color(mark.kind))
-                            .frame(width: 4, height: 3)
-                            .frame(width: 10, height: 7)
-                            .overlay(alignment: .leading) {
-                                if dotted.contains(mark.id) {
-                                    Circle().fill(palette.accent).frame(width: 3, height: 3)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help((mark.path as NSString).lastPathComponent)
-                    .position(x: proxy.size.width - 5, y: 4 + mark.position * max(proxy.size.height - 8, 0))
-                }
-            }
-            .frame(width: 10)
-            .accessibilityHidden(true)
-        }
-    }
-
-    private func color(_ kind: ReviewMark.Kind) -> Color {
-        switch kind {
-        case .added: palette.successTone.ink
-        case .removed: palette.failureTone.ink
-        case .changed: palette.accent
-        case .moved: palette.textTertiary
-        }
     }
 }
 

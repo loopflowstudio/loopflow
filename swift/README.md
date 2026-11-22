@@ -481,11 +481,10 @@ The stream follows the comparison live without moving what you are reading. A
 bar above it names the file you are in, with its counts, **Open** and
 **Viewed**, and under it the function, type or Markdown heading the top line
 sits in. **Viewed** folds a file to its header until its lines change; the
-sidebar counts "12 of 60 viewed", marks each folded file **Viewed**, and stepping passes over it. Marks beside the
-scrollbar place every change, green added, red removed, accent for both; click
-one to land there. Press `]`
+sidebar counts "12 of 60 viewed" and marks each folded file **Viewed**.
+Press `]`
 and `[` (or the arrows around the position) to step through changes across
-files; the change you land on pulses once. **Focus** shows one file and still
+files, skipping folded files. The change you land on pulses once. **Focus** shows one file and still
 steps into the next. Between hunks the stream says how many lines it skipped
 and which declaration follows; click that row to read the lines in place.
 Edited lines emphasize the changed words. A block moved within a file collapses

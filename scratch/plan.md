@@ -129,7 +129,20 @@ Checks left for gate: `documented_commands::` (swift/README.md's language list c
 
 QA November 21 (`scratch/qa.html`, `ce178ae48f`): the redline, Side by side, HTML, grammar colors and Files images work in the Dev build; image diffs stacked for any picture wider than half the pane (fixed); the notices inventory was stale (refreshed). Not reached without clicks: the Source and layout buttons, a step's skipped lines. Open product questions are in `questions.md`, From qa.
 
-Remaining: none of the slices. Demo checks for qa: `scratch/plan.md` rendered and redlined in the Dev build, Side by side in two columns, Source showing the line Diff; `scratch/explore.html` as two pages; a step's skipped lines.
+Remaining: the rendered-file stop repair in "Concept review after the build" below. Demo checks for qa: `scratch/plan.md` rendered and redlined in the Dev build, Side by side in two columns, Source showing the line Diff; `scratch/explore.html` as two pages; a step's skipped lines.
+
+## Concept review after the build (November 21, headless)
+
+Page: `scratch/concept-review.html`, over the whole branch as built. Every concept lines up except one, and it is what the qa run's first question touched: **a "change" is still a line hunk, but a rendered file doesn't show its hunks.** The title, the stepper and next/previous count `ReviewDiff.stops`, which come from the patch alone. So:
+
+- A changed `swift/README.md` reads as a redline, yet counts its line hunks ("3 of 41") and `]` lands on stop ids the rendered view never draws (`ReviewRendered` carries only `file.topID`), so `scrollPosition(id:)` doesn't move: the count climbs while the pane stands still.
+- An image-only change has no hunks: "0 changes in 1 file", "No changes", and its header shows "+0 −0".
+
+**Chosen for review: a rendered file is one change.** The stream's stops come from what it shows: a file the store renders (`rendering(of:in:)` non-nil) is exactly one stop, `"\(path)#rendered"`, and `ReviewRendered` (and `ReviewSidesFailed`, which falls back to lines only for Source-capable files) carries that id; with Source on, its line hunks are the stops again. Passed over: one stop per changed redline block, which needs both sides read before the count is known and would make the count jump as files near the view, the thing `theChangeCountWaitsForEveryFile` just removed. The redline is read as a document; one stop lands on its top.
+
+Across layers: Swift only. `ReviewDiff.stops` / `ReviewFile.stops` stay the patch's; the store gains the one place that turns a shown diff into stops (`stops(_ reader:)`, rendered files collapsed to one) and `position`, `step`, `TaskChangesView.title` and the focus/sidebar lookups read it instead of `diff.stops`/`shownReview.stops`. A binary file's header drops "+0 −0" (it has no lines to count). No Rust, wire or fixture change.
+
+Test (`TaskFilesTests`): a stream of one Swift file with two changes, a changed `.md` with three hunks and a changed `.png` counts "4 changes in 3 files"; stepping visits the Swift stops, then `doc.md#rendered`, then `logo.png#rendered`; turning on the `.md`'s Source makes it 2 + 3 + 1 = 6. Break the feature in your head (stops from the patch again) and the count reads 5, and the image is never visited.
 
 ## Docs
 

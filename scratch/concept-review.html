@@ -2,147 +2,98 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>c9fbcb · concept review · Diff v2</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>c9fbcb concept review — after the build</title>
 <style>
-:root{--bg:#fffcf0;--fg:#100f0f;--mut:#6f6e69;--line:#e6e4d9;--card:#f2f0e5;--add:#e5f0d8;--addk:#66800b;--rem:#fbe2df;--remk:#af3029;--prop:#205ea6;--warn:#ad8301;--kw:#a02f6f;--fn:#205ea6;--ty:#ad8301;--str:#24837b}
-@media (prefers-color-scheme:dark){:root{--bg:#100f0f;--fg:#cecdc3;--mut:#878580;--line:#343331;--card:#1c1b1a;--add:#1f2a14;--addk:#879a39;--rem:#3a1a17;--remk:#d14d41;--prop:#4385be;--warn:#d0a215;--kw:#ce5d97;--fn:#4385be;--ty:#d0a215;--str:#3aa99f}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif}
-main{max-width:980px;margin:0 auto;padding:40px 24px 80px}
-h1{font-size:26px;margin:0 0 6px}h2{font-size:19px;margin:40px 0 10px}h3{font-size:15px;margin:22px 0 6px}
-p{margin:8px 0}.mut{color:var(--mut)}
-code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--card);padding:1px 4px;border-radius:4px}
-table{border-collapse:collapse;width:100%;font-size:14px;margin:10px 0}
-th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--mut);font-weight:600}
-.yes{color:var(--addk);font-weight:700}.no{color:var(--remk);font-weight:700}
-.prop{border-left:3px solid var(--prop);padding:2px 0 2px 12px;margin:12px 0}
-.prop>b:first-child{color:var(--prop)}
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-@media (max-width:720px){.cols{grid-template-columns:1fr}}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
-.card h3{margin-top:0}
-.pane{border:1px solid var(--line);border-radius:8px;overflow:hidden;font:12.5px/1.5 ui-monospace,Menlo,monospace;background:var(--bg)}
-.bar{display:flex;gap:8px;align-items:center;padding:6px 10px;background:var(--card);border-bottom:1px solid var(--line);font:12px -apple-system,system-ui,sans-serif}
-.bar .sp{flex:1}
-.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
-.seg span{padding:1px 8px;border-right:1px solid var(--line)}.seg span:last-child{border-right:0}
-.seg .on{background:var(--fg);color:var(--bg)}
-.btn{border:1px solid var(--line);border-radius:6px;padding:1px 8px}
-.bad{outline:2px dashed var(--remk);outline-offset:2px}
-.row{padding:1px 10px;white-space:pre}
-.a{background:var(--add)}.r{background:var(--rem)}
-.kw{color:var(--kw)}.fn{color:var(--fn)}.ty{color:var(--ty)}.st{color:var(--str)}
-.doc{font:14px/1.5 -apple-system,system-ui,sans-serif;padding:10px 14px}
-.doc h4{margin:4px 0;font-size:16px}
-del{color:var(--remk);background:var(--rem)}ins{text-decoration:none;background:var(--add)}
-.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px}
-.box{border:1px solid var(--line);border-radius:6px;padding:4px 9px;background:var(--card)}
-.box.p{border-color:var(--prop)}.arrow{color:var(--mut)}
-ol.q>li{margin:12px 0}ol.q ol{list-style:lower-alpha;margin:4px 0}
-.tag{font-size:12px;border-radius:4px;padding:0 5px;border:1px solid var(--prop);color:var(--prop)}
-.tag.ex{border-color:var(--mut);color:var(--mut)}
+  :root { color-scheme: light dark;
+    --bg:#fffcf0; --fg:#100f0f; --muted:#6f6e69; --line:#dad8ce; --card:#f2f0e5;
+    --yes:#66800b; --no:#af3029; --prop:#205ea6; --add:#dde2b2; --del:#ffcabb; }
+  @media (prefers-color-scheme: dark) { :root {
+    --bg:#100f0f; --fg:#cecdc3; --muted:#878580; --line:#343331; --card:#1c1b1a;
+    --yes:#879a39; --no:#d14d41; --prop:#4385be; --add:#2a3311; --del:#3d1a17; } }
+  body { background:var(--bg); color:var(--fg); font:15px/1.55 -apple-system, system-ui, sans-serif; max-width:960px; margin:2.5rem auto; padding:0 1.25rem; }
+  h1 { font-size:1.5rem; margin-bottom:.25rem } h2 { font-size:1.1rem; margin-top:2.2rem }
+  .lede { color:var(--muted) }
+  table { border-collapse:collapse; width:100%; font-size:14px }
+  th, td { text-align:left; vertical-align:top; padding:.45rem .6rem; border-bottom:1px solid var(--line) }
+  th { color:var(--muted); font-weight:600 }
+  code { font:12.5px ui-monospace, Menlo, monospace }
+  .yes { color:var(--yes); font-weight:700 } .no { color:var(--no); font-weight:700 }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:1rem }
+  .pane { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:.8rem 1rem }
+  .pane h3 { margin:.1rem 0 .6rem; font-size:.95rem }
+  .proposed { border-color:var(--prop); border-width:2px }
+  .tag { font-size:11px; padding:1px 6px; border-radius:4px; border:1px solid currentColor; margin-left:.4rem }
+  .tag.p { color:var(--prop) } .tag.e { color:var(--muted) }
+  .bar { display:flex; justify-content:space-between; font:12px ui-monospace, Menlo, monospace; color:var(--muted); border-bottom:1px solid var(--line); padding-bottom:.35rem; margin-bottom:.5rem }
+  .file { font:12px ui-monospace, Menlo, monospace; margin:.6rem 0 .2rem; font-weight:600 }
+  .row { font:12px ui-monospace, Menlo, monospace; padding:1px 4px }
+  .a { background:var(--add) } .d { background:var(--del); text-decoration:line-through }
+  .stop { outline:2px solid var(--prop); outline-offset:1px; border-radius:3px }
+  .ghost { color:var(--no); font:11px ui-monospace, Menlo, monospace }
+  .img { display:flex; gap:.5rem } .img div { flex:1; height:46px; background:var(--line); border-radius:4px; display:flex; align-items:end; justify-content:center; font-size:10px; color:var(--muted) }
+  ol li { margin-bottom:.5rem }
+  @media (max-width:700px) { .cols { grid-template-columns:1fr } }
 </style>
 </head>
-<body><main>
-<h1>Diff v2 · do the concepts line up?</h1>
-<p class="mut">Task c9fbcb · concept review, headless, November 21 · reviewed against <code>scratch/plan.md</code> as kickoff left it and the LOO-515 Diff it builds on.</p>
+<body>
+<h1>Diff v2, as built: do the concepts line up?</h1>
+<p class="lede">Area taken: the whole Task Diff with this branch in it, a file read as colored lines or as a rendered page, and the stepper that walks it, since every slice lands in that one stream. Reviewed against <code>main</code>, after slices 1–5 and qa.</p>
 
-<p><b>Area taken:</b> the Diff's reading of one changed file, start to finish: which bytes it reads, how it colors them, how it opens skipped lines, and how it shows a file rendered. Highlighting and rendered diffs both hang off "read this file at this side of the comparison", which is also what skipped lines already do, so the review covers all three rather than the two the Task names. The grammar build (xcframework, queries, inks) is sound as planned and gets one line here.</p>
-
-<h2>One interaction, walked</h2>
-<p>Jack picks the <code>implement</code> step of a Task in the Diff. <code>TaskFileDocument.swift</code> is in it with three hunks, and <code>scratch/plan.md</code> changed.</p>
-<ol>
-<li>The Python docstring hunk colors from the hunk alone, then recolors when the whole file is read. Good.</li>
-<li>He clicks "49 unchanged lines" between hunks. <b>Nothing opens.</b> <code>canOpenGaps</code> is <code>comparison.head == nil</code>: skipped lines read the working tree, and a step has a head. The plan's new <code>--at</code> read of that very file, at that head, sits one store over and isn't used.</li>
-<li><code>plan.md</code> opens rendered with a header control <i>Rendered · Side by side · Source</i>, while the toolbar above already says <i>New code · Unified · Side by side</i>. Two "Side by side" buttons, one per file and one for the stream, can say different things.</li>
-<li>A paragraph got one word changed. The plan matches blocks "by longest common subsequence over each block's plain text", then marks words on "a matched pair whose text differs". An exact-text LCS never matches two blocks that differ, so that paragraph shows as one struck block and one filled block, never as a word edit.</li>
-<li>Failure: the head read fails. Rows keep hunk colors, the rendered reader falls back to Source with Retry. Recovery: Retry reads the side again. Both hold as planned.</li>
-</ol>
-
-<h2>Product concepts and code concepts</h2>
+<h2>Pairings</h2>
 <table>
-<tr><th>What a person knows</th><th>In the code</th><th></th><th>What's wrong</th></tr>
-<tr><td>A changed file, before and after</td><td>Patch (<code>ReviewFile</code>) + three separate whole-file reads: highlights <code>--at</code>, rendered readers, <code>openGap</code> (working tree)</td><td class="no">no</td><td>One idea, three readers, two of them blind to the comparison's head. <b>Biggest mismatch.</b></td></tr>
-<tr><td>Unchanged lines I can open</td><td><code>ReviewGap</code>, <code>openedGaps</code>, <code>canOpenGaps</code></td><td class="no">no</td><td>A precondition that refuses steps and committed comparisons, because the read assumed a fixed context (the working tree).</td></tr>
-<tr><td>How the Diff is laid out</td><td><code>ReviewLayout</code> (New code · Unified · Side by side) + planned per-file Rendered · Side by side · Source</td><td class="no">no</td><td>One name for two ideas, with no rule for which wins.</td></tr>
-<tr><td>Rendered or source</td><td>planned per-file choice, in memory like Viewed</td><td class="yes">yes</td><td>Once "Side by side" leaves it, it is one toggle: Source.</td></tr>
-<tr><td>A picture</td><td>planned <code>TaskFileState.image</code>, chosen by extension in Rust</td><td class="no">no</td><td>"Is this an image" is the decoder's answer, and the app decodes. An extension list in Rust and another in Swift drift; <code>.tiff</code>, <code>.ico</code>, <code>.heic</code> stay "Binary file" in Files for no reason.</td></tr>
-<tr><td>An edited paragraph</td><td>planned block LCS + "matched pair whose text differs"</td><td class="no">no</td><td>Can't occur under exact matching. Lines already solve this: <code>LongestCommon</code> anchors, <code>ReviewPair.align</code> pairs the runs between, <code>ReviewSegment.edit</code> decides.</td></tr>
-<tr><td>Colored code</td><td><code>Grammar</code>, ink table, <code>FileHighlights {old,new}</code> by line number</td><td class="yes">yes</td><td>Maps 1:1. Line numbers are the shared key between patch rows, skipped lines and whole-file parses.</td></tr>
-<tr><td>A theme's colors</td><td>inks from ANSI 1–6 mixed toward <code>text</code> to 4.5:1</td><td class="yes">yes</td><td></td></tr>
-<tr><td>A file at a commit</td><td><code>lf task file --at</code>, read-only reason</td><td class="yes">yes</td><td><code>--at</code> names the version read; right name.</td></tr>
+<tr><th>What a person knows</th><th>In the code</th><th></th><th>Note</th></tr>
+<tr><td>A file's colors</td><td><code>Grammar</code>, <code>SyntaxInks</code>, <code>FileHighlights</code></td><td class="yes">yes</td><td>One grammar per path, one ink table per theme, used by both the Diff and the editor.</td></tr>
+<tr><td>The old and new version of a file</td><td><code>FileSides</code>, <code>lf task file --at</code></td><td class="yes">yes</td><td>One read per side serves colors, skipped lines and rendered views; <code>canOpenGaps</code> is gone.</td></tr>
+<tr><td>Skipped lines</td><td><code>openGap</code> from <code>sides.new</code></td><td class="yes">yes</td><td>Same in a step as in the whole Task.</td></tr>
+<tr><td>Rendered · Source</td><td><code>ReviewRendering</code>, <code>sourceFiles</code></td><td class="yes">yes</td><td>One per-file toggle; the layout picker arranges both.</td></tr>
+<tr><td>A redline</td><td><code>MarkdownRedline</code>, <code>ReviewWords</code></td><td class="yes">yes</td><td>Blocks pair as lines do; line Diffs and redlines share one word edit.</td></tr>
+<tr><td>An image</td><td><code>binary</code> + <code>data</code>, <code>TaskImage</code></td><td class="yes">yes</td><td>No image state on the wire. The Diff picks images by extension (so it never reads a large binary whole) and Files decodes any binary: two rules, each with a reason.</td></tr>
+<tr><td><b>A change</b> (title, stepper, <code>]</code> / <code>[</code>)</td><td><code>ReviewDiff.stops</code>: the patch's hunks</td><td class="no">no</td><td>One name for two ideas. In a rendered file, a change is what you see marked; the code counts hunks that aren't drawn.</td></tr>
 </table>
 
-<h2>The biggest mismatch: one file, read three ways</h2>
+<h2>The mismatch</h2>
+<p>Step through a Task that edits <code>README.md</code> and a PNG. The README reads as a redline, so its line hunks aren't drawn, but they are still the stops. <code>]</code> sets the scroll anchor to a hunk id the redline doesn't carry, and <code>scrollPosition(id:)</code> doesn't move. The image has no hunks, so a change that touches only the image reads "0 changes in 1 file", "No changes", "+0 −0".</p>
+
 <div class="cols">
-<div class="card"><h3>Before <span class="tag ex">plan as kicked off</span></h3>
-<div class="flow"><span class="box">patch</span><span class="arrow">→</span><span class="box">rows</span></div>
-<div class="flow" style="margin-top:8px"><span class="box">--at base / head</span><span class="arrow">→</span><span class="box">FileHighlights</span></div>
-<div class="flow" style="margin-top:8px"><span class="box">rendered reader reads</span><span class="arrow">→</span><span class="box">Markdown / image / HTML</span></div>
-<div class="flow" style="margin-top:8px"><span class="box bad">working tree only</span><span class="arrow">→</span><span class="box">openGap</span><span class="arrow">·</span><span class="mut">off for steps</span></div>
-</div>
-<div class="card"><h3>After <span class="tag">proposed</span></h3>
-<div class="flow"><span class="box">patch</span><span class="arrow">→</span><span class="box">rows</span></div>
-<div class="flow" style="margin-top:8px"><span class="box p">FileSides { old, new }</span><span class="mut">read once, when the file nears the view</span></div>
-<div class="flow" style="margin-top:4px;padding-left:24px"><span class="arrow">→</span><span class="box">FileHighlights</span><span class="arrow">→</span><span class="box">skipped lines</span><span class="arrow">→</span><span class="box">rendered readers</span></div>
-<p class="mut" style="margin-top:10px"><code>canOpenGaps</code> deleted. Old side <code>--at base</code> (old path on rename), new side <code>--at head</code> or the working tree. A draft in Files' Diff still reads the draft.</p>
-</div>
-</div>
-<p>The fix removes a precondition instead of adding one: skipped lines stop assuming the working tree, and step comparisons open them for free. Opened lines are new-side lines, so they color from <code>FileHighlights.new</code> like context rows; nothing new is needed to color them.</p>
-
-<h2>Layout: one picker, one per-file toggle</h2>
-<div class="cols">
-<div class="pane"><div class="bar"><b>Before</b><span class="sp"></span><span class="seg"><span>New</span><span>Unified</span><span class="on">Side by side</span></span></div>
-<div class="bar">scratch/plan.md<span class="sp"></span><span class="seg bad"><span class="on">Rendered</span><span>Side by side</span><span>Source</span></span></div>
-<div class="doc"><h4>Done when</h4>A changed <code>.md</code> opens rendered, <del>redlined; one click</del><ins>redlined in New code</ins>…<p class="mut">Stream says side by side; file says redline.</p></div></div>
-<div class="pane"><div class="bar"><b>After</b> <span class="tag">proposed</span><span class="sp"></span><span class="seg"><span>New</span><span>Unified</span><span class="on">Side by side</span></span></div>
-<div class="bar">scratch/plan.md<span class="sp"></span><span class="btn">Source</span></div>
-<div class="cols" style="gap:0"><div class="doc r" style="border-right:1px solid var(--line)"><h4>Done when</h4>A changed <code>.md</code> opens rendered, <del>redlined; one click</del>…</div><div class="doc a"><h4>Done when</h4>A changed <code>.md</code> opens rendered, <ins>redlined in New code</ins>…</div></div></div>
-</div>
-<table>
-<tr><th>Layout</th><th>Code</th><th>Markdown rendered</th><th>Image, HTML</th></tr>
-<tr><td>New code <span class="mut">(default)</span></td><td>new, removed folded</td><td>redline</td><td>two panes</td></tr>
-<tr><td>Unified</td><td>interleaved</td><td>redline</td><td>two panes</td></tr>
-<tr><td>Side by side</td><td>two columns</td><td>two columns, aligned by pair</td><td>two panes</td></tr>
-<tr><td>under 640 pt</td><td>unified</td><td>redline</td><td>stacked, old above new</td></tr>
-</table>
-<p>Jack's 4c, "redline by default, side by side one click away", holds: the default layout reads redline and Side by side is one click on the picker that already exists. Images (5a) and HTML (6a) stay side by side in every wide layout.</p>
-
-<h2>Markdown blocks pair the way lines do</h2>
-<div class="pane"><div class="bar">MarkdownRedline <span class="tag">proposed</span></div>
-<div class="doc">
-<p class="mut" style="margin:0">anchor (equal kind + text)</p>
-<h4>Decisions</h4>
-<p class="mut" style="margin:0">changed: same kind, <code>ReviewSegment.edit</code> accepts</p>
-<p>Engine: <b>A</b>, native tree-sitter in the app, coloring <del>the Diff</del><ins>both the Diff and the Files editor</ins>.</p>
-<p class="mut" style="margin:0">removed alone · added alone (rewritten past the edit threshold)</p>
-<p><del>Grammars come from SwiftPM.</del></p>
-<p><ins>Grammars ship as one prebuilt xcframework.</ins></p>
-</div></div>
-<p><code>LongestCommon</code> anchors equal blocks; between anchors, the old and new runs align in order as <code>ReviewPair.align</code> aligns lines. Same three outcomes, same threshold, same <code>ReviewSegment</code>; no second diff algorithm.</p>
-
-<h2>Images stay <code>binary</code>, with bytes</h2>
-<div class="cols">
-<div class="card"><h3>Before <span class="tag ex">plan</span></h3><code>state: "image"</code> when Rust sees <code>.png .jpg .jpeg .gif .webp</code>; <code>data</code> only then. Swift keeps its own list to decide which files render.</div>
-<div class="card"><h3>After <span class="tag">proposed</span></h3><code>state: "binary"</code>, <code>data</code> (base64, ≤16 MB, else null), <code>size_bytes</code> as today. The app's extension list picks Diff readers; <code>NSImage(data:)</code> decides what Files Read shows. No new state, no list in Rust.</div>
+  <div class="pane">
+    <h3>Now <span class="tag e">existing</span></h3>
+    <div class="bar"><span>5 changes in 3 files</span><span>4 of 5</span></div>
+    <div class="file">Store.swift</div>
+    <div class="row a stop">+ let cache = Cache()</div>
+    <div class="file">README.md · rendered</div>
+    <div class="row">## Install</div>
+    <div class="row">Run <span class="d">make</span> <span class="a">lf install</span>.</div>
+    <div class="ghost">stops 2–4: hunk ids, not in this view; the pane stays put</div>
+    <div class="file">logo.png · +0 −0</div>
+    <div class="img"><div>old</div><div>new</div></div>
+    <div class="ghost">no stop; never visited</div>
+  </div>
+  <div class="pane proposed">
+    <h3>Proposed <span class="tag p">proposed</span></h3>
+    <div class="bar"><span>3 changes in 3 files</span><span>2 of 3</span></div>
+    <div class="file">Store.swift</div>
+    <div class="row a">+ let cache = Cache()</div>
+    <div class="stop">
+      <div class="file">README.md · rendered</div>
+      <div class="row">## Install</div>
+      <div class="row">Run <span class="d">make</span> <span class="a">lf install</span>.</div>
+    </div>
+    <div class="file">logo.png</div>
+    <div class="img"><div>old · 512×512 · 4 KB</div><div>new · 512×512 · 5 KB</div></div>
+    <div class="row" style="color:var(--muted)">Source on README.md → its 3 hunks are the stops again (5 changes)</div>
+  </div>
 </div>
 
-<h2>Checked and left alone</h2>
-<p>The xcframework route, committed queries, the ink table and the off-main parse all map to real things and survive a failed read. The R2 upload still needs a yes before CI can link, as the plan says; nothing in this review changes that. The <code>dmg-background.png</code> acceptance line now expects <code>binary / true</code>.</p>
+<h2>Recommendation, chosen for review</h2>
+<p><b>A rendered file is one change.</b> The stops come from what the stream shows: a file the store renders is exactly one stop, <code>path#rendered</code>, carried by its rendered view; with Source on, its hunks are the stops. A binary header drops "+0 −0". Swift only: <code>ReviewDiff.stops</code> stays the patch's, and the store gets the one function that turns a shown diff into stops, read by the title, <code>position</code>, <code>step</code> and the sidebar.</p>
+<p>Passed over: one stop per changed redline block. It is finer, but it needs both sides read before the count is known, so the count would jump as files near the view — what <code>theChangeCountWaitsForEveryFile</code> just removed.</p>
+<p>Written into <code>scratch/plan.md</code> under "Concept review after the build", with its test.</p>
 
 <h2>Questions</h2>
-<ol class="q">
-<li>One read of each side (<code>FileSides</code>) serves highlights, skipped lines and rendered readers; <code>canOpenGaps</code> goes.
-<ol><li>Yes, as written into the plan.</li><li>Keep the reads separate; skipped lines stay working-tree only.</li></ol></li>
-<li>Rendered files follow the Diff's layout picker; each has only a Source toggle.
-<ol><li>Yes: New code and Unified redline, Side by side two columns.</li><li>Back to the per-file Rendered · Side by side · Source control.</li><li>Picker as in (a), but New code shows only the new document with removed blocks folded, like it folds lines.</li></ol></li>
-<li>Images ride on <code>binary</code> with <code>data</code>.
-<ol><li>Yes; any decodable binary shows as an image in Files.</li><li>A distinct <code>image</code> state keyed by extension.</li></ol></li>
-<li>Markdown blocks pair with <code>ReviewPair.align</code>'s rule.
-<ol><li>Yes.</li><li>Match by similarity instead (a moved paragraph would pair across anchors).</li></ol></li>
-<li>R2: upload <code>TreeSitterGrammars.xcframework</code> to the <code>bin</code> bucket beside GhosttyKit once slice 1 links?
-<ol><li>Yes.</li><li>Host it elsewhere (name where).</li></ol></li>
+<ol>
+<li>A rendered file counts as: <b>a</b> one change (built next) · <b>b</b> one per changed block once read · <b>c</b> nothing; the title counts files when there are no line stops.</li>
+<li>Hard-wrapped Markdown reads ragged in the redline: <b>a</b> reflow soft breaks in the Diff only · <b>b</b> in the Diff and Files Read · <b>c</b> leave as authored.</li>
+<li>Code blocks in Side by side: <b>a</b> wrap in the column (now) · <b>b</b> scroll sideways as in the redline.</li>
 </ol>
-</main></body></html>
+</body>
+</html>

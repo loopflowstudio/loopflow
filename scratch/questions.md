@@ -68,3 +68,10 @@
 - 2026-11-21 realign (headless): the plan now lists New code as the default layout and the Diff polish among what the demo must see; Jack's November 21 quotes moved into Decisions; the v2 Task is c9fbcb. Product memory notes New code as Jack's reading. No checks run; nothing in code disagreed.
 - 2026-11-21 concept review, tenth pass (headless), over the Diff polish: one repair for implement, in the plan under "Tenth pass". The step menu read every commit from base to head, merges included; on this branch 10 of 54 entries were `Merge <sha>`, one comparing 1,624 files of main's work. Chosen by the review, not by Jack, reversible: steps walk `--first-parent --no-merges` with each commit's parent, and a merge ends a run. Left for the screen: non-`lf` commits each stand alone (44 entries here). The five demo questions are unchanged and unanswered.
 - 2026-11-21 concept review, eleventh pass (headless), over the first-parent step repair: nothing to change. The five demo questions are unchanged and unanswered; whether the 23 non-`lf` commits standing alone fold together is still for the screen. `scratch/concept-review.html` is still the sixth pass's page.
+
+# c9fbcb Diff v2
+
+- 2026-11-21 kickoff (headless): grammars can't come from SwiftPM (five grammar manifests drop `scanner.c` under the manifest sandbox; SQL commits no `parser.c`) and the generated C is ~134 MB, so the plan ships them as a prebuilt `TreeSitterGrammars.xcframework` like GhosttyKit. **Needs Jack's yes:** uploading that new artifact to the `bin` R2 bucket. The October 6 authorization in `swift/GhosttyKitPatches/README.md` names GhosttyKit only. Until then the branch links a local build and CI can't.
+- Measured: the grammars add ~22 MB of arm64 code to a 129 MB app (the explore page guessed 8–15 MB).
+- Chosen for review: `lf task file --at <rev>` (not `--base`); a new `image` file state with base64 `data` up to 16 MB; Dockerfile/Makefile/ini, Objective-C and C# lose their colors (no grammar in the chosen list); the exact capture-to-ANSI table; Files Read shows images.
+- Noticed, not this Task's: Sparkle has no entry in `third_party/manifest.json` or the app's notices.

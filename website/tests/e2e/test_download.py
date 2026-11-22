@@ -16,6 +16,10 @@ def test_cli_install_section(page: Page, base_url: str):
 def test_install_command_fits_without_scrolling(page: Page, base_url: str):
     page.set_viewport_size({"width": 1440, "height": 900})
     page.goto(f"{base_url}/download")
+    # Measure in the site's mono; a wider fallback face would overflow before it loads.
+    assert page.evaluate(
+        "document.fonts.ready.then(() => document.fonts.check('16px \"Spline Sans Mono\"'))"
+    )
     command = page.locator(".install-code").first
     assert command.evaluate("el => el.scrollWidth <= el.clientWidth")
 

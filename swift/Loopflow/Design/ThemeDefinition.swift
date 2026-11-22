@@ -84,7 +84,7 @@ public struct TerminalPalette: Equatable, Sendable {
 }
 
 /// A complete theme. Its name is its identity: config and files refer to it by name.
-public struct ThemeDefinition: Identifiable, Sendable {
+public struct ThemeDefinition: Identifiable, Hashable, Sendable {
     public let name: String
     public let palette: LoopflowPalette
     public let terminal: TerminalPalette
@@ -121,6 +121,12 @@ public struct ThemeDefinition: Identifiable, Sendable {
     public init(name: String, palette: LoopflowPalette, terminal: TerminalPalette) {
         self.name = name; self.palette = palette; self.terminal = terminal
     }
+    /// Two themes are equal when they color the same.
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.name == rhs.name && lhs.palette.definition == rhs.palette.definition && lhs.terminal == rhs.terminal
+    }
+    // The colors are only Equatable; the name spreads themes well enough.
+    public func hash(into hasher: inout Hasher) { hasher.combine(name) }
 }
 
 private struct ThemeKey: EnvironmentKey { static let defaultValue = ThemeDefinition.light }

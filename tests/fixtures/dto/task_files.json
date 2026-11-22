@@ -39,6 +39,7 @@
     "task_id": "task-files",
     "path": "scratch/notes.md",
     "content": "\ufeffnotes\r\n",
+    "data": null,
     "state": "text",
     "revision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "size_bytes": 10,
@@ -51,12 +52,25 @@
     ],
     "read_only_reason": null
   },
+  "image": {
+    "issue_identifier": "TEST-1",
+    "task_id": "task-files",
+    "path": "icon.png",
+    "content": null,
+    "data": "iVBORw0KGgo=",
+    "state": "binary",
+    "revision": null,
+    "size_bytes": 8,
+    "recoveries": [],
+    "read_only_reason": "A committed version is read-only."
+  },
   "save": {
     "file": {
       "issue_identifier": "TEST-1",
       "task_id": "task-files",
       "path": "scratch/notes.md",
       "content": "\ufeffnotes\r\n",
+      "data": null,
       "state": "text",
       "revision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       "size_bytes": 10,

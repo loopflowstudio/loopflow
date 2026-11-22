@@ -53,49 +53,5 @@ struct ConsoleWorkspaceTests {
         #expect(throws: RegistryQueryError.self) { try workspace.newShell() }
         #expect(workspace.multiplexer.layout == before)
     }
-
-    @Test func previewsExpireAndNeverCombineOtherSessionStatus() throws {
-        let now = Date(timeIntervalSince1970: 1000)
-        let working = try record(age: 10)
-        #expect(SessionProgramStatus.unknown.preview(now: now, fallback: "brief", sessions: [working]).text == "Current output")
-        let stale = try record(age: 31)
-        #expect(SessionProgramStatus.unknown.preview(now: now, fallback: "brief", sessions: [stale]).text == "Summary · brief")
-        let available = try record(age: 300, available: true)
-        #expect(SessionProgramStatus.available(available).preview(now: now, fallback: "brief").text == "Current output")
-        let missing = try record(age: nil, available: true)
-        #expect(SessionProgramStatus.available(missing).preview(now: now, fallback: "brief", sessions: [working]).text == "Summary · brief")
-        #expect(SessionProgramStatus.unavailable("Offline").preview(now: now, fallback: "brief", sessions: [working]).text == "Summary · brief")
-        let replaced = try record(age: 10, process: nil)
-        #expect(SessionProgramStatus.unknown.preview(now: now, fallback: "brief", sessions: [replaced]).text == "Summary · brief")
-    }
-
-    @Test(arguments: [ProgramStatusState.idle, .done])
-    func settledReportsUseSummary(state: ProgramStatusState) throws {
-        let session = try record(age: 1)
-        let report = ProgramStatusReport(state: state, id: nil, kind: nil, progress: nil,
-            app: nil, title: nil, msg: nil)
-        let preview = SessionProgramStatus.reported(session, report).preview(
-            now: Date(timeIntervalSince1970: 1000), fallback: "brief")
-        #expect(preview.text == "Summary · brief")
-    }
-
-    @Test func summaryUsesFirstLineOfBrief() {
-        let preview = SessionProgramStatus.unknown.preview(now: Date(),
-            fallback: "Keep unfinished input through Task switches.\n\nImplementation instructions follow.")
-        #expect(preview.text == "Summary · Keep unfinished input through Task switches.")
-    }
-
-    private func record(age: Int?, available: Bool = false, process: String? = "agent") throws -> SessionRecord {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/sessions.json"))
-        var value = try #require((JSONSerialization.jsonObject(with: data) as? [[String: Any]])?.first)
-        value["state"] = "active"
-        value["program_status"] = NSNull()
-        value["availability"] = available ? "available" : NSNull()
-        value["agent_process_id"] = process ?? NSNull() as Any
-        value["preview"] = age.map { ["provider_thread": "thread", "provider_turn": "turn", "source": "codex",
-            "observed_at": 1000 - $0, "text": "Current output"] as [String: Any] } ?? NSNull() as Any
-        return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
-    }
 }
 #endif

@@ -54,6 +54,7 @@ struct ConsoleCommands: Commands {
 
             action("toggle-shell")
             action("toggle-browser")
+            action("details")
             action("page-back")
             action("page-forward")
             action("reload")
@@ -67,7 +68,8 @@ struct ConsoleCommands: Commands {
             let bindings: [DesktopKeyBinding?] = action.keys.isEmpty ? [nil] : action.keys
             ForEach(Array(bindings.enumerated()), id: \.offset) { _, binding in
                 let args = binding?.args ?? [:]
-                let title = args["index"].map { "Task \($0)" } ?? args["direction"]?.capitalized ?? action.title
+                let title = args["index"].map { "Task \($0)" } ?? args["direction"]?.capitalized
+                    ?? args["page"]?.capitalized ?? action.title
                 let button = Button(title) {
                     guard let actions else { return }
                     do { try action.perform(actions.context().with(args: args)) } catch { actions.failed(error) }
@@ -1597,10 +1599,9 @@ struct SessionsContentView: View {
                 VStack(spacing: 0) {
                     // The main pane alone: the sidebar stays put when a Task opens.
                     if let task = model.breadcrumb?.task?.task {
-                        TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
-                    }
-                    if let transition = model.visibleSessions.first(where: { $0.id == navigation.selectedSessionId })?.transition {
-                        ProviderTransitionRow(transition: transition)
+                        TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id],
+                            newConversation: { model.newTaskSession(task.id, open: newTaskSession) },
+                            openSession: openSession)
                     }
                     mainPane
                 }
@@ -1624,6 +1625,7 @@ struct SessionsContentView: View {
             if let id = actionTaskID, let found = model.task(id: id) {
                 VStack(alignment: .leading, spacing: 10) {
                     TaskActionItems(model: model, task: found.task, wave: found.wave?.wave,
+                        work: model.taskWork[id].value,
                         newConversation: {
                             model.newTaskSession(id, open: newTaskSession)
                         }, openSession: openSession)
@@ -1664,6 +1666,7 @@ struct SessionsContentView: View {
         .sheet(item: $model.historyWave) { wave in
             ProjectHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
         }
+        .modifier(TaskAbandonConfirmation(model: model))
         .sheet(isPresented: Binding(
             get: { navigation.renaming != nil || navigation.binding != nil },
             set: { if !$0 { model.cancelSessionRename(); model.cancelSessionBinding() } }
@@ -2101,18 +2104,5 @@ private extension WorkPaneIntent {
         case .shell: .shell
         case .browser: .browser
         }
-    }
-}
-
-struct ProviderTransitionRow: View {
-    let transition: ProviderTransition
-    var body: some View {
-        Text(transition.explanation)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-            .help("Observed at " + Date(timeIntervalSince1970: TimeInterval(transition.observedAt)).formatted())
     }
 }

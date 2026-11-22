@@ -1573,7 +1573,7 @@ impl WaveProjectTarget {
 
 const SETTING_KEYS: &str = "`lf config catalog` lists every preference and where it applies.
 Values use YAML; false disables and [] clears an additive list.
-The default destination is root lf.config.local.yaml, shared across Task worktrees.
+The default destination is the main checkout's .lf/config.local.yaml, shared across Task worktrees.
 --global edits ~/.lf/config.yaml; --shared explicitly edits committed configuration.
 `lf --wave <name> config set` selects a Wave; unset removes only that declaration.
 `lf config settings --skill <name> --json` explains effective values and sources.";

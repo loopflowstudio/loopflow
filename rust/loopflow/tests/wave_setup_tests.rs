@@ -56,7 +56,7 @@ fn configuration_edits_reach_an_open_wave_watch_without_store_writes() {
     let home = tempfile::tempdir().unwrap();
     repo.create_file(".lf/config.yaml", "agent: claude\n");
     repo.create_file(".lf/wave/infra/GOAL.md", "Keep it boring.\n");
-    repo.create_file(".git/info/exclude", "/lf.config.local.yaml\n");
+    repo.create_file(".git/info/exclude", "/.lf/config.local.yaml\n");
     let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     loopflow_execution::work::wave::bootstrap::ensure_wave(
         &store,
@@ -100,11 +100,11 @@ fn configuration_edits_reach_an_open_wave_watch_without_store_writes() {
             .unwrap()
     };
     let before = revision();
-    repo.create_file("lf.config.local.yaml", "agent: codex\n");
+    repo.create_file(".lf/config.local.yaml", "agent: codex\n");
     agent("codex", "personal");
-    repo.create_file("lf.config.local.yaml", "agent: pi\n");
+    repo.create_file(".lf/config.local.yaml", "agent: pi\n");
     agent("pi", "personal");
-    std::fs::remove_file(repo.path().join("lf.config.local.yaml")).unwrap();
+    std::fs::remove_file(repo.path().join(".lf/config.local.yaml")).unwrap();
     agent("claude", "repository");
     std::fs::write(home.path().join("config.yaml"), "agent: opencode\n").unwrap();
     agent("opencode", "personal");

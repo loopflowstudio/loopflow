@@ -184,7 +184,7 @@ struct WorkPalette: View {
         VStack(alignment: .leading, spacing: 12) {
             if sidebarOnly {
                 HStack {
-                    Text("Search sidebar").font(Typography.caption())
+                    Text("Search sidebar").font(Typography.meta)
                     Spacer()
                     Button("Search all Work") { model.navigation.palette = .search }
                 }
@@ -210,31 +210,31 @@ struct WorkPalette: View {
             .onChange(of: model.navigation.sidebarFilter) { _, _ in model.navigation.palette = nil }
             if model.paletteIsStale {
                 Text("May be out of date · showing last available readings")
-                    .font(Typography.caption()).foregroundStyle(palette.textSecondary)
+                    .font(Typography.meta).foregroundStyle(palette.textSecondary)
             }
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                             if search.isEmpty, index == 0 || group(rows[index - 1], working: working) != group(row, working: working) {
-                                Text(group(row, working: working)).font(.caption).foregroundStyle(palette.textSecondary)
+                                Text(group(row, working: working)).font(Typography.meta).foregroundStyle(palette.textSecondary)
                                     .frame(maxWidth: .infinity, alignment: .leading).padding(8)
                             }
                             Button { activate(row.id) } label: {
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(row.title).font(Typography.body())
-                                    Text(row.detail).font(Typography.caption()).foregroundStyle(palette.textSecondary)
+                                    Text(row.title).font(Typography.text)
+                                    Text(row.detail).font(Typography.meta).foregroundStyle(palette.textSecondary)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(8)
                                 .background(selection == row.id ? palette.surfaceMuted : .clear)
                             }.buttonStyle(.plain).id(row.id)
                         }
-                        if rows.isEmpty { Text("No matching destinations").font(Typography.caption()).padding() }
+                        if rows.isEmpty { Text("No matching destinations").font(Typography.meta).padding() }
                     }
                 }
                 .onChange(of: selection) { _, id in if let id { proxy.scrollTo(id) } }
             }
-            Text("↑↓ Select    ↩ Open    Esc Cancel").font(Typography.caption()).foregroundStyle(palette.textSecondary)
+            Text("↑↓ Select    ↩ Open    Esc Cancel").font(Typography.meta).foregroundStyle(palette.textSecondary)
         }
         .padding(20).frame(width: 560, height: 420).background(palette.background)
         .onChange(of: search) { _, _ in highlighted = rows.first?.id }
@@ -262,7 +262,7 @@ struct TaskLinkView: View {
     @Bindable var model: WorkModel
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Open Task").font(Typography.sectionTitle(26))
+            Text("Open Task").serif(.title)
             if let result = model.taskLinkReading.value {
                 if result.tasks.items.isEmpty { Text("No exact Task found in available planning.") }
                 if let reason = result.tasks.unavailableReason { Text(reason) }
@@ -279,7 +279,7 @@ struct TaskLinkView: View {
                     Task { await model.retryTaskLink() }
                 }
             }
-        }.padding(24).frame(width: 560).font(Typography.body())
+        }.padding(24).frame(width: 560).font(Typography.text)
     }
 }
 
@@ -375,9 +375,9 @@ struct GraphCatalogInspector: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(entry?.name ?? "Graph unavailable").font(Typography.sectionTitle(26))
+            Text(entry?.name ?? "Graph unavailable").serif(.title)
             if let entry {
-                Text(entry.source ?? "builtin Graph").font(Typography.code(11))
+                Text(entry.source ?? "builtin Graph").font(Typography.mono)
                 Button(entry.source == nil ? "Customize" : "Edit") {
                     Task {
                         do {
@@ -409,9 +409,9 @@ struct WorkflowCatalogInspector: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(entry?.name ?? "Workflow unavailable").font(Typography.sectionTitle(26))
+            Text(entry?.name ?? "Workflow unavailable").serif(.title)
             if let entry {
-                Text(entry.source ?? "builtin Workflow").font(Typography.code(11))
+                Text(entry.source ?? "builtin Workflow").font(Typography.mono)
                 Button(entry.source == nil ? "Customize" : "Edit") {
                     Task {
                         do {
@@ -427,7 +427,7 @@ struct WorkflowCatalogInspector: View {
             }
             Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }
             if let workflow = entry?.workflow {
-                WorkflowDiagram(nodes: workflow.steps, edges: workflow.runs)
+                WorkflowSteps(workflow: workflow)
             } else { Text(entry?.unavailable ?? "Refresh the Workflow catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }.padding(24).frame(width: 780)
@@ -449,7 +449,7 @@ private struct PaletteSearchField: NSViewRepresentable {
         field.isBordered = false
         field.focusRingType = .none
         field.drawsBackground = false
-        field.font = NSFont(name: "Lato-Regular", size: 13) ?? .systemFont(ofSize: 13)
+        field.font = NSFont(name: Typography.sansFace, size: 13) ?? .systemFont(ofSize: 13)
         field.placeholderString = "Go to a Task, Wave or repository"
         field.setAccessibilityIdentifier("work-palette-search")
         field.delegate = context.coordinator

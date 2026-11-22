@@ -226,7 +226,7 @@ struct WavesView: View {
                 isShowingCreate = true
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Typography.text).fontWeight(.semibold)
                     .foregroundStyle(repos.isEmpty ? palette.textTertiary : palette.text)
             }
             .buttonStyle(.plain)
@@ -252,11 +252,11 @@ struct WavesView: View {
                 .accessibilityIdentifier("portfolio-mode")
 
                 if selected.mode == .folder {
-                    Text(selected.root).font(.caption).textSelection(.enabled)
+                    Text(selected.root).font(Typography.meta).textSelection(.enabled)
                     Button("Choose Folder…") { choosePortfolioPaths(folder: true) }
                         .accessibilityIdentifier("portfolio-folder")
                     ForEach(selected.repos.filter { $0.error != nil }) { repo in
-                        Text("\(repo.displayName): \(repo.error ?? "")").font(.caption)
+                        Text("\(repo.displayName): \(repo.error ?? "")").font(Typography.meta)
                     }
                 } else {
                     Button("Add Repositories…") { choosePortfolioPaths(folder: false) }
@@ -267,7 +267,7 @@ struct WavesView: View {
                                 HStack {
                                     VStack(alignment: .leading) {
                                         Text(repo.displayName)
-                                        Text(repo.error ?? repo.path).font(.caption).textSelection(.enabled)
+                                        Text(repo.error ?? repo.path).font(Typography.meta).textSelection(.enabled)
                                     }
                                     Spacer()
                                     Button("Remove", systemImage: "minus.circle") {
@@ -287,7 +287,7 @@ struct WavesView: View {
                 }
             }
             if let error = portfolioService.error {
-                Text(error).font(.caption).textSelection(.enabled)
+                Text(error).font(Typography.meta).textSelection(.enabled)
             }
             HStack {
                 Button("Refresh") { Task { await refreshRepos() } }
@@ -327,12 +327,12 @@ struct WavesView: View {
         } label: {
             HStack(spacing: Spacing.xs) {
                 Text(headerTitle)
-                    .font(Typography.sectionTitle(16))
+                    .font(Typography.lede)
                     .foregroundStyle(palette.text)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(Typography.meta).fontWeight(.semibold)
                     .foregroundStyle(palette.textSecondary)
             }
             .contentShape(Rectangle())
@@ -347,14 +347,14 @@ struct WavesView: View {
     private var emptyWaveState: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(repos.isEmpty ? "No repositories found." : "No waves yet.")
-                .font(Typography.caption())
+                .font(Typography.meta)
                 .foregroundStyle(palette.textSecondary)
             if !repos.isEmpty {
                 Button {
                     isShowingCreate = true
                 } label: {
                     Label("New wave", systemImage: "plus")
-                        .font(Typography.caption())
+                        .font(Typography.meta)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -619,12 +619,12 @@ struct CreateWaveSheet: View {
     private var form: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             Text("New wave")
-                .font(Typography.sectionTitle(20))
+                .font(Typography.lede)
                 .foregroundStyle(palette.text)
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text("Repository")
-                    .font(Typography.caption())
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
 
                 Picker("Repository", selection: $selectedRepoPath) {
@@ -634,28 +634,28 @@ struct CreateWaveSheet: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .font(Typography.body())
+                .font(Typography.text)
                 .tint(palette.actionInk)
                 .padding(.horizontal, Spacing.md)
                 .padding(.vertical, Spacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(palette.surfaceMuted)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
                 .disabled(isCreating)
             }
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text("Wave name")
-                    .font(Typography.caption())
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
 
                 TextField("Wave name", text: $waveName)
                     .textFieldStyle(.plain)
-                    .font(Typography.body())
+                    .font(Typography.text)
                     .foregroundStyle(palette.text)
                     .padding(Spacing.md)
                     .background(palette.surfaceMuted)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
                     .focused($isNameFocused)
                     .onSubmit(submit)
                     .disabled(isCreating)
@@ -663,24 +663,24 @@ struct CreateWaveSheet: View {
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text("Objective (optional)")
-                    .font(Typography.caption())
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
 
                 TextField("What this Wave is for", text: $objective)
                     .accessibilityIdentifier("new-wave-objective")
                     .textFieldStyle(.plain)
-                    .font(Typography.body())
+                    .font(Typography.text)
                     .foregroundStyle(palette.text)
                     .padding(Spacing.md)
                     .background(palette.surfaceMuted)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
                     .onSubmit(submit)
                     .disabled(isCreating)
             }
 
             if let errorMessage {
                 Text(errorMessage)
-                    .font(Typography.caption())
+                    .font(Typography.meta)
                     .foregroundStyle(palette.failure)
             }
 
@@ -701,7 +701,7 @@ struct CreateWaveSheet: View {
                         Text("Create wave")
                     }
                 }
-                .buttonStyle(DarkButtonStyle())
+                .buttonStyle(LoopflowButtonStyle(.accent))
                 .disabled(isCreating || trimmedName.isEmpty || selectedRepoPath.isEmpty)
             }
         }

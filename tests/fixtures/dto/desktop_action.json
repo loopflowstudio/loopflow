@@ -312,6 +312,23 @@
       "keys": []
     },
     {
+      "name": "details",
+      "title": "Show Task Details",
+      "scope": "pane",
+      "arguments": [
+        {
+          "name": "page",
+          "kind": "string",
+          "required": true
+        }
+      ],
+      "keys": [
+        "⌥⌘1",
+        "⌥⌘2",
+        "⌥⌘3"
+      ]
+    },
+    {
       "name": "graph-log",
       "title": "Show Graph Processes",
       "scope": "pane",

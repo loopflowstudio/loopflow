@@ -44,15 +44,15 @@ struct NewTaskSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 14) {
                 Text("What do you want?")
-                    .font(Typography.sectionTitle(28))
+                    .serif(.title)
                     .foregroundStyle(palette.emphasisInk)
                 TextField("", text: $request, axis: .vertical)
                     .lineLimit(4...10)
                     .textFieldStyle(.plain)
-                    .font(Typography.body(15))
+                    .font(Typography.text)
                     .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(palette.background))
-                    .overlay(RoundedRectangle(cornerRadius: 12)
+                    .background(RoundedRectangle(cornerRadius: CornerRadius.pane).fill(palette.background))
+                    .overlay(RoundedRectangle(cornerRadius: CornerRadius.pane)
                         .strokeBorder(focused ? palette.accent : palette.borderStrong, lineWidth: 1))
                     .focused($focused)
                     .accessibilityIdentifier("new-task-request")
@@ -65,7 +65,7 @@ struct NewTaskSheet: View {
             Divider()
             HStack(spacing: 10) {
                 if let fileError {
-                    Text("Not filed · \(fileError)").font(Typography.body(12)).foregroundStyle(palette.warning)
+                    Text("Not filed · \(fileError)").font(Typography.text).foregroundStyle(palette.warning)
                         .lineLimit(2).textSelection(.enabled).accessibilityIdentifier("new-task-file-error")
                 }
                 Spacer()
@@ -73,13 +73,13 @@ struct NewTaskSheet: View {
                     .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
                     .keyboardShortcut(.cancelAction)
                 Button(filing ? "Filing…" : "File") { file() }
-                    .buttonStyle(WorkOutlineButtonStyle())
+                    .buttonStyle(LoopflowButtonStyle())
                     .disabled(trimmed.isEmpty || filing)
                     .help("Put it in \(scopeName)'s backlog without starting it")
                     .accessibilityIdentifier("new-task-file")
                 Button { create() } label: {
                     Text("Start  ⌘↩")
-                        .font(Typography.strong(13))
+                        .font(Typography.textStrong)
                         .padding(.horizontal, 15).padding(.vertical, 7)
                         .foregroundStyle(palette.accentText)
                         .background(Capsule().fill(palette.accent))
@@ -138,14 +138,14 @@ struct NewTaskSheet: View {
                     .accessibilityIdentifier("new-task-default")
             }
         }
-        .font(Typography.body(13.5))
+        .font(Typography.text)
         .foregroundStyle(palette.text)
     }
 
     private func pickerLabel(_ title: String) -> some View {
         HStack(spacing: 3) {
-            Text(title).font(Typography.strong(13.5))
-            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+            Text(title).font(Typography.textStrong)
+            Image(systemName: "chevron.down").font(Typography.meta).fontWeight(.semibold)
         }
         .foregroundStyle(palette.text)
         .contentShape(Rectangle())
@@ -217,7 +217,7 @@ struct WorkflowSteps: View {
                         .frame(width: step.you == nil ? 9 : 11, height: step.you == nil ? 9 : 11)
                         .padding(.top, step.you == nil ? 1 : 0)
                     Text(step.you ?? " ")
-                        .font(Typography.sectionTitle(15))
+                        .font(Typography.lede)
                         .foregroundStyle(palette.emphasisInk)
                         .fixedSize()
                 }
@@ -230,7 +230,7 @@ struct WorkflowSteps: View {
         .padding(.horizontal, 4)
         .overlay(alignment: .trailing) {
             if workflow.steps.isEmpty {
-                Text("runs on its own").font(Typography.caption()).foregroundStyle(palette.textSecondary).offset(y: 12)
+                Text("runs on its own").font(Typography.meta).foregroundStyle(palette.textSecondary).offset(y: 12)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -262,20 +262,20 @@ private struct WorkflowChooser: View {
         VStack(alignment: .leading, spacing: 0) {
             if let defaultName {
                 Text("New Tasks in \(scope) run \(defaultName). Pick another for this Task only.")
-                    .font(Typography.body(12.5)).foregroundStyle(palette.textSecondary)
+                    .font(Typography.text).foregroundStyle(palette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(12)
                 Divider()
             }
             TextField("Find a workflow", text: $query)
-                .textFieldStyle(.plain).font(Typography.body(13)).padding(10)
+                .textFieldStyle(.plain).font(Typography.text).padding(10)
                 .onSubmit { if let first = sections.flatMap(\.1).first { choose(first.name) } }
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(sections, id: \.0) { title, flows in section(title, flows) }
                     if sections.allSatisfy(\.1.isEmpty) {
-                        Text("No workflow matches").font(Typography.body(12.5)).foregroundStyle(palette.textSecondary).padding(9)
+                        Text("No workflow matches").font(Typography.text).foregroundStyle(palette.textSecondary).padding(9)
                     }
                 }.padding(4)
             }
@@ -287,26 +287,26 @@ private struct WorkflowChooser: View {
     @ViewBuilder private func section(_ title: String?, _ flows: [StartFlow]) -> some View {
         if !flows.isEmpty {
             if let title {
-                Text(title).font(Typography.strong(12.5)).foregroundStyle(palette.textSecondary)
+                Text(title).font(Typography.textStrong).foregroundStyle(palette.textSecondary)
                     .padding(.horizontal, 9).padding(.top, 8).padding(.bottom, 2)
             }
             ForEach(flows) { flow in
                 Button { choose(flow.name) } label: {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
-                            Text(flow.name).font(Typography.strong(13))
+                            Text(flow.name).font(Typography.textStrong)
                             Text(flow.consequence).foregroundStyle(palette.textSecondary)
                             if flow.name == defaultName, let defaultPhrase { Text("· \(defaultPhrase)").foregroundStyle(palette.textSecondary) }
                             if flow.name == chosen { Image(systemName: "checkmark").foregroundStyle(palette.emphasisInk) }
-                        }.font(Typography.body(11.5))
+                        }.font(Typography.meta)
                         if let summary = flow.summary {
-                            Text(summary).font(Typography.body(11.5)).foregroundStyle(palette.textSecondary)
+                            Text(summary).font(Typography.meta).foregroundStyle(palette.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .padding(9)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(RoundedRectangle(cornerRadius: 7))
+                    .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("new-task-workflow-\(flow.name)")
@@ -342,12 +342,12 @@ struct StartingTaskView: View {
         VStack(alignment: .leading, spacing: 18) {
             ScrollView {
                 Text(starting.request)
-                    .font(Typography.body(15))
+                    .font(Typography.text)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             if let error = starting.error {
-                Text(error).font(Typography.body(12)).foregroundStyle(palette.warning)
+                Text(error).font(Typography.text).foregroundStyle(palette.warning)
                     .textSelection(.enabled).accessibilityIdentifier("new-task-error")
                 HStack {
                     Button("Try again") {

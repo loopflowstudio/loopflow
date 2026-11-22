@@ -25,19 +25,19 @@ struct MobileNewTaskView: View {
                             MobileSavedRequestsView(model: model, theme: theme, onOpen: onOpen)
                         } label: {
                             Label("Saved requests (\(model.draft.savedRequests.count))", systemImage: "tray")
-                                .font(Typography.strong(15))
+                                .font(MobileType.strong(15))
                                 .frame(minHeight: 44)
                         }
                     }
                     VStack(alignment: .leading, spacing: 10) {
                         Text("What would you like to work on?")
-                            .font(Typography.strong(24))
+                            .font(MobileType.strong(24))
                             .accessibilityAddTraits(.isHeader)
                         Text("Type or use your keyboard’s microphone to dictate. You can edit before starting.")
-                            .font(Typography.body(14))
+                            .font(MobileType.text(14))
                             .foregroundStyle(theme.palette.textSecondary)
                         TextEditor(text: Binding(get: { model.draft.text }, set: { model.editText($0) }))
-                            .font(Typography.body(17))
+                            .font(MobileType.text(17))
                             .scrollContentBackground(.hidden)
                             .frame(minHeight: 170)
                             .padding(8)
@@ -48,7 +48,7 @@ struct MobileNewTaskView: View {
                             .accessibilityLabel("Task instructions")
                         if model.instructionsTooLong {
                             Text("Shorten these instructions before starting.")
-                                .font(Typography.caption(13)).foregroundStyle(theme.palette.warning)
+                                .font(MobileType.text(13)).foregroundStyle(theme.palette.warning)
                         }
                     }
                     destination
@@ -56,10 +56,10 @@ struct MobileNewTaskView: View {
                         MobileCreationResult(outcome: outcome)
                     } else if model.draft.submission != nil {
                         Text("Your request may already be running. Check its status now or save it for later. Saving does not cancel work on your Machine.")
-                            .font(Typography.body(14))
+                            .font(MobileType.text(14))
                     }
                     if let error = model.error {
-                        Text(error).font(Typography.body(14)).foregroundStyle(theme.palette.warning)
+                        Text(error).font(MobileType.text(14)).foregroundStyle(theme.palette.warning)
                             .accessibilityLabel("\(error)")
                     }
                 }
@@ -96,10 +96,10 @@ struct MobileNewTaskView: View {
 
     private var destination: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("On your Machine").font(Typography.caption(12)).foregroundStyle(theme.palette.textSecondary)
+            Text("On your Machine").font(MobileType.text(12)).foregroundStyle(theme.palette.textSecondary)
             Label(model.draft.submission?.machineName ?? model.context?.name
                 ?? (model.busy ? "Connecting…" : "Machine unavailable"), systemImage: "desktopcomputer")
-                .font(Typography.strong(15))
+                .font(MobileType.strong(15))
             if model.draft.submission == nil, let context = model.context {
                 NavigationLink {
                     MobileRepositoryPicker(model: model, theme: theme)
@@ -107,7 +107,7 @@ struct MobileNewTaskView: View {
                     HStack(spacing: 12) {
                         Text(context.repositories.first(where: { $0.path == model.draft.directory })?.displayName
                             ?? "Choose a repository")
-                            .font(Typography.strong(17))
+                            .font(MobileType.strong(17))
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
@@ -120,12 +120,12 @@ struct MobileNewTaskView: View {
                 if !model.draft.directory.isEmpty,
                    !context.repositories.contains(where: { $0.path == model.draft.directory && $0.error == nil }) {
                     Text("The saved repository is unavailable. Choose a destination.")
-                        .font(Typography.body(14))
+                        .font(MobileType.text(14))
                 }
             }
             if !model.draft.directory.isEmpty {
                 Text(model.draft.submission?.directory ?? model.draft.directory)
-                    .font(Typography.caption(12)).foregroundStyle(theme.palette.textSecondary)
+                    .font(MobileType.text(12)).foregroundStyle(theme.palette.textSecondary)
                     .textSelection(.enabled)
             }
         }
@@ -159,7 +159,7 @@ struct MobileNewTaskView: View {
             }
             if !model.busy && model.draft.submission != nil {
                 Button("Save for later") { editing = false; model.saveForLater() }
-                    .font(Typography.strong(15)).frame(minHeight: 44)
+                    .font(MobileType.strong(15)).frame(minHeight: 44)
             }
         }
         .frame(maxWidth: .infinity).padding(16)
@@ -180,11 +180,11 @@ private struct MobileCreationResult: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(Self.title(outcome), systemImage: outcome.state == .started ? "checkmark.circle" : "info.circle")
-                .font(Typography.strong(17))
+                .font(MobileType.strong(17))
             if let receipt = outcome.receipt {
-                Text("\(receipt.task.identifier) · \(receipt.task.title)").font(Typography.body(15))
+                Text("\(receipt.task.identifier) · \(receipt.task.title)").font(MobileType.text(15))
             }
-            if let message = outcome.message { Text(message).font(Typography.body(14)) }
+            if let message = outcome.message { Text(message).font(MobileType.text(14)) }
         }
     }
 
@@ -212,11 +212,11 @@ struct MobileSavedRequestsView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(request.outcome?.receipt?.task.title ?? request.submission.request)
-                                .font(Typography.strong(17)).lineLimit(3)
+                                .font(MobileType.strong(17)).lineLimit(3)
                             Label(request.submission.machineName, systemImage: "desktopcomputer")
-                                .font(Typography.caption(13)).foregroundStyle(theme.palette.textSecondary)
+                                .font(MobileType.text(13)).foregroundStyle(theme.palette.textSecondary)
                             Text(request.outcome.map(MobileCreationResult.title) ?? "Result not confirmed")
-                                .font(Typography.caption(13)).foregroundStyle(theme.palette.textSecondary)
+                                .font(MobileType.text(13)).foregroundStyle(theme.palette.textSecondary)
                         }
                         .padding(.vertical, 6)
                     }
@@ -224,7 +224,7 @@ struct MobileSavedRequestsView: View {
                 }
             } footer: {
                 Text("Saving a request does not cancel it. Reconnect its original Machine to check the result or open the Task. Your new draft stays separate.")
-                    .font(Typography.body(14))
+                    .font(MobileType.text(14))
             }
         }
         .scrollContentBackground(.hidden)
@@ -247,23 +247,23 @@ struct MobileSavedTaskRequestView: View {
             if let request = model.savedRequest(id) {
                 VStack(alignment: .leading, spacing: 20) {
                     Label(request.submission.machineName, systemImage: "desktopcomputer")
-                        .font(Typography.strong(17))
+                        .font(MobileType.strong(17))
                     Text(request.submission.directory)
-                        .font(Typography.caption(13)).foregroundStyle(theme.palette.textSecondary)
+                        .font(MobileType.text(13)).foregroundStyle(theme.palette.textSecondary)
                         .textSelection(.enabled)
-                    Text(request.submission.request).font(Typography.body(17)).textSelection(.enabled)
+                    Text(request.submission.request).font(MobileType.text(17)).textSelection(.enabled)
                     if let outcome = request.outcome {
                         MobileCreationResult(outcome: outcome)
                     } else {
                         Text("The result hasn’t been confirmed. Checking status recovers this exact request on its original Machine.")
-                            .font(Typography.body(14))
+                            .font(MobileType.text(14))
                     }
                     if let context = model.context, context.machineID != request.submission.machineID {
                         Text("Reconnect \(request.submission.machineName) to continue. Nothing will be sent to \(context.name).")
-                            .font(Typography.body(14)).foregroundStyle(theme.palette.textSecondary)
+                            .font(MobileType.text(14)).foregroundStyle(theme.palette.textSecondary)
                     }
                     if let error = model.error {
-                        Text(error).font(Typography.body(14)).foregroundStyle(theme.palette.warning)
+                        Text(error).font(MobileType.text(14)).foregroundStyle(theme.palette.warning)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading).padding(20)

@@ -265,14 +265,6 @@ public struct WorkflowDefinition: Sendable, Hashable {
     public let steps: [TaskGraph.InteractiveStep]
     public let runs: [Run]
 
-    /// A Task's captured graph: each run carries it to the next interactive step.
-    public init(_ graph: TaskGraph) {
-        name = graph.name
-        steps = graph.interactiveSteps
-        let columns = [TaskGraph.start] + steps.map(\.name) + [TaskGraph.end]
-        runs = zip(columns, columns.dropFirst()).map { Run(from: $0, to: $1, name: "") }
-    }
-
     /// A definition: interactive steps in order, each XOR path's in name order,
     /// and a run back wherever a step returns to an earlier one.
     public init(_ compiled: CompiledGraph) {

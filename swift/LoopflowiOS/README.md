@@ -64,7 +64,7 @@ ever sent twice: after an uncertain send the app says so and waits.
 ## Terminal
 
 Ghostty draws the Session, the same renderer as Desktop, in the theme's terminal
-colours and JetBrains Mono 12 scaled by Dynamic Type. No process runs on the
+colours and Spline Sans Mono 12 scaled by Dynamic Type. No process runs on the
 phone: the bytes the Machine sends are fed to the surface, and what Ghostty
 would write back (keys, and its answers to a program's queries such as
 `OSC 7501;?`) goes to the Machine. Ghostty encodes the key row and hardware keys

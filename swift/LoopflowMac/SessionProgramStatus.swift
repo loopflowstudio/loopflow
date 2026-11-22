@@ -40,35 +40,12 @@ enum SessionProgramStatus {
         }
     }
 
-    /// Freshness changes presentation only, never the underlying execution status.
-    func preview(now: Date, fallback: String, sessions: [SessionRecord] = []) -> (text: String, help: String, age: String?) {
-        let candidate: SessionRecord?
-        switch self {
-        case .unavailable: candidate = nil
-        case .reported(_, let report) where report.state == .idle || report.state == .done: candidate = nil
-        default: candidate = session ?? sessions.min(by: Self.precedes)
-        }
-        if let session = candidate, session.programStatus?.seen != true || session.programStatus?.summary != nil,
-           session.state == .active || session.state == .detached, let excerpt = session.preview,
-           !excerpt.providerThread.isEmpty, !excerpt.providerTurn.isEmpty,
-           session.agentProcessId != nil {
-            let age = now.timeIntervalSince1970 - Double(excerpt.observedAt)
-            let available = session.availability == .available
-            if age >= 0, available || age <= 30 {
-                let safe = ProgramStatusReport.displaySafe(excerpt.text)
-                if !safe.isEmpty {
-                    let line = safe.split(separator: "\n").last.map(String.init) ?? safe
-                    let label = age < 60 ? "\(Int(age))s" : age < 3600 ? "\(Int(age / 60))m" : "\(Int(age / 3600))h"
-                    return (line, "\(session.title) (\(session.id)) · \(excerpt.source) · \(Int(age))s ago\n\(safe)", label)
-                }
-            }
-        }
-        let summary = fallback.split(separator: "\n").first
-            .map { ProgramStatusReport.displaySafe(String($0)) } ?? "No current activity"
-        let detail: String
-        if case .unavailable(let reason) = self { detail = "Activity unavailable · \(reason)\nSummary · \(summary)" }
-        else { detail = "Summary · \(summary)" }
-        return ("Summary · \(summary)", detail, nil)
+    /// What a blocked program is asking, in its own words.
+    var ask: String? {
+        guard case .reported(_, let report) = self, report.state == .blocked,
+              let text = [report.msg, report.title].compactMap({ $0.map(ProgramStatusReport.displaySafe) })
+                .first(where: { !$0.isEmpty }) else { return nil }
+        return text
     }
 
     var label: String? {
@@ -106,21 +83,18 @@ enum SessionProgramStatus {
 /// Existing provider and terminal metadata, with no process-name guessing.
 struct PaneProgramHeading: Equatable {
     let name: String
-    let symbol: String
     let context: String
     let detail: String
 
     init(provider: String?, title: String, directory: String?, fallback: String) {
         switch provider?.lowercased() {
-        case "codex": name = "Codex"; symbol = "terminal"
-        case "claude": name = "Claude"; symbol = "sparkle"
-        case "pi": name = "Pi"; symbol = "terminal"
-        case "opencode": name = "OpenCode"; symbol = "chevron.left.forwardslash.chevron.right"
-        case "agy": name = "Antigravity"; symbol = "terminal"
-        case .some(let value) where !value.isEmpty:
-            name = ProgramStatusReport.displaySafe(value); symbol = "bubble.left"
-        default:
-            name = fallback; symbol = fallback == "Shell" ? "terminal" : "rectangle"
+        case "codex": name = "Codex"
+        case "claude": name = "Claude"
+        case "pi": name = "Pi"
+        case "opencode": name = "OpenCode"
+        case "agy": name = "Antigravity"
+        case .some(let value) where !value.isEmpty: name = ProgramStatusReport.displaySafe(value)
+        default: name = fallback
         }
         let title = ProgramStatusReport.displaySafe(title)
         let folder = directory.map { URL(fileURLWithPath: $0).lastPathComponent }

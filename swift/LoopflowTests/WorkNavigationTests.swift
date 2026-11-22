@@ -102,7 +102,7 @@ struct WorkNavigationTests {
         let key = try #require(registry.selectedWork)
         let root = try #require(registry.retained(key))
         let layout = root.multiplexer.layout
-        let crumbs = WorkBreadcrumbs(model: model)
+        let crumbs = TitleBar(model: model)
         model.navigation.resizeSidebar(460, availableWidth: 1200)
         model.select(.wave(id: "wave-1"))
         try crumbs.inspect().find(button: "loopflow").tap()
@@ -122,7 +122,7 @@ struct WorkNavigationTests {
         let model = try model()
         await model.refresh()
         model.select(.task(id: "issue-review"))
-        let crumbs = WorkBreadcrumbs(model: model)
+        let crumbs = TitleBar(model: model)
         for scope in ["repository", "wave-wave-1"] {
             _ = try crumbs.inspect().find(viewWithAccessibilityIdentifier: "work-jump-" + scope)
         }
@@ -334,14 +334,14 @@ struct WorkNavigationTests {
         #expect(drag.source == nil && drag.target == nil && drag.offset == 0)
     }
 
-    @Test("The sidebar header names the Dashboard under the repository, and ⌘1 marks its first member")
+    @Test("The sidebar header names the Dashboard as written under the repository, and ⌘1 marks its first member")
     func dashboardSidebarHeader() throws {
         let model = try dashboardModel()
         model.selectDashboard("review")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
-        _ = try navigator.inspect().find(text: "REVIEW")
+        _ = try navigator.inspect().find(text: "Review")
         _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-repository")
-        let first = try navigator.inspect().find(TaskRowMetadata.self) { try $0.actualView().slotHint == "⌘1" }
+        let first = try navigator.inspect().find(TaskRow.self) { try $0.actualView().slotHint == "⌘1" }
         #expect(try first.actualView().id == "issue-now")
     }
 
@@ -410,7 +410,8 @@ struct WorkNavigationTests {
         #expect(action("1", .command) == "goto [\"index\": \"1\"]")
         #expect(action("9", [.command, .capsLock]) == "goto [\"index\": \"9\"]")
         #expect(action("0", .command) == nil)
-        #expect(action("1", [.command, .option]) == nil)
+        #expect(action("1", [.command, .shift]) == nil)
+        #expect(action("1", [.command, .option]) == "details [\"page\": \"brief\"]")
         #expect(action("\t", .control) == "next [:]")
         #expect(action("\u{19}", [.control, .shift]) == "previous [:]")
         #expect(action("\t", []) == nil)
@@ -1181,7 +1182,7 @@ struct WorkNavigationTests {
         let model = try model()
         await model.refresh()
         model.select(.task(id: "issue-review"))
-        _ = try WorkBreadcrumbs(model: model).inspect().find(viewWithAccessibilityIdentifier: "work-machine")
+        _ = try TitleBar(model: model).inspect().find(viewWithAccessibilityIdentifier: "work-machine")
         #expect(model.machineTarget == .task(issue: "W2-131"))
         #expect(model.machine(of: .task(issue: "W2-131")).label == "mini")
         model.select(.task(id: "issue-now"))

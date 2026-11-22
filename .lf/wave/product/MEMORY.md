@@ -189,10 +189,8 @@ against an unseen reopening. LOO-385 overlap does not establish closure.
 
 ## History
 
-- Terminal-host adoption (2026-10-07): Jack Heart authorized landing after cmux/herdr
-  trials without full adoption proof; LOO-421 limits at `27613222eb`, same file.
-- LOO-380 Live Home proof, unresolved LOO-367/366/343/test-Wave findings:
-  `314095b00:wave/product/MEMORY.md`; no cleanup authority.
+- Terminal-host adoption (2026-10-07) and LOO-380 Live Home findings:
+  `2a3b6d11d8:.lf/wave/product/MEMORY.md`, this heading; no cleanup authority.
 
 ## Reactive workspace (2026-10-05)
 
@@ -499,16 +497,10 @@ remain distinct from waited delivery.
 
 ## Skill reduction decisions (2026-09-28)
 
-Jack requested a smaller library, then restored debug as the default in examples.
-Debug investigates and fixes a cause; unbreak restores a workflow. That distinction
-is the implementation interpretation, not Jack's explicit wording. Neither needs
-clipboard input. 5whys remains explicit systemic investigation; reduce and polish
-remain optional surveys, with no accepted removal. Research includes conversational
-codebase questions. Realign reconciles memory; pr-message owns PR authorship.
-
-Historical consolidation: `16e9c950b9:wave/product/MEMORY.md`, this heading.
-Workflow decisions supersede those recipes; missing launch history proves neither
-disuse nor caller authorship.
+Debug investigates and fixes a cause; unbreak restores a workflow (the
+implementation's reading, not Jack's wording). Realign reconciles memory;
+pr-message owns PR authorship. The September library reduction and its
+consolidation history: `2a3b6d11d8:.lf/wave/product/MEMORY.md`, this heading.
 
 Jack requested single S1–S5 skills and identified their sequence as VSM. The
 `vsm-operate` design composes delivery, coordination, capacity, adaptation and
@@ -663,10 +655,9 @@ Undo (`536b0fd56:scratch/compress-pane-state.md`), not just visible controls.
 
 LOO-327's demo feedback, approval wording and original navigation design remain at
 `611ed031a031e6798652a15b5d250ba0f132a4e8:scratch/{file-browser-demo-approval,file-browser-demo-feedback,file-browser}.md`.
-The detailed implementation account is at
+Implementation account:
 `446c59eb0:.lf/wave/product/MEMORY.md`, this heading. Overall approval did not
-establish every scenario, merge or Task completion. Current usage lives in the
-Mac README and CLI reference.
+establish every scenario, merge or Task completion.
 
 - Task placement owns Files and the retained conversation. One document per
   Task/path shares draft, selection and Undo across File/Diff, sheets and Sessions.
@@ -691,7 +682,7 @@ Mac README and CLI reference.
   ordinary content reads and typing. Preserve complete UTF-8/BOM/line endings
   within the 1 MB bound; previews never authorize Save. No arbitrary-writer
   exclusion, extended-attribute or power-loss guarantee follows from this design.
-- Historical warm-cache file timings, unexplained failures and optimization limits:
+- Historical file timings, failures and optimization limits:
   `27613222eb:.lf/wave/product/MEMORY.md`, this heading. Measure first selection
   without pre-reading; these AppKit endpoints prove no physical-click/compositor p95.
 - **Native primitives and overall approval have separate evidence.** TextKit
@@ -703,6 +694,27 @@ Mac README and CLI reference.
   provider Home continuity were not individually established by those checks or
   Jack's overall demo approval. A wrapper's returned launch argv must retain its
   Home context; successful initial launch does not prove nested commands do.
+
+## Task Brief, Diff and Files pages (LOO-515, 2026-11-21; PR #1949 unmerged)
+
+- Brief, Diff and Files: tabs of one Files tool (Jack: "why does files show
+  up three times"); Jack named Diff. One renderer, the PR's comparison.
+- One `lf task diff` capped at 1 MB hid the Swift. Jack: "that we felt we
+  couldnt afford to see a full diff". Read by file; say what is cut.
+- Size collapses nothing. Jack: "often the largest diffs are the ones that
+  matter the most".
+- At 600 pt it clipped and "jumps when i hover"; fit 360 pt.
+- Jack reads new code: "i just read the right side"; New code is default.
+- Jack: the change count "should know up front"; jumps beat no pagination.
+- Jack: "The diff is really about the underlying worker not the highest-level
+  session."
+- Jack chose comments to the session, a sidebar and a reading order: the
+  `tour` skill writes `scratch/tour.yaml`, gone at publish.
+- `diff_hidden` adds per layer; `diff_groups` replaces whole (an agent's
+  choice, unreviewed). Desktop reads final values from the config parser.
+  Private settings: `.lf/config.local.yaml` (Jack).
+- Top-level `diff` means `context.diff`; released `lf` warns per command on
+  an unknown `.lf/config.yaml` key.
 
 ## Accepted calmer workspace (2026-09-25)
 

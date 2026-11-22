@@ -38,7 +38,7 @@ struct ProjectReadinessView: View {
             }
             if let successor = readiness?.pendingSuccessor {
                 Text("Project transition remains unresolved: \(successor)")
-                    .font(Typography.caption()).textSelection(.enabled)
+                    .font(Typography.meta).textSelection(.enabled)
             }
         }
         .accessibilityIdentifier("project-readiness")

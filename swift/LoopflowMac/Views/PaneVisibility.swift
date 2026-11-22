@@ -89,7 +89,7 @@ struct HideablePart<Content: View>: View {
                         action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 11))
+                .font(Typography.meta)
                 .foregroundStyle(palette.textSecondary)
                 .frame(width: 22, height: 20)
                 .contentShape(Rectangle())

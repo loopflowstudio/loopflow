@@ -1933,12 +1933,12 @@ struct GhosttyTerminalView: View {
     var body: some View {
         VStack {
             Image(systemName: "terminal")
-                .font(Typography.heroTitle())
+                .serif(.title)
                 .foregroundStyle(theme.palette.textSecondary)
             Text("Embedded terminal not available")
-                .font(Typography.sectionTitle())
+                .font(Typography.lede)
             Text("Build GhosttyKit to enable this feature")
-                .font(Typography.caption())
+                .font(Typography.meta)
                 .foregroundStyle(theme.palette.textSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

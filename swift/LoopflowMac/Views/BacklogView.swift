@@ -640,14 +640,14 @@ struct BacklogView: View {
 
     private func titleLine(_ list: BacklogList, project showsProject: Bool, objective showsObjective: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-            Text(roadmap?.wave.displayName ?? model.repositoryName).font(Typography.strong(17)).lineLimit(1)
+            Text(roadmap?.wave.displayName ?? model.repositoryName).font(Typography.lede).lineLimit(1)
                 .layoutPriority(1).accessibilityIdentifier("wave-title")
             if let roadmap {
                 if let error = roadmap.projects.unavailableReason {
-                    Text("Project unavailable · \(error)").font(Typography.body(12)).foregroundStyle(palette.warning)
+                    Text("Project unavailable · \(error)").font(Typography.text).foregroundStyle(palette.warning)
                         .lineLimit(1)
                 } else if showsProject, let project = roadmap.currentProject {
-                    Text(project.name).font(Typography.body(12)).foregroundStyle(palette.textSecondary)
+                    Text(project.name).font(Typography.text).foregroundStyle(palette.textSecondary)
                         .lineLimit(1).accessibilityIdentifier("wave-current-project")
                 }
                 if showsObjective {
@@ -656,10 +656,10 @@ struct BacklogView: View {
                     } label: {
                         HStack(spacing: Spacing.xs) {
                             Text("Objective")
-                            Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold))
+                            Image(systemName: "chevron.right").font(Typography.meta).fontWeight(.bold)
                                 .rotationEffect(.degrees(list.state.showsObjective ? 90 : 0))
                         }
-                        .font(Typography.body(12)).foregroundStyle(palette.actionInk)
+                        .font(Typography.text).foregroundStyle(palette.actionInk)
                     }
                     .buttonStyle(WorkPlainButtonStyle()).fixedSize()
                     .help(roadmap.wave.goal)
@@ -670,7 +670,7 @@ struct BacklogView: View {
             ShowHiddenMenu(model: model, view: view)
             if let roadmap { waveMenu(roadmap) }
             Button { model.navigation.palette = .newTask } label: { Label("New", systemImage: "plus") }
-                .buttonStyle(WorkOutlineButtonStyle()).fixedSize().help("File a Task (⌘N)")
+                .buttonStyle(LoopflowButtonStyle()).fixedSize().help("File a Task (⌘N)")
                 .accessibilityIdentifier("backlog-new")
         }
     }
@@ -685,9 +685,9 @@ struct BacklogView: View {
                     .buttonStyle(.plain).foregroundStyle(palette.textTertiary).help("Clear search")
             }
         }
-        .font(Typography.body(13))
+        .font(Typography.text)
         .padding(.horizontal, Spacing.sm).padding(.vertical, 5)
-        .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: 6))
+        .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: CornerRadius.control))
     }
 
     private func waveMenu(_ roadmap: WaveRoadmap) -> some View {
@@ -712,17 +712,17 @@ struct BacklogView: View {
     private func objective(_ roadmap: WaveRoadmap) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(roadmap.wave.goal.isEmpty ? "No objective recorded." : roadmap.wave.goal)
-                .font(Typography.body(13)).foregroundStyle(palette.textSecondary).textSelection(.enabled)
+                .font(Typography.text).foregroundStyle(palette.textSecondary).textSelection(.enabled)
             if let project = roadmap.currentProject {
                 HStack(spacing: Spacing.md) {
                     Text(WaveMetricPortfolioPresentation(portfolio: roadmap.metricPortfolio).headline)
-                        .font(Typography.body(12)).foregroundStyle(palette.textSecondary).lineLimit(1)
+                        .font(Typography.text).foregroundStyle(palette.textSecondary).lineLimit(1)
                         .accessibilityIdentifier("wave-metric-headline")
                     TrackerSyncView(sync: project.sync, repo: roadmap.wave.repo)
                 }
                 ForEach(project.krs) { kr in
                     Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "xmark.circle")
-                        .font(Typography.body(12)).lineLimit(1)
+                        .font(Typography.text).lineLimit(1)
                         .foregroundStyle(kr.holds ? palette.success : palette.textSecondary)
                 }
             }
@@ -737,7 +737,7 @@ struct BacklogView: View {
     @ViewBuilder
     private var notices: some View {
         if let notice = list.state.notice {
-            Text(notice).font(Typography.body(12.5)).foregroundStyle(palette.textSecondary).lineLimit(2)
+            Text(notice).font(Typography.text).foregroundStyle(palette.textSecondary).lineLimit(2)
                 .textSelection(.enabled)
                 .accessibilityIdentifier("backlog-notice")
                 .padding(.horizontal, Spacing.xl)
@@ -761,7 +761,7 @@ struct BacklogView: View {
                         Divider().padding(.leading, Spacing.xl)
                     }
                     if list.truncated {
-                        Text("Partial: searching the \(list.all.count) loaded").font(Typography.body(12))
+                        Text("Partial: searching the \(list.all.count) loaded").font(Typography.text)
                             .foregroundStyle(palette.warning).padding(Spacing.xl)
                     }
                     if list.canReorder, !list.rows.isEmpty {
@@ -788,20 +788,20 @@ struct BacklogView: View {
                 .toggleStyle(.checkbox).labelsHidden()
                 .opacity(hovered == task.id || !list.selection.isEmpty ? 1 : 0)
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Text(task.task.identifier).font(Typography.code(11)).foregroundStyle(palette.textSecondary)
+                Text(task.task.identifier).font(Typography.mono).foregroundStyle(palette.textSecondary)
                     .frame(minWidth: 62, alignment: .leading).fixedSize()
-                Text(task.task.name).font(isOpen ? Typography.strong(14) : Typography.body(14))
+                Text(task.task.name).font(isOpen ? Typography.textStrong : Typography.text)
                     .lineLimit(isOpen ? nil : 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if list.state.editing == task.id {
-                    Text("draft").font(Typography.body(11)).foregroundStyle(palette.accentInk)
+                    Text("draft").font(Typography.meta).foregroundStyle(palette.accentInk)
                 }
                 if let standing = BacklogList.standing(task) {
-                    Text(standing).font(Typography.body(11)).foregroundStyle(palette.textSecondary).lineLimit(1)
+                    Text(standing).font(Typography.meta).foregroundStyle(palette.textSecondary).lineLimit(1)
                         .accessibilityIdentifier("backlog-standing-\(task.id)")
                 }
                 if let wave = list.waveLabel(task) {
-                    Text(wave).font(Typography.body(11)).foregroundStyle(palette.textSecondary).lineLimit(1)
+                    Text(wave).font(Typography.meta).foregroundStyle(palette.textSecondary).lineLimit(1)
                 }
                 BacklogOwnerMark(owner: BacklogOwner(task), holder: task.runtime?.owner)
                 Menu { actions(task, list) } label: {
@@ -862,7 +862,7 @@ struct BacklogView: View {
     private func emptyState(_ list: BacklogList) -> some View {
         let empty = list.empty
         VStack(alignment: .leading, spacing: Spacing.md) {
-            Text(empty.title).font(Typography.strong(14))
+            Text(empty.title).font(Typography.textStrong)
             switch empty.step {
             case .clearSearch: Button("Clear search") { state.wrappedValue.query = "" }
             case .showAvailable: Button("Show available") { state.wrappedValue.filter = .available }
@@ -870,7 +870,7 @@ struct BacklogView: View {
             case .new: Button("New") { model.navigation.palette = .newTask }
             }
         }
-        .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
+        .buttonStyle(LoopflowButtonStyle(.accent))
         .padding(Spacing.xl).frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityIdentifier("backlog-empty")
     }
@@ -975,9 +975,9 @@ private struct BacklogDrag: ViewModifier {
         if enabled {
             content
                 .draggable(id) {
-                    Text(title).font(Typography.strong(13)).lineLimit(1)
+                    Text(title).font(Typography.textStrong).lineLimit(1)
                         .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.sm)
-                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 6))
+                        .background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.row))
                 }
                 .dropDestination(for: String.self) { items, _ in drop(items) } isTargeted: { targeted = $0 }
         } else {
@@ -1002,7 +1002,7 @@ struct BacklogOwnerMark: View {
                     .frame(width: 13, height: 13)
             }
         }
-        .font(.system(size: 14)).frame(width: 18)
+        .font(Typography.text).frame(width: 18)
         .help(help)
         .accessibilityLabel(help)
     }
@@ -1028,7 +1028,7 @@ struct BacklogFilterPicker: View {
                 let chosen = filter == selection
                 Button { selection = filter } label: {
                     Text("\(filter.rawValue) \(count(filter))")
-                        .font(chosen ? Typography.strong(12.5) : Typography.body(12.5))
+                        .font(chosen ? Typography.textStrong : Typography.text)
                         .monospacedDigit()
                         .foregroundStyle(chosen ? palette.accentText : palette.textSecondary)
                         .padding(.horizontal, 10).padding(.vertical, 4)
@@ -1084,7 +1084,7 @@ struct BacklogToolbar: View {
                 .menuStyle(.borderlessButton).fixedSize().accessibilityIdentifier("backlog-move")
             Spacer(minLength: Spacing.sm)
             if position {
-                Text(positionText).font(Typography.body(12)).foregroundStyle(palette.textSecondary).monospacedDigit()
+                Text(positionText).font(Typography.text).foregroundStyle(palette.textSecondary).monospacedDigit()
                     .fixedSize().accessibilityIdentifier("backlog-position")
             }
             if arrows {
@@ -1097,7 +1097,7 @@ struct BacklogToolbar: View {
             Button("Abandon\(count)…") { perform(.abandon) }.help("⌘⌫").accessibilityIdentifier("backlog-abandon")
         }
         .buttonStyle(BacklogQuietButtonStyle())
-        .font(Typography.body(12.5))
+        .font(Typography.text)
         .lineLimit(1)
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -1123,7 +1123,7 @@ struct BacklogToolbar: View {
                 .accessibilityIdentifier("backlog-more")
         }
         .buttonStyle(BacklogQuietButtonStyle())
-        .font(Typography.body(12.5))
+        .font(Typography.text)
         .lineLimit(1)
     }
 
@@ -1144,9 +1144,9 @@ struct BacklogQuietButtonStyle: ButtonStyle {
         configuration.label
             .foregroundStyle(isEnabled ? palette.text : palette.textTertiary)
             .padding(.horizontal, Spacing.sm).padding(.vertical, 3)
-            .background(RoundedRectangle(cornerRadius: 5)
+            .background(RoundedRectangle(cornerRadius: CornerRadius.control)
                 .fill(configuration.isPressed ? palette.surfaceElement : hovering && isEnabled ? palette.surfaceMuted : .clear))
-            .contentShape(RoundedRectangle(cornerRadius: 5))
+            .contentShape(RoundedRectangle(cornerRadius: CornerRadius.control))
             .onHover { hovering = $0 }
             .workFocusRing()
     }
@@ -1170,7 +1170,7 @@ struct BacklogStartButton: View {
         let fresh = tasks.filter(\.awaitsStart)
         HStack(spacing: 0) {
             Button { perform(.start(nil)) } label: {
-                Text(list.startLabel).font(Typography.strong(12.5)).lineLimit(1)
+                Text(list.startLabel).font(Typography.textStrong).lineLimit(1)
                     .padding(.leading, Spacing.md).padding(.trailing, Spacing.sm).padding(.vertical, 4)
                     .contentShape(Rectangle())
             }
@@ -1185,7 +1185,7 @@ struct BacklogStartButton: View {
                 Menu {
                     BacklogStartItems(model: model, tasks: tasks, perform: perform)
                 } label: {
-                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
+                    Image(systemName: "chevron.down").font(Typography.meta).fontWeight(.bold)
                 }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .tint(ink)
@@ -1316,22 +1316,22 @@ struct BacklogBrief: View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             if editing {
                 TextEditor(text: state.draft)
-                    .font(Typography.body(14)).scrollContentBackground(.hidden).frame(minHeight: 240)
-                    .padding(Spacing.sm).background(palette.surface, in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(palette.border))
+                    .font(Typography.text).scrollContentBackground(.hidden).frame(minHeight: 240)
+                    .padding(Spacing.sm).background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.row))
+                    .overlay(RoundedRectangle(cornerRadius: CornerRadius.row).strokeBorder(palette.border))
                     .accessibilityIdentifier("backlog-brief-editor")
                 HStack(spacing: Spacing.sm) {
                     Button("Save") { perform(.save(task, state.wrappedValue.draft)) }
-                        .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
+                        .buttonStyle(LoopflowButtonStyle(.accent))
                         .disabled(state.wrappedValue.draft == brief)
                         .keyboardShortcut("s", modifiers: .command)
-                    Button("Cancel") { state.wrappedValue.editing = nil }.buttonStyle(WorkOutlineButtonStyle())
+                    Button("Cancel") { state.wrappedValue.editing = nil }.buttonStyle(LoopflowButtonStyle())
                         .keyboardShortcut(.cancelAction)
                 }
             } else if brief.isEmpty {
                 Text("No brief yet.").foregroundStyle(palette.textTertiary)
             } else {
-                Text(Self.markdown(brief)).font(Typography.body(14)).lineSpacing(4).textSelection(.enabled)
+                Text(Self.markdown(brief)).font(Typography.text).lineSpacing(4).textSelection(.enabled)
                     .lineLimit(long && !state.wrappedValue.showsAll ? 9 : nil)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("backlog-brief-\(task.id)")
@@ -1339,7 +1339,7 @@ struct BacklogBrief: View {
                     Button(state.wrappedValue.showsAll ? "Show less" : "Show all \(Self.words(brief)) words") {
                         state.wrappedValue.showsAll.toggle()
                     }
-                    .buttonStyle(WorkLinkStyle()).font(Typography.body(12.5)).help("Return")
+                    .buttonStyle(WorkLinkStyle()).font(Typography.text).help("Return")
                 }
             }
         }
@@ -1368,7 +1368,7 @@ struct WaveViewHeader: View {
 
     var body: some View {
         HStack(spacing: Spacing.md) {
-            Text(title).font(Typography.strong(15)).lineLimit(1)
+            Text(title).font(Typography.lede).lineLimit(1)
             Spacer(minLength: 0)
             ShowHiddenMenu(model: model, view: view)
         }

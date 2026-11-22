@@ -694,7 +694,7 @@ fn print_task_snapshot(
             tracker_writeback,
         );
         if let Some(graph) = &snapshot.work.graph {
-            println!("  {}", graph.summary());
+            println!("  Graph {}: {}", graph.name, graph.sentence);
         }
         if let Some(conflict) = &snapshot.completion_pending {
             println!("  error: {conflict}");

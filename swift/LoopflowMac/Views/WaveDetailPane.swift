@@ -66,9 +66,9 @@ struct WaveDetailPane: View {
 
     private var header: some View {
         HStack(spacing: Spacing.sm) {
-            WaveLensView(lens: wave.lens)
+            StatusMark(lens: wave.lens)
             Text(wave.displayName)
-                .font(Typography.sectionTitle())
+                .font(Typography.lede)
                 .foregroundStyle(palette.text)
 
             Spacer()
@@ -77,7 +77,7 @@ struct WaveDetailPane: View {
                 onClose()
             } label: {
                 Image(systemName: "xmark")
-                    .font(Typography.caption())
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
             }
             .buttonStyle(WorkPlainButtonStyle())
@@ -191,7 +191,7 @@ private struct WavePlanView: View {
         let lead = Self.firstSentence(full)
         return VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(full.isEmpty ? "No objective written yet." : lead)
-                .font(Typography.sectionTitle(20))
+                .font(Typography.lede)
                 .foregroundStyle(palette.text)
                 .lineSpacing(3)
                 .textSelection(.enabled)
@@ -200,7 +200,7 @@ private struct WavePlanView: View {
             if !full.isEmpty, full != lead {
                 DisclosureGroup {
                     Text(full)
-                        .font(Typography.body(13))
+                        .font(Typography.text)
                         .foregroundStyle(palette.textSecondary)
                         .lineSpacing(3)
                         .textSelection(.enabled)
@@ -208,7 +208,7 @@ private struct WavePlanView: View {
                         .padding(.top, Spacing.xs)
                 } label: {
                     Text("Full objective")
-                        .font(Typography.caption(11))
+                        .font(Typography.meta)
                         .foregroundStyle(palette.textSecondary)
                 }
                 .tint(palette.actionInk)
@@ -317,14 +317,14 @@ struct WaveMetricPortfolioView: View {
                             ),
                             systemImage: "exclamationmark.circle.fill"
                         )
-                        .font(Typography.caption(11))
+                        .font(Typography.meta)
                         .foregroundStyle(palette.failure)
                     }
                 }
                 .accessibilityIdentifier("wave-metric-summary")
 
                 Text(presentation.headline)
-                    .font(Typography.body(12.5))
+                    .font(Typography.text)
                     .foregroundStyle(palette.textSecondary)
 
                 if !portfolio.metrics.isEmpty {
@@ -349,11 +349,11 @@ struct WaveMetricPortfolioView: View {
                             countLabel(portfolio.contractIssues.count, singular: "contract issue", plural: "contract issues"),
                             systemImage: "exclamationmark.triangle.fill"
                         )
-                        .font(Typography.strong(11))
+                        .font(Typography.textStrong)
                         .foregroundStyle(palette.warning)
                         ForEach(Array(portfolio.contractIssues.enumerated()), id: \.offset) { _, issue in
                             Text(issue.summary)
-                                .font(Typography.caption(11))
+                                .font(Typography.meta)
                                 .foregroundStyle(palette.text)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -361,11 +361,11 @@ struct WaveMetricPortfolioView: View {
                     }
                     .padding(.horizontal, Spacing.md)
                     .padding(.vertical, Spacing.sm)
-                    .background(palette.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    .background(palette.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: CornerRadius.pane))
                     .overlay(alignment: .leading) {
                         Rectangle().fill(palette.warning).frame(width: 2)
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.pane))
                     .accessibilityIdentifier("wave-metric-contract-issues")
                 }
             }
@@ -406,7 +406,7 @@ private struct WaveMetricTableHeader: View {
     private func cell(_ text: String) -> some View {
         Text(text)
             .textCase(.uppercase)
-            .font(Typography.strong(10.5))
+            .font(Typography.textStrong)
             .tracking(0.6)
             .foregroundStyle(palette.textTertiary)
     }
@@ -425,7 +425,7 @@ private struct WaveMetricTableRow: View {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Text(presentation.name)
-                        .font(Typography.strong(13))
+                        .font(Typography.textStrong)
                         .foregroundStyle(palette.text)
                         .lineLimit(1)
                     if candidate {
@@ -434,30 +434,30 @@ private struct WaveMetricTableRow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 Text(presentation.value)
-                    .font(Typography.code(12))
+                    .font(Typography.mono)
                     .monospacedDigit()
                     .foregroundStyle(palette.text)
                     .frame(width: MetricColumns.value, alignment: .leading)
                 Text(presentation.target)
-                    .font(Typography.code(12))
+                    .font(Typography.mono)
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(1)
                     .frame(width: MetricColumns.target, alignment: .leading)
                 Text(presentation.window)
-                    .font(Typography.code(12))
+                    .font(Typography.mono)
                     .foregroundStyle(palette.textSecondary)
                     .frame(width: MetricColumns.window, alignment: .leading)
                 WorkChip(text: presentation.state, tone: metric.evidence.tone)
                     .frame(width: MetricColumns.state, alignment: .leading)
             }
             Text(detail(presentation))
-                .font(Typography.caption(11))
+                .font(Typography.meta)
                 .foregroundStyle(metric.instrumented ? palette.textTertiary : palette.warning)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             if let reason = presentation.reason {
                 Text(reason)
-                    .font(Typography.caption(11))
+                    .font(Typography.meta)
                     .foregroundStyle(metric.evidence.tone.ink(in: palette))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -689,21 +689,21 @@ private struct RoadmapTaskView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
-            WaveLensView(lens: WaveLens.forTask(task.condition), diameter: 9, accessibilityId: "task-lens")
+            StatusMark(lens: WaveLens.forTask(task.condition)).accessibilityIdentifier("task-lens")
                 .frame(width: 14)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     Text(task.task.identifier)
-                        .font(Typography.caption(10))
+                        .font(Typography.meta)
                         .foregroundStyle(palette.textSecondary)
                     Text(task.task.name)
-                        .font(Typography.caption(12))
+                        .font(Typography.text)
                         .foregroundStyle(palette.text)
                         .lineLimit(2)
                 }
                 Text(statusLine)
-                    .font(Typography.caption(10))
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
                 if let pr = task.pr {
                     PrLink(pr: pr)
@@ -713,9 +713,9 @@ private struct RoadmapTaskView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Spacing.sm)
         .background(palette.background.opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control))
         .overlay {
-            RoundedRectangle(cornerRadius: CornerRadius.sm)
+            RoundedRectangle(cornerRadius: CornerRadius.control)
                 .stroke(isSelected ? palette.selectionEdge : Color.clear, lineWidth: 1)
         }
         .contentShape(Rectangle())
@@ -741,13 +741,13 @@ private struct WaveWorkInspector: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack {
                 Text("Selected work")
-                    .font(Typography.caption(10))
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
                 Spacer()
             }
             if let task {
                 Text("\(task.task.identifier) · \(task.task.name)")
-                    .font(Typography.sectionTitle(15))
+                    .font(Typography.lede)
                     .foregroundStyle(palette.text)
                 details(
                     status: task.historyLabel,
@@ -767,7 +767,7 @@ private struct WaveWorkInspector: View {
         }
         .padding(Spacing.md)
         .background(palette.surfaceMuted)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
     }
 
     private var task: RoadmapTask? {
@@ -790,16 +790,16 @@ private struct WaveWorkInspector: View {
         pr: PrSnapshot?
     ) -> some View {
         Text("\(status) · \(reason)")
-            .font(Typography.caption(11))
+            .font(Typography.meta)
             .foregroundStyle(palette.textSecondary)
         if let provider {
             Text("Provider · \(provider)")
-                .font(Typography.caption(10))
+                .font(Typography.meta)
                 .foregroundStyle(palette.textSecondary)
         }
         if let location {
             Text(location)
-                .font(.system(size: 10, design: .monospaced))
+                .font(Typography.mono)
                 .foregroundStyle(palette.textSecondary)
                 .textSelection(.enabled)
         }
@@ -820,10 +820,10 @@ private struct PrLink: View {
                 "PR #\(github.number) · \(pr.phase.rawValue)",
                 destination: github.url
             )
-            .font(Typography.caption(10))
+            .font(Typography.meta)
         } else {
             Text("Pull request · \(pr.phase.rawValue) · \(pr.branch)")
-                .font(Typography.caption(10))
+                .font(Typography.meta)
                 .foregroundStyle(palette.textSecondary)
         }
     }
@@ -836,7 +836,7 @@ struct WaveProjectView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(project.name).font(Typography.sectionTitle(15)).textSelection(.enabled)
+            Text(project.name).font(Typography.lede).textSelection(.enabled)
             TrackerSyncView(sync: project.sync, repo: repo)
             ForEach(project.krs) { kr in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -846,7 +846,7 @@ struct WaveProjectView: View {
                         .frame(width: 12, height: 12)
                         .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
                     Text(kr.text)
-                        .font(Typography.body(13))
+                        .font(Typography.text)
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)

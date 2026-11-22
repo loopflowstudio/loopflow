@@ -96,7 +96,7 @@ direct SQL writes and shared fixture lookups to use the new tables. Run
 `test(server::service::tests::a_plan_watch_refreshes_and_a_task_view_resolves_its_primary_session)`
 for primary Session storage changes: the served watch fixture writes the
 association directly before resolving the Task's conversation. Run
-`scripts/test_desktop.sh --filter 'TaskRowMetadataTests|WaveStandupTests|DTOFixtureTests'`
+`scripts/test_desktop.sh --filter 'TaskRowTests|WaveStandupTests|DTOFixtureTests'`
 when changing Task ownership DTOs; inline Swift fixtures must include required
 nullable keys alongside the shared JSON fixtures. Run
 `test(performance_tests::)` to check that seeded Graphs still belong to their

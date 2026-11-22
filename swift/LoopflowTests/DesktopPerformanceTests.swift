@@ -545,7 +545,7 @@ struct DesktopPerformanceTests {
                     && hasRendered(window, "task-work-perf-graph-0")
             })
             try await sample("task_overview", population, attempt, journal, window, action: {
-                files.page = .task
+                files.page = .brief
                 let pane = try #require(multiplexer.layout.pane(for: sessionPane))
                 try workspace.showBrowser(.files, from: pane)
             }, ready: { hasRendered(window, "browser-task-overview") })
@@ -565,8 +565,9 @@ struct DesktopPerformanceTests {
             try await sample("file_edit_refresh", population, attempt, journal, window, action: {
                 files.page = .files
                 multiplexer.showBrowser(.files, location: workspace.location)
-                try await wait(window) { files.changedPaths.first == "notes.txt" }
+                try await wait(window) { files.changes?.files.first?.path == "notes.txt" }
                 files.navigator = .dropdown
+                try await wait(window) { files.treeRows.contains { $0.entry?.path == "notes.txt" } }
                 try pressElement("notes.txt", in: window, property: "Label")
                 files.mode = .edit
                 try await wait(window) { files.selectedDocument?.snapshot != nil }
@@ -1035,7 +1036,9 @@ struct DesktopPerformanceTests {
             case "task" where args.dropFirst().first == "show":
                 return #"{"overview":\#(workJSON),"graph_processes":[],"comments":\#(commentsJSON),"execution":null,"row":null}"#
             case "task" where args.dropFirst().first == "changes":
-                return #"{"issue_identifier":"PERF-0","task_id":"perf-task-0","base_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","files":[{"path":"notes.txt","old_path":null,"committed":true,"staged":false,"unstaged":false,"untracked":false}],"scratch":[],"scratch_truncated":false,"recovery_directory":null}"#
+                return #"{"issue_identifier":"PERF-0","task_id":"perf-task-0","base_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","commits":[],"files":[{"path":"notes.txt","old_path":null,"committed":true,"staged":false,"unstaged":false,"untracked":false,"changes":1}],"scratch":[],"scratch_truncated":false,"recovery_directory":null}"#
+            case "task" where args.dropFirst().first == "files":
+                return #"{"path":"","entries":[{"path":"notes.txt","kind":"file"}],"next_cursor":null}"#
             case "task" where args.dropFirst().first == "file":
                 return #"{"issue_identifier":"PERF-0","task_id":"perf-task-0","path":"notes.txt","content":"Original notes","state":"text","revision":"fixed","size_bytes":14,"recoveries":[],"read_only_reason":null}"#
             case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
@@ -1089,7 +1092,7 @@ struct DesktopPerformanceFixtureTests {
         await store.refresh()
         await store.loadFile()
         #expect(document.text == "Preserved draft")
-        #expect(store.changedPaths == ["notes.txt"])
+        #expect(store.changes?.files.map(\.path) == ["notes.txt"])
         await #expect(throws: RegistryQueryError.self) {
             try await query.updateTaskDirective(id: "PERF-0", text: "denied", cwd: "/src/loopflow")
         }

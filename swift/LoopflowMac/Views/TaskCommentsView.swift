@@ -53,7 +53,7 @@ struct TaskCommentsView: View {
     @ViewBuilder
     private var statusText: some View {
         Text(reading.isLoading ? "Reading comments…" : "")
-            .font(Typography.body(12.5))
+            .font(Typography.text)
             .foregroundStyle(palette.textSecondary)
             .textSelection(.enabled)
             .padding(.leading, 17)
@@ -64,14 +64,14 @@ struct TaskCommentsView: View {
         VStack(alignment: .leading, spacing: 0) {
             if let reason = thread.refreshError {
                 Text("Latest read failed: \(reason)")
-                    .font(Typography.body(12))
+                    .font(Typography.text)
                     .foregroundStyle(palette.textSecondary)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("task-comments-status")
             }
             if thread.comments.isEmpty {
                 Text("No comments.")
-                    .font(Typography.body(12))
+                    .font(Typography.text)
                     .foregroundStyle(palette.textSecondary)
                     .accessibilityIdentifier("task-comments-empty")
             }
@@ -79,25 +79,25 @@ struct TaskCommentsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                         Text(Self.author(comment.author))
-                            .font(Typography.strong(12.5))
+                            .font(Typography.textStrong)
                             .foregroundStyle(palette.text)
                         if thread.pendingSync.contains(comment.id) {
                             Text("Pending sync")
-                                .font(Typography.caption(12))
+                                .font(Typography.text)
                                 .foregroundStyle(palette.textSecondary)
                         }
                         Text(Self.date(comment.createdAt))
-                            .font(Typography.caption(12))
+                            .font(Typography.text)
                             .foregroundStyle(palette.textTertiary)
                     }
                     if let conflict = thread.conflicts[comment.id] {
                         Text("Saved your comment locally. The tracker’s edit is current.")
-                            .font(Typography.strong(12.5))
+                            .font(Typography.textStrong)
                         MarkdownBlocks(source: Self.readableBody(conflict)).equatable()
                     }
                     let body = Self.readableBody(comment.body)
                     if body.isEmpty {
-                        Text("Empty comment").font(Typography.body(13)).foregroundStyle(palette.textSecondary)
+                        Text("Empty comment").font(Typography.text).foregroundStyle(palette.textSecondary)
                     } else {
                         MarkdownBlocks(source: body).equatable()
                     }

@@ -10,7 +10,7 @@ struct AboutLoopflowView: View {
                 .resizable()
                 .frame(width: 64, height: 64)
                 .accessibilityHidden(true)
-            Text("Loopflow").font(.title.bold())
+            Text("Loopflow").serif(.title)
             Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")
                 .foregroundStyle(.secondary)
             Button("Open Source Licenses") {

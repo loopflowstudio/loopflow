@@ -76,11 +76,11 @@ struct WorkNavigator: View {
                     NewTaskRow(model: model)
                     if case .dashboard = scope {
                         HStack {
-                            Text(listTitle.uppercased()).lineLimit(1)
+                            Text(listTitle).font(Typography.textStrong).lineLimit(1)
                                 .matchedGeometryEffect(id: scope, in: scopeTitle)
                             Spacer()
-                            Text("\(taskIDs.count)")
-                        }.font(Typography.code(10)).foregroundStyle(palette.textSecondary).padding(10)
+                            Text("\(taskIDs.count)").font(Typography.meta).monospacedDigit()
+                        }.foregroundStyle(palette.textTertiary).padding(10)
                     }
                     // ⌘N counts the rows on screen; sidebar Task IDs are already unique.
                     ForEach(Array(taskIDs.enumerated()), id: \.element) { index, id in
@@ -88,7 +88,7 @@ struct WorkNavigator: View {
                     }
                     if taskIDs.isEmpty, let emptyListText {
                         Text(emptyListText)
-                            .font(Typography.body(12))
+                            .font(Typography.text)
                             .foregroundStyle(palette.textSecondary).padding(10)
                     }
                     if let selection = model.selection, selection.kind == .task,
@@ -102,7 +102,7 @@ struct WorkNavigator: View {
                                     model.navigation.sidebarWaveID = nil
                                 }
                             }
-                        }.font(Typography.body(11)).padding(10)
+                        }.font(Typography.meta).padding(10)
                     }
                 }.padding(8).coordinateSpace(.named(TaskOrderDrag.space))
             }
@@ -213,14 +213,14 @@ struct WorkNavigator: View {
                 if let unavailableReason {
                     Image(systemName: "exclamationmark.triangle").help(unavailableReason)
                 } else {
-                    Text("\(count)").font(Typography.code(10)).help("\(count) working Tasks")
+                    Text("\(count)").font(Typography.mono).help("\(count) working Tasks")
                 }
-            }.font(Typography.body(13)).padding(10)
+            }.font(Typography.text).padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .foregroundStyle(state == .shown ? palette.workSelectedText : palette.text)
                 .background(SidebarSelectionShape(state: state))
                 // The whole row clicks, as a Task row does, not only its text.
-                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
         }.buttonStyle(.plain)
             .modifier(FocusedWork(focus: $focusedWork, reference: reference))
             .accessibilityLabel("\(name), \(count) working Tasks")
@@ -238,23 +238,10 @@ struct WorkNavigator: View {
         let title = presentation.title
         // Rows slide under the pointer while scrolling. Only the ⌘N hint reads the
         // row's hover, so a crossing re-renders that hint, not rows or the sidebar.
-        return RowHover { hover in VStack(alignment: .leading, spacing: 6) {
-            WorkTaskIdentity(presentation: presentation, showsIdentifier: found == nil)
-                .allowsHitTesting(false)
-            // Only a live excerpt ages; a row showing its summary needs no clock.
-            let fallback = found?.task.task.description ?? ""
-            let current = status.preview(now: .now, fallback: fallback, sessions: sessions)
-            if current.age == nil {
-                rowDetail(current, id: id, waitingForDetails: found == nil && presentation.context == nil, slotHint: slotHint, task: found?.task, status: status, selected: selected, hover: hover)
-            } else {
-                TimelineView(.periodic(from: .now, by: 5)) { clock in
-                    rowDetail(status.preview(now: clock.date, fallback: fallback, sessions: sessions),
-                              id: id, waitingForDetails: found == nil && presentation.context == nil, slotHint: slotHint, task: found?.task, status: status, selected: selected, hover: hover)
-                }
-            }
-        }
-        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .foregroundStyle(selected ? palette.workSelectedText : muted ? palette.textSecondary : palette.text)
+        return RowHover { hover in TaskRow(
+            id: id, presentation: presentation, task: found?.task, status: status,
+            auto: model.sidebarAutoTaskIDs.contains(id), selected: selected, muted: muted,
+            slotHint: slotHint, showsSlotHint: model.navigation.showsSlotHints, hover: hover)
         .background {
             Button {
                 Perf.userAction(Perf.taskWorkspaceReady, scenario: "task", id: id,
@@ -267,12 +254,6 @@ struct WorkNavigator: View {
             }.buttonStyle(.plain).focused($focusedWork, equals: .task(id: id)).accessibilityLabel(title)
                 .accessibilityAddTraits(selected ? .isSelected : [])
                 .accessibilityIdentifier("work-task-\(id)")
-        }
-        .overlay(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 1)
-                .fill(status.tone?.ink(in: palette) ?? palette.borderActive)
-                .frame(width: 2).padding(.vertical, 12).padding(.leading, 4)
-                .allowsHitTesting(false)
         }
         .renderFlash()
         }
@@ -288,36 +269,10 @@ struct WorkNavigator: View {
         }
     }
 
-    /// The preview line and metadata beneath a row's title.
-    private func rowDetail(_ preview: (text: String, help: String, age: String?), id: String,
-                           waitingForDetails: Bool, slotHint: String?, task: RoadmapTask?,
-                           status: SessionProgramStatus, selected: Bool, hover: HoverFlag) -> some View {
-        let detail: (text: String, help: String)?
-        if task?.task.description.isEmpty == false || preview.age != nil {
-            detail = (preview.text, preview.help)
-        } else if waitingForDetails {
-            detail = ("Loading planning…", "Waiting for Task details")
-        } else {
-            detail = nil
-        }
-        return VStack(alignment: .leading, spacing: 6) {
-            if let detail {
-                Text(detail.text)
-                    .font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
-                    .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
-                    .help(detail.help).allowsHitTesting(false)
-            }
-            TaskRowMetadata(id: id, task: task, status: status, auto: model.sidebarAutoTaskIDs.contains(id), selected: selected,
-                slotHint: slotHint,
-                showsSlotHint: model.navigation.showsSlotHints, hover: hover,
-                sourceAge: preview.age)
-        }
-        .renderFlash()
-    }
-
     @ViewBuilder private func actions(for id: String) -> some View {
         if let found = model.task(id: id) {
             TaskActionItems(model: model, task: found.task, wave: found.wave?.wave,
+                work: model.taskWork[id].value,
                 newConversation: onNewTaskSession.map { action in { action(id) } },
                 openSession: onOpenSession)
         }
@@ -329,106 +284,6 @@ struct WorkNavigator: View {
 extension WorkNavigator: Equatable {
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         MainActor.assumeIsolated { lhs.model === rhs.model }
-    }
-}
-
-struct WorkBreadcrumbs: View {
-    @Bindable var model: WorkModel
-    @Environment(\.palette) private var palette
-    @State private var removingWave: WaveSnapshot?
-    @State private var renamingWave: WaveSnapshot?
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ViewThatFits(in: .horizontal) {
-                trail(showWave: true).fixedSize(horizontal: true, vertical: false)
-                trail(showWave: false)
-            }
-        }
-        .buttonStyle(.plain)
-        .font(Typography.strong(13))
-        .foregroundStyle(palette.titlebarText, palette.titlebarSecondaryText)
-        .accessibilityIdentifier("work-breadcrumbs")
-        .waveLifecycleSheets(model: model, removing: $removingWave, renaming: $renamingWave)
-    }
-
-    private func trail(showWave: Bool) -> some View {
-        HStack(alignment: .center, spacing: 6) {
-            Button { model.navigation.toggleNavigator() } label: { Image(systemName: "sidebar.left") }
-                .frame(width: 28, height: 28).contentShape(Rectangle())
-                .help("Toggle sidebar")
-            Button { model.goBack() } label: { Image(systemName: "chevron.left") }
-                .frame(width: 24, height: 28).contentShape(Rectangle())
-                .disabled(model.navigation.backStack.isEmpty).help("Back")
-            Button { model.goForward() } label: { Image(systemName: "chevron.right") }
-                .frame(width: 24, height: 28).contentShape(Rectangle())
-                .disabled(model.navigation.forwardStack.isEmpty).help("Forward")
-            Button(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Work") {
-                // The parent crumb of a zoomed part zooms out.
-                if model.navigation.waveView == .repository { model.setZoomed(nil, in: .repository) }
-                model.select(nil)
-                model.navigation.content = .terminals
-            }.lineLimit(1).fixedSize()
-            WorkJumpSeparator(model: model, scope: .repository, label: "Waves")
-            // A Wave view in the trail, or the Wave of Work outside any board, heads
-            // the crumbs after the repository; the repository page adds none.
-            let board = model.navigation.trailBoard
-            if case .wave(let id) = board {
-                waveCrumb(id, name: model.wave(id: id)?.wave.displayName ?? id)
-            } else if showWave, board == nil || board == .repository, let wave = model.breadcrumb?.wave {
-                waveCrumb(wave.roadmap.wave.id, name: wave.roadmap.wave.displayName)
-            }
-            switch board {
-            // A Dashboard opened through `lf desktop` names itself; Back returns to it.
-            case .saved(let id):
-                Text(model.dashboard(id)?.name ?? id).lineLimit(1).fixedSize()
-                if model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
-            case .workingTasks:
-                Text(WorkNavigation.workingTasksTitle).lineLimit(1).fixedSize()
-                if model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
-            case .wave, .repository, nil: EmptyView()
-            }
-            if let view = model.navigation.waveView, let zoomed = model.zoomedPart(in: view) {
-                ZoomCrumb(title: zoomed.title) { model.setZoomed(nil, in: view) }
-            }
-            if let task = model.breadcrumb?.task {
-                let presentation = model.taskPresentation(id: task.task.id)
-                WorkTaskIdentity(presentation: presentation)
-                if presentation.context == nil {
-                    Text(TaskHeading(task: task.task).state).foregroundStyle(.secondary).fixedSize()
-                        .accessibilityIdentifier("task-heading-state")
-                }
-                if let workspace = model.shownWorkspace, workspace.key.kind == .task, workspace.key.id == task.task.id {
-                    ShowHiddenMenu(workspace: workspace).font(Typography.caption())
-                    let store = workspace.multiplexer
-                    if let zoomed = store.zoomedPaneId, let pane = store.layout.pane(for: zoomed) {
-                        ZoomCrumb(title: pane.kind.rawValue.capitalized) { store.setZoom(zoomed, enabled: false) }
-                    }
-                }
-            }
-            if model.breadcrumb?.task == nil, let selection = model.selection, selection.kind == .task {
-                WorkTaskIdentity(presentation: model.taskPresentation(id: selection.id))
-            }
-            if let target = model.machineTarget {
-                WorkMachineControl(model: model, target: target).padding(.leading, 6)
-            }
-        }
-    }
-
-    private func waveCrumb(_ id: String, name: String) -> some View {
-        HStack(alignment: .center, spacing: 6) {
-            Button(name) {
-                if model.navigation.waveView == .wave(id) { model.setZoomed(nil, in: .wave(id)) }
-                model.select(.wave(id: id))
-                model.navigation.content = .terminals
-            }.lineLimit(1).fixedSize()
-            .contextMenu {
-                if let wave = model.wave(id: id)?.wave {
-                    WaveLifecycleMenu(onRename: { renamingWave = wave }, onRemove: { removingWave = wave })
-                }
-            }
-            WorkJumpSeparator(model: model, scope: .wave(id), label: "Tasks in \(name)")
-        }
     }
 }
 
@@ -453,7 +308,7 @@ struct WorkMachineControl: View {
                 Image(systemName: "desktopcomputer")
                 Text(current.id.map(name) ?? current.label ?? "Machine unknown").lineLimit(1)
             }
-            .font(Typography.caption())
+            .font(Typography.meta)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
@@ -495,7 +350,7 @@ struct WorkJumpSeparator: View {
     var body: some View {
         Button { open.toggle() } label: {
             Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
+                .font(Typography.meta).fontWeight(.semibold)
                 .rotationEffect(.degrees(open ? 90 : 0))
                 .frame(width: 18, height: 28).contentShape(Rectangle())
         }
@@ -518,7 +373,7 @@ struct WorkJumpMenu: View {
     var body: some View {
         let rows = model.jumpRows(scope, filter: filter)
         VStack(alignment: .leading, spacing: 6) {
-            Text(title.uppercased()).font(Typography.code(10)).foregroundStyle(palette.textSecondary)
+            Text(title).font(Typography.textStrong).foregroundStyle(palette.textTertiary)
             TextField("Search \(title.lowercased())", text: $filter)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { if let first = rows.first { choose(first.id) } }
@@ -530,11 +385,11 @@ struct WorkJumpMenu: View {
                             HStack {
                                 Text(row.title).lineLimit(1)
                                 Spacer()
-                                Text(row.detail).font(Typography.caption()).foregroundStyle(palette.textSecondary).lineLimit(1)
+                                Text(row.detail).font(Typography.meta).foregroundStyle(palette.textSecondary).lineLimit(1)
                             }.padding(6).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         }.buttonStyle(.plain)
                     }
-                    if rows.isEmpty { Text("No matches").font(Typography.caption()).foregroundStyle(palette.textSecondary).padding(6) }
+                    if rows.isEmpty { Text("No matches").font(Typography.meta).foregroundStyle(palette.textSecondary).padding(6) }
                 }
             }.frame(maxHeight: 320)
         }
@@ -570,10 +425,10 @@ private struct NewTaskRow: View {
                 Image(systemName: "plus")
                 Text("New Task").lineLimit(1)
                 Spacer()
-                Text("⌘N").font(Typography.code(10))
-            }.font(Typography.body(13)).foregroundStyle(palette.textSecondary).padding(10)
+                Text("⌘N").font(Typography.mono)
+            }.font(Typography.text).foregroundStyle(palette.textSecondary).padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
         }.buttonStyle(.plain)
             .disabled(model.repoPath == nil)
             .accessibilityIdentifier("work-new-task")
@@ -598,9 +453,9 @@ private struct NewWaveRow: View {
                 Image(systemName: "plus")
                 Text("New Wave").lineLimit(1)
                 Spacer()
-            }.font(Typography.body(13)).foregroundStyle(palette.textSecondary).padding(10)
+            }.font(Typography.text).foregroundStyle(palette.textSecondary).padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
         }.buttonStyle(.plain)
             .accessibilityIdentifier("work-new-wave")
             .popover(isPresented: $naming, arrowEdge: .trailing) { form }
@@ -617,7 +472,7 @@ private struct NewWaveRow: View {
             VStack(alignment: .leading, spacing: 8) {
                 TextField("Wave name", text: $name).onSubmit(create).frame(width: 200)
                 TextField("Objective (optional)", text: $objective).onSubmit(create).frame(width: 200)
-                if let error { Text(error).font(Typography.body(11)).foregroundStyle(palette.warning) }
+                if let error { Text(error).font(Typography.meta).foregroundStyle(palette.warning) }
                 HStack { Spacer(); Button("Create", action: create).keyboardShortcut(.defaultAction) }
             }.padding(12)
         }
@@ -649,10 +504,10 @@ struct WaveAddedLeftovers: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(added.created ? "Added \(added.name)" : "\(added.name) already exists")
-                .font(Typography.body(13)).foregroundStyle(palette.text)
+                .font(Typography.text).foregroundStyle(palette.text)
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 ForEach(Array(added.summary.enumerated()), id: \.offset) { _, line in
-                    Text(line).font(Typography.body(11)).foregroundStyle(palette.textSecondary)
+                    Text(line).font(Typography.meta).foregroundStyle(palette.textSecondary)
                 }
             }.accessibilityIdentifier("new-wave-summary")
             HStack {
@@ -687,11 +542,11 @@ struct SidebarSelectionShape: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 6)
+        let shape = RoundedRectangle(cornerRadius: CornerRadius.row)
         switch state {
         case .none: shape.fill(Color.clear)
         case .containing: shape.fill(palette.surface)
-        case .shown: shape.fill(palette.workSelectedFill).overlay(shape.strokeBorder(palette.selectionEdge))
+        case .shown: shape.fill(palette.workSelectedFill)
         }
     }
 }
@@ -872,15 +727,14 @@ extension TaskOrderDrag {
 /// The name remains useful before the full Task and its metadata arrive.
 struct WorkTaskIdentity: View {
     let presentation: WorkModel.TaskPresentation
-    var showsIdentifier = true
     var body: some View {
         HStack(spacing: 6) {
-            if showsIdentifier, let identifier = presentation.identifier {
-                Text(identifier).font(Typography.code(10)).fixedSize()
+            if let identifier = presentation.identifier {
+                Text(identifier).font(Typography.mono).fixedSize()
             }
-            Text(presentation.title).font(Typography.strong(13)).lineLimit(2).help(presentation.title)
+            Text(presentation.title).font(Typography.textStrong).lineLimit(2).help(presentation.title)
             if let context = presentation.context {
-                Text(context).font(Typography.code(10)).foregroundStyle(.secondary)
+                Text(context).font(Typography.mono).foregroundStyle(.secondary)
             }
         }
     }
@@ -889,6 +743,6 @@ struct WorkTaskIdentity: View {
 struct WorkReadStatus: View {
     let status: String
     var body: some View {
-        Text(status).font(Typography.body(11)).padding(10).accessibilityIdentifier("work-status")
+        Text(status).font(Typography.meta).padding(10).accessibilityIdentifier("work-status")
     }
 }

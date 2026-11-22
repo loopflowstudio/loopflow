@@ -95,18 +95,18 @@ struct MachineAddressView: View {
                             .foregroundStyle(theme.palette.accentInk)
                             .accessibilityHidden(true)
                             Text("Your work,\nwithin reach.")
-                                .font(Typography.display)
+                                .serif(.display)
                         }
                         Text(enteringAddress
                             ? "Enter or paste the Tailscale address shown in Desktop’s Mobile settings."
                             : replacing == nil
                             ? "Connect to your Loopflow Machine to open Tasks and continue their Sessions."
                             : "Scan the new code in Desktop’s Mobile settings. Your saved connection stays until the new address is verified.")
-                            .font(Typography.body(17))
+                            .font(MobileType.text(17))
                             .foregroundStyle(theme.palette.textSecondary)
                         if let replacing {
                             Text(replacing.endpoint.absoluteString)
-                                .font(Typography.caption(13))
+                                .font(MobileType.text(13))
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textSelection(.enabled)
                         } else if !enteringAddress {
@@ -115,13 +115,13 @@ struct MachineAddressView: View {
                                 Label("On your Mac, open Loopflow → Settings → Mobile.", systemImage: "2.circle")
                                 Label("Enable mobile access, then scan its code here.", systemImage: "3.circle")
                             }
-                            .font(Typography.body(15))
+                            .font(MobileType.text(15))
                         }
                         if let endpoint, !enteringAddress {
                             Label(endpoint.host ?? "Machine", systemImage: "desktopcomputer")
-                                .font(Typography.strong(16))
+                                .font(MobileType.strong(16))
                             Text(endpoint.absoluteString)
-                                .font(Typography.caption(13))
+                                .font(MobileType.text(13))
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textSelection(.enabled)
                             Button {
@@ -168,13 +168,13 @@ struct MachineAddressView: View {
                         }
                         if let error {
                             Text(error)
-                                .font(Typography.body(14))
+                                .font(MobileType.text(14))
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .accessibilityLabel("Connection issue: \(error)")
                                 .id("machine-connection-error")
                         }
                         Text("Your Sessions run on your Machine. This phone connects through your private Tailscale network.")
-                            .font(Typography.caption(13))
+                            .font(MobileType.text(13))
                             .foregroundStyle(theme.palette.textSecondary)
                     }
                     .padding(28)

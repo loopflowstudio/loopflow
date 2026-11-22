@@ -8,6 +8,11 @@ public struct TaskFileEntry: Decodable, Sendable, Hashable, Identifiable {
     public var id: String { path }
     public let path: String
     public let kind: TaskFileKind
+
+    public init(path: String, kind: TaskFileKind) {
+        self.path = path
+        self.kind = kind
+    }
 }
 
 public struct TaskDirectory: Decodable, Sendable, Hashable {
@@ -37,11 +42,23 @@ public struct TaskChangedFile: Decodable, Sendable, Identifiable, Hashable {
     public let staged: Bool
     public let unstaged: Bool
     public let untracked: Bool
+    /// Runs of changed lines in the file's patch: the Diff's stops, known
+    /// before its lines are read.
+    public let changes: Int
 
     enum CodingKeys: String, CodingKey {
-        case path, committed, staged, unstaged, untracked
+        case path, committed, staged, unstaged, untracked, changes
         case oldPath = "old_path"
     }
+}
+
+/// One commit in a Task's comparison. A Graph step's commits share the
+/// subject prefix `lf <step>:`.
+public struct TaskCommit: Decodable, Sendable, Hashable {
+    public let sha: String
+    /// The first parent: a step starting here compares against it.
+    public let parent: String
+    public let subject: String
 }
 
 public struct TaskChangesSnapshot: Decodable, Sendable, Hashable {
@@ -50,13 +67,15 @@ public struct TaskChangesSnapshot: Decodable, Sendable, Hashable {
     public let taskId: String
     public let baseCommit: String
     public let headCommit: String
+    /// Head's first-parent line since base, oldest first, without merges.
+    public let commits: [TaskCommit]
     public let files: [TaskChangedFile]
     public let scratch: [String]
     public let scratchTruncated: Bool
 
     enum CodingKeys: String, CodingKey {
         case recoveryDirectory = "recovery_directory"
-        case files, scratch
+        case commits, files, scratch
         case scratchTruncated = "scratch_truncated"
         case issueIdentifier = "issue_identifier"
         case taskId = "task_id"

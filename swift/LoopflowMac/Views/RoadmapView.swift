@@ -97,10 +97,10 @@ struct RoadmapView: View {
         HStack(alignment: .center, spacing: Spacing.md) {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text("Work")
-                    .font(Typography.sectionTitle(20))
+                    .font(Typography.lede)
                     .foregroundStyle(palette.text)
                 Text(repoPath == nil ? "All planned Work" : "Planned Work in this repository")
-                    .font(Typography.caption(11))
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(1)
             }
@@ -250,16 +250,16 @@ private struct RoadmapWaveCard: View {
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
                     HStack(spacing: Spacing.sm) {
                         Text(roadmap.wave.name)
-                            .font(Typography.sectionTitle(18))
+                            .font(Typography.lede)
                             .foregroundStyle(palette.text)
                         Text(roadmap.wave.status.label)
-                            .font(Typography.caption(10))
+                            .font(Typography.meta)
                             .foregroundStyle(palette.textSecondary)
 
                     }
                     if !roadmap.wave.goal.isEmpty {
                         Text(roadmap.wave.goal)
-                            .font(Typography.body(12))
+                            .font(Typography.text)
                             .foregroundStyle(palette.textSecondary)
                             .lineLimit(2)
                     }
@@ -268,7 +268,7 @@ private struct RoadmapWaveCard: View {
                 .onTapGesture(perform: onOpenWave)
                 Spacer()
                 Text(roadmap.wave.machine.map { $0.route == "local" ? $0.id : $0.route } ?? "Unplaced")
-                    .font(Typography.caption(10))
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
                     .textSelection(.enabled)
             }
@@ -291,9 +291,9 @@ private struct RoadmapWaveCard: View {
         }
         .padding(Spacing.lg)
         .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.pane))
         .overlay {
-            RoundedRectangle(cornerRadius: CornerRadius.lg)
+            RoundedRectangle(cornerRadius: CornerRadius.pane)
                 .stroke(palette.border, lineWidth: 1)
         }
         .accessibilityIdentifier("loopflow-wave-\(roadmap.wave.id)")
@@ -311,30 +311,30 @@ struct RoadmapTaskRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Image(systemName: task.lifecycle == .done ? "checkmark.circle.fill" : "circle")
-                .font(Typography.caption(11))
+                .font(Typography.meta)
                 .foregroundStyle(task.lifecycle == .done ? palette.success : task.section.color(in: palette))
                 .frame(width: 14)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     if let issueURL = task.reference.issueUrl {
                         Link(task.task.identifier, destination: issueURL)
-                            .font(Typography.caption(10).weight(.semibold))
+                            .font(Typography.meta.weight(.semibold))
                     } else {
                         Text(task.task.identifier)
-                            .font(Typography.caption(10).weight(.semibold))
+                            .font(Typography.meta.weight(.semibold))
                             .foregroundStyle(palette.textSecondary)
                     }
                     Text(task.task.name)
-                        .font(Typography.caption(12))
+                        .font(Typography.text)
                         .foregroundStyle(palette.text)
                         .lineLimit(2)
                     Spacer()
                     Text(task.section.label)
-                        .font(Typography.caption(9).weight(.semibold))
+                        .font(Typography.meta.weight(.semibold))
                         .foregroundStyle(task.section.color(in: palette))
                 }
                 Text(task.condition.reason)
-                    .font(Typography.caption(10))
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(2)
                     .accessibilityLabel(taskConditionAccessibilityLabel(task))
@@ -348,7 +348,7 @@ struct RoadmapTaskRow: View {
         }
         .padding(Spacing.sm)
         .background(palette.background)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control))
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
         .accessibilityIdentifier("loopflow-task-\(task.id)")
@@ -374,7 +374,7 @@ struct WorkChannelChips: View {
             Text(label).foregroundStyle(palette.textSecondary)
             Text(value).foregroundStyle(color)
         }
-        .font(Typography.caption(9))
+        .font(Typography.meta)
         .padding(.horizontal, Spacing.xs)
         .padding(.vertical, 1)
         .background(palette.surfaceMuted.opacity(0.5))
@@ -408,7 +408,7 @@ struct TaskActionCluster: View {
             }
             if let github = task.pr?.publication?.github {
                 Link("PR #\(github.number)", destination: github.url)
-                    .font(Typography.caption(10))
+                    .font(Typography.meta)
             }
         }
     }
@@ -426,10 +426,10 @@ struct NowSectionView: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.sm) {
                 Text(section.group.title)
-                    .font(Typography.sectionTitle(15))
+                    .font(Typography.lede)
                     .foregroundStyle(section.group.color(in: palette))
                 Text("\(section.rows.count)")
-                    .font(Typography.caption(10).weight(.semibold))
+                    .font(Typography.meta.weight(.semibold))
                     .foregroundStyle(palette.textSecondary)
                     .padding(.horizontal, Spacing.xs)
                     .padding(.vertical, 1)
@@ -464,24 +464,24 @@ private struct NowRowView: View {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                 if let issueURL = task.reference.issueUrl {
                     Link(task.task.identifier, destination: issueURL)
-                        .font(Typography.caption(10).weight(.semibold))
+                        .font(Typography.meta.weight(.semibold))
                 } else {
                     Text(task.task.identifier)
-                        .font(Typography.caption(10).weight(.semibold))
+                        .font(Typography.meta.weight(.semibold))
                         .foregroundStyle(palette.textSecondary)
                 }
                 Text(task.task.name)
-                    .font(Typography.caption(12))
+                    .font(Typography.text)
                     .foregroundStyle(palette.text)
                     .lineLimit(2)
                 Spacer()
                 Text(row.wave?.name ?? "No Wave")
-                    .font(Typography.caption(9))
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(1)
             }
             Text(task.condition.reason)
-                .font(Typography.caption(10))
+                .font(Typography.meta)
                 .foregroundStyle(palette.textSecondary)
                 .lineLimit(2)
                 .accessibilityLabel(taskConditionAccessibilityLabel(task))
@@ -494,9 +494,9 @@ private struct NowRowView: View {
         }
         .padding(Spacing.sm)
         .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control))
         .overlay {
-            RoundedRectangle(cornerRadius: CornerRadius.sm)
+            RoundedRectangle(cornerRadius: CornerRadius.control)
                 .stroke(palette.border, lineWidth: 1)
         }
         .contentShape(Rectangle())

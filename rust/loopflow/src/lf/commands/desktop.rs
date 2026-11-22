@@ -2426,8 +2426,8 @@ impl PaneNeed {
     fn for_action(action: &str) -> Self {
         match action {
             "run" | "toggle-shell" => Self::Kind("shell"),
-            "browse" | "files" | "graph-log" | "page-back" | "page-forward" | "reload"
-            | "toggle-browser" => Self::Kind("browser"),
+            "browse" | "details" | "files" | "graph-log" | "page-back" | "page-forward"
+            | "reload" | "toggle-browser" => Self::Kind("browser"),
             "switch" => Self::Kind("session"),
             "send" | "send-key" => Self::Terminal,
             "show" => Self::Hidden,

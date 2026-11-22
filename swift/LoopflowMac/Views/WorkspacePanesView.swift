@@ -115,7 +115,7 @@ struct SessionOpeningView: View {
             Color.clear
             if let screen {
                 ScrollView {
-                    Text(screen).font(.system(.body, design: .monospaced))
+                    Text(screen).font(Typography.mono)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -170,7 +170,7 @@ struct SessionSlotOffer<Description: View>: View {
                     .accessibilityIdentifier(actionIdentifier)
                 if !compact, let note = unavailable ?? note {
                     Text(note)
-                        .font(Typography.caption(9))
+                        .font(Typography.meta)
                         .foregroundStyle(theme.palette.textSecondary)
                 }
             }
@@ -203,7 +203,7 @@ struct PaneEmptyState<Description: View, Actions: View>: View {
                 compactRow(Label(title, systemImage: systemImage).fixedSize())
                 compactRow(Label(title, systemImage: systemImage).labelStyle(.iconOnly))
             }
-            .font(Typography.body(12))
+            .font(Typography.text)
             .padding(Spacing.sm)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -242,7 +242,7 @@ enum PaneGeometry {
     // Keep pane outlines inside the native window's larger lower corners.
     static let windowInset: CGFloat = 10
     static let spacing: CGFloat = 6
-    static let cornerRadius = CornerRadius.md
+    static let cornerRadius = CornerRadius.pane
     /// Pane chrome and content keep clear of the corner arc on every edge.
     static let inset = cornerRadius
     // Nested curves share a center at the workspace's lower corners.
@@ -401,6 +401,21 @@ struct SplitDivider: View {
     }
 }
 
+/// How this Session's conversation relates to the one before it, on its own line above the terminal.
+struct ProviderTransitionRow: View {
+    @Environment(\.theme) private var theme
+    let transition: ProviderTransition
+    var body: some View {
+        Text(transition.explanation)
+            .font(Typography.meta)
+            .foregroundStyle(theme.palette.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, PaneGeometry.inset)
+            .padding(.vertical, 4)
+            .help("Observed at " + Date(timeIntervalSince1970: TimeInterval(transition.observedAt)).formatted())
+    }
+}
+
 struct SessionPaneView: View {
     @Environment(\.theme) private var theme
     @State private var changingSession = false
@@ -430,6 +445,9 @@ struct SessionPaneView: View {
             if showsStrip {
                 strip
                 Rectangle().fill(theme.palette.border).frame(height: 1)
+            }
+            if let transition = item?.record.transition {
+                ProviderTransitionRow(transition: transition)
             }
             content
                 // Reserve the rounded edge before Ghostty measures its surface.
@@ -486,15 +504,11 @@ struct SessionPaneView: View {
     /// Program identity and a Close control on hover; zoom stays in the context menu.
     private var strip: some View {
         HStack(spacing: 8) {
-            if let tone = programTone {
-                Circle().fill(tone.ink(in: theme.palette)).frame(width: 6, height: 6)
-                    .accessibilityHidden(true)
-            }
             Menu {
                 paneContentChoices
             } label: {
-                Label(programHeading.name, systemImage: programHeading.symbol)
-                    .font(Typography.body(11)).fontWeight(.semibold)
+                Text(programHeading.name)
+                    .font(Typography.textStrong)
                     .foregroundStyle(theme.palette.text)
             }
             .menuStyle(.borderlessButton).fixedSize()
@@ -528,13 +542,15 @@ struct SessionPaneView: View {
             if case .browser = pane.content { browserTabs }
             if workspace.key.kind != .task || pane.content.location != workspace.location {
                 Text(programHeading.context)
-                    .font(Typography.code(11)).foregroundStyle(theme.palette.textSecondary)
+                    .font(Typography.mono).foregroundStyle(theme.palette.textSecondary)
                     .lineLimit(1).truncationMode(.middle)
                     .help(programHeading.detail)
                     .accessibilityIdentifier("pane-context-\(pane.id)")
             }
-            if let status = _programStatus, status.summary != nil {
-                ProgramStatusLabel(status: status)
+            if let status = _programStatus, let mark = StatusMark(status: status) {
+                mark.frame(maxWidth: 340, alignment: .leading)
+            } else if let tone = programTone {
+                StatusMark(nil, tone: tone)
             }
             if let error = _programStatusSurface?.observationError {
                 Image(systemName: "exclamationmark.circle")
@@ -543,7 +559,7 @@ struct SessionPaneView: View {
             Spacer(minLength: 8)
             if let copyConfirmation {
                 Text(copyConfirmation)
-                    .font(Typography.body(11))
+                    .font(Typography.meta)
                     .foregroundStyle(theme.palette.text)
                     .lineLimit(1)
                     .allowsHitTesting(false)
@@ -551,7 +567,7 @@ struct SessionPaneView: View {
             }
             if bellRinging {
                 Image(systemName: "bell.fill")
-                    .font(.system(size: 10))
+                    .font(Typography.meta)
                     .foregroundStyle(theme.palette.available)
                     .accessibilityLabel("Session ready")
             }
@@ -609,20 +625,20 @@ struct SessionPaneView: View {
             Divider()
         }
         if let taskId = paneTaskId {
-            ForEach(TaskFilesStore.Page.allCases, id: \.self) { page in
-                Button(page.rawValue, systemImage: page == .task ? "doc.text" : page == .pullRequest ? "arrow.triangle.pull" : "folder") {
-                    guard let browser = workspace.showBrowser(.files, from: pane) else { return }
-                    do {
-                        let files = try workspace.files(for: browser.content, task: model.task(id: taskId)?.task, query: sessions.query)
-                        files.page = page
-                    } catch { paneFailed(error) }
+            // The Task's own pane already has these as its tabs.
+            if pane.content.kind != .browser {
+                ForEach(TaskFilesStore.Page.allCases, id: \.self) { page in
+                    Button(page.rawValue, systemImage: page.symbol) {
+                        guard let browser = workspace.showBrowser(.files, from: pane) else { return }
+                        do {
+                            let files = try workspace.files(for: browser.content, task: model.task(id: taskId)?.task, query: sessions.query)
+                            files.page = page
+                        } catch { paneFailed(error) }
+                    }
                 }
             }
             Button("Task & workflow", systemImage: "list.bullet") {
                 workspace.showBrowser(.task, from: pane)
-            }
-            Button("Changes", systemImage: "plus.forwardslash.minus") {
-                workspace.showBrowser(.changes(comparison: .workingTree(base: "parent")), from: pane)
             }
             Button("lf process", systemImage: "list.bullet.rectangle") {
                 workspace.showBrowser(.graphLog, from: pane)
@@ -705,7 +721,7 @@ struct SessionPaneView: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 11))
+                .font(Typography.meta)
                 .foregroundStyle(theme.palette.textSecondary)
                 .frame(width: 22, height: 20)
                 .contentShape(Rectangle())
@@ -718,8 +734,7 @@ struct SessionPaneView: View {
     }
 
     private var programTone: WorkTone? {
-        if let report = _programStatus?.summary { return report.state.workTone }
-        return SessionProgramStatus(sessions: paneSessions.map(\.record), unavailable: nil).tone
+        SessionProgramStatus(sessions: paneSessions.map(\.record), unavailable: nil).tone
     }
 
     private var paneSessions: [SessionItem] {
@@ -736,6 +751,27 @@ struct SessionPaneView: View {
         onFocus(pane.id, paneSessions.count == 1 ? paneSessions.first?.id : nil)
     }
 
+    /// Types into this workspace's conversation and focuses it; you send.
+    /// The result says whether the text reached the input.
+    private func conversationInput() -> ((String) -> Bool)? {
+        guard let session = store.layout.pane(of: .session), let terminal = session.terminal,
+              sessions.surfaces.surfaceIncarnation(for: terminal) != nil else { return nil }
+        return { text in
+            do {
+                guard let surface = sessions.surfaces.surfaceIncarnation(for: terminal) else {
+                    throw RegistryQueryError("The conversation has no terminal surface; nothing was typed.")
+                }
+                try sessions.surfaces.insertText(text, terminal: terminal, surface: surface)
+                store.setFocusedPane(session.id)
+                sessions.surfaces.focus(terminal)
+                return true
+            } catch {
+                paneFailed(error)
+                return false
+            }
+        }
+    }
+
     @ViewBuilder private var shellTabs: some View {
         if case .shell(let tabs, let selected) = pane.content {
             ScrollView(.horizontal) {
@@ -745,31 +781,55 @@ struct SessionPaneView: View {
                             .accessibilityLabel("Shell \(index + 1)")
                             .padding(.horizontal, 6).padding(.vertical, 3)
                             .background(tab.id == selected ? theme.palette.surfaceElement : .clear,
-                                        in: RoundedRectangle(cornerRadius: 4))
+                                        in: RoundedRectangle(cornerRadius: CornerRadius.control))
                     }
                     Button { do { try workspace.newShell() } catch { paneFailed(error) } }
                         label: { Image(systemName: "plus") }
                         .accessibilityLabel("New shell tab")
-                }.buttonStyle(.plain).font(Typography.code(11))
+                }.buttonStyle(.plain).font(Typography.mono)
             }.fixedSize(horizontal: false, vertical: true)
         }
     }
 
+    /// One row names everything the pane can show: the Task's Brief, Diff and
+    /// Files, then whatever else is open beside them.
     @ViewBuilder private var browserTabs: some View {
-        if case .browser(_, let tabs, let selected, _, _) = pane.content {
+        if case .browser(let taskId, let tabs, let selected, _, _) = pane.content {
+            let task = model.task(id: taskId)?.task
+            let files = try? workspace.files(for: pane.content, task: task, query: sessions.query)
             ScrollView(.horizontal) {
                 HStack(spacing: 4) {
-                    ForEach(tabs) { tab in
-                        Button(tab.title) { workspace.showBrowser(tab, from: pane) }
-                            .lineLimit(1)
-                            .padding(.horizontal, 6).padding(.vertical, 3)
-                            .background(tab.id == selected ? theme.palette.surfaceElement : .clear,
-                                        in: RoundedRectangle(cornerRadius: 4))
-                            .accessibilityIdentifier("browser-tab-\(tab.id)")
+                    if let files {
+                        ForEach(task == nil ? [.changes, .files] : TaskFilesStore.Page.allCases, id: \.self) { page in
+                            browserTab(page.rawValue,
+                                       selected: selected == BrowserTab.files.id && files.shownPage(hasTask: task != nil) == page,
+                                       id: "page-\(page.rawValue.lowercased())") {
+                                workspace.showBrowser(.files, from: pane)
+                                files.page = page
+                                files.noteInteraction()
+                            }
+                        }
                     }
-                }.buttonStyle(.plain).font(Typography.body(11))
+                    ForEach(tabs.filter { $0 != .files || files == nil }) { tab in
+                        browserTab(tab.title, selected: tab.id == selected, id: tab.id) {
+                            workspace.showBrowser(tab, from: pane)
+                        }
+                    }
+                }.buttonStyle(.plain).font(Typography.meta)
             }.fixedSize(horizontal: false, vertical: true)
+            .help("Brief ⌥⌘1 · Diff ⌥⌘2 · Files ⌥⌘3")
         }
+    }
+
+    private func browserTab(_ title: String, selected: Bool, id: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .lineLimit(1)
+            .fontWeight(selected ? .semibold : .regular)
+            .foregroundStyle(selected ? theme.palette.text : theme.palette.textSecondary)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(selected ? theme.palette.surfaceElement : .clear, in: RoundedRectangle(cornerRadius: CornerRadius.control))
+            .accessibilityIdentifier("browser-tab-\(id)")
+            .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     @ViewBuilder
@@ -800,7 +860,7 @@ struct SessionPaneView: View {
                     if workspace.disconnectedShells.contains(tab.id) {
                         VStack {
                             if let screen = workspace.shellScreens[tab.id] {
-                                ScrollView { Text(screen).font(.system(.body, design: .monospaced)).textSelection(.enabled) }
+                                ScrollView { Text(screen).font(Typography.mono).textSelection(.enabled) }
                             }
                             Text("Shell attachment ended. Reconnect checks the same execution; New Shell starts fresh.")
                             Button("Reconnect") { workspace.reconnectShell(tab) }
@@ -838,14 +898,15 @@ struct SessionPaneView: View {
                     let task = model.task(id: taskId)?.task
                     switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
                     case .success(let files):
-                        TaskFilesView(store: files, prURL: task?.pr?.publication?.github?.url,
-                            checkoutBase: task?.reference.workspace?.baseCommit, task: task, isFocused: isFocused)
+                        TaskFilesView(store: files, checkoutBase: task?.reference.workspace?.baseCommit, task: task,
+                            graph: task.flatMap { model.taskWork[$0.id].value?.graph }, isFocused: isFocused, addToConversation: conversationInput())
                             .task(id: pane.content.selectedBrowserTab?.id) {
+                                // A tab names its own comparison, never one Graph step's.
+                                files.showStep(nil)
                                 if case .changes(let comparison) = pane.content.selectedBrowserTab {
                                     files.comparison = comparison
-                                    files.page = .files; files.mode = .diff; files.navigator = .pinned
+                                    files.page = .changes
                                     await files.refresh()
-                                    await files.loadDiff()
                                 } else if files.comparison != .workingTree(base: "parent") {
                                     files.comparison = .workingTree(base: "parent")
                                     await files.refresh()
@@ -860,13 +921,13 @@ struct SessionPaneView: View {
                     if let task = model.task(id: taskId)?.task {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text(task.task.name).font(.headline)
+                                Text(task.task.name).font(Typography.textStrong)
                                 TaskPlanningFactsView(task: task)
                                 TaskWorkflowHeader(model: model, task: task, work: model.taskWork[taskId])
                                 MarkdownBlocks(source: task.task.description).equatable()
                                 TaskWorkView(model: model, task: task)
                                 GraphProcessLog(model: model, taskId: taskId, location: location,
-                                    execution: execution, query: sessions.query)
+                                    execution: execution, query: sessions.query, showsPosition: false)
                             }.padding(14)
                         }.textSelection(.enabled)
                     } else { Text("Task is unavailable") }
@@ -895,7 +956,7 @@ struct SessionPaneView: View {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 Text("No longer open here").foregroundStyle(theme.palette.text)
                 ScrollView {
-                    Text(output).font(.system(.body, design: .monospaced))
+                    Text(output).font(Typography.mono)
                         .foregroundStyle(theme.palette.text).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -984,7 +1045,7 @@ struct SessionPaneView: View {
         let fallback: String = switch pane.content {
         case .session: "Session"
         case .shell: "Shell"
-        case .browser: pane.content.selectedBrowserTab?.title ?? "Browser"
+        case .browser(let task, _, _, _, _): model.task(id: task)?.task.task.identifier ?? "Task"
         }
         return PaneProgramHeading(provider: paneSessions.count == 1 ? paneSessions.first?.presentationProvider : nil,
             title: paneSessions.count == 1 ? paneSessions.first?.record.title ?? _title : _title,

@@ -20,7 +20,7 @@ struct MachineCodeScanner: View {
                     CameraScanner(accept: accept, issue: { message = $0 })
                         .overlay(alignment: .bottom) {
                             Text(message ?? "Point your camera at the code in Loopflow’s Mobile settings.")
-                                .font(Typography.body(16))
+                                .font(MobileType.text(16))
                                 .padding(20).frame(maxWidth: .infinity)
                                 .background(.regularMaterial)
                         }

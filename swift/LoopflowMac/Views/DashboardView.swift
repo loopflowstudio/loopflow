@@ -13,11 +13,11 @@ struct DashboardEditor: View {
     @State private var revision: Int64?
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard").font(.headline)
+            Text(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard").font(Typography.textStrong)
             TextField("Name", text: $name)
-            TextField("Query", text: $expression, axis: .vertical).font(.system(.body, design: .monospaced))
+            TextField("Query", text: $expression, axis: .vertical).font(Typography.mono)
             Text("For example: (wave:product state:open), state:available or state:auto")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(Typography.meta).foregroundStyle(.secondary)
             Toggle("Pin in sidebar", isOn: $pinned)
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -49,7 +49,7 @@ struct DashboardQueryField: View {
 
     var body: some View {
         TextField("Query", text: $draft)
-            .textFieldStyle(.plain).font(Typography.code(11))
+            .textFieldStyle(.plain).font(Typography.mono)
             .disabled(model.dashboardSaving)
             .onSubmit(submit)
             .onChange(of: plan.selection.queryText, initial: true) { _, query in draft = query }
@@ -121,7 +121,7 @@ struct DashboardView: View {
                                     ?? plan.contents.first { $0.work == member.work }?.title ?? member.work.id)
                             }.disabled(model.dashboardSaving).help("Show this occurrence again")
                         }
-                    }.font(.caption).padding(8)
+                    }.font(Typography.meta).padding(8)
                 }
             } else {
                 ContentUnavailableView("Dashboard unavailable", systemImage: "exclamationmark.triangle",
@@ -163,7 +163,7 @@ struct WaveTiles: View {
         if let plan = model.boardPlan(view) {
             let members = model.boardTiles(view)
             if members.isEmpty {
-                Text("No planned or started Tasks").font(Typography.body(15))
+                Text("No planned or started Tasks").font(Typography.text)
                     .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityIdentifier("wave-tiles-empty")
             } else {
@@ -206,7 +206,8 @@ struct DashboardTile: View {
                 }.buttonStyle(.plain)
                 Spacer(minLength: 0)
                 if let task {
-                    Menu { TaskActionItems(model: model, task: task.task, wave: task.wave?.wave) }
+                    Menu { TaskActionItems(model: model, task: task.task, wave: task.wave?.wave,
+                                                     work: model.taskWork[task.task.id].value) }
                         label: { Image(systemName: "ellipsis") }
                         .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
                 }

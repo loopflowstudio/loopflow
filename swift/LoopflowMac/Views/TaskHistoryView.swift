@@ -49,7 +49,7 @@ struct TaskHistoryView: View {
     @ViewBuilder
     private var statusText: some View {
         Text(reading.isLoading ? "Reading history…" : "")
-            .font(Typography.body(12))
+            .font(Typography.text)
             .foregroundStyle(palette.textSecondary)
             .textSelection(.enabled)
             .accessibilityIdentifier("task-history-status")
@@ -59,7 +59,7 @@ struct TaskHistoryView: View {
         VStack(alignment: .leading, spacing: 0) {
             if history.isEmpty {
                 Text("No Session history recorded for this Task.")
-                    .font(Typography.body(12))
+                    .font(Typography.text)
                     .foregroundStyle(palette.textSecondary)
                     .accessibilityIdentifier("task-history-empty")
             }
@@ -71,21 +71,21 @@ struct TaskHistoryView: View {
             ForEach(history) { input in
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Text(input.skill ?? input.harness)
-                        .font(Typography.code(11.5))
+                        .font(Typography.mono)
                         .foregroundStyle(palette.text)
                     Text(Self.agent(input))
-                        .font(Typography.caption(11))
+                        .font(Typography.meta)
                         .foregroundStyle(palette.textSecondary)
                     Spacer(minLength: Spacing.sm)
                     Text(Self.started(input.observedAt))
-                        .font(Typography.caption(11))
+                        .font(Typography.meta)
                         .foregroundStyle(palette.textTertiary)
                     Text(input.status)
-                        .font(Typography.caption(11))
+                        .font(Typography.meta)
                         .foregroundStyle(palette.textSecondary)
                         .frame(minWidth: 72, alignment: .trailing)
                     Text(Self.shortId(input.id))
-                        .font(Typography.code(10.5))
+                        .font(Typography.mono)
                         .foregroundStyle(palette.textTertiary)
                         .textSelection(.enabled)
                         .help(input.id)
@@ -108,7 +108,7 @@ struct TaskHistoryView: View {
 
     private func contextLine(_ text: String, flagged: Bool) -> some View {
         Text(text)
-            .font(Typography.code(10.5))
+            .font(Typography.mono)
             .foregroundStyle(flagged ? palette.text : palette.textTertiary)
             .textSelection(.enabled)
             .help("Submitted input by source, in tokens. ! marks a source over its budget; ? is unrecorded.")

@@ -1311,16 +1311,23 @@ final class TaskFilesStore {
 
     // MARK: Skipped lines
 
-    /// Unchanged lines you opened between hunks, by file and hunk header.
-    private(set) var openedGaps: [String: [String: [ReviewLine]]] = [:]
-    private(set) var gapError: Failure?
+    /// What opening a file's skipped lines has given so far.
+    struct OpenedGaps {
+        /// The unchanged lines you opened between hunks, by hunk header.
+        var lines: [String: [ReviewLine]] = [:]
+        /// The Machine's message from the last open that failed.
+        var failure: String?
+    }
+
+    /// By file. A file's record goes whenever its lines are read again.
+    private(set) var openedGaps: [String: OpenedGaps] = [:]
 
     /// The skipped lines are read from the file as it stands, which is the
     /// comparison's newer side only while it reads the working tree.
     var canOpenGaps: Bool { comparison.head == nil }
 
     func opened(_ file: ReviewFile) -> ReviewFile {
-        openedGaps[file.path].map(file.opening) ?? file
+        openedGaps[file.path].map { file.opening($0.lines) } ?? file
     }
 
     /// Show the lines a hunk header skips. Files' Diff of an unsaved draft
@@ -1341,10 +1348,10 @@ final class TaskFilesStore {
             guard let lines = gap.lines(in: content) else {
                 throw RegistryQueryError("the file changed since this comparison was read.")
             }
-            openedGaps[path, default: [:]][header] = lines
-            gapError = nil
+            openedGaps[path, default: OpenedGaps()].lines[header] = lines
+            openedGaps[path]?.failure = nil
         } catch {
-            gapError = Failure(what: "Skipped lines of \(path) did not load.", machine: error.localizedDescription)
+            openedGaps[path, default: OpenedGaps()].failure = error.localizedDescription
         }
     }
 

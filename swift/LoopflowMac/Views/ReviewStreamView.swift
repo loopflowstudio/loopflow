@@ -21,7 +21,6 @@ struct ReviewStream: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        if let failure = store.gapError { FailureLine(failure).reviewNoticeInset() }
         if reader == .changes {
             // A comment whose file left the comparison still waits to be sent.
             ForEach(store.comments.filter { store.review?.file($0.selection.path) == nil }) { comment in
@@ -51,6 +50,9 @@ struct ReviewStream: View {
                     .onAppear { store.setNear(file.path, true) }
                     .onDisappear { store.setNear(file.path, false) }
             } else {
+                if let machine = store.openedGaps[file.path]?.failure {
+                    FailureLine("Skipped lines did not load.", machine: machine).reviewNoticeInset()
+                }
                 if file.status == .binary {
                     ReviewNotice(text: "Binary file. No text to compare.").id(file.topID)
                 } else if file.blocks.isEmpty, note == nil {

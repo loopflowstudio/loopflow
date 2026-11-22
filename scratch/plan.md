@@ -10,11 +10,13 @@ Slices 1 to 8 are built and were looked at in the Dev app
 (`scratch/qa.html`, five runs). The fifth saw slice 8's two diff-stream
 failures and fixed one thing: a file read called off by a newer reload was
 recorded as "File not read." (questions 80).
-**Next:** slice 9, the last thing to build: a file's skipped-lines failure
-is held with that file's opened rows and drawn above its lines (the fifth
-as-built concept review, `scratch/concept-review.html`; settles questions
-81). Then the gate checks and one look at "Not started." on an unlocked
-display (questions 48).
+Slice 9 is built: a file's skipped-lines failure is held with that file's
+opened rows and drawn above its lines (settles questions 81). Its store
+test passed; nobody has looked at it in the Dev app yet.
+**Next:** nothing left to build. qa looks at slice 9 (a `chmod 000` file
+with a skipped-lines row: the line sits under that file's header, not
+first in the stream, and goes after choosing a step), then the gate checks
+and one look at "Not started." on an unlocked display (questions 48).
 
 The sync with main (6197582ea4) moved `LoopflowButtonStyle`, `StatusMark`,
 `TaskRow` and `WorkflowLine` to `swift/Loopflow/Design/` and brought the
@@ -663,7 +665,9 @@ demo: not headless; qa or demo runs it.
      Dev app: the failed file shows in the Diff tab with the server
      stopped (`scratch/qa.html`, fourth run, item 2); qa looks.
 
-9. **A file's skipped-lines failure lives with the file. Not built.** Swift
+9. **A file's skipped-lines failure lives with the file. Built.**
+   `scripts/test_desktop.sh --filter 'TaskFilesTests|EmptyStateTests|TypographyDisciplineTests'`
+   passed (62 tests in 3 suites), `aFailedSkippedLinesOpenBelongsToItsFile` among them. Swift
    only, two files and a test. Slice 8 left `TaskFilesStore.gapError` one
    `Failure?` for the whole store beside `openedGaps[path]`. So the line is
    drawn first in the stream, screens from the row that was pressed; Files'

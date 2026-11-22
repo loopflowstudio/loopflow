@@ -1138,7 +1138,7 @@ struct TaskFilesTests {
             return nil
         }.first)
         await store.openGap(header, gap: try #require(file.gaps[index]), path: "a.swift", reader: .changes)
-        #expect(store.gapError == nil)
+        #expect(store.openedGaps["a.swift"]?.failure == nil)
         #expect(store.opened(file).lines.compactMap(\.new).contains(5))
         store.reviewSelection = ReviewSelection(path: "a.swift", side: .new, first: 5, last: 5)
         store.commentDraft = "what is five?"
@@ -1147,6 +1147,47 @@ struct TaskFilesTests {
         #expect(store.comments.map(\.anchor) == [["five"]])
         await store.loadReview()
         #expect(store.comments.map(\.detached) == [false])
+    }
+
+    /// Skipped lines that do not load say so under their own file, and the
+    /// words go when that file's opened rows go.
+    @Test func aFailedSkippedLinesOpenBelongsToItsFile() async throws {
+        let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let paths = ["a.swift", "z.swift"]
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
+            let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
+            var value = root[args[1]] as! [String: Any]
+            switch args[1] {
+            case "changes":
+                let file = (value["files"] as! [[String: Any]])[0]
+                value["files"] = paths.map { file.merging(["path": $0, "old_path": NSNull()]) { $1 } }
+            case "file":
+                // Shorter than the comparison's second hunk expects.
+                value["path"] = args[3]
+                value["content"] = "one\n"
+            default:
+                value["patch"] = paths.map { path in
+                    "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n@@ -1 +1 @@\n-uno\n+one\n@@ -9 +9 @@\n-nine\n+nueve\n"
+                }.joined()
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        })
+        store.autosave = false
+        await store.loadReview()
+        let file = try #require(store.shownReview?.file("a.swift"))
+        let (index, header) = try #require(file.blocks.enumerated().compactMap { index, block -> (Int, String)? in
+            if case .hunk(let header) = block, index > 0 { return (index, header) }
+            return nil
+        }.first)
+        await store.openGap(header, gap: try #require(file.gaps[index]), path: "a.swift", reader: .changes)
+        #expect(store.openedGaps["a.swift"]?.failure?.contains("the file changed since this comparison was read") == true)
+        #expect(store.openedGaps["z.swift"] == nil)
+        #expect(store.opened(file) == file)
+
+        store.showStep(ReviewStep(name: "implement", base: "a", commits: [], head: "b"))
+        #expect(store.openedGaps["a.swift"] == nil)
     }
 
     /// A store over `a.swift` and `z.swift` whose checkout holds `tour`.

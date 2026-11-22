@@ -12,7 +12,7 @@ struct WorkspaceLaunchView: View {
         VStack {
             if let error {
                 Text(error).textSelection(.enabled)
-                Button("Retry") { Task { await launch() } }
+                Button("Retry") { Task { await launch() } }.buttonStyle(LoopflowButtonStyle())
             } else {
                 ProgressView("Opening repository…")
             }
@@ -107,7 +107,7 @@ struct RepositoryWorkspaceContent<Content: View>: View {
             if let error {
                 HStack {
                     Text(error).textSelection(.enabled)
-                    Button("Retry", action: retry)
+                    Button("Retry", action: retry).buttonStyle(LoopflowButtonStyle())
                 }.padding()
             }
         }
@@ -123,10 +123,10 @@ struct WorkspaceOpeningFeedback: View {
         VStack(alignment: .leading) {
             if let error {
                 Text(error).textSelection(.enabled)
-                Button("OK") { self.error = nil; dismiss() }
+                Button("OK") { self.error = nil; dismiss() }.buttonStyle(LoopflowButtonStyle())
             } else {
                 Text("No pending workspace requests")
-                Button("Close") { dismiss() }
+                Button("Close") { dismiss() }.buttonStyle(LoopflowButtonStyle())
             }
         }.padding()
     }

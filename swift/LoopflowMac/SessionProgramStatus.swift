@@ -73,6 +73,20 @@ enum SessionProgramStatus {
     }
 }
 
+extension TaskRowStatus {
+    init(task: RoadmapTask, status: SessionProgramStatus) {
+        self.init(task: task, program: status.row)
+    }
+}
+
+extension TaskRow where Trailing == EmptyView {
+    /// A Portfolio row has planning and no Session readings.
+    init(task: RoadmapTask, context: String? = nil) {
+        self.init(id: task.id, title: task.task.name, identifier: task.task.identifier, link: task.reference.issueUrl,
+                  status: TaskRowStatus(task: task), context: context)
+    }
+}
+
 /// The ⌘N hint at a row's trailing edge: shown while ⌘ is held, else while the row is hovered.
 struct TaskRowSlotHint: View {
     let hint: String?
@@ -97,7 +111,7 @@ extension TaskRow where Trailing == TaskRowSlotHint {
          slotHint: String? = nil, showsSlotHint: Bool = false, hover: HoverFlag? = nil) {
         self.init(id: id, title: presentation.title, identifier: task?.task.identifier ?? presentation.identifier,
                   link: task?.reference.issueUrl,
-                  status: status.row ?? task.map { .lifecycle($0.lifecycle) }, auto: auto,
+                  status: task.map { TaskRowStatus(task: $0, status: status) } ?? status.row, auto: auto,
                   // A row named by its list before planning answers says so.
                   context: presentation.context ?? (task == nil ? "Loading planning…" : nil),
                   selected: selected, muted: muted) {

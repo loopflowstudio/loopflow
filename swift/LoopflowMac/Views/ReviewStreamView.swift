@@ -35,7 +35,7 @@ struct ReviewStream: View {
             if let heading = headings[file.path] {
                 Text(heading).font(Typography.textStrong).foregroundStyle(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 12).padding(.top, 22)
+                    .padding(.horizontal, Spacing.md).padding(.top, Spacing.xl)
                     .accessibilityAddTraits(.isHeader)
             }
             if headsFirstFile || file.path != files.first?.path {
@@ -79,12 +79,12 @@ struct ReviewStream: View {
     /// Where new code dropped lines: how many, and the way to read them.
     private func removalMark(_ count: Int, change: String) -> some View {
         Button { store.openedRemovals.insert(change) } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: Spacing.xs) {
                 Rectangle().fill(palette.failureTone.ink).frame(width: 2, height: 12)
                 Text(count == 1 ? "1 old line · Show" : "\(count) old lines · Show")
             }
             .font(Typography.meta).foregroundStyle(palette.failureTone.ink)
-            .padding(.leading, Self.gutterWidth + 6).padding(.vertical, 2)
+            .padding(.leading, Self.gutterWidth + 6).padding(.vertical, Spacing.xxs)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
@@ -95,7 +95,7 @@ struct ReviewStream: View {
 
     private func fileHeader(_ file: ReviewFile, headed: Bool) -> some View {
         ReviewFileTitle(store: store, file: file, note: file.oldPath.map { "from \($0)" }, viewable: reader == .changes)
-            .padding(.vertical, 7)
+            .padding(.vertical, Spacing.sm)
             .background(palette.surfaceMuted)
             .overlay(alignment: .top) { Divider() }
             .padding(.top, headed ? 6 : 16)
@@ -164,14 +164,14 @@ struct ReviewStream: View {
     /// A click reads them from the file and shows them in place.
     @ViewBuilder private func gapRow(_ header: String, gap: ReviewGap?, path: String) -> some View {
         let label = gap?.label ?? ""
-        let row = HStack(spacing: 8) {
+        let row = HStack(spacing: Spacing.sm) {
             if !label.isEmpty {
                 Text(label).font(Typography.meta).foregroundStyle(palette.textTertiary)
                     .lineLimit(1).truncationMode(.tail)
             }
             Rectangle().fill(palette.border).frame(height: 1)
         }
-        .padding(.leading, Self.gutterWidth + 6).padding(.trailing, 12).padding(.vertical, 5)
+        .padding(.leading, Self.gutterWidth + 6).padding(.trailing, Spacing.md).padding(.vertical, Spacing.xs)
         if let gap, !gap.new.isEmpty, store.canOpenGaps {
             Button {
                 Task { await store.openGap(header, gap: gap, path: path, reader: reader) }
@@ -209,7 +209,7 @@ struct ReviewStream: View {
                 }
                 store.noteInteraction()
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: Spacing.xs) {
                     Image(systemName: move.end == .source ? "arrow.turn.right.down" : "arrow.left.arrow.right")
                         .frame(width: 14)
                     Text(Self.movedLabel(move))
@@ -218,7 +218,7 @@ struct ReviewStream: View {
                 }
                 .font(Typography.text)
                 .foregroundStyle(palette.text)
-                .padding(.leading, Self.gutterWidth + 6).padding(.trailing, 12).padding(.vertical, 5)
+                .padding(.leading, Self.gutterWidth + 6).padding(.trailing, Spacing.md).padding(.vertical, Spacing.xs)
                 .background(palette.surfaceElement)
                 .contentShape(Rectangle())
             }
@@ -330,8 +330,8 @@ struct ReviewStream: View {
         // A line past the readable length shows its start until asked for the rest.
         let cut = line.cut.flatMap { store.openedLongLines.contains(line.id(in: path)) ? nil : $0 }
         let text = cut?.shown ?? line.text
-        return VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .top, spacing: 4) {
+        return VStack(alignment: .leading, spacing: Spacing.xxs) {
+            HStack(alignment: .top, spacing: Spacing.xs) {
                 // A marker as well as color: + and − read without hue.
                 // Selecting and copying takes the code only.
                 Text(tone == nil ? " " : line.kind == .added ? "+" : "−")
@@ -349,11 +349,11 @@ struct ReviewStream: View {
             if let cut {
                 Button("\(cut.more.formatted()) more characters · Show") { store.openedLongLines.insert(line.id(in: path)) }
                     .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
-                    .padding(.leading, 12)
+                    .padding(.leading, Spacing.md)
                     .accessibilityIdentifier("changes-long-line")
             }
         }
-        .padding(.vertical, 1).padding(.trailing, 8)
+        .padding(.vertical, Spacing.xxs).padding(.trailing, Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(selected ? palette.accent.opacity(0.16) : tone?.fill ?? .clear)
         .contextMenu { copyMenu(line, side: side, file: file) }
@@ -425,21 +425,21 @@ struct ReviewFileTitle: View {
         ViewThatFits(in: .horizontal) {
             line(directory: true)
             line(directory: false)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
                 ViewThatFits(in: .horizontal) {
                     title(directory: true)
                     title(directory: false)
                 }
-                HStack(spacing: 8) { actions }
+                HStack(spacing: Spacing.sm) { actions }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, Spacing.md)
         .help(file.path)
     }
 
     private func line(directory: Bool) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.sm) {
             title(directory: directory)
             Spacer(minLength: 4)
             actions
@@ -449,7 +449,7 @@ struct ReviewFileTitle: View {
     private func title(directory showsDirectory: Bool) -> some View {
         let name = (file.path as NSString).lastPathComponent
         let directory = (file.path as NSString).deletingLastPathComponent
-        return HStack(spacing: 8) {
+        return HStack(spacing: Spacing.sm) {
             HStack(spacing: 0) {
                 if showsDirectory, !directory.isEmpty {
                     Text(directory + "/").font(Typography.mono).foregroundStyle(palette.textSecondary)
@@ -498,7 +498,7 @@ private struct ReviewGutter: View {
             .font(Typography.mono).monospacedDigit()
             .foregroundStyle(selected || hovered ? palette.text : tone?.ink.opacity(0.8) ?? palette.textTertiary)
             .frame(width: ReviewStream.gutterWidth, alignment: .trailing)
-            .padding(.trailing, 6)
+            .padding(.trailing, Spacing.xs)
             .frame(maxHeight: .infinity)
             .background(hovered && number != nil ? palette.surfaceElement : tone?.fill ?? .clear)
             .contentShape(Rectangle())
@@ -556,7 +556,7 @@ private struct ReviewCommentEditor: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             TextField("Comment on \((selection.path as NSString).lastPathComponent):\(selection.range) · \(selection.side.rawValue)",
                       text: $store.commentDraft, axis: .vertical)
                 .lineLimit(1...5).textFieldStyle(.plain).font(Typography.text)
@@ -565,46 +565,44 @@ private struct ReviewCommentEditor: View {
                 .accessibilityIdentifier("changes-comment")
             // One row where it fits; a narrow pane stacks the two pairs.
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
+                HStack(spacing: Spacing.sm) {
                     commentButton
                     copyButtons
                     Spacer(minLength: 4)
                     cancelButton
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    HStack(spacing: Spacing.sm) {
                         commentButton
                         Spacer(minLength: 4)
                         cancelButton
                     }
-                    HStack(spacing: 8) { copyButtons }
+                    HStack(spacing: Spacing.sm) { copyButtons }
                 }
             }
-            .controlSize(.small)
-            .font(Typography.meta)
         }
-        .padding(.horizontal, 10).padding(.vertical, 8)
+        .padding(.horizontal, Spacing.sm).padding(.vertical, Spacing.sm)
         .background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.row))
         .overlay { RoundedRectangle(cornerRadius: CornerRadius.row).strokeBorder(palette.accent.opacity(0.6)) }
-        .padding(.leading, ReviewStream.gutterWidth + 6).padding(.trailing, 12).padding(.vertical, 5)
+        .padding(.leading, ReviewStream.gutterWidth + 6).padding(.trailing, Spacing.md).padding(.vertical, Spacing.xs)
         .onAppear { focused = true }
     }
 
     private var commentButton: some View {
         Button("Comment") { store.addComment(in: file) }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(LoopflowButtonStyle(.accent))
             .disabled(store.commentDraft.allSatisfy(\.isWhitespace))
             .help("Keep this comment under its lines until you send every comment")
     }
 
     @ViewBuilder private var copyButtons: some View {
         Button("Copy") { ReviewStream.copy(selection.text(in: file)) }
-            .buttonStyle(.bordered)
+            .buttonStyle(LoopflowButtonStyle())
             .help("Copies the code without + and − or line numbers")
         Button("Reference in conversation") {
             if addToConversation?(selection.reference(revision: store.revision)) == true { store.reviewSelection = nil }
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(LoopflowButtonStyle())
         .disabled(addToConversation == nil)
         .help(addToConversation == nil ? "Open the Task conversation to refer to these lines"
               : "Names these lines in the conversation's unsent input; sending stays yours")
@@ -627,9 +625,9 @@ private struct ReviewCommentRow: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
             Image(systemName: "text.bubble").foregroundStyle(palette.accent)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(comment.text).font(Typography.text).foregroundStyle(palette.text)
                     .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 Text(place).font(Typography.meta)
@@ -642,10 +640,10 @@ private struct ReviewCommentRow: View {
             }
             .buttonStyle(.plain).help("Delete this comment").accessibilityLabel("Delete comment")
         }
-        .padding(.horizontal, 10).padding(.vertical, 7)
+        .padding(.horizontal, Spacing.sm).padding(.vertical, Spacing.sm)
         .background(palette.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: CornerRadius.row))
         .overlay { RoundedRectangle(cornerRadius: CornerRadius.row).strokeBorder(palette.accent.opacity(0.3)) }
-        .padding(.leading, ReviewStream.gutterWidth + 6).padding(.trailing, 12).padding(.vertical, 4)
+        .padding(.leading, ReviewStream.gutterWidth + 6).padding(.trailing, Spacing.md).padding(.vertical, Spacing.xs)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("changes-comment-row")
     }
@@ -669,18 +667,18 @@ struct ReviewCommentsStrip: View {
     var body: some View {
         if !store.comments.isEmpty {
             let count = store.comments.count
-            HStack(spacing: 8) {
+            HStack(spacing: Spacing.sm) {
                 Text(count == 1 ? "1 comment" : "\(count) comments").foregroundStyle(palette.accent)
                     .lineLimit(1).accessibilityIdentifier("changes-comment-count")
                 Spacer(minLength: 4)
                 Button(action: send) {
-                    HStack(spacing: 5) {
+                    HStack(spacing: Spacing.xs) {
                         Text("Send to conversation")
                         Text("⌘↩").opacity(0.7)
                     }
                     .lineLimit(1)
                     .foregroundStyle(palette.background)
-                    .padding(.horizontal, 9).frame(height: 20)
+                    .padding(.horizontal, Spacing.sm).frame(height: 20)
                     .background(addToConversation == nil ? palette.textTertiary : palette.accent, in: RoundedRectangle(cornerRadius: CornerRadius.control))
                     .contentShape(Rectangle())
                 }
@@ -692,7 +690,7 @@ struct ReviewCommentsStrip: View {
                 .accessibilityIdentifier("changes-send")
             }
             .font(Typography.meta)
-            .padding(.horizontal, 12).padding(.vertical, 5)
+            .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.xs)
             .background(palette.accent.opacity(0.08))
             Divider()
         }
@@ -713,7 +711,7 @@ struct ReviewNotice: View {
     var body: some View {
         Text(text).font(Typography.text).foregroundStyle(palette.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 14).padding(.vertical, 6)
+            .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.xs)
     }
 }
 
@@ -731,7 +729,7 @@ struct ReviewStepper: View {
             arrow("chevron.up", "Previous change", key: "[", offset: -1)
             Divider().frame(height: 14)
             Text(store.position(reader)).font(Typography.meta).foregroundStyle(palette.text)
-                .monospacedDigit().fixedSize().padding(.horizontal, 8).frame(minWidth: 54)
+                .monospacedDigit().fixedSize().padding(.horizontal, Spacing.sm).frame(minWidth: 54)
                 .accessibilityIdentifier("review-position")
             Divider().frame(height: 14)
             arrow("chevron.down", "Next change", key: "]", offset: 1)
@@ -798,7 +796,7 @@ struct ReviewLayoutPicker: View {
         return Button { store.reviewLayout = layout } label: {
             Text(layout.rawValue).font(Typography.text).lineLimit(1).fixedSize()
                 .foregroundStyle(on ? palette.background : palette.text)
-                .padding(.horizontal, 8).frame(height: 20)
+                .padding(.horizontal, Spacing.sm).frame(height: 20)
                 .background(on ? palette.text : .clear)
                 .contentShape(Rectangle())
         }

@@ -4,7 +4,7 @@
 import Loopflow
 import SwiftUI
 
-/// Every workspace section heading: small tracked caps, one system.
+/// Every workspace section heading: sentence case in the strong step.
 struct WorkSectionHeading<Trailing: View>: View {
     let title: String
     var count: Int?
@@ -13,15 +13,18 @@ struct WorkSectionHeading<Trailing: View>: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-            Text(title)
-                .font(Typography.textStrong)
-                .foregroundStyle(palette.textTertiary)
-            if let count {
-                Text("\(count)")
-                    .font(Typography.meta)
-                    .monospacedDigit()
+        // A trailing control has no text baseline, so it centers on the title's line.
+        HStack(spacing: Spacing.sm) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Text(title)
+                    .font(Typography.textStrong)
                     .foregroundStyle(palette.textTertiary)
+                if let count {
+                    Text("\(count)")
+                        .font(Typography.meta)
+                        .monospacedDigit()
+                        .foregroundStyle(palette.textTertiary)
+                }
             }
             Spacer(minLength: Spacing.sm)
             trailing
@@ -58,11 +61,10 @@ struct WorkChip: View {
     var body: some View {
         Text(text)
             .font(Typography.textStrong)
-            .tracking(0.2)
             .foregroundStyle(tone == .neutral ? tone.ink(in: palette) : tone.text(in: palette))
             .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 1)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xxs)
             .background(tone.fill(in: palette), in: RoundedRectangle(cornerRadius: CornerRadius.control))
             .overlay {
                 if tone == .neutral {
@@ -102,7 +104,7 @@ struct AutoBadge: View {
 }
 
 /// Collapsed heading for a demand-read Task section (Comments, Session history):
-/// chevron, caps title, optional count, and the read's progress.
+/// chevron, title, optional count, and the read's progress.
 struct WorkDisclosureHeading: View {
     let title: String
     let count: Int?
@@ -168,8 +170,8 @@ private struct WorkSelection: ViewModifier {
             .background(selected ? palette.selectionFill : .clear, in: RoundedRectangle(cornerRadius: CornerRadius.row))
             .overlay(alignment: .leading) {
                 if selected {
-                    RoundedRectangle(cornerRadius: 1).fill(palette.selectionEdge)
-                        .frame(width: 2).padding(.vertical, 4)
+                    Capsule().fill(palette.selectionEdge)
+                        .frame(width: Spacing.xxs).padding(.vertical, Spacing.xs)
                 }
             }
     }
@@ -178,25 +180,5 @@ private struct WorkSelection: ViewModifier {
 struct WorkPlainButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.workFocusRing()
-    }
-}
-
-extension View {
-    func workDestinationSelection(_ selected: Bool) -> some View {
-        modifier(WorkDestinationSelection(selected: selected))
-    }
-}
-
-private struct WorkDestinationSelection: ViewModifier {
-    let selected: Bool
-    @Environment(\.palette) private var palette
-    @State private var hovering = false
-    func body(content: Content) -> some View {
-        content
-            .background(selected ? palette.workSelectedFill : (hovering ? palette.actionHover : .clear),
-                        in: RoundedRectangle(cornerRadius: CornerRadius.row))
-            .overlay(RoundedRectangle(cornerRadius: CornerRadius.row).strokeBorder(selected ? palette.selectionEdge : .clear))
-            .onHover { hovering = $0 }
-            .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }

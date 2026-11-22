@@ -41,7 +41,7 @@ struct WorkActivityView: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(LoopflowButtonStyle())
                     .help("Show all Activity")
                     .accessibilityLabel("Show all Activity")
                 }
@@ -106,14 +106,13 @@ struct WorkActivityView: View {
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                    Text("\(entry.work.kind.rawValue.uppercased()) · \(entry.subject)")
+                    Text("\(entry.work.kind.rawValue.capitalized), \(entry.subject)")
                         .font(Typography.textStrong)
-                        .tracking(0.6)
                         .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     Text(activityTime(entry.recordedAt))
-                        .font(Typography.mono)
+                        .font(Typography.meta).monospacedDigit()
                         .foregroundStyle(palette.textSecondary)
                         .help(exactTime(entry.recordedAt))
                 }
@@ -159,7 +158,7 @@ struct WorkActivityView: View {
             case .project:
                 model.waveForProject(projectId: work.id)?.wave.goal
             case .task:
-                model.task(id: work.id)?.task.condition.reason
+                model.task(id: work.id).flatMap { TaskRowStatus(task: $0.task).line }
             }
         }
     }

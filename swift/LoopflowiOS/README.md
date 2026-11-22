@@ -139,12 +139,12 @@ scales with Dynamic Type, nothing meant to be read is under 12 pt, and every
 control is 44 pt tall. Each screen has one accent button.
 
 A view names a step (`Typography.text`, `Spacing.md`, `CornerRadius.pane`) and
-never passes a number; `TypographyDisciplineTests` reads this directory and
+never passes a number; `DesignDisciplineTests` reads this directory and
 fails on a literal size, padding or radius, a `.borderedProminent` button or a
 `ContentUnavailableView`.
 
 ```sh
-cd swift && swift test --filter TypographyDisciplineTests
+cd swift && swift test --filter DesignDisciplineTests
 ```
 
 ## Files

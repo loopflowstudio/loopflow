@@ -13,21 +13,12 @@ enum BacklogFilter: String, CaseIterable, Hashable {
     case all = "All", mine = "Mine", available = "Available"
 }
 
-/// Who holds a backlog Task, as Rust decides it; the row draws it as a mark.
+/// Who holds a backlog Task, as Rust decides it.
 enum BacklogOwner: Equatable {
     case you, someone, nobody
 
     init(_ task: RoadmapTask) {
         if task.ownedByYou { self = .you } else if task.runtime?.owner != nil { self = .someone } else { self = .nobody }
-    }
-
-    /// The mark `lf desktop capture -p backlog` prints at a row's end.
-    var mark: String {
-        switch self {
-        case .you: "●"
-        case .someone: "○"
-        case .nobody: "◌"
-        }
     }
 }
 
@@ -234,6 +225,22 @@ struct BacklogList {
         return waveNames[id]
     }
 
+    /// "claimed by you" or "claimed by Ana". An unclaimed Task says nothing:
+    /// the Available count already does.
+    static func claim(_ task: RoadmapTask) -> String? {
+        switch BacklogOwner(task) {
+        case .you: "claimed by you"
+        case .someone: "claimed by \(task.runtime?.owner?.person ?? task.runtime?.owner?.personKey ?? "someone else")"
+        case .nobody: nil
+        }
+    }
+
+    /// "Growth, claimed by Ana": a row's Wave when it isn't this one, then whose it is.
+    func ownership(_ task: RoadmapTask) -> String? {
+        let parts = [waveLabel(task), Self.claim(task)].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+
     // MARK: Start
 
     /// The one workflow every Task would run, the Graph Rust says its first run
@@ -243,14 +250,14 @@ struct BacklogList {
         return names.count == 1 ? names.first ?? nil : nil
     }
 
-    /// "feature 2 · code 1": the most common workflow first.
+    /// "feature 2, code 1": the most common workflow first.
     static func breakdown(_ tasks: [RoadmapTask]) -> String {
         let counts: [(name: String, count: Int)] = Dictionary(grouping: tasks.compactMap(\.graphName), by: { $0 })
             .map { ($0.key, $0.value.count) }
         let ordered = counts.sorted { left, right in
             left.count != right.count ? left.count > right.count : left.name < right.name
         }
-        return ordered.map { "\($0.name) \($0.count)" }.joined(separator: " · ")
+        return ordered.map { "\($0.name) \($0.count)" }.joined(separator: ", ")
     }
 
     /// "PR #12" once the Task's PR is on GitHub.
@@ -258,12 +265,23 @@ struct BacklogList {
         task.pr?.publication?.github.map { "PR #\($0.number)" }
     }
 
-    /// Where a started Task stands: its step, and its PR when it has one. Nil for an unstarted Task.
-    static func standing(_ task: RoadmapTask) -> String? {
-        guard !task.awaitsStart else { return nil }
+    /// A Task's step and its PR, for the ones it has: "at demo", "PR #12".
+    static func position(_ task: RoadmapTask) -> [String] {
         let step = task.execution?.step ?? task.latestGraphProcess?.steps.last?.label
-        return ([step.map { "at \($0)" } ?? task.nextMove.reason] + [pullRequest(task)].compactMap { $0 })
-            .joined(separator: " · ")
+        return [step.map { "at \($0)" }, pullRequest(task)].compactMap { $0 }
+    }
+
+    /// The status word a row shows: a started Task's, and "Blocked" or "Waiting"
+    /// on one that has not started. Most rows have never run and show none.
+    static func status(_ task: RoadmapTask) -> TaskRowStatus? {
+        let standing = TaskRowStatus(task: task)
+        return !task.awaitsStart || standing.source == .condition ? standing : nil
+    }
+
+    /// "Idle, at demo, PR #12": the word the Task's row shows everywhere, then where it is.
+    static func standing(_ task: RoadmapTask) -> String? {
+        guard let word = status(task)?.word else { return nil }
+        return ([word] + position(task)).joined(separator: ", ")
     }
 
     /// The started Task that Start's place opens: one, selected alone. The
@@ -272,14 +290,17 @@ struct BacklogList {
         tasks.count == 1 && !tasks[0].awaitsStart ? tasks[0] : nil
     }
 
-    /// What Start says it will do: "Start · feature", "Start 3 · feature 2 · code 1",
-    /// and "Open" for one started Task. Started Tasks among others are not counted.
+    /// What Start says it will do: "Start with feature", "Start 2 with feature",
+    /// "Start 3: feature 2, code 1", and "Open" for one started Task. Started
+    /// Tasks among others are not counted.
     static func startLabel(_ tasks: [RoadmapTask]) -> String {
         if opens(tasks) != nil { return "Open" }
         let fresh = tasks.filter(\.awaitsStart)
         guard !fresh.isEmpty else { return "Start" }
-        let names = sharedWorkflow(fresh) ?? breakdown(fresh)
-        return "Start" + (tasks.count > 1 ? " \(fresh.count)" : "") + (names.isEmpty ? "" : " · \(names)")
+        let start = "Start" + (tasks.count > 1 ? " \(fresh.count)" : "")
+        if let shared = sharedWorkflow(fresh) { return "\(start) with \(shared)" }
+        let names = breakdown(fresh)
+        return names.isEmpty ? start : "\(start): \(names)"
     }
 
     var startLabel: String { Self.startLabel(selected) }
@@ -400,7 +421,7 @@ struct BacklogList {
 
     /// The backlog as an agent reads it with `lf desktop capture -p backlog`:
     /// the filter counts, the shown one bracketed, then the rows in order with
-    /// where a started one stands and each row's owner.
+    /// where a started one stands, its Wave when it is another, and who claimed it.
     func text(heading: [String]) -> String {
         var lines = heading
         lines.append("")
@@ -414,9 +435,9 @@ struct BacklogList {
         lines += rows.map { task in
             var line = "  \(task.task.identifier) \(task.task.name)"
             if let standing = Self.standing(task) { line += " · \(standing)" }
-            if let wave = waveLabel(task) { line += " · \(wave)" }
+            if let ownership = ownership(task) { line += " · \(ownership)" }
             if selection.contains(task.id) { line = "›" + line.dropFirst() }
-            return line + " \(BacklogOwner(task).mark)"
+            return line
         }
         if truncated { lines.append("  Partial: searching the \(all.count) loaded") }
         return lines.joined(separator: "\n")
@@ -462,7 +483,7 @@ extension WorkModel {
         var landed: [(task: RoadmapTask, rank: Int)] = []
         for write in writes {
             do { try await rankTask(write.task, rank: write.rank) } catch {
-                backlogNotice(view, "Order not saved · \(write.task.task.identifier): \(error.localizedDescription)")
+                backlogNotice(view, "Order not saved. \(write.task.task.identifier): \(error.localizedDescription)")
                 break
             }
             landed.append(write)
@@ -489,7 +510,7 @@ extension WorkModel {
             "Claimed \(claimed.count == 1 ? claimed[0].task.identifier : String(claimed.count))",
             started == 0 ? nil : started == claimed.count ? "now in Working" : "\(started) now in Working",
             skipped > 0 ? "\(skipped) already claimed" : nil,
-        ].compactMap { $0 }.joined(separator: " · "))
+        ].compactMap { $0 }.joined(separator: ", "))
         return claimed.isEmpty ? nil : .claims(claimed)
     }
 
@@ -527,7 +548,7 @@ extension WorkModel {
             backlogNotice(view, "Saved \(task.task.identifier)'s brief")
             return .brief(task: task, previous: task.task.description, written: text)
         } catch {
-            backlogNotice(view, "Brief not saved · \(error.localizedDescription)")
+            backlogNotice(view, "Brief not saved. \(error.localizedDescription)")
             return nil
         }
     }
@@ -548,7 +569,7 @@ extension WorkModel {
             do {
                 try await updateTaskDirective(task: current, text: previous)
                 backlogNotice(view, "Brief restored")
-            } catch { backlogNotice(view, "Brief not restored · \(error.localizedDescription)") }
+            } catch { backlogNotice(view, "Brief not restored. \(error.localizedDescription)") }
         }
     }
 }
@@ -563,7 +584,6 @@ struct BacklogView: View {
     let view: WorkNavigation.Board
     @Environment(\.palette) private var palette
     @Environment(\.undoManager) private var undoManager
-    @State private var hovered: String?
     @State private var dropTarget: String?
     @State private var abandoning: [RoadmapTask]?
     @FocusState private var focused: Bool
@@ -614,7 +634,7 @@ struct BacklogView: View {
     // MARK: Header
 
     private func header(_ list: BacklogList) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
+        VStack(alignment: .leading, spacing: Spacing.md) {
             // The chapter, then the objective's disclosure, give way before the name does.
             ViewThatFits(in: .horizontal) {
                 titleLine(list, project: true, objective: true)
@@ -640,11 +660,12 @@ struct BacklogView: View {
 
     private func titleLine(_ list: BacklogList, project showsProject: Bool, objective showsObjective: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-            Text(roadmap?.wave.displayName ?? model.repositoryName).font(Typography.lede).lineLimit(1)
+            Text(roadmap?.wave.displayName ?? model.repositoryName).serif(.display)
+                .foregroundStyle(palette.emphasisInk).lineLimit(1)
                 .layoutPriority(1).accessibilityIdentifier("wave-title")
             if let roadmap {
                 if let error = roadmap.projects.unavailableReason {
-                    Text("Project unavailable · \(error)").font(Typography.text).foregroundStyle(palette.warning)
+                    Text("Project unavailable. \(error)").font(Typography.text).foregroundStyle(palette.warning)
                         .lineLimit(1)
                 } else if showsProject, let project = roadmap.currentProject {
                     Text(project.name).font(Typography.text).foregroundStyle(palette.textSecondary)
@@ -686,8 +707,9 @@ struct BacklogView: View {
             }
         }
         .font(Typography.text)
-        .padding(.horizontal, Spacing.sm).padding(.vertical, 5)
-        .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: CornerRadius.control))
+        .padding(.horizontal, Spacing.sm).frame(minHeight: HitTarget.minimum)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.control))
+        .overlay(RoundedRectangle(cornerRadius: CornerRadius.control).strokeBorder(palette.borderStrong))
     }
 
     private func waveMenu(_ roadmap: WaveRoadmap) -> some View {
@@ -697,7 +719,7 @@ struct BacklogView: View {
                 model.historyWave = roadmap.wave
             }.accessibilityIdentifier("wave-project-history")
             if let workflow = roadmap.graph {
-                Button("Workflow · \(workflow)") {
+                Button("Workflow: \(workflow)") {
                     Task {
                         await model.loadGraphCatalog()
                         model.navigation.palette = .workflow(workflow)
@@ -709,22 +731,16 @@ struct BacklogView: View {
             .accessibilityIdentifier("wave-backlog-menu")
     }
 
+    /// The Wave's objective, then its Project as the Portfolio draws it.
     private func objective(_ roadmap: WaveRoadmap) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(roadmap.wave.goal.isEmpty ? "No objective recorded." : roadmap.wave.goal)
                 .font(Typography.text).foregroundStyle(palette.textSecondary).textSelection(.enabled)
             if let project = roadmap.currentProject {
-                HStack(spacing: Spacing.md) {
-                    Text(WaveMetricPortfolioPresentation(portfolio: roadmap.metricPortfolio).headline)
-                        .font(Typography.text).foregroundStyle(palette.textSecondary).lineLimit(1)
-                        .accessibilityIdentifier("wave-metric-headline")
-                    TrackerSyncView(sync: project.sync, repo: roadmap.wave.repo)
-                }
-                ForEach(project.krs) { kr in
-                    Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "xmark.circle")
-                        .font(Typography.text).lineLimit(1)
-                        .foregroundStyle(kr.holds ? palette.success : palette.textSecondary)
-                }
+                Text(WaveMetricPortfolioPresentation(portfolio: roadmap.metricPortfolio).headline)
+                    .font(Typography.text).foregroundStyle(palette.textSecondary).lineLimit(1)
+                    .accessibilityIdentifier("wave-metric-headline")
+                WaveProjectView(project: project, repo: roadmap.wave.repo)
             }
         }
         .accessibilityIdentifier("wave-objective-detail")
@@ -753,19 +769,32 @@ struct BacklogView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if list.rows.isEmpty, model.viewTasks(view) != nil { emptyState(list) }
                     ForEach(list.rows) { task in
+                        let isOpen = list.opened?.id == task.id
                         VStack(alignment: .leading, spacing: 0) {
                             row(task, list)
-                            if list.opened?.id == task.id { BacklogBrief(model: model, view: view, task: task, state: state, perform: perform) }
+                            if let reason = TaskRowStatus(task: task).line {
+                                BacklogUnderTitle(identifier: task.task.identifier) {
+                                    Text(verbatim: reason).font(Typography.text).foregroundStyle(palette.textSecondary)
+                                        .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                                        .accessibilityIdentifier("backlog-reason-\(task.id)")
+                                }
+                            }
+                            if isOpen {
+                                BacklogUnderTitle(identifier: task.task.identifier) {
+                                    BacklogBrief(model: model, view: view, task: task, state: state, perform: perform)
+                                }
+                            }
                         }
+                        .background(isOpen ? palette.surfaceMuted : .clear)
                         .id(task.id)
-                        Divider().padding(.leading, Spacing.xl)
+                        Divider()
                     }
                     if list.truncated {
                         Text("Partial: searching the \(list.all.count) loaded").font(Typography.text)
                             .foregroundStyle(palette.warning).padding(Spacing.xl)
                     }
                     if list.canReorder, !list.rows.isEmpty {
-                        Color.clear.frame(height: 24).contentShape(Rectangle())
+                        Color.clear.frame(height: HitTarget.minimum).contentShape(Rectangle())
                             .dropDestination(for: String.self) { items, _ in drop(items, before: nil, list) }
                     }
                 }
@@ -786,48 +815,56 @@ struct BacklogView: View {
         return HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
             Toggle("Select \(task.task.identifier)", isOn: Binding(get: { selected }, set: { _ in state.wrappedValue.toggle(task.id) }))
                 .toggleStyle(.checkbox).labelsHidden()
-                .opacity(hovered == task.id || !list.selection.isEmpty ? 1 : 0)
+                .frame(width: HitTarget.minimum)
+            Button { state.wrappedValue.select(task.id) } label: {
+                Image(systemName: "chevron.right").font(Typography.meta).fontWeight(.bold)
+                    .rotationEffect(.degrees(isOpen ? 90 : 0))
+                    .frame(width: HitTarget.minimum, height: HitTarget.minimum).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
+            .help(isOpen ? "Hide brief" : "Show brief")
+            .accessibilityLabel(isOpen ? "Hide brief" : "Show brief")
+            .accessibilityIdentifier("backlog-row-brief-\(task.id)")
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Text(task.task.identifier).font(Typography.mono).foregroundStyle(palette.textSecondary)
-                    .frame(minWidth: 62, alignment: .leading).fixedSize()
+                BacklogIdentifier(identifier: task.task.identifier)
                 Text(task.task.name).font(isOpen ? Typography.textStrong : Typography.text)
                     .lineLimit(isOpen ? nil : 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if list.state.editing == task.id {
                     Text("draft").font(Typography.meta).foregroundStyle(palette.accentInk)
                 }
-                if let standing = BacklogList.standing(task) {
-                    Text(standing).font(Typography.meta).foregroundStyle(palette.textSecondary).lineLimit(1)
+                if let standing = BacklogList.status(task), let word = standing.word {
+                    Text("\(Text(verbatim: word).foregroundStyle(standing.tone?.ink(in: palette) ?? palette.textSecondary))\(BacklogList.position(task).map { ", \($0)" }.joined())")
+                        .font(Typography.meta).foregroundStyle(palette.textSecondary).lineLimit(1)
+                        .help(Text(verbatim: standing.detail ?? word))
                         .accessibilityIdentifier("backlog-standing-\(task.id)")
                 }
-                if let wave = list.waveLabel(task) {
-                    Text(wave).font(Typography.meta).foregroundStyle(palette.textSecondary).lineLimit(1)
+                if let ownership = list.ownership(task) {
+                    Text(verbatim: ownership).font(Typography.meta).foregroundStyle(palette.textSecondary).lineLimit(1)
+                        .accessibilityIdentifier("backlog-ownership-\(task.id)")
                 }
-                BacklogOwnerMark(owner: BacklogOwner(task), holder: task.runtime?.owner)
-                Menu { actions(task, list) } label: {
-                    Image(systemName: "ellipsis")
-                }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .foregroundStyle(palette.textTertiary).help("Actions")
-                .opacity(hovered == task.id || selected ? 1 : 0.4)
-                .accessibilityIdentifier("backlog-row-menu-\(task.id)")
             }
             .contentShape(Rectangle())
             .onTapGesture { click(task, list) }
+            Menu { actions(task, list) } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden)
+            .frame(width: HitTarget.minimum)
+            .foregroundStyle(palette.textSecondary).help("Actions")
+            .accessibilityLabel("More for \(task.task.identifier)")
+            .accessibilityIdentifier("backlog-row-menu-\(task.id)")
         }
-        .padding(.leading, Spacing.lg).padding(.trailing, Spacing.xl).padding(.vertical, 9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isOpen ? palette.surfaceMuted : selected ? palette.selectionFill : .clear)
-        .onHover { inside in
-            if inside { hovered = task.id } else if hovered == task.id { hovered = nil }
-        }
+        .padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.xs)
+        .frame(maxWidth: .infinity, minHeight: HitTarget.comfortable, alignment: .leading)
+        .background(selected && !isOpen ? palette.selectionFill : .clear)
         .modifier(BacklogDrag(enabled: list.canReorder, id: task.id, title: list.targets(task.id).count > 1
                               ? "\(list.targets(task.id).count) Tasks" : task.task.name,
                               targeted: Binding(get: { dropTarget == task.id },
                                                 set: { if $0 { dropTarget = task.id } else if dropTarget == task.id { dropTarget = nil } }),
                               drop: { drop($0, before: task.id, list) }))
         .overlay(alignment: .top) {
-            if dropTarget == task.id { Rectangle().fill(palette.accent).frame(height: 2).allowsHitTesting(false) }
+            if dropTarget == task.id { Rectangle().fill(palette.accent).frame(height: Spacing.xxs).allowsHitTesting(false) }
         }
         .contextMenu { actions(task, list) }
         .accessibilityElement(children: .combine)
@@ -986,69 +1023,74 @@ private struct BacklogDrag: ViewModifier {
     }
 }
 
-/// Filled for you, a muted outline for someone else, a dashed ring for nobody.
-struct BacklogOwnerMark: View {
-    let owner: BacklogOwner
-    let holder: TaskOwner?
+/// A row's ID, in the column every row gives it.
+private struct BacklogIdentifier: View {
+    let identifier: String
     @Environment(\.palette) private var palette
 
     var body: some View {
-        Group {
-            switch owner {
-            case .you: Image(systemName: "person.crop.circle.fill").foregroundStyle(palette.accentInk)
-            case .someone: Image(systemName: "person.crop.circle").foregroundStyle(palette.textTertiary)
-            case .nobody:
-                Circle().strokeBorder(palette.textTertiary, style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
-                    .frame(width: 13, height: 13)
-            }
-        }
-        .font(Typography.text).frame(width: 18)
-        .help(help)
-        .accessibilityLabel(help)
-    }
-
-    private var help: String {
-        switch owner {
-        case .you: "Claimed by you"
-        case .someone: "Claimed by \(holder?.person ?? holder?.personKey ?? "someone else")"
-        case .nobody: "Unclaimed"
-        }
+        Text(verbatim: identifier).font(Typography.mono).foregroundStyle(palette.textSecondary)
+            .frame(minWidth: 64, alignment: .leading).fixedSize()
     }
 }
 
-/// All · Mine · Available in the palette's accent.
+/// What sits under a row's title: the row's own columns, empty, come first, so
+/// the content starts where the title does.
+private struct BacklogUnderTitle<Content: View>: View {
+    let identifier: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Color.clear.frame(width: HitTarget.minimum, height: 0)
+            Color.clear.frame(width: HitTarget.minimum, height: 0)
+            BacklogIdentifier(identifier: identifier).frame(height: 0).hidden()
+            content
+            Color.clear.frame(width: HitTarget.minimum, height: 0)
+        }
+        .padding(.horizontal, Spacing.xl).padding(.bottom, Spacing.sm)
+    }
+}
+
+/// All, Mine, Available: one control of three segments, the chosen one in the
+/// selection fill.
 struct BacklogFilterPicker: View {
     @Binding var selection: BacklogFilter
     let count: (BacklogFilter) -> Int
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(spacing: 2) {
+        let shape = RoundedRectangle(cornerRadius: CornerRadius.control)
+        HStack(spacing: 0) {
             ForEach(BacklogFilter.allCases, id: \.self) { filter in
                 let chosen = filter == selection
+                if filter != BacklogFilter.allCases.first { Rectangle().fill(palette.borderStrong).frame(width: 1) }
                 Button { selection = filter } label: {
-                    Text("\(filter.rawValue) \(count(filter))")
-                        .font(chosen ? Typography.textStrong : Typography.text)
-                        .monospacedDigit()
-                        .foregroundStyle(chosen ? palette.accentText : palette.textSecondary)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(chosen ? palette.accent : .clear, in: Capsule())
-                        .contentShape(Capsule())
+                    HStack(spacing: Spacing.xs) {
+                        Text(filter.rawValue).font(chosen ? Typography.textStrong : Typography.text)
+                            .foregroundStyle(chosen ? palette.workSelectedText : palette.text)
+                        Text("\(count(filter))").font(Typography.text).monospacedDigit()
+                            .foregroundStyle(chosen ? palette.workSelectedSecondaryText : palette.textSecondary)
+                    }
+                    .padding(.horizontal, Spacing.md).frame(minHeight: HitTarget.minimum)
+                    .background(chosen ? palette.workSelectedFill : palette.surface)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(WorkPlainButtonStyle())
                 .accessibilityAddTraits(chosen ? .isSelected : [])
                 .accessibilityIdentifier("backlog-filter-\(filter.rawValue.lowercased())")
             }
         }
-        .padding(2)
-        .background(palette.surfaceMuted, in: Capsule())
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(palette.borderStrong))
         .fixedSize()
     }
 }
 
-/// The toolbar acts on the selection and is disabled with none. Start is its one
-/// filled shape; the position, then ↑↓, give way, then Edit, Move and Abandon
-/// fold into one menu. No label wraps.
+/// The action bar says what it acts on, then acts on it; with nothing selected
+/// its buttons are off. Every action is the one button and Start is the
+/// accent. The position, then ↑↓, give way, then Edit, Move and Abandon fold
+/// into one menu. No label wraps.
 struct BacklogToolbar: View {
     let model: WorkModel
     let view: WorkNavigation.Board
@@ -1065,40 +1107,54 @@ struct BacklogToolbar: View {
         }
         .disabled(list.selected.isEmpty)
         .padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.sm)
-        .background(palette.surfaceMuted.opacity(0.6))
+        .background(palette.surfaceMuted)
         .accessibilityIdentifier("backlog-toolbar")
     }
 
-    private var count: String { list.selected.count > 1 ? " \(list.selected.count)" : "" }
+    private var selected: some View {
+        Text(list.selected.isEmpty ? "Nothing selected" : "\(list.selected.count) selected")
+            .font(Typography.text).foregroundStyle(palette.textSecondary).monospacedDigit().fixedSize()
+            .accessibilityIdentifier("backlog-selected")
+    }
+
+    private var claim: some View {
+        Button("Claim") { perform(.claim) }
+            .disabled(!list.selected.contains { BacklogOwner($0) == .nobody })
+            .help("Make it yours without starting it (C)").accessibilityIdentifier("backlog-claim")
+    }
 
     private func bar(position: Bool, arrows: Bool) -> some View {
         let tasks = list.selected
         return HStack(spacing: Spacing.sm) {
+            selected
             BacklogStartButton(model: model, list: list, perform: perform)
-            Button("Claim\(count)") { perform(.claim) }
-                .disabled(!tasks.contains { BacklogOwner($0) == .nobody })
-                .help("Make it yours without starting it (C)").accessibilityIdentifier("backlog-claim")
+            claim
             Button("Edit") { perform(.edit) }.disabled(list.opened == nil).help("Edit the brief (E)")
                 .accessibilityIdentifier("backlog-edit")
-            Menu("Move") { BacklogMoveItems(model: model, list: list, tasks: tasks, perform: perform) }
-                .menuStyle(.borderlessButton).fixedSize().accessibilityIdentifier("backlog-move")
+            Menu { BacklogMoveItems(model: model, list: list, tasks: tasks, perform: perform) } label: {
+                HStack(spacing: Spacing.xs) {
+                    Text("Move")
+                    Image(systemName: "chevron.down").font(Typography.meta)
+                }
+            }
+            .menuStyle(.button).menuIndicator(.hidden).fixedSize().accessibilityIdentifier("backlog-move")
+            Button("Abandon…") { perform(.abandon) }.help("⌘⌫").accessibilityIdentifier("backlog-abandon")
             Spacer(minLength: Spacing.sm)
-            if position {
+            if position, let positionText {
                 Text(positionText).font(Typography.text).foregroundStyle(palette.textSecondary).monospacedDigit()
                     .fixedSize().accessibilityIdentifier("backlog-position")
             }
             if arrows {
                 Group {
-                    Button { perform(.nudge(-1)) } label: { Image(systemName: "arrow.up") }.help("Move up (⌘↑)")
-                    Button { perform(.nudge(1)) } label: { Image(systemName: "arrow.down") }.help("Move down (⌘↓)")
+                    Button { perform(.nudge(-1)) } label: { Image(systemName: "arrow.up") }
+                        .help("Move up (⌘↑)").accessibilityLabel("Move up")
+                    Button { perform(.nudge(1)) } label: { Image(systemName: "arrow.down") }
+                        .help("Move down (⌘↓)").accessibilityLabel("Move down")
                 }
                 .disabled(!list.canReorder)
             }
-            Button("Abandon\(count)…") { perform(.abandon) }.help("⌘⌫").accessibilityIdentifier("backlog-abandon")
         }
-        .buttonStyle(BacklogQuietButtonStyle())
-        .font(Typography.text)
-        .lineLimit(1)
+        .buttonStyle(LoopflowButtonStyle())
         .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -1106,10 +1162,9 @@ struct BacklogToolbar: View {
     private var folded: some View {
         let tasks = list.selected
         return HStack(spacing: Spacing.sm) {
+            selected
             BacklogStartButton(model: model, list: list, perform: perform)
-            Button("Claim\(count)") { perform(.claim) }
-                .disabled(!tasks.contains { BacklogOwner($0) == .nobody })
-                .help("Make it yours without starting it (C)").accessibilityIdentifier("backlog-claim")
+            claim
             Spacer(minLength: 0)
             Menu {
                 Button("Edit brief") { perform(.edit) }.disabled(list.opened == nil)
@@ -1117,87 +1172,55 @@ struct BacklogToolbar: View {
                 Button("Move up") { perform(.nudge(-1)) }.disabled(!list.canReorder)
                 Button("Move down") { perform(.nudge(1)) }.disabled(!list.canReorder)
                 Divider()
-                Button("Abandon\(count)…", role: .destructive) { perform(.abandon) }
+                Button("Abandon…", role: .destructive) { perform(.abandon) }
             } label: { Image(systemName: "ellipsis") }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("More actions")
+                .menuStyle(.button).menuIndicator(.hidden).fixedSize().help("More actions")
+                .accessibilityLabel("More actions")
                 .accessibilityIdentifier("backlog-more")
         }
-        .buttonStyle(BacklogQuietButtonStyle())
-        .font(Typography.text)
-        .lineLimit(1)
+        .buttonStyle(LoopflowButtonStyle())
     }
 
-    private var positionText: String {
-        if list.selected.count > 1 { return "\(list.selected.count) selected" }
-        guard let task = list.selected.first, let index = list.all.firstIndex(where: { $0.id == task.id }) else { return "" }
+    /// "8 of 46" for the one selected Task; several have no single place.
+    private var positionText: String? {
+        guard list.selected.count == 1, let task = list.selected.first,
+              let index = list.all.firstIndex(where: { $0.id == task.id }) else { return nil }
         return "\(index + 1) of \(list.all.count)"
     }
 }
 
-/// The secondary actions' one quiet style: ink only, a fill on hover.
-struct BacklogQuietButtonStyle: ButtonStyle {
-    @Environment(\.palette) private var palette
-    @Environment(\.isEnabled) private var isEnabled
-    @State private var hovering = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(isEnabled ? palette.text : palette.textTertiary)
-            .padding(.horizontal, Spacing.sm).padding(.vertical, 3)
-            .background(RoundedRectangle(cornerRadius: CornerRadius.control)
-                .fill(configuration.isPressed ? palette.surfaceElement : hovering && isEnabled ? palette.surfaceMuted : .clear))
-            .contentShape(RoundedRectangle(cornerRadius: CornerRadius.control))
-            .onHover { hovering = $0 }
-            .workFocusRing()
-    }
-}
-
-/// Start, a split control: the main part runs each unstarted Task's own
-/// workflow and the chevron lists the others. One started Task alone makes it Open.
+/// Start, the bar's accent: the button runs each unstarted Task's own workflow
+/// and the menu beside it lists the others. One started Task alone makes it Open.
 struct BacklogStartButton: View {
     let model: WorkModel
     let list: BacklogList
     let perform: (BacklogView.Action) -> Void
-    @Environment(\.palette) private var palette
-    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         let tasks = list.selected
         let unavailable = BacklogList.startUnavailable(tasks)
-        let enabled = isEnabled && unavailable == nil
-        let fill = enabled ? palette.accent : palette.surfaceElement
-        let ink = enabled ? palette.accentText : palette.textTertiary
         let fresh = tasks.filter(\.awaitsStart)
-        HStack(spacing: 0) {
-            Button { perform(.start(nil)) } label: {
-                Text(list.startLabel).font(Typography.textStrong).lineLimit(1)
-                    .padding(.leading, Spacing.md).padding(.trailing, Spacing.sm).padding(.vertical, 4)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(WorkPlainButtonStyle())
-            .help(unavailable ?? BacklogList.startedNote(tasks) ?? (BacklogList.opens(tasks) != nil
-                ? "Open the Task to continue it (⌘↩)"
-                : fresh.count > 1 && BacklogList.sharedWorkflow(fresh) == nil ? "Each Task on its own workflow (⌘↩)" : "⌘↩"))
-            .accessibilityIdentifier("backlog-start")
+        HStack(spacing: Spacing.xxs) {
+            Button(list.startLabel) { perform(.start(nil)) }
+                .help(unavailable ?? BacklogList.startedNote(tasks) ?? (BacklogList.opens(tasks) != nil
+                    ? "Open the Task to continue it (⌘↩)"
+                    : fresh.count > 1 && BacklogList.sharedWorkflow(fresh) == nil ? "Each Task on its own workflow (⌘↩)" : "⌘↩"))
+                .accessibilityIdentifier("backlog-start")
             // Only unstarted Tasks choose a workflow here.
             if tasks.isEmpty || !fresh.isEmpty {
-                Rectangle().fill(ink.opacity(0.35)).frame(width: 1).padding(.vertical, 4)
                 Menu {
                     BacklogStartItems(model: model, tasks: tasks, perform: perform)
                 } label: {
-                    Image(systemName: "chevron.down").font(Typography.meta).fontWeight(.bold)
+                    Image(systemName: "chevron.down").font(Typography.meta)
                 }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .tint(ink)
-                .padding(.horizontal, Spacing.xs)
+                .menuStyle(.button).menuIndicator(.hidden).fixedSize()
+                .help("Start with another workflow")
+                .accessibilityLabel("Start with another workflow")
                 .accessibilityIdentifier("backlog-start-menu")
-            } else {
-                Color.clear.frame(width: Spacing.xs, height: 1)
             }
         }
+        .buttonStyle(LoopflowButtonStyle(.accent))
         .disabled(unavailable != nil)
-        .foregroundStyle(ink)
-        .background(fill, in: Capsule())
         .fixedSize()
     }
 }
@@ -1241,13 +1264,13 @@ struct StartFlowItems: View {
                 ForEach(flows.unattended) { item($0) }
             }
         } else {
-            Text(model.graphCatalog.failure.map { "Workflows unavailable · \($0)" } ?? "Reading workflows…")
+            Text(model.graphCatalog.failure.map { "Workflows unavailable. \($0)" } ?? "Reading workflows…")
         }
     }
 
     private func item(_ flow: StartFlow) -> some View {
         Toggle(isOn: Binding(get: { flow.name == chosen }, set: { _ in choose(flow.name) })) {
-            Text("\(flow.name)  ·  \(flow.consequence)")
+            Text("\(flow.name), \(flow.consequence)")
             if let summary = flow.summary { Text(summary) }
         }
     }
@@ -1329,9 +1352,9 @@ struct BacklogBrief: View {
                         .keyboardShortcut(.cancelAction)
                 }
             } else if brief.isEmpty {
-                Text("No brief yet.").foregroundStyle(palette.textTertiary)
+                Text("No brief yet.").font(Typography.text).foregroundStyle(palette.textSecondary)
             } else {
-                Text(Self.markdown(brief)).font(Typography.text).lineSpacing(4).textSelection(.enabled)
+                Text(Self.markdown(brief)).font(Typography.text).lineSpacing(Spacing.xs).textSelection(.enabled)
                     .lineLimit(long && !state.wrappedValue.showsAll ? 9 : nil)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("backlog-brief-\(task.id)")
@@ -1344,9 +1367,8 @@ struct BacklogBrief: View {
             }
         }
         .frame(maxWidth: 720, alignment: .leading)
-        .padding(.leading, 96).padding(.trailing, Spacing.xl).padding(.top, Spacing.xs).padding(.bottom, Spacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.surfaceMuted)
+        .padding(.bottom, Spacing.sm)
     }
 
     static func words(_ text: String) -> Int { text.split(whereSeparator: \.isWhitespace).count }
@@ -1368,7 +1390,7 @@ struct WaveViewHeader: View {
 
     var body: some View {
         HStack(spacing: Spacing.md) {
-            Text(title).font(Typography.lede).lineLimit(1)
+            Text(title).serif(.display).foregroundStyle(palette.emphasisInk).lineLimit(1)
             Spacer(minLength: 0)
             ShowHiddenMenu(model: model, view: view)
         }

@@ -95,15 +95,15 @@ struct TaskChangesView: View {
     // MARK: Header
 
     var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
             // Side by side where both fit; a narrow pane puts the pill under the title.
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 8) {
+                HStack(alignment: .top, spacing: Spacing.sm) {
                     titles
                     Spacer(minLength: 8)
                     deliveryPill
                 }
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
                     titles
                     deliveryPill
                 }
@@ -114,12 +114,12 @@ struct TaskChangesView: View {
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.sm)
     }
 
     private var titles: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 Text(store.changesTitle).font(Typography.textStrong)
                     .foregroundStyle(store.changesError == nil ? palette.text : palette.warning)
                     .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
@@ -227,7 +227,7 @@ struct TaskChangesView: View {
                 : checks.contains { $0.failed } ? palette.failureTone.ink
                 : checks.contains { $0.passed } ? palette.successTone.ink : palette.textTertiary
             Button { showsDelivery.toggle() } label: {
-                HStack(spacing: 5) {
+                HStack(spacing: Spacing.xs) {
                     Circle().fill(dot).frame(width: 7, height: 7)
                     Text(delivery.headline.components(separatedBy: " · ").first ?? delivery.headline)
                         .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
@@ -235,7 +235,7 @@ struct TaskChangesView: View {
                         .font(Typography.meta).fontWeight(.semibold).foregroundStyle(palette.textSecondary)
                 }
                 .font(Typography.text)
-                .padding(.horizontal, 9).padding(.vertical, 3)
+                .padding(.horizontal, Spacing.sm).padding(.vertical, Spacing.xxs)
                 .frame(minHeight: HitTarget.minimum)
                 .background(palette.surface, in: Capsule())
                 .overlay { Capsule().strokeBorder(palette.border) }
@@ -257,7 +257,7 @@ struct TaskChangesView: View {
     /// a wide pane anyway), then order and tour, then Focus. What is given up
     /// is in the … menu.
     var toolbar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.sm) {
             Button { store.showsSidebar = !showsSidebar } label: {
                 Image(systemName: "sidebar.left").font(Typography.text)
                     .foregroundStyle(showsSidebar ? palette.text : palette.textSecondary)
@@ -286,7 +286,7 @@ struct TaskChangesView: View {
         }
         .buttonStyle(.plain)
         .font(Typography.meta)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, Spacing.sm)
         .frame(height: TaskFileChrome.headerHeight + 4)
         .background(palette.surfaceMuted.opacity(0.5))
     }
@@ -300,7 +300,7 @@ struct TaskChangesView: View {
     }
 
     private func controls(compact: Bool, order: Bool = true, layout: Bool = true) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.sm) {
             if order {
                 orderMenu
                 tourButton(compact: compact)
@@ -395,7 +395,7 @@ struct TaskChangesView: View {
             let group = store.shownGroups.first { group in group.isTour && group.files.contains { $0.path == file.path } }
             ReviewFileTitle(store: store, file: file, note: group?.title ?? file.oldPath.map { "from \($0)" }, viewable: true)
                 .fillsPane()
-                .padding(.vertical, 4)
+                .padding(.vertical, Spacing.xs)
                 .frame(minHeight: TaskFileChrome.headerHeight)
                 .background(palette.surfaceMuted)
                 .contextMenu {
@@ -420,7 +420,7 @@ struct TaskChangesView: View {
 
     @ViewBuilder private var focusStrip: some View {
         if let focused = store.focusedPath, let review = store.shownReview {
-            HStack(spacing: 6) {
+            HStack(spacing: Spacing.xs) {
                 Text("Only \((focused as NSString).lastPathComponent)").font(Typography.textStrong)
                 Text(review.files.count == 2 ? "· 1 more file" : "· \(review.files.count - 1) more files")
                     .font(Typography.meta).foregroundStyle(palette.textSecondary)
@@ -429,7 +429,7 @@ struct TaskChangesView: View {
                     .buttonStyle(.plain).help("Show all files").accessibilityLabel("Show all files")
             }
             .lineLimit(1)
-            .padding(.horizontal, 12).padding(.vertical, 5)
+            .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.xs)
             .background(palette.surfaceElement)
             .help(focused)
             Divider()
@@ -472,7 +472,7 @@ struct TaskChangesView: View {
                     store.showEarlierFiles()
                 }
                 .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
-                .padding(.horizontal, 12).padding(.vertical, 8)
+                .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.sm)
                 .accessibilityIdentifier("changes-files-above")
             }
             ReviewStream(store: store, reader: .changes, files: files, split: store.layout(width: width) == .split,
@@ -484,7 +484,7 @@ struct TaskChangesView: View {
                     .onAppear { store.extendWindow() }
             }
         } else if store.changesError == nil {
-            ProgressView().frame(maxWidth: .infinity).padding(24)
+            ProgressView().frame(maxWidth: .infinity).padding(Spacing.xxl)
         }
     }
 
@@ -501,7 +501,7 @@ struct TaskChangesView: View {
 
     /// The stream says where it ends, and offers the way back.
     @ViewBuilder private var footer: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: Spacing.xs) {
             if let first = store.shownReview?.stops.first, store.focusedPath == nil,
                store.window.upperBound == store.shownReview?.files.count {
                 Text("End of changes.").font(Typography.meta).foregroundStyle(palette.textSecondary)
@@ -517,7 +517,7 @@ struct TaskChangesView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
+        .padding(.vertical, Spacing.xxl)
     }
 }
 
@@ -534,7 +534,7 @@ private struct EnclosingDeclarationBar: View {
            let declaration = store.opened(file).enclosing(id) {
             Text(declaration).font(Typography.mono).foregroundStyle(palette.textSecondary)
                 .lineLimit(1).truncationMode(.tail)
-                .padding(.leading, ReviewStream.gutterWidth + 18).padding(.trailing, 12).padding(.vertical, 3)
+                .padding(.leading, ReviewStream.gutterWidth + 18).padding(.trailing, Spacing.md).padding(.vertical, Spacing.xxs)
                 .fillsPane()
                 .background(palette.background.opacity(0.94))
                 .overlay(alignment: .bottom) { Divider() }
@@ -575,14 +575,14 @@ struct ChangedFilesSidebar: View {
         VStack(alignment: .leading, spacing: 0) {
             TextField("Filter files", text: $store.reviewFilter)
                 .textFieldStyle(.roundedBorder).font(Typography.text)
-                .padding(8)
+                .padding(Spacing.sm)
                 .accessibilityIdentifier("changes-filter")
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if let viewed = store.viewedSummary {
                         Text(viewed).foregroundStyle(palette.textSecondary)
-                            .padding(.horizontal, 8).padding(.top, 8)
+                            .padding(.horizontal, Spacing.sm).padding(.top, Spacing.sm)
                             .accessibilityIdentifier("changes-viewed-count")
                     }
                     ForEach(store.shownGroups) { group in
@@ -590,12 +590,12 @@ struct ChangedFilesSidebar: View {
                         ForEach(group.files) { file in fileRow(file, in: group) }
                     }
                     if store.shownGroups.isEmpty {
-                        Text("No files to show").foregroundStyle(palette.textSecondary).padding(8)
+                        Text("No files to show").foregroundStyle(palette.textSecondary).padding(Spacing.sm)
                     }
                     tourHidden
                     alwaysHidden
                 }
-                .padding(.bottom, 12)
+                .padding(.bottom, Spacing.md)
             }
         }
         .font(Typography.meta)
@@ -606,12 +606,12 @@ struct ChangedFilesSidebar: View {
 
     private func heading(_ text: String) -> some View {
         Text(text).font(Typography.textStrong).foregroundStyle(palette.textSecondary)
-            .padding(.horizontal, 8).padding(.top, 12).padding(.bottom, 3)
+            .padding(.horizontal, Spacing.sm).padding(.top, Spacing.md).padding(.bottom, Spacing.xxs)
     }
 
     @ViewBuilder private func groupRow(_ group: ReviewGroup) -> some View {
         if !group.title.isEmpty {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                 // A tour's reason reads quieter than the files under it.
                 Text(group.title).font(group.isTour ? Typography.meta : Typography.textStrong)
                     .foregroundStyle(palette.textSecondary)
@@ -623,7 +623,7 @@ struct ChangedFilesSidebar: View {
                         .help("Always leave \(group.title) out of the Diff")
                 }
             }
-            .padding(.horizontal, 8).padding(.top, 10).padding(.bottom, 3)
+            .padding(.horizontal, Spacing.sm).padding(.top, Spacing.sm).padding(.bottom, Spacing.xxs)
         }
     }
 
@@ -633,8 +633,8 @@ struct ChangedFilesSidebar: View {
         let comments = store.comments.count { $0.selection.path == file.path }
         let viewed = store.isViewed(file)
         return Button { jump(file.path) } label: {
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     Text(place.name).font(Typography.mono)
                         .foregroundStyle(viewed ? palette.textTertiary : palette.text)
                         .fixedSize(horizontal: false, vertical: true)
@@ -647,7 +647,7 @@ struct ChangedFilesSidebar: View {
                     if !store.isReading(file) { counts(added: file.additions, removed: file.deletions).fixedSize() }
                 }
                 if place.directory != nil || viewed {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                         if let directory = place.directory {
                             Text(directory).font(Typography.mono).foregroundStyle(palette.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -659,7 +659,7 @@ struct ChangedFilesSidebar: View {
                     }
                 }
             }
-            .padding(.horizontal, 8).padding(.vertical, 4)
+            .padding(.horizontal, Spacing.sm).padding(.vertical, Spacing.xs)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(file.path == current ? palette.surfaceElement : .clear)
             .contentShape(Rectangle())
@@ -676,7 +676,7 @@ struct ChangedFilesSidebar: View {
     }
 
     private func counts(added: Int, removed: Int) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Spacing.xs) {
             Text("+\(added)").foregroundStyle(palette.successTone.ink)
             Text("−\(removed)").foregroundStyle(palette.failureTone.ink)
         }
@@ -694,8 +694,8 @@ struct ChangedFilesSidebar: View {
             heading("Hidden by the tour for this change")
             ForEach(entries, id: \.path) { entry in
                 let shown = store.shownTourHides.contains(entry.path)
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                    HStack(spacing: Spacing.xs) {
                         Text(entry.path).font(Typography.mono).lineLimit(1).truncationMode(.head)
                         Text(fileCount(files.count { entry.matches($0.path) })).foregroundStyle(palette.textSecondary)
                         Spacer(minLength: 4)
@@ -708,7 +708,7 @@ struct ChangedFilesSidebar: View {
                         Text(entry.why).foregroundStyle(palette.textSecondary).fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(.horizontal, 8).padding(.vertical, 3)
+                .padding(.horizontal, Spacing.sm).padding(.vertical, Spacing.xxs)
             }
         }
     }
@@ -720,7 +720,7 @@ struct ChangedFilesSidebar: View {
         let hidden = files.count { store.hides($0.path) }
         heading("Always hidden")
         ForEach(store.hidden, id: \.pattern) { entry in
-            HStack(spacing: 6) {
+            HStack(spacing: Spacing.xs) {
                 Text(entry.pattern).font(Typography.mono).lineLimit(1).truncationMode(.head)
                 Text(fileCount(files.count { DiffPattern.matches(entry.pattern, $0.path) }))
                     .foregroundStyle(palette.textSecondary)
@@ -737,22 +737,22 @@ struct ChangedFilesSidebar: View {
                     .accessibilityLabel("Stop hiding \(entry.pattern)")
                 }
             }
-            .padding(.horizontal, 8).padding(.vertical, 2)
+            .padding(.horizontal, Spacing.sm).padding(.vertical, Spacing.xxs)
         }
         TextField("tests/, *.lock…", text: $hiding)
             .textFieldStyle(.roundedBorder).font(Typography.mono)
             .onSubmit { store.hide(hiding); hiding = "" }
             .help("Hide every changed file whose path contains this text, or ends with it after *")
-            .padding(.horizontal, 8).padding(.vertical, 4)
+            .padding(.horizontal, Spacing.sm).padding(.vertical, Spacing.xs)
             .accessibilityIdentifier("changes-hide")
         if hidden > 0 {
             Toggle(hidden == 1 ? "Show 1 hidden file" : "Show \(hidden) hidden files", isOn: $store.showsHidden)
                 .toggleStyle(.checkbox).controlSize(.small)
-                .padding(.horizontal, 8)
+                .padding(.horizontal, Spacing.sm)
         }
         if let notice {
             Text(notice).foregroundStyle(palette.warning).textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true).padding(8)
+                .fixedSize(horizontal: false, vertical: true).padding(Spacing.sm)
         }
     }
 }
@@ -772,8 +772,8 @@ struct DeliveryCard: View {
         TimelineView(.periodic(from: .now, by: 10)) { context in
             let delivery = TaskDelivery.describe(record: record, taskOpen: taskOpen, reading: store.pullRequest,
                 error: store.error, readAt: store.readAt, localHead: localHead, now: context.date)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Image(systemName: record?.publication?.github == nil ? "arrow.triangle.branch" : "arrow.triangle.pull")
                         .foregroundStyle(palette.textSecondary)
                     Text(delivery.headline).font(Typography.textStrong)
@@ -788,7 +788,7 @@ struct DeliveryCard: View {
                     reading(pr, current: delivery.readingIsCurrent)
                 }
                 if let url {
-                    HStack(spacing: 8) {
+                    HStack(spacing: Spacing.sm) {
                         Button("Read again") { Task { await store.refresh(url) } }
                             .disabled(store.refreshing)
                             .help("Read GitHub again").accessibilityLabel("Refresh pull request")
@@ -800,7 +800,7 @@ struct DeliveryCard: View {
                 }
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
+        .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.surfaceMuted.opacity(0.5))
         .textSelection(.enabled)
@@ -808,12 +808,12 @@ struct DeliveryCard: View {
 
     /// A reading that is not current stays readable but loses its colors.
     private func reading(_ pr: GitHubPullRequest, current: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(pr.title).font(Typography.text).fixedSize(horizontal: false, vertical: true)
             if let checks = pr.statusCheckRollup, !checks.isEmpty {
                 DisclosureGroup(isExpanded: $showsChecks) {
                     ForEach(Array(checks.enumerated()), id: \.offset) { _, check in
-                        HStack(spacing: 6) {
+                        HStack(spacing: Spacing.xs) {
                             Image(systemName: check.failed ? "xmark.circle" : check.passed ? "checkmark.circle" : "clock")
                                 .foregroundStyle(!current ? palette.textSecondary
                                                  : check.failed ? palette.failureTone.ink

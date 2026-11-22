@@ -39,6 +39,7 @@ struct RenameWaveSheetContent: View {
                 HStack(spacing: Spacing.md) {
                     Spacer()
                     Button("Done", action: onDone)
+                        .buttonStyle(LoopflowButtonStyle())
                         .keyboardShortcut(.defaultAction)
                         .accessibilityIdentifier("rename-wave-done")
                 }
@@ -59,9 +60,9 @@ struct RenameWaveSheetContent: View {
                 }
                 HStack(spacing: Spacing.md) {
                     Spacer()
-                    Button("Cancel", action: onDone).buttonStyle(.plain)
-                        .foregroundStyle(palette.textSecondary)
+                    Button("Cancel", action: onDone).buttonStyle(LoopflowButtonStyle())
                     Button("Rename", action: onRename)
+                        .buttonStyle(LoopflowButtonStyle(.accent))
                         .keyboardShortcut(.defaultAction)
                         .disabled(phase == .renaming || trimmed.isEmpty || trimmed == currentName)
                         .accessibilityIdentifier("rename-wave-confirm")

@@ -11,13 +11,15 @@ public struct WorkflowLine: View {
     let auto: Bool
     /// Stands in for the sentence before the run has started, such as setup's
     /// reason for not starting it yet.
-    var setup: String?
+    let setup: String?
+    let sentenceOnly: Bool
     @Environment(\.palette) private var palette
 
-    public init(graph: TaskGraph, auto: Bool, setup: String? = nil) {
+    public init(graph: TaskGraph, auto: Bool, setup: String? = nil, sentenceOnly: Bool = false) {
         self.graph = graph
         self.auto = auto
         self.setup = setup
+        self.sentenceOnly = sentenceOnly
     }
 
     /// How a step reads against where the Task stands.
@@ -46,21 +48,31 @@ public struct WorkflowLine: View {
     }
 
     public var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: Spacing.md) {
-                name
-                steps
-                Text(sentence).fixedSize()
-                    .foregroundStyle(palette.textSecondary)
-                    .accessibilityIdentifier("task-workflow-bar-live")
+        Group {
+            if sentenceOnly {
+                sentenceAlone
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Spacing.md) {
+                        name
+                        steps
+                        Text(sentence).fixedSize()
+                            .foregroundStyle(palette.textSecondary)
+                            .accessibilityIdentifier("task-workflow-bar-live")
+                    }
+                    sentenceAlone
+                }
             }
-            Text(sentence)
-                .foregroundStyle(palette.textSecondary)
-                .accessibilityIdentifier("task-workflow-bar-live")
         }
         .font(Typography.text)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(graph.name): \(sentence)")
+    }
+
+    private var sentenceAlone: some View {
+        Text(sentence)
+            .foregroundStyle(palette.textSecondary)
+            .accessibilityIdentifier("task-workflow-bar-live")
     }
 
     private var name: some View {
@@ -73,7 +85,7 @@ public struct WorkflowLine: View {
         let tones = Self.tones(graph)
         return HStack(spacing: Spacing.sm) {
             ForEach(Array(graph.steps.enumerated()), id: \.offset) { index, step in
-                HStack(spacing: 2) {
+                HStack(spacing: Spacing.xxs) {
                     if step.interactive {
                         Image(systemName: "person.fill").font(Typography.meta)
                             .accessibilityLabel("you take part")

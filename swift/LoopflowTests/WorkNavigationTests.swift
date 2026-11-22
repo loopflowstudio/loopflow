@@ -141,14 +141,16 @@ struct WorkNavigationTests {
         #expect(model.navigation.palette == nil)
     }
 
-    @Test("The heading reads the Task's lifecycle, never Linear's planning state")
+    @Test("The title bar's word is the Task's condition or lifecycle, never Linear's planning state")
     func headingAgreesWithWorkingTasks() throws {
         let tasks = try roadmap().tasks.items
-        func state(_ id: String) throws -> String { TaskHeading(task: try #require(tasks.first { $0.id == id })).state }
+        func word(_ id: String) throws -> String? {
+            TaskRowStatus(task: try #require(tasks.first { $0.id == id })).word
+        }
         #expect(tasks.first { $0.id == "issue-now" }?.task.state == "unstarted")
-        #expect(try state("issue-now") == "Moving")
-        #expect(try state("issue-review") == "Unstarted")
-        #expect(try state("issue-later") == "Done")
+        #expect(try word("issue-now") == "Moving")
+        #expect(try word("issue-review") == "Waiting")
+        #expect(try word("issue-later") == "Done, date unavailable")
     }
 
     @Test("Working Tasks opens as a Dashboard; a sidebar Task keeps it in the trail, as its tile does")

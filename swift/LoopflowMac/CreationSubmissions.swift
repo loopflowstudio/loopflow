@@ -168,7 +168,7 @@ private struct RecoveredCreationInspector: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Spacing.md) {
             Text(resource.task == nil ? "Recovered Session" : "Recovered Task").font(Typography.textStrong)
             ScrollView {
                 Group {
@@ -184,9 +184,9 @@ private struct RecoveredCreationInspector: View {
             DisclosureGroup("Receipt") {
                 ScrollView { Text(resource.receipt).font(Typography.mono).textSelection(.enabled) }
             }
-            Button("Done") { dismiss() }
+            Button("Done") { dismiss() }.buttonStyle(LoopflowButtonStyle())
         }
-        .padding(20).frame(minWidth: 600, minHeight: 400)
+        .padding(Spacing.xl).frame(minWidth: 600, minHeight: 400)
         .task {
             do {
                 guard try await CreationSubmissions.localMachine() == resource.destination else {

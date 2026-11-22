@@ -79,4 +79,14 @@ struct TaskRowStatusTests {
         #expect(standing.line == "setup failed")
     }
 }
+
+/// What a Task's one Session reports.
+func programStatus(reporting state: ProgramStatusState, msg: String?) throws -> SessionProgramStatus {
+    let report = ProgramStatusReport(state: state, id: nil, kind: nil, progress: nil, app: nil, title: nil, msg: msg)
+    var wire = try #require(JSONSerialization.jsonObject(with: loadFixtureData("session.json")) as? [String: Any])
+    wire["program_status"] = try JSONSerialization.jsonObject(
+        with: JSONEncoder().encode(ProgramStatusRecords(seen: true, records: [report])))
+    let session = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
+    return SessionProgramStatus(sessions: [session], unavailable: nil)
+}
 #endif

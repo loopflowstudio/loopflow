@@ -1,9 +1,6 @@
 import Foundation
 import Testing
 @testable import Loopflow
-#if os(macOS)
-@testable import LoopflowMac
-#endif
 
 /// The first Task of `roadmap_snapshot.json` as the server would send it with
 /// these facts changed.
@@ -24,15 +21,3 @@ func roadmapTask(condition: String, reason: String, lifecycle: String = "idle",
     if !graphHasRun { row["latest_graph_process"] = NSNull() }
     return try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
 }
-
-#if os(macOS)
-/// What a Task's one Session reports.
-func programStatus(reporting state: ProgramStatusState, msg: String?) throws -> SessionProgramStatus {
-    let report = ProgramStatusReport(state: state, id: nil, kind: nil, progress: nil, app: nil, title: nil, msg: msg)
-    var wire = try #require(JSONSerialization.jsonObject(with: loadFixtureData("session.json")) as? [String: Any])
-    wire["program_status"] = try JSONSerialization.jsonObject(
-        with: JSONEncoder().encode(ProgramStatusRecords(seen: true, records: [report])))
-    let session = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
-    return SessionProgramStatus(sessions: [session], unavailable: nil)
-}
-#endif

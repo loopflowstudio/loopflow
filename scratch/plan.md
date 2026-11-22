@@ -66,10 +66,6 @@ this field was missing; Swift's `WorkflowDefinition`
 (`swift/Loopflow/Models/Graph.swift:256`) re-derives a different shape
 (interactive steps and unnamed runs) from the compiled nodes.
 
-**The "You take part at …" sentence exists today only as an accessibility
-label** built in Swift (`NewTaskSheet.swift:237`). It joins the wire next to
-the steps so one place writes it, as `TaskGraph.sentence` does.
-
 **"Where you take part" is derived three ways, and they disagree.**
 `TaskGraph.interactive_steps` walks the whole Graph, XOR paths included
 (`task_graph.rs:144`); a started Task's sentence ("You are next needed at …")
@@ -98,9 +94,9 @@ shown in the Task's pane, `SessionsView:1738` and dashboard tiles
 the branch for every other Work. Choosing a workflow there starts the Task
 (`startTaskFromInput($0)`); nothing stores a choice without starting.
 
-**`StartFlowItems` (`BacklogView.swift:1228`) is already the workflow list as
-menu items**, used by the Task bar's "Start with…". The sheet's searchable
-popover `WorkflowChooser` is a second way to choose a workflow.
+**`StartFlowItems` (`BacklogView.swift`) is the workflow list as menu
+items**: the Task bar's "Start with…" and, since slice 2, the sheet's
+workflow menu. The unstarted pane's "Start with…" uses it too.
 
 **"Open the repository conversation" is a real destination**
 (`Destination.repository`, `WorkDestination.swift:8`), New Task is
@@ -111,7 +107,7 @@ popover `WorkflowChooser` is a second way to choose a workflow.
 ## Source of truth
 
 - Workflow steps and the take-part sentence: Rust, on `GraphCatalogEntry`.
-- Layout and wording of the sheet and the six drawn states: the prototype.
+- Layout and wording of the sheet and the drawn states: the prototype.
   States it does not draw follow the same form with wording from `DESIGN.md`'s
   Text rules (sentence case, digits, no middle dot, no em dash).
 
@@ -194,16 +190,10 @@ EmptyState(title: String, sentence: String? = nil, machine: String? = nil) { act
 
 ### New Task sheet
 
-| Part | Now | After |
-|------|-----|-------|
-| Question | `.serif(.title)` | `.serif(.display)` |
-| Request field | `Typography.text`, radius `pane`, padding 12 | `Typography.lede`, radius `control`, `Spacing.md` |
-| Sentence | "In X, running Y · X's default", bold labels with a meta chevron, popover | "In [menu], running [menu], X's default" at `Typography.text`; two `Menu`s with the standard indicator; other than the default reads ", for this Task only" |
-| Workflow | `WorkflowSteps` circles | `WorkflowLine` from the entry's outline, then its sentence |
-| Start | capsule, "Start  ⌘↩" | `LoopflowButtonStyle(.accent)`, "Start ⌘↩" |
-| Cancel, File | plain text; neutral | both `LoopflowButtonStyle()` |
-| "Not filed · reason" | warning text | "Not filed." then the reason in mono |
-| Paddings 22/14/12/10 | literals | `Spacing` steps |
+Built (slice 2); `docs/surfaces.md` "New Task" is the wording and
+`NewTaskSheet.swift` the layout. Still to look at in the Dev app: the
+borderless menus' face and baseline beside the sentence (the commas are
+pulled back with a negative leading pad), and the sheet's height.
 
 **Choices made for review:**
 - The workflow menu is `StartFlowItems`; `WorkflowChooser` goes, and with it
@@ -214,10 +204,12 @@ EmptyState(title: String, sentence: String? = nil, machine: String? = nil) { act
 - File stays (the prototype draws only Cancel and Start, but filing without
   starting is shipped behaviour from #1993 and the brief does not remove it).
 
-`StartingTaskView` (the request after the sheet closes) follows the
-prototype's "A New Task that failed to start": the request at
-`Typography.lede`, "Not started." strong in `palette.failure`, the error in
-mono, "Try again" accent and "Discard".
+`StartingTaskView` has the prototype's failed-start parts (the request at
+`Typography.lede`, "Not started.", the error in mono, "Try again" accent and
+"Discard") but sits top-leading in a scroll view. **Choice made for
+review:** it stays that way and does not become an `EmptyState`: before a
+failure it shows only the request, where the conversation is about to
+appear, and a failure should not move those words to the pane's middle.
 
 ### The states
 
@@ -229,7 +221,6 @@ Drawn in the prototype (wording is the prototype's):
 | `WorkSurfaceView:52`, `SessionsView:1580` | Choose Work | Pick a Task or a Wave in the sidebar, or press ⌘K to find one in any repository. | none |
 | `WorkSurfaceView:215` | Selected Work is unavailable | The latest plan does not include it. Its workspace and conversations are kept. | Read the plan again; "Open its conversations" only if the selection's workspace is still retained and can be opened |
 | `RepositoryWorkspaceView:13`, `:110` | This repository did not open | error in mono | Retry (accent); "Open another repository…" where the view can reach the app's open panel |
-| `StartingTaskView` | as above | | Try again, Discard |
 | An unstarted Task's pane (`TaskStartOffer`) | the Task's title | Not started. It will run `feature`, the Wave's default. You take part at explore, ship-review and verify. | Start (accent), Start with… (`StartFlowItems`) |
 
 The unstarted Task's second sentence is the outline's, word for word, so the
@@ -314,22 +305,19 @@ beside the sentence where the app has the action.
 
 ## What goes
 
-- `WorkflowSteps` and `WorkflowChooser` (`NewTaskSheet.swift`).
-- `WorkflowDefinition`, `WorkflowCatalogEntry` and `model.workflowCatalog`
-  (`Graph.swift:253-323`, `WorkModel.swift:1282`); the sheet, the inspector
-  and their tests read `graphCatalog`. The `DesktopHeadlessTests.swift:542`
-  case that builds a `WorkflowDefinition` goes with it.
-- `StartFlow`'s Swift count of interactive nodes.
-- `SessionSlotOffer`; "Takes up … when it starts", "feature · repository"
-  and "No workflow selected" (`TaskWorkView.swift:26`, `:180`).
+Gone already: `WorkflowSteps`, `WorkflowChooser`, `WorkflowDefinition`,
+`WorkflowCatalogEntry`, `model.workflowCatalog`, `StartFlow`'s own stop
+count, "Takes up … when it starts", the "· loopflow's default" assertion and
+the `new-task-workflow-<name>` identifiers. Remaining:
+
+- `SessionSlotOffer`; "feature · repository" and "No workflow selected"
+  (`TaskWorkView.swift:26`, `:418`, `WorkNavigationTests.swift:1013`);
+  `NewTaskWorkflow.defaultPhrase`, into the one whose-default function.
 - `PaneEmptyState`'s name, its `systemImage` and icon-only compact fallback.
-- Every `ContentUnavailableView` in `swift/LoopflowMac`.
-- `new-task-default`'s "· loopflow's default" assertion in `NewTaskTests`
-  (rewritten for the comma), and the `new-task-workflow-<name>` identifiers.
-- In `DESIGN.md`: the "two workflow renderers" pointer under "Two of the same
-  thing" (the Create Wave pointer stays); "Tokens today" gains `EmptyState` in
-  the component list, the catalog's `workflow` beside `TaskGraph.steps`, and
-  the `display`, `title` and `lede` rows name the sheet and state titles.
+- Every `ContentUnavailableView` in `swift/LoopflowMac` (14 sites in 8
+  files, `WorkspacePanesView.swift:210` being `PaneEmptyState` itself).
+- In `DESIGN.md`: "Tokens today" gains `EmptyState` in the component list,
+  and the `display`, `title` and `lede` rows name the sheet and state titles.
 
 Must survive: File without starting, ⌘↩ and Esc, the sheet opening on the
 sidebar's Wave, the default following the scope, the request kept when
@@ -413,15 +401,11 @@ demo: not headless; qa or demo runs it.
      item, then reads the view again.
    - `defaultPhrase` lives on `NewTaskWorkflow` and now also answers "for
      this Task only"; slice 3 moves it to the one whose-default function.
-   - `StartingTaskView` stays top-leading in a scroll view, not vertically
-     centred as `.app.state` is: before a failure it shows only the request,
-     where the conversation is about to appear. Slice 3 decides whether its
-     failed form becomes an `EmptyState`.
    - Not seen in the Dev app: the borderless menus' face and baseline beside
      the sentence, the 540 pt sheet's height without the divider.
    - Checks: `scripts/test_desktop.sh --filter NewTaskTests` passed (4 tests).
 3. **`EmptyState` and the drawn states. Next.** Rewrite `PaneEmptyState` into
-   `Design/EmptyState.swift`, move its pane sites, then the six prototype
+   `Design/EmptyState.swift`, move its pane sites, then the prototype's
    states, `TaskStartOffer` among them with the one whose-default phrase;
    `SessionSlotOffer` goes. The empty, failed and unstarted view tests.
 4. **Every remaining `ContentUnavailableView`, the plain `Text` empties and

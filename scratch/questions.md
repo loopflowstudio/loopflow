@@ -44,3 +44,10 @@ Made while writing the docs with nobody present.
     show both as written. Should one phrase serve both, and which?
 14. `docs/surfaces.md` draws the unstarted Task's bar with its neutral Start
     beside the pane's accent Start, as the plan keeps both.
+
+Made at realign after the sheet slice with nobody present.
+
+15. `StartingTaskView` keeps its place at the pane's top-leading corner when
+    a start fails, where the prototype's failed state is vertically centred:
+    the request is already there before the failure and should not jump. It
+    has the prototype's parts and is not an `EmptyState`.

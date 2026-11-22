@@ -188,3 +188,43 @@ concrete step. Run the wrapper and `lf` through a script that does
 - Skew: restart the private server from a copy of the installed `lf` on the
   same `LF_HOME` (no migrations between them) to see the branch app read
   older responses.
+
+# Driving the app with the screen locked
+
+A production-mode launch (no `-ui-test-mode`) on a private Machine renders the
+real windows, and a file-driven hook inside the app can snapshot and click
+them. Nothing here needs WindowServer focus.
+
+- Copy `.lf/qa/QAHook.swift` into `swift/LoopflowMac/` and call
+  `QAHook.start()` in `LoopflowApp.init` after the appearance store is set.
+  Delete both before committing. Build the isolated bundle as above, with
+  `sys.path.insert(0, "scripts")` before importing `loopflow-dev.py`.
+- Open with `--env LOOPFLOW_QA_HOOK_DIR=<dir>` beside the private `HOME`,
+  `LF_HOME`, `LF_BIN` and `PATH`. Write one line to `<dir>/<name>.cmd`; the
+  answer appears in `<name>.cmd.out`.
+- `snap <prefix>` writes every window with `cacheDisplay` (no title bar) and
+  lists index, title and size. Indices change as windows open: read the list
+  before each click.
+- `click <window> <x> <y>` takes points from the top left. Scale from the
+  PNG: a 1280 pt window is 2560 px. The hook posts the mouse-up to the queue
+  before sending the mouse-down; sent the other way a segmented control spins
+  in `trackMouse` and the app hangs. Don't `activate` or `makeKey` in the
+  hook: every later click goes dead. The first click after a launch is often
+  swallowed; send it twice and look.
+- `menu Settings…` performs a main-menu item, which is how Choose Theme
+  opens. `close <window>` closes one.
+- Theme: `lf set --global theme "<name>"` on the private Machine, then
+  relaunch. An imported theme is a file in `$LF_HOME/themes/`; Ghostty.app's
+  `Contents/Resources/ghostty/themes/` has many.
+- A Wave's backlog: `open -g -b <bundle id> 'loopflow://<repo>/wave/<wave>'`.
+  The Portfolio: `loopflow://portfolio`. It lists Waves only for repositories
+  under its folder (`$HOME/src`); a symlink there works, but a Task click then
+  opens a second repository window for the symlinked path that stays on
+  "Updating…". Sidebar Wave rows did not answer hook clicks.
+- `lf desktop <tile-or-dashboard>` with `LF_DESKTOP` set to the bundle ID
+  works in this mode (`lf desktop working-tasks`, `lf desktop back`).
+- Not reachable: the title bar, hover, drag, popovers and sheets opened from
+  a "+" (New Wave never appeared), file panels and Ghostty faces. The in-process
+  accessibility tree is empty, so there is no finding a control by name.
+- Stand-in providers exit at once here, so a Session pane shows "Process
+  exited" under its opening overlay. That is the stand-in, not the pane.

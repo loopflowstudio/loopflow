@@ -821,7 +821,7 @@ struct BacklogView: View {
                     .rotationEffect(.degrees(isOpen ? 90 : 0))
                     .frame(width: HitTarget.minimum, height: HitTarget.minimum).contentShape(Rectangle())
             }
-            .buttonStyle(WorkPlainButtonStyle()).foregroundStyle(palette.textSecondary)
+            .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
             .help(isOpen ? "Hide brief" : "Show brief")
             .accessibilityLabel(isOpen ? "Hide brief" : "Show brief")
             .accessibilityIdentifier("backlog-row-brief-\(task.id)")

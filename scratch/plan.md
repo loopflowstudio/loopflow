@@ -539,4 +539,5 @@ or `lf desktop` reads unless its view is deleted.
 | `scripts/test_desktop.sh --filter 'DesignDisciplineTests\|ThemeWorkflowTests\|WorkPaletteTests\|DesktopHeadlessTests\|TaskFilesTests'` | passed after slice 4 (75 tests; two assertions moved to "Built-in Workflow") | build |
 | the grep above | 314 lines at base, 309 after slice 1, 296 after slice 2, 249 after slice 3, none after slice 4 | build |
 | `scripts/test_desktop.sh --skip-build --filter 'BacklogViewTests\|DashboardWorkspaceTests\|RoadmapViewTests\|CreateWaveSheetTests\|TaskRowTests\|TaskStandingTests\|WorkflowLineTests\|WorkNavigationTests\|WorkModelTests\|WaveDetailReadingTests'` | passed after slice 4 (162 tests) | build; CI runs the rest |
-| Dev app in light, dark and an imported theme | not run; needs a display | qa, review |
+| Dev app in light, dark and an imported theme | looked at with the screen locked, on a private Machine: backlog, Portfolio Wave page, dashboard and Choose Theme in Loopflow Light, Loopflow Dark and Dracula (`scratch/qa.html`). Three fixes followed. Title bar, menus, hover, drag and terminal faces need an unlocked display | qa; review for the rest |
+| `scripts/test_desktop.sh --filter 'TaskStandingTests\|TaskRowTests\|BacklogViewTests\|DashboardWorkspaceTests\|DesignDisciplineTests\|RoadmapViewTests'` | passed after the qa fixes (51 tests) | qa; CI runs the rest |

@@ -231,12 +231,16 @@ struct DashboardTile: View {
                                 .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
                         }
                         Button { enter() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
-                            .help("Open this Work in full")
+                            .buttonStyle(.plain).help("Open this Work in full").accessibilityLabel("Open this Work in full")
                         if arrangeable {
                             Button { model.setTile(plan, member, hidden: true) } label: { Image(systemName: "eye.slash") }
-                                .help("Hide this occurrence").disabled(model.dashboardSaving)
+                                .buttonStyle(.plain).help("Hide this occurrence").accessibilityLabel("Hide this occurrence")
+                                .disabled(model.dashboardSaving)
                         }
-                    }.padding([.top, .trailing], Spacing.sm)
+                    }
+                    // A narrow tile wraps its title; it never clips its controls.
+                    .foregroundStyle(palette.textSecondary).fixedSize().layoutPriority(1)
+                    .padding([.top, .trailing], Spacing.sm)
                 }
                 // The row's own line says what the Task asks; otherwise where its workflow stands.
                 if let task, TaskStanding(task: task.task, status: status).line == nil,
@@ -257,6 +261,8 @@ struct DashboardTile: View {
                           let other = plan.resolution.members.first(where: { $0.token == value }), other.work != member.work else { return false }
                     Task { await model.reorderDashboard(id, member: other.work, to: member.work) }; return true
                 }
+            // A pane that cannot shrink to a narrow slot overflows here, so the header keeps the slot's width.
+            Group {
             if let entry, let content {
                 if let error = entry.persistenceError { Text(error).foregroundStyle(palette.warning).textSelection(.enabled) }
                 // The plan read in this frame decides; saved planning may still say otherwise.
@@ -278,6 +284,7 @@ struct DashboardTile: View {
                     ConversationPlaceholder(workspace: entry, model: model, sessions: sessions)
                 }
             } else { PaneEmptyState(title: "Work unavailable", systemImage: "exclamationmark.triangle") }
+            }.frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             // The slot grid clips each tile at its frame.
             .overlay(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)

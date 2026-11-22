@@ -16,6 +16,17 @@ struct TaskStandingTests {
         #expect(standing.line == "merge the PR on GitHub")
     }
 
+    @Test("A Task nobody has started is not waiting on anyone: its word is Unstarted, with no line")
+    func unstartedIsNotWaiting() throws {
+        let standing = TaskStanding(task: try task(condition: "waiting", reason: "ready", lifecycle: "unstarted"), status: .unknown)
+        #expect(standing.word == "Unstarted")
+        #expect(standing.tone == nil)
+        #expect(standing.line == nil)
+        let blocked = TaskStanding(task: try task(condition: "blocked", reason: "the next launch is misconfigured", lifecycle: "unstarted"),
+                                   status: .unknown)
+        #expect(blocked.word == "Blocked" && blocked.line == "the next launch is misconfigured")
+    }
+
     @Test("A clear Task shows its lifecycle word and no line")
     func clearShowsLifecycle() throws {
         let standing = TaskStanding(task: try task(condition: "clear", reason: "ready", lifecycle: "idle"), status: .unknown)

@@ -121,3 +121,19 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
     last caller was the Wave page's old row. `forTasks` and `fold` were
     already unused at the base, with six tests holding them. Left, as outside
     this change. Delete them and their tests?
+37. **An unstarted Task whose next move is Start reads "Unstarted", with no
+    line.** The server marks every such Task `waiting` with the reason
+    "ready", so a whole backlog read "Waiting / ready" in amber on the Wave
+    page and the Now list. `TaskStanding` now treats `waiting` as a need only
+    when the Task has started or its recommended action is not Start. The Now
+    list still files those Tasks under its "Waiting" heading, which comes
+    from the wire. Change the heading, or the server's condition?
+38. **A started Task parked at an interactive step reads "Waiting" over the
+    line "ready".** The line is `next_move.reason` verbatim. On a dashboard
+    tile it also replaces the workflow sentence. "ready" says nothing a
+    person can act on; "Waiting for you at demo" is what the workflow bar
+    says for the same Task. Left: the wording is the server's (question 8).
+39. **A dashboard tile shows its workflow sentence only for a Task opened in
+    this window.** `taskWork` fills from the selected Task's subscription, so
+    a tile for a Task never opened shows its row alone. Left as outside this
+    change; is the sentence on every tile worth a read per tile?

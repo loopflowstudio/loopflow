@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>QA: Wave pages, backlog, dashboards and Choose Theme (8b92c6)</title>
+<style>
+  body { font: 15px/1.5 -apple-system, sans-serif; max-width: 1100px; margin: 2rem auto; padding: 0 1rem; color: #1c1c1c; }
+  h1 { font: 600 26px Georgia, serif; }
+  h2 { margin-top: 2.5rem; border-top: 1px solid #ccc; padding-top: 1rem; }
+  img { max-width: 100%; border: 1px solid #bbb; margin: .5rem 0 1rem; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  figure { margin: 0; } figcaption { font-size: 13px; color: #555; }
+  code { font: 13px ui-monospace, monospace; background: #f1f1f1; padding: 0 3px; }
+  table { border-collapse: collapse; } td, th { border: 1px solid #ccc; padding: 4px 8px; text-align: left; vertical-align: top; }
+</style>
+
+<h1>QA: Wave pages, backlog, dashboards and Choose Theme</h1>
+
+<p>The branch app ran as an isolated bundle (<code>com.loopflow.mac.qa8b92c6.dev</code>) on a private
+Machine: its own <code>HOME</code> and <code>LF_HOME</code>, the branch <code>lf server run</code>, a disposable
+repository "atlas" with two Waves (Growth, Infrastructure), ten Tasks, objectives with key results, a
+second person's claims and a held Graph. The screen was locked, so the app was driven by a local
+file-command hook (snapshot, click, menu item) that is not in the commit. Every picture below is the
+real window drawn by the real app from the real server.</p>
+
+<h2>1. A Wave's backlog</h2>
+<p>Opened the repository, then the Growth backlog. Clicked the filter segments, a checkbox, two
+checkboxes, a disclosure, the objective disclosure, and Start.</p>
+<div class="pair">
+  <figure><img src="qa/01-backlog-before-fix.png"><figcaption>First look. Every chevron carried an accent ring once the list had focus.</figcaption></figure>
+  <figure><img src="qa/03-backlog-rings-before-fix.png"><figcaption>The rings, closer.</figcaption></figure>
+</div>
+<p><b>Fixed.</b> The row chevron used <code>WorkPlainButtonStyle</code>, which draws a focus ring from the
+focused list. It is a plain button now (<code>BacklogView.swift</code>).</p>
+<figure><img src="qa/02-backlog-light.png"><figcaption>After. Serif name, one segmented filter with counts, the action bar, checkbox and disclosure before each title, ownership as words.</figcaption></figure>
+<div class="pair">
+  <figure><img src="qa/04-backlog-objective.png"><figcaption>The objective opened, with its key results.</figcaption></figure>
+  <figure><img src="qa/05-backlog-brief-selected.png"><figcaption>One selected, brief open: "1 selected", "Start with qa". The brief lines up under the title.</figcaption></figure>
+  <figure><img src="qa/06-backlog-two-selected.png"><figcaption>Two selected: "Start 2 with qa".</figcaption></figure>
+  <figure><img src="qa/07-backlog-after-start.png"><figcaption>After the click: both Tasks started, the sidebar gained them without a reload, the bar says "Started 2".</figcaption></figure>
+</div>
+
+<h2>2. The Portfolio and a Wave's page</h2>
+<p>Opened the Portfolio (<code>loopflow://portfolio</code>), switched Now and Roadmap, opened Growth, clicked a
+Task row.</p>
+<div class="pair">
+  <figure><img src="qa/08-portfolio-now.png"><figcaption>Now: hairline sections, no cards.</figcaption></figure>
+  <figure><img src="qa/09-portfolio-roadmap.png"><figcaption>Roadmap.</figcaption></figure>
+  <figure><img src="qa/10-wave-page-light-before.png"><figcaption>The Wave page, first look: every unstarted Task read "Waiting" in amber over a line "ready".</figcaption></figure>
+  <figure><img src="qa/10-wave-page-light.png"><figcaption>After: an unstarted Task reads "Unstarted" and has no line.</figcaption></figure>
+</div>
+<p><b>Fixed.</b> The server marks an unstarted Task <code>waiting</code>, reason "ready". <code>TaskStanding</code>
+now counts <code>waiting</code> as a need only when the Task has started or its recommended action is not
+Start (<code>TaskStanding.swift</code>, test <code>unstartedIsNotWaiting</code>). The pictures were taken with
+a slightly wider rule (any unstarted Task); the narrower one came from the test fixture, where an
+unstarted Task waits on a pull request merge and keeps its line. Every Task in these pictures has Start
+as its next move, so both rules draw them the same; the app was not relaunched after the narrowing.</p>
+<p>A click on a Task row opened that Task in its repository window.</p>
+
+<h2>3. A dashboard</h2>
+<p><code>lf desktop working-tasks</code> against the bundle. Looked at three tiles of different widths and
+paged.</p>
+<div class="pair">
+  <figure><img src="qa/11-dashboard-before.png"><figcaption>First look: the tile's two header buttons were unstyled system buttons drawn as a dark block, and a narrow tile pushed them off its edge.</figcaption></figure>
+  <figure><img src="qa/11-dashboard-light.png"><figcaption>After: plain icon buttons that keep their place; the title wraps beside them.</figcaption></figure>
+</div>
+<p><b>Fixed.</b> "Open in full" and "Hide" are plain buttons with accessibility labels, sized before the
+title, and the tile body no longer widens the header past its slot (<code>DashboardView.swift</code>).</p>
+<p>The header is the Task row; the selected tile's workflow is the sentence "make is running help graph.
+You are next needed at demo."; "Page 1 of 2" is sans; the query is mono.</p>
+
+<h2>4. Choose Theme</h2>
+<p>Opened Settings from the app menu.</p>
+<div class="pair">
+  <figure><img src="qa/12-choose-theme-light.png"><figcaption>Loopflow Light.</figcaption></figure>
+  <figure><img src="qa/13-choose-theme-dark.png"><figcaption>Loopflow Dark.</figcaption></figure>
+</div>
+<p>Serif title, no "Mode" caption. The sample shows a title strip, a selected row with "Blocked since
+12:07", the five status words in their colors, a terminal line and the accent Apply button.</p>
+
+<h2>5. Dark and an imported theme</h2>
+<p>Set the theme with <code>lf set --global theme</code> and relaunched: Loopflow Dark, then Dracula copied
+from Ghostty's themes into <code>$LF_HOME/themes/</code>.</p>
+<div class="pair">
+  <figure><img src="qa/15-backlog-dark.png"><figcaption>Backlog, Loopflow Dark.</figcaption></figure>
+  <figure><img src="qa/20-backlog-dracula.png"><figcaption>Backlog, Dracula.</figcaption></figure>
+  <figure><img src="qa/14-dashboard-dark.png"><figcaption>Dashboard, Loopflow Dark.</figcaption></figure>
+  <figure><img src="qa/18-dashboard-dracula.png"><figcaption>Dashboard, Dracula.</figcaption></figure>
+  <figure><img src="qa/17-wave-page-dark.png"><figcaption>Wave page, Loopflow Dark.</figcaption></figure>
+  <figure><img src="qa/21-wave-page-dracula.png"><figcaption>Wave page, Dracula.</figcaption></figure>
+  <figure><img src="qa/16-portfolio-now-dark.png"><figcaption>Now, Loopflow Dark.</figcaption></figure>
+  <figure><img src="qa/19-choose-theme-dracula.png"><figcaption>Choose Theme previewing Dracula.</figcaption></figure>
+</div>
+<p>Text, hairlines, selection and status colors hold in all three. Nothing was unreadable.</p>
+
+<h2>Checks run</h2>
+<table>
+<tr><th>Command</th><th>Result</th></tr>
+<tr><td><code>scripts/test_desktop.sh --filter 'TaskStandingTests|TaskRowTests|BacklogViewTests|DashboardWorkspaceTests|DesignDisciplineTests|RoadmapViewTests'</code></td><td>51 tests passed. The first run failed 6: the wider unstarted rule dropped a merge-request line the fixture expects; the rule was narrowed and the run repeated.</td></tr>
+<tr><td>the plan's acceptance grep</td><td>prints nothing</td></tr>
+</table>
+
+<h2>What works now</h2>
+<ul>
+<li>The backlog: filter, selection, the one button that names what it starts, disclosure, objective, ownership words. Start on two Tasks started both and the page updated live.</li>
+<li>Portfolio Now, Roadmap and the Wave page; a Task row click opens the Task.</li>
+<li>A dashboard's tiles at three widths, and paging text.</li>
+<li>Choose Theme and its sample.</li>
+<li>All of it in Loopflow Light, Loopflow Dark and Dracula.</li>
+</ul>
+
+<h2>What was not reached, and why</h2>
+<ul>
+<li><b>New Wave</b>, from the sidebar or the Portfolio's "+": no click through the hook opened it. Its tests cover the form; nobody has looked at it.</li>
+<li><b>Apply in Choose Theme.</b> One click on Apply left <code>config.yaml</code> without a theme. Hook clicks are unreliable on a first press, so this is unknown, not a finding. Themes were set from the CLI.</li>
+<li>The title bar (the snapshot omits it), menus, hover states, drag reorder, the theme file panel, terminal faces: all need an unlocked display.</li>
+<li>The "Yours" list in Choose Theme with an imported theme: below the fold of the capture, and the hook cannot scroll.</li>
+<li>Settings' other tabs, Sessions and Activity panes.</li>
+<li>The Dev app on the live Machine with its real backlog: the screen was locked.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li><b>A started Task parked at an interactive step reads "Waiting" over the line "ready"</b>, in the sidebar, on tiles and in Portfolio rows (visible in every dashboard picture). "ready" is the server's <code>next_move.reason</code>; it tells nobody what to do, and on a tile it takes the place of the workflow sentence. The wording is the server's and this change has no Rust; question 38.</li>
+<li><b>A tile shows its workflow sentence only for a Task opened in this window.</b> The other tiles show the row alone. Question 39.</li>
+<li><b><code>loopflow://atlas/wave/growth</code> narrows the sidebar to Growth's Tasks but the page is titled "atlas" and lists the repository's whole backlog</b>, with "atlas 5" still selected (Dracula backlog picture). Not from this change.</li>
+<li><b>The Wave page's "Completed" toggle sits alone on its own line</b>, right-aligned in the narrow column (Wave page pictures). The heading's trailing layout predates this change.</li>
+<li><b>A narrow tile clips its pane's "Open conversation" button.</b> The slot grid clips by design; the pane's placeholder does not shrink.</li>
+<li><b>The Now list's "Waiting 9" heading counts unstarted Tasks</b> that now read "Unstarted". The grouping is the wire's; question 37.</li>
+<li>Small: the system segmented pickers (Folder/Manual, Now/Roadmap, System/Light/Dark) differ from the backlog's segments; a Wave's name, slug and Project name repeat on its page ("Growth … growth"); zeros are slashed in sans body text; the selected theme tile is taller than its neighbours; Portfolio rows sit 12 pt inside their headings.</li>
+</ol>
+
+<h2>What it left behind</h2>
+<p>Nothing running: the private server, its holder, the held Graph and the app were stopped, the bundle
+unregistered and deleted. The hook is kept as <code>.lf/qa/QAHook.swift</code> with the method in
+<code>.lf/qa/desktop.md</code>; it is not in the app target.</p>
+</html>

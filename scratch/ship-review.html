@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Ship review — LOO-1014 One design system</title>
+<meta name="color-scheme" content="light dark">
+<style>
+:root{--bg:#fbfaf8;--fg:#1a1a1a;--mute:#666;--line:#ddd;--code:#f1efea;--accent:#722f37}
+@media (prefers-color-scheme:dark){:root{--bg:#161514;--fg:#e8e6e1;--mute:#999;--line:#333;--code:#22201e;--accent:#d48a93}}
+body{background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif;max-width:880px;margin:2rem auto;padding:0 1.25rem}
+h1{font-size:1.6rem}h2{margin-top:2.2rem;border-top:1px solid var(--line);padding-top:1rem}
+code,pre{font:13px/1.45 ui-monospace,Menlo,monospace;background:var(--code)}code{padding:0 .25em}
+pre{padding:.8rem 1rem;overflow-x:auto;border-left:3px solid var(--accent)}
+img{max-width:100%;border:1px solid var(--line)}.row{display:flex;gap:.75rem}.row figure{flex:1;margin:0}
+figcaption,.mute{color:var(--mute);font-size:.88rem}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--line);padding:.4rem;text-align:left;vertical-align:top}
+</style></head><body>
+<h1>Ship review — One design system (LOO-1014, PR #2011)</h1>
+<p class="mute">Head <code>af1c52f5f2</code>. Written headless; nobody has answered the questions below yet.</p>
+
+<h2>1. What ships</h2>
+<p>One file says what Loopflow looks like: <code>DESIGN.md</code>. <code>VISUAL_DESIGN.md</code> and <code>swift/DESIGN.md</code> are gone, and so are the site's <code>/design</code>, <code>/colors</code> and <code>/fonts</code> pages (1,260 lines of Cormorant/Lato comparisons that contradicted it).</p>
+<pre>## The language
+
+Three voices. Serif is what a person named or asked for, sans is the
+interface, mono is the machine.
+
+| Serif | Old Standard TT 400                | 24 pt and up only …
+| Sans  | Atkinson Hyperlegible Next 400/600 | Everything read or pressed
+| Mono  | Spline Sans Mono 400/700           | Commands, paths, IDs, SHAs, … the terminal</pre>
+<p>In Loopflow for Mac, the terminal looks different: ligatures off, thicker strokes, 10% taller cells. A person's own Ghostty config still wins.</p>
+<pre>static let loopflowConfig = """
+font-size = 13
+font-feature = -calt
+font-feature = -liga
+font-thicken = true
+adjust-cell-height = 10%
+minimum-contrast = 3
+"""</pre>
+<p>The website's stylesheet uses named steps (<code>--t-*</code>, <code>--space-*</code>, <code>--radius-*</code>), with dead selectors removed. The pages look the same, apart from two fixes: the open Company menu no longer turns Pico blue, and the Install button's focus ring is dark on wine.</p>
+<div class="row">
+<figure><img src="qa/menu-before.png"><figcaption>Company menu open, main</figcaption></figure>
+<figure><img src="qa/menu-after.png"><figcaption>branch</figcaption></figure></div>
+<div class="row">
+<figure><img src="qa/focus-btn-primary-main.png"><figcaption>Install focus, main</figcaption></figure>
+<figure><img src="qa/focus-btn-primary-branch.png"><figcaption>branch</figcaption></figure></div>
+<p>Reference pages for the Mac app and website live in <code>design/prototypes/</code> (<code>desktop.html</code>, <code>elements.html</code>, <code>homepage-next/</code>, …).</p>
+
+<h2>2. How to try it</h2>
+<pre>open DESIGN.md
+open design/prototypes/desktop.html design/prototypes/elements.html
+cd website &amp;&amp; PORT=5077 uv run python main.py   # then /, /download, /docs/work; /design is 404</pre>
+<p>To see the terminal defaults you need a Loopflow for Mac build from this branch. Open any Task's terminal and type <code>-&gt; != =&gt;</code>: each one should show as separate characters.</p>
+
+<h2>3. What may surprise you</h2>
+<ul>
+<li><b>The site's style pages are deleted, not rewritten.</b> Concept review made this call: they taught faces <code>DESIGN.md</code> rules out. <code>git revert</code> brings them back.</li>
+<li><b>The new faces don't ship yet.</b> <code>DESIGN.md</code> has two sections, <em>The language</em> (the target) and <em>Tokens today</em> (what ships now). The site still uses its old faces, and the terminal is still JetBrains Mono. The font change waits in <code>design/prototypes/website-fonts.patch</code> for the stacked website Task.</li>
+<li><b>The web's step names don't match the language yet.</b> The web has nine <code>--t-*</code> steps, and four of them (<code>name</code>, <code>head</code>, <code>intro</code>, <code>small</code>) are new on this branch. That breaks rule 4. The rename changes sizes on the page, so it went to the stacked Task.</li>
+<li><b>The sidebar's Work tracking spec moved to <code>swift/README.md</code>.</b> It describes behavior, not looks.</li>
+<li><b>Nobody has seen the terminal change yet.</b> Ghostty's <code>+validate-config</code> accepts the keys (and rejects a misspelled one), but nobody has looked at a rendered terminal.</li>
+</ul>
+
+<h2>4. Findings outside this PR</h2>
+<table>
+<tr><th>Finding</th><th>Proposal</th></tr>
+<tr><td>Apply and delete <code>website-fonts.patch</code>; rename the web <code>--t-*</code> steps to the eight language names</td><td>Already planned for stacked Task <b>dd8997</b> (website in the new faces). No new Task.</td></tr>
+<tr><td>Focused buttons on <code>/download</code> show a thin light-blue ring inside the burgundy outline (main does too)</td><td>Added to dd8997's brief with <code>lf steer</code>. It is the same kind of fix to the same stylesheet.</td></tr>
+<tr><td>Deleted and unknown routes show Starlette's bare "404 Not Found" text, not a site page (main does too)</td><td>Added to dd8997 the same way. Too small to be a Task of its own.</td></tr>
+<tr><td>Shape by kind: the language names control/row/pane/floating (4/8/12/16); Swift and the web name sizes, and the web has no 16</td><td>Belongs with the stacked Tasks dd8997 and 3d4350, which move both codebases onto the language. No new Task.</td></tr>
+<tr><td>The suites on CI's head run were skipped (the head commit only touches scratch), so the Swift build of <code>GhosttyManager.swift</code> and the website suite have not run on CI for this head</td><td>Gate's job: it publishes and has to see <code>macos</code> and <code>website-test</code> actually run. The website suite passed locally (73).</td></tr>
+</table>
+<p>No new Task was filed. Everything left over either fits a Task that already exists or is gate's work.</p>
+
+<h2>5. Questions (still yours)</h2>
+<ol>
+<li>Terminal defaults, once you've seen them in a build: (a) keep all three (b) keep ligatures off, drop <code>font-thicken</code> (c) drop the 10% cell height (d) revert all of them</li>
+<li>Deleting <code>/design</code>, <code>/colors</code> and <code>/fonts</code>: (a) fine (b) bring back a <code>/design</code> generated from <code>DESIGN.md</code></li>
+<li>Web step rename in dd8997, which changes sizes: (a) as planned (b) do it here, keeping sizes the same (c) relax rule 4</li>
+<li>The two pre-existing nits (light-blue inner ring, bare 404): (a) dd8997 as steered (b) fix them in this PR (c) drop them</li>
+</ol>
+<p class="mute">Concept-review questions 1–4 (<code>scratch/concept-review.html</code>) are also unanswered. Its own choices were 1a, 2a, 3a, 4a.</p>
+</body></html>

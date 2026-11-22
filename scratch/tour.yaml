@@ -1,0 +1,24 @@
+at: af1c52f5f2c5818a27bf31bf35edccc0f683c1b3
+first:
+  - path: DESIGN.md
+    why: the one design system; replaces both old files
+  - path: VISUAL_DESIGN.md
+    why: deleted; its content now lives in DESIGN.md
+  - path: swift/DESIGN.md
+  - path: swift/README.md
+    why: Work tracking sidebar spec moved here
+  - path: swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift
+    why: new terminal defaults, the one app-behavior change
+  - path: website/static/style.css
+    why: named size/space/radius steps, dead selectors cut
+  - path: website/main.py
+    why: /design, /colors, /fonts routes removed
+  - path: website/internal_pages.py
+    why: deleted second design system
+  - path: design/prototypes/
+    why: reference pages DESIGN.md points at
+hide:
+  - path: docs/dev/index.html
+    why: regenerated from the site stylesheet
+  - path: design/prototypes/homepage-next/
+    why: pure move from design/homepage-next/

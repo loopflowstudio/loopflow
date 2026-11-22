@@ -28,3 +28,7 @@ Left to the stacked website Task: apply and delete `design/prototypes/website-fo
 Beyond that, moving the Mac app and website code onto the `DESIGN.md` language belongs to the design Tasks stacked on this one.
 
 `scratch/design-audit/` and `scratch/design-explore/` are exploration pages; they link into `design/prototypes/` and stay until gate clears scratch.
+
+## Ship review (headless)
+
+`scratch/ship-review.html`; reading order in `scratch/tour.yaml`. No new Task. The two pre-existing QA nits (light-blue inner focus ring, bare 404) were steered into dd8997. Gate has to see `macos` and `website-test` run: CI skipped them on the scratch-only head.

@@ -20,24 +20,39 @@ says the Task waits, the screen offers the Run that moves it.
 
 ## What the code is today
 
-Slices 1 to 5 are built: the phone's Task screen opens a conversation that
-begins while it shows, `TaskActions` is the one rule both surfaces draw, and
-both Notices say "Auto-Ship requested".
-On top of slices 1 to 3: no line in `swift/LoopflowiOS` or `Loopflow/Services/Notice.swift`
-passes a literal padding, spacing or radius, and `TypographyDisciplineTests`
-fails on one in `LoopflowiOS` (`spacing: 0` passes); the phone terminal has
-`adjust-cell-height = 10%`; the New Task field is typed in `lede`; the
-unavailable Session state has a "Changes" button; pairing was looked at on an
-iPhone SE Simulator in light and dark (`scratch/look/`). Still to do:
+Slices 1 to 5 are built, and nothing in the plan is left to build. The
+phone's Task screen opens a conversation that begins while it shows,
+`TaskActions` is the one rule both surfaces draw, and both Notices say
+"Auto-Ship requested". No line in `swift/LoopflowiOS` or
+`Loopflow/Services/Notice.swift` passes a literal padding, spacing or radius,
+and `TypographyDisciplineTests` fails on one in `LoopflowiOS` (`spacing: 0`
+passes).
 
-- Qa drove every screen on an iPhone SE Simulator against the installed
-  Machine (`.lf/qa/iphone-simulator.md`, `scratch/qa.html`) and repaired what
-  it found: the Session decoder's three newer frame tags (broken on main),
-  "Unavailable" on every Task without a conversation, Task actions lost when
-  the list's filter stops showing the Task, the unstarted Task's failed
-  Changes, short diffs centred in their sheet, the 34 pt address field, the
-  picker's header under its empty state, the list rows 4 pt off their headers.
-- Not looked at: landscape and iPad, the QR scanner, a physical phone (demo).
+Qa drove every screen on an iPhone SE Simulator against the installed
+Machine before slice 5 (`.lf/qa/iphone-simulator.md`, `scratch/qa.html`) and
+repaired what it found. Slice 5 was driven once on the same Simulator: Start
+on an unstarted Task ended in its conversation on the same screen
+(`scratch/look/task-started-conversation.png`).
+
+## What remains
+
+Nothing to build. Checks nobody has run, for qa or demo:
+
+- Run, Auto-Ship and Stop Auto-Ship from a started Task after slice 5 moved
+  the phone's writes to the row's `task.repo`.
+- A phone action disabled over Rust's reason (no Task on the Machine had a
+  refusal), and a row read that fails.
+- The Mac's "Auto-Ship requested" Notice and its Undo in Loopflow Dev.
+- Landscape and iPad, the QR scanner, a physical phone (demo).
+
+For compress: `TaskGraph.runAction` returns a `(label, help)` tuple that
+`TaskActions.init` copies into `TaskActions.Run`; it can return `Run`
+(`swift/Loopflow/Design/TaskActions.swift`, one other caller in
+`WorkflowLineTests`).
+
+Open, a product choice (`scratch/questions.md`): the filter "Working now"
+lists rows that read "Busy", and "Ready for you" lists rows that read
+"Available".
 
 ## Design
 

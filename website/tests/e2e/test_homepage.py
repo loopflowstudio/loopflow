@@ -103,7 +103,7 @@ def test_body_command_names_use_monospace(homepage: Page) -> None:
     names = homepage.locator(".clihero p code")
     assert names.count() >= 2
     for name in names.all():
-        assert "JetBrains Mono" in name.evaluate("el => getComputedStyle(el).fontFamily")
+        assert "Spline Sans Mono" in name.evaluate("el => getComputedStyle(el).fontFamily")
 
 
 def test_landing_variant_url_returns_404(page: Page, base_url: str):

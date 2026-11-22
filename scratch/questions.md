@@ -53,3 +53,5 @@
   the minimum a site page needs.
 - The /download copy button now shares the homepage's `data-copy` script, so it
   says "Copied" on click; its icon returns after 1.6s.
+
+- Kept this Task’s plan and review pages through the design branch’s scratch cleanup. The shipped stylesheet takes its dark keyboard focus ring for solid buttons.

@@ -817,7 +817,7 @@ struct TaskFilesTests {
 
     /// A store over two changed files, each with two separate changes.
     /// `word` is the first hunk's new line, read on every file read.
-    private func twoFileStore(failingOnce: String? = nil,
+    private func twoFileStore(failingOnce: String? = nil, calledOff: Bool = false,
                               word: OSAllocatedUnfairLock<String> = .init(initialState: "uno")) throws -> TaskFilesStore {
         let failed = OSAllocatedUnfairLock(initialState: false)
         let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
@@ -833,6 +833,7 @@ struct TaskFilesTests {
                 }
             } else {
                 if args[3] == failingOnce, !failed.withLock({ let was = $0; $0 = true; return was }) {
+                    if calledOff { throw CancellationError() }
                     throw RegistryQueryError("the server restarted")
                 }
                 // No path argument is the whole comparison.
@@ -921,6 +922,14 @@ struct TaskFilesTests {
         #expect(store.position(.changes) == "2 of 4")
 
         await store.retryFile("b.swift")
+        #expect(store.fileNotes.isEmpty && store.unread.isEmpty)
+        #expect(store.review?.file("b.swift")?.stops.count == 2)
+    }
+
+    /// A read that was called off is not a failure: the file stays unread and is read again.
+    @Test func aFileReadCalledOffIsNotAFailure() async throws {
+        let store = try twoFileStore(failingOnce: "b.swift", calledOff: true)
+        await store.loadReview()
         #expect(store.fileNotes.isEmpty && store.unread.isEmpty)
         #expect(store.review?.file("b.swift")?.stops.count == 2)
     }

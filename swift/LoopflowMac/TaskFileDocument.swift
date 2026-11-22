@@ -1017,7 +1017,7 @@ final class TaskFilesStore {
         guard let changes else { return }
         let files = Dictionary(changes.files.map { ($0.path, $0) }) { first, _ in first }
         let query = self.query, issue = self.issue, base = changes.baseCommit, head = comparison.head
-        await withTaskGroup(of: (String, FileReading).self) { group in
+        await withTaskGroup(of: (String, FileReading?).self) { group in
             var running = 0
             while true {
                 while running < 6, generation == reviewGeneration, !Task.isCancelled,
@@ -1033,7 +1033,8 @@ final class TaskFilesStore {
                 // A newer reload reads this file again; its answer replaces this one.
                 guard generation == reviewGeneration else { continue }
                 reading.remove(path)
-                accept(result, for: path)
+                // A read that was called off is no answer: the file stays unread for the next load.
+                if let result { accept(result, for: path) }
             }
         }
     }
@@ -1087,7 +1088,7 @@ final class TaskFilesStore {
     /// One file's lines: its patch, which for a new file, untracked or
     /// committed, is its contents.
     private nonisolated static func readFile(_ changed: TaskChangedFile, query: RegistryQuery, issue: String,
-                                             base: String, head: String?) async -> FileReading {
+                                             base: String, head: String?) async -> FileReading? {
         let path = changed.path
         do {
             let next = try await query.taskDiff(issue: issue, path: path, base: base, head: head)
@@ -1095,6 +1096,8 @@ final class TaskFilesStore {
             let file = parsed.first { $0.path == path } ?? parsed.first
                 ?? ReviewFile(path: path, oldPath: changed.oldPath, status: next.binary ? .binary : .modified, blocks: [])
             return FileReading(file: file, note: next.truncated ? .cut : nil)
+        } catch is CancellationError {
+            return nil
         } catch {
             return FileReading(file: nil, note: .failed(error.localizedDescription))
         }

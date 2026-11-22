@@ -318,3 +318,15 @@ Made at the fifth compress, with nobody present.
     "Reload saved intent" (Layout not saved.), "OK" (Workspace did not
     open.) and "Retry Project preparation" inside "Project not prepared."
     The Files tree's Retry keeps its link style.
+
+Made at the fifth qa, with nobody present; the page is `scratch/qa.html`.
+
+80. Settles 76: both diff-stream failures were seen in the Dev app, light
+    and dark, with a `chmod 000` file. A read called off by a newer reload
+    showed as "File not read. … Swift.CancellationError"; it is no longer
+    recorded as a failure.
+81. Seen, left: "Skipped lines of <path> did not load." stays after the file
+    is readable again, until a skipped-lines row opens. Clear it when the
+    comparison reloads, or give it a way to dismiss?
+82. Of the three buttons in 79, "OK" was seen in the neutral style; "Reload
+    saved intent" and "Retry Project preparation" were not reached.

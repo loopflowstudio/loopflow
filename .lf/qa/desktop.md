@@ -295,6 +295,19 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
   - "Conversation failed to open": select a repository or Wave whose
     conversation this launch has not opened, or press **Open conversation**.
   A broken `.lf/config.yaml` in the Task's checkout fails none of these.
+- "File not read." in the Diff tab: `echo x > new.txt; chmod 000 new.txt` in
+  a started Task's checkout, then open the tab. `chmod 644` and **Retry**
+  reads it.
+- "Skipped lines of <path> did not load.": the Task's base needs a long file
+  (commit one to the repository before `lf task create … --run`), two edits
+  far apart in the checkout, then `chmod 000` the file and click an
+  "N unchanged lines" row. The stream moves down when "Comparison
+  unavailable." arrives, so capture first and take the row's position from
+  that capture.
+- A capture right after a change in the checkout can take 15 seconds or more
+  to arrive; wait for its `.out` before reading the image.
+- The run's quit script stops the QA app by the PID `pgrep -f` finds for the
+  bundle's full executable path, never `pkill`.
 - `lf desktop do details page=diff` fails with "The Task file location
   changed" in the window a Task was started in (Task ea8659); quit, relaunch
   and open the Task by its link first.

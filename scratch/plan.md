@@ -6,11 +6,13 @@ Task 923677. Reference: `DESIGN.md` ("The language", "What we avoid") and the
 once their screens shipped; `git show fd90d7e6ad:design/prototypes/desktop-more.html`
 has them, and `docs/surfaces.md` holds the wording now.
 
-Slices 1 to 7 are built and were looked at in the Dev app
-(`scratch/qa.html`, four runs). Slice 8 is built and has not been looked at
-there: a file the diff could not read, and skipped lines that did not load.
+Slices 1 to 8 are built and were looked at in the Dev app
+(`scratch/qa.html`, five runs). The fifth saw slice 8's two diff-stream
+failures and fixed one thing: a file read called off by a newer reload was
+recorded as "File not read." (questions 80).
 **Next:** the gate checks and one look at "Not started." on an unlocked
-display (questions 48). Nothing is left to build.
+display (questions 48). Nothing is left to build. Seen and left: the
+skipped-lines failure outlives its cause (questions 81).
 
 The sync with main (6197582ea4) moved `LoopflowButtonStyle`, `StatusMark`,
 `TaskRow` and `WorkflowLine` to `swift/Loopflow/Design/` and brought the
@@ -713,3 +715,9 @@ Dashboard's line is at the leading edge (68). The diff stream's "Could not be re
 note (69) is slice 8.
 `scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|NewTaskTests|WorkNavigationTests|BacklogViewTests|TaskFilesTests|workStates|ProjectActivationTests|RenameWaveSheetTests|RemoveWaveSheetTests|PullRequestTests|WorkCacheTests'`
 passed after them (167 tests in 12 suites); qa ran it.
+
+Fifth qa (at a28344bb4c): one fix. A file read that a newer reload called
+off stays unread and is read by the next load; it was drawn as "File not
+read." with a `CancellationError` (questions 80).
+`scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|BacklogViewTests|TaskFilesTests|WorkflowLineTests|NewTaskTests'`
+passed after it (86 tests in 6 suites); qa ran it.

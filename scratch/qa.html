@@ -13,15 +13,88 @@
 </style>
 
 <h1>QA: New Task and the empty and failed states</h1>
-<p>Task 923677. Four runs are on this page, newest first. The fourth, on 2026-11-22 at 406697d19c plus its four
+<p>Task 923677. Five runs are on this page, newest first. The fifth, on 2026-11-22 at a28344bb4c plus its one
+fix, reached slice 8's two diff-stream failures with a real unreadable file, and went through the main path again
+after the sync with main on the fourth run's store (a returning user). The fourth, at 406697d19c plus its four
 fixes, looked at slice 7's failure lines on a real Machine, went through the main path again from a fresh repository
 and a Wave, and stopped the Machine under an open window to see what each pane says.</p>
 <p>Every run used the branch's Loopflow for Mac in an isolated bundle with its own bundle ID, a private Machine
 (the branch's <code>lf server run</code>, a stand-in <code>claude</code>; <code>LF_HOME=/tmp/lfq923d/lf</code> in the
-fourth) and <code>git init</code> directories made for the run. The screen was locked throughout: windows were
+fourth and fifth) and <code>git init</code> directories made for the run. The screen was locked throughout: windows were
 captured from the app's own rendering (<code>cacheDisplay</code>) and driven through <code>lf desktop</code> and a
 capture loop added to the app for the run only (type into a field, ⌘↩, a click at a point). That loop is removed and
 not committed. Nothing touched the installed app, the shared Loopflow Dev bundle, its server or <code>~/.lf</code>.</p>
+
+<h2>The fifth run: what works now</h2>
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>The fourth run's store and repository opened by the build after the sync with main</td><td>The page, its four backlog rows, the Wave and the started Task as they were left. No migration complaint.</td></tr>
+<tr><td>A new file the Machine cannot read (<code>chmod 000</code>) in a started Task's checkout, Diff tab</td><td><b>"File not read."</b> strong in the failure ink under the file's header, git's message in mono, <b>Retry</b> in the neutral style. The other three files read. Slice 8, seen in both themes.</td></tr>
+<tr><td><code>chmod 644</code>, then <b>Retry</b></td><td>"Reading…", then the file's one line, "added +1 −0".</td></tr>
+<tr><td>A tracked file made unreadable, then its "133 unchanged lines" row pressed</td><td><b>"Skipped lines of long.txt did not load."</b> with "cannot read Task file "long.txt": Permission denied (os error 13)" above the stream, under "Comparison unavailable." Slice 8, seen in both themes.</td></tr>
+<tr><td>The file made readable again, the row pressed again</td><td>The comparison comes back on its own; the skipped-lines line stays until the row is pressed, then the 133 lines open and it goes.</td></tr>
+<tr><td>⌘N, a request, ⌘↩, Loopflow Dark</td><td>The sheet as before; the Task starts ("plan is running kickoff. You are next needed at ship-review.") beside the known "Files did not open" (Task ea8659).</td></tr>
+<tr><td>An unstarted Task's pane, Loopflow Dark</td><td>"Not started", "It will run code, the default. You take part at ship-review and verify.", Start and "Start with…".</td></tr>
+<tr><td>A link to a repository this Machine does not know</td><td>"Workspace did not open." in a 480 by 240 pt window; <b>OK</b> has the neutral style (questions 79).</td></tr>
+<tr><td>A fresh <code>git init</code> directory; a directory that is not a repository; Loopflow Light</td><td>"No planned Work in this repository" with its two buttons; "This repository did not open" with the message in mono and Retry.</td></tr>
+</table>
+<div class="pair">
+  <div><img src="qa/s8-file-not-read-light.jpg"><p class="cap">"File not read.", Loopflow Light.</p></div>
+  <div><img src="qa/s8-file-not-read-dark.jpg"><p class="cap">Loopflow Dark.</p></div>
+  <div><img src="qa/s8-gap-dark.jpg"><p class="cap">"Skipped lines of long.txt did not load." under "Comparison unavailable.", on the fixed build.</p></div>
+  <div><img src="qa/s8-gap-opened-dark.jpg"><p class="cap">The file readable again and the row pressed: the lines open and the line goes.</p></div>
+  <div><img src="qa/s8-sheet-dark.jpg"><p class="cap">The sheet after the sync with main.</p></div>
+  <div><img src="qa/s8-started-dark.jpg"><p class="cap">After ⌘↩.</p></div>
+  <div><img src="qa/s8-not-started-dark.jpg"><p class="cap">An unstarted Task.</p></div>
+  <div><img src="qa/s8-openwork-dark.jpg"><p class="cap">The Open Work window's OK in the neutral style.</p></div>
+  <div><img src="qa/s8-empty-light.jpg"><p class="cap">A fresh repository.</p></div>
+  <div><img src="qa/s8-notrepo-light.jpg"><p class="cap">Not a repository.</p></div>
+</div>
+
+<h2>The fifth run: fixed</h2>
+<h3>A read that was called off showed as "File not read."</h3>
+<p>Making a tracked file unreadable under an open Diff tab left "File not read." with "The operation couldn't be
+completed. (Swift.CancellationError error 1.)" under the file's lines. A change in the checkout starts a reload; a
+second change calls the first reload off while a file's read is in flight, and <code>readFile</code> recorded that
+as the file's failure. It stayed after the comparison itself had failed for the real reason, so the pane held three
+lines in the failure ink, one of them false. The old "Could not be read: …" note had the same fault; slice 8 made it
+strong. A called-off read now leaves the file unread with no note, so the next load reads it
+(<code>TaskFileDocument.swift</code>, <code>readFile</code> and <code>readPatches</code>);
+<code>aFileReadCalledOffIsNotAFailure</code> covers it.</p>
+<div class="pair">
+  <div><img src="qa/s8-three-lines-before-light.jpg"><p class="cap">Before: the comparison's failure, the skipped lines' and a cancelled read.</p></div>
+  <div><img src="qa/s8-cancelled-before-light.jpg"><p class="cap">Before, a moment earlier: the cancelled read alone.</p></div>
+</div>
+<pre>scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|BacklogViewTests|TaskFilesTests|WorkflowLineTests|NewTaskTests'
+✔ Test run with 86 tests in 6 suites passed</pre>
+
+<h2>The fifth run: still wrong or open, worst first</h2>
+<h3>1. "Skipped lines of … did not load." outlives its cause</h3>
+<p>Once the file can be read again the comparison reloads on its own and "Comparison unavailable." goes, but the
+skipped-lines line stays above the stream until a skipped-lines row is pressed and opens. Nothing on the line says
+so, and it has no button. <code>gapError</code> is cleared only by a successful <code>openGap</code>; this predates
+slice 8, which changed how it is drawn.</p>
+<img src="qa/s8-restored-light.jpg"><p class="cap">The file is readable and the comparison is back; the line is still there.</p>
+<h3>2. Three failure lines can stand in one narrow pane</h3>
+<p>With one unreadable tracked file the Diff tab says "Comparison unavailable." with git's whole command line, and
+"Skipped lines … did not load." under it: two strong lines and eight lines of mono for one cause. Each is true.
+Whether the comparison's line should carry git's argv is a wording question for the Machine's message.</p>
+<h3>3. The first ⌘N of a launch took longer than two seconds to bring the sheet</h3>
+<p><code>lf desktop do new-task</code> right after selecting a Task, then a capture two seconds later, showed no sheet;
+the same command a minute later showed it at once. Seen once, not timed, not chased.</p>
+
+<h2>The fifth run: not reached, and why</h2>
+<ul>
+<li>"Not started." with no Task selected on an unlocked display (questions 48). The screen was locked again.</li>
+<li>"Reload saved intent" under "Layout not saved." and "Retry Project preparation" under "Project not prepared.", the
+other two buttons that took the neutral style (questions 79). Neither failure was reached; <b>OK</b> was.</li>
+<li>Menus, terminal faces, real keys, VoiceOver, imported themes: as in the fourth run.</li>
+</ul>
+
+<h2>The fifth run: left behind</h2>
+<p>The private server, its holder, three <code>lf task run</code> trees and the stand-in providers are stopped by PID;
+no launchd job was registered. The QA bundle is deleted, unregistered from LaunchServices and its defaults removed.
+The capture loop is reverted. <code>/tmp/lfq923d</code> (repositories, store, full-size captures) is still on disk.</p>
 
 <h2>The fourth run: what works now</h2>
 <table>

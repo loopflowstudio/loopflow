@@ -107,6 +107,12 @@ public actor ServerLink {
 
     public var isClosed: Bool { failure != nil }
 
+    /// What a window says of a reading from this server that this build can't
+    /// decode: the two are different builds, and the sentence names both.
+    public nonisolated var unreadable: String {
+        "This Loopflow (\(endpoint.client.version)) can't read what the server (\(welcome.build)) sent."
+    }
+
     /// Ends the connection on purpose: requests fail and watches end rather than resume.
     public func close() async {
         fail(RegistryQueryError(Self.closed), resumable: false)
@@ -430,12 +436,19 @@ private final class Expiry: @unchecked Sendable {
     func fire() { lock.withLock { value = true } }
 }
 
+extension ServerLink {
+    public func read(_ query: ServedRead, deadline: Duration?) async throws -> ReadOutput {
+        let result = try await request(.read(query), deadline: deadline)
+        return ReadOutput(result, unreadable: unreadable)
+    }
+}
+
 extension RegistryQuery {
     /// Typed reads and writes over the server `link` returns; nothing runs `lf`.
     /// A read or write unanswered within `deadline` is cancelled and reported.
     public static func served(deadline: Duration?, link: @escaping @Sendable () async throws -> ServerLink) -> RegistryQuery {
         RegistryQuery(serve: { read in
-            try await link().request(.read(read), deadline: deadline).printed
+            try await link().read(read, deadline: deadline)
         }, write: { change in
             String(decoding: try await link().request(.command(change), deadline: deadline).bytes, as: UTF8.self)
         }, change: { change, requestID in

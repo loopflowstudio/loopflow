@@ -30,12 +30,11 @@ mod linear_issue_state;
 mod subscription_events;
 mod task_started;
 
-mod git_tracker;
 mod linear_team_checks;
 mod machine_records;
 mod metrics;
+pub mod plan_carriers;
 pub mod planning_order;
-pub use git_tracker::GitPlanImport;
 mod planning_sync;
 pub mod planning_write;
 mod pr_landings;
@@ -52,6 +51,7 @@ mod revisions;
 pub mod scope_defaults;
 pub mod selections;
 mod session_events;
+pub mod session_recovery;
 pub mod sessions;
 mod turns;
 pub use sessions::SessionCaller;
@@ -66,7 +66,6 @@ pub mod task_moves;
 mod task_retirement;
 mod transport;
 pub use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};
-pub mod task_history;
 mod task_state;
 pub mod task_summaries;
 pub mod task_work;
@@ -78,9 +77,9 @@ pub use children::ClosedTaskPage;
 pub use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts, UnrunGraph};
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::{Revisions, StoreRevisions};
-pub use session_events::{AnsweredTurn, CurrentConversation};
+pub use session_events::{AnsweredTurn, CurrentConversation, TurnSpan};
 pub use task_details::TaskDetailFacts;
-pub use task_work::{OpenWork, TaskShipping};
+pub use task_work::{Auto, AutoState, OpenWork};
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
 /// default while every process opens and records its first receipt. Durable

@@ -1,0 +1,23 @@
+#!/bin/sh
+# The benchmark's provider. The first launch records one turn. Reopening
+# reads that same transcript and answers terminal input until "quit".
+if [ "$1" = --version ]; then echo '2.1.0 (Claude Code)'; exit; fi
+while [ "$#" -gt 1 ]; do
+    case "$1" in
+        --session-id)
+            printf '{"type":"user","sessionId":"%s","message":{"role":"user","content":"Benchmark"}}\n' "$2" > "$BENCHMARK_PROJECT/$2.jsonl"
+            exit $? ;;
+        --resume|-r)
+            id=$2
+            [ -s "$BENCHMARK_PROJECT/$id.jsonl" ] || exit 1
+            echo "resumed $id"
+            [ -n "$BENCHMARK_INTERACTIVE" ] || exit 0
+            while IFS= read -r line; do
+                [ "$line" = quit ] && exit 0
+                echo "reply $id: $line"
+            done < /dev/tty
+            exit $? ;;
+    esac
+    shift
+done
+exit 2

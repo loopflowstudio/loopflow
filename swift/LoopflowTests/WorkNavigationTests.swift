@@ -102,7 +102,7 @@ struct WorkNavigationTests {
         let key = try #require(registry.selectedWork)
         let root = try #require(registry.retained(key))
         let layout = root.multiplexer.layout
-        let crumbs = WorkBreadcrumbs(model: model)
+        let crumbs = TitleBar(model: model)
         model.navigation.resizeSidebar(460, availableWidth: 1200)
         model.select(.wave(id: "wave-1"))
         try crumbs.inspect().find(button: "loopflow").tap()
@@ -122,12 +122,12 @@ struct WorkNavigationTests {
         let model = try model()
         await model.refresh()
         model.select(.task(id: "issue-review"))
-        let crumbs = WorkBreadcrumbs(model: model)
+        let crumbs = TitleBar(model: model)
         for scope in ["repository", "wave-wave-1"] {
             _ = try crumbs.inspect().find(viewWithAccessibilityIdentifier: "work-jump-" + scope)
         }
-        // The jump bar is navigation; Auto-Ship lives in the Workflow bar below it.
-        #expect(throws: (any Error).self) { try crumbs.inspect().find(viewWithAccessibilityIdentifier: "task-ship") }
+        // The jump bar is navigation; the Auto toggle lives in the Workflow bar below it.
+        #expect(throws: (any Error).self) { try crumbs.inspect().find(viewWithAccessibilityIdentifier: "task-auto") }
         #expect(throws: (any Error).self) { try crumbs.inspect().find(text: "This Mac") }
         #expect(throws: (any Error).self) { try crumbs.inspect().find(viewWithAccessibilityLabel: "Navigate Tasks, Waves and repositories") }
         #expect(model.jumpRows(.repository, filter: "").map(\.id) == [.wave("wave-1")])
@@ -141,14 +141,16 @@ struct WorkNavigationTests {
         #expect(model.navigation.palette == nil)
     }
 
-    @Test("The heading reads the Task's lifecycle, never Linear's planning state")
+    @Test("The title bar's word is the Task's condition or lifecycle, never Linear's planning state")
     func headingAgreesWithWorkingTasks() throws {
         let tasks = try roadmap().tasks.items
-        func state(_ id: String) throws -> String { TaskHeading(task: try #require(tasks.first { $0.id == id })).state }
+        func word(_ id: String) throws -> String? {
+            TaskRowStatus(task: try #require(tasks.first { $0.id == id })).word
+        }
         #expect(tasks.first { $0.id == "issue-now" }?.task.state == "unstarted")
-        #expect(try state("issue-now") == "Shipping")
-        #expect(try state("issue-review") == "Unstarted")
-        #expect(try state("issue-later") == "Done")
+        #expect(try word("issue-now") == "Moving")
+        #expect(try word("issue-review") == "Waiting")
+        #expect(try word("issue-later") == "Done, date unavailable")
     }
 
     @Test("Working Tasks opens as a Dashboard; a sidebar Task keeps it in the trail, as its tile does")
@@ -226,31 +228,29 @@ struct WorkNavigationTests {
         #expect(model.navigation.sidebarWaveID == nil)
     }
 
-    @Test("A Wave row counts its working and autonomous Tasks, not backlog or done")
+    @Test("A Wave row counts its working Tasks, not backlog or done")
     func waveRowCountsStartedTasks() throws {
         let model = try dashboardModel(claimed: true)
-        // wave-1: shipping issue-now counts; unstarted, never-started and completed Tasks don't.
+        // wave-1: issue-now, working with auto on, counts; unstarted, never-started and completed Tasks don't.
         #expect(model.startedTaskCount(.wave("wave-1")) == 1)
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         let row = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1")
         #expect(try row.find(text: "1").string() == "1")
     }
 
-    @Test("Shipping Tasks sit under an Autonomous heading below the Working Tasks, in light and dark",
+    @Test("A Task with auto on is listed with the Working Tasks and its row carries the Auto badge, in light and dark",
           arguments: [ColorScheme.light, .dark])
-    func autonomousSectionListsShippingTasks(scheme: ColorScheme) throws {
+    func autoTaskIsAWorkingTaskWithABadge(scheme: ColorScheme) throws {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing must not execute") }, repoPath: "/src/loopflow")
         model.applyFixture(roadmap: .available(try claimedRoadmap()), waves: .available([]), workActivity: .loading, repos: [])
-        // Rust's Working Tasks leave shipping issue-now out; its Autonomous section holds it.
-        // The started list holds both; its states split Working from Autonomous.
-        model.applyStartedFixture(working: ["issue-review"], autonomous: ["issue-now"])
-        #expect(model.sidebarTaskIDs == ["issue-review"])
-        #expect(model.sidebarAutonomousTaskIDs == ["issue-now"])
+        model.applyStartedFixture(working: ["issue-review"], auto: ["issue-now"])
+        #expect(model.sidebarTaskIDs == ["issue-review", "issue-now"])
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in }).environment(\.colorScheme, scheme)
-        let heading = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-autonomous-heading")
-        _ = try heading.find(text: "Autonomous")
-        model.navigation.sidebarFilter = .available
-        #expect(model.sidebarAutonomousTaskIDs.isEmpty)
+        let badge = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-task-auto-issue-now")
+        #expect(try badge.find(text: "Auto").string() == "Auto")
+        #expect(throws: (any Error).self) {
+            try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-task-auto-issue-review")
+        }
     }
 
     @Test("A dropped Task row takes its place before the order is written")
@@ -276,14 +276,12 @@ struct WorkNavigationTests {
     func sidebarFiltersReadTaskStates() {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing must not execute") }, repoPath: "/src/loopflow")
         model.applyStartedFixture([("ready", [.working, .available]), ("running", [.working, .busy]),
-                                   ("quiet", [.working]), ("shipping", [.autonomous, .available])])
-        #expect(model.sidebarTaskIDs == ["ready", "running", "quiet"])
-        #expect(model.sidebarAutonomousTaskIDs == ["shipping"])
+                                   ("quiet", [.working]), ("auto", [.working, .auto, .available])])
+        #expect(model.sidebarTaskIDs == ["ready", "running", "quiet", "auto"])
         model.navigation.sidebarFilter = .available
-        #expect(model.sidebarTaskIDs == ["ready"])
+        #expect(model.sidebarTaskIDs == ["ready", "auto"])
         model.navigation.sidebarFilter = .busy
         #expect(model.sidebarTaskIDs == ["running"])
-        #expect(model.sidebarAutonomousTaskIDs.isEmpty)
     }
 
     @Test("Abandon and Complete drop the open Task's row and open the next one in the click; a refusal puts it back with one Notice",
@@ -338,14 +336,14 @@ struct WorkNavigationTests {
         #expect(drag.source == nil && drag.target == nil && drag.offset == 0)
     }
 
-    @Test("The sidebar header names the Dashboard under the repository, and ⌘1 marks its first member")
+    @Test("The sidebar header names the Dashboard as written under the repository, and ⌘1 marks its first member")
     func dashboardSidebarHeader() throws {
         let model = try dashboardModel()
         model.selectDashboard("review")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
-        _ = try navigator.inspect().find(text: "REVIEW")
+        _ = try navigator.inspect().find(text: "Review")
         _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-repository")
-        let first = try navigator.inspect().find(TaskRowMetadata.self) { try $0.actualView().slotHint == "⌘1" }
+        let first = try navigator.inspect().find(TaskRow<TaskRowSlotHint>.self) { try $0.actualView().trailing.hint == "⌘1" }
         #expect(try first.actualView().id == "issue-now")
     }
 
@@ -380,7 +378,12 @@ struct WorkNavigationTests {
         let offer = TaskStartOffer(model: model, task: task)
         let start = try offer.inspect().find(viewWithAccessibilityIdentifier: "task-start-issue-review").button()
         #expect(!start.isDisabled())
-        #expect(throws: Never.self) { try offer.inspect().find(text: task.task.description) }
+        // The brief and a Dashboard tile's header name the Task; neither size says it again.
+        #expect(throws: Never.self) { try offer.inspect().find(text: "Not started") }
+        #expect(throws: (any Error).self) { try offer.inspect().find(text: task.task.name) }
+        let tile = try offer.environment(\.compactPanes, true).inspect()
+        #expect(throws: Never.self) { try tile.find(text: "Not started") }
+        #expect(throws: (any Error).self) { try tile.find(text: task.task.name) }
         #expect(model.navigation.notices.current == nil)
     }
 
@@ -414,7 +417,8 @@ struct WorkNavigationTests {
         #expect(action("1", .command) == "goto [\"index\": \"1\"]")
         #expect(action("9", [.command, .capsLock]) == "goto [\"index\": \"9\"]")
         #expect(action("0", .command) == nil)
-        #expect(action("1", [.command, .option]) == nil)
+        #expect(action("1", [.command, .shift]) == nil)
+        #expect(action("1", [.command, .option]) == "details [\"page\": \"brief\"]")
         #expect(action("\t", .control) == "next [:]")
         #expect(action("\u{19}", [.control, .shift]) == "previous [:]")
         #expect(action("\t", []) == nil)
@@ -593,7 +597,7 @@ struct WorkNavigationTests {
         model.select(.wave(id: "wave-1"))
     }
 
-    @Test("Autonomous, upcoming and human work keep server order without Sessions")
+    @Test("Auto, upcoming and human work keep server order without Sessions")
     func workDoesNotRequireSessions() throws {
         let roadmap = try roadmap()
         let empty = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: [])
@@ -736,7 +740,7 @@ struct WorkNavigationTests {
     }
 
 
-    @Test("Task briefs and the Wave standup board share the current snapshot")
+    @Test("Task briefs and the Wave backlog share the current snapshot")
     func inspectorShowsPlanning() async throws {
         let model = try model()
         await model.refresh()
@@ -748,14 +752,11 @@ struct WorkNavigationTests {
         #expect(throws: Never.self) { try view.inspect().find(button: "New session") }
         model.select(.wave(id: task.wave!.wave.id))
         let board = WorkNavigation.Board.wave(task.wave!.wave.id)
-        let standup = model.standup(task.wave!.tasks.items, doneDays: WaveStandupDefaults.doneDays)
-        for section in WaveBoardSection.allCases {
-            model.navigation.boardSections[board] = section
-            for row in standup.rows(section) {
-                _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-row-\(row.id)")
-            }
+        let backlog = model.backlog(board)
+        for row in backlog.rows {
+            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-row-\(row.id)")
         }
-        // Completed work without a date is outside Done's window; Project history keeps it.
+        // The backlog lists unstarted Tasks only; Project history keeps finished ones.
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "wave-row-issue-later") }
         #expect(throws: (any Error).self) { try view.inspect().find(TaskHistoryControls.self) }
     }
@@ -981,6 +982,28 @@ struct WorkNavigationTests {
         #expect(workspace.multiplexer.focusedPaneId == pane)
     }
 
+    @Test("An unstarted Task's bar draws the workflow its first run takes up; before the catalog is read, its name alone")
+    func unstartedTaskBarDrawsItsWorkflow() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let catalog = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/graph_catalog.json"), encoding: .utf8)
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            guard args.starts(with: ["graph", "list"]) else { throw RegistryQueryError("The bar only reads the catalog") }
+            return catalog
+        }, repoPath: "/src/loopflow")
+        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
+        let task = try #require(model.task(id: "issue-review")).task
+        #expect(task.graphName == "feature")
+        let unstarted = try JSONDecoder().decode(TaskOverview.self, from: Data(#"{"sessions":[],"graph_processes":[],"graph":null}"#.utf8))
+        let bar = TaskWorkflowBar(model: model, task: task, work: .available(unstarted))
+        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name").text().string() == "feature")
+        #expect(throws: (any Error).self) { try bar.inspect().find(text: "pursue") }
+        await model.loadGraphCatalog()
+        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name").text().string() == "feature")
+        #expect(try ["design", "pursue", "xor-route", "queue"].map { try bar.inspect().find(text: $0).string() }.count == 4)
+        _ = try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start")
+    }
+
     @Test("Workflow loading, absent and failed readings: a failure shows the last good one or nothing")
     func workflowReadingStates() async throws {
         let model = try model()
@@ -989,12 +1012,11 @@ struct WorkNavigationTests {
         let empty = try JSONDecoder().decode(TaskOverview.self, from: Data(#"{"sessions":[],"graph_processes":[],"graph":null}"#.utf8))
         let loading = TaskWorkflowHeader(model: model, task: found.task, work: .loading)
         #expect(try loading.inspect().find(text: "Reading workflow…").string() == "Reading workflow…")
-        #expect(throws: (any Error).self) { try loading.inspect().find(text: "No workflow selected") }
         let missing = TaskWorkflowHeader(model: model, task: found.task, work: .unavailable(lastGood: nil, reason: "Offline"))
         #expect(throws: (any Error).self) { try missing.inspect().find(text: "Reading workflow…") }
-        #expect(throws: (any Error).self) { try missing.inspect().find(text: "No workflow selected") }
         let absent = TaskWorkflowHeader(model: model, task: found.task, work: .available(empty))
-        let selection = found.task.graphName.map { "\($0) · \(found.task.graphSource ?? "")" } ?? "No workflow selected"
+        let selection = try #require(model.workflowSelection(found.task))
+        #expect(selection.hasPrefix("\(try #require(found.task.graphName)), "))
         #expect(try absent.inspect().find(text: selection).string() == selection)
         let stale = TaskWorkflowHeader(model: model, task: found.task, work: .unavailable(lastGood: empty, reason: "Offline"))
         #expect(try stale.inspect().find(text: selection).string() == selection)
@@ -1188,7 +1210,7 @@ struct WorkNavigationTests {
         let model = try model()
         await model.refresh()
         model.select(.task(id: "issue-review"))
-        _ = try WorkBreadcrumbs(model: model).inspect().find(viewWithAccessibilityIdentifier: "work-machine")
+        _ = try TitleBar(model: model).inspect().find(viewWithAccessibilityIdentifier: "work-machine")
         #expect(model.machineTarget == .task(issue: "W2-131"))
         #expect(model.machine(of: .task(issue: "W2-131")).label == "mini")
         model.select(.task(id: "issue-now"))
@@ -1235,8 +1257,8 @@ struct WorkNavigationTests {
     private func roadmap() throws -> RoadmapSnapshot {
         try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
     }
-    /// The fixture with shipping issue-now claimed, as `lf ship` leaves it, and so in Rust's
-    /// Autonomous section; unowned Tasks are backlog.
+    /// The fixture with issue-now, auto on, claimed, as `lf task auto on` leaves it, and so in Rust's
+    /// Working section; unowned Tasks are backlog.
     private func claimedRoadmap() throws -> RoadmapSnapshot {
         var planning = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
         var inventory = try #require(planning["tasks"] as? [String: Any])
@@ -1246,7 +1268,8 @@ struct WorkNavigationTests {
         runtime["owner"] = ["person": "Jack Heart", "person_id": NSNull(), "person_key": "jack@loopflow.studio",
                             "machine": ["id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b", "label": "mini"]]
         tasks[index]["runtime"] = runtime
-        tasks[index]["section"] = "autonomous"
+        tasks[index]["section"] = "working"
+        tasks[index]["selection_states"] = ["moving", "working", "auto"]
         inventory["items"] = tasks
         planning["tasks"] = inventory
         return try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: planning))
@@ -1272,7 +1295,7 @@ struct WorkNavigationTests {
          "workspace":{"machine_id":"local","worktree":"/src/loopflow","task_id":\(taskJSON),"unavailable":null},
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
          "wave_id":\(waveJSON),"work_path":null,"action":\(sessionActionFixtureJSON(state: state.rawValue)),
-         "blocked": false, "title_source":"generated","graph_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["lf","session","resume","\(id)"]}
+         "blocked": false, "title_source":"generated","ended": null, "start": null, "outlook": null, "status_line": null, "graph_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["lf","session","resume","\(id)"]}
         """.utf8))
     }
 }
@@ -1309,7 +1332,7 @@ private actor ReadingSource {
         case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessions),"next":null}"#
         case "wave" where args.dropFirst().first == "list": return "[]"
         case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
-        case "repo" where args.dropFirst().first == "tracker": return #"{"destinations":[]}"#
+        case "repo" where args.dropFirst().first == "tracker": return #"{"tracker":null,"plan":{"git":null,"hub":null},"actions":[]}"#
         case "desktop" where args.dropFirst().prefix(2) == ["view", "show"]:
             return String(decoding: try JSONEncoder().encode(fixtureViewPlan(
                 owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [])), as: UTF8.self)

@@ -646,7 +646,7 @@ fn manifest_round_trips_the_exact_prepared_process_without_ambient_authority() {
         agent: crate::config::Agent::parse("codex:gpt-5.6").unwrap(),
         max_turns: Some(7),
         resume_token: Some("resume-secret".into()),
-        skip_permissions: true,
+        yolo: true,
         directive_relay: Some("/tmp/directive-secret".into()),
         env: BTreeMap::from([("TOKEN".to_string(), "ambient-secret".to_string())]),
         ..crate::agent::AgentConfig::default()
@@ -1246,6 +1246,35 @@ fn recording_failure_cannot_forget_the_thread_used_by_retry() {
             }
             capture.finish("completed")?;
         }
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn an_input_moved_to_another_provider_is_answered_by_that_provider() {
+    let ledger = crate::journal::TestLedgerGuard::new();
+    let _ambient = crate::test_ambient::EnvGuard::new();
+    let home = ledger.home();
+    crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
+        let capture = crate::session_record::SessionRecorder::begin_at(home, spec(home))
+            .map(crate::process::LfProcessRuntime::new)?;
+        capture.claim_session_attachment()?;
+        let (session, refused) = capture.session_attachment().unwrap();
+        let store = crate::session_record::row_store(&capture.artifact_dir())?;
+        store.record_agent_process_exit(&session, &refused, false)?;
+        capture.retry_agent_process("other".into(), None, None)?;
+        let thread = loopflow_model::id::AgentSessionId::from("other-thread");
+        let (_, moved) = capture.session_attachment().unwrap();
+        store.record_session_agent_session(&session, &moved, &thread)?;
+        let captured = store.session(&session)?.unwrap().captured.unwrap();
+        let completed = serde_json::json!({"status":"completed"});
+        store.record_answered_turn_end(captured, &thread, "turn", 3, &completed)?;
+
+        // The capture still says `proof`, which was refused before it answered.
+        let answered = store.input_answered_turn(&capture.artifact_key())?.unwrap();
+        assert_eq!(answered.provider.as_deref(), Some("other"));
+        capture.finish("completed")?;
         Ok(())
     })
     .unwrap();

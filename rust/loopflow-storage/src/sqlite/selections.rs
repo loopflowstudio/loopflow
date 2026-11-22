@@ -104,10 +104,9 @@ fn work_in(
     // State, publication and ownership for every Task in a fixed number of
     // statements: a query per Task costs thousands on a large repository.
     let ids: Vec<_> = tasks.iter().map(|task| task.id.clone()).collect();
-    let task_states = super::task_details::states_in(
-        conn,
-        &super::children::ids_json(ids.iter().map(|id| id.as_str())),
-    )?;
+    let ids_json = super::children::ids_json(ids.iter().map(|id| id.as_str()));
+    let task_states = super::task_details::states_in(conn, &ids_json)?;
+    let auto_on = super::task_details::auto_on_in(conn, &ids_json)?;
     let published = super::task_started::published_in(conn, &ids)?;
     let owners = super::task_ownership::owners_in(conn, &ids)?;
     let mut task_work = Vec::with_capacity(tasks.len());
@@ -120,6 +119,7 @@ fn work_in(
             state,
             owned,
             published.contains(&task.id),
+            auto_on.contains(&task.id),
             task.state.as_deref(),
             reading.activity.get(&task.id),
         );
@@ -191,11 +191,13 @@ impl TaskOrder {
     }
 }
 
-/// The same lifecycle, section and activity set for roadmap rows and selections.
+/// The same lifecycle, section, auto setting and activity set for roadmap rows
+/// and selections.
 pub fn task_selection_states(
     runtime: TaskState,
     owned: bool,
     published: bool,
+    auto: bool,
     plan_state: Option<&str>,
     activity: Option<&TaskActivity>,
 ) -> BTreeSet<SelectionState> {
@@ -204,18 +206,19 @@ pub fn task_selection_states(
     if (owned || published) && !state.is_terminal() {
         states.insert(SelectionState::Open);
     }
+    if auto && !state.is_terminal() {
+        states.insert(SelectionState::Auto);
+    }
     states.insert(match state {
         TaskState::Unstarted => SelectionState::Unstarted,
         TaskState::Idle => SelectionState::Idle,
         TaskState::Active => SelectionState::Active,
         TaskState::Moving => SelectionState::Moving,
-        TaskState::Shipping => SelectionState::Shipping,
         TaskState::Done | TaskState::Abandoned => SelectionState::Done,
     });
     states.insert(match TaskSection::of(runtime, owned, plan_state) {
         TaskSection::Backlog => SelectionState::Backlog,
         TaskSection::Working => SelectionState::Working,
-        TaskSection::Autonomous => SelectionState::Autonomous,
         TaskSection::Done | TaskSection::Abandoned => SelectionState::Done,
     });
     states

@@ -284,9 +284,9 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
 
 fn validate_agent_policy(agent: &str) -> Result<(), LoadError> {
     let (harness, variant) = super::parse_agent(agent);
-    let kind = crate::harness::HarnessKind::parse(&harness).ok_or_else(|| {
+    let kind = loopflow_harness::HarnessKind::parse(&harness).ok_or_else(|| {
         invalid(format!(
-            "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', or 'pi'"
+            "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', 'pi', or 'agy'"
         ))
     })?;
     if let Some(model) = variant {
@@ -606,26 +606,67 @@ fn _split_agent_list(values: &mut serde_yaml_ng::Mapping, locator: &str) {
     }
 }
 
+/// What settings resolution reads that is not a file. It is the argument of
+/// [`resolve_with`] and part of a shared value's key, so the key cannot drift
+/// from what the resolution read.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Outside {
+    environment: Value,
+    invocation: Value,
+    sole_harness: Option<&'static str>,
+    pub(super) home: PathBuf,
+    pub(super) remote: Option<String>,
+}
+
+impl Outside {
+    /// `compute`'s result, shared by served readings under `key`. A
+    /// `--setting` override belongs to the command that carries it, so with
+    /// one the value is computed here and never shared.
+    pub(crate) fn shared<T: Clone + Send + Sync + 'static>(
+        &self,
+        key: crate::observe::Derived,
+        compute: impl FnOnce() -> T,
+    ) -> T {
+        if !self.invocation.is_null() {
+            return compute();
+        }
+        (*crate::observe::derived(key, compute)).clone()
+    }
+}
+
+pub fn outside() -> Result<Outside, LoadError> {
+    Ok(Outside {
+        environment: environment()?,
+        invocation: invocation_values(),
+        sole_harness: super::default_agent(),
+        home: crate::store::lf_home_dir(),
+        remote: super::remote::incoming_text(),
+    })
+}
+
 /// Resolve agent choices before fallbacks; within each key use source, scope, target.
 pub fn resolve_layers(
     layers: &[ConfigDeclarations],
     skill: Option<&Skill>,
 ) -> Result<ResolvedSettings, LoadError> {
+    resolve_with(layers, skill, &outside()?)
+}
+
+pub(crate) fn resolve_with(
+    layers: &[ConfigDeclarations],
+    skill: Option<&Skill>,
+    outside: &Outside,
+) -> Result<ResolvedSettings, LoadError> {
     // Each block shares provenance; specificity orders blocks within a source/scope.
     let mut candidates = Vec::new();
     let mut defaults = serde_yaml_ng::to_value(Config::default()).expect("Config serializes");
-    if let Some(agent) = super::default_agent() {
+    if let Some(agent) = outside.sole_harness {
         insert(&mut defaults, &["default_agent"], agent.into());
     }
     insert(
         &mut defaults,
         &["graph"],
         crate::ops::task::DEFAULT_TASK_GRAPH.into(),
-    );
-    insert(
-        &mut defaults,
-        &["planning"],
-        serde_yaml_ng::to_value(super::TrackerConfig::default()).expect("planning serializes"),
     );
     for key in crate::prompt::context_budget::BudgetKey::ALL {
         insert(
@@ -653,13 +694,13 @@ pub fn resolve_layers(
             source: ConfigSource::Environment,
             scope: SettingScope::Global,
             path: "environment".into(),
-            value: environment()?,
+            value: outside.environment.clone(),
         },
         ConfigDeclarations {
             source: ConfigSource::CommandLine,
             scope: SettingScope::Global,
             path: "CLI".into(),
-            value: invocation_values(),
+            value: outside.invocation.clone(),
         },
     ];
     for layer in layers.iter().chain(&invocation) {
@@ -1282,7 +1323,8 @@ mod tests {
                 None,
             )
             .unwrap();
-            assert!(!resolved.config.yolo);
+            // An unreadable `yolo` falls to the default, which is on.
+            assert!(resolved.config.yolo);
             assert!(resolved.config.claude.model.is_none());
             if values.starts_with("context:") {
                 assert_eq!(resolved.config.context.docs, ["README.md"]);
@@ -1762,6 +1804,66 @@ mod tests {
             .context
             .docs
             .is_empty());
+    }
+    #[test]
+    fn diff_hidden_adds_every_layer_and_diff_groups_take_the_nearest_list_whole() {
+        use super::super::catalog::{DiffGroup, DiffPathGroup, DiffRestGroup};
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let builtin = resolve_layers(&[], None).unwrap().config;
+        assert_eq!(builtin.diff_hidden, ["scratch/"]);
+        let titles = |groups: &[DiffGroup]| -> Vec<String> {
+            groups
+                .iter()
+                .map(|group| match group {
+                    DiffGroup::Paths(group) => group.title.clone(),
+                    DiffGroup::Rest(group) => format!("rest: {:?}", group.rest),
+                })
+                .collect()
+        };
+        assert_eq!(
+            titles(&builtin.diff_groups),
+            [
+                "Docs",
+                "Data model",
+                "rest: Some(\"Everything else\")",
+                "Tests",
+                "Generated and lock files"
+            ]
+        );
+
+        let resolved = resolve_layers(
+            &[
+                layer(
+                    ConfigSource::Repository,
+                    SettingScope::Repository,
+                    "diff_hidden: [vendor/]\ndiff_groups: [{title: Model, paths: [model/]}, {rest: null}]",
+                ),
+                layer(
+                    ConfigSource::Personal,
+                    SettingScope::Repository,
+                    "diff_hidden: [tests/]\ndiff_groups: [{rest: Rest}, {title: Mine, paths: [\"*.rs\"]}]",
+                ),
+            ],
+            None,
+        )
+        .unwrap()
+        .config;
+        assert_eq!(resolved.diff_hidden, ["scratch/", "vendor/", "tests/"]);
+        assert_eq!(
+            resolved.diff_groups,
+            [
+                DiffGroup::Rest(DiffRestGroup {
+                    rest: Some("Rest".into())
+                }),
+                DiffGroup::Paths(DiffPathGroup {
+                    title: "Mine".into(),
+                    paths: vec!["*.rs".into()]
+                }),
+            ]
+        );
+        assert!(super::parse_value("diff_groups", "[{rest: null}]").is_ok());
+        assert!(super::parse_value("diff_groups", "[{}]").is_err());
+        assert!(super::parse_value("diff_groups", "[{title: A, paths: [a/], rest: x}]").is_err());
     }
     #[test]
     fn typed_values_reject_unknown_keys_and_wrong_types() {

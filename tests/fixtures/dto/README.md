@@ -5,8 +5,9 @@ listener and `lf wave status` contracts consumed by the Mac app. Every absent fi
 is a parse error or an explicit null.
 
 `task_detail.json` pins `lf task status --json`: one Task row (each fact once:
-state, reason, Workflow stage, PR, next command) with its Sessions, Graph
-processes, comments and, once it has ended, the summary of its run. `lf task list`, `lf wave show` and `lf wave status`
+state, reason, Workflow stage, PR, next command) with its Sessions, the one that
+is its `conversation` (here it died with exit 137 and the server is starting it
+again), Graph processes, comments and, once it has ended, the summary of its run. `lf task list`, `lf wave show` and `lf wave status`
 print the same row. Rust round-trips it; Desktop reads `lf desktop` instead.
 
 `task_status.json` pins `lf task show --json`: the planning/execution envelope
@@ -30,6 +31,10 @@ condition, reason, and actions through the existing Wave Task row.
 
 `session.json` pins `lf resume --prepare --json`: one unresolved Task GraphStep
 session, its explicit readiness state, and its exact Machine-local attach route.
+
+`session_memberships.json` also pins `ended` (a quit, a death with exit 137,
+a death nobody saw), a Task conversation's `start`, one `outlook` of each
+kind and the `status_line` the server writes from them.
 
 `session_memberships.json` pins each Session's required `graph_membership`:
 the current Graph step, an earlier step, an independent conversation, a Session that

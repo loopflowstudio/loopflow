@@ -45,39 +45,38 @@ struct RemoveWaveSheetContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             Text(removed ? "\(name) removed" : "Remove \(name)?")
-                .font(Typography.sectionTitle(20))
+                .font(Typography.lede)
                 .foregroundStyle(palette.text)
             if let removal {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     ForEach(Array(removal.summary.enumerated()), id: \.offset) { _, line in
-                        Text(line).font(Typography.body()).foregroundStyle(palette.textSecondary)
+                        Text(line).font(Typography.text).foregroundStyle(palette.textSecondary)
                     }
                 }.accessibilityIdentifier("remove-wave-summary")
             } else {
                 ProgressView().controlSize(.small)
             }
             if case .failed(_, let message) = phase {
-                Text(message)
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.failure)
+                FailureLine("Not removed.", machine: message)
                     .accessibilityIdentifier("remove-wave-error")
             }
             HStack(spacing: Spacing.md) {
                 Spacer()
                 if removed {
                     Button("Done", action: onDone)
+                        .buttonStyle(LoopflowButtonStyle())
                         .keyboardShortcut(.defaultAction)
                         .accessibilityIdentifier("remove-wave-done")
                 } else if case .failed = phase {
-                    Button("Cancel", action: onCancel).buttonStyle(.plain)
-                        .foregroundStyle(palette.textSecondary)
+                    Button("Cancel", action: onCancel).buttonStyle(LoopflowButtonStyle())
                     Button("Retry", action: onRetry)
+                        .buttonStyle(LoopflowButtonStyle(.accent))
                         .keyboardShortcut(.defaultAction)
                         .accessibilityIdentifier("remove-wave-retry")
                 } else {
-                    Button("Cancel", action: onCancel).buttonStyle(.plain)
-                        .foregroundStyle(palette.textSecondary)
+                    Button("Cancel", action: onCancel).buttonStyle(LoopflowButtonStyle())
                     Button("Remove", role: .destructive, action: onRemove)
+                        .buttonStyle(LoopflowButtonStyle(.destructive))
                         .keyboardShortcut(.defaultAction)
                         .disabled(!canRemove)
                         .accessibilityIdentifier("remove-wave-confirm")

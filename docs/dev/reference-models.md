@@ -134,7 +134,7 @@ Graph run --< step                 graph_process_steps; result is the step's exi
 | Wave | Enduring objective, memory, cadence, budget and metric instruments; its planning holds status, Tasks, KRs and targets (one Linear Project when connected) |
 | Task | Worktree, optional PR, captured graph and position, and every associated Session and Graph run; independent Graphs do not move that position |
 | Graph | Reusable authored graph of agent/mechanical/router nodes; a running one is a Graph run and its steps |
-| LfProcess | One lf invocation's opaque id (`LfProcessId`, `LF_PROCESS_ID`); no table holds it. The record that owns the work (Session attachment, Graph run, step, Task carrier, ship event, CI repair, project activation) carries its pid, OS start and result |
+| LfProcess | One lf invocation's opaque id (`LfProcessId`, `LF_PROCESS_ID`); no table holds it. The record that owns the work (Session attachment, Graph run, step, Task carrier, CI repair, project activation) carries its pid, OS start and result |
 | AgentProcess | The provider OS process Loopflow started: durable `id` (`AgentProcessId`) with its launching lf, pid, OS start, spawn state, exit, endpoint and inbox, recorded on its Session's row; the Session also holds the attached lf, that lf's pid, OS start and terminal, and the attachment token. A Session runs one agent at a time; a replaced one has exited |
 | LfSession | Loopflow conversation identity, title, feedback, current AgentSession and provider history |
 | AgentSession | Provider-owned conversation, identified by opaque AgentSessionId for resume, turn matching and account attribution; no separate table |
@@ -164,7 +164,12 @@ writing, so a recording failure cannot skip cleanup or stop a replacement.
 ## Definition and execution projections
 
 `GraphCatalogEntry` carries the compiled graph and `GraphComposition`
-disclosure tree. Invalid sources remain visible with their error.
+disclosure tree. Invalid sources remain visible with their error. `included_by`
+names the Graphs that include it with `graph:`, so a client can tell a piece
+from a Graph people start with, and `runs` says whether it runs for a Task or
+a Wave. `workflow` is a `WorkflowOutline`: the top-level steps, the stops and
+the take-part sentence a `TaskGraph` carries, for a Graph no Task stands on
+yet.
 
 `lf wave graph show [WAVE | --no-wave]` reads the graph a Wave's, or the
 repository's, new Tasks take up and which setting chose it, independently of
@@ -377,10 +382,10 @@ once, exhaustively. Agent-issued commands are tool calls in the provider
 transcript; `LF_PROCESS_ID` names the lf they run under and `LF_EXECUTION_ID`
 hands a spawned child the id its owner row already holds.
 
-A spawner (the Task-run loop, the Graph runner, `lf ship`, the CI repair
-launcher) mints its child's id and writes the owner row with pid and OS start
-at spawn. The child writes its own end, exit and error; the spawner writes them
-if the child died first. One result rule covers every owner
+A spawner (the Task-run loop, the Graph runner, the CI repair launcher) mints
+its child's id and writes the owner row with pid and OS start at spawn. The
+child writes its own end, exit and error; the spawner writes them if the child
+died first. One result rule covers every owner
 (`ExecutionResult::of`): no end is running, exit 0 succeeded, 130 with no error
 interrupted, another exit failed, an end with no exit unknown. An AgentProcess
 records no outcome, only its end and exit code. Missing or incompatible storage

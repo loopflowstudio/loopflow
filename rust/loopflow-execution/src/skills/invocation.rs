@@ -174,7 +174,7 @@ impl SkillInvocation {
 
     pub(crate) fn terminal_input(
         &self,
-        harness: &dyn crate::harness::Harness,
+        harness: &dyn crate::harness::Launcher,
         config: &crate::agent::AgentConfig,
     ) -> anyhow::Result<(Vec<String>, String)> {
         let context = &config.task_prompt;

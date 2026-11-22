@@ -53,7 +53,11 @@
     "preview": null,
     "transition": null,
     "turn": null,
-    "raw": false
+    "raw": false,
+    "ended": null,
+    "start": null,
+    "outlook": null,
+    "status_line": "unknown"
   },
   "reopened": {
     "action": {
@@ -100,7 +104,11 @@
     "preview": null,
     "transition": null,
     "turn": null,
-    "raw": false
+    "raw": false,
+    "ended": null,
+    "start": null,
+    "outlook": null,
+    "status_line": "unknown"
   },
   "roadmap": {
     "generated_at": "2026-10-11T22:28:09.267041Z",
@@ -179,6 +187,8 @@
           },
           "execution": {
             "captured": null,
+            "died": null,
+            "outlook": null,
             "reason": "No Task Graph has run; independent Sessions may still be active",
             "state": "idle",
             "step": null
@@ -195,6 +205,7 @@
             "owner": "user",
             "reason": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
           },
+          "owned_by_you": false,
           "pr": null,
           "reference": {
             "issue_url": "https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions",
@@ -211,10 +222,6 @@
           "run_control": {
             "unavailable": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
           },
-          "ship_control": {
-            "unavailable": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
-          },
-          "shipping": null,
           "runtime": {
             "completion_pending": null,
             "provider": "opencode",
@@ -316,7 +323,11 @@
       "preview": null,
       "transition": null,
       "turn": null,
-      "raw": false
+      "raw": false,
+      "ended": null,
+      "start": null,
+      "outlook": null,
+      "status_line": "unknown"
     },
     {
       "action": {
@@ -368,7 +379,11 @@
       "preview": null,
       "transition": null,
       "turn": null,
-      "raw": false
+      "raw": false,
+      "ended": null,
+      "start": null,
+      "outlook": null,
+      "status_line": "unknown"
     },
     {
       "action": {
@@ -414,7 +429,11 @@
       "preview": null,
       "transition": null,
       "turn": null,
-      "raw": false
+      "raw": false,
+      "ended": null,
+      "start": null,
+      "outlook": null,
+      "status_line": "closed; `lf resume session_bf12c20b53be450998e36bf24a58b56f` opens it"
     }
   ],
   "task_primary": {
@@ -467,6 +486,10 @@
     "preview": null,
     "transition": null,
     "turn": null,
-    "raw": false
+    "raw": false,
+    "ended": null,
+    "start": null,
+    "outlook": null,
+    "status_line": "unknown"
   }
 }

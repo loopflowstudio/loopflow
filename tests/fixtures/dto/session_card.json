@@ -52,7 +52,11 @@
         "output_tokens": 1100
       }
     },
-    "raw": false
+    "raw": false,
+    "ended": null,
+    "start": null,
+    "outlook": null,
+    "status_line": "unknown"
   },
   "liveness": "unknown",
   "control_holder": null,

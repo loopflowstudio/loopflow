@@ -221,7 +221,7 @@ fn snapshot_preview_fixture() {
             ));
         }
     });
-    attach_with_terminal(&terminal, None, preview).unwrap();
+    attach_with_terminal(&terminal, None, preview, &mut super::RelayInput::new(true)).unwrap();
     peer.join().unwrap();
     std::fs::write(
         viewer_cwd,
@@ -287,6 +287,16 @@ printf '%s\n' "$*" >> "$HOME/launches"
     if !succeeds {
         std::fs::remove_file(&provider).unwrap();
     } else {
+        let initial_args = std::fs::read_to_string(home.join("launches")).unwrap();
+        let thread = initial_args
+            .split_whitespace()
+            .skip_while(|arg| *arg != "--session-id")
+            .nth(1)
+            .unwrap();
+        let project =
+            loopflow_harness::transcript::live::claude_project(&home.join(".claude"), repo.path());
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join(format!("{thread}.jsonl")), "{}\n").unwrap();
         std::fs::write(
             &provider,
             r#"#!/bin/sh

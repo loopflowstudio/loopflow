@@ -142,10 +142,36 @@ fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
         .unwrap();
     assert_eq!(yielded(&store), None, "headless: lf's stream reports");
     interactive(true);
+    let attempts = |store: &SqliteStore| -> (u32, Option<i64>) {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT starts_since_turn,last_started_at FROM agent_sessions WHERE id='session'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+    };
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET starts_since_turn=3,last_started_at=7 WHERE id='session'",
+            [],
+        )
+        .unwrap();
     store
         .record_native_turn(&adapter, "native", false, None)
         .unwrap();
     assert_eq!(yielded(&store), Some(false));
+    assert_eq!(
+        attempts(&store),
+        (3, Some(7)),
+        "a started turn has not finished"
+    );
     store
         .record_native_turn(&adapter, "native", true, Some(0))
         .unwrap();
@@ -153,6 +179,11 @@ fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
         yielded(&store),
         Some(true),
         "idle, so the server can wake it"
+    );
+    assert_eq!(
+        attempts(&store),
+        (0, None),
+        "a finished turn resets recovery; its next death starts at once"
     );
 }
 
@@ -603,6 +634,26 @@ fn a_cleared_conversation_is_what_reconnect_resumes_on_the_same_account() {
     let resumed = store.input_provider_session(&input).unwrap().unwrap();
     assert_eq!(resumed.agent_session.as_str(), "cleared");
     assert_eq!(resumed.account_id, Some(account));
+}
+
+/// Antigravity names its conversation at its first start, and a held terminal
+/// leaves no launcher to publish it afterwards.
+#[test]
+fn a_start_names_what_reconnect_resumes_when_the_launch_named_nothing() {
+    let (_home, store, adapter) = fixture();
+    let session = store.session("session").unwrap().unwrap();
+    let input = session.artifact_key.unwrap();
+    assert!(store.input_provider_session(&input).unwrap().is_none());
+    store
+        .with_provider_context(
+            &adapter,
+            "reported",
+            NativeBoundary::Select { source: "startup" },
+            || Ok(()),
+        )
+        .unwrap();
+    let resumed = store.input_provider_session(&input).unwrap().unwrap();
+    assert_eq!(resumed.agent_session.as_str(), "reported");
 }
 
 #[test]

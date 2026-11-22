@@ -6,16 +6,16 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::agent::{run_agent, AgentConfig, ProcessConfig};
-use crate::config::{load_config_or_default, MergeMethod};
+use crate::agent::{run_agent, ProcessConfig};
+use crate::config::MergeMethod;
 use crate::git::worktrees::{list_worktrees, main_repo_root};
 use crate::git::{current_branch, get_default_branch, rev_parse};
 use crate::graph::load_skill;
 
-use crate::ops::commit::{commit_workflow, CommitOptions};
+use crate::ops::commit::{commit_workflow, message_launch, CommitOptions, MessageAgent};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
-use crate::ops::task::StackedSync;
+use crate::ops::task::{StackParentPr, StackedSync};
 use crate::ops::util::{command_exists, stderr_from_output};
 
 #[derive(Debug, Clone)]
@@ -197,7 +197,7 @@ pub fn create_or_update_pr(
             parent: stack.as_ref().map(|stack| RecordedParent {
                 identifier: &stack.parent_identifier,
                 branch: &stack.parent_branch,
-                merged: stack.parent_merged,
+                merged: stack.parent == StackParentPr::Merged,
             }),
             base: &base_branch,
             default_branch: &default_branch,
@@ -517,9 +517,11 @@ pub fn generate_pr_copy(
     progress: &impl Progress,
     agent_override: Option<&str>,
 ) -> OpsResult<PrCopy> {
-    let template = load_skill("pr-message", repo)
-        .map_err(|err| OpsError::Message(format!("pr-message skill not found: {err}")))?
+    let skill = load_skill("pr-message", repo)
+        .map_err(|err| OpsError::Message(format!("pr-message skill not found: {err}")))?;
+    let template = skill
         .content
+        .as_deref()
         .ok_or_else(|| OpsError::Message("pr-message skill has no content".to_string()))?;
     let main_repo = resolve_main_repo(repo);
     let default_branch = get_default_branch(&main_repo)?;
@@ -540,22 +542,9 @@ pub fn generate_pr_copy(
         "{template}\n\n## Base branch\n{base_branch}\n\n## Commits\n```\n{log}\n```\n\n## Diff stat\n```\n{stat}\n```\n\n## Unified diff\n```diff\n{diff}\n```\n\nReturn exactly one JSON object with this schema:\n{{\"title\":\"...\",\"body\":\"...\"}}\nNo markdown fences. No explanation."
     );
 
-    let config = load_config_or_default(Some(repo));
-    let agent = match agent_override {
-        Some(agent) => agent,
-        None => config.agent()?,
-    }
-    .to_string();
     progress.status("Generating PR title/body...");
 
-    let launch = AgentConfig {
-        chrome: config.chrome,
-        codex_service_tier: config.codex.service_tier,
-        task_prompt: prompt,
-        cwd: Some(repo.to_path_buf()),
-        skip_permissions: config.yolo,
-        ..AgentConfig::new(crate::config::Agent::parse(&agent)?.with_configured_model(&config))
-    };
+    let launch = message_launch(repo, &skill, MessageAgent::Chosen(agent_override), prompt)?;
     let process = ProcessConfig {
         stream: false,
         ..Default::default()
@@ -2054,7 +2043,7 @@ fn publication_base(
     let stack = crate::ops::task::task_stack(repo)?;
     let base = match stack.as_ref() {
         Some(stack) => stack
-            .live_parent_branch()
+            .live_parent_branch(default_branch)?
             .unwrap_or(default_branch)
             .to_string(),
         None => pr_target(repo, main_repo, default_branch)?,

@@ -48,7 +48,7 @@ fn load_config_parses_basic_yaml() {
         temp.path(),
         r#"
 agent: claude:sonnet
-yolo: true
+yolo: false
 "#,
     );
 
@@ -56,7 +56,7 @@ yolo: true
         .expect("config should load")
         .expect("config should exist");
     assert_eq!(config.agent.as_deref(), Some("claude:sonnet"));
-    assert!(config.yolo);
+    assert!(!config.yolo);
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn load_config_or_default_returns_defaults() {
     let config = with_clean_home(|| load_config_or_default(Some(temp.path())));
 
     assert!(config.agent.is_none());
-    assert!(!config.yolo);
+    assert!(config.yolo);
     assert_eq!(config.chrome, None);
 }
 
@@ -105,7 +105,7 @@ fn config_feature_flags() {
     write_config(
         temp.path(),
         r#"
-yolo: true
+yolo: false
 chrome: true
 pr: true
 "#,
@@ -114,7 +114,7 @@ pr: true
     let config = with_clean_home(|| load_config(Some(temp.path())))
         .unwrap()
         .unwrap();
-    assert!(config.yolo);
+    assert!(!config.yolo);
     assert_eq!(config.chrome, Some(true));
     assert!(config.pr);
 }

@@ -1651,6 +1651,125 @@ Body:
     assert!(result.created);
 }
 
+/// A `gh` that keeps the arguments of `pr create` in `created`.
+fn recording_gh_script(created: &std::path::Path) -> String {
+    format!(
+        "#!/bin/sh\ncase \"$1 $2\" in\n  'pr list') echo '[]'; exit 0;;\n  'pr create') printf '%s\\n' \"$@\" > '{}'; echo 'https://example.com/pr/1'; exit 0;;\n  'pr view') echo 'OPEN'; exit 0;;\nesac\nexit 0\n",
+        created.display()
+    )
+}
+
+#[test]
+fn pr_copy_moves_to_the_next_agent_when_codex_is_out_of_quota() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    std::fs::create_dir_all(home.path().join(".lf")).expect("config dir");
+    std::fs::write(
+        home.path().join(".lf/config.yaml"),
+        "agents: [codex, claude]\n",
+    )
+    .expect("config");
+    let created = home.path().join("created");
+    let received = home.path().join("received");
+    let _env = EnvGuard::with_home(
+        &[
+            ("gh", recording_gh_script(&created).as_str()),
+            ("open", noop_script()),
+            ("codex", support::refused_codex_script().as_str()),
+            (
+                "claude",
+                support::answering_claude_script(
+                    r#"{"title":"written by claude","body":"after codex refused"}"#,
+                    &received,
+                )
+                .as_str(),
+            ),
+        ],
+        Some(home.path()),
+    );
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    // A diff longer than the excerpt a continued conversation would quote.
+    repo.create_file("feature.txt", &"a changed line\n".repeat(1_200));
+    repo.create_file("last.txt", "the end of the diff\n");
+    repo.stage_all();
+    repo.commit("feature work");
+    push_branch(&repo, "feature");
+
+    let result = create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            draft: false,
+            title: None,
+            body: None,
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("PR copy written by the next agent");
+
+    assert!(result.created);
+    assert!(fs::read_to_string(created)
+        .unwrap()
+        .contains("written by claude"));
+    // Claude starts on the same prompt Codex was refused, the whole diff in it.
+    let prompt = fs::read_to_string(received).unwrap();
+    assert!(prompt.contains("## Unified diff"), "{prompt}");
+    assert!(!prompt.contains("Original task:"));
+    assert!(prompt.contains("the end of the diff"));
+    assert!(prompt.ends_with("No markdown fences. No explanation."));
+    assert_eq!(prompt.matches("a changed line").count(), 1_200);
+}
+
+#[test]
+fn pr_copy_starts_on_the_pr_message_skills_own_agent() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    std::fs::create_dir_all(home.path().join(".lf")).expect("config dir");
+    std::fs::write(
+        home.path().join(".lf/config.yaml"),
+        "agents: [codex, claude]\nskill:\n  pr-message:\n    default_agent: claude\n",
+    )
+    .expect("config");
+    let created = home.path().join("created");
+    let launched = home.path().join("codex-launched");
+    let codex = format!("#!/bin/sh\ntouch '{}'\nexit 1\n", launched.display());
+    let _env = EnvGuard::with_home(
+        &[
+            ("gh", recording_gh_script(&created).as_str()),
+            ("open", noop_script()),
+            ("codex", codex.as_str()),
+            (
+                "claude",
+                support::answering_claude_script(
+                    r#"{"title":"written by the skill's agent","body":"body"}"#,
+                    &home.path().join("received"),
+                )
+                .as_str(),
+            ),
+        ],
+        Some(home.path()),
+    );
+    let repo = TestRepo::new();
+    create_changed_branch(&repo, "feature");
+    push_branch(&repo, "feature");
+
+    create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            draft: false,
+            title: None,
+            body: None,
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("PR copy written by the skill's agent");
+
+    assert!(fs::read_to_string(created)
+        .unwrap()
+        .contains("written by the skill's agent"));
+    assert!(!launched.exists(), "Codex was launched for PR copy");
+}
+
 #[test]
 fn persistent_publication_pushes_committed_docs_and_preserves_local_files() {
     let home = tempfile::tempdir().unwrap();

@@ -7,9 +7,10 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use super::{locate, read, ExpiryPolicy, Gap, Located, Source, Turn};
-use crate::harness::HarnessKind;
+use super::{locate, Gap, Located};
 use crate::store::ProviderAccountId;
+use loopflow_harness::transcript::{read, ExpiryPolicy, Source, Turn};
+use loopflow_harness::HarnessKind;
 use loopflow_storage::sqlite::SqliteStore;
 
 pub use loopflow_storage::transcript::{ThreadFacts, TurnFacts};
@@ -136,7 +137,8 @@ fn conversation(Thread { facts, located }: Thread, now: i64) -> Conversation {
             let mut written = false;
             if let Source::File(path) = &source {
                 retention.path = Some(path.display().to_string());
-                retention.after = super::modified(path).and_then(|at| retention.policy.after(at));
+                retention.after = loopflow_harness::transcript::modified(path)
+                    .and_then(|at| retention.policy.after(at));
                 written = std::fs::metadata(path).is_ok_and(|meta| meta.len() > 0);
             }
             match read(harness, &source) {
@@ -170,7 +172,7 @@ fn gone(harness: HarnessKind, gap: &Gap, after: Option<i64>, now: i64) -> String
             Some(after) if after < now => format!(
                 "gone at {}; removed after {}",
                 harness.as_str(),
-                super::date(after)
+                loopflow_harness::transcript::date(after)
             ),
             _ => format!("missing at {}", harness.as_str()),
         },

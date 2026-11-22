@@ -237,32 +237,37 @@ fn validate_document(value: &Value, scope: SettingScope) -> Result<()> {
     Ok(())
 }
 
-pub fn incoming() -> Result<Option<Profile>> {
+/// The forwarded profile as it arrived. A served request has none: it runs
+/// for this Machine's person.
+pub(super) fn incoming_text() -> Option<String> {
     if crate::journal::request::active() {
-        return Ok(None);
+        return None;
     }
-    std::env::var(PROFILE_ENV)
-        .ok()
-        .map(|text| {
-            let profile: Profile = serde_json::from_str(&text)?;
-            anyhow::ensure!(
-                profile.global == project(&profile.global)
-                    && profile.repository_values == project(&profile.repository_values),
-                "remote profile contains host-local or unknown settings"
-            );
-            validate_document(&profile.global, SettingScope::Global)?;
-            validate_document(&profile.repository_values, SettingScope::Repository)?;
-            let mut definitions = std::collections::BTreeSet::new();
-            for definition in &profile.definitions {
-                super::definitions::validate(definition)?;
-                anyhow::ensure!(
-                    definitions.insert((definition.kind, &definition.name)),
-                    "duplicate personal definition"
-                );
-            }
-            Ok(profile)
-        })
-        .transpose()
+    std::env::var(PROFILE_ENV).ok()
+}
+
+pub fn incoming() -> Result<Option<Profile>> {
+    incoming_text().as_deref().map(parse).transpose()
+}
+
+fn parse(text: &str) -> Result<Profile> {
+    let profile: Profile = serde_json::from_str(text)?;
+    anyhow::ensure!(
+        profile.global == project(&profile.global)
+            && profile.repository_values == project(&profile.repository_values),
+        "remote profile contains host-local or unknown settings"
+    );
+    validate_document(&profile.global, SettingScope::Global)?;
+    validate_document(&profile.repository_values, SettingScope::Repository)?;
+    let mut definitions = std::collections::BTreeSet::new();
+    for definition in &profile.definitions {
+        super::definitions::validate(definition)?;
+        anyhow::ensure!(
+            definitions.insert((definition.kind, &definition.name)),
+            "duplicate personal definition"
+        );
+    }
+    Ok(profile)
 }
 
 fn read_projection(path: &Path, kind: Option<DefinitionKind>) -> Result<Value> {
@@ -399,11 +404,15 @@ fn retain(
     Ok(())
 }
 
-pub fn layers(repo: Option<&Path>, wave: Option<&str>) -> Result<Option<Vec<ConfigDeclarations>>> {
-    let Some(profile) = incoming()? else {
-        return Ok(None);
-    };
-    let home = crate::store::lf_home_dir();
+/// Personal layers when `profile` is the forwarded one: its portable settings
+/// over this Machine's host-local ones.
+pub(super) fn layers(
+    profile: &str,
+    home: &Path,
+    repo: Option<&Path>,
+    wave: Option<&str>,
+) -> Result<Vec<ConfigDeclarations>> {
+    let profile = parse(profile)?;
     let global = home.join("config.yaml");
     let mut local = super::files::read(&global)?;
     let portable = project(&local);
@@ -455,7 +464,7 @@ pub fn layers(repo: Option<&Path>, wave: Option<&str>) -> Result<Option<Vec<Conf
             layers.extend(waves);
         }
     }
-    Ok(Some(layers))
+    Ok(layers)
 }
 
 /// Retention is an inbound execution effect, never a side effect of resolution.
@@ -538,17 +547,20 @@ pub fn inspect(replace: bool, keep: bool) -> Result<serde_json::Value> {
 }
 
 /// Apply origin authority to a domain reader without consulting retention metadata.
-pub(crate) fn apply_document(path: &Path, document: &mut Value) -> Result<()> {
-    let Some(profile) = incoming()? else {
+pub(crate) fn apply_document(
+    profile: Option<&str>,
+    home: &Path,
+    path: &Path,
+    document: &mut Value,
+) -> Result<()> {
+    let Some(profile) = profile.map(parse).transpose()? else {
         return Ok(());
     };
-    if path == crate::store::lf_home_dir().join("config.yaml") {
+    if path == home.join("config.yaml") {
         replace_projection(document, &profile.global);
-    } else if path
-        .file_name()
-        .is_some_and(|name| name == super::files::PRIVATE_FILE)
-        && path
-            .parent()
+    } else if path.ends_with(super::files::PRIVATE_FILE)
+        && super::files::private_root(path)
+            .ok()
             .and_then(|repo| crate::repository::RepoId::discover(repo).ok())
             .map(|repo| repo.to_string())
             == profile.repository

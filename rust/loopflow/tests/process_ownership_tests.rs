@@ -7,7 +7,7 @@ mod support;
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::{Child, Command};
+use std::process::Command;
 
 use loopflow_execution::session::{LfSession, TitleSource};
 use loopflow_execution::store::sqlite::SqliteStore;
@@ -15,99 +15,6 @@ use loopflow_execution::store::{open_ephemeral_store, StorageConfig};
 use loopflow_model::id::LfProcessId;
 use loopflow_test_support::{RunningParent, TestRepo};
 
-#[tokio::test]
-async fn agent_settlement_on_read_ends_a_detached_provider_without_losing_history() {
-    use std::os::unix::process::CommandExt;
-
-    struct Agent(Child);
-    impl Drop for Agent {
-        fn drop(&mut self) {
-            if matches!(self.0.try_wait(), Ok(None)) {
-                // SAFETY: this unreaped fixture child created its own process
-                // group; only that owned group is signaled during cleanup.
-                unsafe { libc::kill(-(self.0.id() as i32), libc::SIGKILL) };
-            }
-            let _ = self.0.wait();
-        }
-    }
-
-    let home = tempfile::tempdir().unwrap();
-    let repo = TestRepo::new();
-    let database = home.path().join("loopflow.db");
-    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-        .await
-        .unwrap();
-    let store = loopflow_execution::store::open_sqlite(&database).unwrap();
-    reserve_session(&store, "orphan", repo.path());
-    let sql = rusqlite::Connection::open(&database).unwrap();
-    sql.execute(
-        "UPDATE agent_sessions SET interactive=0 WHERE id='orphan'",
-        [],
-    )
-    .unwrap();
-    let parent = recorded_lf_process(&database);
-    let attachment = attachment::claim_session_attachment(&store, "orphan", None, &parent).unwrap();
-    // Only this throwaway group can be signaled. The shell supplies the server
-    // argv shape, not a configured provider, account or conversation.
-    let started = time::OffsetDateTime::now_utc().unix_timestamp();
-    let mut agent = Agent(
-        Command::new("/bin/sh")
-            .env_clear()
-            .env("PATH", "/usr/bin:/bin")
-            .args([
-                "-c",
-                "sleep 60 & wait; :",
-                "codex",
-                "app-server",
-                "--listen",
-                "fixture",
-            ])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .process_group(0)
-            .spawn()
-            .unwrap(),
-    );
-    sql.execute(
-        "UPDATE processes SET pid=?2,os_started_at=?3,spawn_state='spawn_requested' WHERE id=?1",
-        rusqlite::params![attachment.agent_process_id, agent.0.id(), started],
-    )
-    .unwrap();
-    store
-        .release_session_attachment("orphan", &attachment)
-        .unwrap();
-    let before = store
-        .agent_process(&attachment.agent_process_id)
-        .unwrap()
-        .unwrap();
-    let history = store.session_history("orphan", 0, 0).unwrap();
-    assert!(before.completed_at.is_none());
-    assert!(agent.0.try_wait().unwrap().is_none());
-
-    // An ordinary read of this Machine's Tasks settles a detached row without receipts.
-    let output = command(home.path(), repo.path(), &["task", "list"])
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-    assert!(!agent
-        .0
-        .try_wait()
-        .unwrap()
-        .expect("reconciled provider exited")
-        .success());
-    let ended = store
-        .agent_process(&attachment.agent_process_id)
-        .unwrap()
-        .unwrap();
-    assert!(ended.completed_at.is_some());
-    assert_eq!(ended.pid, before.pid);
-    assert_eq!(ended.parent_lf_process_id, Some(parent));
-    assert_eq!(store.session_history("orphan", 0, 0).unwrap(), history);
-}
-
-/// A held checkout names the Session whose agent holds it, including one
-/// with no OS identity.
 #[test]
 fn task_checkout_blockers_name_the_held_session() {
     let home = tempfile::tempdir().unwrap();

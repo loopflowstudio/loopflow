@@ -58,11 +58,19 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
     // A clone's authored Waves join the store with the first explicit write here.
     crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, &main.to_string_lossy())
         .map_err(lifecycle_error)?;
-    let created = store
-        .get_wave_at(&locator)
-        .await
-        .map_err(lifecycle_error)?
-        .is_none();
+    let held = || async {
+        store
+            .get_wave_at(&locator)
+            .await
+            .map(|wave| wave.is_some())
+            .map_err(lifecycle_error)
+    };
+    // Another Machine may have made a Wave of this name: read the plan first,
+    // so this command joins that Wave and does not make a second.
+    let created = !held().await? && {
+        super::plan_carriers::look_first(&store, &main).await;
+        !held().await?
+    };
     let wave = crate::work::wave::ensure_wave_row(&store, &main, locator.slug())
         .await
         .map_err(lifecycle_error)?;
@@ -77,6 +85,12 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
         &[authored_path(wave.slug())],
         &format!("lf wave add: {}", wave.slug()),
     );
+    super::planning_sync::sync_after_save(
+        &store,
+        &main.to_string_lossy(),
+        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(wave.id().clone()),
+    )
+    .await;
     let mut added = WaveAdded {
         id: wave.id().clone(),
         name: wave.slug().to_string(),
@@ -1078,6 +1092,14 @@ pub async fn rename(
         }
         operation.planning_done = true;
         recovery::save(&operation, &store)?;
+        super::planning_sync::sync_after_save(
+            &store,
+            &operation.target_repo,
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(
+                operation.waves[0].id.clone(),
+            ),
+        )
+        .await;
     }
     let files = recovery::finish_files(&mut operation, &store, &main);
     let initiative = if let Some(provider) = operation.providers.first() {

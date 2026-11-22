@@ -291,22 +291,54 @@ jobs:
       - name: Give tests a fallback Git identity
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
       - uses: astral-sh/setup-uv@v7
-      - name: Acquire and fingerprint the installation image
-        id: image
+      - name: Start disposable installation containers
+        id: installation
+        env:
+          PROOF_IMAGE: docker.io/library/rust:trixie
         run: |
-          uv run python -c 'from scripts.test_task_installation import _prepare_image; _prepare_image("docker.io/library/rust:trixie")'
-          docker image inspect --format 'id={{.Id}}' docker.io/library/rust:trixie >> "$GITHUB_OUTPUT"
+          # Start Docker containers before cache extraction puts pressure on runner storage.
+          uv run python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from scripts.test_task_installation import _start_container
+
+          image = os.environ["PROOF_IMAGE"]
+          cache = Path(os.environ["RUNNER_TEMP"]) / "installation-cargo"
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", buffering=1) as output:
+              for proof in ("tasks", "upgrade"):
+                  container = _start_container(image, cache)
+                  print(f"{proof}={container}", file=output)
+          PY
+          docker image inspect --format 'id={{.Id}}' "$PROOF_IMAGE" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v6
         id: installation-cache
         with:
           path: ${{ runner.temp }}/installation-cargo
-          key: installation-${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.id }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'scripts/test_task_installation.py') }}
+          key: installation-${{ runner.os }}-${{ runner.arch }}-${{ steps.installation.outputs.id }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'scripts/test_task_installation.py') }}
       - name: Prove managed Tasks in a disposable installation
         if: needs.merge-proof.outputs.reuse != 'true' || steps.installation-cache.outputs.cache-hit != 'true'
-        run: uv run python scripts/test_task_installation.py --cache-dir "$RUNNER_TEMP/installation-cargo"
+        env:
+          PROOF_CONTAINER: ${{ steps.installation.outputs.tasks }}
+        run: uv run python scripts/test_task_installation.py --container "$PROOF_CONTAINER"
       - name: Prove populated released repository upgrade
         if: needs.merge-proof.outputs.reuse != 'true' || steps.installation-cache.outputs.cache-hit != 'true'
-        run: uv run python scripts/test_task_installation.py --cache-dir "$RUNNER_TEMP/installation-cargo" --repository-upgrade
+        env:
+          PROOF_CONTAINER: ${{ steps.installation.outputs.upgrade }}
+        run: uv run python scripts/test_task_installation.py --container "$PROOF_CONTAINER" --repository-upgrade
+      - name: Remove disposable installation containers
+        if: always()
+        env:
+          TASKS_CONTAINER: ${{ steps.installation.outputs.tasks }}
+          UPGRADE_CONTAINER: ${{ steps.installation.outputs.upgrade }}
+        run: |
+          containers=()
+          for container in "$TASKS_CONTAINER" "$UPGRADE_CONTAINER"; do
+            if [ -n "$container" ]; then containers+=("$container"); fi
+          done
+          if [ "${#containers[@]}" -gt 0 ]; then
+            docker rm --force "${containers[@]}"
+          fi
       - name: Return Cargo cache ownership to the runner
         if: always() && steps.installation-cache.outcome == 'success'
         run: |

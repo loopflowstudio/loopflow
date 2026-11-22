@@ -341,12 +341,29 @@ pub struct SessionSummary {
     pub held: bool,
     pub primary_scope: Option<String>,
     pub agent_process_evidence: crate::ProcessIdentityEvidence,
+    /// When its current agent's end was recorded, and how; `None` while it
+    /// runs, before the first, or when nobody recorded the end.
+    pub agent_end: Option<AgentEnd>,
+    /// Starts by the server's recovery pass since it last finished a turn.
+    pub starts_since_turn: u32,
+    /// When the pass last started it.
+    pub last_started_at: Option<i64>,
+    /// Why the pass's last start failed; `None` once one succeeded.
+    pub start_failure: Option<String>,
     /// Available for a person, as of the read's clock.
     pub available: bool,
     pub program_status: Option<loopflow_model::program_status::Records>,
     /// None for a conversation Loopflow never attached to.
     pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
     pub task_terminal: bool,
+    /// It is an open Task's conversation in the Task's checkout on this
+    /// Machine: one the server's recovery pass reads. A Task checked out
+    /// elsewhere, a completed conversation, or one moved to another Machine,
+    /// is not.
+    pub in_task_checkout: bool,
+    /// Its held terminal is open and its agent's pid is not recorded yet: a
+    /// start under way, which has no liveness to read.
+    pub launching: bool,
     pub task_ids: Vec<TaskId>,
     pub captured: Option<i64>,
     pub id: LfSessionId,
@@ -374,6 +391,21 @@ pub struct SessionSummary {
     pub independent: bool,
     pub wave_name: Option<String>,
     pub task_identifier: Option<String>,
+}
+
+/// An agent's recorded end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentEnd {
+    pub at: i64,
+    /// The provider's exit, as its launcher saw it; `None` when nobody
+    /// saw it: the holder died, or the Machine restarted.
+    pub exit_code: Option<i32>,
+}
+
+/// The person quit: `/exit` or Ctrl+D (0), or Ctrl+C at the prompt (130).
+/// Every other exit, and an end nobody saw, is a death.
+pub fn quit_by_person(exit_code: Option<i32>) -> bool {
+    matches!(exit_code, Some(0 | 130))
 }
 
 /// A Graph as its Graph process records it; Current says nothing about a live process.

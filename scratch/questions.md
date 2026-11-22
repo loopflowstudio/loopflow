@@ -160,3 +160,7 @@ commands in a checkout are not listed as Task work; LOO-965 owns
 - Four questions on `scratch/concept-review.html` are unanswered: adoption
   for Sessions vs runs, where Mismatch A goes, the primary mark's upgrade
   day, `work_source='inherited'`.
+
+## Sync with main (2026-11-22)
+
+Kept main’s removal of the old Git planning exchange test. Conversation recovery now reads the Session’s Task primary mark, and the table rebuild carries its recovery counters and last start failure.

@@ -26,6 +26,16 @@ struct Fixture {
 impl Fixture {
     /// `waits` keeps the stand-in attached until its stdin receives a line.
     fn new(waits: bool) -> Self {
+        Self::with_server_provider(waits, true)
+    }
+
+    /// Manual resumes pass their own PATH to the holder. Keep the stand-in
+    /// off the server's PATH so the recovery watcher cannot launch it first.
+    fn manual_conversations() -> Self {
+        Self::with_server_provider(false, false)
+    }
+
+    fn with_server_provider(waits: bool, server_has_provider: bool) -> Self {
         let home = tempfile::tempdir().unwrap();
         support::seed_store(home.path());
         let bin = home.path().join("bin");
@@ -35,13 +45,22 @@ impl Fixture {
         let provider = bin.join("opencode");
         std::fs::write(
             &provider,
-            include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+            include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
                 .replace("__WAIT__", if waits { "True" } else { "False" }),
         )
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let server_path = if server_has_provider {
+            format!("{}:/usr/bin:/bin", bin.display())
+        } else {
+            "/usr/bin:/bin".to_owned()
+        };
         Self {
-            _server: MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path()),
+            _server: MachineServer::start_with_path(
+                env!("CARGO_BIN_EXE_lf"),
+                home.path(),
+                &server_path,
+            ),
             home,
             repo: TestRepo::new(),
             launched,
@@ -179,7 +198,7 @@ impl Fixture {
     fn finish_on_resume(&self) {
         std::fs::write(
             self.home.path().join("bin/opencode"),
-            include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+            include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
                 .replace("__WAIT__", "False"),
         )
         .unwrap();
@@ -298,9 +317,9 @@ const PATIENCE: Duration = Duration::from_secs(180);
 const LAUNCH: [&str; 5] = ["-i", "--agent", "opencode", ":", "Review the parser"];
 
 #[test]
-fn task_conversation_starts_at_launch_not_creation() {
+fn task_checkout_prepares_the_conversation_and_manual_launch_reuses_it() {
     for headless in [false, true] {
-        let fixture = Fixture::new(false);
+        let fixture = Fixture::manual_conversations();
         std::fs::create_dir_all(fixture.repo.path().join(".lf")).unwrap();
         std::fs::write(
             fixture.repo.path().join(".lf/config.yaml"),
@@ -436,7 +455,7 @@ fn task_conversation_starts_at_launch_not_creation() {
 
 #[test]
 fn primary_readiness_is_metadata_only_for_repository_wave_and_task() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::manual_conversations();
     support::register_task_with_pr(
         fixture.home.path(),
         fixture.repo.path(),
@@ -682,14 +701,15 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     );
     support::seed_store(fixture.home.path());
     // A bare run stops before the interactive review step; it may return as
-    // its Graph registers, so wait for it to stop there.
+    // its Graph registers, so wait for it to stop there. The Task reads as
+    // moving until the run's own Process has ended.
     let run = fixture
         .command(&["--agent", "codex", "task", "run", task_id, "proof"])
         .output()
         .unwrap();
     assert!(run.status.success(), "{run:?}");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    let final_status = loop {
+    loop {
         let status = fixture.json(&["desktop", "task", task_id, "--json"]);
         let finished = support::recorded_graphs(fixture.home.path())
             .first()
@@ -697,13 +717,13 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         if finished
             && status["execution"]["work"]["graph"]["position"]
                 == serde_json::json!({"kind": "at", "step": "review"})
+            && status["execution"]["status"] == "active"
         {
-            break status;
+            break;
         }
         assert!(std::time::Instant::now() < deadline, "{status}");
         std::thread::sleep(std::time::Duration::from_millis(100));
-    };
-    assert_eq!(final_status["execution"]["status"], "active");
+    }
     assert_eq!(fixture.count("agent_sessions"), 2);
     let graphs = support::recorded_graphs(fixture.home.path());
     assert_eq!(graphs.len(), 1);
@@ -729,7 +749,9 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         .unwrap();
     assert!(!refused.status.success());
     assert!(
-        String::from_utf8_lossy(&refused.stderr).contains("deleted"),
+        [&refused.stdout, &refused.stderr]
+            .iter()
+            .any(|output| String::from_utf8_lossy(output).contains("deleted")),
         "{refused:?}"
     );
     assert_eq!(fixture.count("agent_sessions"), 2);
@@ -768,10 +790,9 @@ fn task_conversation_reopens_after_terminal_startup_failure() {
     );
     let provider = fixture.home.path().join("bin/opencode");
     let original = std::fs::read(&provider).unwrap();
-    std::fs::write(&provider, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::write(&provider, "#!/bin/sh\nexit 3\n").unwrap();
     let failed = fixture.run(&LAUNCH);
     assert!(!failed.status.success());
-    assert!(String::from_utf8_lossy(&failed.stderr).contains("private server failed to start"));
     let sessions = fixture.sessions();
     assert_eq!(sessions.len(), 1);
     let id = sessions[0]["id"].as_str().unwrap();
@@ -787,15 +808,6 @@ fn task_conversation_reopens_after_terminal_startup_failure() {
         .unwrap()
         .iter()
         .any(|id| id == task.task.id.as_str()));
-    let history: i64 = fixture
-        .db()
-        .query_row(
-            "SELECT count(*) FROM session_events WHERE session_id=?1 AND kind='captured'",
-            [id],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(history, 2);
 }
 
 #[test]
@@ -1164,7 +1176,7 @@ fn preparation_rejects_messages_without_admitting_or_launching_a_conversation() 
 
 #[test]
 fn ensured_task_conversation_opens_and_recovers_unrecorded_native_exits() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::manual_conversations();
     support::register_task_with_pr(
         fixture.home.path(),
         fixture.repo.path(),
@@ -1241,7 +1253,7 @@ fn ensured_task_conversation_opens_and_recovers_unrecorded_native_exits() {
 #[test]
 fn ensured_conversation_recovers_native_exit_before_history_is_published() {
     {
-        let fixture = Fixture::new(false);
+        let fixture = Fixture::manual_conversations();
         support::register_task_with_pr(
             fixture.home.path(),
             fixture.repo.path(),
@@ -1264,21 +1276,21 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
         std::fs::write(
             &provider,
             script.replace(
-                "print(json.dumps({\"url\": f\"http://127.0.0.1:{server.server_port}\"}), flush=True)",
-                "_record_launch()\nraise SystemExit(0)",
+                "if \"run\" not in sys.argv:\n    _record_launch()",
+                "if \"run\" not in sys.argv:\n    _record_launch()\n    raise SystemExit(3)",
             ),
         )
         .unwrap();
         let failed = fixture.run(&["session", "resume", id]);
         assert!(!failed.status.success());
         // The reopening runs in a held terminal, so its error reaches the
-        // viewer's screen: the provider exited before publishing resumable history.
+        // viewer's screen.
         let screen = format!(
             "{}{}",
             String::from_utf8_lossy(&failed.stdout),
             String::from_utf8_lossy(&failed.stderr)
         );
-        assert!(screen.contains("failed to start"), "{screen}");
+        assert!(screen.contains("opencode exited"), "{screen}");
         let previous = fixture.launches()[0].clone();
         fixture
             .db()
@@ -1293,8 +1305,8 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
         let opened = fixture.run(&["session", "resume", id]);
         assert!(opened.status.success(), "{opened:?}");
         let launches = fixture.launches();
+        // The reopening continues the conversation lf named at the first launch.
         assert_eq!(launches.len(), 2);
-        assert_ne!(launches[1], previous);
         assert_eq!(fixture.session_row(&previous).0, id);
         assert_eq!(fixture.session_row(&launches[1]).0, id);
         let primary = fixture.json(&[
@@ -1312,7 +1324,7 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
 
 #[test]
 fn a_task_primary_is_one_of_its_own_conversations() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::manual_conversations();
     let sole_path = fixture.repo.create_named_worktree("task-sole");
     let task = support::register_task_with_pr(
         fixture.home.path(),
@@ -1324,7 +1336,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     support::register_sibling_task(&task, "INF-124", "task-several", &several_path);
     let empty_path = fixture.repo.create_named_worktree("task-empty");
     support::register_sibling_task(&task, "INF-125", "task-empty", &empty_path);
-    let converse = |checkout: &Path| -> String {
+    let converse = |checkout: &Path, opened_at: i64| -> String {
         let before = fixture.launches().len();
         let output = fixture
             .command(&LAUNCH)
@@ -1332,7 +1344,23 @@ fn a_task_primary_is_one_of_its_own_conversations() {
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
-        fixture.session_row(&fixture.launches()[before]).0
+        let launches = fixture.launches();
+        let [launch] = &launches[before..] else {
+            panic!(
+                "expected one launch for {}, got {:?}",
+                checkout.display(),
+                &launches[before..]
+            );
+        };
+        let session = fixture.session_row(launch).0;
+        fixture
+            .db()
+            .execute(
+                "UPDATE agent_sessions SET opened_at=?2 WHERE id=?1",
+                rusqlite::params![session, opened_at],
+            )
+            .unwrap();
+        session
     };
     let primary = |args: &[&str]| -> Value {
         fixture.json(
@@ -1362,7 +1390,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     assert!(members("INF-125").is_empty());
 
     // The Task's only unfinished interactive conversation is its primary.
-    let sole = converse(&sole_path);
+    let sole = converse(&sole_path, 1_000);
     let chosen = primary(&["inf-123"]);
     assert_eq!(chosen["id"], sole.as_str());
     // Its row is marked for its Task, and it stays a member of that Task.
@@ -1376,15 +1404,8 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     }
 
     // Among several, the most recently used one; the others stay open.
-    let earlier = converse(&several_path);
-    let later = converse(&several_path);
-    fixture
-        .db()
-        .execute(
-            "UPDATE agent_sessions SET created_at=created_at-60 WHERE id=?1",
-            [&earlier],
-        )
-        .unwrap();
+    let earlier = converse(&several_path, 1_000);
+    let later = converse(&several_path, 2_000);
     assert_eq!(primary(&["INF-124"])["id"], later.as_str());
     assert_eq!(members("INF-124").len(), 2);
 
@@ -1395,7 +1416,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     );
     let explained = fixture.json(&["resume", "--task", "inf-124", "--explain", "--json"]);
     assert_eq!(explained["resolution"]["session"]["value"], later.as_str());
-    let newest = converse(&several_path);
+    let newest = converse(&several_path, 3_000);
     assert_eq!(primary(&["INF-124"])["id"], later.as_str());
     assert_eq!(members("INF-124").len(), 3);
     // The listing marks it, so a reader finds it without choosing one.
@@ -2305,7 +2326,7 @@ fn public_taskless_graph_records_distinct_completed_loop_passes() {
 }
 
 #[test]
-fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
+fn an_opencode_run_that_dies_after_a_tool_fails_its_turn_and_is_not_retried() {
     let fixture = Fixture::new(false);
     saved_graph_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("disconnect-after-tool"), "").unwrap();
@@ -2327,8 +2348,8 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
         )
         .unwrap();
     assert_eq!(starts, 1);
-    // The exit read closes the turn OpenCode's store left open; it never
-    // reads as a turn that finished.
+    // The run left without an answer: its turn failed, and never reads as
+    // one that finished.
     let endings: Vec<String> = fixture
         .db()
         .prepare("SELECT status FROM history.turns WHERE ended_at IS NOT NULL")
@@ -2337,7 +2358,7 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert_eq!(endings, ["interrupted"]);
+    assert_eq!(endings, ["failed"]);
     // The Graph stopped at its first step and launched nothing after it.
     let graphs = support::recorded_graphs(fixture.home.path());
     assert_eq!(graphs.len(), 1);
@@ -2709,18 +2730,6 @@ fn promotion_sets_directory_immediately_and_resumes_same_native_conversation() {
     )
     .unwrap();
     fixture.finish_on_resume();
-    std::fs::write(fixture.home.path().join("reject-move"), "once").unwrap();
-    let failed = fixture.run(&["resume", &id]);
-    assert!(
-        !failed.status.success(),
-        "native move failure must not advertise a connection"
-    );
-    let failed_session = fixture
-        .sessions()
-        .into_iter()
-        .find(|s| s["id"] == id)
-        .unwrap();
-    assert_eq!(failed_session["cwd"], destination.to_str().unwrap());
     let continued = fixture.run(&["resume", &id]);
     assert!(continued.status.success(), "{continued:?}");
     let received: Value = serde_json::from_str(

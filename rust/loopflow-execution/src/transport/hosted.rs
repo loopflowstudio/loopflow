@@ -98,7 +98,6 @@ pub(super) struct Hosted {
     /// that takes it up later has it too.
     kept: Option<std::path::PathBuf>,
     execution_directory_reported: bool,
-    planning: Option<crate::ops::planning_sync::PlanningSync>,
     title: crate::terminal_title::OutputTitle,
     /// The Program Status viewers were last sent.
     reported_status: Option<loopflow_model::program_status::Records>,
@@ -165,7 +164,6 @@ impl Hosted {
             departure: None,
             kept: None,
             execution_directory_reported: false,
-            planning: None,
             title: crate::terminal_title::OutputTitle::new(&id, &watchers.titles),
             reported_status: None,
             replayed_through: 0,
@@ -187,7 +185,6 @@ impl Hosted {
     /// taking up what an earlier server kept there.
     pub fn keep_in(&mut self, directory: std::path::PathBuf) {
         if let Some(record) = read_kept::<Box<NativeExit>>(&directory.join(EXIT_RECORD)) {
-            self.planning = start_planning(&record.cwd);
             self.attachment.set(Some(&record));
             self.exit_record = Some(record);
         }
@@ -224,7 +221,7 @@ impl Hosted {
     /// Serve every connection, move input and output, and judge the ending.
     pub fn pass(&mut self, child: &mut Source) -> Result<Pass> {
         let child_pid = child.pid();
-        let mut owner_change = false;
+        let previous_owner = self.sizing.id().map(str::to_owned);
         let mut size_change = false;
         let mut theme_change = false;
         let mut attaching = Vec::new();
@@ -232,7 +229,7 @@ impl Hosted {
         self.viewers.retain_mut(|viewer| {
             !viewer.heartbeat_expired(Instant::now()) && viewer.read().is_ok()
         });
-        owner_change |= self.sizing.settle(&self.viewers);
+        self.sizing.settle(&self.viewers);
         self.finish_departed_paste();
         let viewed = self.viewers.iter().any(Viewer::live);
         let native_ready = self.client.is_some()
@@ -258,11 +255,11 @@ impl Hosted {
                 departure,
                 kept,
                 execution_directory_reported,
-                planning,
                 close_notice,
                 ..
             } = self;
-            viewers.retain_mut(|viewer| {
+            for index in 0..viewers.len() {
+                let viewer = &mut viewers[index];
                 let result = (|| -> Result<()> {
                     while let Some((tag, payload)) = viewer.decoder.next()? {
                         let request = match tag {
@@ -276,7 +273,7 @@ impl Hosted {
                                 let typed = if sizing.held_by(viewer) {
                                     payload
                                 } else {
-                                    input::without_reports(&payload)
+                                    input::keys(&payload).collect()
                                 };
                                 if typed.is_empty() {
                                     continue;
@@ -348,10 +345,10 @@ impl Hosted {
                                 if focused {
                                     sizing.touch(viewer);
                                 }
-                                // The agent hears focus only when it asked for it.
-                                if output
-                                    .terminal()
-                                    .is_some_and(|terminal| terminal.focus_reporting())
+                                if sizing.held_by(viewer)
+                                    && output
+                                        .terminal()
+                                        .is_some_and(|terminal| terminal.focus_reporting())
                                 {
                                     let report: &[u8] = if focused { b"\x1b[I" } else { b"\x1b[O" };
                                     let _ = pending_input.push(report);
@@ -382,9 +379,6 @@ impl Hosted {
                                     viewer.reply(answers, Reply::Busy);
                                     continue;
                                 }
-                                // The launcher kept its repository's planning in
-                                // sync while it waited; that wait is now ours.
-                                *planning = start_planning(&record.cwd);
                                 if let Some(directory) = kept {
                                     keep(&directory.join(EXIT_RECORD), &record);
                                 }
@@ -400,7 +394,6 @@ impl Hosted {
                                 if let Some(directory) = kept {
                                     remove_kept(&directory.join(EXIT_RECORD));
                                 }
-                                *planning = None;
                                 viewer.reply(answers, Reply::Accepted);
                             }
                             Request::Attach {
@@ -408,6 +401,7 @@ impl Hosted {
                                 cols,
                                 name,
                                 from,
+                                focused,
                             } => {
                                 *attached = true;
                                 viewer.size = dimensions(rows, cols);
@@ -419,9 +413,8 @@ impl Hosted {
                                 viewer.attached = true;
                                 viewer.heartbeat_at = Instant::now();
                                 attaching.push(viewer.id.clone());
-                                sizing.touch(viewer);
-                                let owner = Some(viewer.id.as_str());
-                                viewer.reply(answers, viewer.attached_reply(owner, true));
+                                sizing.attach(viewer, focused.unwrap_or(true));
+                                viewer.reply(answers, viewer.attached_reply(sizing.id()));
                                 // Binding selects a directory for later connections;
                                 // the running provider keeps its own.
                                 if let Some(cwd) = exit_record
@@ -447,6 +440,7 @@ impl Hosted {
                             }
                             Request::Leave => {
                                 viewer.leaving = true;
+                                break;
                             }
                             _ => {} // a key the execution did not issue, or a passive connection
                         }
@@ -454,16 +448,20 @@ impl Hosted {
                     viewer.flush()?;
                     Ok(())
                 })();
-                result.is_ok() && !viewer.leaving
-            });
+                viewer.leaving |= result.is_err();
+                if viewer.leaving && sizing.held_by(viewer) {
+                    sizing.settle(viewers);
+                }
+            }
         }
         self.viewers.retain(|viewer| !viewer.leaving);
-        owner_change |= self.sizing.settle(&self.viewers);
         self.finish_departed_paste();
         let owner = self
             .viewers
             .iter()
             .find(|viewer| self.sizing.held_by(viewer));
+        let owner_name = owner.and_then(|viewer| viewer.name.clone());
+        let owner_change = previous_owner.as_deref() != self.sizing.id();
         let new_size = owner
             .filter(|_| owner_change || size_change)
             .map(|viewer| viewer.size);
@@ -509,8 +507,11 @@ impl Hosted {
                 }
             }
             if owner_change || fresh {
-                let event = self.sizing.event(viewer);
-                viewer.event(event);
+                viewer.event(Event::Owner {
+                    viewer: self.sizing.id().map(str::to_owned),
+                    name: owner_name.clone(),
+                    held: self.sizing.held_by(viewer),
+                });
             }
             if fresh {
                 if let Some(status) = self.output.program_status() {
@@ -696,7 +697,6 @@ impl Hosted {
                 },
                 None,
             );
-            self.planning = None;
             self.exit = Some((settled.code, Instant::now()));
         }
         // Include held native output and exit reports before announcing the end.
@@ -897,14 +897,6 @@ impl Hosted {
         }
         child.poll(!self.pending_input.is_empty(), fds);
     }
-}
-
-fn start_planning(cwd: &std::path::Path) -> Option<crate::ops::planning_sync::PlanningSync> {
-    crate::ops::planning_sync::PlanningSync::start_for_directory(cwd)
-        .inspect_err(
-            |error| tracing::warn!(%error, "planning sync unavailable to this held terminal"),
-        )
-        .ok()
 }
 
 /// The launcher's handed-off exit record, beside its held terminal.

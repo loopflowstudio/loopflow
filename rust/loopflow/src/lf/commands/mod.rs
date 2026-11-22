@@ -8,6 +8,7 @@ pub mod context;
 pub mod context_cost;
 pub mod desktop;
 pub mod discord;
+pub mod docs;
 pub mod doctor;
 pub mod graph;
 pub mod graph_inventory;
@@ -31,7 +32,6 @@ pub mod server;
 pub mod session;
 pub mod session_history;
 pub mod setting;
-pub mod ship;
 pub mod ssh;
 pub mod tracker;
 

@@ -432,10 +432,9 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
     if let Some(kind) = agent
         .provider
         .as_deref()
-        .and_then(super::HarnessKind::parse)
+        .and_then(loopflow_harness::HarnessKind::parse)
     {
-        kind.harness()
-            .validate_agent_process_close(store, session, &agent.id)?;
+        crate::harness::launcher(kind).validate_agent_process_close(store, session, &agent.id)?;
     }
     close_agent_process(pid, started)
         .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
@@ -636,7 +635,7 @@ fn is_agent_process(process: &OsProcess, started_at: i64, provider: Option<&str>
         return false;
     }
     provider
-        .and_then(super::HarnessKind::parse)
+        .and_then(loopflow_harness::HarnessKind::parse)
         .is_some_and(|kind| kind.harness().recognizes_driver(&process.command))
 }
 
@@ -1372,11 +1371,102 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         for (provider, argv) in [
             ("codex", &["codex", "app-server", "--listen", "fixture"][..]),
-            ("opencode", &["opencode", "serve"]),
+            ("opencode", &["opencode", "run"]),
             ("claude", &["claude"]),
         ] {
             reap_detached(provider, argv);
         }
+    }
+
+    /// Only the portable reader invokes ps; macOS observes the kernel directly.
+    /// A failed reading, of the leader or only of its descendants, leaves the
+    /// orphan running and its records untouched.
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn failed_sampling_reaps_nothing_and_reports_why() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
+        let mut child = Command::new("/bin/sh")
+            .args([
+                "-c",
+                "sleep 60 & wait; :",
+                "codex",
+                "app-server",
+                "--listen",
+                "fixture",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let start = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
+        let session = store.test_session("orphan", &crate::session_record::new_artifact_key());
+        rusqlite::Connection::open(home.path().join("db"))
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider='codex',interactive=0 WHERE id=?1",
+                [session.id.as_str()],
+            )
+            .unwrap();
+        let attached = attachment::claim_session_attachment(
+            &store,
+            &session.id,
+            None,
+            &store.test_lf_process(),
+        )
+        .unwrap();
+        store
+            .record_agent_process_identity(&session.id, &attached, pid, start)
+            .unwrap();
+        store
+            .release_session_attachment(&session.id, &attached)
+            .unwrap();
+        let before = store.agent_process(&attached.agent_process_id).unwrap();
+        let bin = home.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let ps = bin.join("ps");
+        let previous = std::env::var_os("PATH");
+        // Exact leader observation succeeds in the second reading, but
+        // descendant inventory fails: the reaper refuses before signaling.
+        for forward in ["", "if [ \"$1\" = -p ]; then exec /bin/ps \"$@\"; fi\n"] {
+            std::fs::write(
+                &ps,
+                format!("#!/bin/sh\n{forward}printf 'fixture sampling unavailable' >&2\nexit 2\n"),
+            )
+            .unwrap();
+            std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display()));
+            let report = super::reap_in(&store);
+            match &previous {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+            let report = report.unwrap();
+            assert!(
+                report
+                    .errors
+                    .iter()
+                    .any(|error| error.contains("fixture sampling unavailable")),
+                "{report:?}"
+            );
+            assert!(report.reaped.is_empty(), "{report:?}");
+            assert!(child.try_wait().unwrap().is_none());
+            assert_eq!(
+                store.agent_process(&attached.agent_process_id).unwrap(),
+                before
+            );
+        }
+        let _ = crate::os_process::terminate_process_group(pid);
+        let _ = child.wait();
     }
 
     fn reap_detached(provider: &str, argv: &[&str]) {

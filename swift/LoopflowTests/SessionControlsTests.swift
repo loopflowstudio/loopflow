@@ -145,7 +145,7 @@ import ViewInspector
         }, repoPath: task.task.repo)
         model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])
         await model.refreshSessions()
-        let actions = TaskActionItems(model: model, task: task, wave: nil)
+        let actions = TaskActionItems(model: model, task: task, wave: nil, work: nil)
         try actions.inspect().find(button: "Make Research primary…").tap()
         #expect(model.navigation.binding?.sessionId == record.id)
         #expect(model.navigation.binding?.assignedTaskId == record.work?.id)

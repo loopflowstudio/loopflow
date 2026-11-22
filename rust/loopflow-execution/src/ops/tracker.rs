@@ -79,11 +79,10 @@ impl From<crate::linear::LinearError> for TrackerError {
 /// The repository's planning selection. Unreadable configuration selects none:
 /// routing is configuration, never availability.
 fn transport(repo: &Path) -> Option<TrackerConfig> {
-    crate::config::load_planning_transport(repo).ok()
+    crate::config::load_planning_transport(repo).ok().flatten()
 }
 
-/// The tracker that sends through the action queue: Linear or Asana. Git
-/// exchanges its journal instead, so it answers none.
+/// The tracker that sends through the action queue: Linear or Asana.
 pub fn queued_tracker(repo: &Path) -> Option<TrackerKind> {
     match transport(repo)? {
         TrackerConfig::Linear { .. } => Some(TrackerKind::Linear),
@@ -123,8 +122,7 @@ fn repository_name(repo: &Path) -> String {
         .unwrap_or_else(|| "loopflow".into())
 }
 
-/// The configured Linear or Asana tracker for one repository; Git planning
-/// exchanges the journal and has none.
+/// The configured Linear or Asana tracker for one repository.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Tracker {
@@ -154,8 +152,9 @@ impl Tracker {
     }
 
     /// A send carrying our own id cannot duplicate, so a lost reply repeats
-    /// it: Linear comments take the id we give them, and every link reads
-    /// what the tracker holds before it adds anything.
+    /// it: Linear comments take the id we give them, a relation reads what
+    /// the tracker holds before adding one, and a PR link updates the
+    /// attachment it recorded or finds the one Linear already has.
     pub fn idempotent(&self, kind: ActionKind) -> bool {
         match self {
             Self::Linear(_) => matches!(kind, ActionKind::Comment | ActionKind::Link),

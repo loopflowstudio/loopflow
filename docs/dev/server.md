@@ -50,7 +50,7 @@ phone ─ authenticated HTTPS/WSS ─ server (LOO-718)
 server read/subscription ─ shared Rust readers
 server write ─ request worker ─ Write::run ─┐
 CLI mutation ─ mutation dispatcher ─────────┴─ engine operations / shared Rust write functions
-server task.run, task.ship ─ engine::launch ─ detached `lf task run`, `lf ship` ─ Graph processes
+server task.run, task.auto.on ─ engine::launch ─ detached `lf task run`, `lf task auto on` ─ Graph processes
 server session.start / attach ─ held terminal ─ holder ─ PTY ─ agent
 
 Desktop terminal preparation/launch ─ ordinary CLI ─ held terminals
@@ -106,7 +106,7 @@ both new Tasks and Session adoption. With `run`, one transaction records the
 Task, its claim, its Graph and its primary Session; the server starts the held
 conversation and answers. The conversation makes the checkout and starts the
 Graph; tracker sync and the assignee check run after the answer.
-`task.run` and `task.ship` start the same command a terminal would as a plain
+`task.run` and `task.auto.on` start the same command a terminal would as a plain
 detached process, and answer the typed value that process reports
 (`engine/launch.rs`); the request never carries the run. Desktop's Work operations
 use the shared protocol; execution stays with holders and Graph processes.

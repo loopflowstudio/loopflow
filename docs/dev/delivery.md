@@ -128,7 +128,7 @@ and push the exact head. Branch commits and merge resolutions retain their ident
 GitHub applies the repository’s allowed merge method or merge queue policy. `arm` and `land` request
 GitHub auto-merge, record the landing, and return. Success means handoff;
 `lf pr reconcile` checks recorded repository landings once and repairs nothing;
-the waiting landing (`--wait-and-fix`, `lf ship`) does. `submit` performs the
+the waiting landing (`--wait-and-fix`, `lf task auto on`) does. `submit` performs the
 same preparation but leaves the exact-head merge to a person. These delivery
 commands inspect Task delivery state when present; they do not require a running
 Task Graph or certify that a particular Graph ran.
@@ -246,8 +246,8 @@ read required checks on H1 once
 ```
 
 `lf pr reconcile` repeats this from fresh evidence, records a failure and
-returns. Only a waiting landing (`lf land --wait-and-fix`, the ship process of a
-shipping Task) and a release's own landing start a repair through this check.
+returns. Only a waiting landing (`lf land --wait-and-fix`, as a Graph's landing
+step runs it) and a release's own landing start a repair through this check.
 The landing lock, landing generation and incident reservation are the claim, so
 none of them repeats a fix. A returned bare landing is repaired by nothing.
 
@@ -259,11 +259,10 @@ attempt; the next attempt starts after a backoff, with the earlier summaries.
 
 ### Recovery
 
-There is no schedule. Any lf read of this Machine's Tasks or processes
-(`lf task status`, `lf task list`, `lf session list`, `lf wave status`, Desktop's planning
-reads) first settles AgentProcesses whose lf died and starts the ship process of
-each shipping Task checked out here again when it has exited. A Machine nothing
-reads recovers on its next read.
+The Machine server's recovery pass (`server/recovery.rs`) settles
+AgentProcesses whose lf died and carries again, as `lf task run`, each Task run
+checked out here whose carrier died. It runs when the store changes and
+at least every minute, so a Machine nobody reads recovers too.
 
 A check never transfers green checks from one head to another. A failure is
 confirmed by a second observation before repair. One incident (head, failed check set and provider check URLs) owns one repair

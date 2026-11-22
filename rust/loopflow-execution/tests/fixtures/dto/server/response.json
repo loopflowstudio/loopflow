@@ -57,7 +57,11 @@
     "transition": null,
     "model": null,
     "turn": null,
-    "raw": false
+    "raw": false,
+    "ended": null,
+    "start": null,
+    "outlook": null,
+    "status_line": "running"
   },
   "revisions": {"sessions": 41}
 }

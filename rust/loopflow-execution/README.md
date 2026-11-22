@@ -8,7 +8,13 @@ cargo test -p loopflow-execution --lib task_graph::tests::
 `engine` supplies typed operations; `ops` implements them. Provider conversations,
 Task and Graph execution, tracker fetches above synchronous storage, shared readings,
 Machine clients and native terminal lifetimes live here. The crate depends on
-model, definitions, storage and terminal libraries and never on `loopflow`.
+model, definitions, storage, harness and terminal libraries and never on
+`loopflow`.
+
+What each native client writes (stream decoders, transcript readers, where its
+files are) is [`loopflow-harness`](../loopflow-harness/README.md), a sibling of
+storage. Execution launches a harness, records it and joins its transcripts to
+Sessions in the store; it re-exports nothing from that crate.
 
 The application owns Clap, server dispatch and build provenance. Its entry points
 supply `BuildIdentity` before execution. Landing selection takes the application's

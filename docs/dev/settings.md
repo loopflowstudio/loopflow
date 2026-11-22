@@ -84,7 +84,7 @@ applicability/lifecycle reason, not an adapter that advertises an omission.
 | Content | Authority |
 | --- | --- |
 | Personal global declarations | Personal config.yaml |
-| Private repository and Wave declarations | Main checkout's lf.config.local.yaml, shared across linked worktrees |
+| Private repository and Wave declarations | Main checkout's .lf/config.local.yaml, shared across linked worktrees |
 | Shared repository and Wave declarations | Committed repository/Wave files |
 | Skill and Graph occurrence declarations | Their authored definitions |
 | Explicit CLI and environment choices | The invocation; never persisted as preferences |

@@ -228,6 +228,9 @@ while [ ! -f "$LF_HOME/release" ]; do sleep 0.02; done
         .skip_while(|arg| *arg != "--session-id")
         .nth(1)
         .unwrap();
+    let project = home.join("claude/projects/fixture");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join(format!("{native}.jsonl")), "{}\n").unwrap();
     let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     let session: String = db
         .query_row("SELECT id FROM agent_sessions", [], |row| row.get(0))

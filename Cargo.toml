@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "rust/loopflow",
   "rust/loopflow-execution",
+  "rust/loopflow-harness",
   "rust/loopflow-model",
   "rust/loopflow-storage",
   "rust/loopflow-terminal",

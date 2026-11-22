@@ -1,4 +1,4 @@
-use crate::machine::ssh::REMOTE_PATH;
+use crate::machine::ssh::remote_path;
 use crate::store::Store;
 use anyhow::{anyhow, Context};
 use loopflow_model::durable::{Machine, MachineId};
@@ -114,7 +114,8 @@ pub async fn probe(target: &str, forward_agent: bool) -> anyhow::Result<Probe> {
         return Err(anyhow!("SSH destination cannot be empty or contain NUL"));
     }
     let command = format!(
-        "{REMOTE_PATH}; command -v lf >/dev/null 2>&1 || {{ echo lf-not-installed; exit 127; }}; lf --version && lf machine id"
+        "{}; command -v lf >/dev/null 2>&1 || {{ echo lf-not-installed; exit 127; }}; lf --version && lf machine id",
+        remote_path()
     );
     let mut child = tokio::process::Command::new("ssh");
     child

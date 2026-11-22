@@ -43,8 +43,9 @@ use snapshot::{
     validate_task_relative_path,
 };
 pub use snapshot::{task_changes, task_diff, task_file, task_snapshot, MAX_FILE_BYTES};
+pub mod auto;
 mod file_save;
-pub mod ship;
+pub mod run_recovery;
 pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
 
@@ -53,7 +54,6 @@ use loopflow_model::comment::TaskComments;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::agent::checkout_execution_boundary;
 use crate::durable::TaskState;
 use crate::git::worktree_name::WorktreeName;
 use crate::git::worktrees::{
@@ -68,7 +68,7 @@ use crate::work::wave::Wave;
 use loopflow_model::durable::WorkStatus;
 use loopflow_storage::child::ChildRef;
 use loopflow_storage::planning_sync::LostAnswer;
-use loopflow_storage::sqlite::tracker_actions::ActionPhase;
+use loopflow_storage::sqlite::tracker_actions::{ActionOwner, ActionPhase, TrackerAction};
 use loopflow_storage::sqlite::{SqliteStore, TaskCheckout};
 use loopflow_storage::work::task::{
     GithubPr, Observation, PrMergeMode, PrPhase, PrPublication, Task, TaskEventKind, TaskPr,
@@ -104,6 +104,9 @@ pub struct TaskProcessOptions {
     /// Place a new branch from the refs the last fetch left, without the
     /// network: the caller exchanges planning and the assignee afterwards.
     pub from_last_fetch: bool,
+    /// `lf task auto on`: the run turns auto on, lifting an off, and stands in at
+    /// the interactive step the Task waits at.
+    pub auto_on: bool,
 }
 
 impl TaskProcessOptions {
@@ -203,10 +206,10 @@ pub struct TaskSnapshot {
     pub actions: TaskActionModel,
     /// Who started the Task's latest Graph.
     pub started_by: Option<crate::process::Starter>,
-    /// Who approved Auto-Ship and when, while the Task is approved.
-    pub ship_approval: Option<ShipMark>,
-    /// The stop that keeps a run from approving Auto-Ship, until `lf ship`.
-    pub ship_stop: Option<ShipMark>,
+    /// The Task's auto setting: on, off, and who set it when;
+    /// `null` when nobody has.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub auto: Option<loopflow_storage::sqlite::Auto>,
     /// The Task this one is stacked on.
     #[serde(deserialize_with = "Option::deserialize")]
     pub stack_parent: Option<TaskStackParent>,
@@ -224,15 +227,6 @@ pub struct TaskStackParent {
     pub pr_number: Option<u64>,
 }
 
-/// When someone approved or stopped Auto-Ship, and who.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct ShipMark {
-    pub at: i64,
-    pub by: crate::process::Starter,
-}
-
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -243,6 +237,21 @@ pub struct TaskChangedFile {
     pub staged: bool,
     pub unstaged: bool,
     pub untracked: bool,
+    /// Runs of changed lines in the file's patch, each the Diff's stop: a run
+    /// ends at an unchanged line, a hunk's end, or a removal after additions.
+    pub changes: u64,
+}
+
+/// One commit in a Task's comparison. A Graph step's commits share the subject
+/// prefix `lf <step>:`.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct TaskCommit {
+    pub sha: String,
+    /// The commit's first parent: a step starting here compares against it.
+    pub parent: String,
+    pub subject: String,
 }
 
 #[derive(
@@ -254,6 +263,9 @@ pub struct TaskChangesSnapshot {
     pub task_id: String,
     pub base_commit: String,
     pub head_commit: String,
+    /// The commits on head's first-parent line since base, oldest first,
+    /// without merges.
+    pub commits: Vec<TaskCommit>,
     pub files: Vec<TaskChangedFile>,
     pub scratch: Vec<String>,
     pub scratch_truncated: bool,
@@ -407,6 +419,17 @@ async fn task_store() -> OpsResult<SharedStore> {
         .ok_or_else(|| task_error("no Loopflow registry on this machine; run `lf doctor`"))
 }
 
+/// Where a stack parent's current PR stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StackParentPr {
+    Open,
+    Merged,
+    /// Closed without merging, and the parent Task has no PR after it.
+    Closed {
+        number: Option<u64>,
+    },
+}
+
 /// Durable placement for a Task checkout forked from another Task's PR.
 #[derive(Debug, Clone)]
 pub struct StackedSync {
@@ -417,14 +440,42 @@ pub struct StackedSync {
     pub parent_identifier: String,
     /// The parent's PR branch, kept after it merges.
     pub parent_branch: String,
-    pub parent_merged: bool,
+    /// The row the parent resolves to now; differs from the child's recorded
+    /// `parent_pr_id` when the recorded PR closed and the parent reopened.
+    pub parent_pr: TaskPrId,
+    pub parent: StackParentPr,
 }
 
 impl StackedSync {
-    /// The live parent branch, or `None` once the parent has merged.
-    pub fn live_parent_branch(&self) -> Option<&str> {
-        (!self.parent_merged).then_some(self.parent_branch.as_str())
+    /// The parent branch to build on while its PR is open, `None` once it
+    /// merged. A parent that closed with no PR to follow is an error naming
+    /// both ways out.
+    pub fn live_parent_branch(&self, default_branch: &str) -> OpsResult<Option<&str>> {
+        match &self.parent {
+            StackParentPr::Open => Ok(Some(&self.parent_branch)),
+            StackParentPr::Merged => Ok(None),
+            StackParentPr::Closed { number } => {
+                let parent = &self.parent_identifier;
+                let pr = number.map_or("PR".to_string(), |number| format!("PR #{number}"));
+                Err(task_error(format!(
+                    "stack parent {parent}'s {pr} closed without merging; `lf sync {parent}` restacks this Task on its branch, `lf sync {default_branch}` detaches it"
+                )))
+            }
+        }
     }
+}
+
+/// The stack parent's PR as people think of it: the recorded row, unless it
+/// closed without merging; then the parent Task's current row.
+async fn current_parent_pr(store: &SharedStore, recorded: TaskPr) -> OpsResult<TaskPr> {
+    if recorded.abandoned_at.is_none() || recorded.merge_commit.is_some() {
+        return Ok(recorded);
+    }
+    Ok(store
+        .active_task_pr(&recorded.task_id)
+        .await
+        .map_err(task_error)?
+        .unwrap_or(recorded))
 }
 
 /// Resolve a Task's current cross-Task stack from durable ids, consulting
@@ -440,13 +491,13 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
         let Some(parent_id) = task.parent_pr_id.clone() else {
             return Ok(None);
         };
-        let parent = store
+        let recorded = store
             .get_task_pr(&parent_id)
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
         let mut parent_task = store
-            .get_task(&parent.task_id)
+            .get_task(&recorded.task_id)
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("stack parent Task is missing"))?;
@@ -454,25 +505,30 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
         // resolution used to enumerate every PR on the branch independently,
         // bypassing both the Task cache and outage-tolerant reconcile.
         reconcile_task_pr(&store, &mut parent_task).await?;
-        let parent = store
+        let recorded = store
             .get_task_pr(&parent_id)
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("stack parent {parent_id} disappeared")))?;
-        let merged = parent.merge_commit.is_some();
-        let closed = parent.abandoned_at.is_some();
-        if closed && !merged {
-            return Err(task_error(format!(
-                "stack parent {} closed without merging; re-place the child deliberately",
-                parent.branch
-            )));
-        }
+        let parent = current_parent_pr(&store, recorded).await?;
+        let state = if parent.merge_commit.is_some() {
+            StackParentPr::Merged
+        } else if parent.abandoned_at.is_some() {
+            StackParentPr::Closed {
+                number: parent.github().map(|github| u64::from(github.number)),
+            }
+        } else {
+            StackParentPr::Open
+        };
         // A child rebased onto the default branch after its parent landed holds
         // the parent's work through the merge commit, not the recorded parent
         // tip. That commit is its base now; one missing both is refused later.
         let fork_base = match parent.merge_commit.as_deref() {
             Some(merge) if contains_commit(worktree, merge)? => merge.to_string(),
-            _ if !crate::git::commit_exists(worktree, &task.base_commit)? => {
+            // A closed parent's branch may be gone; its consumers refuse first.
+            _ if !matches!(state, StackParentPr::Closed { .. })
+                && !crate::git::commit_exists(worktree, &task.base_commit)? =>
+            {
                 // Recover from shared Git history without changing placement on
                 // a read. The owned sync records its verified target on success.
                 crate::git::merge_base(worktree, "HEAD", &format!("origin/{}", parent.branch))?
@@ -484,7 +540,8 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
             child: *task,
             parent_identifier: parent_task.identifier,
             parent_branch: parent.branch,
-            parent_merged: merged,
+            parent_pr: parent.id,
+            parent: state,
         }))
     })
 }
@@ -528,7 +585,8 @@ fn contains_commit(worktree: &Path, commit: &str) -> OpsResult<bool> {
 pub fn stack_for_landing(worktree: &Path) -> OpsResult<Option<StackedSync>> {
     let stacked = task_stack(worktree)?;
     if let Some(stacked) = &stacked {
-        if let Some(parent) = stacked.live_parent_branch() {
+        let default = crate::git::get_default_branch(worktree)?;
+        if let Some(parent) = stacked.live_parent_branch(&default)? {
             return Err(task_error(format!(
                 "Task PR is stacked on {parent}, which has not merged; land the parent first"
             )));
@@ -537,8 +595,9 @@ pub fn stack_for_landing(worktree: &Path) -> OpsResult<Option<StackedSync>> {
     Ok(stacked)
 }
 
-/// Persist the exact base reached by a successful deterministic sync. Clear
-/// the parent link after landing or an explicitly requested default-branch sync.
+/// Persist the exact base reached by a successful deterministic sync, with the
+/// parent PR it followed. Clear the parent link after landing or an explicitly
+/// requested default-branch sync.
 /// Refuses with an actionable authority error if the registry is not usable, so
 /// a post-sync base is never silently dropped — the sync already pushed, so
 /// the operator must know the durable record did not advance with it.
@@ -567,11 +626,12 @@ pub fn record_stack_sync(
         // The immutable event log preserves the audit trail — the child's
         // `PrStarted` (parent base) and the parent's `PrMerged` remain — so the
         // sync only repoints the mutable row to the post-merge truth.
+        let parent_pr = (!clear_parent).then_some(&stacked.parent_pr);
         store
             .sync_task_placement(
                 &task_id,
                 &new_base,
-                clear_parent,
+                parent_pr,
                 time::OffsetDateTime::now_utc(),
             )
             .await
@@ -613,9 +673,21 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskRunStart {
     /// A run of the Task's Graph from this step; the caller starts it as
-    /// `lf --task ISSUE graph run`. With `ships`, Auto-Ship is approved: no
-    /// interactive step is left ahead, and the run may merge the PR.
-    Run { step: String, ships: bool },
+    /// `lf --task ISSUE graph run`. With `merges`, the run may merge the PR:
+    /// Auto is on, or no interactive step is left ahead, and nobody turned auto off.
+    /// With `stands_in`, a person asked for auto and the run sets out at that
+    /// interactive step.
+    Run {
+        step: String,
+        merges: bool,
+        stands_in: Option<String>,
+    },
+    /// A person asked for auto while the Task's run was live: auto is on, and
+    /// that run carries on.
+    Live {
+        run: String,
+        graph_process: loopflow_model::id::LfProcessId,
+    },
     /// The Task now waits at this interactive step; nothing runs.
     Waiting(String),
     /// Nothing remained: the Task reached `end`.
@@ -637,6 +709,7 @@ pub fn task_place(
         graph,
         from,
         reason,
+        auto_on,
         ..
     } = options.clone();
     let source = remote::source_for_task(issue)?;
@@ -657,6 +730,7 @@ pub fn task_place(
             graph.as_deref(),
             from.as_deref(),
             mode,
+            auto_on,
             merges,
         )
         .await?;
@@ -675,7 +749,7 @@ pub enum TaskRunMode {
     Stop,
     /// Run each with a person in this terminal (`-i`).
     InPlace,
-    /// Run each headless, standing in for the person (`-b`, `lf ship`).
+    /// Run each headless, standing in for the person (`-b`).
     Headless,
 }
 
@@ -726,12 +800,18 @@ impl TaskRunSelection {
 /// The graph a Task takes up when it names none: your `lf set wave.graph`, then its
 /// Wave's and the repository's `graph:`, then the builtin `code`.
 pub fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(String, ConfigSource)> {
+    let (repo, wave) = task_scope(store, task)?;
+    scope_graph_default(&repo, wave.as_deref())
+}
+
+/// The repository and Wave whose configuration the Task reads.
+fn task_scope(store: &Store, task: &Task) -> OpsResult<(PathBuf, Option<String>)> {
     let repo = repository_for_task(store, task)?;
     let wave = match &task.wave_id {
         Some(id) => store.sqlite.get_wave(id).map_err(task_error)?,
         None => None,
     };
-    scope_graph_default(&repo, wave.as_ref().map(|w| w.slug()))
+    Ok((repo, wave.map(|wave| wave.slug().to_owned())))
 }
 
 /// The graph a new Task in this Wave, or the repository when `wave` is `None`,
@@ -740,14 +820,17 @@ pub(crate) fn scope_graph_default(
     repo: &Path,
     wave: Option<&str>,
 ) -> OpsResult<(String, ConfigSource)> {
-    let layers = crate::config::config_layers(Some(repo), wave).map_err(task_error)?;
-    let resolved = crate::config::settings::resolve_layers(&layers, None).map_err(task_error)?;
+    let resolved = crate::config::resolved(Some(repo), wave).map_err(task_error)?;
     let source = resolved.settings["graph"]
         .selected()
         .expect("graph has a builtin default")
         .source;
     Ok((
-        resolved.config.graph.expect("graph has a builtin default"),
+        resolved
+            .config
+            .graph
+            .clone()
+            .expect("graph has a builtin default"),
         source,
     ))
 }
@@ -781,6 +864,7 @@ pub fn select_task_run(
     checkout: &Path,
     requested: Option<&str>,
     from: Option<&str>,
+    stands_in: bool,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskRunSelection> {
     use crate::task_graph::{END, START};
@@ -855,7 +939,13 @@ pub fn select_task_run(
                         graph.describe_steps()
                     ))
                 })?;
-                graph.after(&place).map(RunStart::from)
+                // A bare run means the person finished this step; a run asked
+                // for auto stands in at it.
+                if stands_in {
+                    Some(place.into())
+                } else {
+                    graph.after(&place).map(RunStart::from)
+                }
             }
         },
     };
@@ -868,18 +958,74 @@ pub fn select_task_run(
 
 /// Put the Task where `lf task run` sets out: on a run carried by this
 /// process, at the interactive step `--from` names, or at `end` when nothing
-/// remains.
+/// remains. What the run asks of auto is written once the Task has its Graph.
+/// Two runs setting out together leave one: the other reads the Task again.
 async fn start_task_run(
     store: &SharedStore,
     task: &mut Task,
     requested: Option<&str>,
     from: Option<&str>,
     mode: TaskRunMode,
+    auto_on: bool,
     merges: fn(&[String]) -> bool,
 ) -> OpsResult<TaskRunStart> {
-    let through = mode.runs_through();
-    let selection = select_task_run(store, task, task.worktree()?, requested, from, merges)?;
-    let ships = selection.reaches_end(mode);
+    loop {
+        if let Some(start) =
+            try_start_task_run(store, task, requested, from, mode, auto_on, merges).await?
+        {
+            return Ok(start);
+        }
+    }
+}
+
+/// `None` when another run moved the Task while this one was setting out.
+async fn try_start_task_run(
+    store: &SharedStore,
+    task: &mut Task,
+    requested: Option<&str>,
+    from: Option<&str>,
+    mode: TaskRunMode,
+    auto_on: bool,
+    merges: fn(&[String]) -> bool,
+) -> OpsResult<Option<TaskRunStart>> {
+    let standing = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
+        .map_err(task_error)?
+        .filter(|row| auto_on && requested.is_none_or(|name| name == row.graph.name));
+    match standing.as_ref().map(|row| (row, &row.run)) {
+        // A live run reads auto at each interactive step, so it stands in
+        // from here without being started again. The mark is written before
+        // the wait for its Graph, so a slow registration cannot lose it.
+        Some((row, Some((cursor, carrier))))
+            if crate::store::task_work::carrier_may_run(carrier) =>
+        {
+            auto::turn_on(store, task)?;
+            if let Some(graph_process) = auto::running_graph(store, task, &carrier.id).await? {
+                let at = row.graph.step_name_of(cursor);
+                return Ok(Some(TaskRunStart::Live {
+                    run: format!(
+                        "{} at {}",
+                        row.graph.name,
+                        at.as_deref().unwrap_or(&row.step)
+                    ),
+                    graph_process,
+                }));
+            }
+        }
+        Some((row, None)) if row.step == crate::task_graph::END && from.is_none() => {
+            return Ok(Some(TaskRunStart::Ended));
+        }
+        _ => {}
+    }
+    let selection = select_task_run(
+        store,
+        task,
+        task.worktree()?,
+        requested,
+        from,
+        auto_on,
+        merges,
+    )?;
+    let reaches_end = selection.reaches_end(mode);
     let TaskRunSelection {
         graph,
         take_up,
@@ -889,34 +1035,68 @@ async fn start_task_run(
     let (process, carrier) = crate::journal::current_lf_process_id()
         .zip(crate::journal::current_execution_start())
         .ok_or_else(|| task_error("a Task run requires a registered Process"))?;
-    // This lf carries the run, and the Task's shipping when the run hands it
-    // off at `end`; each ends with this lf.
+    // This lf carries the run; it ends with this lf.
     crate::journal::mark_run_owner(loopflow_storage::graph_process::RunOwner::TaskCarrier);
-    crate::journal::mark_run_owner(loopflow_storage::graph_process::RunOwner::ShipCarrier);
     if take_up {
-        crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &graph)
-            .map_err(task_error)?;
+        let graph = serde_json::to_string(&graph).map_err(task_error)?;
+        // A Task with no Graph takes its first one up once; naming another
+        // replaces the one it has.
+        if requested.is_some() {
+            store
+                .sqlite
+                .take_up_task_graph(&task.id, &graph)
+                .map_err(task_error)?;
+        } else if !store
+            .sqlite
+            .take_up_first_task_graph(&task.id, &graph)
+            .map_err(task_error)?
+        {
+            return Ok(None);
+        }
+        auto::configured(store, task)?;
     }
+    if auto_on {
+        auto::turn_on(store, task)?;
+    }
+    // Auto on runs through the interactive steps, standing in at each;
+    // off, no run merges.
+    let (on, merges) = match store
+        .sqlite
+        .task_auto(&task.id)
+        .map_err(task_error)?
+        .map(|mark| mark.state)
+    {
+        Some(loopflow_storage::sqlite::AutoState::On) => (true, true),
+        Some(loopflow_storage::sqlite::AutoState::Off) => (false, false),
+        None => (false, reaches_end),
+    };
+    let through = mode.runs_through() || on;
     let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
         .ok_or_else(|| task_error(format!("Task {issue} lost its graph while starting")))?;
+    // The start below replaces the carrier this row names. One that set out
+    // since the selection was read is live, not stopped: read the Task again.
+    if row
+        .run
+        .as_ref()
+        .is_some_and(|(_, carrier)| crate::store::task_work::carrier_may_run(carrier))
+    {
+        return Ok(None);
+    }
     let Some(start) = start else {
-        if store
-            .sqlite
-            .end_task_graph(&task.id, (&process, &carrier))
-            .map_err(task_error)?
-        {
+        if store.sqlite.end_task_graph(&task.id).map_err(task_error)? {
             settle_pending_completion(store, task).await?;
         }
-        return Ok(TaskRunStart::Ended);
+        return Ok(Some(TaskRunStart::Ended));
     };
     // Starting at an interactive step without running past it puts the Task there.
-    if let Some(step) = graph.interactive_at(&start.place).filter(|_| !through) {
+    let interactive = graph.interactive_at(&start.place);
+    if let Some(step) = interactive.filter(|_| !through) {
         store
             .sqlite
             .set_task_graph_step(&task.id, step)
             .map_err(task_error)?;
-        return Ok(TaskRunStart::Waiting(step.to_owned()));
+        return Ok(Some(TaskRunStart::Waiting(step.to_owned())));
     }
     let label = if start.place == crate::task_graph::Place::default() {
         format!("{} from start", graph.name)
@@ -929,16 +1109,16 @@ async fn start_task_run(
         &row,
         &start.cursor,
         (&process, &carrier),
-        ships,
     )
     .map_err(task_error)?
     {
-        return Err(task_error(format!(
-            "Task {issue} moved on graph {} while this run was starting; read `lf task status {issue}` and run again",
-            graph.name
-        )));
+        return Ok(None);
     }
-    Ok(TaskRunStart::Run { step: label, ships })
+    Ok(Some(TaskRunStart::Run {
+        step: label,
+        merges,
+        stands_in: interactive.filter(|_| auto_on).map(str::to_owned),
+    }))
 }
 
 /// The run this process carried ended; settle a completion its arrival at
@@ -1028,15 +1208,13 @@ pub(crate) async fn fetch_from_tracker(
         .unwrap_or_default()
         .planning_transport()
     {
-        crate::config::TrackerConfig::Linear { .. } => {
+        Some(crate::config::TrackerConfig::Linear { .. }) => {
             super::linear::fetch_task(repo, issue, refresh).await
         }
-        crate::config::TrackerConfig::Git { .. } => Err(task_error(format!(
-            "Task {issue:?} not found in the Git tracker"
-        ))),
-        crate::config::TrackerConfig::Asana { .. } => Err(task_error(format!(
+        Some(crate::config::TrackerConfig::Asana { .. }) => Err(task_error(format!(
             "Task {issue:?} not saved on this Machine; Asana Tasks are not fetched yet"
         ))),
+        _ => Err(task_error(format!("Task {issue:?} not found"))),
     }
 }
 
@@ -1165,6 +1343,8 @@ fn validate_preparation_status(task: &Task, status: WorkStatus) -> OpsResult<()>
     }
 }
 
+const CHECKOUT_LEASE_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
 async fn restore_task_checkout(
     store: &SharedStore,
     task: &Task,
@@ -1172,7 +1352,14 @@ async fn restore_task_checkout(
 ) -> OpsResult<()> {
     let repo = crate::git::worktrees::main_repo_root(&repository_for_task(store, task)?)?;
     let worktree = task.worktree()?;
-    let _lease = crate::git::acquire_worktree_lease(&repo, worktree, "Task checkout")?;
+    // Two starts of one Task at the same moment both restore its checkout;
+    // the second waits out the first's short hold instead of failing.
+    let _lease = crate::git::acquire_worktree_lease_wait(
+        &repo,
+        worktree,
+        "Task checkout",
+        CHECKOUT_LEASE_WAIT,
+    )?;
     let recovered = recover_from
         .map(|commit| {
             let output = git_output_bytes(
@@ -1845,6 +2032,12 @@ async fn place_prepared_task(
     prepared: TaskPlacement,
     options: &TaskProcessOptions,
 ) -> OpsResult<Task> {
+    // Placing an unowned Task claims it: read what other Machines claimed first.
+    if let Some(task) = store.get_task(task_id).await.map_err(task_error)? {
+        if let Ok(repository) = repository_for_task(store, &task) {
+            super::plan_carriers::before_claim(store, &repository, task_id).await;
+        }
+    }
     let (mut task, acquisition) = loop {
         let task = store
             .get_task(task_id)
@@ -1940,11 +2133,6 @@ pub fn task_create(
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
-        if let Err(error) =
-            super::planning_sync::fetch_repository(&store, &main.to_string_lossy()).await
-        {
-            tracing::debug!(%error,"tracker refresh pending; creating from retained planning");
-        }
         let receipt = receipt.map(|identity| Receipt {
             identity,
             admit: None,
@@ -2008,9 +2196,6 @@ pub(crate) fn sync_admitted(main: &Path, task: &loopflow_model::durable::TaskId)
     let synced = block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
         let repo = main.to_string_lossy();
-        if let Err(error) = super::planning_sync::fetch_repository(&store, &repo).await {
-            tracing::warn!(%error, "tracker fetch after creation failed");
-        }
         super::planning_sync::sync_after_save(
             &store,
             &repo,
@@ -2271,48 +2456,44 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
 }
 
 /// Current launch preferences at the Task checkout, with no saved Task agent.
+/// Your own settings are found from `repository`, so they hold for a Task
+/// whose checkout is gone.
 pub fn resolve_task_agent(
     worktree: &Path,
+    repository: &Path,
     wave: Option<&str>,
-    personal: &crate::config::PersonalSettings,
     skill: Option<&crate::graph::Skill>,
 ) -> OpsResult<crate::config::Agent> {
-    let config =
-        crate::config::load_wave_config_with(Some(worktree), wave, personal)?.unwrap_or_default();
-    let resolved = crate::config::settings::resolve(&config, skill)?;
+    let shared = crate::config::resolved_for_task(worktree, repository, wave)?;
+    let Some(skill) = skill else {
+        return Ok(crate::config::Agent::parse(shared.config.agent()?)?);
+    };
+    let resolved = crate::config::settings::resolve(&shared.config, Some(skill))?;
     Ok(crate::config::Agent::parse(resolved.config.agent()?)?)
 }
 
 fn task_configuration_refusal(
     task: &Task,
+    repository: &Path,
     wave: Option<&str>,
-    personal: &crate::config::PersonalSettings,
-    skill: Option<&crate::graph::Skill>,
 ) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
-    // A Graph's steps may choose different agents; no general preference is
-    // required to inspect or start the Graph. Each launch resolves its own choice.
-    let agent = match resolve_task_agent(worktree, wave, personal, skill) {
-        Ok(agent) => agent,
-        Err(OpsError::Load(crate::error::LoadError::AgentSelection)) if skill.is_none() => {
-            return None
-        }
-        Err(error) => return Some(error.to_string()),
-    };
-    checkout_execution_boundary(worktree, &agent)
-        .err()
-        .map(|error| error.to_string())
+    // Each Graph step can select its own agent.
+    match resolve_task_agent(worktree, repository, wave, None) {
+        Ok(_) | Err(OpsError::Load(crate::error::LoadError::AgentSelection)) => None,
+        Err(error) => Some(error.to_string()),
+    }
 }
 
 /// Why the Task cannot start a process: its configuration, else a
 /// non-resumable failure as its latest event.
 pub fn task_process_refusal_after(
     task: &Task,
+    repository: &Path,
     wave: Option<&str>,
-    personal: &crate::config::PersonalSettings,
     latest: Option<&loopflow_storage::work::task::TaskEvent>,
 ) -> Option<String> {
-    task_configuration_refusal(task, wave, personal, None)
+    task_configuration_refusal(task, repository, wave)
         .or_else(|| task_event_process_refusal(latest).map(str::to_string))
 }
 
@@ -2634,23 +2815,27 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     })
 }
 
-/// Start the Task's conversation beside work that does not open it here:
-/// `lf task run`, `lf ship` and `lf task checkout`. Best-effort.
-pub fn start_conversation_beside(task: &Task) {
-    let started = block_on_task(async {
+/// Prepare the Task's conversation beside work that does not open it here:
+/// `lf task run`, `lf task auto on` and `lf task checkout`. The Machine server's
+/// recovery pass starts a prepared conversation that never ran. Best-effort.
+pub fn prepare_conversation_beside(task: &Task) {
+    let prepared = block_on_task(async {
         let store = task_store().await?;
-        crate::ops::human_session::primary::start_task_conversation(&store, task).await;
+        let worktree = task.worktree().map_err(task_error)?.clone();
+        crate::ops::human_session::primary::ensure_task(&store, &worktree, task.id.as_str(), None)
+            .await
+            .map_err(task_error)?;
         Ok(())
     });
-    if let Err(error) = started {
-        tracing::warn!(task = %task.identifier, %error, "background Task conversation did not start");
+    if let Err(error) = prepared {
+        tracing::warn!(task = %task.identifier, %error, "Task conversation was not prepared");
     }
 }
 
 /// `lf task sync`: exchange the Task with its tracker now. Linear and Asana
-/// look for every sent action and resend what the tracker lacks; Git
-/// exchanges the repository's planning ref, so a peer's Task this Machine
-/// has not fetched yet is found in `repo`'s planning. An `answer` first
+/// look for every sent action and resend what the tracker lacks; without a
+/// tracker, the repository's plan is exchanged with its hub and its remote, so
+/// a Task another Machine made is found there. An `answer` first
 /// settles every value the Task lost; `lf repo tracker answer` settles one.
 pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsResult<String> {
     block_on_task(async {
@@ -2679,10 +2864,10 @@ pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsRes
                 .map_err(task_error)?;
         }
         let Some(tracker) = super::tracker::queued_tracker(&repository) else {
-            let fetched = super::planning_sync::fetch_repository(&store, &repo).await;
-            super::planning_sync::publish_repository_now(&store, &repo).await?;
-            fetched?;
-            return synced(&store, &task.id).await;
+            super::plan_carriers::sync(&store, &repo)
+                .await
+                .map_err(|error| task_error(format!("{error:#}")))?;
+            return carriers_synced(&store, &repo, &task);
         };
         let project = task
             .project_id
@@ -2730,9 +2915,41 @@ async fn synced(store: &Store, task: &loopflow_storage::work::task::TaskId) -> O
         .ok_or_else(|| task_error("Task is missing"))?;
     let open = store.task_tracker_sync(task).map_err(task_error)?.lines();
     Ok(if open.is_empty() {
-        format!("{}: synchronized", saved.identifier)
+        format!("{}: nothing open", saved.identifier)
     } else {
         format!("{}: {}", saved.identifier, open.join("\n"))
+    })
+}
+
+/// What `lf task sync` prints without a tracker: what each carrier has yet
+/// to take of the repository's plan.
+fn carriers_synced(store: &Store, repo: &str, task: &Task) -> OpsResult<String> {
+    use loopflow_storage::sqlite::plan_carriers::Carrier;
+    let mut unsent = Vec::new();
+    for carrier in [Carrier::Git, Carrier::Hub] {
+        let Some(held) = store
+            .sqlite
+            .plan_carrier(repo, carrier)
+            .map_err(task_error)?
+        else {
+            continue;
+        };
+        let count = store
+            .sqlite
+            .plan_unsent(repo, carrier, 0)
+            .map_err(task_error)?
+            .count;
+        if count > 0 {
+            unsent.push(match carrier {
+                Carrier::Git => format!("Git {}, {count} unsent", held.peer),
+                Carrier::Hub => format!("hub, {count} unsent"),
+            });
+        }
+    }
+    Ok(if unsent.is_empty() {
+        format!("{}: nothing unsent", task.identifier)
+    } else {
+        format!("{}: {}", task.identifier, unsent.join("; "))
     })
 }
 
@@ -2844,24 +3061,29 @@ pub(super) async fn link_pr_to_planning(store: &SharedStore, task: &Task, pr: &m
         else {
             return Ok(None);
         };
-        let owner = loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone());
-        super::tracker::drain::drain_repository(
-            store,
-            &repo.to_string_lossy(),
-            super::tracker::drain::Scope::First(&owner),
-            super::tracker::drain::Bound::PASS,
-        )
-        .await?;
-        let action = store.sqlite.tracker_action(&id).map_err(task_error)?;
-        Ok::<_, OpsError>(match action {
-            Some(action)
-                if matches!(
+        let shown = |action: &Option<TrackerAction>| {
+            action.as_ref().is_some_and(|action| {
+                matches!(
                     action.phase,
                     ActionPhase::Confirmed | ActionPhase::Conflicted
-                ) =>
-            {
-                None
-            }
+                )
+            })
+        };
+        let mut action = store.sqlite.tracker_action(&id).map_err(task_error)?;
+        // The tracker already shows this state: nothing to send.
+        if !shown(&action) {
+            let owner = ActionOwner::Task(task.id.clone());
+            super::tracker::drain::drain_repository(
+                store,
+                &repo.to_string_lossy(),
+                super::tracker::drain::Scope::First(&owner),
+                super::tracker::drain::Bound::PASS,
+            )
+            .await?;
+            action = store.sqlite.tracker_action(&id).map_err(task_error)?;
+        }
+        Ok::<_, OpsError>(match action {
+            action if shown(&action) => None,
             Some(action) => Some(action.error.unwrap_or_else(|| {
                 "PR link is waiting to be sent; `lf repo tracker` lists it".into()
             })),

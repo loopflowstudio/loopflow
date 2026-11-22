@@ -26,6 +26,7 @@ struct GhosttyTerminalMountTests {
         // advances one reading; no provider or personal Session is involved.
         terminal.command = """
         /bin/sh -c \(shellEscape("""
+        printf '%s' "$LF_RELAY_FOCUSED" > "\(directory.path)/initial-focus"
         {
           printf '%s\\n' '{"generation":1,"state":"connected","native_ready":false,"message":null}'
           for phase in 1 2 3; do
@@ -61,6 +62,7 @@ struct GhosttyTerminalMountTests {
             try Data().write(to: directory.appendingPathComponent(String(phase)))
         }
         try await wait { terminal.connectionReading?.state == .connected }
+        #expect(try String(contentsOf: directory.appendingPathComponent("initial-focus"), encoding: .utf8) == "0")
         #expect(!terminal.connectionAcceptsInput)
         window.makeFirstResponder(nil)
         try advance(1)
@@ -505,7 +507,7 @@ struct GhosttyTerminalInputTests {
                 "id": id, "run_id": id, "interactive": true, "work": NSNull(), "title": id,
                 "workspace": ["machine_id": fixtureMachineId, "worktree": NSTemporaryDirectory(), "task_id": NSNull(), "unavailable": NSNull()],
                 "detail": "test", "cwd": NSTemporaryDirectory(), "state": "active",
-                "work_path": NSNull(), "action": sessionActionFixture(state: "active"), "blocked": false, "title_source": "generated", "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn": NSNull(), "raw": false, "terminal_ids": [pane], "open_argv": ["unused"],
+                "work_path": NSNull(), "action": sessionActionFixture(state: "active"), "blocked": false, "title_source": "generated", "ended": NSNull(), "start": NSNull(), "outlook": NSNull(), "status_line": NSNull(), "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn": NSNull(), "raw": false, "terminal_ids": [pane], "open_argv": ["unused"],
             ])
             records.append(try JSONDecoder().decode(SessionRecord.self, from: data))
         }

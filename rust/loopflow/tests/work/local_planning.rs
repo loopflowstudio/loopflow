@@ -2133,7 +2133,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             .unwrap()
         };
         let before = revision();
-        db.execute_batch("CREATE TRIGGER fail_refile BEFORE INSERT ON git_tracker_changes BEGIN SELECT RAISE(ABORT,'injected receipt failure'); END;").unwrap();
+        db.execute_batch("CREATE TRIGGER fail_refile BEFORE INSERT ON plan_changes BEGIN SELECT RAISE(ABORT,'injected receipt failure'); END;").unwrap();
         assert!(!command(repo.path(), home.path(), &args)
             .output()
             .unwrap()
@@ -3392,62 +3392,7 @@ fn unconfigured_repository_runs_tasks_on_the_builtin_code_graph() {
     assert_eq!(listed[0]["graph_name"], "code");
     let shown = run_until_waiting(repo.path(), home.path(), &["task", "run", id], id);
     assert_eq!(shown["name"], "code");
-    assert_eq!(shown["position"]["step"], "human-review");
-}
-
-#[test]
-fn auto_graph_runs_a_task_to_end() {
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    repo.create_file(".lf/config.yaml", "graph: auto\n");
-    // Stand in for the agent and delivery steps; the graph stays the builtin.
-    repo.create_file(".lf/graphs/pursue.yaml", "- cmd: graph show pursue\n");
-    repo.create_file(".lf/graphs/deliver.yaml", "- cmd: graph show deliver\n");
-    repo.stage_all();
-    repo.commit("Run Tasks on auto");
-    repo.push();
-    let created = lf(
-        repo.path(),
-        home.path(),
-        &["task", "create", "--title", "Auto Task", "--json"],
-    )["task"]
-        .clone();
-    let id = created["id"].as_str().unwrap();
-    let shown = run_until_waiting(repo.path(), home.path(), &["task", "run", id], id);
-    assert_eq!(shown["name"], "auto");
-    assert_eq!(shown["position"]["step"], "end");
-}
-
-#[test]
-fn your_graph_for_a_wave_selects_the_builtin_auto() {
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    lf(
-        repo.path(),
-        home.path(),
-        &["wave", "add", "product", "--json"],
-    );
-    lf(
-        repo.path(),
-        home.path(),
-        &["--wave", "product", "set", "graph", "auto"],
-    );
-    let created = lf(
-        repo.path(),
-        home.path(),
-        &[
-            "task", "create", "--wave", "product", "--title", "Auto", "--json",
-        ],
-    )["task"]
-        .clone();
-    let listed = lf(repo.path(), home.path(), &["task", "list", "--json"]);
-    let task = listed
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|task| task["task"]["id"] == created["id"])
-        .unwrap();
-    assert_eq!(task["graph_name"], "auto");
+    assert_eq!(shown["position"]["step"], "ship-review");
 }
 
 #[test]

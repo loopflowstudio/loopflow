@@ -193,6 +193,44 @@ struct WorkCacheTests {
         registry.prepareForQuit()
     }
 
+    @Test("Restoring Dev Work waits for a visit, then prepares only that Task")
+    func devRestoresWithoutOpeningTerminals() async throws {
+        let source = try Source()
+        let cache = WorkCache(directory: try temporaryDirectory())
+        let previous = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
+        previous.confirmMachine("home-a")
+        await previous.refresh()
+        previous.select(.task(id: "issue-review"))
+        cache.flush()
+
+        let repository = "repo_" + UUID().uuidString.lowercased()
+        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository)") }
+        let model = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
+        model.confirmMachine("home-a")
+        let registry = SessionsWorkspaceRegistry(localMachineId: "home-a", opensUnvisitedWork: false)
+        defer { registry.prepareForQuit() }
+        model.bindWorkspaces(registry, repository: repository)
+        await source.setLocationFailure(nil)
+        await model.refresh()
+        let selected = try #require(registry.selectedWork)
+        let workspace = try #require(registry.retained(selected))
+        #expect(selected.kind == .task)
+        #expect(registry.recentTasks.count > 1)
+        #expect(registry.warmPrimaries.count > 1)
+        #expect(!model.conversationIsOpening(workspace))
+        #expect(registry.preparationCount == 0)
+        #expect(await source.preparedTasks.isEmpty)
+        #expect(await source.preparedPrimaries.isEmpty)
+
+        model.select(.task(id: "issue-review"))
+        let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
+        await spin { registry.preparationCount > 0 }
+        #expect(await source.preparedTasks == [selected.id])
+        #expect(await source.preparedPrimaries.isEmpty)
+        #expect(store.sessions.filter { $0.state == .prepared }.map(\.launchArguments) ==
+                [["lf", "session", "resume", "conversation-" + selected.id]])
+    }
+
     @Test("A failed load opening shows its failure")
     func failedPrefetchKeepsItsReason() async throws {
         let source = try Source()
@@ -769,15 +807,15 @@ private extension SessionsStore {
     var preparedTaskConversations: [SessionItem] { sessions.filter { $0.state == .prepared && $0.record.taskPrimary } }
 }
 
-/// `populateWorkingTasks` rows: `owned` working Tasks, oldest first, then shipping,
-/// done, abandoned and unstarted Tasks, then a started Task nobody owns.
+/// `populateWorkingTasks` rows: `owned` working Tasks, oldest first, then done,
+/// abandoned and unstarted Tasks, then a started Task nobody owns.
 @MainActor
 private enum Prefetch {
     /// Five more working Tasks than the warm bound.
     static let owned = SessionsWorkspaceRegistry.warmConversationLimit + 4
     static let newestOwned = "prefetch-\(owned - 1)"
-    static let unstarted = "prefetch-\(owned + 3)"
-    static let unowned = "prefetch-\(owned + 4)"
+    static let unstarted = "prefetch-\(owned + 2)"
+    static let unowned = "prefetch-\(owned + 3)"
     static let working = (0..<owned).map { "prefetch-\($0)" } + [unowned]
 }
 
@@ -833,7 +871,7 @@ private actor Source {
         var inventory = wire["tasks"] as! [String: Any]
         let template = (inventory["items"] as! [[String: Any]])[0]
         // The newest row is a started Task nobody owns; it opens like any working Task.
-        let states = (0..<owned).map { ["idle", "active", "moving"][$0 % 3] } + ["shipping", "done", "abandoned", "unstarted", "idle"]
+        let states = (0..<owned).map { ["idle", "active", "moving"][$0 % 3] } + ["done", "abandoned", "unstarted", "idle"]
         inventory["items"] = states.enumerated().map { index, state in
             var row = template
             var task = row["task"] as! [String: Any]

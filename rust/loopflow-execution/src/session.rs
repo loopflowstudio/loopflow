@@ -9,12 +9,7 @@ pub fn conversation(
 ) -> anyhow::Result<LfSession> {
     let skill = crate::graph::load_skill(skill, cwd)?;
     let wave = crate::work::wave::context::resolve_ambient_wave_name();
-    let agent = crate::ops::task::resolve_task_agent(
-        cwd,
-        wave.as_deref(),
-        &crate::config::PersonalSettings::read(Some(cwd), wave.as_deref()),
-        Some(&skill),
-    )?;
+    let agent = crate::ops::task::resolve_task_agent(cwd, cwd, wave.as_deref(), Some(&skill))?;
     Ok(LfSession {
         captured: None,
         id: uuid::Uuid::new_v4().simple().to_string().into(),

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en" data-fonts="new" data-stops="person">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loopflow for Mac, more screens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Old+Standard+TT:wght@400;700&family=Atkinson+Hyperlegible+Next:ital,wght@0,200..800;1,200..800&family=Spline+Sans+Mono:wght@300..700&family=Cormorant+Garamond:wght@500&family=Lato:wght@400;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="desktop.css">
+</head>
+<body>
+
+
+<main class="page">
+<h1>Loopflow for Mac, more screens</h1>
+<p class="lede">The Task pane's Brief and Changes tabs, a dashboard of Tasks side by side, and the theme chooser. Same rules, fonts and tokens as <a href="desktop.html">the first two screens</a>.</p>
+<p class="soft">There is no screenshot of these screens as they are today, so each note says what the app does now, read from its source. Everything is live: type, choose, and switch themes. All 24 bundled themes are in the Theme menu.</p>
+<form class="switches" onsubmit="return false">
+  <fieldset><legend>Fonts</legend>
+    <label><input type="radio" name="fonts" value="new" checked><span>Old Standard, Atkinson, Spline Sans Mono</span></label>
+    <label><input type="radio" name="fonts" value="app"><span>The app's own (Cormorant, Lato, JetBrains Mono)</span></label></fieldset>
+  <fieldset><legend>Theme</legend><select name="theme" aria-label="Theme"></select></fieldset>
+  <fieldset><legend>Steps that stop for you</legend>
+    <label><input type="radio" name="stops" value="person" checked><span>Person icon</span></label>
+    <label><input type="radio" name="stops" value="word"><span>The word "you"</span></label>
+    <label><input type="radio" name="stops" value="ink"><span>Underlined burgundy</span></label>
+    <label><input type="radio" name="stops" value="none"><span>Sentence only</span></label>
+    <label><input type="radio" name="stops" value="diamond"><span>Diamond</span></label></fieldset>
+  <fieldset><legend>Numbers</legend>
+    <label><input type="radio" name="pins" value="on" checked><span>Shown</span></label>
+    <label><input type="radio" name="pins" value="off"><span>Hidden</span></label></fieldset>
+</form>
+
+<h2>The Task pane: Brief and Changes</h2>
+<p class="soft">Drawn from the LOO-515 branch as it stands, which already replaced the old pull request view. The tabs are Brief, Diff and Files.</p>
+<div class="pair one"><div class="stage" data-h="760"><div class="scale"><div class="app two"><div class="panes">
+  <section class="pane">
+    <header><div class="tabs" role="tablist"><button role="tab" aria-selected="true">Brief</button><button role="tab" aria-selected="false">Diff</button><button role="tab" aria-selected="false">Files</button></div></header>
+    <div class="brief" tabindex="0">
+      <h4 data-pin="1">Make Task PR, file-browser and brief views useful beside the conversation</h4>
+      <p class="state" data-pin="2"><b>Moving, at build.</b> <span class="why">The loop chose another pass on the concept review.</span></p>
+      <dl class="facts" data-pin="3">
+        <dt>Pull request</dt><dd><button class="link"><span class="mono">#1949</span> is open: 1 failed, 1 pending, 1 passed. Read 3 min ago.</button></dd>
+        <dt>Related</dt><dd><a href="#" class="mono">LOO-497</a>, <a href="#" class="mono">LOO-416</a></dd>
+        <dt>In this brief</dt><dd><a href="#">Who benefits</a>, <a href="#">What changes</a>, <a href="#">Acceptance</a></dd>
+      </dl>
+      <p class="fresh" data-pin="4">The brief changed since you last read it.</p>
+      <hr>
+      <h5>Task details beside the conversation</h5>
+      <p>The Task pane shows the brief, what changed and the files, so a review does not start in a browser.</p>
+      <h5>Who benefits</h5>
+      <p>Someone reviewing a Task in Desktop with its conversation open beside it.</p>
+      <h5>What changes</h5>
+      <ul><li>The pull request becomes part of the Diff tab; the GitHub patch list goes.</li><li>⌥⌘1, ⌥⌘2 and ⌥⌘3 open Brief, Diff and Files.</li><li>Page, scroll and tree expansion are kept across Task switches.</li></ul>
+      <h5>Acceptance</h5>
+      <ul><li>A step's changes can be read alone or as the whole Task.</li><li>A comment on a line reaches the conversation.</li></ul>
+    </div>
+  </section>
+  <section class="pane">
+    <header><div class="tabs" role="tablist"><button role="tab" aria-selected="false">Brief</button><button role="tab" aria-selected="true">Diff</button><button role="tab" aria-selected="false">Files</button></div></header>
+    <div class="dhead">
+      <span data-pin="5"><b class="num">85 changed files</b> <button class="pick">Whole Task, 59 commits <svg><use href="#i-down"/></svg></button></span>
+      <span class="cmp" data-pin="6">Compared with <span class="mono">main</span> at <span class="mono">2750c9e0fb</span>. Includes uncommitted changes.</span>
+      <button class="btn pill" data-pin="7"><i class="dot"></i><span class="mono">#1949</span> open, 1 check failed <svg><use href="#i-down"/></svg></button>
+      <div class="card">
+        <p><b>Pull request <span class="mono">#1949</span> is open.</b> <span class="second">Read 3 min ago.</span></p>
+        <p class="line"><span class="mono">Tests</span><span class="end"><span class="bad">Failed</span></span></p>
+        <p class="line"><span class="mono">Build</span><span class="end"><span class="wait">In progress</span></span></p>
+        <p class="line"><span class="mono">legacy-ci</span><span class="end"><span class="ok">Passed</span></span></p>
+        <p class="acts2"><button class="btn">Read again</button><button class="btn">Open on GitHub</button></p>
+      </div>
+    </div>
+    <div class="dbar" data-pin="8">
+      <button class="icon" aria-label="Hide file list"><svg><use href="#i-side"/></svg></button>
+      <button class="icon" aria-label="Previous change"><svg><use href="#i-up"/></svg></button><span class="num second">3 of 212 changes</span><button class="icon" aria-label="Next change"><svg><use href="#i-dn"/></svg></button>
+      <button class="pick">Order: Tour <svg><use href="#i-down"/></svg></button><button class="btn">Update tour</button>
+      <span class="end"><div class="seg" role="group" aria-label="Layout"><button aria-pressed="false">New code</button><button aria-pressed="true">Unified</button><button aria-pressed="false">Side by side</button></div><button class="icon" aria-label="More"><svg><use href="#i-more"/></svg></button></span>
+    </div>
+    <div class="dbody">
+      <div class="dfiles" data-pin="9">
+        <label class="find"><svg><use href="#i-find"/></svg><input type="text" placeholder="Filter files" aria-label="Filter files"></label>
+        <p class="count num">12 of 85 viewed</p>
+        <h5>Docs</h5><button><span class="mono">config.md</span><span class="n">+9 −5</span><small class="mono">docs/</small><small>Viewed</small></button>
+        <h5>Data model</h5><button aria-current="true"><span class="mono">TaskWorkspace.swift</span><span class="n">+4 −2</span><small class="mono">swift/Loopflow/Models/</small></button><button><span class="mono">catalog.rs</span><span class="n">+28</span><small class="mono">rust/loopflow-execution/src/config/</small></button>
+        <h5>Everything else</h5><button><span class="mono">TaskChangesView.swift</span><span class="n">+872</span><small class="mono">swift/LoopflowMac/Views/</small></button><button><span class="mono">ReviewStreamView.swift</span><span class="n">+758</span><small class="mono">swift/LoopflowMac/Views/</small></button><button><span class="mono">TaskBriefView.swift</span><span class="n">+143</span><small class="mono">swift/LoopflowMac/Views/</small><small>Viewed</small></button><button><span class="mono">config.yaml</span><span class="n">+10</span><small class="mono">.lf/</small></button>
+        <h5>Tests</h5><button><span class="mono">PullRequestTests.swift</span><span class="n">+58 −21</span><small class="mono">swift/LoopflowTests/</small></button>
+      </div>
+      <div class="dstream" tabindex="0">
+        <div class="fbar" data-pin="10"><span class="mono"><span class="second">swift/Loopflow/Models/</span>TaskWorkspace.swift</span><span class="end"><span class="mono second">+4 −2</span><button class="btn">Open</button><label><input type="checkbox"> Viewed</label></span></div>
+        <p class="decl mono">struct TaskCommit</p>
+        <div class="code"><p><i>54</i><span> </span><span>public struct TaskCommit: Decodable, Sendable, Hashable {</span></p><p><i>55</i><span> </span><span>    public let sha: String</span></p><p class="add"><i>56</i><span>+</span><span>    /// The first parent: a step starting here compares against it.</span></p><p class="add"><i>57</i><span>+</span><span>    public let parent: String</span></p><p><i>58</i><span> </span><span>    public let subject: String</span></p><p><i>59</i><span> </span><span>}</span></p></div>
+        <button class="fold">Show the 5 unchanged lines</button>
+        <p class="decl mono">struct TaskChangesSnapshot</p>
+        <div class="code" data-pin="11"><p><i>65</i><span> </span><span>    public let baseCommit: String</span></p><p><i>66</i><span> </span><span>    public let headCommit: String</span></p><p class="del"><i></i><span>−</span><span>    /// Base to head, oldest first.</span></p><p class="add"><i>67</i><span>+</span><span>    /// Head's first-parent line since base, oldest first, without merges.</span></p><p><i>68</i><span> </span><span>    public let commits: [TaskCommit]</span></p><p><i>69</i><span> </span><span>    public let files: [TaskChangedFile]</span></p></div>
+        <button class="fold">Show the 132 unchanged lines</button>
+      </div>
+    </div>
+  </section>
+</div></div></div></div></div>
+<ol class="notes">
+  <li><i>1</i><div><b>The Brief starts with the Task's name, in serif.</b> On the LOO-515 branch the Task's name appears nowhere in the pane. Here it is the 26 pt title step. It wraps to three lines at this width; that is the cost of putting serif in the Task workspace without a new row. <small>Your call: this is the "Brief tab" option from before.</small></div></li>
+  <li><i>2</i><div><b>State and reason are one sentence.</b> The branch shows "Moving · build" in 13 pt bold and the reason under it at 12 pt. One line, one size, a comma where the dot was.</div></li>
+  <li><i>3</i><div><b>Pull request, related Tasks and the outline are one small table.</b> The branch draws them as a clipped chip, 10 pt capsules and 10 pt links, each in its own style. All three are 13 pt with their label beside them, and the pull request line wraps where the chip cut it off. <small>Rules: nothing under 11 pt; nothing meaningful truncates. Branch: <code>TaskBriefView.swift:60-117</code>.</small></div></li>
+  <li><i>4</i><div><b>"The brief changed since you last read it"</b> keeps its warning color at 13 pt; it was 10.</div></li>
+  <li><i>5</i><div><b>The title counts files and the step menu sits beside it.</b> "Whole Task · N steps" loses its dot. The count of commits here is real; the branch groups them into steps, and I did not count those.</div></li>
+  <li><i>6</i><div><b>The comparison line wraps and marks what is a name.</b> The branch truncates it in the middle, through the SHA. The ref and the SHA are mono; the rest is a sentence.</div></li>
+  <li><i>7</i><div><b>The delivery button says the one thing that matters, whole.</b> The branch caps the pill at 200 pt and clips its headline. Here it reads "#1949 open, 1 check failed", and its card (shown open) lists each check with a word, in the order failed, in progress, passed. "Open on GitHub" loses its typed arrow. <small>Check names are the branch's test fixture names. The branch offers no way to run a check again, so neither does this.</small></div></li>
+  <li><i>8</i><div><b>The layout choice is words.</b> The branch uses three icons with no labels for New code, Unified and Side by side. The order menu names its current value.</div></li>
+  <li><i>9</i><div><b>File rows are 12 pt and never clip.</b> The branch sets names at 11 and counts at 10. The name comes first with its directory under it, "12 / 85 viewed" reads "12 of 85 viewed", and a viewed file says so in a word beside its check mark. <small>File names and line counts are real, from the branch's diff.</small></div></li>
+  <li><i>10</i><div><b>The file bar is unchanged in structure.</b> Directory in grey, name in ink, both mono, then counts, Open and Viewed.</div></li>
+  <li><i>11</i><div><b>Added and removed lines use the theme's success and failure colors</b>, as the branch does, with a plus or minus beside each so the tint is not the only signal. This hunk is real. <small>Per-file notes on the branch ("Reading…", "Binary file · no text to compare") are 10 pt; they would be 13 with full stops.</small></div></li>
+</ol>
+
+<h2>A dashboard of Tasks side by side</h2>
+<div class="pair one"><div class="stage"><div class="scale"><div class="app">
+<div class="titlebar"><span class="lights"><i></i><i></i><i></i></span><button class="icon" aria-label="Hide sidebar"><svg><use href="#i-side"/></svg></button><button class="icon" aria-label="Back"><svg><use href="#i-left"/></svg></button><button class="icon" aria-label="Forward"><svg><use href="#i-right"/></svg></button><nav class="crumbs" aria-label="Location"><button>loopflow</button><svg><use href="#i-right"/></svg><span class="here"><span>Needs you</span></span></nav></div>
+  <div class="body" style="grid-template-columns:1fr"><div class="dash">
+    <div class="head" data-pin="1"><h4>Needs you</h4><span class="mono second" data-pin="2">state:available or state:shipping</span><span class="end"><button class="btn">Edit query</button><button class="btn">Default Slots</button></span></div>
+    <div class="tiles">
+<section class="pane tile"><header data-pin="3"><p class="r1"><b>Make Task PR, file-browser and brief views useful beside the conversation</b><button class="icon" aria-label="Open LOO-515 in full"><svg><use href="#i-expand"/></svg></button><button class="icon" aria-label="More for LOO-515"><svg><use href="#i-more"/></svg></button></p><p class="r2"><span class="mono">LOO-515</span><span class="st blocked num">Blocked since 12:07</span></p><p class="r3">Fable limit reached. Choose how to continue.</p></header><div class="term" tabindex="0">› Message from @Loopflow: (ctrl+o to expand)
+  ⎿  You've hit your Fable limit · resets Nov 25 at 4am
+
+  What do you want to do?
+
+  ❯ 1. Stop and wait for limit to reset
+    2. Wait here, then continue at Nov 25 at 4am
+    3. Switch to usage credits
+
+  Enter to confirm · Esc to cancel</div></section><section class="pane tile"><header data-pin="4"><p class="r1"><b>Keep interrupted terminal pastes from swallowing Session input</b><button class="icon" aria-label="Open LOO-912 in full"><svg><use href="#i-expand"/></svg></button><button class="icon" aria-label="More for LOO-912"><svg><use href="#i-more"/></svg></button></p><p class="r2"><span class="mono">LOO-912</span><span class="st working num">Working</span></p><p class="r3">build is running. You are next needed at human-review.</p></header><div class="term" tabindex="0">● Read rust/loopflow-terminal/src/paste.rs
+● Bash cargo test -p loopflow-terminal paste::
+  running 6 tests
+  test result: ok. 6 passed
+
+● The bracketed-paste end marker was dropped when the Session restarted mid-paste. Holding the tail until the marker arrives fixes it.</div></section><section class="pane tile"><header><p class="r1"><b>Keep Desktop scrolling responsive under build load</b><button class="icon" aria-label="Open LOO-910 in full"><svg><use href="#i-expand"/></svg></button><button class="icon" aria-label="More for LOO-910"><svg><use href="#i-more"/></svg></button></p><p class="r2"><span class="mono">LOO-910</span><span class="st available num">Available</span></p><p class="r3">Waiting at human-review.</p></header><div class="term" tabindex="0">● Scrolling stays above 100 frames a second with a release build running beside it.
+
+  Ready for you to try: scroll the Session pane of any Task while cargo build runs.
+
+❯ </div></section>
+    </div>
+    <p class="pager" data-pin="5"><button class="icon" aria-label="Previous page" disabled><svg><use href="#i-left"/></svg></button><span class="num">Page 1 of 2</span><button class="icon" aria-label="Next page"><svg><use href="#i-right"/></svg></button></p>
+  </div></div>
+</div></div></div></div>
+<ol class="notes">
+  <li><i>1</i><div><b>The dashboard's name is the serif title.</b> You named it, so it gets the 26 pt step.</div></li>
+  <li><i>2</i><div><b>The query is mono because you can type it.</b> Today the query field uses the system monospace and the example under it is plain text. <small>Today: <code>DashboardView.swift:18</code>.</small></div></li>
+  <li><i>3</i><div><b>A tile's header is the sidebar row.</b> Title in full, ID, status with its time, and one line of what it is asking. At a third of the window the same four things still fit without clipping. Today a tile is headed "Slot 1". <small>Rule: one component per job. Today: <code>DashboardSlotGrid.swift:196</code>.</small></div></li>
+  <li><i>4</i><div><b>In a tile the workflow is the sentence alone.</b> The full line of steps does not fit at this width, so the tile keeps the part that answers the question: what is running and when you are next needed.</div></li>
+  <li><i>5</i><div><b>"Page 1 of 2" is in the interface face.</b> Today it is 11 pt mono. <small>Today: <code>DashboardSlotGrid.swift:144</code>. The terminal text in all three tiles is a stand-in.</small></div></li>
+</ol>
+
+<h2>Choose Theme</h2>
+<div class="pair one"><div class="stage plain" style="max-width:760px">
+  <div class="app sheet">
+    <h4 data-pin="1">Choose Theme</h4>
+    <div class="chooser">
+      <div><div class="seg" role="group" aria-label="Mode" data-pin="2"><button aria-pressed="true">System</button><button aria-pressed="false">Light</button><button aria-pressed="false">Dark</button></div>
+        <div class="names" id="names" data-pin="3"></div></div>
+      <div><div class="sample" data-pin="4"><p class="bar">loopflow</p>
+        <div class="rows"><p class="sel"><span>Selected Work</span><span class="num">Blocked since 12:07</span></p><p><span>Working</span><span style="color:var(--working)">Working</span></p><p><span>Available</span><span style="color:var(--available)">Available</span></p><p><span>Warning</span><span style="color:var(--waiting)">Blocked</span></p><p><span>Error</span><span style="color:var(--failure)">Failed</span></p><p><span>Success</span><span style="color:var(--success)">Passed</span></p></div>
+        <p class="tt">$ lf task status LOO-515</p></div>
+        <p class="second" style="margin-top:var(--sm)">Previewing <span data-theme-label></span></p></div>
+    </div>
+    <p class="foot2"><span class="left"><button class="btn">Customize</button> <button class="btn">Import file…</button></span><button class="btn">Cancel</button><button class="btn primary">Apply</button></p>
+  </div>
+</div></div>
+<ol class="notes">
+  <li><i>1</i><div><b>One title, at the title step.</b> Today's "Choose Theme" uses a section-title helper that takes any size.</div></li>
+  <li><i>2</i><div><b>The mode control needs no caption.</b> Today a small grey "Mode" sits above a control whose three options already say what it is. <small>Rule: a label that repeats its neighbor is deleted. Today: <code>ThemeChooser.swift:18</code>.</small></div></li>
+  <li><i>3</i><div><b>Every bundled theme is here and live.</b> Click one: this page, both prototypes' frames above, and the sample beside it all change. The palettes are read from the theme files, value for value. Today "Built-in" and "Yours" are system caption text at about 10 pt.</div></li>
+  <li><i>4</i><div><b>The sample shows roles in use.</b> Today five colored words stand in a row. Here they sit where they appear in the app: a title bar, a selected row, status words on a sidebar surface, and a terminal line, so a theme with poor contrast is visible before you apply it.</div></li>
+</ol>
+
+<h2>Not drawn</h2>
+<ul class="plain">
+  <li><b>The Wave page.</b> Skipped as asked.</li>
+  <li><b>The settings form</b> (<code>ConfigurationSettingsView</code>): a title, a destination picker, three text fields and five buttons. It needs the same button and field, and nothing it would teach is new.</li>
+  <li><b>Loading states.</b> The app shows "Opening repository…" with a spinner; that is one line of text and is left as it is.</li>
+</ul>
+</main>
+<script src="desktop-themes.js"></script>
+<script src="desktop.js"></script>
+<script>
+  var names = document.getElementById("names");
+  [["Light", "light"], ["Dark", "dark"]].forEach(function (g) {
+    var p = document.createElement("p"); p.textContent = g[0] + " themes"; names.appendChild(p);
+    Object.keys(THEMES).forEach(function (n) { if (THEMES[n]._mode !== g[1]) return; var b = document.createElement("button"); b.textContent = n; b.dataset.themeName = n; b.type = "button"; b.onclick = function () { applyTheme(n); }; names.appendChild(b); });
+  });
+  applyTheme("Loopflow Light");
+  document.querySelectorAll(".seg").forEach(function (seg) { seg.addEventListener("click", function (e) { var b = e.target.closest("button"); if (!b) return; seg.querySelectorAll("button").forEach(function (x) { x.setAttribute("aria-pressed", x === b); }); }); });
+</script>
+</body>
+</html>

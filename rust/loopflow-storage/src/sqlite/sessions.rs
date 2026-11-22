@@ -458,7 +458,12 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread),
         COALESCE(captured.provider_thread IS NOT NULL,0),
         EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),
-        graph.pid,graph.os_started_at,graph.exit_code,graph.error,a.agent_ended_at IS NOT NULL
+        graph.pid,graph.os_started_at,graph.exit_code,graph.error,a.agent_ended_at IS NOT NULL,
+        a.agent_ended_at,a.agent_exit_code,
+        a.starts_since_turn,a.last_started_at,a.start_failure,
+        EXISTS(SELECT 1 FROM task_checkouts pc WHERE pc.task_id=t.id AND {here}),
+        a.agent_pid IS NULL AND a.agent_ended_at IS NULL
+         AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id
@@ -466,7 +471,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
         ORDER BY {order}", super::task_work::session_tasks("a"),
-        task_state = super::durable::task_state_sql("t"))
+        task_state = super::durable::task_state_sql("t"),
+        here = super::session_recovery::task_conversation_here_sql("a", "t", "pc"))
 }
 
 fn read_summary(
@@ -543,6 +549,16 @@ fn read_summary(
             }),
             unviewed,
             held: live && row.get(35)?,
+            agent_end: row
+                .get::<_, Option<i64>>(41)?
+                .map(|at| {
+                    row.get(42)
+                        .map(|exit_code| crate::session::AgentEnd { at, exit_code })
+                })
+                .transpose()?,
+            starts_since_turn: row.get(43)?,
+            last_started_at: row.get(44)?,
+            start_failure: row.get(45)?,
             task_ids: serde_json::from_str(&row.get::<_, String>(24)?)?,
             primary_scope: row.get(25)?,
             agent_process_evidence,
@@ -554,6 +570,8 @@ fn read_summary(
                 .filter(|_| live),
             agent_process_id,
             task_terminal: row.get(27)?,
+            in_task_checkout: row.get(46)?,
+            launching: row.get(47)?,
             captured: row.get(15)?,
             id: row.get(0)?,
             artifact_key: row
@@ -2413,8 +2431,8 @@ mod metadata_tests {
             "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_1','/repo',1);
              INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
              VALUES('task_1','repo_1','FIX-1',1);
-             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
-             VALUES('chosen','Chosen','human',1,0,'/elsewhere');
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,starts_since_turn,last_started_at,start_failure)
+             VALUES('chosen','Chosen','human',1,0,'/elsewhere',3,100,'provider unavailable');
              INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
              VALUES('other','Other','human',1,0,'/elsewhere','task_1');
              INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task_1','chosen');",
@@ -2442,6 +2460,14 @@ mod metadata_tests {
         };
         let pair = |session: &str| vec![(session.to_owned(), "task_1".to_owned())];
         assert_eq!(marks(), pair("chosen"));
+        let recovery: (u32, i64, String) = conn
+            .query_row(
+                "SELECT starts_since_turn,last_started_at,start_failure FROM agent_sessions WHERE id='chosen'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(recovery, (3, 100, "provider unavailable".to_owned()));
 
         // Released lf chooses another primary through its table.
         conn.execute_batch(

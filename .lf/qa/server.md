@@ -2,6 +2,13 @@ Read when QA runs a branch-built `lf`, its server or a private Machine (`LF_HOME
 
 # Private Machine
 
+In a shallow checkout the build panics ordering migrations (`CREATE INDEX
+… graph_processes …`), and `rust/loopflow-storage/migration-order.txt` lags
+main. Deepen with `git fetch --shallow-since=<months ago> origin main`, write
+`_migration_order(Path('.'))` from `scripts/test_task_installation.py` to a
+file (import with `sys.path` on `scripts/`) and build with
+`LOOPFLOW_MIGRATION_ORDER=<file>`.
+
 For live server QA, build `cargo build -p loopflow --bin lf`, then use a fresh
 Git repository with a local Git identity and a private `LF_HOME`. Put Desktop
 QA homes under a short path such as `/tmp/lf-qa-*`: macOS
@@ -14,6 +21,8 @@ Run `lf server run` in the foreground and read its socket from `lf server status
 the socket is hashed under `/tmp`, not inside `LF_HOME`. Speak the documented
 newline JSON protocol, disconnect before an answer, then look up
 `lf server receipt qa-report --json` before retrying identical content.
+Commands that print "Opening loopflow://…" (`lf desktop view`) leave the
+private Machine: the installed app opens the repository under the real `~/.lf`.
 Stop every server and holder launched for the walkthrough: a private home's
 `lf holder run` outlives its server, and the providers it holds are its direct
 children. For input and resize checks without a provider login, hold a real
@@ -87,9 +96,9 @@ Never open a copy of the Machine's own store with `lf`, a read included:
 `lf session list`, `lf session history`, `lf task status|list|show`,
 `lf wave status|list|show` and `lf plan list` run recovery first
 (`ops/recovery.rs`), which follows the real worktrees and PIDs the copy
-records. It starts `lf --task <id> ship` in the real checkout of any approved
-Task whose ship process has exited, and can stop a headless agent the stale
-copy takes for orphaned. A copy
+records. It starts `lf task run <id>` in the real checkout of any Task whose
+run's carrier has exited, and can stop a headless agent the stale copy takes
+for orphaned. A copy
 (`sqlite3 "file:$HOME/.lf/loopflow.db?mode=ro" ".backup <copy>"`) is for
 `sqlite3` only: counts, `EXPLAIN QUERY PLAN`, timing a statement. For
 returning-state checks, build the earlier state in a private home with the
@@ -117,6 +126,50 @@ CLI is installed, even for a command-only Graph. Set `CODEX_HOME` and
 conversations' providers by their disposable checkout cwd and stop them with
 their descendants; they are children of the private home's `lf holder run`, so
 stopping the foreground server alone leaves them running.
+
+# Comparing served reads between two builds
+
+Make two private Machines with the same script (a repository, a Wave with its
+own `config.yaml`, Tasks created with `lf task create '<title>' --wave <wave>`,
+a few adopted with `--worktree`), one per binary: the branch build and the
+installed `lf` (`whence -p lf`) as the base. Keep `HOME`, `LF_HOME`,
+`CODEX_HOME` and `CLAUDE_CONFIG_DIR` under `/tmp/lf-qa-*/<tag>/home`. Build the
+branch with `--release` before timing anything: the installed `lf` is a
+release build and a debug server is several times slower.
+
+`wave.plan` is `lf wave status --json` as a request; it has no subscription.
+The reads that subscribe are `plan.list`, `task.get`, `task.status`,
+`session.list`, `session.history`, `repo.tracker`, `task.wait` and the Desktop
+views; anything else answers "has no --subscribe". `subscribe` needs
+`"sender": null` as `request` does. `skill.list` takes `"path": []`, not null.
+
+A settings or skill file edit reaches the next served read after the Local
+refresh, about a second: wait two before asking. Normalize the home path and
+`home_<id>` Machine IDs, then diff each step's answer between the two servers.
+
+For CPU, open several connections holding `plan.list` and `task.get`
+subscriptions, write through `task.update` (`notes`) a few times a second, and
+read `ps -o time= -p <server pid>` before and after; `sample <pid> 5 -file …`
+during. Count a function from the call-graph section by summing the top-most
+frame of each stack that names it: `grep -c` counts lines, not samples. Rust
+v0 symbols are mangled; match `settings14validate_value`, not
+`settings::validate_value`. File warnings go to the server's stderr.
+
+Remove and re-add a Task's worktree (`git worktree remove --force`, then
+`git worktree add <path> <branch>`) as one of the changes: most recorded Tasks
+have no checkout left, and a read that locates a file from the worktree goes
+wrong only then. A second repository with nothing under `.lf` in Git, one Task
+adopted into a worktree and `lf config set agent …` as its only setting shows
+it in `task.get` at `execution.provider` (a subscription frame holds the same
+object under `body`).
+
+To see what a later commit changed, keep the earlier branch binary as a third
+tag beside base and branch. For a returning Machine, stop the base server,
+link a new tag's directory to the base's (`ln -s old ret`) and start the
+branch binary there.
+
+Stop the servers by the PID you recorded, after checking its `LF_HOME` with
+`ps eww -p <pid>`: other worktrees run their own `lf server run`.
 
 # Comparing a branch with the installed lf
 

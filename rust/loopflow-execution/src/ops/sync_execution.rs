@@ -87,16 +87,17 @@ pub(crate) fn run_sync_in(
     };
     let detach =
         stacked.is_some() && onto.is_some_and(|target| target == default || target == upstream);
-    if stacked.is_some() && onto.is_some() && !detach {
-        return Err(anyhow!(
-            "{} names no other open Task; name one to restack this Task on it, the default branch to detach it, or omit the target to sync its parent",
-            onto.unwrap_or_default()
-        ));
+    let mut stacked_onto = None;
+    if let Some(stacked) = stacked.as_ref().filter(|_| !detach) {
+        stacked_onto = stacked
+            .live_parent_branch(&default)?
+            .map(|branch| format!("origin/{branch}"));
+        if let Some(onto) = onto {
+            return Err(anyhow!(
+                "{onto} names no other open Task; name one to restack this Task on it, the default branch to detach it, or omit the target to sync its parent"
+            ));
+        }
     }
-    let stacked_onto = stacked
-        .as_ref()
-        .and_then(|stacked| stacked.live_parent_branch())
-        .map(|branch| format!("origin/{branch}"));
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
     let default_target = if on_main { &upstream } else { &default };
     let target = if detach {
@@ -120,14 +121,12 @@ pub(crate) fn run_sync_in(
         && !on_main
         && matches!(plan.strategy, crate::ops::SyncStrategy::MergeTarget)
         && crate::git::intervention_state(repo_root)?.is_none()
-        && {
-            progress.status("Committing uncommitted edits before merging...");
-            checkpoint_uncommitted_work(
-                repo_root,
-                &format!("Checkpoint edits before syncing onto {}", plan.base_ref),
-            )?
-        }
+        && checkpoint_uncommitted_work(
+            repo_root,
+            &format!("Checkpoint edits before syncing onto {}", plan.base_ref),
+        )?
     {
+        progress.status("Committed uncommitted edits before merging.");
         plan = plan_sync(repo_root, Some(target), fork_base.clone())?;
     }
     let options = SyncOptions {
@@ -225,9 +224,9 @@ pub fn checkpoint_uncommitted_work(repo: &Path, message: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// Hand a conflicted sync to exactly one recovery agent under the owning
-/// operation's scoped ids. The agent continues the existing sequencer; the
-/// caller keeps ownership and performs verification and the single push.
+/// Run one conflict resolution under the owning operation's scoped IDs.
+/// The agent continues the existing sequencer. The caller keeps ownership
+/// and performs verification and the single push.
 fn resolve_sync_conflict(
     repo_root: &Path,
     onto: &str,
@@ -360,10 +359,15 @@ fn process_skill_agent(
     capture.finish(outcome)?;
     let result = result?;
     if result.exit_code != 0 {
+        let reason = result.stderr.trim();
+        let reason = if reason.is_empty() {
+            String::new()
+        } else {
+            format!("\n{reason}")
+        };
         return Err(anyhow!(
-            "agent exited with code {} while resolving {}",
-            result.exit_code,
-            skill_name,
+            "agent exited with code {} while resolving {skill_name}{reason}",
+            result.exit_code
         ));
     }
     Ok(())

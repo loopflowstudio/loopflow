@@ -81,20 +81,6 @@
         "created_at": "2026-10-08T12:00:00Z"
       },
       "tracker_value": null
-    },
-    {
-      "id": "git-head-title",
-      "seq": null,
-      "owner_kind": "task",
-      "owner_id": "task_00000000000000000000000000000001",
-      "kind": "field",
-      "change": "title",
-      "subject": "task_title",
-      "phase": "conflicted",
-      "tracker": "git",
-      "error": null,
-      "local_value": "Mine",
-      "tracker_value": "Peer title"
     }
   ]
 }

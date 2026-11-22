@@ -181,18 +181,22 @@ pub(super) async fn run() -> Result<()> {
     // redeems what a control connection on the same carrier requested.
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
+    let (remote_control, remote_requests) = mpsc::channel(8);
     super::wake::start();
     super::maintenance::start();
+    super::maintenance::start_plan_exchange();
     // Held terminals keep running in their holders whether or not this server
     // can host them; without a registry their views wait for the next server.
     let terminals = match Registry::open(&executable_sha256) {
-        Ok(terminals) => Some(terminals),
+        Ok(terminals) => {
+            super::recovery::start(terminals.clone());
+            Some(terminals)
+        }
         Err(error) => {
             tracing::error!(%instance, %error, "Held terminals are not hosted by this server");
             None
         }
     };
-    let (remote_control, remote_requests) = mpsc::channel(8);
     let remote = super::remote::manage(
         super::mobile::configured(),
         remote_requests,
@@ -980,7 +984,7 @@ async fn start_held(
 /// What `session.continue` starts: `lf session resume` of exactly this
 /// Session, in its directory, with this server's environment and its own
 /// `LF_HOME` and `LF_BIN`.
-fn continuing(
+pub(super) fn continuing(
     session: loopflow_model::id::LfSessionId,
     request: String,
     rows: u16,
@@ -1273,6 +1277,11 @@ async fn request(
     #[cfg(test)]
     let completion = tests::take_request_completion(&id);
     let write = operation.is_write();
+    let mut operation = operation;
+    // A command run here is followed by one exchange by each plan carrier.
+    let planned = matches!(origin, Origin::Local)
+        .then(|| operation.directory())
+        .flatten();
     let started = Instant::now();
     let trace_id = loopflow_model::id::TraceId::default();
     let answer = match operation {
@@ -1309,6 +1318,9 @@ async fn request(
             ServerMessage::written_error(Some(id.clone()), refusal, answer.revisions)
         }
     };
+    if let Some(directory) = planned {
+        loopflow_execution::ops::plan_carriers::after_command(directory);
+    }
     // A closed connection drops the answer; the effect stands.
     if let Err(failure) = outgoing.deliver(message, reservation).await {
         let _ = deliver(
@@ -1453,6 +1465,25 @@ async fn served(
         Operation::Server(ServerOperation::SessionBoundary(_)) => {
             unreachable!("request dispatches boundaries")
         }
+        Operation::Server(ServerOperation::PlanApply {
+            repository,
+            records,
+        }) => {
+            plan_here(reservation, move |store| {
+                Ok(serde_json::to_value(
+                    loopflow_execution::ops::plan_hub::apply_here(store, &repository, &records)?,
+                )?)
+            })
+            .await
+        }
+        Operation::Server(ServerOperation::PlanChanges { repository, since }) => {
+            plan_here(reservation, move |store| {
+                Ok(serde_json::to_value(
+                    loopflow_execution::ops::plan_hub::changes_here(store, &repository, since)?,
+                )?)
+            })
+            .await
+        }
         Operation::Write(_) | Operation::Measured(super::wire::MeasuredOperation::Write { .. }) => {
             unreachable!("operate answers writes")
         }
@@ -1497,6 +1528,26 @@ async fn mobile_control(
         .await
         .map_err(|_| Error::new(ErrorCode::Unavailable, "mobile listener is not running"))?;
     Ok(())
+}
+
+/// The hub's answer to another Machine's plan exchange, from this Machine's store.
+async fn plan_here(
+    reservation: Arc<Reservation>,
+    answer: impl FnOnce(&loopflow_execution::store::sqlite::SqliteStore) -> Result<serde_json::Value>
+        + Send
+        + 'static,
+) -> Result<serde_json::Value, Error> {
+    tokio::task::spawn_blocking(move || {
+        let _held = reservation;
+        loopflow_execution::journal::request::isolate(|| {
+            let path = loopflow_execution::store::default_db_path();
+            anyhow::ensure!(path.exists(), "Machine registry is absent");
+            answer(&loopflow_execution::store::open_sqlite(&path)?)
+        })
+    })
+    .await
+    .map_err(unavailable)?
+    .map_err(unavailable)
 }
 
 /// Record a hook's boundary and answer its steers. A `stop`'s planning refresh
@@ -1630,7 +1681,7 @@ mod tests {
     use std::sync::{Arc, LazyLock, Mutex};
     use std::time::Duration;
 
-    use super::{connection, deliver_or_spill, Clients};
+    use super::{connection, deliver_or_spill, local, Clients};
     use crate::lf::commands::read::Read;
     use crate::server::subscriptions::Subscriptions;
     use crate::server::ticket::{Admission, Purpose, Tickets};
@@ -1641,8 +1692,8 @@ mod tests {
     };
     use loopflow_execution::engine::ErrorCode;
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::UnixStream;
-    use tokio::sync::Semaphore;
+    use tokio::net::{UnixListener, UnixStream};
+    use tokio::sync::{mpsc, Semaphore};
     use tokio_util::codec::{Framed, LinesCodec};
 
     /// A subscription that needs no directory and reads an empty home.
@@ -1884,6 +1935,42 @@ mod tests {
             .block_on(body);
     }
 
+    #[tokio::test]
+    async fn a_client_that_closes_before_accept_leaves_the_server_listening() {
+        let directory = tempfile::tempdir_in("/tmp").unwrap();
+        let path = directory.path().join("server.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        // Queue and close the first client before the accept loop can run.
+        drop(UnixStream::connect(&path).await.unwrap());
+        let mut probe = UnixStream::connect(&path).await.unwrap();
+        let (remote_control, _remote_requests) = mpsc::channel(1);
+        let serving = local(
+            listener,
+            "incarnation".into(),
+            Arc::new("fixture".into()),
+            Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+            Clients::default(),
+            remote_control,
+            Arc::new(Tickets::default()),
+            Arc::new(Subscriptions::default()),
+            None,
+        );
+        // A status probe checks that the listener answers without opening a
+        // Machine registry as a hello would.
+        let status = async {
+            probe.write_all(b"{\"type\":\"status\"}\n").await.unwrap();
+            let mut line = String::new();
+            BufReader::new(probe).read_line(&mut line).await.unwrap();
+            serde_json::from_str::<ServerMessage>(&line).unwrap()
+        };
+        tokio::select! {
+            result = serving => panic!("server stopped listening: {result:?}"),
+            result = tokio::time::timeout(Duration::from_secs(5), status) => {
+                assert!(matches!(result.unwrap(), ServerMessage::Status(_)));
+            }
+        }
+    }
+
     #[test]
     fn a_machine_request_without_its_sender_is_invalid() {
         with_empty_home(async {
@@ -1954,12 +2041,12 @@ mod tests {
                 // The fixture's repository has no checkout here, so the hold fails and is logged.
                 let answer = client.receive().await.unwrap();
                 assert!(
-                    matches!(&answer, ServerMessage::Error { id: Some(id), .. } if id == "hold-1"),
+                    matches!(&answer, ServerMessage::Error { id: Some(id), .. } if id == "auto-1"),
                     "{answer:?}"
                 );
             });
         let log = std::fs::read_to_string(loopflow_execution::diagnostic_log::log_path()).unwrap();
-        assert!(log.contains("request=hold-1"), "{log}");
+        assert!(log.contains("request=auto-1"), "{log}");
         assert!(!log.contains("sk-fixture"), "{log}");
     }
 

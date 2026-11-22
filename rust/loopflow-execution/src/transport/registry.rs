@@ -240,17 +240,11 @@ struct Entry {
     reported: Option<Records>,
 }
 
+/// Both steps read the terminal's size when they act: a view that takes the
+/// size meanwhile is what the program is narrowed from and returned to.
 enum Nudge {
-    Replaying {
-        until: u64,
-        rows: u16,
-        cols: u16,
-    },
-    Narrowed {
-        since: Instant,
-        rows: u16,
-        cols: u16,
-    },
+    Replaying { until: u64 },
+    Narrowed { since: Instant },
 }
 
 enum Command {
@@ -375,6 +369,10 @@ impl Registry {
         });
         let mut unsettled = Vec::new();
         let (entries, pending) = registry.adopt(&mut unsettled);
+        // Ends found at startup are recorded before anyone reads the store
+        // through this registry: the recovery pass would otherwise reap the
+        // dead agent first, and its end would read as a move, not a death.
+        unsettled.retain_mut(|exit| !settle(exit));
         *registry.pending.lock().expect("registry lock poisoned") = pending.clone();
         for holder in pending {
             let registry = registry.clone();
@@ -452,7 +450,7 @@ impl Registry {
         };
         meta.write(&self.place, &terminal)?;
         crate::journal::process_ledger()?.create_terminal(&terminal, &self.build)?;
-        let mut client = Client::ensure(&self.place)?;
+        let mut client = Client::ensure(&self.place, &self.build)?;
         let holder = client.hello()?;
         let (rows, cols) = dimensions(start.rows, start.cols);
         let mut env: Vec<(String, String)> = start
@@ -701,8 +699,6 @@ impl Registry {
         // the ring no longer holds of the visible screen.
         entry.nudge = Some(Nudge::Replaying {
             until: held.written,
-            rows: held.rows,
-            cols: held.cols,
         });
         Ok(entry)
     }
@@ -1024,23 +1020,19 @@ impl Entry {
         // Output the ring dropped before it was read is missing from the
         // screen; the program is asked to draw it again.
         if source.take_gap().is_some() && self.nudge.is_none() {
-            let (rows, cols) = self.hosted.size();
             self.nudge = Some(Nudge::Replaying {
                 until: source.position(),
-                rows,
-                cols,
             });
         }
+        let (rows, cols) = self.hosted.size();
         match self.nudge {
-            Some(Nudge::Replaying { until, rows, cols }) if source.position() >= until => {
+            Some(Nudge::Replaying { until }) if source.position() >= until => {
                 source.resize(rows, cols.saturating_sub(1).max(2));
                 self.nudge = Some(Nudge::Narrowed {
                     since: Instant::now(),
-                    rows,
-                    cols,
                 });
             }
-            Some(Nudge::Narrowed { since, rows, cols }) if since.elapsed() >= NUDGE => {
+            Some(Nudge::Narrowed { since }) if since.elapsed() >= NUDGE => {
                 source.resize(rows, cols);
                 self.nudge = None;
             }
@@ -1050,7 +1042,7 @@ impl Entry {
 
     fn nudge_at(&self) -> Option<Instant> {
         match self.nudge {
-            Some(Nudge::Narrowed { since, .. }) => Some(since + NUDGE),
+            Some(Nudge::Narrowed { since }) => Some(since + NUDGE),
             _ => None,
         }
     }

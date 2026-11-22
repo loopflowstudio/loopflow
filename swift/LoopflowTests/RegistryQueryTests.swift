@@ -52,7 +52,7 @@ struct RegistryQueryTests {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let detail = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/graph_detail.json"), encoding: .utf8)
         let expected = try JSONDecoder().decode(GraphProcessDetail.self, from: Data(detail.utf8))
-        let overview = "{\"sessions\":[],\"graph_processes\":[],\"graph\":{\"name\":\"feature\",\"interactive_steps\":[],\"position\":{\"kind\":\"at\",\"step\":\"demo\"}}}"
+        let overview = "{\"sessions\":[],\"graph_processes\":[],\"graph\":{\"name\":\"feature\",\"interactive_steps\":[],\"position\":{\"kind\":\"at\",\"step\":\"demo\"},\"steps\":[{\"name\":\"demo\",\"interactive\":true}],\"current_step\":0,\"sentence\":\"Waiting for you at demo.\"}}"
         let query = RegistryQuery(subscribeRead: { args, cwd in
             guard args == ["--machine", "peer", "--repo-id", "plan", "task", "show", "task", "--json", "--subscribe"], cwd == nil else {
                 throw RegistryQueryError("A peer run page must never use local execution")
@@ -62,7 +62,7 @@ struct RegistryQueryTests {
                 continuation.yield(Data("{\"answers\":null,\"unavailable\":null,\"body\":\(body),\"read_at\":{\"planning\":7}}".utf8))
                 continuation.finish()
             }
-            return LineSubscription(lines: lines, send: { _ in }, cancel: {})
+            return LineSubscription(lines: lines, send: { _ in }, cancel: {}, unreadable: { nil })
         }) { _, _ in throw RegistryQueryError("Unexpected one-shot read") }
         let subscription = try await query.onMachine("peer", repository: "plan").subscribeTask(task: "task")
         var iterator = subscription.lines.makeAsyncIterator()
@@ -124,12 +124,12 @@ struct RegistryQueryTests {
         #expect(try object(move) == object(#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null,"machine":null}"#))
         #expect(move.argv == ["task", "move", "FIX-1", "--no-wave", "--json"])
         #expect(move.cwd == "/r")
-        let stop = ServedWrite.taskHold(directory: "/r", issue: "FIX-1")
-        #expect(try object(stop) == object(#"{"kind":"task.hold","directory":"/r","issue":"FIX-1","reason":null}"#))
+        let off = ServedWrite.taskAutoOff(directory: "/r", issue: "FIX-1")
+        #expect(try object(off) == object(#"{"kind":"task.auto.off","directory":"/r","issue":"FIX-1","reason":null}"#))
         let keep = ServedWrite.repoTrackerAnswer(directory: "/r", action: "a1", answer: .keepTheirs)
         #expect(try object(keep) == object(#"{"kind":"repo.tracker.answer","directory":"/r","action":"a1","answer":"keep_theirs"}"#))
         #expect(keep.argv == ["repo", "tracker", "answer", "a1", "--keep-theirs", "--json"])
-        #expect(stop.argv == ["task", "hold", "FIX-1", "--json"])
+        #expect(off.argv == ["task", "auto", "off", "FIX-1", "--json"])
         let save = ServedWrite.taskSave(directory: "/", issue: "FIX-1", path: "a.txt", revision: "r", content: "text")
         #expect(try object(save) == object(
             #"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#))
@@ -396,7 +396,7 @@ struct RegistryQueryTests {
           "provider": "codex",
           "owner": {"person": "Jack Heart", "person_id": null, "machine": {"id": null, "label": null}}
         },
-        "graph_name":"feature","graph_source":"repository","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
+        "graph_name":"feature","graph_source":"repository","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},
         "next_move": {
           "owner": "task",
           "reason": "ready"
@@ -421,7 +421,8 @@ struct RegistryQueryTests {
           "reason": "resume the parked Task"
         },
         "pr": null,
-        "section": "working"
+        "section": "working",
+        "owned_by_you": false
       }
     ],
     "truncated": false
@@ -553,7 +554,7 @@ struct RegistryQueryTests {
             #expect(cwd == nil)
             switch args {
             case ["task", "changes", "INF-123", "--base", "parent", "--json"]:
-                return #"{"issue_identifier":"INF-123","task_id":"ts_1","base_commit":"abc","head_commit":"def","files":[{"path":"src/parser.rs","old_path":null,"committed":true,"staged":false,"unstaged":true,"untracked":false}],"scratch":[],"scratch_truncated":false}"#
+                return #"{"issue_identifier":"INF-123","task_id":"ts_1","base_commit":"abc","head_commit":"def","commits":[],"files":[{"path":"src/parser.rs","old_path":null,"committed":true,"staged":false,"unstaged":true,"untracked":false,"changes":2}],"scratch":[],"scratch_truncated":false}"#
             case ["task", "diff", "INF-123", "src/parser.rs", "--base", "parent", "--json"]:
                 return #"{"issue_identifier":"INF-123","task_id":"ts_1","path":"src/parser.rs","base_commit":"abc","patch":"@@ -1 +1 @@","binary":false,"truncated":false}"#
             case ["task", "file", "INF-123", "src/parser.rs", "--json"]:

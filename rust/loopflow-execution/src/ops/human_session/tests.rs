@@ -85,8 +85,7 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
     let _ambient = crate::test_ambient::EnvGuard::new();
     let home = ledger.home();
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    crate::journal::with_process(|| {
-        crate::journal::admit_process(home, &["lf".into(), "session".into()]);
+    crate::journal::with_runtime(home, &["lf".into(), "session".into()], || {
         runtime.block_on(async {
             let store = std::sync::Arc::new(
                 crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
@@ -127,8 +126,8 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 &crate::harness::Recording { store: store.sqlite.clone(), session: session.id.to_string(), attachment: first.clone() },
                 crate::harness::LaunchKind::Batch,
             )?;
-            let opened = super::open(&store, home, &session.id, None, None, false, true, false).await;
-            let forked = super::open(&store, home, &session.id, None, None, true, true, false).await;
+            let opened = super::open(&store, home, &session.id, None, None, false, true, Default::default()).await;
+            let forked = super::open(&store, home, &session.id, None, None, true, true, Default::default()).await;
             let running = provider.try_wait()?.is_none();
             provider.kill().await?;
             assert!(running, "resume stopped the Run's provider");
@@ -224,11 +223,17 @@ fn summary_fixture() -> crate::session::SessionSummary {
         agent_process_id: None,
         primary_scope: None,
         agent_process_evidence: crate::store::ProcessIdentityEvidence::Unknown,
+        agent_end: None,
+        starts_since_turn: 0,
+        last_started_at: None,
+        start_failure: None,
         available: false,
         terminal_id: None,
         unviewed: false,
         held: false,
         task_terminal: false,
+        in_task_checkout: false,
+        launching: false,
         task_ids: vec![task.clone()],
         captured: Some(1),
         id: "metadata".into(),
@@ -262,6 +267,421 @@ fn summary_fixture() -> crate::session::SessionSummary {
     }
 }
 
+/// A Session's row read at `now`, on a Machine that claims its Task and runs
+/// a server.
+fn row_at(summary: &crate::session::SessionSummary, now: i64) -> super::SessionRecord {
+    super::summary_surface(
+        summary,
+        super::session_ending(summary, now, || true, || true),
+    )
+}
+
+/// A Session's row long after everything it records.
+fn surfaced(summary: &crate::session::SessionSummary) -> super::SessionRecord {
+    row_at(summary, 1_000_000)
+}
+
+fn outlook(summary: &crate::session::SessionSummary) -> Option<super::SessionOutlook> {
+    surfaced(summary).outlook
+}
+
+fn line(row: &super::SessionRecord) -> &str {
+    row.status_line.as_deref().unwrap()
+}
+
+/// A Task conversation that is down says once whether it comes back, when,
+/// and which command opens it otherwise.
+#[test]
+fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
+    use super::SessionOutlookKind::{ComingBack, CouldNotStart, Quit, Starting, WaitingForYou};
+    use super::SessionState;
+    let died = |at| {
+        Some(crate::session::AgentEnd {
+            at,
+            exit_code: Some(137),
+        })
+    };
+    let mut summary = summary_fixture();
+    summary.primary_scope = Some("task".into());
+    summary.in_task_checkout = true;
+    summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Dead;
+    summary.agent_end = died(1_000);
+
+    let first = surfaced(&summary);
+    assert_eq!(first.state, SessionState::Closed);
+    assert!(
+        line(&first).starts_with("died ") && line(&first).ends_with(" (exit 137) · starting again"),
+        "{}",
+        line(&first)
+    );
+    let ended = first.ended.unwrap();
+    assert_eq!(ended.exit_code, Some(137));
+    assert_eq!(first.start, None, "the pass has started nothing yet");
+    let next = first.outlook.unwrap();
+    assert_eq!(
+        (next.kind, next.at, next.reason, next.command),
+        (ComingBack, Some(ended.at), None, None),
+        "the first start is immediate"
+    );
+
+    summary.starts_since_turn = 2;
+    summary.last_started_at = Some(2_000);
+    assert_eq!(
+        outlook(&summary).unwrap().at,
+        loopflow_harness::transcript::rfc3339(2_000),
+        "a start counted after the death is under way"
+    );
+    summary.start_failure = Some("no PTY left: 511 in use (kern.tty.ptmx_max)".into());
+    assert_eq!(
+        outlook(&summary).unwrap().at,
+        loopflow_harness::transcript::rfc3339(2_000 + crate::ops::pr_landing::repair_backoff(2)),
+        "a start that failed is not under way: the next waits its backoff"
+    );
+
+    summary.agent_end = died(2_500);
+    // Read before that backoff passes.
+    let waiting = row_at(&summary, 2_001);
+    assert!(
+        line(&waiting).contains(" (exit 137) · starts again ")
+            && line(&waiting)
+                .ends_with(" · last start failed: no PTY left: 511 in use (kern.tty.ptmx_max)"),
+        "{}",
+        line(&waiting)
+    );
+    let next = waiting.outlook.unwrap();
+    assert_eq!(
+        (next.kind, next.at),
+        (
+            ComingBack,
+            loopflow_harness::transcript::rfc3339(
+                2_000 + crate::ops::pr_landing::repair_backoff(2)
+            )
+        ),
+        "a death after that start waits its backoff"
+    );
+    assert_eq!(
+        next.reason.as_deref(),
+        Some("last start failed: no PTY left: 511 in use (kern.tty.ptmx_max)")
+    );
+
+    // This Machine's pass leaves it: nothing promises a start.
+    let no_server = super::summary_surface(
+        &summary,
+        super::session_ending(&summary, 2_600, || true, || false),
+    );
+    assert!(
+        line(&no_server).ends_with(
+            " (exit 137) · no server runs here to start it; last start failed: no PTY left: \
+             511 in use (kern.tty.ptmx_max); `lf resume --task INF-123` opens it"
+        ),
+        "{}",
+        line(&no_server)
+    );
+    let left = no_server.outlook.unwrap();
+    assert_eq!((left.kind, left.at), (WaitingForYou, None));
+    assert_eq!(left.command.as_deref(), Some("lf resume --task INF-123"));
+    summary.start_failure = None;
+    let unclaimed = super::summary_surface(
+        &summary,
+        super::session_ending(&summary, 2_600, || false, || true),
+    );
+    assert_eq!(
+        unclaimed.outlook.unwrap().reason.as_deref(),
+        Some("its Task is not claimed on this Machine")
+    );
+    summary.in_task_checkout = false;
+    let elsewhere = outlook(&summary).unwrap();
+    assert_eq!(
+        (elsewhere.kind, elsewhere.reason.as_deref()),
+        (WaitingForYou, Some("its Task is not checked out here"))
+    );
+    summary.in_task_checkout = true;
+
+    summary.starts_since_turn = loopflow_storage::sqlite::session_recovery::CONVERSATION_STARTS;
+    let row = surfaced(&summary);
+    assert!(
+        line(&row).ends_with(" (exit 137) · started 5 times; `lf resume --task INF-123` opens it"),
+        "{}",
+        line(&row)
+    );
+    assert_eq!(row.start.unwrap().attempts, 5);
+    let gave_up = row.outlook.unwrap();
+    assert_eq!(
+        (gave_up.kind, gave_up.at, gave_up.reason.as_deref()),
+        (WaitingForYou, None, Some("started 5 times"))
+    );
+    assert_eq!(gave_up.command.as_deref(), Some("lf resume --task INF-123"));
+
+    summary.agent_end = Some(crate::session::AgentEnd {
+        at: 3_000,
+        exit_code: Some(0),
+    });
+    let row = surfaced(&summary);
+    assert!(
+        line(&row).starts_with("quit ")
+            && line(&row).ends_with("; `lf resume --task INF-123` opens it"),
+        "{}",
+        line(&row)
+    );
+    assert_eq!(row.start, None, "a quit conversation stays quit");
+    let quit = row.outlook.unwrap();
+    assert_eq!((quit.kind, quit.at), (Quit, None));
+    assert_eq!(quit.command.as_deref(), Some("lf resume --task INF-123"));
+
+    // Running again: the starts stay visible until a turn ends.
+    summary.agent_end = None;
+    summary.starts_since_turn = 1;
+    summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Live;
+    let row = surfaced(&summary);
+    assert!(
+        line(&row).starts_with("running (started again ") && line(&row).ends_with(", attempt 1)"),
+        "{}",
+        line(&row)
+    );
+    assert_eq!((row.ended, row.outlook), (None, None));
+    assert_eq!(row.start.unwrap().attempts, 1);
+    summary.starts_since_turn = 0;
+    assert_eq!(line(&surfaced(&summary)), "running");
+
+    // A start under way: its agent is attached and has no pid to check yet.
+    summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Unknown;
+    summary.launching = true;
+    summary.starts_since_turn = 1;
+    let row = surfaced(&summary);
+    assert_eq!(row.state, SessionState::Unknown);
+    assert_eq!(line(&row), "starting");
+    assert_eq!(row.outlook.unwrap().kind, Starting);
+    summary.starts_since_turn = 0;
+    summary.launching = false;
+
+    // Prepared, and no agent has run yet: the server is starting it. With no
+    // agent its state is unknown, not closed.
+    summary.last_started_at = None;
+    let prepared = surfaced(&summary);
+    assert_eq!(prepared.state, SessionState::Unknown);
+    assert_eq!(line(&prepared), "starting");
+    let starting = prepared.outlook.unwrap();
+    assert_eq!(
+        (
+            starting.kind,
+            starting.at,
+            starting.reason,
+            starting.command
+        ),
+        (Starting, None, None, None)
+    );
+    // With no server here nothing is starting it.
+    let unstarted = super::summary_surface(
+        &summary,
+        super::session_ending(&summary, 5_000, || true, || false),
+    );
+    assert_eq!(
+        line(&unstarted),
+        "not started · no server runs here to start it; `lf resume --task INF-123` opens it"
+    );
+    // A recorded agent this Machine cannot check still reads unknown.
+    summary.agent_process_id = Some(loopflow_model::id::AgentProcessId::new());
+    let unchecked = surfaced(&summary);
+    assert_eq!(
+        (line(&unchecked), unchecked.outlook.as_ref()),
+        ("unknown", None)
+    );
+    summary.agent_process_id = None;
+    summary.starts_since_turn = 1;
+
+    // Its first start failed. It never reads as a death.
+    summary.last_started_at = Some(5_000);
+    summary.start_failure = Some("claude is not installed on this Machine's PATH".into());
+    let row = row_at(&summary, 5_001);
+    assert!(
+        line(&row).starts_with(
+            "could not start: claude is not installed on this Machine's PATH · tries again "
+        ),
+        "{}",
+        line(&row)
+    );
+    assert_eq!(row.ended, None);
+    let failed = row.outlook.unwrap();
+    assert_eq!(
+        (failed.kind, failed.reason.as_deref(), failed.command),
+        (
+            CouldNotStart,
+            Some("claude is not installed on this Machine's PATH"),
+            None
+        )
+    );
+    assert_eq!(
+        failed.at,
+        loopflow_harness::transcript::rfc3339(5_000 + crate::ops::pr_landing::repair_backoff(1))
+    );
+    summary.start_failure = None;
+
+    summary.primary_scope = None;
+    summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Dead;
+    summary.agent_end = Some(crate::session::AgentEnd {
+        at: 4_000,
+        exit_code: None,
+    });
+    let row = surfaced(&summary);
+    assert_eq!(
+        line(&row).split_once(' ').map(|(died, _)| died),
+        Some("died"),
+        "{}",
+        line(&row)
+    );
+    assert!(
+        line(&row).ends_with(&format!(
+            " (no exit recorded); `lf resume {}` opens it",
+            summary.id
+        )),
+        "{}",
+        line(&row)
+    );
+    assert_eq!(row.start, None);
+    let other = row.outlook.unwrap();
+    assert_eq!(
+        (other.kind, other.command),
+        (WaitingForYou, Some(format!("lf resume {}", summary.id))),
+        "only a Task's conversation comes back"
+    );
+}
+
+/// The recovery pass starts a conversation exactly when its Session's outlook
+/// says the server does, whatever its row holds: both ask
+/// `ops::recovery::server_start`.
+#[test]
+fn the_pass_starts_what_the_outlook_says_the_server_starts() {
+    use super::SessionOutlookKind::{ComingBack, CouldNotStart, Quit, Starting, WaitingForYou};
+    use rusqlite::params;
+    const NOW: i64 = 1_800_000_000;
+    let home = tempfile::tempdir_in("/tmp").unwrap();
+    let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let checkout = repo.path().to_string_lossy().into_owned();
+    let task = loopflow_model::durable::TaskId::new();
+    store
+        .create_task(&loopflow_storage::work::task::NewTask {
+            repository_id: crate::repository::location::ensure_repository(&store, &checkout)
+                .unwrap(),
+            id: task.clone(),
+            project_id: None,
+            title: "Recover".into(),
+            description: String::new(),
+            due_date: None,
+        })
+        .unwrap();
+    let session = store
+        .test_session(
+            "session_recovered",
+            &crate::session_record::new_artifact_key(),
+        )
+        .id;
+    let captured = store.session(session.as_str()).unwrap().unwrap().captured;
+    crate::store::sessions::bind_session(&store, session.as_str(), captured, &task).unwrap();
+    crate::process::attachment::claim_session_attachment(
+        &store,
+        session.as_str(),
+        None,
+        &store.test_lf_process(),
+    )
+    .unwrap();
+    let execute = |sql: &str, values: &[&dyn rusqlite::ToSql]| {
+        store.conn.lock().unwrap().execute(sql, values).unwrap();
+    };
+    execute(
+        "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+        params![task.as_str(), checkout],
+    );
+    execute(
+        "UPDATE agent_sessions SET primary_scope='task',interactive=1,cwd=?2 WHERE id=?1",
+        params![session.as_str(), checkout],
+    );
+    // What the Session's outlook says, and whether the pass lists it.
+    let read = || {
+        let summary = super::session_projection::session_summary(&store, session.as_str(), NOW)
+            .unwrap()
+            .unwrap();
+        let ending = super::session_ending(
+            &summary,
+            NOW,
+            || crate::ops::recovery::claimed_here(&store, &task),
+            || true,
+        );
+        let due = crate::ops::recovery::due_task_conversations(&store, NOW).unwrap();
+        (
+            ending
+                .outlook
+                .map(|outlook| (outlook.kind, outlook.at.is_some())),
+            !due.now.is_empty() || due.next_at.is_some(),
+        )
+    };
+    let set = |columns: &str| {
+        execute(
+            &format!("UPDATE agent_sessions SET {columns} WHERE id=?1"),
+            params![session.as_str()],
+        );
+    };
+    let ended = format!(
+        "agent_pid=NULL,agent_os_started_at=NULL,agent_ended_at={}",
+        NOW - 5
+    );
+
+    set(&format!("{ended},agent_exit_code=137"));
+    assert_eq!(
+        read(),
+        (Some((WaitingForYou, false)), false),
+        "not claimed here"
+    );
+    crate::store::ownership::claim_task(&store, &task).unwrap();
+    assert_eq!(read(), (Some((ComingBack, true)), true), "killed");
+    set(&format!("starts_since_turn=2,last_started_at={NOW}"));
+    assert_eq!(
+        read(),
+        (Some((ComingBack, true)), true),
+        "waiting its backoff"
+    );
+    set("starts_since_turn=5");
+    assert_eq!(
+        read(),
+        (Some((WaitingForYou, false)), false),
+        "out of starts"
+    );
+    set("starts_since_turn=0,last_started_at=NULL,agent_exit_code=0");
+    assert_eq!(read(), (Some((Quit, false)), false), "quit");
+    set(&format!("agent_exit_code=1,completed_at={NOW}"));
+    assert_eq!(read(), (Some((WaitingForYou, false)), false), "completed");
+    set("completed_at=NULL,cwd='/elsewhere'");
+    assert_eq!(
+        read(),
+        (Some((WaitingForYou, false)), false),
+        "not checked out here"
+    );
+    execute(
+        "UPDATE agent_sessions SET cwd=?2 WHERE id=?1",
+        params![session.as_str(), checkout],
+    );
+
+    set("agent_process_id=NULL,agent_ended_at=NULL,agent_exit_code=NULL");
+    assert_eq!(
+        read(),
+        (Some((Starting, false)), true),
+        "prepared, never started"
+    );
+    set(&format!(
+        "starts_since_turn=1,last_started_at={NOW},start_failure='no PTY left'"
+    ));
+    assert_eq!(
+        read(),
+        (Some((CouldNotStart, true)), true),
+        "its first start failed"
+    );
+    execute(
+        "UPDATE tasks SET abandoned_at=?2 WHERE id=?1",
+        params![task.as_str(), NOW],
+    );
+    assert_eq!(read(), (None, false), "its Task is abandoned");
+}
+
 /// A summary whose projected state is `state`: a running one has an agent
 /// process, a detached one is held and unviewed.
 fn summary_in(state: super::SessionState, interactive: bool) -> crate::session::SessionSummary {
@@ -289,7 +709,7 @@ fn session_metadata_keeps_unknown_position_visible() {
     let mut summary = summary_fixture();
     let task = summary.task_id.clone().unwrap();
     let wave = summary.wave_id.clone().unwrap();
-    let row = super::summary_surface(&summary);
+    let row = surfaced(&summary);
     assert_eq!(row.id, summary.id);
     assert_eq!(row.work, Some(loopflow_model::durable::WorkRef::Task(task)));
     assert_eq!(row.wave_id, Some(wave));
@@ -305,14 +725,14 @@ fn session_metadata_keeps_unknown_position_visible() {
     ));
     summary.graph_step_latest = true;
     assert!(matches!(
-        super::summary_surface(&summary).graph_membership,
+        surfaced(&summary).graph_membership,
         super::SessionGraphMembership::Step {
             occurrence: super::SessionGraphOccurrence::Current,
             ..
         }
     ));
     summary.graph.as_mut().unwrap().state = crate::session::GraphProcessSummaryState::Stopped;
-    let row = super::summary_surface(&summary);
+    let row = surfaced(&summary);
     assert!(matches!(
         row.graph_membership,
         super::SessionGraphMembership::Step {
@@ -327,15 +747,15 @@ fn session_metadata_keeps_unknown_position_visible() {
     );
     summary.graph_lf_process_id = None;
     assert!(matches!(
-        super::summary_surface(&summary).graph_membership,
+        surfaced(&summary).graph_membership,
         super::SessionGraphMembership::Unknown { .. }
     ));
     summary.independent = true;
     assert_eq!(
-        super::summary_surface(&summary).graph_membership,
+        surfaced(&summary).graph_membership,
         super::SessionGraphMembership::Independent
     );
-    let row = super::summary_surface(&summary);
+    let row = surfaced(&summary);
     assert_eq!(row.state, super::SessionState::Unknown);
     assert_eq!(row.availability, None);
     summary.completed_at = Some(1);
@@ -418,6 +838,26 @@ fn session_action_fixtures_match_the_shared_boundary() {
             session
         );
     }
+}
+
+/// The shared fixture carries one conversation per outlook, and the key is
+/// required: a client that drops it would work the outlook out for itself.
+#[test]
+fn outlook_fixtures_cover_every_kind_and_are_required() {
+    use super::SessionOutlookKind::{ComingBack, CouldNotStart, Quit, Starting, WaitingForYou};
+    let json = include_str!("../../../../../tests/fixtures/dto/session_memberships.json");
+    let sessions: Vec<super::SessionRecord> = serde_json::from_str(json).unwrap();
+    let kinds: Vec<_> = sessions
+        .iter()
+        .filter_map(|session| Some(session.outlook.as_ref()?.kind))
+        .collect();
+    assert_eq!(
+        kinds,
+        [Quit, ComingBack, WaitingForYou, CouldNotStart, Starting]
+    );
+    let mut without: Vec<serde_json::Value> = serde_json::from_str(json).unwrap();
+    without[0].as_object_mut().unwrap().remove("outlook");
+    assert!(serde_json::from_value::<super::SessionRecord>(without.remove(0)).is_err());
 }
 
 #[test]
@@ -846,7 +1286,7 @@ fn opening_an_admitted_holder_of_unknown_liveness_takes_it_over() {
             None,
             false,
             true,
-            false,
+            Default::default(),
         )
         .await;
         let message = opened.unwrap_err().to_string();
@@ -879,6 +1319,13 @@ fn resuming_an_ended_conversation_launches_its_provider_as_the_session() {
     )
     .unwrap();
     std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // The thread's transcript is still here, so it resumes rather than starting fresh.
+    let _claude_home = crate::test_ambient::EnvGuard::clear(&["CLAUDE_CONFIG_DIR"]);
+    let claude_home = tempfile::tempdir().unwrap();
+    let project = claude_home.path().join("projects").join("-home");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("claude-thread.jsonl"), "{}\n").unwrap();
+    std::env::set_var("CLAUDE_CONFIG_DIR", claude_home.path());
     // The launch records the CLI it would hand children; never the Machine's.
     std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
     let path = std::env::var_os("PATH").unwrap_or_default();
@@ -940,9 +1387,18 @@ fn resuming_an_ended_conversation_launches_its_provider_as_the_session() {
                 ),
                 super::SessionResumeIntent::Resume
             );
-            super::open(&store, home, &session.id, None, None, false, true, false)
-                .await
-                .map(|_| ())
+            super::open(
+                &store,
+                home,
+                &session.id,
+                None,
+                None,
+                false,
+                true,
+                Default::default(),
+            )
+            .await
+            .map(|_| ())
         })
     });
     std::env::set_var("PATH", path);
@@ -970,7 +1426,7 @@ fn preparing_a_consumed_first_launch_offers_try_again_and_changes_nothing() {
             None,
             false,
             false,
-            false,
+            Default::default(),
         )
         .await
         .unwrap()
@@ -1030,7 +1486,7 @@ fn preparing_a_consumed_first_launch_offers_try_again_and_changes_nothing() {
             None,
             false,
             false,
-            false,
+            Default::default(),
         )
         .await
         .unwrap()
@@ -1066,7 +1522,7 @@ fn recovery_refresh_follows_current_holder_and_history() {
             None,
             false,
             false,
-            false,
+            Default::default(),
         )
         .await
         .unwrap()
@@ -1107,7 +1563,7 @@ fn recovery_refresh_follows_current_holder_and_history() {
             None,
             false,
             false,
-            false,
+            Default::default(),
         )
         .await
         .unwrap()
@@ -1162,7 +1618,7 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
             None,
             false,
             false,
-            false,
+            Default::default(),
         )
         .await
         .unwrap()
@@ -1186,7 +1642,7 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
             None,
             false,
             false,
-            false,
+            Default::default(),
         )
         .await
         .unwrap()
@@ -1245,7 +1701,7 @@ fn a_session_switched_to_another_provider_resumes_on_it() {
         let resumed = store.session(&record.id).await.unwrap().unwrap();
         assert_eq!(resumed.provider.as_deref(), Some("codex"));
         let config =
-            crate::agent::resolve_session_config(&resumed, serde_yaml_ng::Value::Null, None, false)
+            crate::agent::resolve_session_config(&resumed, serde_yaml_ng::Value::Null, None)
                 .unwrap();
         assert_eq!(config.agent.to_string(), "codex");
         assert_eq!(config.resume_token, Some("codex-thread".into()));
@@ -1287,6 +1743,10 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
         let (record, _) = super::primary::ensure(&store, repo.path(), None)
             .await
             .unwrap();
+        let retry = |request| {
+            super::new_thread(&store, &record.id, None, false, Default::default(), request)
+        };
+        let receipt = |request: &str| store.sqlite.creation_receipt(request).unwrap().unwrap();
         let original = store.session(&record.id).await.unwrap().unwrap();
         let identity = crate::engine::creation::identity(
             "session.new",
@@ -1300,20 +1760,14 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             .sqlite
             .begin_thread_creation(&identity, &record.id, &artifact)
             .unwrap();
-        let stopped = store
-            .sqlite
-            .creation_receipt("interrupted")
-            .unwrap()
-            .unwrap();
+        let stopped = receipt("interrupted");
         assert_eq!(
             stopped.disposition,
             loopflow_storage::sqlite::creation::RecoveryDisposition::Inspect
         );
         assert_eq!(stopped.explanation, "Conversation change unconfirmed");
         // A crash while stopping is uncertain, even if no provider is live now.
-        let refused = super::new_thread(&store, &record.id, None, false, false, "interrupted")
-            .await
-            .unwrap_err();
+        let refused = retry("interrupted").await.unwrap_err();
         assert_eq!(
             refused.downcast_ref::<crate::engine::Error>().unwrap().code,
             crate::engine::ErrorCode::OutcomeUnknown
@@ -1330,67 +1784,31 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             .replace_session_input(original.captured, next, Some("interrupted".into()))
             .await
             .unwrap();
+        assert_eq!(receipt("interrupted").milestone, "admitted");
         assert_eq!(
-            store
-                .sqlite
-                .creation_receipt("interrupted")
-                .unwrap()
-                .unwrap()
-                .milestone,
-            "admitted"
-        );
-        assert_eq!(
-            store
-                .sqlite
-                .creation_receipt("interrupted")
-                .unwrap()
-                .unwrap()
-                .disposition,
+            receipt("interrupted").disposition,
             loopflow_storage::sqlite::creation::RecoveryDisposition::Continue
         );
         // Simulate app/server death after the atomic append, before publication.
-        let recovered = super::new_thread(&store, &record.id, None, false, false, "interrupted")
-            .await
-            .unwrap()
-            .0;
+        let recovered = retry("interrupted").await.unwrap().0;
         assert_eq!(recovered.captured, next.captured);
         assert_eq!(recovered.artifact_key.as_deref(), Some(artifact.as_str()));
         assert!(recovered.input_published);
-        let result = store
-            .sqlite
-            .creation_receipt("interrupted")
-            .unwrap()
-            .unwrap()
-            .result;
+        let result = receipt("interrupted").result;
         assert!(result.is_some());
         assert_eq!(
-            store
-                .sqlite
-                .creation_receipt("interrupted")
-                .unwrap()
-                .unwrap()
-                .disposition,
+            receipt("interrupted").disposition,
             loopflow_storage::sqlite::creation::RecoveryDisposition::Complete
         );
         let mut newer = recovered.clone();
         newer.request = Some("A later independent input".into());
         let newer = super::append_input(&store, newer).await.unwrap();
-        super::new_thread(&store, &record.id, None, false, false, "interrupted")
-            .await
-            .unwrap();
+        retry("interrupted").await.unwrap();
         assert_eq!(
             store.session(&record.id).await.unwrap().unwrap().captured,
             newer.captured
         );
-        assert_eq!(
-            store
-                .sqlite
-                .creation_receipt("interrupted")
-                .unwrap()
-                .unwrap()
-                .result,
-            result
-        );
+        assert_eq!(receipt("interrupted").result, result);
 
         let identity = crate::engine::creation::identity(
             "session.new",
@@ -1413,33 +1831,22 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
             .unwrap();
         // A lookup can permit continuation, then newer input wins before retry.
         assert_eq!(
-            store
-                .sqlite
-                .creation_receipt("superseded")
-                .unwrap()
-                .unwrap()
-                .disposition,
+            receipt("superseded").disposition,
             loopflow_storage::sqlite::creation::RecoveryDisposition::Continue
         );
         let newest = super::append_input(&store, pending).await.unwrap();
-        let refused = super::new_thread(&store, &record.id, None, false, false, "superseded")
-            .await
-            .unwrap_err();
+        let refused = retry("superseded").await.unwrap_err();
         assert_eq!(
             refused.downcast_ref::<crate::engine::Error>().unwrap().code,
             crate::engine::ErrorCode::OutcomeUnknown
         );
-        let receipt = store
-            .sqlite
-            .creation_receipt("superseded")
-            .unwrap()
-            .unwrap();
+        let superseded = receipt("superseded");
         assert_eq!(
-            receipt.disposition,
+            superseded.disposition,
             loopflow_storage::sqlite::creation::RecoveryDisposition::Inspect
         );
         assert_eq!(
-            receipt.explanation,
+            superseded.explanation,
             "Newer conversation input replaced this change"
         );
         assert_eq!(
@@ -1473,19 +1880,11 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
         )
         .unwrap();
         // Publication succeeded but the result was not recorded before exit.
-        let recovered = super::new_thread(&store, &record.id, None, false, false, "published")
-            .await
-            .unwrap()
-            .0;
+        let recovered = retry("published").await.unwrap().0;
         assert_eq!(recovered.captured, published.captured);
         assert!(recovered.input_published);
         assert_eq!(
-            store
-                .sqlite
-                .creation_receipt("published")
-                .unwrap()
-                .unwrap()
-                .disposition,
+            receipt("published").disposition,
             loopflow_storage::sqlite::creation::RecoveryDisposition::Complete
         );
     });
@@ -1501,11 +1900,11 @@ fn new_thread_before_a_first_provider_keeps_the_original_prompt_and_retries_once
         let (record, _) = super::primary::ensure(&store, repo.path(), None)
             .await
             .unwrap();
-        let first = super::new_thread(&store, &record.id, None, false, false, "first")
+        let first = super::new_thread(&store, &record.id, None, false, Default::default(), "first")
             .await
             .unwrap()
             .0;
-        let retry = super::new_thread(&store, &record.id, None, false, false, "first")
+        let retry = super::new_thread(&store, &record.id, None, false, Default::default(), "first")
             .await
             .unwrap()
             .0;

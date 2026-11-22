@@ -34,7 +34,7 @@ for line in sys.stdin:
 fn base_launch() -> AgentConfig {
     AgentConfig {
         task_prompt: "prompt".to_string(),
-        skip_permissions: true,
+        yolo: true,
         ..AgentConfig::new(loopflow_execution::config::Agent::parse("claude").unwrap())
     }
 }
@@ -191,7 +191,14 @@ fn model_unavailable_result_falls_through_or_stops_without_spending_quota() {
             "fable\nopus\n",
             true,
         ),
-        ("bare", false, vec!["claude:opus"], "fable\n", true),
+        // A command outside a Graph step moves the same way.
+        (
+            "command",
+            false,
+            vec!["claude:opus"],
+            "fable\nopus\n",
+            false,
+        ),
     ] {
         let home = TempDir::new().unwrap();
         let script = claude_script(

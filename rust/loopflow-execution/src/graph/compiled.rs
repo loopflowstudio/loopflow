@@ -16,6 +16,7 @@ use std::path::Path;
 
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
 use crate::graph::ConcreteStep;
+use crate::task_graph::WorkflowOutline;
 
 pub use loopflow_storage::graph::{
     project_position, CompiledGraph, CompiledGraphPath, GraphNode, GraphNodeKind, GraphReturn,
@@ -80,26 +81,83 @@ fn composition_items(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GraphCatalogEntry {
     pub name: String,
+    /// Its `description:` line; `None` when the file has none or does not load.
+    pub description: Option<String>,
     /// The repository file that defines it; `None` for a builtin.
     pub source: Option<String>,
     /// Topology; `None` for an unusable definition.
     pub compiled: Option<CompiledGraph>,
     pub composition: Option<GraphComposition>,
+    /// The Graph as a Task's workflow line draws it; null exactly when
+    /// `compiled` is.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub workflow: Option<WorkflowOutline>,
     /// Why the definition is unusable; set exactly when it has no topology.
     pub unavailable: Option<String>,
+    /// The Graphs that include this one with `graph:`, by name. Empty for a
+    /// Graph people start with; a piece of other Graphs names them here.
+    pub included_by: Vec<String>,
+    /// What it runs for: a Task, or a Wave's own operation.
+    pub runs: GraphSubject,
+}
+
+/// What a Graph is started on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum GraphSubject {
+    Task,
+    Wave,
 }
 
 /// Every Graph available in `repo`, each read through the shared
 /// loader. A file that does not load stays listed with the reason.
 pub fn graph_catalog(repo: &Path) -> Result<Vec<GraphCatalogEntry>, crate::error::LoadError> {
-    crate::graph::available_graph_names(repo)?
+    let mut catalog = crate::graph::available_graph_names(repo)?
         .into_iter()
-        .map(|name| graph_catalog_entry(&name, repo))
-        .collect()
+        .map(|name| load_catalog_entry(&name, repo))
+        .collect::<Result<Vec<_>, _>>()?;
+    // A compiled node's sources name the Graphs it came through, outermost first.
+    let mut included = BTreeMap::<String, std::collections::BTreeSet<String>>::new();
+    for entry in &catalog {
+        let mut pending: Vec<&GraphNode> = entry
+            .compiled
+            .iter()
+            .flat_map(|compiled| &compiled.steps)
+            .collect();
+        while let Some(node) = pending.pop() {
+            for source in node.sources.iter().filter(|source| **source != entry.name) {
+                included
+                    .entry(source.clone())
+                    .or_default()
+                    .insert(entry.name.clone());
+            }
+            pending.extend(node.paths.iter().flat_map(|path| &path.steps));
+        }
+    }
+    for entry in &mut catalog {
+        entry.included_by = included
+            .remove(&entry.name)
+            .map(|names| names.into_iter().collect())
+            .unwrap_or_default();
+    }
+    Ok(catalog)
 }
 
-/// Read only the requested definition; invalid sources retain their diagnostic.
+/// The requested definition as the catalog lists it; an invalid source keeps its diagnostic.
 pub fn graph_catalog_entry(
+    name: &str,
+    repo: &Path,
+) -> Result<GraphCatalogEntry, crate::error::LoadError> {
+    let entry = load_catalog_entry(name, repo)?;
+    Ok(graph_catalog(repo)?
+        .into_iter()
+        .find(|listed| listed.name == entry.name)
+        .unwrap_or(entry))
+}
+
+/// One definition alone; who includes it is known only across the catalog.
+fn load_catalog_entry(
     name: &str,
     repo: &Path,
 ) -> Result<GraphCatalogEntry, crate::error::LoadError> {
@@ -113,21 +171,35 @@ pub fn graph_catalog_entry(
                 revision: hex::encode(Sha256::digest(bytes)),
                 items: composition_items(&resolved, &mut 0, &mut 0),
             };
+            let steps = flatten_resolved(&resolved);
             Ok((
-                crate::graph::compiled::compile(&graph.name, &flatten_resolved(&resolved)),
+                crate::graph::compiled::compile(&graph.name, &steps),
                 composition,
+                WorkflowOutline::of(&steps),
+                graph.description,
             ))
         }),
     };
-    let (compiled, composition, unavailable) = match compiled {
-        Ok((compiled, composition)) => (Some(compiled), Some(composition), None),
-        Err(error) => (None, None, Some(error.to_string())),
+    let (compiled, composition, workflow, description, unavailable) = match compiled {
+        Ok((compiled, composition, workflow, description)) => (
+            Some(compiled),
+            Some(composition),
+            Some(workflow),
+            description,
+            None,
+        ),
+        Err(error) => (None, None, None, None, Some(error.to_string())),
+    };
+    let name = compiled
+        .as_ref()
+        .map_or_else(|| name.to_string(), |compiled| compiled.name.clone());
+    let runs = match loopflow_definitions::builtins::builtin_graph_category(&name) {
+        Some("Wave") => GraphSubject::Wave,
+        _ => GraphSubject::Task,
     };
     Ok(GraphCatalogEntry {
-        name: compiled
-            .as_ref()
-            .map_or_else(|| name.to_string(), |compiled| compiled.name.clone()),
-        source: crate::graph::find_graph_source_path(name, repo)?.map(|path| {
+        description,
+        source: crate::graph::find_graph_source_path(&name, repo)?.map(|path| {
             path.strip_prefix(repo)
                 .unwrap_or(&path)
                 .to_string_lossy()
@@ -135,7 +207,11 @@ pub fn graph_catalog_entry(
         }),
         compiled,
         composition,
+        workflow,
         unavailable,
+        included_by: Vec::new(),
+        runs,
+        name,
     })
 }
 
@@ -286,6 +362,74 @@ pub use loopflow_storage::graph::loop_passes;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_catalog_entry_outlines_the_workflow_a_task_would_show() {
+        use super::graph_catalog;
+        use crate::task_graph::{CapturedGraph, TaskGraph};
+        let repo = tempfile::tempdir().unwrap();
+        let graphs = repo.path().join(".lf/graphs");
+        std::fs::create_dir_all(&graphs).unwrap();
+        // Its only stop is inside an XOR path.
+        std::fs::write(
+            graphs.join("conditional.yaml"),
+            "- implement\n- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n- gate\n",
+        )
+        .unwrap();
+        std::fs::write(graphs.join("alone.yaml"), "- implement\n- gate\n").unwrap();
+        std::fs::write(graphs.join("broken.yaml"), "- graph: no-such-graph\n").unwrap();
+        let catalog = graph_catalog(repo.path()).unwrap();
+        let outline = |name: &str| {
+            let entry = catalog.iter().find(|entry| entry.name == name).unwrap();
+            assert_eq!(entry.workflow.is_some(), entry.compiled.is_some());
+            entry.workflow.clone()
+        };
+
+        // A composed Graph reads as the Graphs it includes.
+        let code = outline("code").unwrap();
+        let steps: Vec<_> = code
+            .steps
+            .iter()
+            .map(|step| (step.name.as_str(), step.interactive))
+            .collect();
+        assert_eq!(
+            steps,
+            [
+                ("plan", false),
+                ("build", false),
+                ("ship-review", true),
+                ("deliver", false),
+                ("verify", true)
+            ]
+        );
+        assert_eq!(code.sentence, "You take part at ship-review and verify.");
+        assert_eq!(
+            outline("feature").unwrap().sentence,
+            "You take part at explore, ship-review and verify."
+        );
+
+        let conditional = outline("conditional").unwrap();
+        let interactive: Vec<_> = conditional
+            .steps
+            .iter()
+            .filter(|step| step.interactive)
+            .map(|step| step.name.as_str())
+            .collect();
+        assert_eq!(interactive, ["xor-route"]);
+        assert_eq!(conditional.sentence, "You take part at demo.");
+
+        assert_eq!(outline("alone").unwrap().sentence, "Runs on its own.");
+        assert_eq!(outline("broken"), None);
+
+        // A Task that takes the Graph up reads the same steps and stops.
+        for name in ["code", "conditional"] {
+            let captured = CapturedGraph::load(name, repo.path()).unwrap().unwrap();
+            let task = TaskGraph::read(&captured, "start".into(), None, None);
+            let outline = outline(name).unwrap();
+            assert_eq!(task.steps, outline.steps, "{name}");
+            assert_eq!(task.interactive_steps, outline.interactive_steps, "{name}");
+        }
+    }
+
     #[test]
     fn template_resolution_preserves_composition_and_execution() {
         use super::{graph_catalog, GraphCompositionItem};
@@ -589,6 +733,26 @@ mod tests {
             .iter()
             .all(|node| node.kind != GraphNodeKind::Op || node.label == "sync"));
         assert_eq!(compiled.steps[4].sources, ["pursue", "build"]);
+    }
+
+    #[test]
+    fn the_catalog_names_who_includes_a_graph_and_what_it_runs_for() {
+        let repo = tempfile::tempdir().unwrap();
+        let catalog = super::graph_catalog(repo.path()).unwrap();
+        let entry = |name: &str| catalog.iter().find(|entry| entry.name == name).unwrap();
+        // People start a Task on code; build is a piece of the Graphs that include it.
+        assert!(entry("code").included_by.is_empty());
+        let includes_build = &entry("build").included_by;
+        assert!(["code", "feature", "pursue"]
+            .iter()
+            .all(|name| includes_build.contains(&name.to_string())));
+        assert!(!includes_build.contains(&"build".to_string()));
+        assert_eq!(entry("code").runs, super::GraphSubject::Task);
+        assert_eq!(entry("vsm-operate").runs, super::GraphSubject::Wave);
+        assert_eq!(
+            super::graph_catalog_entry("build", repo.path()).unwrap(),
+            *entry("build")
+        );
     }
 
     #[test]

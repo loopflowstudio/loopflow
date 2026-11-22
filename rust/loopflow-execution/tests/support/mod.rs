@@ -261,6 +261,16 @@ echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"'"$thread"'"}}}'
 read -r turn_start
 echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"'"$turn"'"}}}'
 echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"inProgress"}}}'
+# A fixture that left `tool_turn.py` gets the hooks lf declared, run around a tool.
+if [ -f "$LF_HOME/tool_turn.py" ]; then
+    hooks=$(printf '%s' "$thread_start" | python3 -c 'import json, sys; print(json.dumps(json.load(sys.stdin)["params"]["config"]["hooks"]))')
+    python3 "$LF_HOME/tool_turn.py" "$thread" "$hooks" || exit 1
+fi
+# A fixture that left `hold-turn` holds the turn open until it is removed.
+if [ -f "$LF_HOME/hold-turn" ]; then
+    printf '%s' "$thread" > "$LF_HOME/holding"
+    while [ -f "$LF_HOME/hold-turn" ]; do sleep 0.05; done
+fi
 printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","itemId":"message-test","delta":__OUTPUT__}}'
 printf '%s\n' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","item":{"type":"agentMessage","id":"message-test","text":__OUTPUT__,"phase":"final_answer"}}}'
 python3 '__ROLLOUT__' "$thread" "$turn" '__OUTPUT__' || exit 1
@@ -299,6 +309,66 @@ fi
 {script}
 "#,
         script = script.strip_prefix("#!/bin/sh\n").unwrap_or(script),
+    )
+}
+
+/// A Codex whose first turn the provider refuses, in the words Codex sends:
+/// the rollout holds the thread and nothing the agent said.
+#[allow(dead_code)] // Shared provider mock compiled into multiple test crates.
+pub fn refused_codex_script() -> String {
+    codex_socket_script(
+        r#"#!/bin/sh
+read -r initialize
+echo '{"jsonrpc":"2.0","id":1,"result":{}}'
+read -r initialized
+read -r thread_start
+thread=$(python3 -c 'import uuid; print(uuid.uuid4())')
+turn=$(python3 -c 'import uuid; print(uuid.uuid4())')
+echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"'"$thread"'"}}}'
+read -r turn_start
+echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"'"$turn"'"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"inProgress"}}}'
+day="$CODEX_HOME/sessions/$(date -u +%Y/%m/%d)"
+mkdir -p "$day"
+printf '%s\n' \
+  '{"type":"session_meta","payload":{"id":"'"$thread"'","cwd":"'"$PWD"'"}}' \
+  '{"type":"response_item","payload":{"type":"reasoning","id":"thought","summary":[{"type":"summary_text","text":"Checking the task."}]}}' \
+  > "$day/rollout-$(date -u +%Y-%m-%dT%H-%M-%S)-$thread.jsonl"
+echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","willRetry":false,"error":{"message":"You’ve hit your usage limit. Upgrade to Pro, or try again at 9:41 PM.","codexErrorInfo":null,"additionalDetails":null}}}'
+echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"failed","error":{"message":"You’ve hit your usage limit. Upgrade to Pro, or try again at 9:41 PM.","codexErrorInfo":null,"additionalDetails":null}}}}'
+if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
+while read -r line; do :; done
+"#,
+    )
+}
+
+/// A Claude that answers one turn with `answer` and keeps the prompt it was
+/// sent in `received`.
+#[allow(dead_code)] // Shared provider mock compiled into multiple test crates.
+pub fn answering_claude_script(answer: &str, received: &Path) -> String {
+    r#"#!/usr/bin/python3
+import json, sys
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+message = json.loads(sys.stdin.readline())
+open(__RECEIVED__, 'w').write(message['message']['content'][0]['text'])
+message['session_id'] = 'fixture-thread'
+print(json.dumps(message), flush=True)
+print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'fixture-thread'}), flush=True)
+answer = __ANSWER__
+print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': answer}]}}), flush=True)
+print(json.dumps({'type': 'result', 'uuid': 'fixture-result', 'session_id': 'fixture-thread', 'subtype': 'success', 'is_error': False, 'result': answer}), flush=True)
+for line in sys.stdin:
+    pass
+"#
+    .replace(
+        "__RECEIVED__",
+        &serde_json::to_string(&received.display().to_string()).expect("encode path"),
+    )
+    .replace(
+        "__ANSWER__",
+        &serde_json::to_string(answer).expect("encode answer"),
     )
 }
 
@@ -459,25 +529,40 @@ pub fn select_wave_graph(
     wave: &WaveId,
     name: &str,
 ) {
+    set_wave_setting(repo, store, wave, "graph", name);
+}
+
+/// Set `key` in a Wave's committed `config.yaml` in `repo`.
+#[allow(dead_code)] // Shared helper compiled into integration tests without Wave settings.
+pub fn set_wave_setting(
+    repo: &Path,
+    store: &loopflow::store::sqlite::SqliteStore,
+    wave: &WaveId,
+    key: &str,
+    value: &str,
+) {
     let wave = store.get_wave(wave).unwrap().unwrap();
     let path = repo.join(".lf/wave").join(wave.slug()).join("config.yaml");
     let mut config: serde_yaml_ng::Mapping = fs::read_to_string(&path)
         .ok()
         .and_then(|content| serde_yaml_ng::from_str(&content).ok())
         .unwrap_or_default();
-    config.insert("graph".into(), name.into());
+    config.insert(key.into(), value.into());
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(&path, serde_yaml_ng::to_string(&config).unwrap()).unwrap();
     for args in [
         vec!["add", "--", path.to_str().unwrap()],
-        vec!["commit", "--quiet", "-m", "Select the Wave's graph"],
+        vec!["commit", "--quiet", "-m", "Set the Wave's configuration"],
     ] {
         let status = std::process::Command::new("git")
             .current_dir(repo)
             .args(args)
             .status()
             .unwrap();
-        assert!(status.success(), "git could not commit the Wave's graph");
+        assert!(
+            status.success(),
+            "git could not commit the Wave's configuration"
+        );
     }
 }
 

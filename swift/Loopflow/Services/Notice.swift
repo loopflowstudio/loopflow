@@ -139,15 +139,15 @@ public struct NoticeView: View {
                         .accessibilityIdentifier("notice-action")
                     }
                 }
-                .font(Typography.body(12))
+                .font(Typography.text)
                 .foregroundStyle(palette.text)
-                .padding(.leading, 14)
-                .padding(.trailing, 10)
-                .padding(.vertical, 8)
-                .background(RoundedRectangle(cornerRadius: 9).fill(palette.surfaceElement))
-                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(palette.border, lineWidth: 1))
+                .padding(.leading, Spacing.lg)
+                .padding(.trailing, Spacing.md)
+                .padding(.vertical, Spacing.sm)
+                .background(RoundedRectangle(cornerRadius: CornerRadius.row).fill(palette.surfaceElement))
+                .overlay(RoundedRectangle(cornerRadius: CornerRadius.row).strokeBorder(palette.border, lineWidth: 1))
                 .shadow(color: palette.shadow, radius: 8, y: 2)
-                .padding(.bottom, 18)
+                .padding(.bottom, Spacing.xl)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }

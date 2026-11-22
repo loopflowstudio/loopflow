@@ -495,10 +495,10 @@ pub struct RoadmapTask {
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
-    pub ship_control: TaskRunControl,
-    pub shipping: Option<loopflow_execution::ops::task::ship::ShippingSnapshot>,
     pub pr: Option<PrSnapshot>,
     pub section: TaskSection,
+    /// Whether its owner is you; `false` when nobody owns it.
+    pub owned_by_you: bool,
     /// The graph step the Task stands at; `None` while a run carries it.
     /// Carried to `lf task status`'s `TaskRow`, not on the wire.
     #[serde(skip)]
@@ -877,7 +877,7 @@ pub struct TaskListArgs {
     pub wave: Option<String>,
     /// Project ID, provider ID, slug or name.
     pub project: Option<String>,
-    /// An open `TaskState` label: unstarted, idle, active, moving or shipping.
+    /// An open `TaskState` label: unstarted, idle, active or moving.
     pub state: Option<String>,
 }
 
@@ -886,6 +886,7 @@ pub struct TaskListArgs {
 pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
+        loopflow_execution::ops::plan_carriers::before_first_read(repo).await;
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         let tasks = match &store {
             Some(store) => open_tasks(store, repo, query).await?,
@@ -966,7 +967,8 @@ fn task_machine(repo: &Path, issue: &str) -> Result<Option<TaskMachine>> {
         selection: Selection::capture(repo, None)?,
         secrets: Secrets::default(),
     };
-    let connection = loopflow_execution::machine::client::Connection::open_on(&machine, sender)?;
+    let connection =
+        loopflow_execution::machine::client::Connection::open_on(&machine, sender, None)?;
     let read = super::read::Read::TaskStatus {
         directory: repo.to_owned(),
         issue: route.task_id.to_string(),
@@ -1033,10 +1035,15 @@ fn print_remote_detail(machine: &str, detail: &TaskDetail) -> Result<()> {
     println!("{} · {}", task.title, task.identifier);
     println!("Runs on {machine}; read from its server.");
     println!(
-        "State: {} · {}",
+        "State: {}{} · {}",
         serde_json::to_value(task.state)?
             .as_str()
             .expect("a Task state is a string"),
+        detail
+            .auto
+            .as_ref()
+            .map(crate::lf::commands::task_row::auto_phrase)
+            .unwrap_or_default(),
         task.reason
     );
     if let Some(graph) = &task.graph {
@@ -1221,26 +1228,39 @@ pub(crate) async fn task_detail(
         .task
         .ok_or_else(|| anyhow!("this Task is not registered in Loopflow"))?;
     let row = task_row(store, &task).await?;
-    let mut sessions = Vec::new();
-    for session in status
+    let (overview_sessions, graph) = status
         .overview
-        .map(|overview| overview.sessions)
-        .unwrap_or_default()
-    {
+        .map(|overview| (overview.sessions, overview.graph))
+        .unwrap_or_default();
+    let mut sessions = Vec::new();
+    for session in overview_sessions {
         if let Some(record) =
             loopflow_execution::ops::human_session::listed(store, session.id.as_str())?
         {
             sessions.push(SessionFacts::of(record));
         }
     }
+    let conversation = task_conversation(store, &task.id)?;
+    let conversation_id = conversation.as_ref().map(|facts| facts.id.clone());
+    if let Some(facts) = conversation {
+        if !sessions.iter().any(|session| session.id == facts.id) {
+            sessions.insert(0, facts);
+        }
+    }
     let summary = store.sqlite.task_summary(&task.id)?;
     Ok(TaskDetail {
         summary,
+        conversation: conversation_id,
+        auto: status
+            .execution
+            .as_ref()
+            .and_then(|execution| execution.auto.clone()),
         stack_parent: status
             .execution
             .and_then(|execution| execution.stack_parent),
         task: TaskNames::read(Some(store)).await?.row(row),
         sessions,
+        graph,
         graph_processes: status
             .graph_processes
             .into_iter()
@@ -1248,6 +1268,36 @@ pub(crate) async fn task_detail(
             .collect(),
         comments: status.comments.map(TaskThread::from),
     })
+}
+
+/// The Task's conversation, as `lf session list` reads it; `None` before it
+/// has one.
+fn task_conversation(
+    store: &SharedStore,
+    task: &loopflow_model::durable::TaskId,
+) -> Result<Option<SessionFacts>> {
+    let Some(session) =
+        store
+            .sqlite
+            .primary_session(&loopflow_execution::session::PrimaryScope::Task(
+                task.clone(),
+            ))?
+    else {
+        return Ok(None);
+    };
+    Ok(
+        loopflow_execution::ops::human_session::listed(store, session.id.as_str())?
+            .map(SessionFacts::of),
+    )
+}
+
+/// `lf task status`'s conversation line for `task`, as the server wrote it;
+/// `None` before it has one.
+pub fn task_conversation_line(task: &loopflow_model::durable::TaskId) -> Result<Option<String>> {
+    let Some(store) = loopflow_execution::store::read_existing_registry()? else {
+        return Ok(None);
+    };
+    Ok(task_conversation(&std::sync::Arc::new(store), task)?.and_then(|facts| facts.status_line))
 }
 
 /// The open Tasks `query` selects, read from the store's filter rather than
@@ -1803,10 +1853,23 @@ async fn snapshot_tasks(
     Ok((details, unavailable_tasks))
 }
 
+/// The details of one reading's Tasks. A bare command reads them as one
+/// reading too, so Tasks that share a checkout resolve its settings once.
+fn snapshot_task_details(
+    store: &SharedStore,
+    requests: Vec<&Task>,
+    probe_pr_empty: bool,
+    shared: &SharedTaskReads,
+) -> Result<Vec<RoadmapTask>> {
+    loopflow_execution::observe::reading(|| {
+        gather_task_details(store, requests, probe_pr_empty, shared)
+    })
+}
+
 /// Each detail waits on fresh Git observations of its own checkout. Gather
 /// them side by side: one after another, those children are most of a
 /// roadmap read. Details and the first error keep their request order.
-fn snapshot_task_details(
+fn gather_task_details(
     store: &SharedStore,
     requests: Vec<&Task>,
     probe_pr_empty: bool,
@@ -1869,27 +1932,14 @@ struct DetailReads<'a> {
     >,
     /// Each Task Wave's name, which selects its agent; read once per Wave.
     wave_names: HashMap<loopflow_model::id::WaveId, String>,
-    /// Each Task Wave's and repository's checkout with your `lf set` values,
-    /// which select its agent; read once per Wave and repository.
-    personal: HashMap<
-        (
-            Option<loopflow_model::id::WaveId>,
-            loopflow_model::durable::RepositoryId,
-        ),
-        (
-            std::path::PathBuf,
-            loopflow_execution::config::PersonalSettings,
-        ),
+    /// Each repository's checkout, where a Task without a worktree resolves
+    /// its agent; read once per repository.
+    repositories: HashMap<loopflow_model::durable::RepositoryId, std::path::PathBuf>,
+    /// You in each Task's repository, which recognizes your claims; read once per repository.
+    you: HashMap<
+        loopflow_model::durable::RepositoryId,
+        loopflow_storage::sqlite::task_ownership::You,
     >,
-    /// Each handed-off Task's Auto-Ship progress.
-    shipping: HashMap<
-        loopflow_model::durable::TaskId,
-        loopflow_execution::ops::task::ship::ShippingSnapshot,
-    >,
-    /// Agents already resolved in this reading, by the configuration that chose
-    /// them. Checkouts of one repository usually share their files, and resolving
-    /// validates every setting, so each distinct configuration resolves once.
-    agents: std::sync::Mutex<HashMap<String, Option<loopflow_execution::config::Agent>>>,
     /// Each Task's latest Graph and what its execution reads, asked once.
     graphs:
         HashMap<loopflow_model::durable::TaskId, loopflow_storage::graph_process::GraphExecution>,
@@ -1924,7 +1974,8 @@ impl<'a> DetailReads<'a> {
             HashMap::<_, (String, Option<loopflow_execution::config::ConfigSource>)>::new();
         let mut selections = HashMap::new();
         let mut wave_names = HashMap::new();
-        let mut personal = HashMap::new();
+        let mut repositories = HashMap::new();
+        let mut you = HashMap::new();
         for task in tasks {
             let selection = match facts.graph_names.get(&task.id) {
                 Some(name) => (name.clone(), None),
@@ -1950,32 +2001,18 @@ impl<'a> DetailReads<'a> {
                 }
             }
             if let std::collections::hash_map::Entry::Vacant(entry) =
-                personal.entry((task.wave_id.clone(), task.repository_id.clone()))
+                repositories.entry(task.repository_id.clone())
             {
                 let repo = loopflow_execution::ops::task::repository_for_task(store, task)?;
-                let wave = task
-                    .wave_id
-                    .as_ref()
-                    .and_then(|id| wave_names.get(id))
-                    .map(String::as_str);
-                let values = loopflow_execution::config::PersonalSettings::read(Some(&repo), wave);
-                entry.insert((repo, values));
-            }
-        }
-        let mut shipping = HashMap::new();
-        for task in tasks.iter().filter(|task| facts.shipped.contains(&task.id)) {
-            let status = *facts
-                .states
-                .get(&task.id)
-                .ok_or_else(|| anyhow!("Task {} has no state", task.id))?;
-            let graph = loopflow_execution::store::task_work::task_graph(&store.sqlite, &task.id)?;
-            if let Some(snapshot) = loopflow_execution::ops::task::ship::read_shipping(
-                &store.sqlite,
-                &task.id,
-                graph.as_ref(),
-                status,
-            )? {
-                shipping.insert(task.id.clone(), snapshot);
+                you.insert(
+                    task.repository_id.clone(),
+                    loopflow_execution::store::ownership::you(
+                        &store.sqlite,
+                        &task.repository_id,
+                        &repo,
+                    )?,
+                );
+                entry.insert(repo);
             }
         }
         Ok(Self {
@@ -1985,47 +2022,11 @@ impl<'a> DetailReads<'a> {
             planning_connections,
             selections,
             wave_names,
-            personal,
-            shipping,
+            repositories,
+            you,
             graphs,
             execution,
-            agents: Default::default(),
         })
-    }
-
-    /// The agent Task work at `checkout` would launch with, resolved once per
-    /// distinct configuration in this reading.
-    fn agent(
-        &self,
-        checkout: &Path,
-        wave: Option<&str>,
-        personal: &loopflow_execution::config::PersonalSettings,
-    ) -> Option<loopflow_execution::config::Agent> {
-        let resolve = || {
-            loopflow_execution::ops::task::resolve_task_agent(checkout, wave, personal, None).ok()
-        };
-        let Ok(layers) =
-            loopflow_execution::config::config_layers_with(Some(checkout), wave, personal)
-        else {
-            return resolve();
-        };
-        // Paths only name where a value came from; the agent depends on the values.
-        let key = serde_json::to_string(
-            &layers
-                .iter()
-                .map(|layer| (&layer.source, &layer.scope, &layer.value))
-                .collect::<Vec<_>>(),
-        )
-        .expect("configuration values serialize");
-        if let Some(agent) = self.agents.lock().expect("agent memo poisoned").get(&key) {
-            return agent.clone();
-        }
-        let agent = resolve();
-        self.agents
-            .lock()
-            .expect("agent memo poisoned")
-            .insert(key, agent.clone());
-        agent
     }
 }
 
@@ -2075,12 +2076,18 @@ async fn snapshot_task_detail(
         .as_ref()
         .and_then(|id| reads.wave_names.get(id))
         .map(String::as_str);
-    let (repo, personal) = reads
-        .personal
-        .get(&(task.wave_id.clone(), task.repository_id.clone()))
-        .ok_or_else(|| anyhow!("Task {} has no setup reading", task.id))?;
-    let agent = reads.agent(task.worktree.as_deref().unwrap_or(repo), wave, personal);
-    let provider = agent.map(|agent| agent.harness.as_str().to_owned());
+    let repo = reads
+        .repositories
+        .get(&task.repository_id)
+        .ok_or_else(|| anyhow!("Task {} has no repository reading", task.id))?;
+    let provider = loopflow_execution::ops::task::resolve_task_agent(
+        task.worktree.as_deref().unwrap_or(repo),
+        repo,
+        wave,
+        None,
+    )
+    .ok()
+    .map(|agent| agent.harness.as_str().to_owned());
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
     let reference = task_reference(
         facts.issue_urls.get(&task.id).cloned(),
@@ -2097,25 +2104,20 @@ async fn snapshot_task_detail(
     let worktree_blocker =
         loopflow_execution::ops::task::task_worktree_blocker_after(task, latest_event)?;
     let launch_refusal = if worktree_blocker.is_none() {
-        loopflow_execution::ops::task::task_process_refusal_after(
-            task,
-            wave,
-            personal,
-            latest_event,
-        )
-        .or_else(|| {
-            matches!(
-                tracker_state.state,
-                loopflow_execution::store::PlanningState::Invalid
-                    | loopflow_execution::store::PlanningState::Removed
-            )
-            .then(|| {
-                format!(
-                    "Task planning has invalidation or removal evidence; run `lf task sync {}`",
-                    task.identifier
+        loopflow_execution::ops::task::task_process_refusal_after(task, repo, wave, latest_event)
+            .or_else(|| {
+                matches!(
+                    tracker_state.state,
+                    loopflow_execution::store::PlanningState::Invalid
+                        | loopflow_execution::store::PlanningState::Removed
                 )
+                .then(|| {
+                    format!(
+                        "Task planning has invalidation or removal evidence; run `lf task sync {}`",
+                        task.identifier
+                    )
+                })
             })
-        })
     } else {
         None
     };
@@ -2209,22 +2211,6 @@ async fn snapshot_task_detail(
             launch_refusal: launch_refusal.as_deref(),
         },
     );
-    let shipping = reads.shipping.get(&task.id).cloned();
-    let ship_control = TaskRunControl {
-        unavailable: run_control.unavailable.clone().or_else(|| {
-            if shipping.is_some() {
-                Some("Task is already shipping".to_string())
-            } else if facts
-                .steps
-                .get(&task.id)
-                .is_some_and(|step| step == loopflow_execution::task_graph::END)
-            {
-                Some("Task is at the end of its graph".to_string())
-            } else {
-                None
-            }
-        }),
-    };
     let (graph_name, graph_source) = reads
         .selections
         .get(&task.id)
@@ -2235,6 +2221,12 @@ async fn snapshot_task_detail(
         runtime.owner.is_some(),
         task.state.as_deref(),
     );
+    let owned_by_you = runtime.owner.as_ref().is_some_and(|holder| {
+        reads
+            .you
+            .get(&task.repository_id)
+            .is_some_and(|you| you.holds(holder))
+    });
     Ok(RoadmapTask {
         task: task_summary(
             task,
@@ -2256,6 +2248,7 @@ async fn snapshot_task_detail(
             status,
             runtime.owner.is_some(),
             pr.as_ref().is_some_and(|pr| pr.publication.is_some()),
+            facts.auto_on.contains(&task.id),
             task.state.as_deref(),
             reads.selection_readings[&task.repository_id]
                 .activity
@@ -2270,8 +2263,6 @@ async fn snapshot_task_detail(
         latest_graph_process: graph_record,
         execution: Some(execution),
         run_control,
-        ship_control,
-        shipping,
         pr: pr.as_ref().map(|pr| {
             let empty = (probe_pr_empty && pr.is_active())
                 .then(|| task_pr_empty(task, pr))
@@ -2279,6 +2270,7 @@ async fn snapshot_task_detail(
             PrSnapshot::new(pr, empty)
         }),
         section,
+        owned_by_you,
         step: facts.steps.get(&task.id).cloned(),
     })
 }
@@ -2702,6 +2694,7 @@ fn print_setup(setup: &loopflow_execution::work::wave::setup::WaveSetup) {
     };
     println!("  setup");
     line("graph", &setup.graph);
+    line("auto", &setup.auto);
     line("agent", &setup.agent);
     for (skill, value) in &setup.skill_agents {
         line(&format!("  {skill}"), value);
@@ -3137,7 +3130,6 @@ fn section_label(section: TaskSection) -> &'static str {
     match section {
         TaskSection::Backlog => "BACKLOG",
         TaskSection::Working => "WORKING",
-        TaskSection::Autonomous => "AUTONOMOUS",
         TaskSection::Done => "DONE",
         TaskSection::Abandoned => "ABANDONED",
     }
@@ -3178,7 +3170,6 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             .clamp(12, 32);
         for section in [
             TaskSection::Working,
-            TaskSection::Autonomous,
             TaskSection::Backlog,
             TaskSection::Done,
             TaskSection::Abandoned,
@@ -4381,6 +4372,8 @@ mod tests {
             reason: "Release target is unavailable".into(),
             step: None,
             captured: None,
+            died: None,
+            outlook: None,
         });
         let none = None;
         let missing = LocalProgressEvidenceState::Missing;
@@ -4412,6 +4405,8 @@ mod tests {
                 reason: "Process evidence remains unresolved".into(),
                 step: None,
                 captured: None,
+                died: None,
+                outlook: None,
             };
             assert!(unresolved(
                 TaskState::Done,
@@ -4503,6 +4498,8 @@ mod tests {
                 reason: "worker evidence".into(),
                 step: None,
                 captured: None,
+                died: None,
+                outlook: None,
             };
             let actions = TaskActionEvidence {
                 status: WorkStatus::Ready,
@@ -4596,6 +4593,8 @@ mod tests {
             reason: "gate: process exited with status 1".into(),
             step: None,
             captured: None,
+            died: None,
+            outlook: None,
         };
         for (status, reason) in [
             (TaskState::Done, "Task is complete"),
@@ -4786,8 +4785,8 @@ mod tests {
         .replace("}]}','demo',3)", "}]}','end',3)");
         conn.execute_batch(&fixture).unwrap();
         loopflow_execution::store::migrations::upgrade_from_migration(&conn, "task_paused");
-        // The planning read, not this setup, fails.
-        conn.execute_batch("DROP TABLE task_ship_events").unwrap();
+        // Fail the planning inventory's latest-event query.
+        conn.execute_batch("DROP TABLE task_events").unwrap();
         let frontier =
             loopflow_execution::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
         let store: loopflow_execution::store::SharedStore =
@@ -4816,10 +4815,7 @@ mod tests {
                 roadmap.tasks
             );
         };
-        assert!(
-            reason.contains("no such table: task_ship_events"),
-            "{reason}"
-        );
+        assert!(reason.contains("no such table: task_events"), "{reason}");
         let graph = loopflow_execution::store::task_work::task_overview(&store.sqlite, &task)
             .unwrap()
             .0

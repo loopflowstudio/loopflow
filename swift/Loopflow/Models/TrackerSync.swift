@@ -22,13 +22,12 @@ public enum TrackerActionOwnerKind: String, Decodable, Sendable, Hashable {
     case task, project, wave
 }
 
-/// Where a planning change goes: Git's journal, or a queued tracker.
+/// The tracker a queued planning change goes to.
 public enum TrackerKind: String, Decodable, Sendable, Hashable {
-    case git, linear, asana
+    case linear, asana
 
     public var displayName: String {
         switch self {
-        case .git: "Git"
         case .linear: "Linear"
         case .asana: "Asana"
         }

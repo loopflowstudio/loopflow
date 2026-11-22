@@ -171,6 +171,30 @@ pub enum Starter {
         name: Option<String>,
         requester: Option<String>,
     },
+    /// A configured default set it: `auto: on`. Only an auto mark names one.
+    Config { layer: ConfigLayer },
+}
+
+/// The configuration a default came from, as `lf task status` names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigLayer {
+    /// The Task's Wave's `config.yaml`, or a personal setting for that Wave.
+    Wave,
+    /// The repository's `.lf/config.yaml`.
+    Repository,
+    /// Personal configuration.
+    Personal,
+}
+
+impl ConfigLayer {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Wave => "wave",
+            Self::Repository => "repository",
+            Self::Personal => "personal",
+        }
+    }
 }
 
 impl std::fmt::Display for Starter {
@@ -192,6 +216,7 @@ impl std::fmt::Display for Starter {
                     None => Ok(()),
                 }
             }
+            Self::Config { layer } => write!(f, "{} config", layer.as_str()),
         }
     }
 }

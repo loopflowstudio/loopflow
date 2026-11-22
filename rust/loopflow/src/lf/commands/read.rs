@@ -24,7 +24,7 @@ use super::waves::list as list_waves;
 use crate::lf::SessionListArgs;
 use loopflow_execution::engine::{Error, ErrorCode};
 use loopflow_execution::machine::connection::local_machine;
-use loopflow_execution::ops::task::{task_changes, task_diff, task_file};
+use loopflow_execution::ops::task::{task_changes, task_diff, task_file, task_files};
 use loopflow_execution::read_stream::{Subscription, Transport};
 use loopflow_execution::session::SessionFilter;
 use loopflow_model::durable::RepositoryId;
@@ -160,6 +160,16 @@ pub enum Read {
     #[serde(rename = "task.file")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskFileSnapshot>()))]
     TaskFile { issue: String, path: String },
+    /// `lf task files <issue> <path> [--cursor <cursor>] [--show-ignored]`:
+    /// one page of a Task checkout directory's immediate entries.
+    #[serde(rename = "task.files")]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskDirectory>()))]
+    TaskFiles {
+        issue: String,
+        path: String,
+        cursor: Option<String>,
+        show_ignored: bool,
+    },
     /// `lf wave list --all`: every Wave on this Machine that is not removed.
     #[serde(rename = "wave.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::waves::WaveSnapshot>>()))]
@@ -446,6 +456,19 @@ impl Read {
                 argv
             }
             Self::TaskFile { issue, path } => words(&["task", "file", issue, path, "--json"]),
+            Self::TaskFiles {
+                issue,
+                path,
+                cursor,
+                show_ignored,
+            } => {
+                let mut argv = words(&["task", "files", issue, path, "--json"]);
+                argv.extend(optional("--cursor", cursor.as_ref()));
+                if *show_ignored {
+                    argv.push("--show-ignored".into());
+                }
+                argv
+            }
             Self::WaveList => words(&["wave", "list", "--all", "--json"]),
             Self::MachineSelf => words(&["machine", "self", "--json"]),
             Self::DesktopPortfolio => words(&["desktop", "portfolio", "--json"]),
@@ -711,6 +734,12 @@ impl Read {
                 draft.as_deref(),
             )?),
             Self::TaskFile { issue, path } => value(&task_file(issue, path, false)?),
+            Self::TaskFiles {
+                issue,
+                path,
+                cursor,
+                show_ignored,
+            } => value(&task_files(issue, path, cursor.as_deref(), *show_ignored)?),
             Self::WaveList => {
                 let waves = block_on(list_waves(true))??;
                 value(&waves.unwrap_or_default())
@@ -924,6 +953,7 @@ impl Read {
             | Self::TaskChanges { .. }
             | Self::TaskDiff { .. }
             | Self::TaskFile { .. }
+            | Self::TaskFiles { .. }
             | Self::WaveList
             | Self::MachineSelf
             | Self::DesktopPortfolio

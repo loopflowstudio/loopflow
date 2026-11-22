@@ -9,7 +9,17 @@ import ViewInspector
 @Suite("Sessions store")
 @MainActor
 struct SessionsStoreTests {
-    @Test("Provider switching keeps the Session and prepares an explicit provider launch", arguments: ["claude", "codex", "opencode", "pi"])
+    @Test("Prepared SSH panes use the server’s local relay command")
+    func sshPaneUsesPreparedCommand() throws {
+        var record = try #require(records([session(id: "remote", state: "closed")]).first)
+        let ssh = ["--", "ssh", "peer", "lf session attach remote"]
+        record.openArgv = ["/bin/lf", "session", "attach"] + ssh
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in "" })
+        store.reconcile([record])
+        #expect(item(store, "remote")?.launchArguments == record.openArgv)
+    }
+
+    @Test("Provider switching keeps the Session and prepares an explicit provider launch", arguments: ["claude", "codex", "opencode", "pi", "agy"])
     func switchingProviderKeepsSession(agent: String) async throws {
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
             session(id: "main", state: "closed")
@@ -658,7 +668,7 @@ private func session(id: String, state: String, primary: Bool = false) -> String
       "state": "\(wire)", "availability": \(state == "available" ? "\"available\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
       "action": \(sessionActionFixtureJSON(state: wire)),
-      "blocked": false, "title_source": "generated", "primary_scope": \(primary ? "\"task\"" : "null"), "graph_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids": [],
+      "blocked": false, "title_source": "generated", "ended": null, "start": null, "outlook": null, "status_line": null, "primary_scope": \(primary ? "\"task\"" : "null"), "graph_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids": [],
       "open_argv": ["lf", "session", "resume", "\(id)"]
     }
     """

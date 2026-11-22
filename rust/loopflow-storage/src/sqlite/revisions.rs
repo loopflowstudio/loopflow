@@ -152,8 +152,12 @@ mod tests {
         "planning_peer_imports",
         "planning_peer_observed",
         "planning_peer_routes",
+        // A field's stamp decides which value is kept; views read the value.
+        "plan_stamps",
+        // Which commit of another Machine's plan ref was read; views read the plan.
+        "plan_refs",
         "blob_tokens",
-        // Desktop reads GitHub people once per repository through `lf repo people`.
+        // A lookup cache `lf repo people` fills; no Work projection reads it.
         "github_people",
         // Refresh attempts and watermarks do not change displayed Work.
         "linear_team_checks",
@@ -429,8 +433,9 @@ mod tests {
     /// tracker names; each sees the other's writes, counted once.
     #[test]
     fn tracker_table_mirror_keeps_released_writers_and_readers_in_step() {
-        let (_dir, store) = store();
-        let conn = store.conn.lock().unwrap();
+        let (dir, _store) = store();
+        // Released writers still use the retiring Git journal tables.
+        let conn = rusqlite::Connection::open(dir.path().join("db")).unwrap();
         let issue = uuid::Uuid::new_v4().to_string();
         let read = |sql: &str| -> Option<String> {
             conn.query_row(sql, [&issue], |row| row.get(0))
@@ -545,8 +550,9 @@ mod tests {
 
     #[test]
     fn tracker_table_mirror_carries_project_membership_events_and_git_conflicts() {
-        let (_dir, store) = store();
-        let conn = store.conn.lock().unwrap();
+        let (dir, _store) = store();
+        // Released writers still use the retiring Git journal tables.
+        let conn = rusqlite::Connection::open(dir.path().join("db")).unwrap();
         conn.execute_batch(
             "INSERT INTO waves(id,name,repo,created_at) VALUES('wave','work','/repo',1);
              INSERT INTO pm_projects(repo,provider,id,observed_at) VALUES('/repo','linear','p',1);
@@ -630,6 +636,8 @@ mod tests {
             "task_changes",
             "task_state_deliveries",
             "tracker_actions",
+            "plan_carriers",
+            "plan_changes",
         ] {
             let trigger: String = conn
                 .query_row(

@@ -1,9 +1,9 @@
-//! The `task` namespace's core loop: run, ship, hold, steer, report, wait and
+//! The `task` namespace's core loop: run, auto, steer, report, wait and
 //! interrupt a Task, and claim or unassign it.
 //!
-//! A run and a ship outlive the request that starts them. From a terminal the
+//! A run and an auto on outlive the request that starts them. From a terminal the
 //! `lf` process is their carrier; a served request has none, so [`run`] and
-//! [`ship`] start the same command detached ([`super::launch`]) and return the
+//! [`auto_on`] start the same command detached ([`super::launch`]) and return the
 //! result it reports, the value its CLI spelling prints with `--json`. Each
 //! runs here: the caller sends a Task another Machine runs to that Machine,
 //! whose server starts it with the `environment` the sender carried.
@@ -30,9 +30,9 @@ pub enum TaskRun {
         issue: String,
         /// The graph and where the run set out: `code from implement`.
         run: String,
-        /// No interactive step is left ahead: Auto-Ship is approved and the
-        /// run may merge the PR.
-        ships: bool,
+        /// The run may merge the PR: auto is on, or no interactive step is
+        /// left ahead, and nobody turned auto off.
+        merges: bool,
         graph_process: LfProcessId,
         /// Where the run's output goes once its launcher lets go; null while a
         /// terminal (`-b`, `-i`) keeps it.
@@ -51,13 +51,13 @@ impl TaskRun {
             Self::Running {
                 issue,
                 run,
-                ships,
+                merges,
                 graph_process,
                 log: Some(log),
             } => Some(format!(
                 "{issue} · {run} running as Graph run {graph_process}{}\n  follow: lf task status {issue}\n  log:    {}",
-                if *ships {
-                    format!("\n  ships:  no interactive step is left, so this run may merge the PR; `lf task hold {issue}` withdraws")
+                if *merges {
+                    format!("\n  merges: this run may merge the PR; `lf task auto off {issue}` stops it")
                 } else {
                     String::new()
                 },
@@ -70,66 +70,18 @@ impl TaskRun {
     }
 }
 
-/// What `task.ship` set going.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
-pub enum TaskShip {
-    /// Auto-Ship is approved and `process` ships the Task to `end`.
-    Shipping {
-        issue: String,
-        #[serde(rename = "lf_process_id")]
-        process: LfProcessId,
-        /// The ship's output once its launcher lets go; null under `-b`.
-        log: Option<PathBuf>,
-    },
-    /// Another live process already ships it.
-    AlreadyShipping {
-        issue: String,
-        #[serde(rename = "lf_process_id")]
-        process: LfProcessId,
-    },
-    /// The Task already stands at `end`.
-    AtEnd { issue: String },
-}
-
-impl TaskShip {
-    /// What `lf ship` prints; a ship its terminal keeps prints nothing here.
-    pub fn render(&self) -> Option<String> {
-        match self {
-            Self::Shipping {
-                issue,
-                log: Some(log),
-                ..
-            } => Some(format!(
-                "{issue} shipping\n  follow: lf task status {issue}\n  log:    {}",
-                log.display()
-            )),
-            Self::Shipping { log: None, .. } => None,
-            Self::AlreadyShipping { issue, process } => {
-                Some(format!("{issue} is already shipping (process {process})"))
-            }
-            Self::AtEnd { issue } => Some(format!("{issue} is already at its end")),
-        }
-    }
-}
-
-/// What `task.hold` withdrew.
+/// What `task.auto.off` turned off.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Hold {
+pub struct AutoOff {
     pub issue: String,
-    /// A run was shipping the Task; otherwise only the stop was saved.
-    pub stopped: bool,
+    /// Auto was on before this.
+    pub was_on: bool,
 }
 
-impl Hold {
+impl AutoOff {
     pub fn render(&self) -> String {
-        let issue = &self.issue;
-        if self.stopped {
-            format!("{issue} stopped shipping")
-        } else {
-            format!("{issue} is not shipping; no run ships it until `lf ship {issue}`")
-        }
+        format!("{}: auto off", self.issue)
     }
 }
 
@@ -143,7 +95,7 @@ pub struct Waited {
 
 /// `task.run`: start the Task's run detached, as `lf [-b] [-a <agent>] task
 /// run <issue> [--from <step>]` does, and return once it is known. `approve`
-/// runs every step headless to `end` and approves Auto-Ship, as `-b` does;
+/// runs every step headless to `end`, as `-b` does, and writes no auto;
 /// without it the run stops before the next interactive step. With no
 /// `agent`, each step's harness is the repository's configured default.
 pub fn run(
@@ -162,20 +114,24 @@ pub fn run(
     )
 }
 
-/// `task.ship`: approve Auto-Ship and start shipping detached, as `lf --task
-/// <issue> ship` does: every remaining step headless, an interactive step
-/// standing in for the person, until the PR lands.
-pub fn ship(directory: &Path, issue: &str, environment: &[(String, String)]) -> Result<TaskShip> {
-    launch::start_with(directory, &spell_ship(issue), environment)
+/// `task.auto.on`: turn auto on and start the Task's run detached, as
+/// `lf task auto on <issue>` does: it returns what `task.run` returns, and the
+/// run stands in at each interactive step until the PR lands. It is the one
+/// way to turn auto on.
+pub fn auto_on(directory: &Path, issue: &str, environment: &[(String, String)]) -> Result<TaskRun> {
+    launch::start_with(directory, &spell_auto_on(issue), environment)
 }
 
-/// `task.hold`: withdraw the Task's Auto-Ship approval, as `lf --task <issue>
-/// ship --stop` does, until the next `task.ship`.
-pub fn hold(issue: &str, reason: Option<&str>) -> Result<Hold> {
-    let stopped = crate::ops::task::ship::ship_stop(issue, reason).map_err(written)?;
-    Ok(Hold {
+/// `task.auto.off`: turn the Task's auto setting off, as `lf task auto off
+/// <issue>` does. Nothing is killed: the run waits at its next interactive or
+/// merging step until `task.auto.on` turns auto on again.
+pub fn auto_off(issue: &str, reason: Option<&str>) -> Result<AutoOff> {
+    let was_on = crate::ops::task::auto::off(issue, reason)
+        .map_err(written)?
+        .ok_or_else(|| missing(issue))?;
+    Ok(AutoOff {
         issue: issue.to_owned(),
-        stopped,
+        was_on,
     })
 }
 
@@ -314,15 +270,15 @@ pub fn spell_run(
     args
 }
 
-pub fn spell_ship(issue: &str) -> Vec<String> {
-    ["--task", issue, "ship", "--json"]
+pub fn spell_auto_on(issue: &str) -> Vec<String> {
+    ["--task", issue, "task", "auto", "on", "--json"]
         .map(str::to_owned)
         .to_vec()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Hold, TaskRun, TaskShip};
+    use super::{AutoOff, TaskRun};
     use serde::{de::DeserializeOwned, Serialize};
 
     /// A response fixture's `result` decodes as `T` and encodes back unchanged.
@@ -351,28 +307,23 @@ mod tests {
         else {
             panic!("the fixture is a running Task")
         };
-        let ships = TaskRun::Running {
+        let merging = TaskRun::Running {
             issue,
             run,
-            ships: true,
+            merges: true,
             graph_process,
             log,
         };
-        assert!(ships
+        assert!(merging
             .render()
             .unwrap()
-            .contains("this run may merge the PR; `lf task hold LOO-1` withdraws"));
-        let shipping: TaskShip = result(include_str!(
-            "../../tests/fixtures/dto/server/task_shipping.json"
+            .contains("this run may merge the PR; `lf task auto off LOO-1` stops it"));
+        let off: AutoOff = result(include_str!(
+            "../../tests/fixtures/dto/server/task_auto_off_answer.json"
         ));
-        assert!(shipping.render().unwrap().starts_with("LOO-1 shipping"));
-        let held: Hold = result(include_str!(
-            "../../tests/fixtures/dto/server/task_held.json"
-        ));
-        assert_eq!(held.render(), "LOO-1 stopped shipping");
+        assert_eq!(off.render(), "LOO-1: auto off");
         // A missing field is an error, never a default.
         assert!(serde_json::from_str::<TaskRun>(r#"{"state":"running","issue":"LOO-1"}"#).is_err());
-        assert!(serde_json::from_str::<TaskShip>(r#"{"state":"at_end"}"#).is_err());
         let waiting = TaskRun::Waiting {
             issue: "LOO-1".into(),
             step: "demo".into(),

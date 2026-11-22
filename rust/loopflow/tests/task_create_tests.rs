@@ -71,8 +71,7 @@ impl Drop for Service {
             let running: i64 = db
                 .query_row(
                     "SELECT (SELECT count(*) FROM graph_processes WHERE ended_at IS NULL)
-                        + (SELECT count(*) FROM task_graphs WHERE run_pid IS NOT NULL)
-                        + (SELECT count(*) FROM task_ship_events WHERE pid IS NOT NULL)",
+                        + (SELECT count(*) FROM task_graphs WHERE run_pid IS NOT NULL)",
                     [],
                     |row| row.get(0),
                 )

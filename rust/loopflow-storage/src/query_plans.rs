@@ -13,10 +13,8 @@ use rusqlite::OptionalExtension;
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
-const GROWING: [&str; 16] = [
+const GROWING: [&str; 14] = [
     "agent_sessions",
-    "git_tracker_changes",
-    "git_tracker_routes",
     "processes",
     "session_activity",
     "session_events",
@@ -27,22 +25,22 @@ const GROWING: [&str; 16] = [
     "task_moves",
     "task_ownership",
     "task_retirements",
+    "task_auto",
     "task_update_readings",
-    "task_ship_events",
     "tasks",
 ];
 
 /// `sqlite_stat1` as `ANALYZE` measured it on a Machine with 17,536
-/// Sessions, 170,688 Processes, 283,304 Session events, 37,512 planning
-/// changes and 3,362 steers (November 13). Indexes newer than that store's
+/// Sessions, 170,688 Processes, 283,304 Session events and 3,362 steers
+/// (November 13). Indexes newer than that store's
 /// schema were built and analyzed on a copy of it; `steer_delivered` is counted
 /// from the rows its migration copies there.
 /// `task_checkouts` retains the November 12 measurement of 838 checkouts;
 /// `tasks_abandoned` counts that store's 259 abandoned Tasks, and
 /// `task_checkouts_parent_pr` its 11 parent PRs;
 /// `agent_sessions_primary_task` takes the 319 primaries `tasks_primary_session` counted.
-/// `task_ship_events` counts the 396 rows that store's 174 shipping and 12
-/// stopped Tasks backfill to, 216 of them naming a Process.
+/// `task_auto` counts the 186 marks that store's 174 shipping and 12 stopped
+/// Tasks backfill to.
 /// `task_ownership` counts November 13's 895 entries over 880 Tasks.
 /// `agent_sessions_attached` and `agent_sessions_unended_agent` count
 /// November 17's 117 attached Sessions and 17 unended agents of 22,221;
@@ -56,8 +54,8 @@ const GROWING: [&str; 16] = [
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_delivered',
          'steer_adapters','projects','waves',
-         'git_tracker_changes','git_tracker_routes','repository_plans','steers',
-         'task_retirements','task_checkouts','task_ship_events',
+         'repository_plans','steers',
+         'task_retirements','task_checkouts','task_auto',
          'task_ownership','task_update_readings','session_activity');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
          ('agent_sessions','agent_sessions_agent_process','17171 1'),
@@ -76,11 +74,6 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('agent_sessions','session_repo_inventory','17206 101 58 1 1 1'),
          ('agent_sessions','sqlite_autoindex_agent_sessions_1','17206 1'),
          ('agent_sessions','sqlite_autoindex_agent_sessions_2','17206 1'),
-         ('git_tracker_changes','git_tracker_changes_clock','37312 1'),
-         ('git_tracker_changes','git_tracker_changes_object','37312 3 2'),
-         ('git_tracker_changes','sqlite_autoindex_git_tracker_changes_1','37312 1'),
-         ('git_tracker_routes','git_tracker_routes_mutation','4220 1'),
-         ('git_tracker_routes','sqlite_autoindex_git_tracker_routes_1','4220 401 267 1'),
          ('processes','agent_process_attachment','17979 4'),
          ('processes','agent_process_unfinished','77 1'),
          ('processes','processes_agent_session','18327 1'),
@@ -145,8 +138,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('task_ownership','idx_task_ownership_task','895 1'),
          ('task_ownership','sqlite_autoindex_task_ownership_1','895 1'),
          ('agent_sessions','agent_sessions_primary_task','319 1'),
-         ('task_ship_events','task_ship_events_task','396 3 1'),
-         ('task_ship_events','task_ship_events_process','216 1'),
+         ('task_auto','sqlite_autoindex_task_auto_1','186 1'),
          ('tasks','idx_tasks_issue_identifier','1219 1'),
          ('tasks','idx_tasks_project','1219 20 1'),
          ('tasks','idx_tasks_repository','1219 134 22 2'),
@@ -522,7 +514,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_ship_log_reads_and_writes_plan_by_index() {
+    fn auto_reads_and_writes_plan_by_index() {
         let (_home, store, _task, _viewer) = fixture();
         let task = TaskId::new();
         store
@@ -535,30 +527,15 @@ mod tests {
                 due_date: None,
             })
             .unwrap();
+        let mark = crate::sqlite::Auto {
+            state: crate::sqlite::AutoState::On,
+            at: 1,
+            by: crate::process::Starter::Person { name: None },
+        };
         let traced = statements(&store, || {
-            store
-                .ship_task(
-                    &task,
-                    (
-                        &loopflow_model::id::LfProcessId::new(),
-                        &crate::graph_process::ExecutionStart::reserved(1),
-                    ),
-                    "ship",
-                )
-                .unwrap();
-            store.count_ship_restart(&task).unwrap();
-            store
-                .ship_task(
-                    &task,
-                    (
-                        &loopflow_model::id::LfProcessId::new(),
-                        &crate::graph_process::ExecutionStart::reserved(1),
-                    ),
-                    "ship",
-                )
-                .unwrap();
-            store.task_shipping(&task).unwrap();
-            store.reset_ship_restarts(&task).unwrap();
+            store.set_task_auto(&task, &mark, true).unwrap();
+            store.task_auto(&task).unwrap();
+            store.task_state(&task).unwrap();
         });
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));
@@ -625,9 +602,42 @@ mod tests {
         });
         let scans: Vec<_> = growing_scans(&store, &traced)
             .into_iter()
-            .filter(|scan| scan.contains("git_tracker_changes") || scan.contains("SCAN tasks"))
+            .filter(|scan| scan.contains("SCAN tasks"))
             .collect();
         assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
+    fn stamps_and_unsent_records_are_read_by_index() {
+        let (_home, store, _task) = crate::test_fixture::store_with_task();
+        let conn = store.conn.lock().unwrap();
+        for (sql, index) in [
+            ("SELECT COALESCE(MAX(at),0) FROM plan_stamps", "plan_stamps_at"),
+            (
+                "SELECT field,at,machine_id FROM plan_stamps WHERE owner_id='t'",
+                "PRIMARY KEY",
+            ),
+            (
+                "SELECT COUNT(*) FROM plan_changes WHERE repo='r' AND seq>0",
+                "plan_changes_repo",
+            ),
+            (
+                "SELECT seq,owner_table,owner_id FROM plan_changes WHERE repo='r' AND seq>0 ORDER BY seq",
+                "plan_changes_repo",
+            ),
+        ] {
+            let plan: Vec<String> = conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .unwrap()
+                .query_map([], |row| row.get(3))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert!(
+                plan.iter().all(|step| step.contains(index)) && !plan.is_empty(),
+                "{sql}: {plan:?}"
+            );
+        }
     }
 
     #[test]

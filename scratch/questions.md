@@ -24,3 +24,18 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
    on the backlog before the sweep uses it.
 7. **`frame` widths and heights stay numbers**, and the discipline test does
    not check them.
+8. **A blocked or waiting Task's reason shows on its sidebar row too.**
+   `TaskStanding` gives every row the same line, so the sidebar gains one for
+   a Task whose condition is not clear. Keep the reason to the Portfolio and
+   the Brief instead?
+9. **A click on a Task in the Portfolio opens it; `WaveWorkInspector` is
+   deleted.** The Wave page loses the provider's name and the checkout's path
+   as text. Keep select-then-open there?
+10. **The order of program report, condition and lifecycle is decided in
+    Swift.** Rust writes each source; none of them merges a program's report
+    with planning. Should the planning wire carry one standing instead?
+11. **"Available" counts Tasks you claimed.** Mine 2, Available 43 overlap,
+    and an unclaimed row says nothing because "the Available count already
+    does". Left as is. Rename it, or make it mean unclaimed?
+12. **A Wave keeps two pages** (its repository view and the Portfolio's).
+    Named in the plan as outside this change.

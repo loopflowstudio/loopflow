@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept review: Wave pages, backlog and dashboards (Task 8b92c6)</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #fbfaf8; --ink: #1b1a19; --second: #5d5a56; --rule: #dedad4; --panel: #f2efea;
+  --yes: #1f6f43; --no: #a3271f; --new: #1d5fa8; --newbg: #e8f0fa; --sel: #e4dccf;
+  --warn: #8a5a00; --work: #1d5fa8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171615; --ink: #ece9e4; --second: #a7a29b; --rule: #37342f; --panel: #211f1d;
+    --yes: #6fcf97; --no: #f08a80; --new: #8ab8f0; --newbg: #1b2a3d; --sel: #3a342b;
+    --warn: #e0b050; --work: #8ab8f0;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, "Atkinson Hyperlegible Next", system-ui, sans-serif; }
+main { max-width: 1040px; margin: 0 auto; padding: 40px 24px 80px; }
+h1 { font: 400 32px/1.15 "Old Standard TT", Georgia, serif; margin: 0 0 12px; }
+h2 { font: 400 24px/1.2 "Old Standard TT", Georgia, serif; margin: 48px 0 12px; }
+h3 { font-size: 15px; margin: 24px 0 8px; }
+p { margin: 0 0 12px; max-width: 72ch; }
+code, .mono { font: 12.5px/1.4 "Spline Sans Mono", ui-monospace, Menlo, monospace; }
+.second { color: var(--second); }
+table { border-collapse: collapse; width: 100%; margin: 12px 0 8px; }
+th, td { text-align: left; vertical-align: top; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--rule); }
+th { font-weight: 600; }
+.yes { color: var(--yes); font-weight: 600; white-space: nowrap; }
+.no { color: var(--no); font-weight: 600; white-space: nowrap; }
+.new { background: var(--newbg); border-left: 3px solid var(--new); padding: 12px 16px; margin: 12px 0; }
+.new > :last-child, .was > :last-child { margin-bottom: 0; }
+.tag { color: var(--new); font-weight: 600; }
+.was { border-left: 3px solid var(--rule); padding: 12px 16px; margin: 12px 0; background: var(--panel); }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+.shot { border: 1px solid var(--rule); border-radius: 8px; padding: 4px 0; background: var(--bg); font-size: 13px; }
+.shot h4 { margin: 0; padding: 8px 12px 4px; font-size: 11px; font-weight: 400; color: var(--second); }
+.row { padding: 8px 12px; }
+.row + .row, .shot h4 + .row { border-top: 1px solid var(--rule); }
+.row .t { display: block; }
+.row .m { display: flex; gap: 8px; font-size: 11px; color: var(--second); flex-wrap: wrap; align-items: baseline; }
+.row .a { display: block; color: var(--second); }
+.chip { background: var(--panel); border-radius: 99px; padding: 0 6px; }
+.blocked { color: var(--no); } .working { color: var(--work); } .waiting { color: var(--warn); }
+.btn { border: 1px solid var(--rule); border-radius: 4px; padding: 1px 8px; font-size: 12px; }
+ol.q > li { margin-bottom: 16px; max-width: 76ch; }
+ol.q ol { list-style: lower-alpha; margin-top: 4px; }
+ul { max-width: 76ch; }
+</style>
+<main>
+
+<h1>Do the product's concepts and the code's concepts line up?</h1>
+<p class="second">Task 8b92c6, reviewed before anything is built, against <code>scratch/plan.md</code> at d8802dd4cb and <code>swift/LoopflowMac</code> on main at 0fa6a4e202.</p>
+
+<p><b>The area taken:</b> every Mac screen where a person looks at a Wave and the Tasks in it. That is the Wave's backlog, the Portfolio's roadmap, Now list and Wave page, and a dashboard. The Task asks for those screens to follow DESIGN.md, and its plan is a styling pass. The review asks what the screens say, since the same type on seven different sentences is still seven sentences. Choose Theme, Settings and the spacing sweep are in the plan and are not reviewed here beyond one row in the table: their concepts are sound.</p>
+
+<p><b>Outcome:</b> the plan changed. Short version: a Task's row is drawn four ways today, and the plan folds them into <code>TaskRow</code>. But the row is the smaller half. Where a Task stands is <em>said</em> seven ways from six sources, and <code>TaskRow</code> as built cannot say it in the Portfolio at all. The plan now builds that answer once and makes it the first slice.</p>
+
+<h2>One interaction, walked</h2>
+<p>LOO-515 is blocked: its run stopped at a review that needs a person. Someone opens the Portfolio to see what needs them, clicks through to the Wave, then opens the repository window. The same Task, on five surfaces, today:</p>
+
+<div class="grid">
+<div class="shot">
+  <h4>Portfolio, Now list (<code>NowRowView</code>)</h4>
+  <div class="row"><span class="m"><b>LOO-515</b></span><span class="t">Review a Task's brief, diff and files beside its conversation</span><span class="a" style="font-size:11px">Graph stopped at human-review</span><span class="m"><span class="chip">Condition <span class="waiting">blocked</span></span><span class="chip">PM open</span><span class="chip">Status <span class="working">idle</span></span></span><span class="m"><span class="btn">Start</span><span class="btn">Worktree</span>PR #1949</span></div>
+  <h4>Portfolio, roadmap (<code>RoadmapTaskRow</code>)</h4>
+  <div class="row"><span class="m">○ <b>LOO-515</b><span style="margin-left:auto" class="working"><b>Working</b></span></span><span class="t">Review a Task's brief, diff and files beside its conversation</span><span class="a" style="font-size:11px">Graph stopped at human-review</span><span class="m"><span class="chip">Condition <span class="waiting">blocked</span></span><span class="chip">PM open</span><span class="chip">Status <span class="working">idle</span></span></span></div>
+  <h4>Portfolio, Wave page (<code>RoadmapTaskView</code>), then its inspector far below</h4>
+  <div class="row"><span class="m"><span class="blocked">●</span> LOO-515</span><span class="t">Review a Task's brief, diff and files beside its conversation</span><span class="m">idle · Jack Heart · next: user</span></div>
+  <h4>Repository window, sidebar (<code>TaskRow</code>) and title bar (<code>TaskHeading</code>)</h4>
+  <div class="row" style="background:var(--sel)"><span class="t"><b>Review a Task's brief, diff and files beside its conversation</b></span><span class="m">LOO-515 <b>Idle</b></span></div>
+  <h4>Backlog row, when the Task is unowned (<code>BacklogList.standing</code>)</h4>
+  <div class="row"><span class="m"><span class="mono">LOO-515</span><span style="color:var(--ink);font-size:13px">Review a Task's brief, diff…</span><span style="margin-left:auto">at human-review · PR #1949</span></span></div>
+</div>
+<div>
+<p>"Working", "idle", "blocked", "open", "next: user" and "at human-review" all describe one Task at one moment. Each is true in its own vocabulary. A person has to learn that <em>Working</em> is a board section, <em>idle</em> a lifecycle, <em>blocked</em> a condition and <em>open</em> the tracker's state, and none of that learning buys anything: the question was "does this need me".</p>
+<p><b>The failure.</b> The sidebar row, the one built to DESIGN.md, says only "Idle". It prints a second line only when a <em>program</em> reports Blocked. This Task's Graph stopped; no program is running to report. The best row is the one that hides the problem.</p>
+<p><b>The recovery.</b> In the Now list a click opens the Task. On the Wave page a click selects it; an inspector appears under the metric table, possibly off screen, and its "Open Task workspace" button exists only if the Task has a checkout. In the backlog a click selects for the action bar. Three meanings for a click on a Task, two of them in one window.</p>
+<p><b>What the plan did with this.</b> It replaced the three Portfolio rows with <code>TaskRow</code> "fed the way the sidebar feeds it", and said "the Task row's status word carries what three capsules did". It does not. The Portfolio rows hold a <code>RoadmapTask</code> and no Session readings; <code>TaskRow</code> would print "Idle" and drop "Graph stopped at human-review". The Now list is grouped by that reason. It would have become a list of Tasks that all say Idle.</p>
+</div>
+</div>
+
+<h2>Product concepts against code concepts</h2>
+<table>
+<tr><th style="width:21%">A person knows</th><th style="width:34%">The code has</th><th style="width:7%">Line up?</th><th>What is wrong</th></tr>
+<tr><td><b>Where a Task stands</b>, and whether it needs me</td><td><code>SessionProgramStatus</code>, <code>TaskState</code> (lifecycle), <code>TaskSection</code>, <code>TaskConditionSnapshot</code>, <code>WorkNextMove</code>, <code>historyLabel</code>, <code>terminalLabel</code>, <code>BacklogList.standing</code>, <code>TaskHeading.state</code>, <code>WaveLens.forTask</code></td><td class="no">No</td><td>One idea under six names, chosen again in seven views. The biggest mismatch; see below.</td></tr>
+<tr><td><b>A Task's row</b></td><td><code>TaskRow</code>, <code>RoadmapTaskRow</code>, <code>NowRowView</code>, <code>RoadmapTaskView</code>, <code>TaskHeading</code>, the backlog's row</td><td class="no">No</td><td>Five drawings of one thing. The plan folds four into <code>TaskRow</code>; its interface is the sidebar's accident (<code>WorkModel.TaskPresentation</code> plus Session records), which the Portfolio cannot supply. The backlog's row stays a second kind on purpose: a line in a ranked list of unstarted work, ID first.</td></tr>
+<tr><td><b>Open a Task</b></td><td><code>onOpenTask</code> on tap (roadmap, Now); <code>selectedTaskID</code> + <code>WaveWorkInspector</code> + a conditional button (Wave page)</td><td class="no">No</td><td>One action, no single owner: the same gesture opens in one list and selects in the next.</td></tr>
+<tr><td><b>A Wave's page</b></td><td>The Wave view in a repository window (<code>BacklogView</code>, <code>WaveViewHeader</code>, tiles, conversation) and <code>WaveDetailPane</code> in the Portfolio</td><td class="no">No</td><td>One name for two pages with different contents: one has the backlog and the conversation, the other the key results, metrics and finished Tasks. The plan gives both the serif name, which makes them look like the same page. Outside this change; see the end.</td></tr>
+<tr><td><b>A Project's key results</b></td><td><code>WaveProjectView</code> (circles); the backlog objective's <code>Label</code>s with a check or a cross</td><td class="no">No</td><td>Two drawings. Small, and inside the files this change rebuilds.</td></tr>
+<tr><td><b>Who has a Task</b>: you, someone, nobody</td><td><code>ownedByYou</code> and <code>runtime.owner</code> from Rust; <code>BacklogOwner</code>; filter All / Mine / Available</td><td class="yes">Yes</td><td>The plan's "claimed by Ana" fits. One wrinkle: Available counts what you claimed, so Mine is inside it. Question 4.</td></tr>
+<tr><td><b>Start, claim, edit, move, abandon</b> backlog work</td><td><code>BacklogView.Action</code>, one <code>perform</code> for the bar, the row menu and the keys</td><td class="yes">Yes</td><td>One owner already. The plan restyles it and changes nothing underneath.</td></tr>
+<tr><td><b>New Wave</b></td><td><code>CreateWaveSheet</code> and <code>NewWaveRow</code>'s popover form</td><td class="yes">Yes, after the plan</td><td>Two forms become one. Already in the plan.</td></tr>
+<tr><td><b>A dashboard</b> and its tiles</td><td><code>DashboardView</code>, <code>DashboardTile</code>, <code>WorkViewPlan</code></td><td class="yes">Yes</td><td>A tile headed by the Task's row is the right pairing.</td></tr>
+<tr><td><b>Status</b> and <b>workflow position</b> as two things</td><td><code>TaskRow</code>'s word; <code>WorkflowLine</code> with Rust's <code>TaskGraph.sentence</code></td><td class="yes">Yes, with a gap</td><td>The split is real and DESIGN.md names both. The gap: list rows hold <code>execution.step</code>, not the sentence, so the backlog says "at build" where the Task's page says a sentence. Needs the wire; outside this change.</td></tr>
+<tr><td><b>A theme</b>, light and dark sides</td><td><code>AppearanceSelection</code>, <code>ThemeLibrary</code></td><td class="yes">Yes</td><td>The plan keeps the per-side pickers the prototype dropped. That is the true model: System mode needs two themes.</td></tr>
+</table>
+
+<h2>The biggest mismatch: where a Task stands</h2>
+<div class="grid">
+<div class="was">
+<h3 style="margin-top:0">Existing, and in the plan as written</h3>
+<p>Rust writes six facts about a Task. Each view picks some and joins them with middle dots.</p>
+<table>
+<tr><th>View</th><th>Reads</th></tr>
+<tr><td>Sidebar row</td><td>program status, else lifecycle</td></tr>
+<tr><td>Title bar, tile</td><td>lifecycle</td></tr>
+<tr><td>Backlog row</td><td>step, else next move's reason</td></tr>
+<tr><td>Roadmap row</td><td>section, condition, tracker state, lifecycle</td></tr>
+<tr><td>Now row</td><td>condition, tracker state, lifecycle</td></tr>
+<tr><td>Wave page row</td><td>condition, lifecycle, owner, next mover</td></tr>
+<tr><td>Brief, inspector</td><td>lifecycle, condition</td></tr>
+</table>
+<p>The plan deleted three rows and the capsules, and kept the sidebar's rule as the only one. That rule knows nothing about condition.</p>
+</div>
+<div class="new">
+<h3 style="margin-top:0"><span class="tag">Proposed.</span> <code>TaskStanding</code>, built once</h3>
+<p>A word, its tone, its tooltip, and an optional line. One function, from a <code>RoadmapTask?</code> and a <code>SessionProgramStatus</code>:</p>
+<ol>
+<li>A program that reports: its label. Reported Blocked keeps its own word.</li>
+<li>Session readings unavailable: no word, the info mark, as now.</li>
+<li>Else a blocked or waiting condition: "Blocked" or "Waiting".</li>
+<li>Else the lifecycle. An unknown condition adds no word.</li>
+</ol>
+<p>The line is the program's ask, else the condition's reason when it is not clear. That is the rule the Brief already uses.</p>
+<p><code>TaskRow</code> draws it and stops choosing. A screen with no Session readings passes <code>.unknown</code> and still gets rules 3 and 4.</p>
+</div>
+</div>
+
+<h3>The same Task afterwards <span class="tag">(proposed)</span></h3>
+<div class="grid">
+<div class="shot" style="border-color:var(--new)">
+  <h4>Sidebar, dashboard tile header, roadmap, Wave page: one row</h4>
+  <div class="row"><span class="t">Review a Task's brief, diff and files beside its conversation</span><span class="m">LOO-515 <span class="blocked">Blocked</span></span><span class="a">Graph stopped at human-review</span></div>
+  <h4>Now list: the same row, the Wave's name in its context slot, the verbs beside it</h4>
+  <div class="row"><span class="t">Review a Task's brief, diff and files beside its conversation</span><span class="m">LOO-515 <span class="blocked">Blocked</span> Product</span><span class="a">Graph stopped at human-review</span><span class="m" style="margin-top:4px"><span class="btn">Start</span><span class="btn">Worktree</span>PR #1949</span></div>
+  <h4>While a program reports, anywhere Session readings exist</h4>
+  <div class="row"><span class="t">Review a Task's brief, diff and files beside its conversation</span><span class="m">LOO-515 <span class="working">Working</span></span></div>
+  <h4>Backlog row, unowned and started</h4>
+  <div class="row"><span class="m"><span class="mono">LOO-515</span><span style="color:var(--ink);font-size:13px">Review a Task's brief, diff…</span><span style="margin-left:auto">Blocked, at human-review, PR #1949</span></span></div>
+</div>
+<div>
+<p>A click on the row opens the Task on all three Portfolio lists. <code>WaveWorkInspector</code> and its selection go.</p>
+<h3>Tested on three paths</h3>
+<ul>
+<li><b>Normal.</b> A Task is running. Sidebar: "Working" from the program. Portfolio, with no Session reading: the lifecycle word. Same row, less evidence, nothing invented.</li>
+<li><b>Failure.</b> The Graph stops and no program is alive. Every row says "Blocked" and why. Today only the Portfolio does, in capsules.</li>
+<li><b>Recovery.</b> Click the row, the Task opens, the workflow line says who is needed. One gesture.</li>
+</ul>
+<h3>Counterexamples kept</h3>
+<ul>
+<li><b>A program reports Working while the condition is blocked.</b> The word is the program's, the line is the condition's reason. Two sources on one row; they can disagree for a moment. Accepted: both are true and the line is the one that asks for a person.</li>
+<li><b>The sidebar gets taller.</b> A blocked or waiting Task gains a line there. DESIGN.md wants a row that needs someone to say so; "waiting" may not always mean a person. Question 1.</li>
+<li><b>What the inspector showed.</b> Provider name and checkout path as text are gone from the Wave page. Both are in the workspace the click opens. Question 2.</li>
+<li><b>The tracker's own state</b> ("PM open") is no longer on any row. It was a third copy of done or not done; a Task done in the tracker and not in Loopflow is the case it could have shown, and no row called that out before either.</li>
+<li><b>Swift decides the order.</b> The repository's rule is that a sentence shown by CLI and Desktop is written in Rust. A program's report never reaches <code>RoadmapTask</code>, so Desktop is the first place the two meet, and the CLI prints no merged row. Question 3.</li>
+</ul>
+</div>
+</div>
+
+<h2>What changed in the plan</h2>
+<ul>
+<li>New section, "Where a Task stands, said once": <code>TaskStanding</code>, its four rules and its line. Not a component; it is what <code>TaskRow</code> already works out inline.</li>
+<li><code>TaskRow</code> gains an initializer from a <code>RoadmapTask</code>. The claim that the Portfolio feeds it "the way the sidebar does" is gone.</li>
+<li>A click on a Task opens it on every Portfolio screen. <code>WaveWorkInspector</code> is deleted, where the plan had only removed its fill.</li>
+<li>The backlog's standing leads with the same word; its key results use <code>WaveProjectView</code>.</li>
+<li>The title bar prints the standing's word, so it agrees with the selected sidebar row.</li>
+<li><b>The first slice moved.</b> It was the spacing test on the backlog. It is now the standing and the one row in all five hosts, because that is what can fail: one row in a 240 pt sidebar, a third-width tile and a full-width roadmap, and a blocked Task reading as blocked with no Session behind it. The spacing table is slice 2.</li>
+<li>Two things are named as outside this change, below.</li>
+</ul>
+
+<h2>Outside this change</h2>
+<p><b>One page for a Wave.</b> A Wave has two pages that share no header and disclose the objective two ways. One page would mean the Portfolio opening a Wave in its repository window, as it already opens a Task, that view gaining finished Tasks and the metric table, and <code>WaveDetailPane</code> going. It changes what the Portfolio window is for.</p>
+<p><b>Workflow position on a list row.</b> The planning wire would carry <code>TaskGraph.sentence</code> on each <code>RoadmapTask</code>, so the backlog and the roadmap say the sentence the Task's page says. Rust, the DTO fixtures, and <code>BacklogList.standing</code> then goes entirely.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+<li><b>Should a blocked or waiting Task's reason show on its sidebar row?</b> Chosen: (a).
+  <ol><li>Yes, the same line everywhere.</li><li>Only for blocked; waiting gives the word and no line.</li><li>No; keep the reason to the Portfolio and the Brief, and accept that the row differs by screen.</li></ol></li>
+<li><b>On the Portfolio's Wave page, what does a click on a Task do?</b> Chosen: (a).
+  <ol><li>Opens the Task; the inspector is deleted.</li><li>Selects it and shows the inspector, as today, restyled.</li></ol></li>
+<li><b>Who decides the order of program report, condition and lifecycle?</b> Chosen: (a).
+  <ol><li>Swift, in <code>TaskStanding</code>, in this change.</li><li>Rust: planning carries one standing, and <code>lf task list</code> prints it. A wire change, its own Task.</li></ol></li>
+<li><b>"Available" counts Tasks you claimed.</b> Chosen: (a).
+  <ol><li>Leave it: available to you.</li><li>Make it mean unclaimed, so All = Mine + Available + someone else's.</li></ol></li>
+<li><b>Does a Wave keep two pages?</b> Chosen: (a).
+  <ol><li>For this change, yes; both get the serif name.</li><li>File the one-page Task now, and give only the repository view the display step so the two do not read as one.</li></ol></li>
+<li><b>Is the backlog's row a second kind of row, or should it be <code>TaskRow</code> with a checkbox?</b> Chosen: (a).
+  <ol><li>A second kind: ID first, one line, as the prototype draws it.</li><li><code>TaskRow</code>, title first and in full, at the cost of a taller list.</li></ol></li>
+</ol>
+
+</main>
+</html>

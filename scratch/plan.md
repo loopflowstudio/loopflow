@@ -2,7 +2,8 @@
 
 Task 8b92c6. Builds on main at 0fa6a4e202 (#2016), which shipped the fonts, the
 ramp, `TaskRow`, `StatusMark`, `WorkflowLine`, `LoopflowButtonStyle` and
-`TitleBar`. This change uses them and adds no component.
+`TitleBar`. This change uses them and adds no component. It adds one value,
+`TaskStanding`, which is what `TaskRow` already works out inline.
 
 Reference: `DESIGN.md` ("The language", "What we avoid") and the live
 prototypes `design/prototypes/desktop.html` ("A Wave's backlog") and
@@ -13,12 +14,17 @@ screens.
 ## Outcome
 
 Someone opening a Wave, a dashboard, Settings or the Portfolio in Loopflow for
-Mac sees the same type, spacing, button and Task row as the Task workspace.
-Nothing on those screens is an uppercase label, mono prose, a typed glyph, a
-card inside a card or a stripe without a status.
+Mac sees the same type, spacing, button and Task row as the Task workspace,
+and the same Task says the same thing about itself on each of them. Nothing on
+those screens is an uppercase label, mono prose, a typed glyph, a card inside
+a card or a stripe without a status.
 
 ## Done when
 
+- A Task reads the same in the sidebar, the title bar, a dashboard tile, the
+  roadmap, the Now list and a Wave's page: one status word, and one line when
+  it needs someone. One function decides both.
+- A click on a Task's row opens the Task, on every Portfolio screen.
 - A Wave's backlog shows the Wave's name in serif at the display step, one
   filter control, an action bar of the one button that begins with what is
   selected, a checkbox and a disclosure before each title, and ownership as a
@@ -50,7 +56,7 @@ grep -rnE '\.padding\(([^)]*, *)?-?[0-9]|spacing: *[1-9]|[cC]ornerRadius: *[0-9]
 The view suites that inspect the changed screens pass:
 `BacklogViewTests`, `DashboardWorkspaceTests`, `RoadmapViewTests`,
 `CreateWaveSheetTests`, `ThemeWorkflowTests`, `TaskRowTests`,
-`WorkflowLineTests`, `WorkPaletteTests`.
+`TaskStandingTests`, `WorkflowLineTests`, `WorkPaletteTests`.
 
 Looked at in Loopflow Dev (`uv run python scripts/loopflow-dev.py run`, after
 checking the Dev app is not in use and the installed `lf` is at the branch's
@@ -88,12 +94,74 @@ Counts are from `swift/LoopflowMac` at the base commit.
 - Task rows exist four ways: `TaskRow`, `RoadmapTaskRow` and `NowRowView`
   (`RoadmapView.swift`), `RoadmapTaskView` (`WaveDetailPane.swift`), plus
   `TaskHeading` (`TaskWorkView.swift:212`) heading a dashboard tile.
+- Where a Task stands is said seven ways, from six sources:
+
+  | Where | What it prints | Source |
+  |-------|----------------|--------|
+  | Sidebar `TaskRow` | "Working", else "Idle"; the program's ask | `SessionProgramStatus`, else `lifecycle` |
+  | Title bar, dashboard tile (`TaskHeading`) | "Idle" | `lifecycle` |
+  | Backlog row | "at build · PR #12" | `BacklogList.standing`: `execution.step`, else `nextMove.reason` |
+  | Roadmap row | "Working", a reason, and Condition / PM / Status capsules | `section`, `condition`, `task.terminalLabel`, `lifecycle` |
+  | Now row | a reason and the same capsules | `condition`, `lifecycle` |
+  | Wave page row | a dot, "idle · Ana · next: user" | `condition` as a lens, `historyLabel`, `nextMove.owner` |
+  | Wave page inspector, Brief | "idle · reason"; "Blocked: reason" | `historyLabel`, `condition` |
+
+  Every source is written in Rust; the choice between them is made again in
+  each view. The Portfolio rows hold a `RoadmapTask` and no Session readings,
+  so `TaskRow` as it is (it takes `WorkModel.TaskPresentation` and a
+  `SessionProgramStatus`) would print only "Idle" there and drop the reason a
+  Task is blocked, which is what the Now list exists to show.
+- A click on a Task row does three things: opens the Task (roadmap, Now),
+  selects it and shows `WaveWorkInspector` under the metrics, where "Open
+  Task workspace" appears only if a checkout exists (Wave page), or selects
+  it for the action bar (backlog).
+- A Project's key results are drawn twice: circles in `WaveProjectView`,
+  `Label`s with a check or a cross in the backlog's objective
+  (`BacklogView.swift:723`).
 - New Wave exists twice: `CreateWaveSheet` (`WavesView.swift:582`, with a
   repository picker) and `NewWaveRow`'s popover form
   (`WorkNavigator.swift:466`, repository implied). Both end in
   `WaveAddedLeftovers`.
 
 ## Design
+
+### Where a Task stands, said once
+
+A person asks one thing of a Task's row: where does it stand, and does it
+need me. `TaskStanding` (in `Design/`, beside `TaskRow`) is that answer: a
+word, its tone, its tooltip, and an optional line. It is built in one place
+from a `RoadmapTask?` and a `SessionProgramStatus`, in this order:
+
+1. A program that reports or is available: its label, tone and help, as
+   `TaskRow` prints them now. Reported Blocked keeps its own word.
+2. Session readings unavailable: no word, the info mark with the reason, as
+   now.
+3. Otherwise the Task's condition, when it is blocked or waiting: "Blocked"
+   or "Waiting" in that tone.
+4. Otherwise its lifecycle, capitalized; "Done, date unavailable" when done
+   with no date. An unknown condition adds no word.
+
+The line is the program's ask when it has one, else `condition.reason` when
+the condition is not clear, which is the rule the Brief already applies
+(`TaskBriefView.swift:128`). A screen with no Session readings passes
+`.unknown` and gets rules 3 and 4.
+
+`TaskRow` draws a `TaskStanding` and stops choosing. It gains an initializer
+from a `RoadmapTask`, for hosts that hold one; the sidebar keeps
+`presentation` for a row named before planning answers. `TitleBar` prints
+the same word. Nothing else in `LoopflowMac` reads `lifecycle.label`,
+`section.label`, `historyLabel` or `condition.state` to say where a Task
+stands; the Brief's "Blocked: reason" line reads `TaskStanding` too.
+
+Choice made for review: the condition's reason shows on the sidebar row as
+well as in the Portfolio, so a sidebar row whose Task is blocked or waiting
+gains a line it does not have today. Passed over: a row that shows the reason
+only in the Portfolio, which is the same Task saying two things.
+
+Choice made for review: the order above is decided in Swift. A program's
+report reaches Desktop through Session readings and never reaches
+`RoadmapTask`, so Desktop is the first place the two meet. The CLI prints no
+row that merges them.
 
 ### The scale becomes a test
 
@@ -145,7 +213,16 @@ widths, icon boxes), not spacing; they stay, except hit targets, which use
   folding order under `ViewThatFits` stays.
 - **Row.** Checkbox, then a chevron that shows or hides the brief, then the
   ID in mono, the title, the standing, ownership, and the "more" menu last.
-  The chevron reflects `list.opened`; it adds no state.
+  The chevron reflects `list.opened`; it adds no state. This row is not
+  `TaskRow`: it is a line in a ranked list of work mostly not started, with
+  the ID first and the title on one line, as the prototype draws it.
+- **Standing.** A started Task in the backlog leads with `TaskStanding`'s
+  word, then its step and PR, joined by commas: "Idle, at build, PR #12".
+  `BacklogList.standing` keeps the step and the PR and stops falling back to
+  `nextMove.reason`; the word and the reason come from `TaskStanding`.
+- **Key results.** The objective's disclosure shows the Project through
+  `WaveProjectView`, the one drawing of key results. The backlog's own
+  check-and-cross `Label`s go.
 - **Ownership.** `BacklogOwnerMark` is deleted. A claimed row says "claimed
   by you" or "claimed by Ana" in `meta`, after the Wave's name when the row
   shows one ("Growth, claimed by Ana"). An unclaimed row says nothing; the
@@ -165,12 +242,20 @@ widths, icon boxes), not spacing; they stay, except hit targets, which use
   a bordered card holding filled rows. `RoadmapWaveCard` loses its border and
   fill.
 - `RoadmapTaskRow`, `NowRowView` and `RoadmapTaskView` are deleted for
-  `TaskRow`, fed from the window's `WorkModel` the way
-  `WorkNavigator.taskRow` feeds it. `WorkChannelChips` goes with them: the
-  Task row's status word carries what three capsules did. `TaskActionCluster`
-  keeps its verbs as `LoopflowButtonStyle` buttons beside the row.
-- `WaveWorkInspector` loses its fill: it is text under a heading, with "Open
-  Task workspace" as the one button.
+  `TaskRow`, built from the `RoadmapTask` each already holds and a
+  `TaskStanding`. The Now row's Wave name goes in the row's context slot.
+  `WorkChannelChips` goes with them: the standing's word and line carry the
+  condition and the lifecycle, and the tracker's own state ("PM") was a
+  third copy of done or not done. `TaskSection.label`, its color and
+  `TaskConditionState.color` go with their last readers.
+- A click on a Task's row opens the Task, on the roadmap, the Now list and
+  the Wave page alike. `TaskActionCluster` sits beside the row on all three,
+  its verbs as `LoopflowButtonStyle` buttons.
+- `WaveWorkInspector` and `selectedTaskID` are deleted. Choice made for
+  review: what the inspector added to the row was the provider's name and
+  the checkout's path as text; both are in the Task workspace the click
+  opens, and "Worktree" in the cluster opens the checkout. Passed over:
+  keeping a select-then-open step on one of three lists.
 - The metric table header is sentence case in `meta`, untracked. The table
   keeps `workPanel()` as the one framed surface on the page.
 - Contract issues: the tinted, striped block becomes a notice with a hairline
@@ -194,7 +279,8 @@ widths, icon boxes), not spacing; they stay, except hit targets, which use
   "Default Slots" and "Edit Dashboard" as the one button.
 - A tile's header is `TaskRow` (title in full, ID, status word, the ask),
   with "open in full", "more" and "hide" as icon buttons at its end.
-  `TaskHeading` is deleted; `TitleBar` reads the lifecycle label directly.
+  `TaskHeading` is deleted; `TitleBar` prints `TaskStanding`'s word, so the
+  bar and the sidebar row agree about the open Task.
 - Under the row, the workflow is its sentence: `WorkflowLine` gains a
   sentence-only setting the tile uses, since a tile's width is known to be
   too narrow for the steps. A row with an ask shows the ask instead.
@@ -292,7 +378,10 @@ New Task and the empty and failed states, which have not shipped.
 
 `BacklogOwnerMark`, `BacklogQuietButtonStyle`, the capsule Start control,
 `RoadmapTaskRow`, `NowRowView`, `RoadmapTaskView`, `WorkChannelChips`,
-`TaskHeading`, `NewWaveRow`'s inline form, the striped contract-issue block,
+`WaveWorkInspector`, `TaskHeading`, `TaskRow`'s inline choice of status word,
+`TaskSection.label` and the two status color extensions in
+`RoadmapView.swift`, the backlog's key-result `Label`s, `NewWaveRow`'s inline
+form, the striped contract-issue block,
 `WaveMetricTableHeader`'s uppercase cell, `TypographyDisciplineTests` under
 that name. Tests that name these (`BacklogViewTests`, `RoadmapViewTests`,
 `DashboardWorkspaceTests`, `CreateWaveSheetTests`, `ThemeWorkflowTests`)
@@ -300,34 +389,61 @@ move to the surviving view and identifier.
 
 What survives: every backlog action and shortcut, drag reorder, the folding
 toolbar, undo registration, tile drag and drop and hide, dashboard slot
-editing, theme import, customize, delete and the per-side assignment, the
-New Wave leftovers receipt, and every accessibility identifier that a test
+editing, theme import, customize, delete and the per-side assignment, Start,
+Open PR, Worktree and the PR link on every Portfolio Task, the reason a Task
+is blocked or waiting, the New Wave leftovers receipt, and every accessibility identifier that a test
 or `lf desktop` reads unless its view is deleted.
 
 ## Slices
 
-1. **The test and the backlog.** Rename the discipline test, add the padding,
+1. **One standing, one row, every host.** `TaskStanding` with its tests
+   (program report over condition over lifecycle; the line; unknown adds no
+   word), `TaskRow` drawing it, then the row in the title bar, a dashboard
+   tile, the roadmap, the Now list and the Wave page, with the three
+   Portfolio rows, the capsules, the inspector and `TaskHeading` deleted.
+   This is the slice that can fail: one row has to hold in a 240 pt sidebar,
+   a tile a third of the window wide and a full-width roadmap, and a blocked
+   Task has to read as blocked with no Session reading behind it. If the row
+   needs a host-specific switch to pass, the standing is wrong and changes
+   here.
+2. **The test and the backlog.** Rename the discipline test, add the padding,
    spacing and radius rules, and bring `BacklogView.swift` and
    `Design/WorkStyle.swift` to pass them while rebuilding the backlog to the
    prototype. It shows whether the snap table holds on a dense, real screen
    (the 9 pt row padding, the 96 pt brief indent, the 5 pt search field) and
    whether one button style carries a five-action bar that still folds. If
-   rows read cramped at 8, the table is wrong and changes here, before 300
-   more lines use it. The test fails on the other files until slice 4; that
-   is the remaining-work list.
-2. **Dashboard.** Tile header as `TaskRow`, the sentence, the pager, the
-   header. `TaskHeading` goes.
-3. **Portfolio and New Wave.** `TaskRow` in the roadmap and Wave page, cards
-   flattened, the contract-issue notice, the one form.
+   rows read cramped at 8, the table changes here, before 300 more lines use
+   it. The test fails on the other files until slice 4; that is the
+   remaining-work list.
+3. **The rest of the dashboard and the Portfolio, and New Wave.** The tile's
+   sentence, the pager and the dashboard header; cards flattened, the
+   contract-issue notice, the one form.
 4. **Choose Theme, then the sweep.** The sample, then every remaining file
    to named steps, one button, roles, mono and glyphs, until the test and the
    grep are clean. DESIGN.md's pointers and "Tokens today" change last, from
    what the code then is.
 
+## Outside this change
+
+- **One page for a Wave.** A Wave has two: its view in a repository window
+  (backlog, conversation, tiles) and `WaveDetailPane` in the Portfolio
+  (objective, key results, every Task with history, metrics). They share no
+  header and disclose the objective two ways. One page would mean the
+  Portfolio opening a Wave in its repository window, as it already opens a
+  Task, and that view gaining completed Tasks and the metric table; then
+  `WaveDetailPane` goes. That changes what the Portfolio window is for, so it
+  is its own Task.
+- **Workflow position on a list row.** `RoadmapTask` carries
+  `execution.step` and not `TaskGraph.sentence`, so the backlog says "at
+  build" where the Task's own page says "build is running. You are next
+  needed at human-review." One sentence on both needs the planning wire to
+  carry it.
+
 ## Checks
 
 | Command | Result | Who runs it |
 |---------|--------|-------------|
+| `scripts/test_desktop.sh --filter TaskStandingTests` | not run; the suite does not exist yet | build |
 | `scripts/test_desktop.sh --filter DesignDisciplineTests` | not run; the suite does not exist yet | build |
 | the grep above | 314 lines at base | build |
 | Dev app in light, dark and an imported theme | not run; needs a display | qa, review |

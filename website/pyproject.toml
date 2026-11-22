@@ -32,5 +32,4 @@ extend = "../pyproject.toml"
 # `@rt(...)  def get():` route handlers (F811). E501 on the page builders is
 # almost all unbreakable string literals — inline SVG/HTML, SQL, prose content.
 "main.py" = ["F403", "F405", "F811", "E501"]
-"internal_pages.py" = ["F403", "F405", "E501"]
 "db.py" = ["E501"]

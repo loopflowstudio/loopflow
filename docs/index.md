@@ -185,7 +185,7 @@ contract), `scratch/`, and `.lf/wave/` automatically. Pull in more context when
 you need it:
 
 ```bash
-lf gate --docs VISUAL_DESIGN.md     # one file
+lf gate --docs DESIGN.md            # one file
 lf gate --docs 'docs/*.md'          # a glob
 lf gate --diff files                # paths of files changed on the branch
 lf debug -c                         # clipboard contents

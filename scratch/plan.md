@@ -13,13 +13,14 @@
 - QA (`scratch/qa.html`): 14 pages at desktop and phone widths, copy button, nav menu, `docs/dev/index.html`; Ghostty `+validate-config` accepts the new terminal defaults.
 - Swift build of `GhosttyManager.swift` and a look at the terminal rendering: not run here; gate/CI builds it, a person looks.
 
-## Remains (from concept review, `scratch/concept-review.html`)
+## Concept-review cleanup (done)
 
-The Task's outcome is one design system, but the site still serves a second one. Do these in this Task:
+- `website/internal_pages.py` and the `/fonts`, `/colors`, `/design` routes are deleted; the site serves one design system.
+- `design/homepage-next/` moved to `design/prototypes/homepage-next/`, listed in `DESIGN.md`; `release/v0.15.3/NOTES.md` keeps the old path (shipped record).
+- `DESIGN.md § Work tracking` moved to `swift/README.md` before `## Code map`.
+- Website suite after the deletion: 73 passed; `ruff check website` clean. `documented_commands::` (DESIGN.md and swift/README.md edits, no command changes): gate runs it.
 
-1. Delete `website/internal_pages.py`, the `/fonts`, `/colors` and `/design` routes and their import in `website/main.py`, and its entry in `website/pyproject.toml`. These pages present an older system (Cormorant, Lato) that nothing links to and that contradicts `DESIGN.md`. This is a choice made for review; git keeps them. Then run the website suite.
-2. Move `design/homepage-next/` to `design/prototypes/homepage-next/` so prototypes have one home. Leave `release/v0.15.3/NOTES.md` as written (shipped record). Update the `design/prototypes/` line in `DESIGN.md` to list it.
-3. Move `DESIGN.md § Work tracking` (sidebar behaviour, not look) into `swift/README.md`.
+## Remains
 
 Left to the stacked website Task: apply and delete `design/prototypes/website-fonts.patch`, and rename the web `--t-*` steps to the language's eight names (rule 4). That rename changes sizes on the page.
 

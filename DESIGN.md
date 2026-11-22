@@ -90,8 +90,9 @@ One component for each of these, on every surface that shows it:
 `design/prototypes/` holds the reference for layout and wording until the
 code matches: `desktop.html` and `desktop-more.html` (Loopflow for Mac, live,
 in all 24 themes), `elements.html` (the Task row, workflow line and New Task
-three ways each) and `website-fonts.patch` (the website in these faces;
-`git apply` it).
+three ways each), `homepage-next/` (the next homepage draft and the claims it
+still needs to make true) and `website-fonts.patch` (the website in these
+faces; `git apply` it).
 Delete a prototype when its screens ship.
 
 ## What we avoid
@@ -341,30 +342,6 @@ fills and contrast; the app owns gutter/header chrome.
 Built-ins and imported Desktop appearances have explicit roles. `WorkPaletteTests`
 resolves actual SwiftUI colors and composites selection fills over each surface: ordinary text
 must reach 4.5:1, meaningful indicators 3:1.
-
-## Work tracking
-
-The sidebar presents the repository's retained working Task order, then direct Wave
-rows. Opening started, unpaused Work appends once. Activity and query refresh never
-reorder slots; explicit pause hides a slot without deleting its stored position.
-Working references are saved through WorkCache; they convey no execution authority.
-Unstarted Tasks show their brief beside a Start offer in the Session slot without
-joining the working set. Only Start runs anything.
-
-The navigator's Working tasks / Available / Running choice filters presentation
-without selecting Work or changing panes, clients, focus or drafts. Missing planning
-keeps an unavailable row. Work observation retains its last reading on failure.
-Wave navigation leaves working positions and the sidebar viewport intact.
-
-Title-bar breadcrumbs follow hierarchy as a jump bar: each name navigates, and the
-› after it lists what is inside (repository › Waves, Wave › Tasks) with a filter that searches that scope. Back follows
-visits, and Cmd+K routes
-cross-repository Work to its own window. Cmd+1–9 and Control+Tab address the same
-stable eligible slots, independent of the filter. Each Work owns one retained
-workspace. Dashboard queries compose those workspaces side by side; ordinary
-navigation selects one destination. Rust owns query membership and arrangement,
-including hidden occurrences and duplicate suppression. Tiles show the primary
-Session or explicit zoom without acquiring a provider.
 
 ## Text
 

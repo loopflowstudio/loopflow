@@ -42,9 +42,12 @@ public struct TaskChangedFile: Decodable, Sendable, Identifiable, Hashable {
     public let staged: Bool
     public let unstaged: Bool
     public let untracked: Bool
+    /// Runs of changed lines in the file's patch: the Diff's stops, known
+    /// before its lines are read.
+    public let changes: Int
 
     enum CodingKeys: String, CodingKey {
-        case path, committed, staged, unstaged, untracked
+        case path, committed, staged, unstaged, untracked, changes
         case oldPath = "old_path"
     }
 }

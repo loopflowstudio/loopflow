@@ -266,8 +266,14 @@ pub(super) fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskC
     })
     .collect();
     let net = net_changed_paths(workspace)?;
+    let counts = change_counts(workspace)?;
     files.retain(|path, file| {
         file.old_path = net.get(path).cloned().flatten();
+        file.changes = match counts.get(path) {
+            Some(count) => *count,
+            None if file.untracked => untracked_changes(&workspace.checkout.worktree.join(path)),
+            None => 0,
+        };
         net.contains_key(path) || file.untracked
     });
     let (scratch, scratch_truncated) = if workspace.head_commit.is_none() {
@@ -289,6 +295,131 @@ pub(super) fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskC
         scratch,
         scratch_truncated,
     })
+}
+
+/// Each tracked file's runs of changed lines, from the patch the Diff reads:
+/// with its usual context, since Git aligns some changes differently without.
+/// A file with no hunks (binary, a pure rename) is absent.
+fn change_counts(workspace: TaskComparison<'_>) -> OpsResult<BTreeMap<String, u64>> {
+    let mut args = vec![
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "--find-renames",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        workspace.base_commit,
+    ];
+    args.extend(workspace.head_commit);
+    args.push("--");
+    Ok(count_changes(&git_output_bytes(
+        workspace.checkout.worktree,
+        &args,
+    )?))
+}
+
+pub(super) fn count_changes(patch: &[u8]) -> BTreeMap<String, u64> {
+    let mut counts = BTreeMap::new();
+    let mut old_path = None::<String>;
+    let mut path = None::<String>;
+    // Lines left in the current hunk, old and new side.
+    let (mut old, mut new) = (0u64, 0u64);
+    let mut previous = b' ';
+    for line in patch.split(|byte| *byte == b'\n') {
+        if old > 0 || new > 0 {
+            match line.first() {
+                Some(b'-') => old = old.saturating_sub(1),
+                Some(b'+') => new = new.saturating_sub(1),
+                Some(b' ') => {
+                    old = old.saturating_sub(1);
+                    new = new.saturating_sub(1);
+                }
+                _ => continue,
+            }
+            let kind = line[0];
+            let starts = kind != b' ' && (previous == b' ' || (kind == b'-' && previous == b'+'));
+            if starts {
+                if let Some(path) = path.as_ref().or(old_path.as_ref()) {
+                    *counts.entry(path.clone()).or_insert(0) += 1;
+                }
+            }
+            previous = kind;
+        } else if line.starts_with(b"diff --git ") {
+            old_path = None;
+            path = None;
+        } else if let Some(name) = line.strip_prefix(b"--- a/") {
+            old_path = Some(patch_path(name));
+        } else if let Some(name) = line.strip_prefix(b"+++ b/") {
+            path = Some(patch_path(name));
+        } else if line.starts_with(b"@@ ") {
+            (old, new) = hunk_lengths(line);
+            previous = b' ';
+        }
+    }
+    counts
+}
+
+/// A path as Git writes it after `a/` or `b/`: C-quoted when it holds
+/// unusual bytes, followed by a tab when it holds a space.
+fn patch_path(name: &[u8]) -> String {
+    let name = name.strip_suffix(b"\t").unwrap_or(name);
+    let Some(quoted) = name
+        .strip_prefix(b"\"")
+        .and_then(|name| name.strip_suffix(b"\""))
+    else {
+        return String::from_utf8_lossy(name).into_owned();
+    };
+    let mut bytes = Vec::with_capacity(quoted.len());
+    let mut rest = quoted.iter().copied();
+    while let Some(byte) = rest.next() {
+        if byte != b'\\' {
+            bytes.push(byte);
+            continue;
+        }
+        match rest.next() {
+            Some(b'n') => bytes.push(b'\n'),
+            Some(b't') => bytes.push(b'\t'),
+            Some(digit @ b'0'..=b'7') => {
+                let mut value = digit - b'0';
+                for _ in 0..2 {
+                    if let Some(next) = rest.next() {
+                        value = value.wrapping_mul(8).wrapping_add(next.wrapping_sub(b'0'));
+                    }
+                }
+                bytes.push(value);
+            }
+            Some(other) => bytes.push(other),
+            None => {}
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// The old and new line counts of `@@ -a[,b] +c[,d] @@`; a missing count is 1.
+fn hunk_lengths(header: &[u8]) -> (u64, u64) {
+    let header = String::from_utf8_lossy(header);
+    let mut sides = header.split(' ').skip(1).take(2);
+    let mut length = || {
+        let side = sides.next().and_then(|side| side.get(1..)).unwrap_or("");
+        side.split_once(',')
+            .map_or(Ok(1), |(_, count)| count.parse())
+            .unwrap_or(0)
+    };
+    (length(), length())
+}
+
+/// An untracked file reads as one addition, unless it is empty or binary (a
+/// NUL in Git's first 8,000 bytes), when there is nothing to step to.
+fn untracked_changes(path: &Path) -> u64 {
+    use std::io::Read;
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => return 1,
+        Ok(metadata) if metadata.is_file() => {}
+        _ => return 0,
+    }
+    let mut head = Vec::with_capacity(8_000);
+    let read = std::fs::File::open(path).and_then(|file| file.take(8_000).read_to_end(&mut head));
+    u64::from(read.is_ok() && !head.is_empty() && !head.contains(&0))
 }
 
 pub fn task_diff(
@@ -704,6 +835,7 @@ fn record_changed_paths(
                 staged: false,
                 unstaged: false,
                 untracked: false,
+                changes: 0,
             });
         mark(file);
     }

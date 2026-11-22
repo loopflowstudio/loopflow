@@ -429,17 +429,13 @@ impl TaskGraph {
         };
         let (position, current_step, sentence) = match run {
             None => {
-                let place = match step.as_str() {
-                    START | END => None,
-                    step => graph.interactive_step(step).or_else(|| graph.find(step)),
-                };
-                let sentence = match step.as_str() {
-                    START => "Not started.".to_owned(),
-                    END => "At its end.".to_owned(),
-                    step if graph.interactive_step(step).is_some() => {
-                        format!("Waiting for you at {step}.")
-                    }
-                    step => format!("Waiting at {step}."),
+                let (place, sentence) = match step.as_str() {
+                    START => (None, "Not started.".to_owned()),
+                    END => (None, "At its end.".to_owned()),
+                    step => match graph.interactive_step(step) {
+                        Some(place) => (Some(place), format!("Waiting for you at {step}.")),
+                        None => (graph.find(step), format!("Waiting at {step}.")),
+                    },
                 };
                 (
                     TaskGraphPosition::At { step },

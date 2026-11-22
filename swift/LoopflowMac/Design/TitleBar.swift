@@ -10,11 +10,9 @@ struct TitleBar: View {
     @State private var renamingWave: WaveSnapshot?
 
     var body: some View {
-        HStack(spacing: 8) {
-            ViewThatFits(in: .horizontal) {
-                trail(showWave: true).fixedSize(horizontal: true, vertical: false)
-                trail(showWave: false)
-            }
+        ViewThatFits(in: .horizontal) {
+            trail(showWave: true).fixedSize(horizontal: true, vertical: false)
+            trail(showWave: false)
         }
         .buttonStyle(.plain)
         .font(Typography.textStrong)
@@ -25,15 +23,11 @@ struct TitleBar: View {
 
     private func trail(showWave: Bool) -> some View {
         HStack(alignment: .center, spacing: 6) {
-            Button { model.navigation.toggleNavigator() } label: { Image(systemName: "sidebar.left") }
-                .frame(width: HitTarget.minimum, height: HitTarget.minimum).contentShape(Rectangle())
-                .help("Toggle sidebar")
-            Button { model.goBack() } label: { Image(systemName: "chevron.left") }
-                .frame(width: HitTarget.minimum, height: HitTarget.minimum).contentShape(Rectangle())
-                .disabled(model.navigation.backStack.isEmpty).help("Back")
-            Button { model.goForward() } label: { Image(systemName: "chevron.right") }
-                .frame(width: HitTarget.minimum, height: HitTarget.minimum).contentShape(Rectangle())
-                .disabled(model.navigation.forwardStack.isEmpty).help("Forward")
+            target("sidebar.left", help: "Toggle sidebar") { model.navigation.toggleNavigator() }
+            target("chevron.left", help: "Back") { model.goBack() }
+                .disabled(model.navigation.backStack.isEmpty)
+            target("chevron.right", help: "Forward") { model.goForward() }
+                .disabled(model.navigation.forwardStack.isEmpty)
             Button(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Work") {
                 // The parent crumb of a zoomed part zooms out.
                 if model.navigation.waveView == .repository { model.setZoomed(nil, in: .repository) }
@@ -84,6 +78,12 @@ struct TitleBar: View {
                 WorkMachineControl(model: model, target: target).padding(.leading, 6)
             }
         }
+    }
+
+    private func target(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: symbol) }
+            .frame(width: HitTarget.minimum, height: HitTarget.minimum).contentShape(Rectangle())
+            .help(help)
     }
 
     private func waveCrumb(_ id: String, name: String) -> some View {

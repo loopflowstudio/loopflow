@@ -68,3 +68,8 @@
   GitHub's order, unchanged.
 
 - Sync kept this Task’s concept review and notes. Main removed the inherited LOO-515 scratch material.
+
+## Compress (2026-11-22, headless)
+
+- Cut `TaskRow.since`: no caller passed it. The change that records a status
+  start time adds the parameter with its first caller.

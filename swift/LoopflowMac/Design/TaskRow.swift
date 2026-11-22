@@ -15,9 +15,6 @@ struct TaskRow: View {
     var selected = false
     /// The row belongs to another Wave than the one selected.
     var muted = false
-    /// When the status began, in tabular digits. Status reports carry no start
-    /// time yet, so every caller passes nil.
-    var since: Date?
     var slotHint: String?
     /// The hint shows while ⌘ is held, or while `hover` reports the row hovered.
     var showsSlotHint = false
@@ -41,17 +38,14 @@ struct TaskRow: View {
                         .foregroundStyle(selected ? palette.workSelectedText : tone.ink(in: palette))
                         .help(Text(verbatim: status.help))
                         .accessibilityIdentifier("work-program-status-\(id)")
-                } else if let task, !status.isUnavailable {
-                    Text(verbatim: task.lifecycle.label.capitalized)
-                        .accessibilityIdentifier("work-task-lifecycle-\(id)")
                 } else if case .unavailable = status {
                     Image(systemName: "info.circle")
                         .help(Text(verbatim: status.help))
                         .accessibilityLabel(Text(verbatim: status.help))
                         .accessibilityIdentifier("work-program-status-unavailable-\(id)")
-                }
-                if let since {
-                    Text(since, style: .time).monospacedDigit()
+                } else if let task {
+                    Text(verbatim: task.lifecycle.label.capitalized)
+                        .accessibilityIdentifier("work-task-lifecycle-\(id)")
                 }
                 if auto {
                     Text("Auto")
@@ -64,10 +58,10 @@ struct TaskRow: View {
                 }
                 Spacer(minLength: 0)
                 if let slotHint {
-                    if showsSlotHint || hover == nil {
-                        Text(slotHint)
-                    } else if let hover {
+                    if let hover, !showsSlotHint {
                         HoverRevealed(flag: hover) { Text(slotHint) }
+                    } else {
+                        Text(slotHint)
                     }
                 }
             }

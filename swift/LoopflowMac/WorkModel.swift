@@ -2828,6 +2828,11 @@ final class WorkModel {
         return nil
     }
 
+    /// Why no run of `task` can be started now; nil when one can.
+    func runRefusal(_ task: RoadmapTask) -> String? {
+        changeRefusal ?? task.runControl.unavailable
+    }
+
     /// Abandon… asks first: the window confirms before `abandonTask`.
     func beginAbandon(_ task: RoadmapTask) {
         navigation.abandoning = task.id

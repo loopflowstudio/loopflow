@@ -84,7 +84,7 @@ public enum Typography {
 /// The two serif steps. They are not `Font` values: serif is set only through
 /// `.serif(_:)`, which applies the face with common ligatures off ("fl" stays two
 /// letters in "Loopflow") and its −3% tracking together.
-public enum SerifStep: CaseIterable, Sendable {
+public enum SerifStep: Sendable {
     /// Wave name, "What do you want?".
     case display
     /// Task title in the Brief, dashboard name, state titles.

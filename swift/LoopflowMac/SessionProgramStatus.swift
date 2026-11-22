@@ -40,11 +40,6 @@ enum SessionProgramStatus {
         }
     }
 
-    var isUnavailable: Bool {
-        if case .unavailable = self { return true }
-        return false
-    }
-
     /// What a blocked program is asking, in its own words.
     var ask: String? {
         guard case .reported(_, let report) = self, report.state == .blocked,

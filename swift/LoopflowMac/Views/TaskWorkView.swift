@@ -100,7 +100,7 @@ struct TaskAutoControl: View {
         if on || !task.isCompleted {
             let issue = task.task.identifier
             // Rust's refusal to turn it on again never disables turning it off.
-            let refusal = on ? model.changeRefusal : model.changeRefusal ?? task.runControl.unavailable
+            let refusal = on ? model.changeRefusal : model.runRefusal(task)
             Button(on ? "Stop Auto-Ship" : "Auto-Ship") {
                 if on { model.turnAutoOff(task) } else { model.turnAutoOn(task) }
             }
@@ -144,8 +144,8 @@ struct TaskWorkflowBar: View {
                 Button(next.label) { model.startTaskFromInput(nil, task: task) }
                     .buttonStyle(LoopflowButtonStyle())
                     .fixedSize()
-                    .disabled(unavailable != nil)
-                    .help(unavailable ?? next.help)
+                    .disabled(model.runRefusal(task) != nil)
+                    .help(model.runRefusal(task) ?? next.help)
                     .accessibilityIdentifier(next.identifier)
             }
             TaskAutoControl(model: model, task: task)
@@ -205,10 +205,6 @@ struct TaskWorkflowBar: View {
         }
     }
 
-    /// Why no run can be started now.
-    private var unavailable: String? {
-        model.changeRefusal ?? task.runControl.unavailable
-    }
 }
 
 /// A Task's identity wherever it heads Work: the window trail and Dashboard tiles.
@@ -238,16 +234,12 @@ struct TaskStartOffer: View {
     let model: WorkModel
     let task: RoadmapTask
 
-    private var unavailable: String? {
-        model.changeRefusal ?? task.runControl.unavailable
-    }
-
     var body: some View {
         SessionSlotOffer(
             title: "Not started", systemImage: "play.circle",
             action: "Start", actionImage: "play.fill",
             note: "Starts this Task’s Workflow and its first conversation.",
-            unavailable: unavailable, help: "lf task run \(task.task.identifier)",
+            unavailable: model.runRefusal(task), help: "lf task run \(task.task.identifier)",
             accessibilityLabel: "Start \(task.task.identifier)",
             actionIdentifier: "task-start-\(task.id)",
             perform: { model.startTaskFromInput(nil, task: task) }
@@ -273,9 +265,6 @@ struct TaskActionItems: View {
 
     private var unavailable: Bool { model.changeRefusal != nil }
 
-    /// Why no run can be started now.
-    private var runRefusal: String? { model.changeRefusal ?? task.runControl.unavailable }
-
     var body: some View {
         if let workflow = work?.graph {
             // Start the next run at a step: back, ahead, or waiting at an interactive step.
@@ -285,14 +274,14 @@ struct TaskActionItems: View {
                         .accessibilityIdentifier("task-workflow-move-\(step)")
                 }
             }
-            .disabled(runRefusal != nil)
-            .help(runRefusal ?? "lf task run \(task.task.identifier) --from <step>")
+            .disabled(model.runRefusal(task) != nil)
+            .help(model.runRefusal(task) ?? "lf task run \(task.task.identifier) --from <step>")
             .accessibilityIdentifier("task-workflow-move")
         } else if work != nil, !task.isCompleted {
             Menu("Start with…") {
                 StartFlowItems(model: model, chosen: task.graphName) { model.startTaskFromInput($0, task: task) }
             }
-            .disabled(runRefusal != nil)
+            .disabled(model.runRefusal(task) != nil)
             .accessibilityIdentifier("task-workflow-choose")
         }
         Button("New conversation") { newConversation?() }.disabled(newConversation == nil || unavailable)
@@ -375,18 +364,16 @@ struct TaskAbandonConfirmation: ViewModifier {
     }
 }
 
-/// The Task's due date and regression mark stay beside the conversation and in Task details.
+/// The Task's due date, beside the conversation and in Task details.
 struct TaskPlanningFactsView: View {
     let task: RoadmapTask
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.xxs) {
-            if let due = task.task.dueDate {
-                Text("Due \(due)")
-                    .font(Typography.text)
-                    .foregroundStyle(palette.textSecondary)
-            }
+        if let due = task.task.dueDate {
+            Text("Due \(due)")
+                .font(Typography.text)
+                .foregroundStyle(palette.textSecondary)
         }
     }
 }

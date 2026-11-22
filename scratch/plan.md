@@ -373,9 +373,11 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    `scripts/test_desktop.sh --filter 'DesktopHeadlessTests|WorkflowLineTests|TaskHistoryFilterTests'`
    (30) with the new `workflowBarMenuIsTheSidebarMenu`; TaskConcept,
    SessionControls, WorkModel suites pass. `WorkNavigationTests` "Navigation
-   shortcuts…" fails on ⌘⌥1 → `details brief`, a shortcut this slice does not
-   touch (gate looks). Not seen in the Dev app.
-5. **Next:** Task row + status mark + button (`LoopflowButtonStyle` replaces
-   the bar's `WorkOutlineButtonStyle`) + title bar; Session strip and notice
+   shortcuts…" fails on ⌘⌥1 → `details brief`: the binding is in
+   `DesktopActions.swift`, which no 3d4350 commit touches (last changed by
+   main #1993); gate looks. Not seen in the Dev app.
+5. **Next:** `TaskRow`, `StatusMark`, `LoopflowButtonStyle` (replaces the
+   bar's `WorkOutlineButtonStyle`, so Auto-Ship becomes the 24 pt button the
+   Demo names) and `TitleBar`. Then: Session strip and notice
    line; Brief/Diff/Files; DESIGN.md once cfadc6 is on main; QA in three
    themes at the narrowest width.

@@ -52,7 +52,7 @@ struct RegistryQueryTests {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let detail = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/graph_detail.json"), encoding: .utf8)
         let expected = try JSONDecoder().decode(GraphProcessDetail.self, from: Data(detail.utf8))
-        let overview = "{\"sessions\":[],\"graph_processes\":[],\"graph\":{\"name\":\"feature\",\"interactive_steps\":[],\"position\":{\"kind\":\"at\",\"step\":\"demo\"}}}"
+        let overview = "{\"sessions\":[],\"graph_processes\":[],\"graph\":{\"name\":\"feature\",\"interactive_steps\":[],\"position\":{\"kind\":\"at\",\"step\":\"demo\"},\"steps\":[{\"name\":\"demo\",\"interactive\":true}],\"current_step\":0,\"sentence\":\"Waiting for you at demo.\"}}"
         let query = RegistryQuery(subscribeRead: { args, cwd in
             guard args == ["--machine", "peer", "--repo-id", "plan", "task", "show", "task", "--json", "--subscribe"], cwd == nil else {
                 throw RegistryQueryError("A peer run page must never use local execution")

@@ -1,7 +1,7 @@
 import Loopflow
 import SwiftUI
 
-/// Keep current Workflow position/actions compact; disclose its graph in Overview.
+/// Keep current Workflow position/actions compact; disclose the brief in Overview.
 /// Rust owns the graph, position and legal actions.
 struct TaskWorkflowHeader: View {
     let model: WorkModel
@@ -33,7 +33,7 @@ struct TaskWorkflowHeader: View {
                     Text("Unassigned").foregroundStyle(palette.textSecondary)
                 }
                 if let workflow = work.value?.graph {
-                    Text(positionLabel(workflow))
+                    Text(workflow.sentence)
                         .lineLimit(1)
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-workflow-position")
@@ -108,16 +108,6 @@ struct TaskWorkflowHeader: View {
                 get: { expandedTasks.contains(task.id) },
                 set: { if $0 { expandedTasks.insert(task.id) } else { expandedTasks.remove(task.id) } }
             )) {
-                if let workflow = work.value?.graph {
-                    let shape = WorkflowDefinition(workflow)
-                    WorkflowDiagram(
-                        nodes: shape.steps, edges: shape.runs, position: workflow.position,
-                        choices: choices(workflow, shape),
-                        unavailable: unavailable, fits: true,
-                        hint: { "lf task run \(task.task.identifier) · to \($0.to)" },
-                        choose: { _ in model.startTaskFromInput(nil, task: task) })
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
                 Text(task.task.description)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -182,22 +172,6 @@ struct TaskWorkflowHeader: View {
 
     private func runAction(_ workflow: TaskGraph) -> (label: String, help: String)? {
         Self.runAction(workflow, issue: task.task.identifier)
-    }
-
-    /// The run `lf task run` would start, by its place among the diagram's runs.
-    private func choices(_ workflow: TaskGraph, _ shape: WorkflowDefinition) -> [Int] {
-        guard runAction(workflow) != nil,
-              let index = shape.runs.firstIndex(where: { $0.from == workflow.position.step }) else { return [] }
-        return [index]
-    }
-
-    private func positionLabel(_ workflow: TaskGraph) -> String {
-        switch workflow.position {
-        case .at(let step): return "\(workflow.name) · \(step)"
-        case .run(let step, _, _, let running):
-            let to = WorkflowDefinition(workflow).runs.first { $0.from == step }?.to
-            return "\([step, to].compactMap { $0 }.joined(separator: " → ")) · \(running ? "running" : "stopped")"
-        }
     }
 
     /// Why no run can be started now.
@@ -287,53 +261,32 @@ struct TaskAutoControl: View {
     }
 }
 
-/// The selected Task's Workflow under the jump bar: its interactive steps as dots, what
-/// is happening now, and the Auto toggle. Clicking the dots opens a
-/// row with each interactive step, who takes part there and where the Task is. Rust owns the
-/// graph, the position and whether auto can start; this only arranges them.
+/// The selected Task's Workflow under the jump bar: the workflow line, then
+/// the Auto toggle. Rust owns the graph, the position, the sentence and
+/// whether auto can start; this only arranges them.
 struct TaskWorkflowBar: View {
     let model: WorkModel
     let task: RoadmapTask
     /// The Task part of the workspace stream, as last read.
     let work: Reading<TaskOverview>
-    /// Per viewer: the bar opens to its step cells.
-    @State private var expanded = false
     @Environment(\.palette) private var palette
 
-    /// One dot: an interactive step where a person takes part, or `end`.
-    struct Stage: Equatable {
-        enum Place: Equatable { case passed, here, going, ahead }
-        let name: String
-        let place: Place
-        /// You, or a stand-in while auto is on; `end` has no one.
-        let who: String?
-        let note: String
-        /// Where the Task stands now or is headed.
-        var current: Bool { place == .here || place == .going }
-    }
-
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: Spacing.md) {
-                if let workflow = work.value?.graph {
-                    Text(workflow.name).fontWeight(.semibold).fixedSize()
-                        .accessibilityIdentifier("task-workflow-bar-name")
-                    dots(stages)
-                }
-                Text(live)
+        HStack(spacing: Spacing.md) {
+            if let workflow = work.value?.graph {
+                WorkflowLine(graph: workflow, auto: model.taskExecution[task.id].value?.auto?.state == .on,
+                             setup: task.setupPosition)
+            } else {
+                Text(placeholder)
                     .lineLimit(1).truncationMode(.tail)
                     .foregroundStyle(palette.textSecondary)
-                    .help(live)
                     .accessibilityIdentifier("task-workflow-bar-live")
-                Spacer(minLength: 0)
-                TaskAutoControl(model: model, task: task)
             }
-            .padding(.horizontal, 14)
-            .frame(height: 34)
-            if expanded, work.value?.graph != nil {
-                cells(stages)
-            }
+            Spacer(minLength: 0)
+            TaskAutoControl(model: model, task: task)
         }
+        .padding(.horizontal, 14)
+        .frame(height: 34)
         .font(Typography.text)
         .background(palette.background)
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
@@ -341,117 +294,10 @@ struct TaskWorkflowBar: View {
         .accessibilityIdentifier("task-workflow-bar")
     }
 
-    private func dots(_ stages: [Stage]) -> some View {
-        Button { expanded.toggle() } label: {
-            HStack(spacing: 5) {
-                ForEach(stages, id: \.name) { stage in
-                    Circle()
-                        .fill(fill(stage.place))
-                        .overlay(Circle().strokeBorder(stage.place == .ahead ? palette.borderStrong : .clear))
-                        .frame(width: stage.current ? 9 : 7, height: stage.current ? 9 : 7)
-                        .help(stage.who.map { "\(stage.name) (\($0))" } ?? stage.name)
-                }
-                Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(Typography.meta).fontWeight(.semibold)
-                    .foregroundStyle(palette.textTertiary)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .fixedSize()
-        .help(expanded ? "Hide interactive steps" : "Show interactive steps")
-        .accessibilityLabel("Interactive steps")
-        .accessibilityIdentifier("task-workflow-bar-dots")
-    }
-
-    private func cells(_ stages: [Stage]) -> some View {
-        HStack(alignment: .top, spacing: Spacing.sm) {
-            ForEach(stages, id: \.name) { stage in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(stage.who ?? " ").font(Typography.meta).foregroundStyle(palette.textTertiary)
-                    Text(stage.name).fontWeight(.semibold)
-                    Text(stage.note).foregroundStyle(palette.textSecondary).lineLimit(2)
-                }
-                .padding(.horizontal, 8).padding(.vertical, 6)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: CornerRadius.row).fill(
-                    stage.current ? palette.surfaceElement : palette.surface))
-                .accessibilityIdentifier("task-workflow-bar-stage-\(stage.name)")
-            }
-        }
-        .padding(.horizontal, 14).padding(.bottom, 8)
-    }
-
-    private func fill(_ place: Stage.Place) -> Color {
-        switch place {
-        case .passed: palette.textTertiary
-        case .here: palette.text
-        case .going: auto?.state == .on ? palette.success : palette.working
-        case .ahead: .clear
-        }
-    }
-
-    private var stages: [Stage] {
-        work.value?.graph.map { Self.stages($0, auto: auto?.state == .on) } ?? []
-    }
-
-    private var auto: Auto? { model.taskExecution[task.id].value?.auto }
-
-    /// What is happening now, in one line: where the Task stands, and its
-    /// auto setting when someone set one.
-    var live: String {
-        guard let auto else { return position }
-        return "\(position) · \(Self.autoLine(auto))"
-    }
-
-    static func autoLine(_ mark: Auto) -> String {
-        switch mark.state {
-        case .on: return "auto on, by \(mark.by.label)"
-        case .off:
-            let when = Date(timeIntervalSince1970: TimeInterval(mark.at)).formatted(date: .abbreviated, time: .shortened)
-            return "auto off by \(mark.by.label) \(when)"
-        }
-    }
-
-    private var position: String {
-        guard let workflow = work.value?.graph else {
-            if work.value == nil { return work.isLoading ? task.setupPosition ?? "Reading workflow…" : "" }
-            return task.graphName.map { "Takes up \($0) when it starts" } ?? "No workflow selected"
-        }
-        switch workflow.position {
-        // A Task that took up its Graph and is waiting for setup to start it.
-        case .at(TaskGraph.start): return task.setupPosition ?? "Not started"
-        case .at(TaskGraph.end): return "At its end"
-        case .at(let step): return "At \(step) · yours"
-        case .run(let from, let at, let process, let running):
-            let to = WorkflowDefinition(workflow).runs.first { $0.from == from }?.to
-            guard running else { return "Stopped at \(at)" + (to.map { " before \($0)" } ?? "") }
-            let step = model.graphProcesses[process]?.presentation.reason
-            return [[from, to].compactMap { $0 }.joined(separator: " → "), step].compactMap { $0 }.joined(separator: " · ")
-        }
-    }
-
-    /// The Workflow's interactive steps in order, then `end`, each placed
-    /// against the Task's position. While auto is on, stand-ins take the steps ahead.
-    static func stages(_ workflow: TaskGraph, auto: Bool) -> [Stage] {
-        let names = workflow.interactiveSteps.map(\.name) + [TaskGraph.end]
-        let (at, going): (String, Bool) = switch workflow.position {
-        case .at(let step): (step, false)
-        case .run(let from, _, _, let running):
-            (WorkflowDefinition(workflow).runs.first { $0.from == from }?.to ?? TaskGraph.start, running)
-        }
-        let here = names.firstIndex(of: at) ?? -1
-        return names.enumerated().map { index, name in
-            let place: Stage.Place = index < here ? .passed : index == here ? (going ? .going : .here) : .ahead
-            let who: String? = name == "end" ? nil : (auto && index >= here ? "stand-in" : "you")
-            let note: String = switch place {
-            case .here: "here now"
-            case .going: "on the way"
-            case .passed: "passed"
-            case .ahead: auto ? "agents will run it" : "ahead"
-            }
-            return Stage(name: name, place: place, who: who, note: note)
-        }
+    /// What the bar says before the Task has a Graph.
+    private var placeholder: String {
+        if work.value == nil { return work.isLoading ? task.setupPosition ?? "Reading workflow…" : "" }
+        return task.graphName.map { "Takes up \($0) when it starts" } ?? "No workflow selected"
     }
 }
 
@@ -613,8 +459,9 @@ struct GraphProcessLog: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     if let work {
-                        TaskRunPosition(workflow: work.graph,
-                                        execution: readsWindow ? task?.execution : captured?.row?.execution)
+                        Text(work.graph?.sentence ?? (readsWindow ? task?.execution : captured?.row?.execution)?.reason
+                             ?? "No workflow selected")
+                            .accessibilityIdentifier("task-run-position")
                     } else {
                         Text(task?.setupPosition ?? "Reading workflow…")
                     }
@@ -884,28 +731,5 @@ struct GraphRunStep: View {
             }
         }
         .accessibilityIdentifier("graph-process-step-\(step.lfProcessId)")
-    }
-}
-
-
-struct TaskRunPosition: View {
-    let workflow: TaskGraph?
-    let execution: TaskExecutionSnapshot?
-
-    var label: String {
-        guard let workflow else { return execution?.reason ?? "No workflow selected" }
-        switch workflow.position {
-        case .at(TaskGraph.start): return "\(workflow.name) · not started"
-        case .at(TaskGraph.end): return "\(workflow.name) · at end"
-        case .at(let step): return "\(step) · available for review"
-        case .run(_, let at, _, let running):
-            if let execution, execution.state != .idle { return execution.reason }
-            return "\(running ? "Running" : "Stopped") at \(at)"
-        }
-    }
-
-    var body: some View {
-        Text(label).textSelection(.enabled)
-            .accessibilityIdentifier("task-run-position")
     }
 }

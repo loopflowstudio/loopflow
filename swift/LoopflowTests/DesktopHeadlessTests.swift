@@ -62,13 +62,6 @@ struct DesktopHeadlessTests {
         #expect(throws: (any Error).self) { try failed.inspect().find(text: "Summary") }
     }
 
-    @Test("The run page names interactive review independently of completed runs")
-    func runPositionReadiness() throws {
-        let workflow = TaskGraph(name: "feature", interactiveSteps: [], position: .at(step: "demo"))
-        let view = TaskRunPosition(workflow: workflow, execution: nil)
-        #expect(try view.inspect().find(text: "demo · available for review").string() == view.label)
-    }
-
     @Test("The repository roadmap shows where its plan lives through the ordinary query")
     func roadmapRepositoryPlan() async throws {
         let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
@@ -135,7 +128,7 @@ struct DesktopHeadlessTests {
         let entry = try #require(model.workflowCatalog.value?.first { $0.name == "code" })
         let view = WorkflowCatalogInspector(entry: entry, model: model)
         #expect(try view.inspect().find(text: "builtin Workflow").string() == "builtin Workflow")
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
+        _ = try view.inspect().find(text: "demo")
         _ = try view.inspect().find(button: "Customize")
     }
 
@@ -220,14 +213,12 @@ struct DesktopHeadlessTests {
         for id in diagnostics.sessions.map(\.id) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(id)")
         }
-        // The Workflow line names who turned auto on, and the Auto toggle reads on.
+        // The Workflow bar reads Rust's sentence, and the Auto toggle reads on.
         let bar = TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
-        #expect(bar.live.hasSuffix(" · auto on, by Maya"))
+        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-live").text().string()
+            == shown.graph?.sentence)
         let control = TaskAutoControl(model: model, task: task)
         #expect(try control.inspect().find(viewWithAccessibilityIdentifier: "task-auto").toggle().isOn())
-        // Turning it off says who did and when.
-        let line = TaskWorkflowBar.autoLine(Auto(state: .off, at: 1793266380, by: .person(name: "Maya")))
-        #expect(line.hasPrefix("auto off by Maya "))
         // A stacked Task names its parent by Task beside its PR line.
         let parent = try #require(model.taskExecution[task.id].value?.stackParent)
         let stacked = TaskStackParentLabel(parent: parent)
@@ -344,7 +335,7 @@ struct DesktopHeadlessTests {
             WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == name }, model: model)
         }
         let builtin = view("feature")
-        _ = try builtin.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
+        _ = try builtin.inspect().find(text: "demo")
         _ = try builtin.inspect().find(text: "builtin Workflow")
         _ = try builtin.inspect().find(button: "Customize")
         let invalid = view("broken")
@@ -386,28 +377,17 @@ struct DesktopHeadlessTests {
         // The fixture's run from review-design is running: nothing to start beside it.
         let running = try view()
         #expect(try running.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position").text().string()
-            == "review-design → demo · running")
-        #expect(try running.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-edge-1")
-            .accessibilityValue().string() == "Running")
+            == "build is running implement. You are next needed at demo.")
         #expect(throws: (any Error).self) { try running.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run") }
-        #expect(throws: (any Error).self) {
-            try running.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-1")
-        }
 
         // Stopped, it holds the Task and is offered again.
         let process = "11111111-1111-4111-8111-111111111111"
         let stopped = try view(position: ["kind": "run", "step": "review-design", "at": "implement", "lf_process_id": process, "running": false])
-        let again = try stopped.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-1")
-        #expect(try again.accessibilityValue().string() == "Stopped")
-        #expect(try !again.button().isDisabled())
         #expect(try stopped.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run").button()
             .labelView().text().string() == "Run again")
 
         // At `demo` the one action continues after it; going into `end` is auto's too.
         let waiting = try view(position: ["kind": "at", "step": "demo"])
-        #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position").text().string() == "feature · demo")
-        #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
-            .accessibilityValue().string() == "Current")
         let next = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run").button()
         #expect(try next.labelView().text().string() == "Continue")
         try next.tap()
@@ -512,44 +492,8 @@ struct DesktopHeadlessTests {
         #expect(await sent.calls.last == ["task", "auto", "off", task.task.identifier, "--json"])
     }
 
-    @Test("A workflow is drawn as a graph: circles, described interactive steps, a loop arc and an arrow per run")
-    func workflowGraph() async throws {
-        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
-        let wave = try #require(roadmap.waves.first)
-        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && !$0.selectionStates.contains(.auto) })
-        let started = Recorder()
-        let model = WorkModel(query: RegistryQuery(run: { args, _ in
-            if args.prefix(2) == ["task", "run"] { await started.add(args) }
-            return "{}"
-        }))
-        var wire = try #require(JSONSerialization.jsonObject(
-            with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
-        func view(_ position: [String: Any]) throws -> TaskWorkflowHeader {
-            var workflow = try #require(wire["graph"] as? [String: Any])
-            workflow["position"] = position
-            wire["graph"] = workflow
-            let work = try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))
-            return TaskWorkflowHeader(model: model, task: task, work: .available(work))
-        }
-
-        // `feature`, with the Task waiting at `review-design`.
-        let feature = try view(["kind": "at", "step": "review-design"])
-        for node in ["start", "review-design", "demo", "end"] {
-            let drawn = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-\(node)")
-            #expect(try drawn.accessibilityValue().string() == (node == "review-design" ? "Current" : ""))
-        }
-        _ = try feature.inspect().find(text: "you review the plan")
-        _ = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-edge-0")
-        _ = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-edge-2")
-        // The run `lf task run` would start next is the diagram's button.
-        let next = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-1").button()
-        try next.tap()
-        for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls == [["task", "run", task.task.identifier, "--json"]])
-
-        // A definition: a step that returns to an earlier one draws a loop over
-        // the interactive step it comes back to.
+    @Test("A workflow definition names its interactive steps and the runs between them, a step that returns included")
+    func workflowDefinition() throws {
         let catalog = try JSONDecoder().decode([GraphCatalogEntry].self,
             from: Data(contentsOf: fixtures.appendingPathComponent("graph_catalog.json")))
         let definition = try #require(catalog.first?.compiled.map(WorkflowDefinition.init))
@@ -557,23 +501,6 @@ struct DesktopHeadlessTests {
         #expect(definition.runs.map { [$0.from, $0.to, $0.name] } == [
             ["start", "demo", "task-design"], ["demo", "end", "loop-or-next"], ["demo", "demo", "loop-or-next"],
         ])
-        let drawn = WorkflowDiagramLayout(nodes: definition.steps, edges: definition.runs)
-        #expect(drawn.arrows.map(\.route) == [.straight, .straight, .loop(level: 0)])
-        #expect(drawn.boxes.map(\.terminal) == [true, false, true])
-        let demo = try #require(drawn.boxes.first { $0.name == "demo" })
-        #expect(drawn.arrows[2].label.y < demo.frame.minY)
-        #expect(abs(drawn.arrows[2].label.x - demo.frame.midX) < 1)
-
-        // A run that goes back, or passes over a step, takes its own lane below the row.
-        let step = { TaskGraph.InteractiveStep(name: $0, skill: "demo", description: nil) }
-        let run = { WorkflowDefinition.Run(from: $0, to: $1, name: $2) }
-        let lanes = WorkflowDiagramLayout(nodes: [step("a"), step("b")], edges: [
-            run("start", "a", "one"), run("a", "b", "two"), run("b", "a", "back"), run("start", "b", "skip"),
-        ])
-        #expect(lanes.arrows.map(\.route) == [.straight, .straight, .lane(level: 0), .lane(level: 1)])
-        #expect(lanes.arrows[2].label.y > lanes.boxes[1].frame.maxY)
-        #expect(lanes.arrows[3].label.y > lanes.arrows[2].label.y)
-        #expect(lanes.size.height > lanes.arrows[3].label.y)
     }
 
     @Test("A Task lists available conversations before working ones, its primary leading each")

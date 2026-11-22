@@ -427,7 +427,7 @@ struct WorkflowCatalogInspector: View {
             }
             Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }
             if let workflow = entry?.workflow {
-                WorkflowDiagram(nodes: workflow.steps, edges: workflow.runs)
+                WorkflowSteps(workflow: workflow)
             } else { Text(entry?.unavailable ?? "Refresh the Workflow catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }.padding(24).frame(width: 780)

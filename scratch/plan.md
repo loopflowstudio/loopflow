@@ -329,8 +329,35 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    passes with `WorkPaletteTests`. Not run here: the iPhone build (gate's
    `scripts/test_ios.py`), and no look at the Dev app; sizes moved by up to
    ±3 pt everywhere outside the Task pane, which QA sees.
-3. **Workflow line end to end (next).** Rust `steps` + `sentence`, fixtures, CLI
-   text, `WorkflowLine`, delete the three position renderers.
-4. Then: Task row + status mark + button + title bar; Session strip and
+3. **Built.** `TaskGraph` carries `steps`, `current_step` and `sentence`,
+   written by `TaskGraph::read` (`task_graph.rs`) from the cursor;
+   `read_task_graph` hands it the run and the auto state, which
+   `SavedTaskGraphRow` now reads in the same savepoint (one point query on
+   `task_auto`). `summary()` is gone; `lf task status` prints
+   `Graph code: <sentence>`. `lf task status --json` is `TaskDetail`, whose
+   `task.graph` is the list row's `{name, step}`, so `TaskDetail` gained a
+   top-level `graph` (the whole `TaskGraph`) and the acceptance `jq '.graph'`
+   reads it. Seen on this Task with the branch `lf`: steps plan, build,
+   ship-review (interactive), deliver, verify (interactive), `current_step` 1,
+   "build is running implement. Auto stands in next at ship-review." Swift:
+   `WorkflowLine` (`LoopflowMac/Design/`) draws the bar; `TaskWorkflowBar` is
+   the line plus `TaskAutoControl`. Deleted: `Stage`/dots/cells/`live`/
+   `autoLine`, `WorkflowDiagram.swift` (with its layout test),
+   `TaskRunPosition`, `positionLabel`, `WorkflowDefinition.init(TaskGraph)`.
+   The Task pane header and the Graph log print the sentence. The Workflow
+   catalog inspector shows `WorkflowSteps` (New Task's existing definition
+   line) rather than a definition-built `WorkflowLine`: a definition has no
+   top-level labels on the wire, and deriving them in Swift would copy Rust's
+   label rule. The header's Overview disclosure keeps only the brief until the
+   "…" menu slice moves the header's buttons. Passed: `cargo test -p
+   loopflow-execution --lib task_graph::`, `dto_fixtures::`,
+   `server::schema::tests::`, and `scripts/test_desktop.sh --filter
+   'WorkflowLineTests|DTOFixtureTests|TypographyDisciplineTests|DesktopHeadlessTests|RegistryQueryTests'`
+   (97 tests). Not run: clippy and the lifecycle fixture regeneration
+   (`task_lifecycle.json` edited by hand: its live test compares only
+   position, status and Graph steps); gate.
+4. **Next:** the bar's next-step button, Auto-Ship button and "…" menu
+   (moving the header's Complete/Claim/Abandon/Start from… and Overview into
+   it). Then: Task row + status mark + button + title bar; Session strip and
    notice line; Brief/Diff/Files; DESIGN.md once cfadc6 is on main; QA in
    three themes at the narrowest width.

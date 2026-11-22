@@ -85,3 +85,8 @@
   (13 pt) rather than `meta` (11 pt regular), so bold labels keep their
   emphasis and `TaskChangesView`'s tour/non-tour group titles stay distinct.
   The table had no row for it. Reversible per site.
+
+- 2026-11-21 slice 3 (headless): `lf task status --json` emits `TaskDetail`, not `TaskWork`; added a top-level `graph: TaskGraph | null` beside `task.graph` (`{name, step}`, the list row) so the acceptance `jq '.graph'` holds. Alternative: put `steps`/`sentence` on `TaskRowGraph`, which `lf task list` builds from summaries without the captured graph.
+- 2026-11-21 slice 3: the Workflow catalog inspector shows `WorkflowSteps` instead of a definition-built `WorkflowLine`; a definition-built line needs top-level labels from Rust in the graph catalog (or a Swift copy of the `sources[1]` rule).
+- 2026-11-21 slice 3: sentences chosen beyond the plan: an At at a non-interactive step (a landing wait) reads "Waiting at land."; a run with no interactive step ahead ends after "X is running." with no second clause.
+

@@ -954,7 +954,7 @@ struct TaskFilesTests {
                 let whole = !args.contains("--head")
                 value["base_commit"] = base
                 value["commits"] = subjects.enumerated().filter { whole || $0.offset < 2 }
-                    .map { ["sha": sha($0.offset + 1), "subject": $0.element] }
+                    .map { ["sha": sha($0.offset + 1), "parent": $0.offset == 0 ? base : sha($0.offset), "subject": $0.element] }
             } else {
                 value["patch"] = ""
             }

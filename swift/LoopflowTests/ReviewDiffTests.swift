@@ -298,14 +298,17 @@ struct ReviewDiffTests {
     }
 
     /// Commits whose subjects share `lf <step>:` in a run read as one step;
-    /// any other commit stands alone; each step starts where the last ended.
+    /// any other commit stands alone, and each step compares against its
+    /// first commit's parent. A merge between two runs, which the list never
+    /// holds, keeps them two steps.
     @Test func commitsReadAsGraphSteps() {
-        let commits = ["lf implement: a", "lf implement: b", "Merge main", "lf implement: c", "lf gate: d"]
-            .enumerated().map { TaskCommit(sha: "\($0.offset)", subject: $0.element) }
-        let steps = ReviewStep.steps(commits, base: "base")
-        #expect(steps.map(\.title) == ["implement · 2 commits", "Merge main", "implement", "gate"])
-        #expect(steps.map(\.base) == ["base", "1", "2", "3"])
-        #expect(steps.map(\.head) == ["1", "2", "3", "4"])
+        let commits = [("1", "base", "lf implement: a"), ("2", "1", "lf implement: b"), ("3", "2", "fix a typo"),
+                       ("4", "3", "lf implement: c"), ("6", "merge", "lf implement: d"), ("7", "6", "lf gate: e")]
+            .map { TaskCommit(sha: $0.0, parent: $0.1, subject: $0.2) }
+        let steps = ReviewStep.steps(commits)
+        #expect(steps.map(\.title) == ["implement · 2 commits", "fix a typo", "implement", "implement", "gate"])
+        #expect(steps.map(\.base) == ["base", "2", "3", "merge", "6"])
+        #expect(steps.map(\.head) == ["2", "3", "4", "6", "7"])
     }
 
     /// A file stays viewed only while its lines read the same.

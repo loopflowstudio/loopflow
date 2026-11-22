@@ -246,6 +246,8 @@ pub struct TaskChangedFile {
 )]
 pub struct TaskCommit {
     pub sha: String,
+    /// The commit's first parent: a step starting here compares against it.
+    pub parent: String,
     pub subject: String,
 }
 
@@ -258,7 +260,8 @@ pub struct TaskChangesSnapshot {
     pub task_id: String,
     pub base_commit: String,
     pub head_commit: String,
-    /// The commits from base to head, oldest first.
+    /// The commits on head's first-parent line since base, oldest first,
+    /// without merges.
     pub commits: Vec<TaskCommit>,
     pub files: Vec<TaskChangedFile>,
     pub scratch: Vec<String>,

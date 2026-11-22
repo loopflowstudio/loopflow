@@ -1017,6 +1017,62 @@ fn task_without_a_local_checkout_never_reads_a_local_path() {
 }
 
 #[test]
+fn task_changes_offer_first_parent_commits_without_merges() {
+    let repo = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        super::git_output(repo.path(), args)
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    let identity = ["-c", "user.name=Test", "-c", "user.email=test@example.com"];
+    let commit = |file: &str, subject: &str| {
+        std::fs::write(repo.path().join(file), subject).unwrap();
+        git(&["add", "."]);
+        git(&[identity.as_slice(), &["commit", "-qm", subject]].concat());
+        git(&["rev-parse", "HEAD"])
+    };
+    git(&["init", "-q", "-b", "main"]);
+    let base = commit("base.txt", "base");
+    git(&["checkout", "-qb", "task"]);
+    let before = commit("task.txt", "lf implement: before");
+    git(&["checkout", "-q", "main"]);
+    commit("main.txt", "main moves on");
+    git(&["checkout", "-q", "task"]);
+    git(&[identity.as_slice(), &["merge", "-q", "--no-edit", "main"]].concat());
+    let merge = git(&["rev-parse", "HEAD"]);
+    let after = commit("task.txt", "lf implement: after");
+    let id = TaskId::new();
+    let changes = super::snapshot::changes_snapshot(super::TaskComparison {
+        checkout: super::TaskWorkspace {
+            issue_identifier: "TEST-1",
+            task_id: &id,
+            worktree: repo.path(),
+        },
+        base_commit: &base,
+        head_commit: None,
+    })
+    .unwrap();
+    // Neither the merge nor main's commit is offered; the commit after the
+    // merge compares against the merge, so it cannot fold into `before`.
+    assert_eq!(
+        changes.commits,
+        [
+            super::TaskCommit {
+                sha: before,
+                parent: base,
+                subject: "lf implement: before".to_string()
+            },
+            super::TaskCommit {
+                sha: after,
+                parent: merge,
+                subject: "lf implement: after".to_string()
+            },
+        ]
+    );
+}
+
+#[test]
 fn task_files_compare_net_parent_head_and_revisioned_drafts() {
     let repo = tempfile::tempdir().unwrap();
     let git = |args: &[&str]| {
@@ -1087,6 +1143,7 @@ fn task_files_compare_net_parent_head_and_revisioned_drafts() {
         committed_files.commits,
         [super::TaskCommit {
             sha: head.clone(),
+            parent: parent.clone(),
             subject: "fixture".to_string()
         }]
     );

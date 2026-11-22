@@ -249,15 +249,22 @@ pub(super) fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskC
         &[
             "log",
             "--reverse",
-            "--format=%H%x1f%s",
+            "--first-parent",
+            "--no-merges",
+            "--format=%H%x1f%P%x1f%s",
             &format!("{}..{head_commit}", workspace.base_commit),
         ],
     )?
     .lines()
-    .filter_map(|line| line.split_once('\u{1f}'))
-    .map(|(sha, subject)| TaskCommit {
-        sha: sha.to_string(),
-        subject: subject.to_string(),
+    .filter_map(|line| {
+        let mut fields = line.splitn(3, '\u{1f}');
+        let (sha, parent, subject) = (fields.next()?, fields.next()?, fields.next()?);
+        // A root commit has no parent to compare against; it is no step.
+        (!parent.is_empty()).then(|| TaskCommit {
+            sha: sha.to_string(),
+            parent: parent.to_string(),
+            subject: subject.to_string(),
+        })
     })
     .collect();
     let net = net_changed_paths(workspace)?;

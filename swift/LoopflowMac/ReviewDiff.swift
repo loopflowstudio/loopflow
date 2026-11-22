@@ -200,7 +200,7 @@ extension ReviewDiff {
 struct ReviewStep: Equatable, Sendable, Identifiable {
     /// The step's name, or the subject of a commit standing alone.
     let name: String
-    /// The commit before the step's first.
+    /// The first parent of the step's first commit.
     let base: String
     let commits: [TaskCommit]
     /// A step's last commit, which no other step shares.
@@ -210,17 +210,18 @@ struct ReviewStep: Equatable, Sendable, Identifiable {
     /// "implement · 3 commits".
     var title: String { commits.count == 1 ? name : "\(name) · \(commits.count) commits" }
 
-    static func steps(_ commits: [TaskCommit], base: String) -> [ReviewStep] {
+    /// A commit joins the step before it only when it is the same step's and
+    /// builds on that step's head; anything between them, a merge included,
+    /// keeps them apart.
+    static func steps(_ commits: [TaskCommit]) -> [ReviewStep] {
         var steps: [ReviewStep] = []
-        var before = base
         for commit in commits {
             let name = Self.name(commit.subject)
-            if let name, let last = steps.last, Self.name(last.commits[0].subject) == name {
+            if let name, let last = steps.last, last.head == commit.parent, Self.name(last.commits[0].subject) == name {
                 steps[steps.count - 1] = ReviewStep(name: name, base: last.base, commits: last.commits + [commit], head: commit.sha)
             } else {
-                steps.append(ReviewStep(name: name ?? commit.subject, base: before, commits: [commit], head: commit.sha))
+                steps.append(ReviewStep(name: name ?? commit.subject, base: commit.parent, commits: [commit], head: commit.sha))
             }
-            before = commit.sha
         }
         return steps
     }

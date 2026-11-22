@@ -53,6 +53,8 @@ public struct TaskChangedFile: Decodable, Sendable, Identifiable, Hashable {
 /// subject prefix `lf <step>:`.
 public struct TaskCommit: Decodable, Sendable, Hashable {
     public let sha: String
+    /// The first parent: a step starting here compares against it.
+    public let parent: String
     public let subject: String
 }
 
@@ -62,7 +64,7 @@ public struct TaskChangesSnapshot: Decodable, Sendable, Hashable {
     public let taskId: String
     public let baseCommit: String
     public let headCommit: String
-    /// Base to head, oldest first.
+    /// Head's first-parent line since base, oldest first, without merges.
     public let commits: [TaskCommit]
     public let files: [TaskChangedFile]
     public let scratch: [String]

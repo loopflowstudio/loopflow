@@ -813,7 +813,7 @@ final class TaskFilesStore {
             guard !Task.isCancelled, generation == refreshGeneration, comparison == target else { return }
             self.changes = changes
             // A step's own read holds only its commits; the steps come from the whole Task's.
-            if step == nil { steps = ReviewStep.steps(changes.commits, base: changes.baseCommit) }
+            if step == nil { steps = ReviewStep.steps(changes.commits) }
             if selection == nil, let first = changes.scratch.first ?? changes.files.first?.path {
                 selection = first
                 autoSelected = true

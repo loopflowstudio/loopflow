@@ -436,10 +436,10 @@ struct DesktopHeadlessTests {
         for _ in 0..<200 where await started.calls.last?.contains("complete") != true { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["task", "complete", task.task.identifier, "--json"])
 
-        // Auto on says it was requested, never that it shipped; its Undo is auto off.
+        // Auto-Ship says it was requested, never that it shipped; its Undo is Stop Auto-Ship.
         model.turnAutoOn(task)
         let notice = try #require(model.navigation.notices.current)
-        #expect(notice.text == "\(task.task.identifier) Auto on requested")
+        #expect(notice.text == "\(task.task.identifier) Auto-Ship requested")
         let view = NoticeView(center: model.navigation.notices)
         let sent = await started.calls.count
         try view.inspect().find(viewWithAccessibilityIdentifier: "notice-action").button().tap()

@@ -61,7 +61,7 @@ struct TitleBar: View {
                 WorkTaskIdentity(presentation: presentation)
                 // The word its sidebar row shows.
                 if presentation.context == nil,
-                   let word = TaskStanding(task: task.task, status: model.programStatus(task: task.task.id)).word {
+                   let word = TaskRowStatus(task: task.task, status: model.programStatus(task: task.task.id)).word {
                     Text(verbatim: word).foregroundStyle(palette.titlebarSecondaryText).fixedSize()
                         .accessibilityIdentifier("task-heading-state")
                 }

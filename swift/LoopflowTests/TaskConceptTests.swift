@@ -112,7 +112,7 @@ struct TaskConceptTests {
             let active = try #require(phase.tasks.first { $0.task.identifier == "FIX-2" })
             let picker = try #require(model.jumpRows(.wave(wave.wave.id), filter: "FIX-2").first)
             // The picker says the word the Task's row says.
-            #expect(picker.detail == "FIX-2 · \(try #require(TaskStanding(task: active, status: model.programStatus(task: active.id)).word))")
+            #expect(picker.detail == "FIX-2 · \(try #require(TaskRowStatus(task: active, status: model.programStatus(task: active.id)).word))")
             for task in phase.tasks where task.awaitsStart && task.need == nil {
                 let row = model.jumpRows(.wave(wave.wave.id), filter: "").first { $0.id == .task(task.id) }
                 #expect(row?.detail == "\(task.task.identifier) · Unstarted")

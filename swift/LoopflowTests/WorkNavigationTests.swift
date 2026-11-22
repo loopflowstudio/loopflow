@@ -145,7 +145,7 @@ struct WorkNavigationTests {
     func headingAgreesWithWorkingTasks() throws {
         let tasks = try roadmap().tasks.items
         func word(_ id: String) throws -> String? {
-            TaskStanding(task: try #require(tasks.first { $0.id == id }), status: .unknown).word
+            TaskRowStatus(task: try #require(tasks.first { $0.id == id }), status: .unknown).word
         }
         #expect(tasks.first { $0.id == "issue-now" }?.task.state == "unstarted")
         #expect(try word("issue-now") == "Moving")
@@ -343,7 +343,7 @@ struct WorkNavigationTests {
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         _ = try navigator.inspect().find(text: "Review")
         _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-repository")
-        let first = try navigator.inspect().find(TaskRow.self) { try $0.actualView().slotHint == "⌘1" }
+        let first = try navigator.inspect().find(TaskRow<TaskRowSlotHint>.self) { try $0.actualView().trailing.hint == "⌘1" }
         #expect(try first.actualView().id == "issue-now")
     }
 

@@ -2696,18 +2696,18 @@ final class WorkModel {
         }
     }
 
-    /// Turn auto on and run the Task, as `lf task auto on` does: the Notice says auto on
+    /// Turn auto on and run the Task, as `lf task auto on` does: the Notice says Auto-Ship
     /// was requested and its Undo turns auto off. The Task moves when the
     /// Machine's reading says so.
     func turnAutoOn(_ task: RoadmapTask) {
-        request(task, "Auto on", .taskAutoOn(directory: directory(task), issue: task.task.identifier),
-                      undo: Notice.Action("Undo", help: "Auto off") { [weak self] in
+        request(task, TaskActions.Auto.off.offer, .taskAutoOn(directory: directory(task), issue: task.task.identifier),
+                      undo: Notice.Action("Undo", help: TaskActions.Auto.on.offer) { [weak self] in
                           self?.turnAutoOff(task)
                       })
     }
 
     func turnAutoOff(_ task: RoadmapTask) {
-        request(task, "Auto off", .taskAutoOff(directory: directory(task), issue: task.task.identifier))
+        request(task, TaskActions.Auto.on.offer, .taskAutoOff(directory: directory(task), issue: task.task.identifier))
     }
 
     /// The Work the Machine control describes: the current started Task, else the
@@ -2947,7 +2947,7 @@ final class WorkModel {
         }
     }
 
-    /// Start, Auto on and Auto off say "requested" in the click.
+    /// Start, Auto-Ship and Stop Auto-Ship say "requested" in the click.
     private func request(_ task: RoadmapTask, _ name: String, _ write: ServedWrite, undo: Notice.Action? = nil,
                          refused: @escaping @MainActor () -> Void = {}) {
         pendingChanges.request(name, subject: task.task.identifier, write: write, notices: navigation.notices,

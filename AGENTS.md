@@ -18,7 +18,7 @@ How we build Loopflow. Contributors and agents follow it.
 **Both:**
 - Mock side effects; don't test mock wiring or reshape production code for tests
 - Design docs go under `scratch/`; `lf pr submit` and `lf pr land` run `lf scratch clear`, which removes added files and keeps existing ones
-- Headless runs make the call and keep moving; note genuinely open choices in `scratch/questions.md`
+- Stop only processes you started, by PID; never `pkill` or `killall` by pattern. Other agents and the person's own apps run on this Machine
 
 **Secrets:**
 - Fetch every secret from Doppler. Never hardcode a key, read one from a dotfile, or paste one into code. Prefer `doppler run -- <cmd>`, which injects the value as an env var.

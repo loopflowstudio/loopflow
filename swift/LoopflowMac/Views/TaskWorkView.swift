@@ -24,12 +24,12 @@ struct TaskWorkflowHeader: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
                 // The word the Task's row and the title bar say.
-                let standing = TaskStanding(task: task, status: model.programStatus(task: task.id))
+                let standing = TaskRowStatus(task: task, status: model.programStatus(task: task.id))
                 if let word = standing.word {
                     Text(verbatim: word)
                         .fontWeight(task.isCompleted ? .semibold : .regular)
                         .foregroundStyle(standing.tone?.ink(in: palette) ?? palette.textSecondary)
-                        .help(Text(verbatim: standing.help ?? word))
+                        .help(Text(verbatim: standing.detail ?? word))
                         .accessibilityIdentifier("task-lifecycle-status")
                 }
                 if task.isUnassigned {
@@ -86,26 +86,18 @@ struct TaskAutoControl: View {
     let model: WorkModel
     let task: RoadmapTask
 
-    /// The Task reading's own mark; until it arrives, the state its row carries.
-    var on: Bool {
-        guard let execution = model.taskExecution[task.id].value else { return task.selectionStates.contains(.auto) }
-        return execution.auto?.state == .on
-    }
-
     var body: some View {
-        if on || !task.isCompleted {
-            let issue = task.task.identifier
-            // Rust's refusal to turn it on again never disables turning it off.
-            let refusal = on ? model.changeRefusal : model.runRefusal(task)
-            Button(on ? "Stop Auto-Ship" : "Auto-Ship") {
-                if on { model.turnAutoOff(task) } else { model.turnAutoOn(task) }
+        let actions = TaskActions(work: model.taskWork[task.id].value, row: task,
+                                  execution: model.taskExecution[task.id].value)
+        if let auto = actions.auto {
+            let refusal = model.changeRefusal ?? actions.autoRefusal
+            Button(auto.offer) {
+                if auto == .on { model.turnAutoOff(task) } else { model.turnAutoOn(task) }
             }
             .buttonStyle(LoopflowButtonStyle())
             .fixedSize()
             .disabled(refusal != nil)
-            .help(refusal ?? (on
-                ? "lf task auto off \(issue): the run waits at its next interactive step for you, and auto-merge is disarmed"
-                : "lf task auto on \(issue): run every remaining step and land it"))
+            .help(refusal ?? auto.help(issue: task.task.identifier))
             .accessibilityIdentifier("task-auto")
         }
     }
@@ -125,10 +117,12 @@ struct TaskWorkflowBar: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
+        let actions = TaskActions(work: work.value, row: task, execution: model.taskExecution[task.id].value)
         HStack(spacing: Spacing.md) {
             if let workflow = work.value?.graph {
-                WorkflowLine(graph: workflow, auto: model.taskExecution[task.id].value?.auto?.state == .on,
-                             setup: task.setupPosition)
+                // One line in a 34 pt bar: a sentence that does not fit is cut, with the whole of it in the tooltip.
+                let line = WorkflowLine(graph: workflow, auto: actions.auto == .on, setup: task.setupPosition)
+                line.lineLimit(1).truncationMode(.tail).help(line.sentence)
             } else {
                 Text(placeholder)
                     .lineLimit(1).truncationMode(.tail)
@@ -136,13 +130,14 @@ struct TaskWorkflowBar: View {
                     .accessibilityIdentifier("task-workflow-bar-live")
             }
             Spacer(minLength: 0)
-            if let next {
-                Button(next.label) { model.startTaskFromInput(nil, task: task) }
+            if let run = actions.run {
+                let refusal = model.changeRefusal ?? actions.runRefusal
+                Button(run.label) { model.startTaskFromInput(nil, task: task) }
                     .buttonStyle(LoopflowButtonStyle())
                     .fixedSize()
-                    .disabled(model.runRefusal(task) != nil)
-                    .help(model.runRefusal(task) ?? next.help)
-                    .accessibilityIdentifier(next.identifier)
+                    .disabled(refusal != nil)
+                    .help(refusal ?? run.help)
+                    .accessibilityIdentifier(work.value?.graph == nil ? "task-workflow-start" : "task-workflow-run")
             }
             TaskAutoControl(model: model, task: task)
             Menu {
@@ -175,32 +170,6 @@ struct TaskWorkflowBar: View {
         if work.value == nil { return work.isLoading ? task.setupPosition ?? "Reading workflow…" : "" }
         return task.graphName.map { "Takes up \($0) when it starts" } ?? "No workflow selected"
     }
-
-    /// The step that moves the Task from here: Start before it has a Graph,
-    /// else what `lf task run` does from where it stands.
-    private var next: (label: String, help: String, identifier: String)? {
-        let issue = task.task.identifier
-        if let workflow = work.value?.graph {
-            return Self.runAction(workflow, issue: issue).map { ($0.label, $0.help, "task-workflow-run") }
-        }
-        // Only a successful reading with no Workflow offers Start; Rust says when it can't.
-        guard work.value != nil else { return nil }
-        return ("Start", "lf task run \(issue)", "task-workflow-start")
-    }
-
-    /// What `lf task run` does from here, named for it; `nil` while a run
-    /// carries the Task or once it is at `end`.
-    static func runAction(_ workflow: TaskGraph, issue: String) -> (label: String, help: String)? {
-        let help = "lf task run \(issue)"
-        switch workflow.position {
-        case .at(TaskGraph.start): return ("Start", help)
-        case .at(TaskGraph.end): return nil
-        case .at(let step): return ("Run", "\(help): continue after \(step)")
-        case .run(_, _, _, true): return nil
-        case .run(_, let at, _, false): return ("Run", "\(help): run again at \(at)")
-        }
-    }
-
 }
 
 /// An unstarted Task's Session slot. Showing it starts nothing; Start runs the

@@ -10,7 +10,7 @@ struct TaskStandingTests {
         ("blocked", "Blocked"), ("waiting", "Waiting"),
     ])
     func conditionNeedsSomeone(state: String, word: String) throws {
-        let standing = TaskStanding(task: try roadmapTask(condition: state, reason: "merge the PR on GitHub"), status: .unknown)
+        let standing = TaskRowStatus(task: try roadmapTask(condition: state, reason: "merge the PR on GitHub"), status: .unknown)
         #expect(standing.word == word)
         #expect(standing.tone == .warning)
         #expect(standing.line == "merge the PR on GitHub")
@@ -19,26 +19,26 @@ struct TaskStandingTests {
     @Test("A Task whose Graph has never run is not waiting on anyone, opened or not: its lifecycle word, with no line",
           arguments: [("unstarted", "Unstarted"), ("idle", "Idle")])
     func awaitingItsFirstRunIsNotWaiting(lifecycle: String, word: String) throws {
-        let standing = TaskStanding(task: try roadmapTask(condition: "waiting", reason: "ready", lifecycle: lifecycle,
+        let standing = TaskRowStatus(task: try roadmapTask(condition: "waiting", reason: "ready", lifecycle: lifecycle,
                                                           recommended: "run", graphHasRun: false), status: .unknown)
         #expect(standing.word == word)
         #expect(standing.tone == nil)
         #expect(standing.line == nil)
-        let blocked = TaskStanding(task: try roadmapTask(condition: "blocked", reason: "the next launch is misconfigured",
+        let blocked = TaskRowStatus(task: try roadmapTask(condition: "blocked", reason: "the next launch is misconfigured",
                                                          lifecycle: lifecycle, graphHasRun: false), status: .unknown)
         #expect(blocked.word == "Blocked" && blocked.line == "the next launch is misconfigured")
     }
 
     @Test("A finished Task waits for nobody, whatever its condition says")
     func finishedIsNotWaiting() throws {
-        let standing = TaskStanding(task: try roadmapTask(condition: "waiting", reason: "ready", lifecycle: "abandoned"), status: .unknown)
+        let standing = TaskRowStatus(task: try roadmapTask(condition: "waiting", reason: "ready", lifecycle: "abandoned"), status: .unknown)
         #expect(standing.word == "Abandoned")
         #expect(standing.line == nil)
     }
 
     @Test("A clear Task shows its lifecycle word and no line")
     func clearShowsLifecycle() throws {
-        let standing = TaskStanding(task: try roadmapTask(condition: "clear", reason: "ready", lifecycle: "idle"), status: .unknown)
+        let standing = TaskRowStatus(task: try roadmapTask(condition: "clear", reason: "ready", lifecycle: "idle"), status: .unknown)
         #expect(standing.word == "Idle")
         #expect(standing.tone == nil)
         #expect(standing.line == nil)
@@ -46,7 +46,7 @@ struct TaskStandingTests {
 
     @Test("A condition that could not be read adds no word, and still says why")
     func unknownAddsNoWord() throws {
-        let standing = TaskStanding(task: try roadmapTask(condition: "unknown", reason: "checkout unreadable", lifecycle: "active"),
+        let standing = TaskRowStatus(task: try roadmapTask(condition: "unknown", reason: "checkout unreadable", lifecycle: "active"),
                                     status: .unknown)
         #expect(standing.word == "Active")
         #expect(standing.line == "checkout unreadable")
@@ -54,35 +54,35 @@ struct TaskStandingTests {
 
     @Test("A finished Task with no completion date says the date is unavailable")
     func undatedDone() throws {
-        let standing = TaskStanding(task: try roadmapTask(condition: "clear", reason: "complete", lifecycle: "done"), status: .unknown)
+        let standing = TaskRowStatus(task: try roadmapTask(condition: "clear", reason: "complete", lifecycle: "done"), status: .unknown)
         #expect(standing.word == "Done, date unavailable")
     }
 
     @Test("A program's report is the word, over the condition; a blocked program's ask is the line")
     func programReportWins() throws {
         let waiting = try roadmapTask(condition: "waiting", reason: "merge the PR on GitHub")
-        let busy = TaskStanding(task: waiting, status: try programStatus(reporting: .working, msg: nil))
+        let busy = TaskRowStatus(task: waiting, status: try programStatus(reporting: .working, msg: nil))
         #expect(busy.word == "Busy")
         #expect(busy.tone == .running)
         // The Task still needs someone, whatever its program is doing.
         #expect(busy.line == "merge the PR on GitHub")
 
-        let asking = TaskStanding(task: waiting, status: try programStatus(reporting: .blocked, msg: "Approve the plan?"))
+        let asking = TaskRowStatus(task: waiting, status: try programStatus(reporting: .blocked, msg: "Approve the plan?"))
         #expect(asking.word == "Blocked")
         #expect(asking.line == "Approve the plan?")
     }
 
     @Test("Unreadable Session readings give a reason and no word; the condition's line stays")
     func unavailableReadings() throws {
-        let standing = TaskStanding(task: try roadmapTask(condition: "blocked", reason: "setup failed"), status: .unavailable("Offline"))
+        let standing = TaskRowStatus(task: try roadmapTask(condition: "blocked", reason: "setup failed"), status: .unavailable("Offline"))
         #expect(standing.word == nil)
-        #expect(standing.help?.contains("Offline") == true)
+        #expect(standing.detail?.contains("Offline") == true)
         #expect(standing.line == "setup failed")
     }
 
     @Test("A row named before planning answers says nothing about where it stands")
     func noTask() {
-        let standing = TaskStanding(task: nil, status: .unknown)
+        let standing = TaskRowStatus(task: nil, status: .unknown)
         #expect(standing.word == nil)
         #expect(standing.line == nil)
     }

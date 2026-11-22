@@ -26,15 +26,3 @@ public enum WorkTone: Sendable {
     public func stroke(in palette: LoopflowPalette) -> Color { style(in: palette).stroke }
     public func text(in palette: LoopflowPalette) -> Color { style(in: palette).text }
 }
-
-extension WorkViewPlan.Content {
-    /// A Task's status from the states its reading carries, in Desktop's words.
-    public var status: (label: String, tone: WorkTone) {
-        if primarySession == nil { return ("No conversation yet", .neutral) }
-        if !unavailable.isEmpty { return ("Unavailable", .stopped) }
-        if states.contains(.blocked) { return ("Blocked", .warning) }
-        if states.contains(.busy) { return ("Running", .running) }
-        if states.contains(.available) { return ("Ready", .available) }
-        return ("Open", .stopped)
-    }
-}

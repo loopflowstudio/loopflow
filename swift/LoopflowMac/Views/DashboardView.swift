@@ -252,7 +252,8 @@ struct DashboardTile: View {
                 if let task, let workflow = model.taskWork[task.task.id].value?.graph,
                    let line = Self.workflow(workflow, status: status, auto: model.taskExecution[task.task.id].value?.auto?.state == .on,
                                             setup: task.task.setupPosition) {
-                    line.padding(.horizontal, Spacing.md).padding(.bottom, Spacing.sm)
+                    line.lineLimit(1).truncationMode(.tail).help(line.sentence)
+                        .padding(.horizontal, Spacing.md).padding(.bottom, Spacing.sm)
                 }
             }.background(palette.surface)
                 .foregroundStyle(palette.text, palette.textSecondary)

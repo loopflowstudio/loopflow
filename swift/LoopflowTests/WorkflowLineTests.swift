@@ -83,5 +83,25 @@ struct WorkflowLineTests {
         #expect(WorkflowLine.tones(line.graph) == Array(repeating: .done, count: 5))
         #expect(line.sentence == "At its end.")
     }
+
+    @Test("The step that moves a Task is named from where its Graph stands")
+    func runAction() {
+        func action(_ position: TaskGraph.Position) -> TaskActions.Run? {
+            graph(position, current: nil, sentence: "").runAction(issue: "LOO-5")
+        }
+        #expect(action(.at(step: "start")) == .init(label: "Start", help: "lf task run LOO-5"))
+        #expect(action(.at(step: "ship-review")) == .init(label: "Run", help: "lf task run LOO-5: continue after ship-review"))
+        #expect(action(run(running: false)) == .init(label: "Run", help: "lf task run LOO-5: run again at implement"))
+        // A run carries the Task, or it is finished: nothing to press.
+        #expect(action(run(running: true)) == nil)
+        #expect(action(.at(step: "end")) == nil)
+    }
+
+    @Test("Alone, the sentence sets no line limit, so a phone shows all of it")
+    func sentenceWraps() throws {
+        let source = try String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Loopflow/Design/WorkflowLine.swift"), encoding: .utf8)
+        #expect(!source.contains("lineLimit"))
+    }
 }
 #endif

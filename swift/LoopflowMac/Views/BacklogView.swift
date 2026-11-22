@@ -273,8 +273,8 @@ struct BacklogList {
 
     /// The status word a row shows: a started Task's, and "Blocked" or "Waiting"
     /// on one that has not started. Most rows have never run and show none.
-    static func word(_ task: RoadmapTask) -> TaskStanding? {
-        let standing = TaskStanding(task: task, status: .unknown)
+    static func word(_ task: RoadmapTask) -> TaskRowStatus? {
+        let standing = TaskRowStatus(task: task, status: .unknown)
         return !task.awaitsStart || standing.source == .condition ? standing : nil
     }
 
@@ -772,7 +772,7 @@ struct BacklogView: View {
                         let isOpen = list.opened?.id == task.id
                         VStack(alignment: .leading, spacing: 0) {
                             row(task, list)
-                            if let reason = TaskStanding(task: task, status: .unknown).line {
+                            if let reason = TaskRowStatus(task: task, status: .unknown).line {
                                 BacklogUnderTitle(identifier: task.task.identifier) {
                                     Text(verbatim: reason).font(Typography.text).foregroundStyle(palette.textSecondary)
                                         .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
@@ -836,7 +836,7 @@ struct BacklogView: View {
                 if let standing = BacklogList.word(task), let word = standing.word {
                     Text("\(Text(verbatim: word).foregroundStyle(standing.tone?.ink(in: palette) ?? palette.textSecondary))\(BacklogList.position(task).map { ", \($0)" }.joined())")
                         .font(Typography.meta).foregroundStyle(palette.textSecondary).lineLimit(1)
-                        .help(Text(verbatim: standing.help ?? word))
+                        .help(Text(verbatim: standing.detail ?? word))
                         .accessibilityIdentifier("backlog-standing-\(task.id)")
                 }
                 if let ownership = list.ownership(task) {

@@ -141,13 +141,13 @@ public struct NoticeView: View {
                 }
                 .font(Typography.text)
                 .foregroundStyle(palette.text)
-                .padding(.leading, Spacing.md)
-                .padding(.trailing, Spacing.sm)
+                .padding(.leading, Spacing.lg)
+                .padding(.trailing, Spacing.md)
                 .padding(.vertical, Spacing.sm)
                 .background(RoundedRectangle(cornerRadius: CornerRadius.row).fill(palette.surfaceElement))
                 .overlay(RoundedRectangle(cornerRadius: CornerRadius.row).strokeBorder(palette.border, lineWidth: 1))
                 .shadow(color: palette.shadow, radius: 8, y: 2)
-                .padding(.bottom, Spacing.lg)
+                .padding(.bottom, Spacing.xl)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }

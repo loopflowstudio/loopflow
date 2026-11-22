@@ -196,3 +196,4 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
     not on `graphHasRun`, so such a Task shows its word there and is not
     offered in the bar's Start. Left as it is; move the backlog to
     `graphHasRun` too?
+54. Sync with main uses the shared Task row on Mac and iPhone. The Mac supplies its planning condition. Notice uses main’s padding steps.

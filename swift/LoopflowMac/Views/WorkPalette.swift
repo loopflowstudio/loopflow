@@ -125,7 +125,7 @@ extension WorkModel {
             rows = waves + tasks
         case .wave(let id):
             rows = (wave(id: id)?.tasks.items ?? []).map { task in
-                let word = TaskStanding(task: task, status: programStatus(task: task.id)).word
+                let word = TaskRowStatus(task: task, status: programStatus(task: task.id)).word
                 return WorkPaletteRow(id: .task(task.id), title: task.task.name,
                     detail: task.task.identifier + (word.map { " · \($0)" } ?? ""), key: task.task.identifier)
             }

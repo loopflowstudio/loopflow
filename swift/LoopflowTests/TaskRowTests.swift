@@ -215,7 +215,7 @@ struct TaskRowTests {
         #expect(shell.context == "vim notes.md · loopflow")
     }
 
-    private func row(_ task: RoadmapTask, status: SessionProgramStatus) -> TaskRow {
+    private func row(_ task: RoadmapTask, status: SessionProgramStatus) -> TaskRow<TaskRowSlotHint> {
         TaskRow(id: task.id, presentation: .init(title: task.task.name, identifier: task.task.identifier, context: nil),
                 task: task, status: status)
     }

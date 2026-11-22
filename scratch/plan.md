@@ -16,8 +16,10 @@ says "human-review"; step names are whatever Rust reports.)
 
 A Task filed and not yet started says the same thing in the same words: its
 bar draws that step line, and its pane reads "Not started. It will run
-feature, the Wave's default. You take part at explore, ship-review and
-verify." with Start and "Start with…".
+feature, Product's default. You take part at explore, ship-review and
+verify." with Start and "Start with…". (The prototype says "the Wave's
+default"; the wire cannot tell a Wave's `graph:` from the repository's, so the
+pane names the scope as the sheet does. Open choice, questions 13.)
 
 Anywhere the app has nothing to show or something failed, the pane is
 left-aligned: a 26 pt serif title saying what happened, one sentence, then
@@ -162,31 +164,28 @@ A started Task's bar is unchanged.
 
 ### Whose choice the workflow is
 
-One Swift function phrases (source, scope): "loopflow's default", "the
-Wave's default", "your default", "the default", "for this Task only". The
-sheet (`defaultPhrase` today), the unstarted Task's pane and the status strip
-(`TaskWorkView.swift:26`, "feature · repository" today) use it. It covers
-every `graph_source` value Rust sends.
+Built: `WorkModel.workflowChoice(source:wave:)` ("Product's default", "your
+default", "the default", "for this Task only") and `workflowSelection(_:)`
+for a filed Task's pair. The sheet, the unstarted pane, the status strip and
+the Graph log's position line read them. They sit in `NewTaskSheet.swift` and
+`TaskWorkView.swift`; slice 4 moves both beside `WorkModel`.
+
+**Open choice (questions 13):** saying "the Wave's default" as the prototype
+does needs Rust to send which layer's `graph:` won (a new `ConfigSource` or a
+scope field). Until someone asks for it the scope's name stands.
 
 ### `EmptyState`
 
-```swift
-EmptyState(title: String, sentence: String? = nil, machine: String? = nil) { actions }
-```
+Built: `Design/EmptyState.swift`,
+`EmptyState(title:sentence:machine:) { actions }`. Leading, vertically
+centred, serif title, sentence about 52 characters wide, the machine's
+message in mono and selectable, `LoopflowButtonStyle` buttons. Compact
+(`\.compactPanes`): the title and the buttons on one line, else the buttons
+alone with the sentence or message as help. No `systemImage`.
 
-- Leading-aligned, vertically centred in its pane, padding `Spacing.xxxl`,
-  gap `Spacing.sm`.
-- Title: `.serif(.title)`, `palette.emphasisInk`.
-- Sentence: `Typography.text`, at most about 52 characters wide.
-- `machine`: the machine's message, `Typography.mono`,
-  `palette.textSecondary`, selectable, wraps anywhere. A state with `machine`
-  is a failure.
-- Actions: `LoopflowButtonStyle`, at most one `.accent`, a shortcut inside
-  its button's label ("New Task ⌘N").
-- Compact (dashboard slots, `\.compactPanes`): one line, the title in
-  `Typography.text` and the action; when that does not fit, the action alone
-  with the title as its help. **Choice made for review:** the `systemImage`
-  parameter goes entirely, so a compact slot no longer falls back to an icon.
+Remaining in it (slice 4): a compact state with no button drops to nothing
+when its title does not fit ("Work unavailable" in a narrow tile,
+`DashboardView.swift:252`); it should keep its title, truncated.
 
 ### New Task sheet
 
@@ -213,23 +212,11 @@ appear, and a failure should not move those words to the pane's middle.
 
 ### The states
 
-Drawn in the prototype (wording is the prototype's):
-
-| Site | Title | Sentence | Buttons |
-|------|-------|----------|---------|
-| `WorkSurfaceView:43`, `RoadmapView:144` with a repository | No planned Work in this repository | Say what you want built, or talk it through first. | New Task ⌘N (accent), Open the repository conversation |
-| `WorkSurfaceView:52`, `SessionsView:1580` | Choose Work | Pick a Task or a Wave in the sidebar, or press ⌘K to find one in any repository. | none |
-| `WorkSurfaceView:215` | Selected Work is unavailable | The latest plan does not include it. Its workspace and conversations are kept. | Read the plan again; "Open its conversations" only if the selection's workspace is still retained and can be opened |
-| `RepositoryWorkspaceView:13`, `:110` | This repository did not open | error in mono | Retry (accent); "Open another repository…" where the view can reach the app's open panel |
-| An unstarted Task's pane (`TaskStartOffer`) | the Task's title | Not started. It will run `feature`, the Wave's default. You take part at explore, ship-review and verify. | Start (accent), Start with… (`StartFlowItems`) |
-
-The unstarted Task's second sentence is the outline's, word for word, so the
-pane and the sheet cannot differ; the prototype joins the two with "and".
-`TaskStartOffer` becomes an `EmptyState`; `SessionSlotOffer` goes. Start
-keeps `runRefusal` as its disabled reason and its `task-start-<id>`
-identifier. In a dashboard tile it is the compact form: the title and Start.
-"Conversation not open" and "Conversation failed to open"
-(`WorkspacePanesView:93`) stay the state for every other Work, restyled.
+The prototype's drawn states are built: `NoPlannedWork` and `ChooseWork`
+(`WorkSurfaceView.swift:9`, `:32`), the missing selection (`:240`),
+`RepositoryDidNotOpen` (`RepositoryWorkspaceView.swift:98`),
+`TaskStartOffer` (`TaskWorkView.swift:236`) and the pane sites in
+`WorkspacePanesView.swift`. `docs/surfaces.md` holds their wording.
 
 **Choices made for review:**
 - The second button reads "Start with…", not the prototype's "Choose
@@ -239,22 +226,26 @@ identifier. In a dashboard tile it is the compact form: the title and Start.
 - An unstarted Task's full screen has Start twice, neutral in the bar and
   accent in the pane. The bar's stays because it is the one left when the
   conversation pane is collapsed or another pane is zoomed.
+- "Open another repository…" and "Open its conversations" did not ship: the
+  open panel lives in `LoopflowApp`, and neither view reaches it or a
+  retained workspace's conversations (questions 8).
+- The unstarted pane shows neither the Task's description nor the refusal
+  under Start; a refused Start is off with the reason as its tooltip
+  (questions 17). The workflow's name in its sentence is not mono
+  (questions 16).
 
 Not drawn; same form, sentence case, next step only where the app has one:
 
 | Site | After |
 |------|-------|
-| `RoadmapView:144` without a repository | "No planned Work yet", no button |
-| `RoadmapView:165` | "Nothing needs action" / "No live or stopped work across these Waves." / Show roadmap (the lens switch) |
+| `RoadmapView:160` | "Nothing needs action" / "No live or stopped work across these Waves." / Show roadmap (the lens switch) |
 | `DashboardView:127` | "This dashboard is no longer available" / Show working Tasks |
-| `DashboardView:252` | "Work unavailable", compact |
 | `SessionsView:1440` | "This repository did not open", `machineError` in mono, Retry only if a re-read exists there |
 | `WorkActivityView:86` | "No activity in this window" / "Work creation, runs, PRs and steers appear here." |
 | `TaskFilesView:420` | "Select a file" |
 | `TaskFilesView:425` | "Comparison unavailable", reason in mono, Retry through the store's existing retry if it covers changes |
 | `TaskFilesView:435` | the snapshot state's title |
 | `OpenSourceLicenses:51` | title and sentence as they are; nothing to press |
-| `WorkspacePanesView` (the remaining `PaneEmptyState` sites) | same titles and actions, no icon |
 
 Plain `Text` empties stay one line (one serif thing per screen): sentence
 case, `Typography.text`, `palette.textSecondary`, full stop, and a button
@@ -272,7 +263,8 @@ beside the sentence where the app has the action.
   "No steps", "Empty comment", "Task is unavailable", "Session location
   unavailable", "Task status unavailable." get the face, colour and full stop
   where they differ.
-- Inline failures ("Latest read failed: …", `TaskFilesView:297`,
+- Inline failures (`RepositoryWorkspaceContent`'s error beside a retained
+  workspace, "Latest read failed: …", `TaskFilesView:297`,
   `ReviewStreamView:69`, `SessionsView:1787`, `WorkPalette` source errors,
   `RemoveWaveSheet:74`): what failed in sans, the machine's message in mono,
   Retry kept.
@@ -307,13 +299,15 @@ beside the sentence where the app has the action.
 
 Gone already: `WorkflowSteps`, `WorkflowChooser`, `WorkflowDefinition`,
 `WorkflowCatalogEntry`, `model.workflowCatalog`, `StartFlow`'s own stop
-count, "Takes up … when it starts", the "· loopflow's default" assertion and
-the `new-task-workflow-<name>` identifiers. Remaining:
+count, "Takes up … when it starts", the "· loopflow's default" assertion,
+the `new-task-workflow-<name>` identifiers, `PaneEmptyState`,
+`SessionSlotOffer`, `NewTaskWorkflow.defaultPhrase`, "feature · repository"
+and "No workflow selected". Remaining:
 
 - Every `ContentUnavailableView` left in `swift/LoopflowMac`:
-  `OpenSourceLicenses:51`, `DashboardView:127`, `RoadmapView` ("Nothing
-  needs action"), `SessionsView` ("Workspace unavailable"),
-  `WorkActivityView:86`, `TaskFilesView` (3).
+  `OpenSourceLicenses:51`, `DashboardView:127`, `RoadmapView:160`,
+  `SessionsView:1440`, `WorkActivityView:86`, `TaskFilesView:420`, `:425`,
+  `:435`.
 - In `DESIGN.md`: "Tokens today" gains `EmptyState` in the component list,
   and the `display`, `title` and `lede` rows name the sheet and state titles.
 
@@ -402,34 +396,13 @@ demo: not headless; qa or demo runs it.
    - Not seen in the Dev app: the borderless menus' face and baseline beside
      the sentence, the 540 pt sheet's height without the divider.
    - Checks: `scripts/test_desktop.sh --filter NewTaskTests` passed (4 tests).
-3. **`EmptyState` and the drawn states. Built.** `Design/EmptyState.swift`
-   is `EmptyState(title:sentence:machine:) { actions }`; `PaneEmptyState`,
-   `SessionSlotOffer`, "feature · repository", "No workflow selected" and
-   `NewTaskWorkflow.defaultPhrase` are gone. The pane sites, the empty
-   repository (`NoPlannedWork`, shared by `WorkSurfaceView` and
-   `RoadmapView`), "Choose Work" (`ChooseWork`, also `SessionsView`'s "No
-   Work open"), the missing selection, the repository that did not open
-   (`RepositoryDidNotOpen`, in the launch window and
-   `RepositoryWorkspaceContent`) and `TaskStartOffer` use it. What it taught:
-   - Whose choice is `WorkModel.workflowChoice(source:wave:)`; a filed Task's
-     pair is `workflowSelection(_:)` ("feature, loopflow's default"), which
-     the status strip and the Graph log's position line print too.
+3. **`EmptyState` and the drawn states. Built** (d9a69d87a5); the design
+   sections above say what stands. What it taught:
    - The wire cannot tell a Wave's `graph:` from the repository's: both are
      `ConfigSource::Repository`, and a Task with its own Graph sends no
-     source. So "the Wave's default" cannot be said; the pane names the scope
-     as the sheet does ("Product's default"), and `docs/surfaces.md` now
-     shows that (questions 13).
-   - `sentence` is a `String`, so the workflow's name in the unstarted
-     sentence is not mono as the prototype draws it (questions 16).
-   - "Open another repository…" and "Open its conversations" did not ship:
-     the open panel lives in `LoopflowApp` and neither view reaches it or a
-     retained workspace's conversations.
+     source.
    - `RepositoryWorkspaceContent` with a retained workspace and an error
-     keeps its inline text and Retry beside the content; slice 4's inline
-     failures restyle it.
-   - Compact: the title and the buttons, else the buttons alone, with the
-     sentence or the machine's message as help. A compact state with no
-     button and no room shows nothing ("Work unavailable" in a narrow tile).
+     keeps its inline text and Retry beside the content.
    - Not seen in the Dev app: any of these states, the borderless "Start
      with…" beside the accent Start, compact tiles. qa or demo looks.
    - Checks: `scripts/test_desktop.sh --filter 'EmptyStateTests|NewTaskTests'`
@@ -438,10 +411,14 @@ demo: not headless; qa or demo runs it.
      `finishedOwnedTaskWithoutHistoryShowsRecord`, `reopenDuringResolution`
      and `TypographyDisciplineTests`. `documented_commands::` not run after
      the one-word `docs/surfaces.md` edit; gate runs it.
-4. **Every remaining `ContentUnavailableView`, the plain `Text` empties and
-   inline failures**, then the source scan and the rest of `DESIGN.md`
-   ("Tokens today" gains `EmptyState`; the ramp rows name the sheet and state
-   titles). The "two workflow renderers" pointer is already gone.
+4. **Every remaining `ContentUnavailableView` (8, under "What goes"), the
+   plain `Text` empties and inline failures** as "The states" lists them,
+   the compact title fallback, `workflowChoice` and `workflowSelection`
+   moved beside `WorkModel`, then the source scan beside
+   `TypographyDisciplineTests` and the rest of `DESIGN.md` ("Tokens today"
+   gains `EmptyState`; the ramp rows name the sheet and state titles; each
+   "We do these now" pointer this change fixed goes). The "two workflow
+   renderers" pointer is already gone.
 
 ## Docs written ahead of the build
 

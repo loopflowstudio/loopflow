@@ -39,9 +39,12 @@ Made during concept review with nobody present; the page is
 
 Made while writing the docs with nobody present.
 
-13. With a Wave chosen, the sheet today says "Product's default" (the scope's
-    name), and the plan's unstarted pane says "the Wave's default". The docs
-    show both as written. Should one phrase serve both, and which?
+13. The prototype's unstarted pane says "the Wave's default". Taken: one
+    phrase for the sheet and the pane, the scope's name ("Product's
+    default"). The wire sends `repository` for a Wave's `graph:` and the
+    repository's alike, so "the Wave's default" would be a guess; telling
+    them apart needs a new `ConfigSource` or a scope field from Rust. Is the
+    scope's name enough, or should Rust send the layer?
 14. `docs/surfaces.md` draws the unstarted Task's bar with its neutral Start
     beside the pane's accent Start, as the plan keeps both.
 
@@ -54,10 +57,6 @@ Made at realign after the sheet slice with nobody present.
 
 Made while building the states with nobody present.
 
-13 (taken). One phrase serves both: the scope's name, "Product's default".
-    The wire sends `repository` for a Wave's `graph:` and the repository's
-    alike, so "the Wave's default" would be a guess. Telling them apart needs
-    a new `ConfigSource` or a scope field from Rust.
 16. The workflow's name in "It will run feature, …" is set in the sentence's
     face, not mono as the prototype draws it: `EmptyState.sentence` is a
     `String`. Making it `Text` would allow the mono run.

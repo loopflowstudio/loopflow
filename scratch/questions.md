@@ -35,3 +35,5 @@
 
 - Implement round 6: a `config.yaml` that isn't valid YAML (`theme: [unclosed`) answers `config.theme` with no theme rather than an error, so Desktop shows the defaults with no notice. Not changed here; found while writing the read-failure test.
 - Implement round 6: the parse sentence is matched on the refusal's shape (`invalid`, `data.kind`, "<kind>: " prefix) because released servers send no other marker.
+
+- QA round 6: a failed `config.theme` read retries every second rather than waiting for a reconnect or a file change, so updating the server clears the banner by itself. Passed over: retrying on reconnect only (ServerLink exposes no reconnect signal to AppearanceStore).

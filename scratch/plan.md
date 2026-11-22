@@ -1,6 +1,6 @@
 # 50f7f9: review the bundled themes
 
-Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. Round 3's concept review found two leftovers of the per-side picker; round 4 removed them: `previewTheme` and `importTheme` share one assignment that takes the side from the theme's own colors, `showPicker` is gone and `picker` is `previewSide`. Round 4 QA passed. Concept review round 4 shaped the steer's iPhone and website pieces; implement built them and round 5 QA passed them, with one open Desktop glitch. Concept review round 5 sent one change back to implement (the notice split); round 6 built it. Next: ship-review.
+Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. Round 3's concept review found two leftovers of the per-side picker; round 4 removed them: `previewTheme` and `importTheme` share one assignment that takes the side from the theme's own colors, `showPicker` is gone and `picker` is `previewSide`. Round 4 QA passed. Concept review round 4 shaped the steer's iPhone and website pieces; implement built them and round 5 QA passed them, with one open Desktop glitch. Concept review round 5 sent one change back to implement (the notice split); round 6 built it, and round 6 QA passed it after making a failed read retry. Next: ship-review.
 
 ## What people said
 
@@ -44,6 +44,8 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 
 - 2026-11-22, compress round 6: the parse sentence folded into `ServerLink.answered` (no public `unparsed`). `swift test … 'AppAppearanceTests|aRequestTheServerCannotParseNamesBothBuilds'` 5 and 2 cases passed.
 
+- 2026-11-22, QA round 6 (`scratch/qa.html`), screen locked: Dev app against a 0.16.0 server shows the both-builds sentence with no button and Choose Theme still draws its cards; swapping to the branch server left the banner stuck until relaunch, fixed by retrying while `readFailure` is set (rerun: cleared in 12 s, Fig Leaf applied). Unknown-name notice keeps Choose Theme…; R5.10 did not reproduce. `swift test … 'AppAppearanceTests|ThemeWorkflowTests'` 8 passed.
+
 ## Demo
 
 Dev app → Settings → Choose Theme: 13 cards per side in their own colors, both sides in System mode. Click Fig and the window turns plum with lime; Fig Leaf is the light half. Import a dark file from the light section in Light mode: the mode switches to Dark and the file previews there.
@@ -60,7 +62,7 @@ Concept review round 5 (`scratch/concept-review.html`) found one mismatch in wha
 
 Implement round 6 built it. `AppearanceStore.readFailure` holds a failed `config.theme` read or write (`reload`, `applyMode`, the config half of `apply`); a successful one clears it. The window banner shows it without **Choose Theme…**; the chooser lists it above `notice`. `ServerLink` turns the server's parse refusal (`invalid`, `data.kind`, message "<kind>: …", from `refused_operation`) into "The server (Y) can't read what this Loopflow (X) asked. Update the older one."; an unknown operation keeps the server's own sentence. Tests: `AppAppearanceTests.failedRead`, `ServerClientTests.aRequestTheServerCannotParseNamesBothBuilds`. The phone is unchanged.
 
-Then **ship-review.** The Dev app on an unlocked display (Import panel, Apply/Cancel, the editor's Title bar row, a key window's bar, a dark import from the light section, Choose Theme with an unknown-name notice up: are the light cards there?), the Dev app against the live 0.16.0 server (the skew sentence, no button), the phone in Fig on a simulator against a Machine whose `theme:` is `light:Fig Leaf,dark:Fig`, and the site (`scratch/qa/home.png`, `scratch/qa/docs.png` are headless renders).
+Then **ship-review.** The Dev app on an unlocked display (Import panel, Apply/Cancel, the editor's Title bar row, a key window's bar, a dark import from the light section, Choose Theme with an unknown-name notice up: are the light cards there?), the phone in Fig on a simulator against a Machine whose `theme:` is `light:Fig Leaf,dark:Fig`, and the site (`scratch/qa/home.png`, `scratch/qa/docs.png` are headless renders).
 
 ## Left outside this Task
 

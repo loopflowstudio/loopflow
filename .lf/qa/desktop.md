@@ -203,6 +203,12 @@ them. Nothing here needs WindowServer focus.
 - Open with `--env LOOPFLOW_QA_HOOK_DIR=<dir>` beside the private `HOME`,
   `LF_HOME`, `LF_BIN` and `PATH`. Write one line to `<dir>/<name>.cmd`; the
   answer appears in `<name>.cmd.out`.
+- Give `snap` and `frame` an absolute prefix: a relative one is resolved
+  against the app's cwd (`/`), and the `.out` lists a file that was never written.
+- Skew without relaunching: start the private server through a symlink
+  `bin/lf` and swap the binary it serves (`kill` the server PID, relink,
+  start again on the same `LF_HOME`); the running app reconnects to the new
+  one, which is how "update the older one" is checked.
 - `snap <prefix>` writes every window with `cacheDisplay` (no title bar) and
   lists index, title and size. Indices change as windows open: read the list
   before each click.
@@ -267,9 +273,8 @@ them. Nothing here needs WindowServer focus.
   titled with the repository's name; if none appears in 15 s, open
   `loopflow://<repo>`. Never send a finished Task's link to a relaunched app.
 - A theme set from the CLI reaches the running app. With the unknown-name
-  notice up, Choose Theme drew no light cards on every open (nothing in the
-  accessibility tree either); with a valid live change it drew them all.
-  Unresolved whether a key window on screen does the same.
+  notice up, Choose Theme once drew no light cards on every open; a later run
+  on the same steps drew them all, so a blank grid there is not reproducible.
 - `tree <window>` prints the window's accessibility elements with frames;
   a lazy grid's cards appear there only once drawn.
 - Not reachable: hover, drag, the jump menu (its shortcut needs

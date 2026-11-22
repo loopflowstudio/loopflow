@@ -169,9 +169,11 @@ final class AppearanceStore {
         }
     }
 
+    /// A failed read retries every tick: until the server answers, its config path is unknown, so
+    /// there is no file to watch, and updating the older build should clear the banner on its own.
     private func reloadIfChanged() async {
         let latest = currentFingerprint()
-        guard latest != fingerprint else { return }
+        guard latest != fingerprint || readFailure != nil else { return }
         fingerprint = latest
         await reload()
     }

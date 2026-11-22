@@ -9,6 +9,28 @@ code{background:#f3f1ee;padding:0 .25em;border-radius:3px}
 table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.3rem .6rem;text-align:left}
 .ok{color:#256b2a}.bad{color:#9a2a2a}
 </style>
+<h1>Round 6: a failed theme read, against a released server</h1>
+<p>Isolated bundle <code>com.loopflow.mac.qa50f7f9.dev</code> with <code>QAHook.swift</code>, branch at a630122eaa. Private Machine <code>/tmp/lfq6</code> (one git-planned repository, one Task, <code>theme: "light:Fig Leaf,dark:Fig"</code>) served first by a copy of the installed <code>lf</code> (0.16.0+c4de2038f), then by the branch <code>lf</code> on the same home. Screen locked. Run 2026-11-22.</p>
+<h2>R6.1 Launch against the 0.16.0 server</h2>
+<p class="ok">The window keeps Loopflow Light and the banner reads "The server (0.16.0+c4de2038f) can't read what this Loopflow (0.16.0+a630122ea) asked. Update the older one." No Choose Theme… button. (Round 5 showed <code>config.theme: missing field `path`</code> with the button.)</p>
+<img src="qa/r6-old-server-banner.png">
+<h2>R6.2 Choose Theme with the read failure up</h2>
+<p class="ok">Settings → Appearance opens with all 13 light cards; the sentence sits above Cancel/Apply in the error color. No Advanced disclosure (the server never named its config path).</p>
+<img src="qa/r6-old-server-chooser.png">
+<h2>R6.3 Doing what the banner says: the server is updated</h2>
+<p class="bad">Stopping the 0.16.0 server and starting the branch server on the same home left the banner up and the theme on Loopflow Light; editing <code>config.yaml</code> changed nothing either. Only a relaunch would clear it. Round 6 moved the first fingerprint into a successful read, so after a failed first read there was no config path to watch and the 1 s watch never asked again.</p>
+<p><b>Fix:</b> <code>AppearanceStore.reloadIfChanged</code> asks the server again every tick while <code>readFailure</code> is set. Rerun: banner up against 0.16.0, then within 12 s of the branch server starting the banner went away and the window turned Fig Leaf, no relaunch. <code>AppAppearanceTests</code> passed.</p>
+<img src="qa/r6-server-updated.png">
+<h2>R6.4 Unknown name on the branch server</h2>
+<p class="ok"><code>theme: "Verdigris"</code>: the banner names the server's file and keeps Choose Theme…. Choose Theme drew every light card with the notice up, Fig Leaf ringed. R5.10 did not reproduce this time.</p>
+<img src="qa/r6-unknown-name-chooser.png">
+<h2>Round 6: what works</h2>
+<p>A released server's parse refusal reads as a sentence naming both builds, with no button that resends the request; the chooser still opens and shows the cards; updating the server clears the banner by itself.</p>
+<h2>Round 6: not reached</h2>
+<p>An unlocked display: a key window's bar, the Import panel, Apply/Cancel clicks, the editor's Title bar row. The phone was not changed this round.</p>
+<h2>Round 6: still wrong</h2>
+<p>1. Both builds print as 0.16.0 plus a hash, so "Update the older one" leaves the person to work out which is older; the sentence can't say, since a branch build and a release share a version. 2. While a read keeps failing, Desktop sends one <code>config.theme</code> per second to the server (on its existing connection).</p>
+
 <h1>Round 5: one Machine theme on the Mac, the phone and the site</h1>
 <p>Branch <code>lf</code> at 726f6cd735 on a private Machine (<code>LF_HOME</code> under <code>/tmp</code>, <code>theme: "light:Fig Leaf,dark:Fig"</code>, one git repository with two Tasks). Its own mobile listener on the tailnet name with <code>mobile-same-device</code> in that home, paired from a fresh iPhone SE simulator (iOS 26.2). Desktop: isolated bundle with <code>QAHook.swift</code>, screen locked (idle 3.4 h). Website: <code>main.py</code> on port 5077 with Playwright. Run 2026-11-22.</p>
 

@@ -317,7 +317,7 @@ shows built-ins, then **Yours**, ending with a dashed **Import file…** tile.
 
 Beside the pickers, a sample draws the previewed theme where its colors land in
 the app: a title bar with the repository's name, a selected Task row, the
-status words on the sidebar's surface, and one terminal line:
+status words on the sidebar's surface, and a terminal color sample:
 
 ```text
 loopflow
@@ -327,7 +327,9 @@ $ lf task status LOO-515
 ```
 
 A theme whose status words are hard to read on the sidebar shows it here,
-before **Apply**.
+before **Apply**. That terminal line previews palette colors only; check font
+weight and glyph rendering in an open shell or Session pane, which keeps your
+terminal font settings while you preview, apply or cancel a theme.
 
 ```yaml
 # ~/.lf/config.yaml
@@ -361,10 +363,14 @@ loopflow-accent = #3d59a1    # optional app roles; the rest derive from ANSI col
 Files read up to 256 KiB of UTF-8. Six-digit RGB background/foreground are
 required; cursor, selection, `palette = N=#RRGGBB` and `loopflow-` roles are
 optional. Preview explains defaults, repeats and omitted settings. Fonts,
-commands, keybindings, includes and theme references are never followed.
+`font-thicken`, commands, keybindings, includes and theme references are never
+followed; put non-color terminal settings in your
+[Ghostty configuration](https://ghostty.org/docs/config#file-location) and
+reopen Loopflow.
 
 Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
-their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
+their source values. Personal non-color Ghostty settings still load at launch;
+its `theme =` is ignored and its file never written.
 Source and license notices ship offline with the catalogue.
 
 Under the jump bar, the workflow bar reads where the Task stands:
@@ -764,25 +770,31 @@ current match for 160 ms; hiding a pane cancels the cue. Reduce Motion uses
 Find's persistent match styling. Programs that own selection may show their own
 copy confirmation; terminal feedback describes only a terminal-owned copy.
 
-Terminals draw in Spline Sans Mono 13 with its real bold and italic faces and
-ligatures off; Ghostty draws box drawing, blocks and braille itself, so Claude's
-frames stay continuous. Your Ghostty configuration still wins: a
-`font-family` you set comes first and Spline Sans Mono fills the glyphs it
-lacks, and your `font-size`, `adjust-cell-height` or `font-feature` replace
-Loopflow's.
+Terminals draw in Spline Sans Mono 13 at its native stroke weight, with its real
+bold and italic faces and ligatures off; Ghostty draws box drawing, blocks and
+braille itself, so Claude's frames stay continuous. Your
+[Ghostty configuration](https://ghostty.org/docs/config#file-location) (such as
+`~/.config/ghostty/config`) still wins: a `font-family` you set comes first and
+Spline Sans Mono fills the glyphs it lacks, and your `font-size`,
+`adjust-cell-height`, `font-feature`, `font-thicken` or `minimum-contrast`
+replace Loopflow's defaults. Add `font-thicken = true` if you want Ghostty's
+thicker macOS strokes, then reopen Loopflow so Task shells and Session panes
+pick up the change.
 
 ```ini
-# In your Ghostty configuration; reopen Loopflow after editing.
+# In your Ghostty configuration (e.g. ~/.config/ghostty/config); reopen Loopflow after editing.
 font-family = Berkeley Mono
+font-thicken = true
 minimum-contrast = 1
 ```
 
-The default is `3`. Set `1` to preserve original colors. Correction moves only
-low-contrast text toward black or white while retaining its alpha and channel
-ordering. It preserves more color than replacing text with black or white, but
-cannot guarantee exact hue or separation of nearly identical colors. Faint text
-may not reach the requested ratio. Graphics, images, transparent backdrops and
-custom postprocessing are outside the opaque-text contrast guarantee.
+`minimum-contrast` defaults to `3`; set `1` to preserve original colors.
+Correction moves only low-contrast text toward black or white while retaining
+its alpha and channel ordering. It preserves more color than replacing text with
+black or white, but cannot guarantee exact hue or separation of nearly identical
+colors. Faint text may not reach the requested ratio. Graphics, images,
+transparent backdrops and custom postprocessing are outside the opaque-text
+contrast guarantee.
 
 Files and the Graph process log open beside retained Sessions and shells in the
 same multiplexer. Resize, zoom, close and Reopen preserve each pane’s content.

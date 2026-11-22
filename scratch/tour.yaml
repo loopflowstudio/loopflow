@@ -1,4 +1,4 @@
-at: 23c37a8ae0ecad77061fe0b6f137006542602e0e
+at: 828c1a5ddb876f4db2f448ecc5f7c77929717f79
 first:
   - path: swift/README.md
     why: What a person gets: families, cards, title bar role
@@ -24,7 +24,7 @@ first:
   - path: swift/Loopflow/Design/ThemeFile.swift
     why: Where a file's own accent decides its bar
   - path: swift/Loopflow/Design/ThemeDefinition.swift
-    why: Catalogue order and counts
+    why: Catalogue order, Loopflow pair first
   - path: swift/LoopflowMac/Design/AppearanceStore.swift
     why: Side from colors; config path from the server; readFailure vs notice
   - path: swift/LoopflowMac/LoopflowApp.swift
@@ -32,7 +32,7 @@ first:
   - path: swift/Loopflow/Services/ServerLink.swift
     why: A refused parse names both builds
   - path: swift/LoopflowMac/Views/ThemeChooser.swift
-    why: The card grid replacing tiles and sample
+    why: Card grid; Customize and Delete in the bottom bar
   - path: swift/LoopflowiOS/README.md
     why: What the phone draws and when it asks
   - path: swift/LoopflowiOS/MachineTheme.swift

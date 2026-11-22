@@ -810,7 +810,7 @@ struct SessionPaneView: View {
                             }
                             .simultaneousGesture(TapGesture().onEnded { focusPane() })
                     case .failure(let error):
-                        Text(error.localizedDescription).textSelection(.enabled)
+                        EmptyState(title: "Files did not open", machine: error.localizedDescription)
                     }
                 case .task:
                     if let task = model.task(id: taskId)?.task {

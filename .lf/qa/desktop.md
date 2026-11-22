@@ -95,7 +95,8 @@ To build the isolated bundle, import `scripts/loopflow-dev.py`, set
 `DEV_APP.stem` and `DEV_BUNDLE_ID` to a unique ID ending in `.dev`. Run
 `cmd_build()` and, if it succeeds, `_install_dev_app()`.
 Run that script with `uv run python` from the checkout: the module imports
-`boto3`, which only the project environment has.
+`boto3`, which only the project environment has, and `app_bundle` from
+`scripts/`, so put `scripts` on `sys.path` before loading it.
 LaunchServices won't resolve a bundle ID under `/tmp`, so `lf desktop view`
 fails there with `LSCopyApplicationURLsForBundleIdentifier`. Register with
 `lsregister -f`, open it with `LOOPFLOW_DEV_WAVE_REPO` and `--repo` after
@@ -222,8 +223,25 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
   in this repository"; **Open the repository conversation** starts the
   conversation and brings the page, whose backlog reads "Nothing is waiting
   in this repository." beside **New**. Filing a Task brings the page too.
-- A failed Start is hard to produce: an unwritable `.git` and a repository
-  default naming a missing Graph both end in creation recovery (a notice,
-  and the Task is filed), not in "Not started." on the request.
+- "Not filed." and "Not started.": stop the private server (`kill` its PID),
+  wait five seconds, then `lf desktop do new-task`, type, and press File or ⌘↩.
+  The sheet then shows "running …" with no step line. Start the server again
+  and **Try again** starts the Task. An unwritable `.git` or a repository
+  default naming a missing Graph ends in creation recovery (a notice, and the
+  Task is filed), not in "Not started.".
+- A SwiftUI `ScrollView` that meets the title bar comes back white from
+  `cacheDisplay`, background included ("Not started." with no Task selected).
+  To see it, build once with the scroll view padded 60 pt from the top; do not
+  commit that.
+- A stand-in `claude` must answer `--version` (exit 0) and then stay alive
+  (`cat > /dev/null; while :; do sleep 5; done`). One that exits fails the
+  Graph at its first step with "claude --version failed", and a repository
+  conversation reads "Session ended."
+- For what a released build does, install a second bundle whose ID does not
+  end in `.dev`: it opens a repository's conversation on arrival, so a fresh
+  repository shows its page and never the empty state.
+- `lf desktop state --json` is one long document; read it through `jq`. A
+  pane's `location.worktree` and `attachment` say where it points and whether
+  it opened.
 - Give the isolated `HOME` a `src/` directory, or the status line shows
   "Read …/home/src: No such file or directory".

@@ -156,3 +156,24 @@ Made at compress after slice 5 with nobody present.
     unavailable." and the rest) went from regular to semibold. Not seen in
     the Dev app. Passed over: a regular `FailureLine` in the sheet, which
     would have undone the weight qa saw there.
+
+Made at the second qa with nobody present; `scratch/qa.html` has the captures.
+
+44. A Files pane that could not open drew the bare message centred. It is
+    `EmptyState(title: "Files did not open", machine:)` with no button: the
+    pane has no re-read of its own.
+45. Seen, not fixed: a Task started from New Task opened beside "Files did not
+    open" three times in one window; the pane's recorded location was the
+    repository while the Task had moved to its checkout. Reopening the app
+    clears it. This branch changed nothing in `SessionsWorkspace.files(for:)`.
+    Its own Task?
+46. Question 39, seen: the same build under a bundle ID not ending in `.dev`
+    opens a fresh repository straight on its page with a conversation started.
+    Only the Dev app arrives on "No planned Work in this repository".
+47. About twenty failures beside content are still bare `Text(error)`
+    (`scratch/qa.html`, item 3). None was reached on screen, so none was
+    changed. Convert them in this change, or leave them to a sweep?
+48. The "Not started." pane with no Task selected could not be captured as
+    committed: its scroll view meets the title bar and `cacheDisplay` returns
+    white. Two local builds showed the view is drawn. Needs one look at an
+    unlocked display.

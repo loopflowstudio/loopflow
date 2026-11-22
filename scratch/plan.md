@@ -6,8 +6,10 @@ Task 923677. Reference: `DESIGN.md` ("The language", "What we avoid") and the
 once their screens shipped; `git show fd90d7e6ad:design/prototypes/desktop-more.html`
 has them, and `docs/surfaces.md` holds the wording now.
 
-Every slice is built. What remains is looking at slice 5 in the Dev app, the
-gate checks, and the open choice under "Open choice" below.
+Every slice is built and slice 5 was looked at in the Dev app
+(`scratch/qa.html`). What remains is the gate checks, one look at "Not
+started." on an unlocked display (questions 48), and the open choice under
+"Open choice" below.
 
 ## Outcome
 
@@ -349,7 +351,9 @@ directory goes straight to its page there, with a terminal and "Nothing is
 waiting in this repository." beside New, and reads "No planned Work in this
 repository" only after the conversation is closed. Holding the conversation
 back changes when a repository's agent starts, which this Task's brief does
-not ask for; nobody has said which is wanted (questions 39).
+not ask for; nobody has said which is wanted (questions 39). Qa ran the
+build under a bundle ID that does not end in `.dev` and saw exactly that
+(questions 46).
 
 ## Acceptance check at gate
 
@@ -513,10 +517,17 @@ sheet; "No Graph has run." under "Waiting for you at explore.".
 `lf desktop capture -p backlog` still prints "Wave planning unavailable · …"
 (`WorkModel.swift:1035`); it is capture text, not a drawn state.
 
-Slices 1 to 4 were looked at in the Dev app at qa in both themes
-(`scratch/qa.html`): the sheet, the unstarted Task, the failed repository
-and the Task pane's sentences read as designed. Left for later steps: the
-gate checks above.
+Every slice was looked at in the Dev app at qa (`scratch/qa.html`): the
+sheet, the unstarted Task, the failed repository, the empty repository and
+its two buttons, "Not filed." and "Not started." with the Machine away, and a
+Wave's default read as designed. The second run fixed one state the slices
+missed (a Files pane that could not open is "Files did not open", questions
+44) and left three findings on the page: a new Task's Files pane pointing at
+the repository (questions 45), about twenty bare failure texts beside content
+(questions 47), and the released build never arriving on the empty state
+(questions 46). Left for later steps: the gate checks above.
+`scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|NewTaskTests'`
+passed after the fix (12 tests).
 
 ## Docs written ahead of the build
 

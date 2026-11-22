@@ -45,10 +45,15 @@ pub enum LostReply {
 }
 
 /// A sent action is looked for at most once per `window` seconds; its
-/// first look happens on the next pass. Idempotent sends repeat instead.
+/// first look happens on the next pass. Idempotent sends repeat instead, at
+/// most once per `window` after the last send, so one that keeps failing
+/// does not go out again from every pass.
 pub fn lost_reply(action: &TrackerAction, idempotent: bool, now: i64, window: i64) -> LostReply {
     if idempotent {
-        return LostReply::Resend;
+        return match action.sent_at {
+            Some(at) if now - at < window => LostReply::Wait,
+            _ => LostReply::Resend,
+        };
     }
     match action.looked_at {
         Some(at) if now - at < window => LostReply::Wait,
@@ -314,7 +319,17 @@ mod tests {
         sent.looked_at = Some(900);
         assert_eq!(lost_reply(&sent, false, 1_000, 600), LostReply::Wait);
         assert_eq!(lost_reply(&sent, false, 1_500, 600), LostReply::Look);
+    }
+
+    #[test]
+    fn an_idempotent_send_repeats_once_per_window() {
+        let mut sent = action(ActionKind::Link, ActionPhase::Sent, json!(null));
         assert_eq!(lost_reply(&sent, true, 1_000, 600), LostReply::Resend);
+        sent.sent_at = Some(900);
+        assert_eq!(lost_reply(&sent, true, 1_000, 600), LostReply::Wait);
+        assert_eq!(lost_reply(&sent, true, 1_500, 600), LostReply::Resend);
+        // `lf task sync` sends now.
+        assert_eq!(lost_reply(&sent, true, 1_000, 0), LostReply::Resend);
     }
 
     #[test]

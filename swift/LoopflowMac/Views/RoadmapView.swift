@@ -141,12 +141,7 @@ struct RoadmapView: View {
         } else if snapshot == nil {
             Color.clear
         } else if visibleWaves.isEmpty {
-            ContentUnavailableView(
-                repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
-                systemImage: "map",
-                description: Text("Waves without readable Projects remain in the Waves sidebar.")
-            )
-            .accessibilityIdentifier("loopflow-work-empty")
+            NoPlannedWork(model: model)
         } else {
             switch lens {
             case .now: nowContent

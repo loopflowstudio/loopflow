@@ -5,6 +5,37 @@ import AppKit
 import Loopflow
 import SwiftUI
 
+/// A plan with no Waves and no Tasks. A repository's says what to do next.
+struct NoPlannedWork: View {
+    let model: WorkModel
+
+    var body: some View {
+        Group {
+            if model.repoPath == nil {
+                EmptyState(title: "No planned Work yet")
+            } else {
+                EmptyState(title: "No planned Work in this repository",
+                           sentence: "Say what you want built, or talk it through first.") {
+                    Button("New Task ⌘N") { model.navigation.palette = .newTask }
+                        .buttonStyle(LoopflowButtonStyle(.accent))
+                        .accessibilityIdentifier("loopflow-work-empty-new-task")
+                    Button("Open the repository conversation") { model.jump(to: .repository, source: "empty") }
+                        .accessibilityIdentifier("loopflow-work-empty-conversation")
+                }
+            }
+        }
+        .accessibilityIdentifier("loopflow-work-empty")
+    }
+}
+
+/// Nothing is selected in a plan that has Work.
+struct ChooseWork: View {
+    var body: some View {
+        EmptyState(title: "Choose Work",
+                   sentence: "Pick a Task or a Wave in the sidebar, or press ⌘K to find one in any repository.")
+    }
+}
+
 struct WorkSurfaceView: View {
     @Bindable var model: WorkModel
     var onOpenSession: (SessionRecord) -> Void = { _ in }
@@ -40,16 +71,11 @@ struct WorkSurfaceView: View {
         } else if snapshot == nil {
             Color.clear
         } else if visibleWaves.isEmpty, model.visibleWaves.isEmpty, model.visibleTasks.isEmpty {
-            ContentUnavailableView(
-                model.repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
-                systemImage: "map",
-                description: Text("Open the repository conversation to decide what to work on.")
-            )
-            .accessibilityIdentifier("loopflow-work-empty")
+            NoPlannedWork(model: model)
         } else {
             switch model.selection?.kind {
             case nil:
-                ContentUnavailableView("Choose Work", systemImage: "list.bullet")
+                ChooseWork()
             case .wave:
                 if let selection = model.selection { BacklogView(model: model, view: .wave(selection.id)) }
             case .project:
@@ -212,11 +238,12 @@ struct WorkSurfaceView: View {
     // MARK: - Shared pieces
 
     private var missingSelection: some View {
-        ContentUnavailableView(
-            "Selected Work is unavailable",
-            systemImage: "questionmark.circle",
-            description: Text("This planning read cannot resolve the selection. Its workspace and conversations remain retained.")
-        )
+        EmptyState(title: "Selected Work is unavailable",
+                   sentence: "The latest plan does not include it. Its workspace and conversations are kept.") {
+            Button("Read the plan again") { model.rescanWork() }
+                .buttonStyle(LoopflowButtonStyle(.accent))
+                .accessibilityIdentifier("loopflow-work-reread")
+        }
     }
 
     private func evidenceBanner(title: String, detail: String) -> some View {

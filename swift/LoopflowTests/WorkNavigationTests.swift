@@ -376,7 +376,7 @@ struct WorkNavigationTests {
         let offer = TaskStartOffer(model: model, task: task)
         let start = try offer.inspect().find(viewWithAccessibilityIdentifier: "task-start-issue-review").button()
         #expect(!start.isDisabled())
-        #expect(throws: Never.self) { try offer.inspect().find(text: task.task.description) }
+        #expect(throws: Never.self) { try offer.inspect().find(text: task.task.name) }
         #expect(model.navigation.notices.current == nil)
     }
 
@@ -1005,12 +1005,11 @@ struct WorkNavigationTests {
         let empty = try JSONDecoder().decode(TaskOverview.self, from: Data(#"{"sessions":[],"graph_processes":[],"graph":null}"#.utf8))
         let loading = TaskWorkflowHeader(model: model, task: found.task, work: .loading)
         #expect(try loading.inspect().find(text: "Reading workflow…").string() == "Reading workflow…")
-        #expect(throws: (any Error).self) { try loading.inspect().find(text: "No workflow selected") }
         let missing = TaskWorkflowHeader(model: model, task: found.task, work: .unavailable(lastGood: nil, reason: "Offline"))
         #expect(throws: (any Error).self) { try missing.inspect().find(text: "Reading workflow…") }
-        #expect(throws: (any Error).self) { try missing.inspect().find(text: "No workflow selected") }
         let absent = TaskWorkflowHeader(model: model, task: found.task, work: .available(empty))
-        let selection = found.task.graphName.map { "\($0) · \(found.task.graphSource ?? "")" } ?? "No workflow selected"
+        let selection = try #require(model.workflowSelection(found.task))
+        #expect(selection.hasPrefix("\(try #require(found.task.graphName)), "))
         #expect(try absent.inspect().find(text: selection).string() == selection)
         let stale = TaskWorkflowHeader(model: model, task: found.task, work: .unavailable(lastGood: empty, reason: "Offline"))
         #expect(try stale.inspect().find(text: selection).string() == selection)

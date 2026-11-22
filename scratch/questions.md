@@ -51,3 +51,18 @@ Made at realign after the sheet slice with nobody present.
     a start fails, where the prototype's failed state is vertically centred:
     the request is already there before the failure and should not jump. It
     has the prototype's parts and is not an `EmptyState`.
+
+Made while building the states with nobody present.
+
+13 (taken). One phrase serves both: the scope's name, "Product's default".
+    The wire sends `repository` for a Wave's `graph:` and the repository's
+    alike, so "the Wave's default" would be a guess. Telling them apart needs
+    a new `ConfigSource` or a scope field from Rust.
+16. The workflow's name in "It will run feature, …" is set in the sentence's
+    face, not mono as the prototype draws it: `EmptyState.sentence` is a
+    `String`. Making it `Text` would allow the mono run.
+17. The unstarted pane no longer shows the Task's description (it is in the
+    brief beside it) or the refusal under the button; a refused Start is off
+    with the reason as its tooltip, as `docs/surfaces.md` says.
+18. A failed conversation or Session open shows the error as the machine's
+    message in mono, with no sentence above it.

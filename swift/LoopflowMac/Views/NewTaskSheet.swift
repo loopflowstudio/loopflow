@@ -58,7 +58,7 @@ struct NewTaskSheet: View {
                 Button(filing ? "Filing…" : "File") { file() }
                     .buttonStyle(LoopflowButtonStyle())
                     .disabled(trimmed.isEmpty || filing)
-                    .help("Put it in \(NewTaskWorkflow.scopeName(wave, in: model))'s backlog without starting it")
+                    .help("Put it in \(model.scopeName(wave))'s backlog without starting it")
                     .accessibilityIdentifier("new-task-file")
                 Button("Start ⌘↩") { create() }
                     .buttonStyle(LoopflowButtonStyle(.accent))
@@ -108,16 +108,8 @@ struct NewTaskWorkflow: View {
         id.flatMap { id in model.visibleRoadmaps.first { $0.wave.id == id }?.wave }
     }
 
-    static func scopeName(_ wave: WaveSnapshot?, in model: WorkModel) -> String {
-        wave?.displayName ?? repositoryName(model)
-    }
-
-    private static func repositoryName(_ model: WorkModel) -> String {
-        model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "repository"
-    }
-
     private var wave: WaveSnapshot? { Self.wave(waveID, in: model) }
-    private var scopeName: String { Self.scopeName(wave, in: model) }
+    private var scopeName: String { model.scopeName(wave) }
     private var reported: WaveGraph.Default? {
         model.graphDefaults[model.graphDefaultKey(wave: wave)]?.value?.default
     }
@@ -127,8 +119,8 @@ struct NewTaskWorkflow: View {
     }
     /// Whose choice the workflow is; nil until the scope's default is read.
     private var whose: String? {
-        guard let reported else { return graph == nil ? nil : "for this Task only" }
-        return chosen == reported.name ? Self.defaultPhrase(reported, scope: scopeName) : "for this Task only"
+        if graph == nil, reported == nil { return nil }
+        return model.workflowChoice(source: chosen == reported?.name ? reported?.source : nil, wave: wave)
     }
 
     var body: some View {
@@ -136,7 +128,7 @@ struct NewTaskWorkflow: View {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                 Text("In")
                 Menu(scopeName) {
-                    Button(Self.repositoryName(model)) { waveID = nil }
+                    Button(model.repositoryName) { waveID = nil }
                     ForEach(model.visibleRoadmaps, id: \.wave.id) { roadmap in
                         Button(roadmap.wave.displayName) { waveID = roadmap.wave.id }
                     }
@@ -163,13 +155,20 @@ struct NewTaskWorkflow: View {
                 WorkflowLine(outline: outline).accessibilityIdentifier("new-task-steps")
             }
         }
-    }
+    }}
 
-    /// Whose default the reported workflow is, named for the scope it follows.
-    static func defaultPhrase(_ reported: WaveGraph.Default, scope: String) -> String {
-        switch reported.source {
+extension WorkModel {
+    /// The Wave a Task is filed in, else the repository.
+    func scopeName(_ wave: WaveSnapshot?) -> String { wave?.displayName ?? repositoryName }
+
+    /// Whose choice a workflow is, from the layer Rust says chose it: "your
+    /// default", "loopflow's default" for the scope it follows, "the default"
+    /// for the builtin, and "for this Task only" when the Task has its own.
+    func workflowChoice(source: String?, wave: WaveSnapshot?) -> String {
+        switch source {
+        case nil: "for this Task only"
         case "personal": "your default"
-        case "repository": "\(scope)'s default"
+        case "repository": "\(scopeName(wave))'s default"
         default: "the default"
         }
     }

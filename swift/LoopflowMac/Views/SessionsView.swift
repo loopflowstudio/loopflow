@@ -1577,8 +1577,7 @@ struct SessionsContentView: View {
                 .accessibilityIdentifier("work-layout")
                 .transition(.zoom(from: navigation.zoomOrigin))
             } else {
-                ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
-                    description: Text("Open a repository, Wave or Task from the sidebar."))
+                ChooseWork()
             }
         }
         .coordinateSpace(.named(ZoomFromTile.space))

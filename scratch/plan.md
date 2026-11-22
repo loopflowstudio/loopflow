@@ -310,12 +310,10 @@ Gone already: `WorkflowSteps`, `WorkflowChooser`, `WorkflowDefinition`,
 count, "Takes up … when it starts", the "· loopflow's default" assertion and
 the `new-task-workflow-<name>` identifiers. Remaining:
 
-- `SessionSlotOffer`; "feature · repository" and "No workflow selected"
-  (`TaskWorkView.swift:26`, `:418`, `WorkNavigationTests.swift:1013`);
-  `NewTaskWorkflow.defaultPhrase`, into the one whose-default function.
-- `PaneEmptyState`'s name, its `systemImage` and icon-only compact fallback.
-- Every `ContentUnavailableView` in `swift/LoopflowMac` (14 sites in 8
-  files, `WorkspacePanesView.swift:210` being `PaneEmptyState` itself).
+- Every `ContentUnavailableView` left in `swift/LoopflowMac`:
+  `OpenSourceLicenses:51`, `DashboardView:127`, `RoadmapView` ("Nothing
+  needs action"), `SessionsView` ("Workspace unavailable"),
+  `WorkActivityView:86`, `TaskFilesView` (3).
 - In `DESIGN.md`: "Tokens today" gains `EmptyState` in the component list,
   and the `display`, `title` and `lede` rows name the sheet and state titles.
 
@@ -404,10 +402,42 @@ demo: not headless; qa or demo runs it.
    - Not seen in the Dev app: the borderless menus' face and baseline beside
      the sentence, the 540 pt sheet's height without the divider.
    - Checks: `scripts/test_desktop.sh --filter NewTaskTests` passed (4 tests).
-3. **`EmptyState` and the drawn states. Next.** Rewrite `PaneEmptyState` into
-   `Design/EmptyState.swift`, move its pane sites, then the prototype's
-   states, `TaskStartOffer` among them with the one whose-default phrase;
-   `SessionSlotOffer` goes. The empty, failed and unstarted view tests.
+3. **`EmptyState` and the drawn states. Built.** `Design/EmptyState.swift`
+   is `EmptyState(title:sentence:machine:) { actions }`; `PaneEmptyState`,
+   `SessionSlotOffer`, "feature · repository", "No workflow selected" and
+   `NewTaskWorkflow.defaultPhrase` are gone. The pane sites, the empty
+   repository (`NoPlannedWork`, shared by `WorkSurfaceView` and
+   `RoadmapView`), "Choose Work" (`ChooseWork`, also `SessionsView`'s "No
+   Work open"), the missing selection, the repository that did not open
+   (`RepositoryDidNotOpen`, in the launch window and
+   `RepositoryWorkspaceContent`) and `TaskStartOffer` use it. What it taught:
+   - Whose choice is `WorkModel.workflowChoice(source:wave:)`; a filed Task's
+     pair is `workflowSelection(_:)` ("feature, loopflow's default"), which
+     the status strip and the Graph log's position line print too.
+   - The wire cannot tell a Wave's `graph:` from the repository's: both are
+     `ConfigSource::Repository`, and a Task with its own Graph sends no
+     source. So "the Wave's default" cannot be said; the pane names the scope
+     as the sheet does ("Product's default"), and `docs/surfaces.md` now
+     shows that (questions 13).
+   - `sentence` is a `String`, so the workflow's name in the unstarted
+     sentence is not mono as the prototype draws it (questions 16).
+   - "Open another repository…" and "Open its conversations" did not ship:
+     the open panel lives in `LoopflowApp` and neither view reaches it or a
+     retained workspace's conversations.
+   - `RepositoryWorkspaceContent` with a retained workspace and an error
+     keeps its inline text and Retry beside the content; slice 4's inline
+     failures restyle it.
+   - Compact: the title and the buttons, else the buttons alone, with the
+     sentence or the machine's message as help. A compact state with no
+     button and no room shows nothing ("Work unavailable" in a narrow tile).
+   - Not seen in the Dev app: any of these states, the borderless "Start
+     with…" beside the accent Start, compact tiles. qa or demo looks.
+   - Checks: `scripts/test_desktop.sh --filter 'EmptyStateTests|NewTaskTests'`
+     passed (8 tests); so did `unstartedTaskOffersStart`,
+     `workflowReadingStates`, `workStates`,
+     `finishedOwnedTaskWithoutHistoryShowsRecord`, `reopenDuringResolution`
+     and `TypographyDisciplineTests`. `documented_commands::` not run after
+     the one-word `docs/surfaces.md` edit; gate runs it.
 4. **Every remaining `ContentUnavailableView`, the plain `Text` empties and
    inline failures**, then the source scan and the rest of `DESIGN.md`
    ("Tokens today" gains `EmptyState`; the ramp rows name the sheet and state
@@ -424,5 +454,3 @@ match.
   "Describe a Graph".
 - `docs/work.md`: `graph.steps[].interactive` covers a stop inside the step.
 
-Open: `scratch/questions.md` 13, whether the sheet ("Product's default") and
-the unstarted pane ("the Wave's default") share one phrase.

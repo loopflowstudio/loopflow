@@ -22,8 +22,7 @@ struct TaskWorkflowHeader: View {
     private var position: String? {
         if let workflow = work.value?.graph { return workflow.sentence }
         if work.value != nil {
-            // The shared resolver reports the first-run default and its owner.
-            return task.graphName.map { "\($0) · \(task.graphSource ?? "")" } ?? "No workflow selected"
+            return model.workflowSelection(task)
         }
         return work.isLoading ? task.setupPosition ?? "Reading workflow…" : nil
     }
@@ -231,26 +230,49 @@ struct TaskHeading: View {
     }
 }
 
-/// An unstarted Task's Session slot. Showing it starts nothing; Start runs the
-/// Task's Workflow through the same path as `lf task run`.
+/// An unstarted Task's Session slot, in the New Task sheet's words: the
+/// workflow Start will run, whose choice it is and where a person takes part.
+/// Showing it starts nothing; Start runs the same path as `lf task run`.
 struct TaskStartOffer: View {
     let model: WorkModel
     let task: RoadmapTask
+    @Environment(\.compactPanes) private var compact
+
+    private var sentence: String {
+        let outline = task.graphName.flatMap { name in model.graphCatalog.value?.first { $0.name == name }?.workflow }
+        return (["Not started."] + [model.workflowSelection(task).map { "It will run \($0)." }, outline?.sentence].compactMap { $0 })
+            .joined(separator: " ")
+    }
 
     var body: some View {
-        SessionSlotOffer(
-            title: "Not started", systemImage: "play.circle",
-            action: "Start", actionImage: "play.fill",
-            note: "Starts this Task’s Workflow and its first conversation.",
-            unavailable: model.runRefusal(task), help: "lf task run \(task.task.identifier)",
-            accessibilityLabel: "Start \(task.task.identifier)",
-            actionIdentifier: "task-start-\(task.id)",
-            perform: { model.startTaskFromInput(nil, task: task) }
-        ) {
-            Text(task.task.description.isEmpty ? "No description recorded." : task.task.description)
-                .lineLimit(8)
+        let refusal = model.runRefusal(task)
+        EmptyState(title: task.task.name, sentence: sentence) {
+            Button("Start") { model.startTaskFromInput(nil, task: task) }
+                .buttonStyle(LoopflowButtonStyle(.accent))
+                .disabled(refusal != nil)
+                .help(refusal ?? "lf task run \(task.task.identifier)")
+                .accessibilityLabel("Start \(task.task.identifier)")
+                .accessibilityIdentifier("task-start-\(task.id)")
+            if !compact {
+                Menu("Start with…") {
+                    StartFlowItems(model: model, chosen: task.graphName) { model.startTaskFromInput($0, task: task) }
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .disabled(refusal != nil)
+                .accessibilityIdentifier("task-start-with-\(task.id)")
+            }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("task-start-offer-\(task.id)")
+        .task { await model.loadGraphCatalog() }
+    }
+}
+
+extension WorkModel {
+    /// The workflow a Task's first run takes up and whose choice it is:
+    /// "feature, loopflow's default".
+    func workflowSelection(_ task: RoadmapTask) -> String? {
+        task.graphName.map { "\($0), \(workflowChoice(source: task.graphSource, wave: self.task(id: task.id)?.wave?.wave))" }
     }
 }
 
@@ -415,7 +437,7 @@ struct GraphProcessLog: View {
                     HStack {
                         if let work {
                             Text(work.graph?.sentence ?? (readsWindow ? task?.execution : captured?.row?.execution)?.reason
-                                 ?? "No workflow selected")
+                                 ?? task.flatMap(model.workflowSelection) ?? "")
                                 .accessibilityIdentifier("task-run-position")
                         } else {
                             Text(task?.setupPosition ?? "Reading workflow…")

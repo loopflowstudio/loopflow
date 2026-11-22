@@ -11,8 +11,7 @@ struct WorkspaceLaunchView: View {
     var body: some View {
         VStack {
             if let error {
-                Text(error).textSelection(.enabled)
-                Button("Retry") { Task { await launch() } }
+                RepositoryDidNotOpen(error: error) { Task { await launch() } }
             } else {
                 ProgressView("Opening repository…")
             }
@@ -90,6 +89,20 @@ struct RepositoryWorkspaceView: View {
     }
 }
 
+/// A repository with nothing to show in its place: the Machine's message and Retry.
+struct RepositoryDidNotOpen: View {
+    let error: String
+    let retry: () -> Void
+
+    var body: some View {
+        EmptyState(title: "This repository did not open", machine: error) {
+            Button("Retry", action: retry)
+                .buttonStyle(LoopflowButtonStyle(.accent))
+                .accessibilityIdentifier("repository-retry")
+        }
+    }
+}
+
 /// Keep the content at one structural position through refresh and failure.
 struct RepositoryWorkspaceContent<Content: View>: View {
     let workspace: RepositoryWorkspace?
@@ -101,10 +114,13 @@ struct RepositoryWorkspaceContent<Content: View>: View {
         VStack(spacing: 0) {
             if let workspace {
                 content(workspace)
-            } else if error == nil {
+            } else if let error {
+                RepositoryDidNotOpen(error: error, retry: retry)
+            } else {
                 ProgressView("Opening repository…")
             }
-            if let error {
+            // A retained workspace stays mounted; its failure reads beside it.
+            if let error, workspace != nil {
                 HStack {
                     Text(error).textSelection(.enabled)
                     Button("Retry", action: retry)

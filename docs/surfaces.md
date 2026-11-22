@@ -186,7 +186,7 @@ feature   ☺ explore   plan   build   ☺ ship-review   deliver   ☺ verify   
 
 Customize terminal chords
 
-Not started. It will run feature, the Wave's default.
+Not started. It will run feature, Product's default.
 You take part at explore, ship-review and verify.
 
 [Start]   Start with… ▾

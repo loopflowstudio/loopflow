@@ -249,7 +249,7 @@ struct DashboardTile: View {
                     // Dashboard stays. The zoom control is the way into the Work.
                     ConversationPlaceholder(workspace: entry, model: model, sessions: sessions)
                 }
-            } else { PaneEmptyState(title: "Work unavailable", systemImage: "exclamationmark.triangle") }
+            } else { EmptyState(title: "Work unavailable") }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             // The slot grid clips each tile at its frame.
             .overlay(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)

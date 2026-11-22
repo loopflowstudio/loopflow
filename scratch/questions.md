@@ -104,3 +104,16 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
 32. **The scrolling Task detail's bottom margin is 32 pt**, where it was 72.
 33. **The browser pane's Back, Forward and Reload are bordered icon
     buttons**, like the roadmap's Refresh (question 26).
+34. **Four AppKit views keep a system font set by number.** The file editor
+    (`TaskFileDocument.swift:133`), the history filter's counts
+    (`TaskHistoryFilter.swift:128`), the terminal search count
+    (`TerminalSearchBar.swift:46`) and the licenses text
+    (`OpenSourceLicenses.swift:72`) use `ofSize:`, which
+    `DesignDisciplineTests` does not read, so DESIGN.md's "fails on a font
+    outside the ramp" holds for SwiftUI only. Found after slice 4; the plan
+    never listed them. Move them to the bundled faces and add `ofSize:` to
+    the test, here or in their own Task?
+35. **The Files tree's changed-directory badge is a typed "•"**
+    (`CheckoutTree.swift:159`), in the mono column that holds M, R and U. The
+    plan named the unsaved-draft "•" only. Leave it as that column's mark, or
+    make it a symbol?

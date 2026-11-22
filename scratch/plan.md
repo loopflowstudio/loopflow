@@ -66,31 +66,32 @@ look needs a display, so it belongs to qa and review, not to build.
 
 ## What the code is today
 
-Counts are from `swift/LoopflowMac` at the base commit unless a slice is
-named. After slice 4 the acceptance grep prints nothing and
-`DesignDisciplineTests` passes.
+All four slices are built. The acceptance grep prints nothing (seen again
+after slice 4's commit, 6fe53188bb) and the Checks table has
+`DesignDisciplineTests` passing. Nothing remains for build; what is left is
+the Dev app look (qa) and the choices in `scratch/questions.md`.
 
-- Font sizes are already on the ramp: `TypographyDisciplineTests` holds it.
-  One literal remains, the AppKit field at `WorkPalette.swift:452`
-  (`NSFont(name:size: 13)`).
-- 177 lines pass a literal padding and 132 pass a literal non-zero `spacing:`.
-  Off-scale values in use: 1, 3, 5, 6, 7, 9, 10, 14, 15, 17, 18, 22, 28, 30,
-  36, 72, 96. Heaviest files: `TaskChangesView` 22, `WorkNavigator` 18,
-  `ReviewStreamView` 18, `TaskFilesView` 17, `NewTaskSheet` 14.
-- 29 uses of system button styles (`.borderedProminent`, `.bordered`,
-  `.controlSize`) and 11 of `.secondary` or a system color in place of a role.
-- 69 uses of `Typography.mono`; each needs reading against "could a person
-  paste this into a terminal".
-- `WorkSectionHeading` and `WorkDisclosureHeading` are already sentence case
-  since #2016; only their doc comments still say "caps". One live uppercase is
-  left since slice 3, the kind label in `WorkActivityView.swift:109`, and 22
-  uses of a system button style.
+- At the base, 177 lines passed a literal padding and 132 a literal non-zero
+  `spacing:`, with off-scale values 1, 3, 5, 6, 7, 9, 10, 14, 15, 17, 18, 22,
+  28, 30, 36, 72, 96. All are named steps now.
+- SwiftUI text is on the ramp and the test holds it. Four AppKit views set a
+  system font by number and no rule reads them (`ofSize:` has a capital S):
+  the file editor (`TaskFileDocument.swift:133`, system mono 12), the history
+  filter's counts (`TaskHistoryFilter.swift:128`, `:186`), the terminal
+  search count (`TerminalSearchBar.swift:46`, 11) and the licenses text
+  (`OpenSourceLicenses.swift:72`). They were there at the base. See
+  question 34.
+- 52 `.buttonStyle(.plain)` remain, on rows and icon buttons that draw
+  themselves; no `.bordered`, `.borderedProminent` or `.link` is left.
+  `.controlSize` remains on progress spinners and three checkboxes.
+- `WorkSectionHeading` and `WorkDisclosureHeading` are sentence case and
+  their comments say so. No `uppercased()` or tracking is left on a label.
+- The changed-directory badge in the Files tree is still a typed "•"
+  (`CheckoutTree.swift:159`, drawn at `TaskFilesView.swift:275` in the column
+  that holds M, R and U). See question 35.
 - `WaveStandupBoard.swift` no longer exists. The Portfolio window
   (`WavesView`) mounts `WaveDetailPane` and `RoadmapView`; those are the Wave
   page and the standup's successor.
-- DESIGN.md's "✓/✗ before key results (`BacklogView.swift`)" pointer is
-  already fixed in code (`Label` with SF Symbols); the pointer is stale. "⚠"
-  remains at `TaskFilesView.swift:368`.
 - Task rows and the seven ways of saying where a Task stands are gone since
   slice 1: one `TaskRow` drawing one `TaskStanding`, and a click opens the
   Task on every Portfolio list. The backlog row is its own view; since

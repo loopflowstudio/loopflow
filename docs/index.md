@@ -190,7 +190,7 @@ Every skill also sees `LOOPFLOW.md`, `scratch/`, and `.lf/wave/`.
 Pull in more context explicitly:
 
 ```bash
-lf gate --docs VISUAL_DESIGN.md        # one doc
+lf gate --docs DESIGN.md               # one doc
 lf gate --docs 'docs/*.md'             # a glob
 lf gate --diff files                   # bodies of files changed on the branch
 lf debug -c                            # the clipboard

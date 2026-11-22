@@ -50,6 +50,15 @@ struct ThemeChooser: View {
             HStack {
                 if editing, appearance.selectedSource == .yours {
                     Button("Done Editing") { editing = false }
+                } else {
+                    // Here rather than under the chosen card, so choosing a card never moves the grid.
+                    Button("Customize") { appearance.customize(); editing = true }
+                        .help(appearance.selectedSource == .yours ? "Edit your theme" : "Make your own copy of \(appearance.selectedTheme.name)")
+                        .accessibilityIdentifier("appearance-customize-theme")
+                }
+                if appearance.canDelete {
+                    Button(appearance.deleteRevertsToBuiltin ? "Revert to built-in" : "Delete") { appearance.deleteTheme() }
+                        .accessibilityIdentifier("appearance-delete-theme")
                 }
                 if let config = appearance.configPath {
                     DisclosureGroup("Advanced") {
@@ -100,42 +109,18 @@ struct ThemeChooser: View {
     /// The theme drawn in its own roles; the chosen card is ringed in the window's focus color.
     private func card(_ entry: ThemeEntry, side: AppearanceMode) -> some View {
         let assigned = appearance.themeName(for: side) == entry.name
-        let selected = assigned && appearance.previewSide == side
-        return VStack(alignment: .leading, spacing: Spacing.xs) {
-            Button { editing = false; appearance.previewTheme(entry.name) } label: {
-                ThemeCard(theme: entry.theme)
-                    .overlay(RoundedRectangle(cornerRadius: CornerRadius.row)
-                        .strokeBorder(assigned ? palette.keyboardFocus : entry.theme.palette.border, lineWidth: assigned ? 2 : 1))
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .workFocusRing()
-            .accessibilityLabel(entry.name)
-            .accessibilityAddTraits(assigned ? .isSelected : [])
-            .accessibilityIdentifier("appearance-theme-\(entry.name)")
-            if selected {
-                // Labels never wrap mid-word; a narrow card stacks the buttons instead.
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: Spacing.xs) { themeActions(entry) }
-                    VStack(alignment: .leading, spacing: Spacing.xs) { themeActions(entry) }
-                }
-                .font(Typography.meta).buttonStyle(LoopflowButtonStyle())
-            }
+        return Button { editing = false; appearance.previewTheme(entry.name) } label: {
+            ThemeCard(theme: entry.theme)
+                .overlay(RoundedRectangle(cornerRadius: CornerRadius.row)
+                    .strokeBorder(assigned ? palette.keyboardFocus : entry.theme.palette.border, lineWidth: assigned ? 2 : 1))
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .workFocusRing()
+        .accessibilityLabel(entry.name)
+        .accessibilityAddTraits(assigned ? .isSelected : [])
+        .accessibilityIdentifier("appearance-theme-\(entry.name)")
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private func themeActions(_ entry: ThemeEntry) -> some View {
-        Button("Customize") { appearance.customize(); editing = true }
-            .help(entry.source == .yours ? "Edit your theme" : "Make your own copy of \(entry.name)")
-            .accessibilityIdentifier("appearance-customize-theme")
-            .fixedSize()
-        if appearance.canDelete {
-            Button(appearance.deleteRevertsToBuiltin ? "Revert to built-in" : "Delete") { appearance.deleteTheme() }
-                .accessibilityIdentifier("appearance-delete-theme")
-                .fixedSize()
-        }
     }
 
     private func importTheme() {

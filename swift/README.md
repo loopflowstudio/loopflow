@@ -350,8 +350,8 @@ light half **Fig Leaf** a leaf-green ground with plum ink.
 
 Your themes are Ghostty theme files in `~/.lf/themes/`; `~/.config/ghostty/themes/`
 is read too, never written. Names resolve to yours, then built-ins, then Ghostty's.
-A file named like a built-in overrides it. **Customize** on a built-in writes your
-copy; on yours it edits in place. **Delete** removes yours (**Revert to built-in**
+A file named like a built-in overrides it. **Customize**, beside Cancel and Apply,
+acts on the chosen card: on a built-in it writes your copy; on yours it edits in place. **Delete** removes yours (**Revert to built-in**
 for an override). **Import file…** copies a theme into Yours on the side its colors say; in Light
 or Dark mode the preview switches to that side.
 

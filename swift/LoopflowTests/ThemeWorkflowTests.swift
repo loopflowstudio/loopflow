@@ -69,16 +69,19 @@ struct ThemeWorkflowTests {
             #expect(appearance.entries(for: .light).builtins.allSatisfy { !$0.theme.isDark })
             #expect(appearance.entries(for: .dark).builtins.count == 12)
             #expect(appearance.entries(for: .dark).builtins.allSatisfy { $0.theme.isDark })
-            // System lists both sides at once; each card assigns its own side and takes the Customize row.
+            // System lists both sides at once; each card assigns its own side. Customize stays in the
+            // bottom bar for whichever card was chosen, so choosing one never grows the grid.
             func customizeShown(under name: String) -> Bool {
                 (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-\(name)").parent()
                     .find(viewWithAccessibilityIdentifier: "appearance-customize-theme")) != nil
             }
             try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Fjord Light").button().tap()
-            #expect(customizeShown(under: "Fjord Light"))
-            try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Signal").button().tap()
-            #expect(customizeShown(under: "Signal"))
+            #expect(appearance.selectedName == "Fjord Light")
             #expect(!customizeShown(under: "Fjord Light"))
+            try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Signal").button().tap()
+            #expect(appearance.selectedName == "Signal")
+            #expect(!customizeShown(under: "Signal"))
+            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-customize-theme")
             #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-heading-light").text().string() == "Light themes · Fjord Light")
             #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-heading-dark").text().string() == "Dark themes · Signal")
             #expect(appearance.themeName(for: .light) == "Fjord Light")

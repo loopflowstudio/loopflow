@@ -11,6 +11,7 @@
 
 - Website suite: 73 passed (after the QA nav fix and regenerating `docs/dev/index.html`).
 - QA (`scratch/qa.html`): 14 pages at desktop and phone widths, copy button, nav menu, `docs/dev/index.html`; Ghostty `+validate-config` accepts the new terminal defaults.
+- QA after the cleanup (`scratch/qa.html` §5): 84 crawled pages answer 200, the three deleted routes 404 and leave the sitemap and llms.txt, and the Install button's focus ring is dark on wine.
 - Swift build of `GhosttyManager.swift` and a look at the terminal rendering: not run here; gate/CI builds it, a person looks.
 
 ## Concept-review cleanup (done)

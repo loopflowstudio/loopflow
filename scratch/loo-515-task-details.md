@@ -503,3 +503,12 @@ Jack, on the branch build:
 
 1. The change count ("N changes", "2 of N") is right from the first frame and never grows as patches load. `task.changes` already lists every file; carry each file's change count there (one value, computed in Rust from the patch: contiguous runs of changed lines, matching the client's stops, including how moved blocks count) or otherwise know it before the patches arrive.
 2. Scrolling is smooth on a large change (this PR's own Diff is the test). Paginate if that's what it takes: jumping to any file from the sidebar must be instant, and that matters more than one continuous stream.
+
+Order for item 2, as pasted by Jack:
+
+> Pagination would bound both costs. Fixing the first is cheaper and keeps the single stream you read from top to bottom. In order:
+> 1. Profile one slow Task in Instruments to confirm where the time goes.
+> 2. Draw every line as its own lazy row, so a long change is built only as it scrolls into view.
+> 3. If it's still slow, paginate by file. The stream shows a window of files around where you are, and the sidebar, j/k and the marks jump between windows.
+
+(The marks are gone since cfc6c89cc5; the sidebar and stepping are what jump.)

@@ -25,9 +25,12 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     private(set) var saveFailed = false
     private(set) var readOnlyReason: String?
     var onEdit: (() -> Void)?
-    /// The palette the editor shows, once it has been on screen.
-    @ObservationIgnored private var palette: LoopflowPalette?
+    /// The theme the editor shows, once it has been on screen.
+    @ObservationIgnored private var theme: ThemeDefinition?
     @ObservationIgnored private var coloringScheduled = false
+    /// The last highlights worked out, and the `editVersion` of the text they read.
+    @ObservationIgnored private var colored: (version: Int, highlights: [Grammar.Highlight])?
+    @ObservationIgnored private var highlighting = false
 
     var canSave: Bool {
         dirty && !saving && external == nil && deferredSnapshot == nil
@@ -150,21 +153,65 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     }
 
     /// The editor's colors, syntax included. Setting the text color clears
-    /// every syntax color, so they are applied again after it.
-    func applyPalette(_ palette: LoopflowPalette) {
-        self.palette = palette
-        editor.applyPalette(palette)
-        colorSyntax()
+    /// every syntax color, so they are painted again after it.
+    func applyTheme(_ theme: ThemeDefinition) {
+        if let shown = self.theme, shown.name == theme.name, shown.palette.definition == theme.palette.definition,
+           shown.terminal == theme.terminal { return }
+        self.theme = theme
+        editor.applyPalette(theme.palette)
+        paintSyntax()
+        if colored?.version != editVersion { colorSyntax() }
     }
 
+    /// Parse the buffer off the main thread, one parse at a time. Colors are
+    /// painted only for the text they were worked out from; typing meanwhile
+    /// keeps the colors already shown and parses again once this one ends.
     private func colorSyntax() {
-        guard let palette, !editor.hasMarkedText() else { return }
-        editor.textStorage?.colorSyntax(path: path, palette: palette)
+        guard theme != nil, !highlighting else { return }
+        highlighting = true
+        let version = editVersion, text = editor.string, path = path
+        Task { [weak self] in
+            let highlights = await Task.detached(priority: .userInitiated) {
+                Grammar.named(path)?.highlights(of: text) ?? []
+            }.value
+            guard let self else { return }
+            self.highlighting = false
+            if self.editVersion == version {
+                self.colored = (version, highlights)
+                self.paintSyntax()
+            } else {
+                self.colorSyntax()
+            }
+        }
     }
 
-    /// Storage cannot change inside its own editing callback; color after it.
+    private func paintSyntax() {
+        guard let theme, let colored, colored.version == editVersion, !editor.hasMarkedText(),
+              let storage = editor.textStorage, let font = editor.font else { return }
+        let inks = SyntaxInks.of(theme)
+        let whole = NSRange(location: 0, length: storage.length)
+        storage.beginEditing()
+        storage.addAttribute(.foregroundColor, value: NSColor(theme.palette.text), range: whole)
+        storage.addAttribute(.font, value: font, range: whole)
+        let bold = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+        let italic = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+        for highlight in colored.highlights where NSMaxRange(highlight.range) <= storage.length {
+            guard let ink = highlight.ink else { continue }
+            switch ink {
+            case .emphasis: storage.addAttribute(.font, value: italic, range: highlight.range)
+            case .strong: storage.addAttribute(.font, value: bold, range: highlight.range)
+            default:
+                if ink == .heading { storage.addAttribute(.font, value: bold, range: highlight.range) }
+                if let color = inks.color(ink) { storage.addAttribute(.foregroundColor, value: NSColor(color), range: highlight.range) }
+            }
+        }
+        storage.endEditing()
+    }
+
+    /// Storage cannot change inside its own editing callback, and `editVersion`
+    /// settles after it; color after it.
     private func scheduleSyntaxColors() {
-        guard palette != nil, !coloringScheduled else { return }
+        guard theme != nil, !coloringScheduled else { return }
         coloringScheduled = true
         Task { [weak self] in
             await Task.yield()
@@ -1265,6 +1312,33 @@ final class TaskFilesStore {
         } catch {
             tourWriting = .failed("The tour could not start: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: Syntax colors
+
+    /// Each file's syntax colors, with the fingerprint of the lines they were
+    /// worked out from. Parsing runs off the main thread.
+    private var highlighted: [String: (fingerprint: Int, highlights: FileHighlights)] = [:]
+    @ObservationIgnored private var highlighting: [String: Int] = [:]
+
+    /// The file's syntax colors, worked out from its hunks the first time they
+    /// are asked for. Until they arrive, the colors of the lines it had before,
+    /// which keep their numbers when skipped lines open.
+    func highlights(of file: ReviewFile) -> FileHighlights? {
+        let known = highlighted[file.path]
+        if known?.fingerprint == file.fingerprint { return known?.highlights }
+        if highlighting[file.path] != file.fingerprint {
+            highlighting[file.path] = file.fingerprint
+            Task { [weak self] in
+                let result = await Task.detached(priority: .userInitiated) {
+                    Grammar.named(file.path).map { FileHighlights.hunks(of: file, grammar: $0) } ?? FileHighlights()
+                }.value
+                guard let self, self.highlighting[file.path] == file.fingerprint else { return }
+                self.highlighting[file.path] = nil
+                self.highlighted[file.path] = (file.fingerprint, result)
+            }
+        }
+        return known?.highlights
     }
 
     // MARK: Skipped lines

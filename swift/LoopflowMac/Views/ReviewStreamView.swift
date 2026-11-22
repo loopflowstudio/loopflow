@@ -19,6 +19,7 @@ struct ReviewStream: View {
     var headsFirstFile = true
     let addToConversation: ((String) -> Bool)?
     @Environment(\.palette) private var palette
+    @Environment(\.theme) private var theme
 
     var body: some View {
         if let error = store.gapError { ReviewNotice(text: error) }
@@ -334,7 +335,9 @@ struct ReviewStream: View {
                 Text(tone == nil ? " " : line.kind == .added ? "+" : "−")
                     .foregroundStyle(tone?.ink ?? palette.textSecondary)
                     .textSelection(.disabled)
-                Text(Self.attributed(text, segments: cut == nil ? segments : nil, tone: tone, path: path, palette: palette))
+                Text(Self.attributed(text, segments: cut == nil ? segments : nil, tone: tone,
+                                     highlights: store.highlights(of: file)?.spans(for: line) ?? [],
+                                     inks: SyntaxInks.of(theme)))
                     .lineLimit(store.wrapsLines ? nil : 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -374,9 +377,9 @@ struct ReviewStream: View {
     }
 
     /// The line in its syntax colors; the changed words of an edited line
-    /// carry a stronger fill.
+    /// carry a stronger fill. A cut line colors only what it shows.
     static func attributed(_ text: String, segments: [ReviewSegment]?, tone: ThemeTone?,
-                           path: String, palette: LoopflowPalette) -> AttributedString {
+                           highlights: [Grammar.Highlight], inks: SyntaxInks) -> AttributedString {
         var result = AttributedString()
         if let segments, let tone {
             for segment in segments {
@@ -389,7 +392,7 @@ struct ReviewStream: View {
         } else {
             result = AttributedString(text.isEmpty ? " " : text)
         }
-        result.colorSyntax(of: text, path: path, palette: palette)
+        result.paint(highlights, inks: inks)
         return result
     }
 

@@ -293,6 +293,37 @@ struct TaskFilesTests {
         #expect(document.text == "disk\ntwo\nTHREE\n")
     }
 
+    /// The editor colors through the file's grammar, off the main thread, and
+    /// colors again after typing: wrapping code in a block comment turns it
+    /// comment-colored.
+    @Test func theEditorColorsByGrammarAsYouType() async throws {
+        let document = TaskFileDocument(path: "Store.swift")
+        await document.reconcile(snapshot("struct Store {}\nlet count = 42\n"))
+        let theme = ThemeDefinition.dark
+        document.applyTheme(theme)
+        let inks = SyntaxInks.of(theme)
+        func ink(at offset: Int) -> UInt32? {
+            guard let color = document.editor.textStorage?.attribute(.foregroundColor, at: offset, effectiveRange: nil)
+                    as? NSColor, let rgb = color.usingColorSpace(.sRGB) else { return nil }
+            return UInt32(rgb.redComponent * 255 + 0.5) << 16 | UInt32(rgb.greenComponent * 255 + 0.5) << 8
+                | UInt32(rgb.blueComponent * 255 + 0.5)
+        }
+        func settles(_ offset: Int, to expected: SyntaxInk) async -> Bool {
+            for _ in 0..<500 {
+                if ink(at: offset) == inks.colors[expected]?.hex { return true }
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            return false
+        }
+        #expect(await settles(0, to: .keyword))
+        #expect(await settles(28, to: .constant))
+        // An unclosed `/*` is a parse error, not a comment; closing it is.
+        document.editor.insertText("/*", replacementRange: NSRange(location: 0, length: 0))
+        document.editor.insertText("*/", replacementRange: NSRange(location: 34, length: 0))
+        #expect(await settles(2, to: .comment))
+        #expect(await settles(30, to: .comment))
+    }
+
     @Test func sameRevisionAccessChangePreservesDraftSelectionAndUndo() async {
         let document = TaskFileDocument(path: "note.txt")
         let original = snapshot("original")

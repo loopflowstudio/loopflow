@@ -18,6 +18,9 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     from: 2.7.0
+  SwiftTreeSitter:
+    url: https://github.com/ChimeHQ/SwiftTreeSitter
+    from: 0.25.0
 
 targets:
   Loopflow:
@@ -48,8 +51,12 @@ targets:
         excludes:
           - Info.plist
           - GhosttyResources
+          - Grammars
           - ThirdPartyNotices
       - path: LoopflowMac/GhosttyResources
+        buildPhase: resources
+        type: folder
+      - path: LoopflowMac/Grammars
         buildPhase: resources
         type: folder
       - path: LoopflowMac/ThirdPartyNotices
@@ -58,6 +65,10 @@ targets:
     dependencies:
       - target: Loopflow
       - package: Sparkle
+      - package: SwiftTreeSitter
+      # Built by `scripts/loopflow-dev.py grammars-build`, as Package.swift links it.
+      - framework: .build/local/TreeSitterGrammars.xcframework
+        embed: false
     postBuildScripts:
       - name: Stamp app build identity
         script: |

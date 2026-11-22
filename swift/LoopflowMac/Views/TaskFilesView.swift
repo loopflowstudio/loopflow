@@ -535,6 +535,7 @@ private enum TaskHTMLRules {
 private struct TaskDocumentView: NSViewRepresentable {
     let document: TaskFileDocument
     @Environment(\.palette) private var palette
+    @Environment(\.theme) private var theme
     func makeNSView(context: Context) -> NSView { NSView() }
     func updateNSView(_ host: NSView, context: Context) {
         if document.scroll.superview !== host {
@@ -544,7 +545,7 @@ private struct TaskDocumentView: NSViewRepresentable {
             document.scroll.autoresizingMask = [.width, .height]
             host.addSubview(document.scroll)
         }
-        document.applyPalette(palette)
+        document.applyTheme(theme)
         document.editor.recordReadiness()
         document.scroll.backgroundColor = NSColor(palette.background)
     }

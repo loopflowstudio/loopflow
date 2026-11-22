@@ -12,13 +12,15 @@ struct TaskWorkspaceView: View {
     @State private var showsChanges = false
     /// The Task as the Machine last read it.
     @State private var reading = Loaded<Reading>.loading
+    /// The conversation that began while the screen was showing.
+    @State private var begun: String?
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(spacing: 0) {
             // While the Machine is away the sentence would be an old one.
-            if case .value(let reading) = reading, let graph = reading.graph, feed.pendingChanges.acceptsChanges {
-                WorkflowLine(graph: graph, auto: states.contains(.auto))
+            if case .value(let reading) = reading, let graph = reading.work.graph, feed.pendingChanges.acceptsChanges {
+                WorkflowLine(graph: graph, auto: reading.actions?.auto == .on)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Spacing.lg)
@@ -32,53 +34,61 @@ struct TaskWorkspaceView: View {
             ToolbarItem(placement: .topBarTrailing) { actions.disabled(!feed.pendingChanges.acceptsChanges) }
         }
         .overlay { NoticeView(center: feed.notices) }
-        .task(id: scenePhase == .active) { await watchGraph() }
+        .task(id: scenePhase == .active) { await watchTask() }
     }
 
-    /// What the Machine read of one Task: its Graph (nil until it takes one up),
-    /// the states its row carries, and its checkout once it has one.
+    /// What the Machine read of one Task: its work (the Graph it took up and
+    /// its Sessions), its row, and its auto mark.
     struct Reading: Equatable {
-        let graph: TaskGraph?
-        let states: [WorkSelectionState]
-        let checkout: String?
-    }
+        let work: TaskOverview
+        let row: RoadmapTask?
+        let execution: TaskExecution?
 
-    /// The feed's row for this Task, with pending changes made. The list's
-    /// filter decides whether it has one: a Task just started leaves Backlog,
-    /// and one opened from its creation answer may never have been listed.
-    private var row: WorkViewPlan.Content? {
-        feed.shownRepositories.lazy.flatMap(\.tasks).first { $0.work.id == task.id }
-    }
-
-    /// The Task's states from its own reading, which no filter hides; the
-    /// list's row stands in until that reading arrives.
-    private var states: [WorkSelectionState] {
-        if case .value(let reading) = reading { return reading.states }
-        return row?.states ?? []
-    }
-
-    /// Where on the Machine a write for this Task runs: its repository while
-    /// the list shows it, else its own checkout.
-    private var directory: String? {
-        if let row, let path = feed.directory(of: row) { return path }
-        if case .value(let reading) = reading { return reading.checkout }
-        return nil
+        var actions: TaskActions? { row.map { TaskActions(work: work, row: $0, execution: execution) } }
+        /// Nil until the Task starts.
+        var checkout: String? { row?.reference.workspace?.worktree }
     }
 
     /// Follow the Task's reading while the screen shows and the app is active.
     /// A lost link resumes the same reading; one that cannot start leaves no
     /// sentence, and the Notice says why the Machine is away.
-    private func watchGraph() async {
+    private func watchTask() async {
         guard scenePhase == .active else { return }
         let watch = client.observeTask(issue: task.id)
         defer { watch.cancel() }
         do {
-            for try await frame in watch.updates { reading = Self.reading(in: frame, task: task.id) }
+            for try await frame in watch.updates {
+                reading = Self.reading(in: frame, task: task.id)
+                await openConversation()
+            }
         } catch is CancellationError {
             return
         } catch {
             reading = .failed(machineConnectionMessage(error))
         }
+    }
+
+    /// A Task started from this screen gets its conversation here. A row that
+    /// names none yet is asked again on the next frame.
+    private func openConversation() async {
+        guard task.primarySession == nil, begun == nil else { return }
+        do {
+            begun = try await Self.conversation(after: reading) { [client, id = task.id] repository in
+                try await client.task(id: id, directory: repository)
+            }
+        } catch {
+            feed.notices.post(Notice("The conversation couldn’t be opened: \(machineConnectionMessage(error))",
+                                     key: "task-conversation-\(task.id)"))
+        }
+    }
+
+    /// The conversation to open after `reading`: once it lists a Session, the
+    /// primary one the Task's row names. `row` reads that row in a repository.
+    static func conversation(after reading: Loaded<Reading>,
+                             row: (String) async throws -> MobileTask?) async throws -> String? {
+        guard case .value(let reading) = reading, !reading.work.sessions.isEmpty,
+              let repository = reading.row?.task.repo else { return nil }
+        return try await row(repository)?.primarySession
     }
 
     /// One frame of the Task's reading.
@@ -89,81 +99,44 @@ struct TaskWorkspaceView: View {
             guard case .task(let part?) = frame.content else {
                 return .failed(frame.unavailable ?? "Task reading is unavailable")
             }
-            return .value(Reading(graph: part.work.graph,
-                                  states: part.row.map { $0.selectionStates.sorted { $0.rawValue < $1.rawValue } } ?? [],
-                                  checkout: part.row?.reference.workspace?.worktree))
+            return .value(Reading(work: part.work, row: part.row, execution: part.execution))
         } catch {
             return .failed(error.localizedDescription)
         }
     }
 
-    /// One entry of "Task actions": its name in the menu and the Notice, and the write it sends.
-    enum Action: Equatable {
-        /// `lf task run`, under the name the Graph gives it: "Start" or "Run".
-        case run(String)
-        case autoShip, stopAutoShip
-
-        var label: String {
-            switch self {
-            case .run(let label): label
-            case .autoShip: "Auto-Ship"
-            case .stopAutoShip: "Stop Auto-Ship"
-            }
-        }
-
-        var symbol: String {
-            switch self {
-            case .run: "play.fill"
-            case .autoShip: "paperplane"
-            case .stopAutoShip: "pause.circle"
-            }
-        }
-
-        func write(directory: String, issue: String) -> ServedWrite {
-            switch self {
-            case .run: .taskRun(directory: directory, issue: issue, graph: nil, from: nil, agent: nil, approve: false)
-            case .autoShip: .taskAutoOn(directory: directory, issue: issue)
-            case .stopAutoShip: .taskAutoOff(directory: directory, issue: issue)
-            }
-        }
-    }
-
-    /// What "Task actions" offers: the step that moves the Task from where its
-    /// Graph stands, which needs a current reading, and its auto setting, which
-    /// needs only its states.
-    static func actions(reading: Loaded<Reading>, states: [WorkSelectionState], issue: String) -> [Action] {
-        var actions: [Action] = []
-        if case .value(let reading) = reading {
-            if let graph = reading.graph {
-                if let run = graph.runAction(issue: issue) { actions.append(.run(run.label)) }
-            } else if states.contains(.unstarted) {
-                actions.append(.run("Start"))
-            }
-        }
-        if states.contains(.auto) {
-            actions.append(.stopAutoShip)
-        } else if states.contains(.working) {
-            actions.append(.autoShip)
-        }
-        return actions
-    }
-
+    /// "Task actions": what `TaskActions` offers, each sending its write from
+    /// the Task's repository. A refused action is disabled over Rust's reason.
     @ViewBuilder private var actions: some View {
-        let issue = task.identifier ?? task.id
-        let actions = Self.actions(reading: reading, states: states, issue: issue)
-        if let directory, !actions.isEmpty {
+        if case .value(let reading) = reading, let row = reading.row, let actions = reading.actions,
+           actions.run != nil || actions.auto != nil {
+            let (issue, directory) = (row.task.identifier, row.task.repo)
             Menu("Task actions", systemImage: "ellipsis.circle") {
-                ForEach(actions, id: \.label) { action in
-                    Button(action.label, systemImage: action.symbol) {
-                        feed.request(action.label, issue: issue, write: action.write(directory: directory, issue: issue))
-                    }
+                if let run = actions.run {
+                    item(run.label, symbol: "play.fill", refusal: actions.runRefusal, issue: issue,
+                         write: .taskRun(directory: directory, issue: issue, graph: nil, from: nil, agent: nil, approve: false))
+                }
+                if let auto = actions.auto {
+                    item(auto.offer, symbol: auto == .on ? "pause.circle" : "paperplane", refusal: actions.autoRefusal, issue: issue,
+                         write: auto == .on ? .taskAutoOff(directory: directory, issue: issue)
+                             : .taskAutoOn(directory: directory, issue: issue))
                 }
             }
         }
     }
 
+    private func item(_ name: String, symbol: String, refusal: String?, issue: String, write: ServedWrite) -> some View {
+        Button {
+            feed.request(name, issue: issue, write: write)
+        } label: {
+            Label(name, systemImage: symbol)
+            if let refusal { Text(refusal) }
+        }
+        .disabled(refusal != nil)
+    }
+
     @ViewBuilder private var content: some View {
-        if let session = task.primarySession {
+        if let session = task.primarySession ?? begun {
             SessionView(client: client, task: task, session: session, theme: theme, draft: $draft) { showsChanges = true }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {

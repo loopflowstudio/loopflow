@@ -78,15 +78,19 @@ Mac. A Task that has not taken up a Graph shows no sentence.
 - **Start** before the Task has run, **Run** once its Graph has stopped or is
   waiting at a step. While a run carries the Task, neither is there.
 - **Auto-Ship** turns the Task's auto setting on and runs it, as
-  `lf task auto on` does; **Stop Auto-Ship** turns it off.
+  `lf task auto on` does; **Stop Auto-Ship** turns it off. Every Task that is
+  not completed has one of them.
 
 Each shows a line like "LOO-5 Auto-Ship requested" at the bottom of the
-screen; if the Machine refuses, the same line says why.
+screen. An action the Machine already knows it would refuse is greyed, with
+the reason under it; any other refusal shows in that line.
 
 **Changes** lists the files the Task changed; each opens its diff, and the diff
 opens the whole file. A Task with no conversation opens on its Changes; one
-that has not started says "No changes yet" and offers **Start**. Task actions
-follow the Task itself, so they stay when the list's filter no longer shows it.
+that has not started says "No changes yet" and offers **Start**. Once it
+starts, its conversation opens in place, without going back to the list. Task
+actions follow the Task itself, so they stay when the list's filter no longer
+shows it.
 
 The device touched last has the terminal. When another device takes it, the
 phone stops drawing and offers **Continue here**.

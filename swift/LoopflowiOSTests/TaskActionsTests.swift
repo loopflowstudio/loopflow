@@ -3,42 +3,33 @@ import Loopflow
 import XCTest
 @testable import LoopflowiOS
 
-/// What "Task actions" offers on the phone, from the Task's Graph and its row.
+/// What is the phone's own on the Task screen: reading the Machine's frames and
+/// opening a conversation that begins while the screen shows. What a Task
+/// offers is `TaskActions`, tested with the shared library.
 @MainActor
 final class TaskActionsTests: XCTestCase {
-    private func graph(_ position: [String: Any]) throws -> TaskGraph {
-        try JSONDecoder().decode(TaskGraph.self, from: JSONSerialization.data(withJSONObject: [
-            "name": "code", "interactive_steps": [], "position": position, "steps": [],
-            "current_step": NSNull(), "sentence": "Waiting for you at ship-review.",
-        ] as [String: Any]))
+    private func fixture(_ name: String) throws -> [String: Any] {
+        let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto")
+        return try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(contentsOf: directory.appendingPathComponent(name))) as? [String: Any])
     }
 
-    private func read(_ graph: TaskGraph?) -> Loaded<TaskWorkspaceView.Reading> {
-        .value(TaskWorkspaceView.Reading(graph: graph, states: [], checkout: nil))
+    /// The Task's reading, with the fixture's Sessions or with none yet.
+    private func reading(sessions: Bool) throws -> Loaded<TaskWorkspaceView.Reading> {
+        var work = try fixture("task_work.json")
+        if !sessions { work["sessions"] = [Any]() }
+        let roadmap = try fixture("roadmap_snapshot.json")
+        let row = try XCTUnwrap(((roadmap["tasks"] as? [String: Any])?["items"] as? [[String: Any]])?.first)
+        return .value(TaskWorkspaceView.Reading(
+            work: try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: work)),
+            row: try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row)),
+            execution: nil))
     }
 
-    private func actions(_ reading: Loaded<TaskWorkspaceView.Reading>, _ states: [WorkSelectionState]) -> [TaskWorkspaceView.Action] {
-        TaskWorkspaceView.actions(reading: reading, states: states, issue: "LOO-5")
-    }
-
-    func testATaskWaitingAtAStepCanBeRunAndAutoShipped() throws {
-        let waiting = try graph(["kind": "at", "step": "ship-review"])
-        XCTAssertEqual(actions(read(waiting), [.working, .idle]), [.run("Run"), .autoShip])
-    }
-
-    func testATaskARunCarriesOffersNoRun() throws {
-        let running = try graph(["kind": "run", "step": "plan", "at": "implement", "lf_process_id": "p", "running": true])
-        XCTAssertEqual(actions(read(running), [.working, .active, .auto]), [.stopAutoShip])
-    }
-
-    func testATaskWithNoGraphStartsOnlyWhileUnstarted() {
-        XCTAssertEqual(actions(read(nil), [.unstarted, .backlog]), [.run("Start")])
-        XCTAssertEqual(actions(read(nil), [.done]), [])
-    }
-
-    func testWithoutAGraphReadingOnlyTheAutoSettingIsOffered() {
-        XCTAssertEqual(actions(.failed("The Machine is away"), [.working, .idle]), [.autoShip])
-        XCTAssertEqual(actions(.loading, [.unstarted]), [])
+    private func task(session: String?) -> MobileTask {
+        MobileTask(WorkViewPlan.Content(work: .init(repository: "repo", kind: .task, id: "task"), title: "Task",
+            states: [.working], identifier: "W2-144", primarySession: session, location: nil, argv: nil, unavailable: []))
     }
 
     func testAReadingTheMachineCouldNotMakeShowsNoGraph() throws {
@@ -47,5 +38,30 @@ final class TaskActionsTests: XCTestCase {
             return XCTFail("an unavailable reading must not yield a Graph")
         }
         XCTAssertEqual(reason, "store is busy")
+    }
+
+    func testATaskStartedFromItsScreenOpensTheConversationItsRowNames() async throws {
+        var asked: [String] = []
+        let begun = try await TaskWorkspaceView.conversation(after: try reading(sessions: true)) { repository in
+            asked.append(repository)
+            return self.task(session: "session-1")
+        }
+        XCTAssertEqual(begun, "session-1")
+        XCTAssertEqual(asked, ["/src/loopflow"])
+    }
+
+    func testARowThatNamesNoConversationYetLeavesTheScreenAsItIs() async throws {
+        let begun = try await TaskWorkspaceView.conversation(after: try reading(sessions: true)) { _ in self.task(session: nil) }
+        XCTAssertNil(begun)
+    }
+
+    func testBeforeTheReadingListsASessionNothingIsAsked() async throws {
+        for reading in [try reading(sessions: false), .loading, .failed("The Machine is away")] {
+            let begun = try await TaskWorkspaceView.conversation(after: reading) { _ in
+                XCTFail("the row is read only once a Session exists")
+                return nil
+            }
+            XCTAssertNil(begun)
+        }
     }
 }

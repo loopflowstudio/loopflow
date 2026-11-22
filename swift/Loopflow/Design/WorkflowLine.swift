@@ -97,18 +97,3 @@ public struct WorkflowLine: View {
         }
     }
 }
-
-public extension TaskGraph {
-    /// What `lf task run` does from where the Task stands, named for it; `nil`
-    /// while a run carries the Task or once it is at `end`.
-    func runAction(issue: String) -> (label: String, help: String)? {
-        let help = "lf task run \(issue)"
-        switch position {
-        case .at(TaskGraph.start): return ("Start", help)
-        case .at(TaskGraph.end): return nil
-        case .at(let step): return ("Run", "\(help): continue after \(step)")
-        case .run(_, _, _, true): return nil
-        case .run(_, let at, _, false): return ("Run", "\(help): run again at \(at)")
-        }
-    }
-}

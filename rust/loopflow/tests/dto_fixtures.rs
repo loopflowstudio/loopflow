@@ -301,7 +301,9 @@ fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
     let json = include_str!("../../../tests/fixtures/dto/task_files.json");
     let files: Files = serde_json::from_str(json).unwrap();
     assert_eq!(files.changes.base_commit, files.diff.base_commit);
+    assert_eq!(files.changes.commits[0].parent, files.changes.base_commit);
     assert_eq!(files.changes.files[0].old_path.as_deref(), Some("old.txt"));
+    assert_eq!(files.changes.files[0].changes, 1);
     assert_eq!(files.file.content.as_deref(), Some("\u{feff}notes\r\n"));
     assert_eq!(
         serde_json::to_value(files).unwrap(),

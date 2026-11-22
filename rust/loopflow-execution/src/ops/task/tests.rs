@@ -1017,6 +1017,165 @@ fn task_without_a_local_checkout_never_reads_a_local_path() {
 }
 
 #[test]
+fn task_changes_offer_first_parent_commits_without_merges() {
+    let repo = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        super::git_output(repo.path(), args)
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    let commit = |file: &str, subject: &str| {
+        std::fs::write(repo.path().join(file), subject).unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", subject]);
+        git(&["rev-parse", "HEAD"])
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.name", "Test"]);
+    git(&["config", "user.email", "test@example.com"]);
+    let base = commit("base.txt", "base");
+    git(&["checkout", "-qb", "task"]);
+    let before = commit("task.txt", "lf implement: before");
+    git(&["checkout", "-q", "main"]);
+    commit("main.txt", "main moves on");
+    git(&["checkout", "-q", "task"]);
+    git(&["merge", "-q", "--no-edit", "main"]);
+    let merge = git(&["rev-parse", "HEAD"]);
+    let after = commit("task.txt", "lf implement: after");
+    let id = TaskId::new();
+    let changes = super::snapshot::changes_snapshot(super::TaskComparison {
+        checkout: super::TaskWorkspace {
+            issue_identifier: "TEST-1",
+            task_id: &id,
+            worktree: repo.path(),
+        },
+        base_commit: &base,
+        head_commit: None,
+    })
+    .unwrap();
+    // Neither the merge nor main's commit is offered; the commit after the
+    // merge compares against the merge, so it cannot fold into `before`.
+    assert_eq!(
+        changes.commits,
+        [
+            super::TaskCommit {
+                sha: before,
+                parent: base,
+                subject: "lf implement: before".to_string()
+            },
+            super::TaskCommit {
+                sha: after,
+                parent: merge,
+                subject: "lf implement: after".to_string()
+            },
+        ]
+    );
+}
+
+#[test]
+fn task_changes_count_each_files_stops_before_any_patch_is_read() {
+    let repo = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        super::git_output(repo.path(), args)
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    let lines = |numbers: &[&str]| numbers.join("\n") + "\n";
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.name", "Test"]);
+    git(&["config", "user.email", "test@example.com"]);
+    let file = |name: &str, content: &str| std::fs::write(repo.path().join(name), content).unwrap();
+    let ten = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+    file("edited.txt", &lines(&ten));
+    file("with space.txt", &lines(&ten));
+    file("old name.txt", &lines(&ten));
+    file("removed.txt", &lines(&["a", "b"]));
+    git(&["add", "."]);
+    git(&["commit", "-qm", "base"]);
+    let base = git(&["rev-parse", "HEAD"]);
+    // Two runs: the first line, and the last line replaced with one added.
+    file(
+        "edited.txt",
+        &lines(&[
+            "one", "2", "3", "4", "5", "6", "7", "8", "9", "ten", "eleven",
+        ]),
+    );
+    file(
+        "with space.txt",
+        &lines(&["1", "2", "3", "4", "five", "6", "7", "8", "9", "10"]),
+    );
+    git(&["mv", "old name.txt", "renamed.txt"]);
+    git(&["rm", "-q", "removed.txt"]);
+    file("binary.bin", "\0\u{1}\u{2}");
+    git(&["add", "binary.bin"]);
+    file("new.txt", &lines(&["a", "b", "c"]));
+    file("empty.txt", "");
+    let id = TaskId::new();
+    let changes = super::snapshot::changes_snapshot(super::TaskComparison {
+        checkout: super::TaskWorkspace {
+            issue_identifier: "TEST-1",
+            task_id: &id,
+            worktree: repo.path(),
+        },
+        base_commit: &base,
+        head_commit: None,
+    })
+    .unwrap();
+    let counts = changes
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file.changes))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        counts,
+        std::collections::BTreeMap::from([
+            ("binary.bin", 0),
+            ("edited.txt", 2),
+            ("empty.txt", 0),
+            ("new.txt", 1),
+            ("removed.txt", 1),
+            ("renamed.txt", 0),
+            ("with space.txt", 1),
+        ])
+    );
+    // The Diff's patch holds the same stops; Swift parses the checked-in copy.
+    let diff = super::snapshot::diff_snapshot(
+        super::TaskComparison {
+            checkout: super::TaskWorkspace {
+                issue_identifier: "TEST-1",
+                task_id: &id,
+                worktree: repo.path(),
+            },
+            base_commit: &base,
+            head_commit: None,
+        },
+        None,
+    )
+    .unwrap();
+    let nonzero = counts
+        .iter()
+        .filter(|(_, count)| **count > 0)
+        .map(|(path, count)| (path.to_string(), *count))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        super::snapshot::count_changes(diff.patch.as_bytes()),
+        nonzero
+    );
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/review/change_counts.patch");
+    assert_eq!(
+        super::snapshot::count_changes(&std::fs::read(fixture).unwrap()),
+        nonzero
+    );
+    let adjacent =
+        b"diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n+new\n-old\n+again\n-more\n";
+    // A removal right after additions starts a new stop, as the Diff reads it.
+    assert_eq!(super::snapshot::count_changes(adjacent)["x"], 3);
+}
+
+#[test]
 fn task_files_compare_net_parent_head_and_revisioned_drafts() {
     let repo = tempfile::tempdir().unwrap();
     let git = |args: &[&str]| {
@@ -1083,6 +1242,14 @@ fn task_files_compare_net_parent_head_and_revisioned_drafts() {
         ..workspace
     };
     let committed_files = super::snapshot::changes_snapshot(committed).unwrap();
+    assert_eq!(
+        committed_files.commits,
+        [super::TaskCommit {
+            sha: head.clone(),
+            parent: parent.clone(),
+            subject: "fixture".to_string()
+        }]
+    );
     assert!(committed_files
         .files
         .iter()

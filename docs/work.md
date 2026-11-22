@@ -380,7 +380,7 @@ lf wave status billing                          # shows every effective setting 
 ```
 
 Wave `config.yaml` overrides `.lf/config.yaml`, and your private
-`lf.config.local.yaml` (edited by `lf set`, shared across this clone's
+`.lf/config.local.yaml` (edited by `lf set`, shared across this clone's
 worktrees) overrides both. Use `lf unset <key>` to remove a personal override.
 See [Configuration](config.md) for the complete precedence rules.
 

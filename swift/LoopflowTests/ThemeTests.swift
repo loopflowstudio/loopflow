@@ -343,26 +343,6 @@ struct ThemeTests {
         #expect(store.notice?.contains("Default text") == true)
     }
 
-    @Test func unchangedDiffRecolorsWithoutReplacingSelection() throws {
-        let patch = "@@ -1 +1 @@\n-old\n+new\n"
-        let lines = TaskPatchLine.changes(in: patch)
-        let text = TaskPatchTextView(usingTextLayoutManager: true)
-        text.update(patch: patch, lines: lines, palette: .dark)
-        let selection = NSRange(location: 12, length: 3)
-        text.setSelectedRange(selection)
-        text.update(patch: patch, lines: lines, palette: .light)
-        #expect(text.string == patch)
-        #expect(text.selectedRange() == selection)
-        #expect(text.backgroundColor == NSColor(LoopflowPalette.light.background))
-        #expect(text.textColor == NSColor(LoopflowPalette.light.text))
-        #expect(text.insertionPointColor == NSColor(LoopflowPalette.light.keyboardFocus))
-        #expect(text.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(LoopflowPalette.light.workSelectedFill))
-        for line in lines {
-            let color = text.textStorage?.attribute(.backgroundColor, at: line.range.location, effectiveRange: nil) as? NSColor
-            #expect(color == NSColor(line.added ? LoopflowPalette.light.successTone.fill : LoopflowPalette.light.failureTone.fill))
-        }
-    }
-
     @Test func boundedImportRetainsColorsAndReportsOmissions() throws {
         let theme = try imported("""
         # concrete RGB snapshot

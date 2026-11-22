@@ -6881,6 +6881,42 @@
         },
         {
           "additionalProperties": false,
+          "description": "`lf task files <issue> <path> [--cursor <cursor>] [--show-ignored]`:\none page of a Task checkout directory's immediate entries.",
+          "properties": {
+            "cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.files",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "show_ignored": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "path",
+            "cursor",
+            "show_ignored"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskDirectory"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "`lf wave list --all`: every Wave on this Machine that is not removed.",
           "properties": {
             "kind": {
@@ -11934,6 +11970,12 @@
     },
     "TaskChangedFile": {
       "properties": {
+        "changes": {
+          "description": "Runs of changed lines in the file's patch, each the Diff's stop: a run\nends at an unchanged line, a hunk's end, or a removal after additions.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "committed": {
           "type": "boolean"
         },
@@ -11962,7 +12004,8 @@
         "committed",
         "staged",
         "unstaged",
-        "untracked"
+        "untracked",
+        "changes"
       ],
       "type": "object"
     },
@@ -11970,6 +12013,13 @@
       "properties": {
         "base_commit": {
           "type": "string"
+        },
+        "commits": {
+          "description": "The commits on head's first-parent line since base, oldest first,\nwithout merges.",
+          "items": {
+            "$ref": "#/$defs/TaskCommit"
+          },
+          "type": "array"
         },
         "files": {
           "items": {
@@ -12008,6 +12058,7 @@
         "task_id",
         "base_commit",
         "head_commit",
+        "commits",
         "files",
         "scratch",
         "scratch_truncated"
@@ -12164,6 +12215,27 @@
         "pending_sync",
         "conflicts",
         "refresh_error"
+      ],
+      "type": "object"
+    },
+    "TaskCommit": {
+      "description": "One commit in a Task's comparison. A Graph step's commits share the subject\nprefix `lf <step>:`.",
+      "properties": {
+        "parent": {
+          "description": "The commit's first parent: a step starting here compares against it.",
+          "type": "string"
+        },
+        "sha": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "parent",
+        "subject"
       ],
       "type": "object"
     },
@@ -12400,6 +12472,31 @@
         "patch",
         "binary",
         "truncated"
+      ],
+      "type": "object"
+    },
+    "TaskDirectory": {
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/TaskFileEntry"
+          },
+          "type": "array"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "entries",
+        "next_cursor"
       ],
       "type": "object"
     },
@@ -13039,6 +13136,29 @@
           "type": "string"
         }
       ]
+    },
+    "TaskFileEntry": {
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/TaskFileKind"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "TaskFileKind": {
+      "enum": [
+        "file",
+        "directory",
+        "symlink"
+      ],
+      "type": "string"
     },
     "TaskFileRecovery": {
       "properties": {

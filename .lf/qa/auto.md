@@ -22,7 +22,7 @@ takes no graph, so for it set `graph: qaship` in `.lf/config.yaml` (committed,
 pushed, merged into the checkouts) so a never-run Task takes it up.
 
 `auto: on` in config: `lf config set auto on` writes your own value
-(`lf.config.local.yaml`), or commit it in `.lf/config.yaml` or
+(`.lf/config.local.yaml`), or commit it in `.lf/config.yaml` or
 `.lf/wave/<wave>/config.yaml` (push, merge into the checkouts). Read it back with
 `lf config settings`, `lf --wave <wave> config settings` and the `auto` line of
 `lf wave status <wave>`. A bare `lf task run <id>` on a never-run Task then

@@ -896,6 +896,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::TaskChanges { .. }
         | Read::TaskDiff { .. }
         | Read::TaskFile { .. }
+        | Read::TaskFiles { .. }
         | Read::WaveList
         | Read::MachineSelf
         | Read::DesktopPortfolio
@@ -961,6 +962,12 @@ fn server_operations_match_their_lf_commands() {
                 Read::TaskFile {
                     issue: "INF-123".into(),
                     path: "edit.txt".into(),
+                },
+                Read::TaskFiles {
+                    issue: "INF-123".into(),
+                    path: String::new(),
+                    cursor: None,
+                    show_ignored: false,
                 },
                 Read::WaveList,
                 Read::MachineSelf,

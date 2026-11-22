@@ -24,13 +24,16 @@ struct MarkdownBlocks: View, Equatable {
     let source: String
     @Environment(\.palette) private var palette
 
+    /// Each block's scroll id, for an outline to jump to.
+    static func anchor(_ block: Int) -> String { "markdown-block-\(block)" }
+
     /// Reading copy at 1.55 line height: Lato 13 sets ~15.6 pt natively.
     static let lineSpacing: CGFloat = 4.5
 
     var body: some View {
         let blocks = Perf.measure(Perf.markdownParse, "bytes=\(source.utf8.count)") { Self.blocks(source) }
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+            ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     if let marker = block.marker {
                         Text(marker).foregroundStyle(palette.textSecondary)
@@ -42,6 +45,7 @@ struct MarkdownBlocks: View, Equatable {
                 .font(Typography.body(13))
                 .lineSpacing(block.kind == .code ? 0 : Self.lineSpacing)
                 .padding(.leading, CGFloat(max(block.depth - 1, 0)) * 16)
+                .id(Self.anchor(index))
             }
         }
         .textSelection(.enabled)

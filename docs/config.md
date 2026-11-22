@@ -82,7 +82,7 @@ lf set --global skill.review.agents codex    # review: Codex only, everywhere
 ### Private vs. shared repo and Wave settings
 
 ```bash
-lf set skill.design.agent claude                     # private repo preference (lf.config.local.yaml)
+lf set skill.design.agent claude                     # private repo preference (.lf/config.local.yaml)
 lf --wave frontend set skill.implement.agent claude  # private Wave preference
 lf --wave frontend set --shared default_agent claude # committed to .lf/wave/frontend/config.yaml
 lf unset skill.design.agent                          # remove override and reveal the next value
@@ -157,7 +157,7 @@ the same Explain and Unset controls.
 | File | Applies to | Committed? |
 |---|---|---|
 | `~/.lf/config.yaml` (`LF_HOME` overrides `~/.lf`) | Your global preferences | No |
-| `./lf.config.local.yaml` | Your private repo and Wave preferences (shared across Task worktrees, auto-excluded from Git) | No |
+| `.lf/config.local.yaml` | Your private repo and Wave preferences (shared across Task worktrees, auto-excluded from Git) | No |
 | `.lf/config.yaml` | Team repo defaults | Yes |
 | `.lf/wave/<name>/config.yaml` | Team Wave defaults | Yes |
 
@@ -167,7 +167,7 @@ Each setting resolves independently:
 
 1. Command-line flags (`-a`, `--setting`)
 2. Environment (`LF_SETTINGS`, `LF_AGENT_OVERRIDE`, `LF_YOLO_OVERRIDE`, `LF_CHROME_OVERRIDE`, `LF_USER_NAME`)
-3. Personal config (`lf.config.local.yaml`, `~/.lf/config.yaml`)
+3. Personal config (`.lf/config.local.yaml`, `~/.lf/config.yaml`)
 4. Repository config (`.lf/wave/<name>/config.yaml`, `.lf/config.yaml`, Skill frontmatter, Graph step)
 5. Built-in defaults
 
@@ -199,6 +199,8 @@ high as `agents`.
 | Changed file paths | `--diff files` | `context: {diff_files: true}` |
 | Raw diff reference | `--diff patch` | `context: {diff: true}` |
 | Exclude from LF context | — | `context: {exclude: ["*.test.ts", dist]}` |
+| Hide from a Task's Diff in Desktop | — | `diff_hidden: [vendor/]` (path substrings; adds across layers, `[]` clears) |
+| Headings of a Task's Diff in Desktop | — | `diff_groups` (replaces as a unit) |
 | Clipboard | `-c, --clipboard` | `context: {paste: true}` |
 | Claude Chrome tool | `--chrome on` / `--chrome off` | `chrome: true` / `false` |
 | Permission prompts | `--yolo` (skip) · `--setting yolo=false` (ask) | `yolo: false` (ask when attended; default skips) |
@@ -421,8 +423,10 @@ Loopflow sends no method override.
 ## FAQ
 
 **How do worktrees and separate clones share preferences?**
-Task worktrees share their main checkout's `lf.config.local.yaml`. Separate
-clones of the same repo keep independent private preferences.
+Task worktrees share their main checkout's `.lf/config.local.yaml`. Separate
+clones of the same repo keep independent private preferences. A
+`lf.config.local.yaml` left in the checkout root by an earlier release moves
+there the first time LF looks for it.
 
 **What happens when a Wave is renamed?**
 Private Wave preferences are keyed by the Wave's UUID, so renaming or moving a

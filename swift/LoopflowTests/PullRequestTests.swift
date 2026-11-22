@@ -1,20 +1,16 @@
 #if os(macOS)
 import Foundation
+import Loopflow
 import Testing
 @testable import LoopflowMac
 
 @Suite("Compact GitHub pull request")
 struct PullRequestTests {
-    @Test @MainActor func removingPublicationClearsRetainedDiffPresentation() async {
+    @Test @MainActor func removingPublicationClearsTheReading() async {
         let store = PullRequestStore()
-        store.showsFiles = true
-        store.expandedFiles = ["old.txt"]
         await store.refresh(nil)
-        #expect(!store.showsFiles)
-        #expect(store.expandedFiles.isEmpty)
-        #expect(store.pullRequest == nil && store.files == nil)
-        #expect(store.error == nil && store.filesError == nil)
-        #expect(!store.refreshing && !store.loadingFiles)
+        #expect(store.pullRequest == nil && store.error == nil && store.readAt == nil)
+        #expect(!store.refreshing)
     }
 
     @Test func githubReadingDistinguishesPendingFailedAndUnavailableChecks() throws {
@@ -46,19 +42,60 @@ struct PullRequestTests {
         #expect(try JSONDecoder().decode(GitHubPullRequest.self, from: Data(unavailable.utf8)).statusCheckRollup == nil)
     }
 
-    @Test func publishedDiffDisclosesMissingAndPartialPatchesAndRenames() throws {
-        let data = Data(#"""
-        [[{"filename":"new.txt","previous_filename":"old.txt","status":"renamed","additions":1,"deletions":1,
-           "patch":"@@ -1 +1 @@\n-old\n+new","blob_url":"https://github.com/example/repo/blob/head/new.txt"}],
-         [{"filename":"image.png","status":"added","additions":0,"deletions":0},
-          {"filename":"large.txt","status":"modified","additions":40,"deletions":0,"patch":"@@ -0 +1 @@\n+one"}]]
-        """#.utf8)
-        let files = try JSONDecoder().decode([[GitHubPullRequestFile]].self, from: data).flatMap { $0 }
-        #expect(files.count == 3)
-        #expect(files[0].previousFilename == "old.txt")
-        #expect(!files[0].incompletePatch)
-        #expect(files[1].incompletePatch)
-        #expect(files[2].incompletePatch)
+    // MARK: Delivery on the Changes page
+
+    private static let reading = #"""
+    {"number":12,"url":"https://github.com/example/repo/pull/12","title":"A change","body":"",
+     "state":"OPEN","isDraft":false,"additions":1,"deletions":1,"changedFiles":1,
+     "headRefOid":"head","baseRefOid":"base","headRefName":"feature","baseRefName":"main",
+     "reviewDecision":"REVIEW_REQUIRED","reviewRequests":[],
+     "statusCheckRollup":[{"name":"Build","status":"COMPLETED","conclusion":"SUCCESS"}]}
+    """#
+
+    private func record(_ phase: String, github: Bool = true, merge: String? = nil) throws -> PrSnapshot {
+        let publication = github
+            ? #"{"requested_at":"2026-11-14T10:00:00Z","presentation":null,"github":{"number":12,"url":"https://github.com/example/repo/pull/12"},"merge":null}"#
+            : #"{"requested_at":"2026-11-14T10:00:00Z","presentation":null,"github":null,"merge":null}"#
+        let json = """
+        {"id":"pr","sequence":1,"slug":"s","branch":"b","base_commit":"base","phase":"\(phase)","empty":false,
+         "publication":\(phase == "working" ? "null" : publication),
+         "merge_commit":\(merge.map { "\"\($0)\"" } ?? "null"),"abandoned_at":null}
+        """
+        return try JSONDecoder().decode(PrSnapshot.self, from: Data(json.utf8))
+    }
+
+    @Test func deliveryDistinguishesEveryStateWithDistinctText() throws {
+        let now = Date()
+        let pr = try JSONDecoder().decode(GitHubPullRequest.self, from: Data(Self.reading.utf8))
+        func describe(_ record: PrSnapshot?, reading: GitHubPullRequest? = nil, error: String? = nil,
+                      readAt: Date? = nil, head: String? = "head") -> TaskDelivery {
+            TaskDelivery.describe(record: record, taskOpen: true, reading: reading, error: error,
+                                  readAt: readAt, localHead: head, now: now)
+        }
+        let none = describe(nil)
+        let working = describe(try record("working"))
+        let publishing = describe(try record("publishing", github: false))
+        let open = describe(try record("open"), reading: pr, readAt: now.addingTimeInterval(-20))
+        let stale = describe(try record("open"), reading: pr, readAt: now.addingTimeInterval(-600))
+        let ahead = describe(try record("open"), reading: pr, readAt: now.addingTimeInterval(-20), head: "newer")
+        let unavailable = describe(try record("open"), reading: pr, error: "gh: offline", readAt: now.addingTimeInterval(-840))
+        let merged = describe(try record("merged", merge: "abcdef0123456789"))
+        let abandoned = describe(try record("abandoned"))
+
+        #expect(none.headline == "No pull request yet · changes below are local")
+        #expect(working == none)
+        #expect(publishing.headline == "Publishing… · requested 2026-11-14T10:00:00Z")
+        #expect(open.headline == "Open #12 · 1 passed · read 20 s ago")
+        #expect(open.detail == "Review required" && open.readingIsCurrent)
+        #expect(stale.headline == "Open #12 · stale · read 10 min ago" && !stale.readingIsCurrent)
+        #expect(ahead.detail == "Local checkout is ahead of the PR" && !ahead.readingIsCurrent)
+        #expect(unavailable.headline == "GitHub unavailable: gh: offline")
+        #expect(unavailable.detail == "Last read 14 min ago" && !unavailable.readingIsCurrent)
+        // A merged PR never reads as a finished Task.
+        #expect(merged.headline == "Merged abcdef0123" && merged.detail == "Task still open")
+        #expect(abandoned.headline == "Abandoned" && abandoned.detail == "Task still open")
+        let headlines = [none, publishing, open, stale, unavailable, merged, abandoned].map(\.headline)
+        #expect(Set(headlines).count == headlines.count)
     }
 }
 #endif

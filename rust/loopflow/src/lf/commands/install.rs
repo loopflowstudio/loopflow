@@ -667,6 +667,7 @@ mod compatibility_tests {
             loopflow_execution::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
         let global = home.path().join("config.yaml");
         let private = loopflow_execution::config::files::private_path(repo.path()).unwrap();
+        std::fs::create_dir_all(private.parent().unwrap()).unwrap();
         let original = "# personal\nchrome: false\n";
         std::fs::write(&global, original).unwrap();
 

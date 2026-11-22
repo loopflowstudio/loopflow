@@ -609,20 +609,20 @@ struct SessionPaneView: View {
             Divider()
         }
         if let taskId = paneTaskId {
-            ForEach(TaskFilesStore.Page.allCases, id: \.self) { page in
-                Button(page.rawValue, systemImage: page == .task ? "doc.text" : page == .pullRequest ? "arrow.triangle.pull" : "folder") {
-                    guard let browser = workspace.showBrowser(.files, from: pane) else { return }
-                    do {
-                        let files = try workspace.files(for: browser.content, task: model.task(id: taskId)?.task, query: sessions.query)
-                        files.page = page
-                    } catch { paneFailed(error) }
+            // The Task's own pane already has these as its tabs.
+            if pane.content.kind != .browser {
+                ForEach(TaskFilesStore.Page.allCases, id: \.self) { page in
+                    Button(page.rawValue, systemImage: page.symbol) {
+                        guard let browser = workspace.showBrowser(.files, from: pane) else { return }
+                        do {
+                            let files = try workspace.files(for: browser.content, task: model.task(id: taskId)?.task, query: sessions.query)
+                            files.page = page
+                        } catch { paneFailed(error) }
+                    }
                 }
             }
             Button("Task & workflow", systemImage: "list.bullet") {
                 workspace.showBrowser(.task, from: pane)
-            }
-            Button("Changes", systemImage: "plus.forwardslash.minus") {
-                workspace.showBrowser(.changes(comparison: .workingTree(base: "parent")), from: pane)
             }
             Button("lf process", systemImage: "list.bullet.rectangle") {
                 workspace.showBrowser(.graphLog, from: pane)
@@ -736,6 +736,27 @@ struct SessionPaneView: View {
         onFocus(pane.id, paneSessions.count == 1 ? paneSessions.first?.id : nil)
     }
 
+    /// Types into this workspace's conversation and focuses it; you send.
+    /// The result says whether the text reached the input.
+    private func conversationInput() -> ((String) -> Bool)? {
+        guard let session = store.layout.pane(of: .session), let terminal = session.terminal,
+              sessions.surfaces.surfaceIncarnation(for: terminal) != nil else { return nil }
+        return { text in
+            do {
+                guard let surface = sessions.surfaces.surfaceIncarnation(for: terminal) else {
+                    throw RegistryQueryError("The conversation has no terminal surface; nothing was typed.")
+                }
+                try sessions.surfaces.insertText(text, terminal: terminal, surface: surface)
+                store.setFocusedPane(session.id)
+                sessions.surfaces.focus(terminal)
+                return true
+            } catch {
+                paneFailed(error)
+                return false
+            }
+        }
+    }
+
     @ViewBuilder private var shellTabs: some View {
         if case .shell(let tabs, let selected) = pane.content {
             ScrollView(.horizontal) {
@@ -755,21 +776,45 @@ struct SessionPaneView: View {
         }
     }
 
+    /// One row names everything the pane can show: the Task's Brief, Diff and
+    /// Files, then whatever else is open beside them.
     @ViewBuilder private var browserTabs: some View {
-        if case .browser(_, let tabs, let selected, _, _) = pane.content {
+        if case .browser(let taskId, let tabs, let selected, _, _) = pane.content {
+            let task = model.task(id: taskId)?.task
+            let files = try? workspace.files(for: pane.content, task: task, query: sessions.query)
             ScrollView(.horizontal) {
                 HStack(spacing: 4) {
-                    ForEach(tabs) { tab in
-                        Button(tab.title) { workspace.showBrowser(tab, from: pane) }
-                            .lineLimit(1)
-                            .padding(.horizontal, 6).padding(.vertical, 3)
-                            .background(tab.id == selected ? theme.palette.surfaceElement : .clear,
-                                        in: RoundedRectangle(cornerRadius: 4))
-                            .accessibilityIdentifier("browser-tab-\(tab.id)")
+                    if let files {
+                        ForEach(task == nil ? [.changes, .files] : TaskFilesStore.Page.allCases, id: \.self) { page in
+                            browserTab(page.rawValue,
+                                       selected: selected == BrowserTab.files.id && files.shownPage(hasTask: task != nil) == page,
+                                       id: "page-\(page.rawValue.lowercased())") {
+                                workspace.showBrowser(.files, from: pane)
+                                files.page = page
+                                files.noteInteraction()
+                            }
+                        }
+                    }
+                    ForEach(tabs.filter { $0 != .files || files == nil }) { tab in
+                        browserTab(tab.title, selected: tab.id == selected, id: tab.id) {
+                            workspace.showBrowser(tab, from: pane)
+                        }
                     }
                 }.buttonStyle(.plain).font(Typography.body(11))
             }.fixedSize(horizontal: false, vertical: true)
+            .help("Brief ⌥⌘1 · Diff ⌥⌘2 · Files ⌥⌘3")
         }
+    }
+
+    private func browserTab(_ title: String, selected: Bool, id: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .lineLimit(1)
+            .fontWeight(selected ? .semibold : .regular)
+            .foregroundStyle(selected ? theme.palette.text : theme.palette.textSecondary)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(selected ? theme.palette.surfaceElement : .clear, in: RoundedRectangle(cornerRadius: 4))
+            .accessibilityIdentifier("browser-tab-\(id)")
+            .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     @ViewBuilder
@@ -838,14 +883,15 @@ struct SessionPaneView: View {
                     let task = model.task(id: taskId)?.task
                     switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
                     case .success(let files):
-                        TaskFilesView(store: files, prURL: task?.pr?.publication?.github?.url,
-                            checkoutBase: task?.reference.workspace?.baseCommit, task: task, isFocused: isFocused)
+                        TaskFilesView(store: files, checkoutBase: task?.reference.workspace?.baseCommit, task: task,
+                            isFocused: isFocused, addToConversation: conversationInput())
                             .task(id: pane.content.selectedBrowserTab?.id) {
+                                // A tab names its own comparison, never one Graph step's.
+                                files.showStep(nil)
                                 if case .changes(let comparison) = pane.content.selectedBrowserTab {
                                     files.comparison = comparison
-                                    files.page = .files; files.mode = .diff; files.navigator = .pinned
+                                    files.page = .changes
                                     await files.refresh()
-                                    await files.loadDiff()
                                 } else if files.comparison != .workingTree(base: "parent") {
                                     files.comparison = .workingTree(base: "parent")
                                     await files.refresh()
@@ -984,7 +1030,7 @@ struct SessionPaneView: View {
         let fallback: String = switch pane.content {
         case .session: "Session"
         case .shell: "Shell"
-        case .browser: pane.content.selectedBrowserTab?.title ?? "Browser"
+        case .browser(let task, _, _, _, _): model.task(id: task)?.task.task.identifier ?? "Task"
         }
         return PaneProgramHeading(provider: paneSessions.count == 1 ? paneSessions.first?.presentationProvider : nil,
             title: paneSessions.count == 1 ? paneSessions.first?.record.title ?? _title : _title,

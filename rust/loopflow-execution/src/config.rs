@@ -917,7 +917,8 @@ mod tests {
     #[test]
     fn private_wave_reads_skip_malformed_entries_but_validate_authored_identity() {
         let repo = tempfile::tempdir().unwrap();
-        let path = repo.path().join("lf.config.local.yaml");
+        let path = repo.path().join(".lf/config.local.yaml");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let document = serde_yaml_ng::from_str("waves: {}\n").unwrap();
         assert!(
             super::private_wave_layers(repo.path(), Some("missing"), &path, &document)

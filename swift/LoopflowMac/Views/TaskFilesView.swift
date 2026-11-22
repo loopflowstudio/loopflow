@@ -11,96 +11,49 @@ enum TaskFileChrome {
 
 struct TaskFilesView: View {
     @Bindable var store: TaskFilesStore
-    let prURL: URL?
     /// The recorded base moves with a store commit, not a file.
     let checkoutBase: String?
     var task: RoadmapTask? = nil
     var isFocused = true
+    /// Types into the Task conversation without sending.
+    var addToConversation: ((String) -> Bool)? = nil
     @Environment(\.palette) private var palette
     @FocusState private var navigatorFocused: Bool
+    @FocusState private var treeFocused: Bool
+    @State private var treePosition = ScrollPosition()
 
     private var diffIdentity: String {
         "\(store.selection ?? "")|\(store.changes?.baseCommit ?? "")|\(store.selectedDocument?.editVersion ?? 0)|\(store.mode)"
     }
 
+    private var page: TaskFilesStore.Page { store.shownPage(hasTask: task != nil) }
+
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 4) {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 12) {
-                        if task != nil { Button("Brief") { store.page = .task; store.noteInteraction() } }
-                        Button("Changes") {
-                            store.page = .files; store.mode = .diff; store.navigator = .pinned; store.noteInteraction()
-                        }
-                        if prURL != nil { Button("Pull request") { store.page = .pullRequest; store.noteInteraction() } }
-                        ForEach(store.tabs) { tab in
-                            HStack(spacing: 4) {
-                                Button(tab.path) { store.selectFileFromInput(tab.path, mode: .read) }
-                                    .fontWeight(store.page == .files && store.selection == tab.path ? .semibold : .regular)
-                                Button { store.closeTab(tab.id); store.noteInteraction() } label: { Image(systemName: "xmark") }
-                                    .accessibilityLabel("Close \(tab.path)")
-                            }
-                        }
-                    }.buttonStyle(.plain).font(.caption).padding(8)
-                }
-                navigationBar
-            }
-            Divider()
-            if let task, store.page == .task {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(task.task.identifier).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
-                        Text(task.task.name).font(Typography.strong(16))
-                        TaskPlanningFactsView(task: task)
-                        MarkdownBlocks(source: task.task.description).equatable()
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14).textSelection(.enabled)
-                }
-                .accessibilityIdentifier("browser-task-overview")
-            } else if task != nil, store.page == .pullRequest {
-                TaskPullRequestView(store: store.pullRequest, url: prURL)
-            } else {
-                VStack(spacing: 0) {
-                    GeometryReader { geometry in
-                        let docked = store.navigator == .pinned && geometry.size.width >= 360
-                        HSplitView {
-                            if docked {
-                                navigator.frame(minWidth: 140, idealWidth: 220, maxWidth: 300)
-                            }
-                            documentPane
-                        }
-                        .overlay(alignment: .topLeading) {
-                            if store.navigator != .closed && !docked {
-                                ZStack(alignment: .topLeading) {
-                                    Color.black.opacity(0.001).contentShape(Rectangle())
-                                        .onTapGesture { dismissNavigator() }
-                                    navigator
-                                        .frame(width: min(360, geometry.size.width),
-                                               height: max(0, geometry.size.height - 8))
-                                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(palette.border))
-                                        .shadow(color: .black.opacity(0.2), radius: 12, x: 3, y: 6)
-                                        .accessibilityIdentifier("files-navigation-dropdown")
-                                }
-                            }
-                        }
-                    }
-                }
-                .background {
-                    HStack {
-                        Button("Choose file") { toggleNavigator() }
-                            .keyboardShortcut("p", modifiers: .command)
-                        Button("Pin file navigation") { store.togglePinnedNavigator() }
-                            .keyboardShortcut("b", modifiers: [.control, .command])
-                    }.disabled(!isFocused).hidden().accessibilityHidden(true).frame(width: 0, height: 0)
-                }
+            switch page {
+            case .brief:
+                if let task { TaskBriefView(store: store, task: task) }
+            case .changes:
+                TaskChangesView(store: store, task: task, isFocused: isFocused, addToConversation: addToConversation)
+            case .files:
+                documentRow
+                Divider()
+                filesPage
             }
         }
         .background(palette.background)
+        .background {
+            // ⌘P from any page opens Files with its navigator.
+            HStack {
+                Button("Choose file") { toggleNavigator() }
+                    .keyboardShortcut("p", modifiers: .command)
+                Button("Pin file navigation") { store.togglePinnedNavigator() }
+                    .keyboardShortcut("b", modifiers: [.control, .command])
+            }.disabled(!isFocused).hidden().accessibilityHidden(true).frame(width: 0, height: 0)
+        }
         .tint(palette.actionInk)
-        .task(id: "\(store.page)|\(checkoutBase ?? "")") {
-            guard task == nil || store.page == .files else { return }
+        .task(id: "\(page)|\(checkoutBase ?? "")") {
+            guard page == .files else { return }
             store.observeFiles()
             await store.refreshChanges()
         }
@@ -108,6 +61,71 @@ struct TaskFilesView: View {
             if store.mode != .diff { await store.loadFile() }
         }
         .task(id: diffIdentity) { if store.mode == .diff { await store.loadDiff() } }
+    }
+
+    /// Open documents and their controls; only the Files page has them.
+    private var documentRow: some View {
+        HStack(spacing: 4) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 12) {
+                    ForEach(store.tabs) { tab in
+                        HStack(spacing: 4) {
+                            Button((tab.path as NSString).lastPathComponent) { store.selectFileFromInput(tab.path, mode: .read) }
+                                .fontWeight(store.selection == tab.path ? .semibold : .regular)
+                                .help(tab.path)
+                            if store.documents[tab.path]?.dirty == true { Text("•").help("Unsaved draft") }
+                            Button { store.closeTab(tab.id); store.noteInteraction() } label: { Image(systemName: "xmark") }
+                                .accessibilityLabel("Close \(tab.path)")
+                        }
+                    }
+                }.buttonStyle(.plain).font(.caption).padding(8)
+            }
+            navigationBar
+        }
+    }
+
+    /// Where the selected file lives: Machine, checkout, directory.
+    private var location: some View {
+        let machine = store.query.remoteMachine ?? "this Mac"
+        let checkout = URL(fileURLWithPath: store.cwd).lastPathComponent
+        let directory = store.selection.map { ($0 as NSString).deletingLastPathComponent } ?? ""
+        return Text([machine, checkout + (directory.isEmpty ? "" : "/" + directory)].joined(separator: " · "))
+            .font(Typography.code(10)).foregroundStyle(palette.textSecondary)
+            .lineLimit(1).truncationMode(.head)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10).padding(.vertical, 3)
+            .help(store.cwd)
+            .accessibilityIdentifier("files-location")
+    }
+
+    private var filesPage: some View {
+        VStack(spacing: 0) {
+            location
+            GeometryReader { geometry in
+                let docked = store.navigator == .pinned && geometry.size.width >= 360
+                HSplitView {
+                    if docked {
+                        navigator.frame(minWidth: 140, idealWidth: 220, maxWidth: 300)
+                    }
+                    documentPane
+                }
+                .overlay(alignment: .topLeading) {
+                    if store.navigator != .closed && !docked {
+                        ZStack(alignment: .topLeading) {
+                            Color.black.opacity(0.001).contentShape(Rectangle())
+                                .onTapGesture { dismissNavigator() }
+                            navigator
+                                .frame(width: min(360, geometry.size.width),
+                                       height: max(0, geometry.size.height - 8))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(palette.border))
+                                .shadow(color: .black.opacity(0.2), radius: 12, x: 3, y: 6)
+                                .accessibilityIdentifier("files-navigation-dropdown")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func toggleNavigator() {
@@ -130,14 +148,20 @@ struct TaskFilesView: View {
         VStack(spacing: 0) {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(palette.textSecondary)
-                TextField("Find in scratch and changes", text: $store.search)
+                TextField("Find in scratch and opened folders", text: $store.search)
                     .textFieldStyle(.plain).focused($navigatorFocused)
                     .accessibilityIdentifier("files-search")
                     .onSubmit {
-                        let paths = store.scratchPaths + store.changedPaths
-                        if let path = paths.first {
-                            selectFile(path, mode: store.scratchPaths.contains(path) ? .read : .diff)
+                        if let path = store.scratchPaths.first {
+                            read(path)
+                        } else if let entry = store.treeRows.compactMap(\.entry).first(where: { $0.kind != .directory }) {
+                            read(entry.path)
                         }
+                    }
+                    .onKeyPress(.downArrow) {
+                        treeFocused = true
+                        Task { await store.moveTree(.down) }
+                        return .handled
                     }
                 Button { store.togglePinnedNavigator() } label: {
                     Image(systemName: store.navigator == .pinned ? "pin.slash" : "pin")
@@ -147,43 +171,112 @@ struct TaskFilesView: View {
                 .accessibilityIdentifier("files-pin-navigator")
             }.padding(10)
             Divider()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 4) {
-                    sectionHeader("scratch", expanded: $store.showsScratch)
-                    if store.showsScratch {
-                        ForEach(store.scratchPaths, id: \.self) { path in
-                            row(path, label: String(path.dropFirst("scratch/".count)), mode: .read)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        sectionHeader("scratch", expanded: $store.showsScratch)
+                        if store.showsScratch {
+                            ForEach(store.scratchPaths, id: \.self) { path in
+                                scratchRow(path)
+                            }
+                            if store.changes?.scratchTruncated == true {
+                                Text("Scratch list truncated").font(.caption).foregroundStyle(palette.textSecondary)
+                            }
                         }
-                        if store.changes?.scratchTruncated == true {
-                            Text("Scratch list truncated").font(.caption).foregroundStyle(palette.textSecondary)
+                        Text(URL(fileURLWithPath: store.cwd).lastPathComponent)
+                            .font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                            .padding(.top, 12).padding(.bottom, 2)
+                            .help(store.cwd)
+                        let badges = store.changeBadges
+                        ForEach(store.treeRows) { row in treeRow(row, badges: badges) }
+                        if let reason = store.changesError {
+                            Text(reason).font(.caption).foregroundStyle(palette.warning)
+                        } else if !store.search.isEmpty, store.scratchPaths.isEmpty, store.treeRows.isEmpty {
+                            Text("No matching files").font(.caption).foregroundStyle(palette.textSecondary)
                         }
+                    }.padding(10)
+                }
+                .scrollPosition($treePosition)
+                .onScrollGeometryChange(for: CGPoint.self, of: \.contentOffset) { _, offset in store.treeOffset = offset }
+                .focusable().focused($treeFocused).focusEffectDisabled()
+                .onKeyPress(keys: [.upArrow, .downArrow, .leftArrow, .rightArrow, .return]) { press in
+                    let move: TaskFilesStore.TreeMove = switch press.key {
+                    case .upArrow: .up
+                    case .downArrow: .down
+                    case .leftArrow: .collapse
+                    case .rightArrow: .expand
+                    default: .open
                     }
-                    sectionHeader("Changed files", expanded: $store.showsChanges).padding(.top, 12)
-                    if store.showsChanges {
-                        ForEach(store.changedPaths, id: \.self) { path in row(path, label: path, mode: .diff) }
+                    Task {
+                        let wasDropdown = store.navigator == .dropdown
+                        await store.moveTree(move)
+                        if move == .open, wasDropdown, store.navigator == .closed { dismissNavigator() }
+                        if let selection = store.tree.selection { proxy.scrollTo("entry:\(selection)") }
                     }
-                    if store.isRefreshingChanges, store.changes == nil { ProgressView().controlSize(.small) }
-                    if let reason = store.changesError {
-                        Text(reason).font(.caption).foregroundStyle(palette.warning)
-                    } else if store.changes != nil, store.scratchPaths.isEmpty, store.changedPaths.isEmpty {
-                        Text(store.search.isEmpty ? "No scratch or changed files" : "No matching files")
-                            .font(.caption).foregroundStyle(palette.textSecondary)
-                    }
-                }.padding(10)
+                    return .handled
+                }
             }
-            if let sha = store.changes?.baseCommit {
-                Text("Parent · \(sha.prefix(10))").font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(palette.textSecondary).padding(8)
-            }
-            if store.query.remoteMachine == nil, let directory = store.changes?.recoveryDirectory {
-                Button("Open saved versions ↗") {
-                    NSWorkspace.shared.open(URL(fileURLWithPath: directory))
-                }.buttonStyle(WorkPlainButtonStyle()).font(.caption).lineLimit(1).padding(8)
-            }
+            .accessibilityIdentifier("files-tree")
         }
         .background(palette.surfaceMuted)
-        .onAppear { if store.navigator == .dropdown { navigatorFocused = true } }
+        .task { await store.openTree() }
+        .onAppear {
+            treePosition.scrollTo(point: store.treeOffset)
+            if store.navigator == .dropdown { navigatorFocused = true }
+        }
         .onExitCommand { dismissNavigator() }
+    }
+
+    @ViewBuilder private func treeRow(_ row: CheckoutTree.Row, badges: [String: CheckoutChange]) -> some View {
+        let indent = CGFloat(row.depth) * 12
+        switch row {
+        case .entry(let entry, _):
+            let label = store.search.isEmpty ? (entry.path as NSString).lastPathComponent : entry.path
+            Button {
+                if entry.kind == .directory {
+                    Task { await store.setDirectory(entry.path, expanded: !store.tree.isExpanded(entry.path)) }
+                } else {
+                    store.tree.selection = entry.path
+                    read(entry.path)
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: entry.kind == .directory
+                          ? (store.tree.isExpanded(entry.path) ? "chevron.down" : "chevron.right")
+                          : entry.kind == .symlink ? "arrow.turn.up.right" : "doc")
+                        .font(.system(size: 9, weight: .semibold)).frame(width: 10)
+                        .foregroundStyle(palette.textSecondary)
+                    Text(label)
+                        .font(.system(size: 11, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                    if store.documents[entry.path]?.dirty == true { Text("•").help("Unsaved draft") }
+                    Spacer(minLength: 4)
+                    if let badge = badges[entry.path] {
+                        Text(badge.rawValue).font(Typography.code(10))
+                            .foregroundStyle(badge == .untracked ? palette.successTone.ink : palette.actionInk)
+                            .help(badge.help)
+                    }
+                }
+                .padding(.leading, indent + 2).padding(.trailing, 4).padding(.vertical, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .workSelection(store.tree.selection == entry.path || store.selection == entry.path)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).help(entry.path)
+            .accessibilityLabel(entry.path)
+            .accessibilityValue(entry.kind == .directory ? (store.tree.isExpanded(entry.path) ? "Expanded" : "Collapsed") : "")
+        case .loading:
+            ProgressView().controlSize(.mini).padding(.leading, indent + 16)
+        case .more(let directory, _):
+            Button("Load more") { Task { await store.readDirectory(directory, more: true) } }
+                .buttonStyle(.link).font(.caption).padding(.leading, indent + 16)
+                .accessibilityIdentifier("files-load-more")
+        case .failed(let directory, let reason, _):
+            HStack(spacing: 6) {
+                Text(reason).font(.caption).foregroundStyle(palette.warning).lineLimit(2)
+                Button("Retry") { Task { await store.retryDirectory(directory) } }
+                    .buttonStyle(.link).font(.caption)
+            }.padding(.leading, indent + 16)
+        }
     }
 
     private var navigationBar: some View {
@@ -196,7 +289,7 @@ struct TaskFilesView: View {
             .help("Show or hide file browser (⌘P)")
             .accessibilityLabel("Show or hide file browser")
             .accessibilityIdentifier("files-toggle-navigator")
-            if store.page == .files, let document = store.selectedDocument, document.snapshot?.state == .text {
+            if let document = store.selectedDocument, document.snapshot?.state == .text {
                 Button {
                     Task {
                         await document.save(issue: store.issue, query: store.query)
@@ -212,21 +305,18 @@ struct TaskFilesView: View {
                 .keyboardShortcut("s", modifiers: .command)
                 .fixedSize()
             }
-            if store.page == .files {
-                Picker("View", selection: Binding(get: { store.mode }, set: { store.mode = $0; store.noteInteraction() })) {
-                    Text("Read").tag(TaskFilesStore.Mode.read)
-                    Text("Edit").tag(TaskFilesStore.Mode.edit)
-                    Text("Diff").tag(TaskFilesStore.Mode.diff)
-                        .disabled(store.changesError != nil)
-                }.pickerStyle(.menu).labelsHidden()
-                    .accessibilityLabel("View").frame(width: 70).fixedSize()
-            }
+            Picker("View", selection: Binding(get: { store.mode }, set: { store.mode = $0; store.noteInteraction() })) {
+                Text("Read").tag(TaskFilesStore.Mode.read)
+                Text("Edit").tag(TaskFilesStore.Mode.edit)
+                Text("Diff").tag(TaskFilesStore.Mode.diff)
+                    .disabled(store.changesError != nil)
+            }.pickerStyle(.menu).labelsHidden()
+                .accessibilityLabel("View").frame(width: 70).fixedSize()
         }
         .font(Typography.caption(11)).padding(.horizontal, 10)
         .frame(height: TaskFileChrome.headerHeight)
         .fixedSize(horizontal: true, vertical: false)
     }
-
 
     private var documentPane: some View {
         VStack(spacing: 0) {
@@ -280,27 +370,27 @@ struct TaskFilesView: View {
         .accessibilityValue(expanded.wrappedValue ? "Expanded" : "Collapsed")
     }
 
-    private func selectFile(_ path: String, mode: TaskFilesStore.Mode) {
+    /// Open a file the navigator offers; a dropdown has done its job.
+    private func read(_ path: String) {
         let wasDropdown = store.navigator == .dropdown
-        store.selectFileFromInput(path, mode: mode)
+        store.selectFileFromInput(path, mode: .read)
         if wasDropdown { dismissNavigator() }
     }
 
-    private func row(_ path: String, label: String, mode: TaskFilesStore.Mode) -> some View {
+    private func scratchRow(_ path: String) -> some View {
         Button {
-            selectFile(path, mode: mode)
+            read(path)
         } label: {
             HStack {
-                Text(label)
+                Text(path.dropFirst("scratch/".count))
                     .font(.system(size: 11, design: .monospaced)).lineLimit(1).truncationMode(.middle)
                 if store.documents[path]?.dirty == true { Text("•") }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 4).padding(.vertical, 2)
-            .workSelection(store.selection == path && (store.mode == .diff) == (mode == .diff))
+            .workSelection(store.selection == path)
             .contentShape(Rectangle())
         }.buttonStyle(.plain).help(path)
-            .id("\(mode.rawValue):\(path)")
             .accessibilityLabel(path)
     }
 
@@ -308,12 +398,8 @@ struct TaskFilesView: View {
         if store.selection == nil {
             ContentUnavailableView("Select a file", systemImage: "doc.text")
         } else if store.mode == .diff {
-            if let diff = store.diff {
-                if diff.binary { ContentUnavailableView("Binary diff", systemImage: "doc") }
-                else {
-                    TaskPatchView(patch: diff.patch, lines: store.patchLines)
-                    if diff.truncated { Text("Diff truncated at 1 MB").font(.caption) }
-                }
+            if let review = store.fileReview {
+                TaskFileDiffView(store: store, review: review, isFocused: isFocused, addToConversation: addToConversation)
             } else if let reason = store.changesError {
                 ContentUnavailableView("Comparison unavailable", systemImage: "doc", description: Text(reason))
             } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
@@ -458,60 +544,57 @@ private struct TaskDocumentView: NSViewRepresentable {
             document.scroll.autoresizingMask = [.width, .height]
             host.addSubview(document.scroll)
         }
-        document.editor.applyPalette(palette)
+        document.applyPalette(palette)
         document.editor.recordReadiness()
         document.scroll.backgroundColor = NSColor(palette.background)
     }
 }
 
-private struct TaskPatchView: NSViewRepresentable {
-    let patch: String
-    let lines: [TaskPatchLine]
+/// Files' Diff mode: one file through the review stream, compared with the
+/// unsaved draft while there is one. Next/previous steps the file's changes,
+/// then opens the next or previous changed file here.
+private struct TaskFileDiffView: View {
+    @Bindable var store: TaskFilesStore
+    let review: TaskFilesStore.FileReview
+    let isFocused: Bool
+    let addToConversation: ((String) -> Bool)?
     @Environment(\.palette) private var palette
-    func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
-        let text = TaskPatchTextView(usingTextLayoutManager: true)
-        text.isEditable = false
-        text.isRichText = false
-        text.usesFindBar = true
-        text.isVerticallyResizable = true
-        text.autoresizingMask = [.width]
-        text.textContainer?.widthTracksTextView = true
-        text.textContainerInset = NSSize(width: 12, height: 12)
-        scroll.hasVerticalScroller = true
-        scroll.documentView = text
-        return scroll
-    }
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let text = scroll.documentView as? TaskPatchTextView else { return }
-        text.update(patch: patch, lines: lines, palette: palette)
-        scroll.backgroundColor = NSColor(palette.background)
-    }
-}
+    @State private var width: CGFloat = 0
 
-final class TaskPatchTextView: NSTextView {
-    private var renderedPalette: PaletteDefinition?
-    private var renderedLines: [TaskPatchLine] = []
+    private var reader: TaskFilesStore.ReviewReader { .file(review.path) }
 
-    func update(patch: String, lines: [TaskPatchLine], palette: LoopflowPalette) {
-        let display = patch.isEmpty ? "No textual changes." : patch
-        guard string != display || renderedPalette != palette.definition || renderedLines != lines else { return }
-        if string != display { string = display }
-        let storage = textStorage
-        storage?.beginEditing()
-        storage?.setAttributes([
-            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
-            .foregroundColor: NSColor(palette.text),
-        ], range: NSRange(location: 0, length: (display as NSString).length))
-        for line in lines {
-            storage?.addAttribute(.backgroundColor,
-                                  value: NSColor(line.added ? palette.successTone.fill : palette.failureTone.fill),
-                                  range: line.range)
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                ReviewStepper(store: store, reader: reader, isFocused: isFocused)
+                Text(store.revision + (review.draft ? " · unsaved draft" : ""))
+                    .font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                    .lineLimit(1).truncationMode(.middle)
+                    .accessibilityIdentifier("files-diff-comparison")
+                Spacer(minLength: 4)
+                ReviewLayoutPicker(store: store, width: width)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .frame(height: TaskFileChrome.headerHeight)
+            Divider()
+            ReviewCommentsStrip(store: store, isFocused: isFocused, addToConversation: addToConversation)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if review.truncated { ReviewNotice(text: "Diff truncated at 1 MB") }
+                    if review.diff.files.isEmpty {
+                        ReviewNotice(text: "No changes in \(review.path)")
+                    }
+                    ReviewStream(store: store, reader: reader, files: review.diff.files, split: store.layout(width: width) == .split,
+                                 addToConversation: addToConversation)
+                }
+                .scrollTargetLayout()
+            }
+            .scrollPosition(id: store.anchor(reader), anchor: .top)
+            .onScrollPhaseChange { _, phase in if phase == .interacting { store.noteInteraction() } }
+            .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
+            .accessibilityIdentifier("files-diff")
         }
-        storage?.endEditing()
-        applyPalette(palette)
-        renderedPalette = palette.definition
-        renderedLines = lines
     }
 }
 

@@ -516,6 +516,22 @@ struct DesktopAction {
             }
             return outcome
         },
+        DesktopAction("details", "Show Task Details", scope: .pane,
+            arguments: [.init(name: "page", kind: .string, required: true)],
+            keys: [(Character("1"), "brief"), (Character("2"), "diff"), (Character("3"), "files")].map {
+                DesktopKeyBinding(.character($0.0), [.command, .option], args: ["page": $0.1])
+            }, available: taskTool) { context in
+            let value = try context.string("page")
+            guard let page = TaskFilesStore.Page.allCases.first(where: { $0.rawValue.lowercased() == value }) else {
+                throw DesktopArgumentError("page=\(value) is not brief, diff or files; nothing changed.")
+            }
+            let outcome = try show(.files, context)
+            let workspace = try context.task
+            if let browser = workspace.multiplexer.browserPane {
+                try workspace.files(for: browser.content, task: nil, query: RegistryQueryLocal.shared).page = page
+            }
+            return outcome
+        },
         DesktopAction("graph-log", "Show Graph Processes", scope: .pane, available: taskTool) { context in
             try show(.graphLog, context)
         },

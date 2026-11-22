@@ -1,294 +1,428 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-515 · The Changes pane, redesigned</title>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diff v2 explore</title>
 <style>
-:root{color-scheme:light dark;--paper:#f8f6f2;--panel:#fffefa;--soft:#f1eee8;--ink:#292b28;--muted:#6d7169;--faint:#a3a69e;--line:#dddcd4;--accent:#743d49;--accent-bg:#f6ebed;--green:#25704e;--green-bg:#edf6ef;--green-w:#c4e6cd;--red:#a54b49;--red-bg:#fbf0ee;--red-w:#f3ccc7;--blue:#375d99;--blue-bg:#e6eefb;--violet:#6a4a94;--violet-bg:#f2edf8;--old-g:#dcefe0;--old-r:#f7dedb}
-@media(prefers-color-scheme:dark){:root{--paper:#1d2023;--panel:#25292d;--soft:#2c3135;--ink:#e3e5df;--muted:#a6ada6;--faint:#727a76;--line:#42484a;--accent:#dda7b2;--accent-bg:#3a2c31;--green:#9ed5ac;--green-bg:#253229;--green-w:#33583f;--red:#e6aaa1;--red-bg:#352829;--red-w:#663a3a;--blue:#b0c9f2;--blue-bg:#2b374b;--violet:#cfb4eb;--violet-bg:#352d42;--old-g:#2b4735;--old-r:#4b3032}}
-*{box-sizing:border-box}
-html{scroll-behavior:smooth;scroll-padding-top:20px}
-body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-main{max-width:1180px;margin:auto;padding:56px 32px 90px}
-.col{max-width:720px}
-h1{font-size:44px;line-height:1.08;letter-spacing:-1.2px;margin:0 0 18px;font-weight:650}
-h2{font-size:26px;letter-spacing:-.5px;margin:0 0 10px;font-weight:650}
-h3{font-size:15px;margin:0 0 8px;font-weight:600}
-p{margin:0 0 12px}
-code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em}
-.lede{font-size:18px;color:var(--muted)}
-.sub{color:var(--muted);font-size:12.5px}
-.grow{flex:1;min-width:0}
-.hidden{display:none!important}
-kbd{font:11px ui-monospace,Menlo,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--panel);color:var(--muted)}
-.pair{display:grid;grid-template-columns:repeat(2,minmax(0,540px));gap:28px;margin-top:34px;justify-content:space-between}
-.cap{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
-.cap b{font-size:17px}
-.pane{border:1px solid var(--line);border-radius:11px;background:var(--panel);overflow:hidden;box-shadow:0 14px 40px #0000000d;height:640px;display:flex;flex-direction:column;position:relative}
-.scroll{flex:1;overflow:auto;position:relative}
-button{font:inherit;color:inherit;cursor:pointer}
+:root {
+  --bg: #fffcf0; --surface: #f2f0e5; --raised: #ffffff; --border: #dad8ce; --text: #100f0f; --muted: #6f6e69; --faint: #9f9d96;
+  --accent: #ad8301; --add-bg: #e6eed1; --add-ink: #66800b; --del-bg: #f6dcd6; --del-ink: #af3029; --add-word: #cfdea3; --del-word: #eebbb0;
+  --proposed: #205ea6; --proposed-bg: #e1ebf6;
+  --k: #a02f6f; --t: #ad8301; --f: #205ea6; --p: #24837b; --s: #66800b; --n: #bc5215; --c: #9f9d96; --v: #5e409d; --o: #6f6e69; --a: #bc5215;
+  --old-k: #205ea6; --old-s: #24837b; --old-n: #ad8301; --old-c: #9f9d96;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #100f0f; --surface: #1c1b1a; --raised: #282726; --border: #403e3c; --text: #cecdc3; --muted: #878580; --faint: #575653;
+    --accent: #d0a215; --add-bg: #1f2414; --add-ink: #879a39; --del-bg: #2c1714; --del-ink: #d14d41; --add-word: #34401a; --del-word: #4f221d;
+    --proposed: #4385be; --proposed-bg: #14202d;
+    --k: #ce5d97; --t: #d0a215; --f: #4385be; --p: #3aa99f; --s: #879a39; --n: #da702c; --c: #6f6e69; --v: #8b7ec8; --o: #878580; --a: #da702c;
+    --old-k: #4385be; --old-s: #3aa99f; --old-n: #d0a215; --old-c: #6f6e69;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #100f0f; --surface: #1c1b1a; --raised: #282726; --border: #403e3c; --text: #cecdc3; --muted: #878580; --faint: #575653;
+  --accent: #d0a215; --add-bg: #1f2414; --add-ink: #879a39; --del-bg: #2c1714; --del-ink: #d14d41; --add-word: #34401a; --del-word: #4f221d;
+  --proposed: #4385be; --proposed-bg: #14202d;
+  --k: #ce5d97; --t: #d0a215; --f: #4385be; --p: #3aa99f; --s: #879a39; --n: #da702c; --c: #6f6e69; --v: #8b7ec8; --o: #878580; --a: #da702c;
+  --old-k: #4385be; --old-s: #3aa99f; --old-n: #d0a215; --old-c: #6f6e69;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+main { max-width: 860px; margin: 0 auto; padding: 32px 16px 96px; }
+h1 { font-size: 26px; line-height: 1.25; margin: 0 0 12px; }
+h2 { font-size: 20px; margin: 56px 0 8px; }
+h3 { font-size: 16px; margin: 24px 0 6px; }
+p { margin: 8px 0; }
+code, .mono { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 12.5px; }
+a { color: var(--proposed); }
+.lede { font-size: 17px; color: var(--text); }
+.muted { color: var(--muted); }
+.decision { border-left: 3px solid var(--accent); padding: 4px 0 4px 14px; margin: 20px 0; }
+.tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 10px; margin-right: 6px; vertical-align: 2px; }
+.tag.new { background: var(--proposed-bg); color: var(--proposed); }
+.tag.now { background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+.tag.rec { background: var(--add-bg); color: var(--add-ink); }
+.theme-switch { float: right; display: flex; gap: 4px; }
+button, .seg label { font: inherit; font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+button[aria-pressed="true"] { background: var(--raised); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.seg { display: inline-flex; gap: 4px; flex-wrap: wrap; margin: 8px 0; }
 
-/* ---------- before: as built ---------- */
-.b-bar{display:flex;gap:8px;align-items:center;padding:0 10px;height:30px;border-bottom:1px solid var(--line);font-size:11px}
-.b-bar span{cursor:default}
-.b-card{background:var(--soft);padding:10px 14px;font-size:12px}
-.b-card .cap2{font-size:11px;color:var(--muted)}
-.b-files{padding:10px 14px;font:10px/1.7 ui-monospace,Menlo,monospace}
-.b-files b{font:600 12px -apple-system,sans-serif;display:block;margin-bottom:4px}
-.b-files div{display:flex;gap:8px}
-.b-fh{display:flex;gap:8px;padding:6px 10px;background:var(--soft);border-top:1px solid var(--line);margin-top:12px;font:600 11px ui-monospace,Menlo,monospace}
-.b-fh span{font-weight:400;font-size:10px}
-.b-hunk{font:10px ui-monospace,Menlo,monospace;color:var(--muted);padding:3px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bl{display:grid;grid-template-columns:42px 42px 12px 1fr;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre}
-.bl i{font-style:normal;font-size:10px;color:var(--muted);text-align:right;padding-right:4px}
-.bl span{overflow:hidden;text-overflow:ellipsis}
-.bl.add span,.bl.add b{background:var(--old-g)} .bl.del span,.bl.del b{background:var(--old-r)}
-.bl b{font-weight:400} .bl.add b{color:var(--green)} .bl.del b{color:var(--red)}
-.bl mark{color:inherit;text-decoration:underline;background:#25704e47} .bl.del mark{background:#a54b4947}
-.b-cur{box-shadow:inset 3px 0 0 var(--blue)}
-.b-move{font-size:11px;color:var(--muted);padding:4px 10px;background:var(--soft)}
-.b-foot{padding:14px;font:10px ui-monospace,Menlo,monospace;color:var(--muted)}
-.b-sel{display:flex;gap:10px;align-items:center;padding:6px 10px;background:var(--soft);border-top:1px solid var(--line);font-size:11px}
-.g{color:var(--green)} .r{color:var(--red)}
+.vision { border: 1px solid var(--border); border-radius: 10px; background: var(--raised); padding: 18px 20px; margin: 18px 0; }
+.vision h3 { margin-top: 0; font-size: 18px; }
+.vision .true { font-size: 15.5px; margin-bottom: 12px; }
+dl.cost { display: grid; grid-template-columns: 92px 1fr; gap: 4px 12px; margin: 12px 0 0; font-size: 14px; }
+dl.cost dt { color: var(--muted); }
+dl.cost dd { margin: 0; }
 
-/* ---------- after ---------- */
-.a-top{padding:10px 14px 8px;border-bottom:1px solid var(--line)}
-.a-title{display:flex;align-items:baseline;gap:8px}
-.a-title b{font-size:14px;letter-spacing:-.1px}
-.a-pr{margin-left:auto;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:99px;padding:1px 10px;font-size:12px;background:var(--panel)}
-.a-pr:hover{border-color:var(--muted)}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block}
-.a-deliv{margin-top:8px;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:12.5px;background:var(--paper)}
-.a-deliv .chk{display:flex;gap:6px;align-items:center;color:var(--muted)}
-.a-bar{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--line);background:var(--soft);font-size:12.5px;position:relative}
-.step{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:8px;background:var(--panel);overflow:hidden}
-.step button{border:0;background:transparent;padding:2px 9px;font-size:13px}
-.step button:hover{background:var(--soft)}
-.step .pos{padding:0 8px;font-variant-numeric:tabular-nums;border-left:1px solid var(--line);border-right:1px solid var(--line);min-width:58px;text-align:center}
-.filebtn{border:1px solid transparent;background:transparent;border-radius:7px;padding:2px 8px;display:inline-flex;gap:6px;align-items:center;min-width:0;max-width:210px}
-.filebtn:hover{border-color:var(--line);background:var(--panel)}
-.filebtn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-.tog{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
-.tog button{border:0;background:transparent;padding:2px 9px;font-size:12px}
-.tog button.on{background:var(--ink);color:var(--paper)}
-.tog button:disabled{opacity:.4;cursor:default}
-.ghost{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:2px 9px;font-size:12px}
-.ghost.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
-.menu{position:absolute;left:10px;right:10px;top:36px;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 14px 40px #0003;z-index:9;padding:5px}
-.menu div{display:flex;gap:8px;align-items:center;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:12.5px}
-.menu div:hover,.menu div.cur{background:var(--soft)}
-.menu .dir{color:var(--muted)}
-.bars{display:inline-flex;gap:1px;width:44px;height:6px;border-radius:3px;overflow:hidden;background:var(--line)}
-.bars u{background:var(--green);height:100%} .bars s{background:var(--red);height:100%}
-.focusnote{display:flex;gap:8px;align-items:center;padding:5px 12px;background:var(--blue-bg);color:var(--blue);font-size:12.5px}
-.focusnote button{margin-left:auto;border:0;background:transparent;color:inherit;font-size:13px}
-.fhead{position:sticky;top:0;z-index:3;display:flex;align-items:center;gap:8px;padding:6px 12px;background:var(--panel);border-bottom:1px solid var(--line);font-size:12.5px}
-.file+.file{margin-top:18px;border-top:1px solid var(--line)}
-.fhead .dir{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;min-width:0}
-.fhead b{white-space:nowrap}
-.fhead a{color:var(--muted);font-size:12px;cursor:pointer;white-space:nowrap}
-.fhead a:hover{color:var(--ink)}
-.stat{font:11.5px ui-monospace,Menlo,monospace;white-space:nowrap}
-.gap{display:flex;align-items:center;gap:8px;padding:5px 12px 5px 46px;color:var(--faint);font-size:11.5px}
-.gap::after{content:"";flex:1;border-top:1px dashed var(--line)}
-.gap em{font-style:normal;font-family:ui-monospace,Menlo,monospace;color:var(--muted)}
-.ln{display:grid;grid-template-columns:40px 14px 1fr;font:12px/1.65 ui-monospace,Menlo,monospace;white-space:pre}
-.ln i{font-style:normal;font-size:11px;color:var(--faint);text-align:right;padding-right:6px;cursor:pointer;user-select:none;position:relative}
-.ln i:hover{color:var(--blue);background:var(--blue-bg)}
-.ln b{font-weight:400;color:var(--faint);text-align:center;user-select:none}
-.ln span{overflow:hidden;text-overflow:ellipsis;padding-right:10px}
-.ln.add{background:var(--green-bg)} .ln.add b{color:var(--green)}
-.ln.del{background:var(--red-bg)} .ln.del b{color:var(--red)}
-.ln.add mark{background:var(--green-w);color:inherit;border-radius:3px;padding:1px 0}
-.ln.del mark{background:var(--red-w);color:inherit;border-radius:3px;padding:1px 0}
-.ln.sel{background:var(--blue-bg)!important} .ln.sel i{color:var(--blue);font-weight:600}
-.chg{position:relative;margin:2px 0}
-.chg.cur::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent);border-radius:0 2px 2px 0;z-index:1}
-@keyframes land{0%{box-shadow:inset 0 0 0 2px var(--accent)}100%{box-shadow:inset 0 0 0 2px transparent}}
-.chg.land{animation:land .9s ease-out}
-@keyframes arrive{0%{background:var(--accent-bg)}100%{background:transparent}}
-.chg.fresh{animation:arrive 2s ease-out}
-.mov{background:var(--violet-bg)}
-.movrow{display:flex;gap:8px;align-items:center;padding:4px 12px 4px 46px;color:var(--violet);font-size:12.5px;cursor:pointer}
-.movrow span:last-child{margin-left:auto}
-.mov .ln{background:transparent}
-.end{padding:26px 14px 34px;text-align:center;color:var(--muted);font-size:12.5px}
-.end a{color:var(--ink);cursor:pointer;text-decoration:underline;text-underline-offset:3px}
-.float{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:8px;align-items:center;padding:6px 8px 6px 12px;border-radius:11px;background:var(--ink);color:var(--paper);font-size:12.5px;box-shadow:0 10px 30px #0004;z-index:8;white-space:nowrap}
-.float button{border:1px solid #8887;background:transparent;border-radius:7px;padding:2px 9px;font-size:12.5px}
-.float button.pri{background:var(--paper);color:var(--ink);border-color:var(--paper)}
-.float kbd{background:transparent;border-color:#8887;color:inherit;opacity:.7}
-.newchip{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);padding:4px 12px;border-radius:99px;background:var(--accent);color:var(--paper);font-size:12.5px;cursor:pointer;z-index:7;box-shadow:0 8px 24px #0003}
-.toast{margin-top:10px;font-size:13px;min-height:22px;color:var(--muted)}
-.sim{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:3px 11px;font-size:13px}
+/* diff */
+.diff { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--bg); margin: 12px 0; }
+.diff .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; background: var(--surface); border-bottom: 1px solid var(--border); font-size: 13px; flex-wrap: wrap; }
+.diff .head b { font-weight: 600; }
+.diff pre { margin: 0; padding: 6px 0; overflow-x: auto; font: 12.5px/1.6 "SF Mono", ui-monospace, Menlo, monospace; }
+.diff .ln { display: block; padding: 0 12px 0 0; white-space: pre; }
+.diff .ln::before { content: attr(data-n); display: inline-block; width: 38px; text-align: right; padding-right: 12px; color: var(--faint); }
+.diff .ln.add { background: var(--add-bg); }
+.diff .ln.del { background: var(--del-bg); }
+.diff .ln.hunk { color: var(--muted); background: var(--surface); }
+.diff .w-add { background: var(--add-word); border-radius: 2px; }
+.diff .w-del { background: var(--del-word); border-radius: 2px; }
+.k { color: var(--k); } .t { color: var(--t); } .f { color: var(--f); } .p { color: var(--p); } .s { color: var(--s); }
+.n { color: var(--n); } .c { color: var(--c); font-style: italic; } .v { color: var(--v); } .o { color: var(--o); } .a { color: var(--a); }
+/* today's highlighter: only comment / string / number / keyword, in today's inks */
+.today .t, .today .f, .today .p, .today .v, .today .o, .today .a { color: inherit; }
+.today .k { color: var(--old-k); } .today .s { color: var(--old-s); } .today .n { color: var(--old-n); } .today .c { color: var(--old-c); font-style: normal; }
+.only-today { display: none; } .today .only-today { display: block; } .today .only-grammar { display: none; }
 
-ol.notes{padding:0;margin:26px 0 0;list-style:none;counter-reset:n;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 34px}
-ol.notes li{counter-increment:n;padding-left:34px;position:relative;font-size:14.5px}
-ol.notes li::before{content:counter(n);position:absolute;left:0;top:1px;width:23px;height:23px;border-radius:50%;background:var(--accent);color:var(--paper);font-size:12px;text-align:center;line-height:23px}
-ol.notes b{display:block}
-ol.notes .was{color:var(--muted)}
-.q{border-top:1px solid var(--line);padding:14px 0}
-.q b.n{color:var(--accent);margin-right:6px}
-.q .opts{margin:6px 0 0 22px;color:var(--muted)}
-@media(prefers-reduced-motion:reduce){*{animation:none!important;scroll-behavior:auto!important}}
-@media(max-width:1150px){.pair{grid-template-columns:minmax(0,540px);justify-content:start}ol.notes{grid-template-columns:1fr}main{padding:30px 16px 60px}h1{font-size:32px}}
-</style></head><body><main>
+/* rendered markdown */
+.md { padding: 14px 20px 18px; font-size: 15px; line-height: 1.55; background: var(--bg); }
+.md h4 { font-size: 18px; margin: 6px 0 8px; }
+.md p, .md li { margin: 6px 0; }
+.md .blk-add { border-left: 3px solid var(--add-ink); background: var(--add-bg); padding: 2px 10px; margin-left: -13px; }
+.md .blk-del { border-left: 3px solid var(--del-ink); background: var(--del-bg); padding: 2px 10px; margin-left: -13px; text-decoration: line-through; text-decoration-color: var(--del-ink); color: var(--muted); }
+.md ins { text-decoration: none; background: var(--add-word); border-radius: 2px; }
+.md del { text-decoration: line-through; text-decoration-color: var(--del-ink); background: var(--del-word); border-radius: 2px; }
+.md code { background: var(--surface); padding: 0 4px; border-radius: 4px; }
+.md table { border-collapse: collapse; font-size: 14px; }
+.md td, .md th { border: 1px solid var(--border); padding: 3px 10px; text-align: left; }
+.md tr.row-add td { background: var(--add-bg); }
+.md.side { display: grid; grid-template-columns: 1fr 1fr; gap: 0; padding: 0; }
+.md.side > div { padding: 12px 16px; }
+.md.side > div + div { border-left: 1px solid var(--border); }
+.md .label { font-size: 12px; color: var(--muted); }
 
-<header class="col">
-<h1>The Changes pane,<br>redesigned.</h1>
-<p class="lede">Same pane, same behaviour: one stream for the whole comparison, stepping across files, focus on one file, unified or side by side, word emphasis, collapsed moves, select lines to copy or ask, the delivery card, live updates that keep your place. What changes is how it reads.</p>
-<p><b>The decision:</b> is the right-hand pane what gets built, and which of the twelve changes below would you undo?</p>
-<p class="sub" style="font-size:14px">Left is the pane as built, redrawn from <code>TaskChangesView.swift</code> and <code>ReviewStreamView.swift</code>: sizes, order and wording come from the source; it is a reconstruction, not a screenshot. Right is proposed and works: step, pick a file, focus, expand the move, drag the line numbers, open the PR pill. Both show the same seven changes in four files at 540 points.</p>
-</header>
+/* image compare */
+.imgcmp { position: relative; background: repeating-conic-gradient(var(--surface) 0 25%, var(--bg) 0 50%) 0 0 / 16px 16px; display: flex; justify-content: center; padding: 18px; gap: 18px; flex-wrap: wrap; }
+.imgcmp figure { margin: 0; text-align: center; font-size: 12px; color: var(--muted); }
+.imgcmp svg { display: block; width: 220px; height: 150px; }
+.stack { position: relative; width: 300px; height: 205px; }
+.stack svg { position: absolute; inset: 0; width: 300px; height: 205px; }
+.stack .top { clip-path: inset(0 0 0 50%); }
+.stack .handle { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: var(--accent); }
+.range { display: block; width: 300px; margin: 8px auto 0; accent-color: var(--accent); }
+.imgnote { font-size: 13px; color: var(--muted); padding: 0 12px 10px; text-align: center; }
 
-<div class="pair">
-<div><div class="cap"><b>As built</b><span class="sub">static</span></div><div class="pane"><div id="before" style="display:contents"></div></div></div>
-<div><div class="cap"><b>Redesigned</b><span class="sub">proposed · try it</span><span class="grow"></span><button class="sim" id="sim">Simulate an agent edit</button></div>
-<div class="pane" id="after" tabindex="0">
- <div class="a-top"><div class="a-title"><b>7 changes in 4 files</b><span class="sub">against <span class="mono">main</span> at <span class="mono">a0548bf</span> · includes uncommitted</span><button class="a-pr" id="prpill"><span class="dot"></span>#1949 · open</button></div>
-  <div class="a-deliv hidden" id="deliv"><div style="display:flex;gap:8px;align-items:baseline"><b class="grow">Make Task PR, file-browser and brief views useful beside the conversation</b><a class="sub" style="cursor:pointer;white-space:nowrap">Open on GitHub ↗</a></div><div class="chk" style="margin-top:5px"><span class="dot"></span>2 passed · 15 skipped<span class="grow"></span>read 20 s ago · <a style="cursor:pointer">read again</a></div><div class="chk" style="margin-top:2px">Local checkout matches the PR head · description ▸</div></div></div>
- <div class="a-bar"><span class="step"><button id="prev" title="Previous change">↑</button><span class="pos" id="pos"></span><button id="next" title="Next change">↓</button></span><span class="sub"><kbd>[</kbd> <kbd>]</kbd></span>
-  <button class="filebtn" id="filebtn"><span id="filename"></span>▾</button><span class="grow"></span>
-  <button class="ghost" id="focus" title="Show one file at a time; next and previous still cross files">Focus</button>
-  <span class="tog"><button class="on" title="Unified">☰</button><button disabled title="Side by side needs 640 points; this pane is 540">◫</button></span>
-  <div class="menu hidden" id="menu"></div></div>
- <div class="focusnote hidden" id="focusnote"></div>
- <div class="scroll" id="scroll"></div>
- <div class="float hidden" id="float"></div>
- <div class="newchip hidden" id="newchip">1 new change below ↓</div>
-</div><div class="toast" id="toast"></div></div>
+/* html compare */
+.htmlcmp { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+.htmlcmp > div { padding: 8px; }
+.htmlcmp > div + div { border-left: 1px solid var(--border); }
+.htmlcmp iframe { width: 100%; height: 170px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+
+ol.questions { padding-left: 22px; }
+ol.questions > li { margin: 14px 0; }
+ol.questions ol { list-style: lower-alpha; padding-left: 22px; margin: 4px 0; }
+ol.questions ol li { margin: 2px 0; }
+table.compare { width: 100%; border-collapse: collapse; font-size: 14px; margin: 12px 0; }
+table.compare th, table.compare td { border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: top; }
+table.compare th { color: var(--muted); font-weight: 500; }
+.scroll { overflow-x: auto; }
+@media (max-width: 640px) {
+  .md.side, .htmlcmp { grid-template-columns: 1fr; }
+  .md.side > div + div, .htmlcmp > div + div { border-left: 0; border-top: 1px solid var(--border); }
+  dl.cost { grid-template-columns: 1fr; }
+  dl.cost dt { margin-top: 6px; }
+  .stack, .stack svg, .range { width: 260px; } .stack, .stack svg { height: 178px; }
+}
+</style>
+</head>
+<body>
+<main>
+<div class="theme-switch">
+  <button data-set-theme="light">Light</button><button data-set-theme="dark">Dark</button>
 </div>
 
-<section style="margin-top:64px">
-<h2>What changed, and why</h2>
-<ol class="notes">
-<li><b>What you are looking at comes first.</b><span class="was">Was: "Compared with main at a0548bf · includes uncommitted changes" in 10-point type under the last line of the last file.</span> Now the pane's title, with the size of the change.</li>
-<li><b>The diff starts at the top.</b><span class="was">Was: the delivery card, then every changed file listed inline, then the first line of code. This branch touches hundreds of files.</span> The file list is a menu on the current file's name; the stream begins under the bar.</li>
-<li><b>Delivery is one pill until you want it.</b><span class="was">Was: a tinted card with headline, title, checks disclosure and description disclosure, always first in the scroll.</span> A pill with a status dot; click for the same card. Nothing it reports is removed.</li>
-<li><b>The stepper looks like the main control.</b><span class="was">Was: two bare chevrons and grey 11-point text beside an unstyled "Focus file".</span> One bordered control with the position in the middle and the keys shown next to it, not only in a tooltip.</li>
-<li><b>You always know which file you are in.</b><span class="was">Was: file headers scroll away, and the toolbar names the file only in Focus.</span> Headers stick while their file is on screen and the bar always names the current file. The name is bold, the directory quiet.</li>
-<li><b>No git plumbing.</b><span class="was">Was: raw <code>@@ -210,7 +210,11 @@</code> lines.</span> A dashed rule with what a person wants from it: how many lines were skipped and which function this is.</li>
-<li><b>One column of line numbers.</b><span class="was">Was: two 42-point gutters in unified, 84 points of a 540-point pane, in 10-point type.</span> One gutter: the new number, or the old one on a removed line. Side by side keeps one per side.</li>
-<li><b>Colour says less, words say more.</b><span class="was">Was: heavy row fills, and changed words both filled and underlined.</span> A light row tint with a clearly darker word; no underline. <code>+</code> and <code>−</code> stay so it reads without hue.</li>
-<li><b>A move looks like a move.</b><span class="was">Was: a grey caption row, the same look as "Binary file" and "No textual changes".</span> Its own colour and wording, "Moved here from L164", with the whole row as the expand target.</li>
-<li><b>Selecting lines is something you can find.</b><span class="was">Was: click a 10-point number, ⇧-click another; only a tooltip says so. The result is a bar docked at the bottom reading <code>path:211-215 · new</code>.</span> Numbers light up on hover and drag to select. The actions float over the code, Ask is the primary one and has a key.</li>
-<li><b>Focus says what it hid.</b><span class="was">Was: a grey caption, "Showing … · 5 other files hidden", and the button renamed "All files".</span> A tinted strip with a close button; the Focus button stays put and shows as on.</li>
-<li><b>The pane acknowledges you.</b><span class="was">Was: stepping moved a 3-point bar; live edits appeared silently; the stream just stopped.</span> The change you land on flashes once. A new edit outside the view offers "1 new change below" and never scrolls you. The end says it is the end.</li>
-</ol>
+<h1>Diff v2: where the colors come from, and how Markdown, images and HTML read</h1>
+<p class="lede">The Diff pane LOO-515 built colors only comments, strings, numbers and keywords. It also can't show a Markdown file, an image or a page as what it is. This page offers four ways to get real grammar highlighting, then a working sketch of rendered diffs, which every one of them needs.</p>
+
+<div class="decision">
+  <b>The decision:</b> which engine colors the code (question 1). The rendered-diff questions (3–6) are smaller and independent. Answers like “1a, 3a, 5b” are complete.
+</div>
+<p class="muted"><span class="tag now">Today</span> marks what ships now. <span class="tag new">Proposed</span> marks what this Task would build.</p>
+
+<h2>What changes, on one hunk</h2>
+<p>Here is the same Swift change colored by today's highlighter and by a grammar. Switch between them. A grammar colors types, functions, properties and parameters. Today's highlighter sees only words in a keyword list.</p>
+<div class="seg" role="group" aria-label="Highlighter">
+  <button data-hl="today" aria-pressed="false">Today · SyntaxColors.swift</button>
+  <button data-hl="grammar" aria-pressed="true">Proposed · grammar</button>
+</div>
+<div class="hl-target">
+<div class="diff">
+  <div class="head"><span><b>SyntaxColors.swift</b> <span class="muted">swift/LoopflowMac</span></span><span class="mono muted">+3 −2</span></div>
+<pre><span class="ln hunk" data-n="">@@ -31,9 +31,10 @@ struct SyntaxLanguage: Sendable {</span>
+<span class="ln" data-n="31">    <span class="k">enum</span> <span class="t">Kind</span><span class="o">:</span> <span class="t">Equatable</span>, <span class="t">Sendable</span> { <span class="k">case</span> <span class="p">comment</span>, <span class="p">string</span>, <span class="p">number</span>, <span class="p">keyword</span> }</span>
+<span class="ln" data-n="32"></span>
+<span class="ln del" data-n="33">    <span class="k">static</span> <span class="k">func</span> <span class="f w-del">named</span>(<span class="v">_</span> <span class="v">path</span><span class="o">:</span> <span class="t">String</span>) <span class="o">-&gt;</span> <span class="t w-del">SyntaxLanguage</span><span class="o">?</span> {</span>
+<span class="ln del" data-n="34">        <span class="k">let</span> <span class="v">name</span> <span class="o">=</span> <span class="w-del">(<span class="v">path</span> <span class="k">as</span> <span class="t">NSString</span>)</span>.<span class="p">lastPathComponent</span>.<span class="f">lowercased</span>()</span>
+<span class="ln add" data-n="33">    <span class="k">static</span> <span class="k">func</span> <span class="f w-add">grammar</span>(<span class="a w-add">for</span> <span class="v">path</span><span class="o">:</span> <span class="t">String</span>) <span class="o">-&gt;</span> <span class="t w-add">Grammar</span><span class="o">?</span> {</span>
+<span class="ln add" data-n="34">        <span class="k">let</span> <span class="v">name</span> <span class="o">=</span> <span class="w-add"><span class="t">URL</span>(<span class="a">fileURLWithPath</span><span class="o">:</span> <span class="v">path</span>)</span>.<span class="p">lastPathComponent</span>.<span class="f">lowercased</span>()</span>
+<span class="ln add" data-n="35">        <span class="c">// A dotfile's whole name is its kind: ".zshrc" reads as shell.</span></span>
+<span class="ln" data-n="36">        <span class="k">return</span> <span class="v">byExtension</span>[(<span class="v">name</span> <span class="k">as</span> <span class="t">NSString</span>).<span class="p">pathExtension</span>] <span class="o">??</span> <span class="v">byName</span>[<span class="v">name</span>]</span>
+<span class="ln" data-n="37">    }</span>
+</pre>
+</div>
+
+<p>Lines cut out of their file are where today goes wrong. This hunk opens in the middle of a Python docstring. Today's highlighter reads <code>Don't</code> as the start of a string and colors the rest of the line. A grammar that parses the whole file knows these lines are a docstring.</p>
+<div class="diff">
+  <div class="head"><span><b>render.py</b> <span class="muted">scripts</span></span><span class="mono muted">+1</span></div>
+<pre class="only-grammar"><span class="ln hunk" data-n="">@@ -40,6 +40,7 @@ def render(page):</span>
+<span class="ln" data-n="40"><span class="s">    Its body is read as Markdown. Don't</span></span>
+<span class="ln add" data-n="41"><span class="s">    rely on "quotes" here: they're prose, and 3 is just a word.</span></span>
+<span class="ln" data-n="42"><span class="s">    """</span></span>
+<span class="ln" data-n="43">    <span class="k">return</span> <span class="f">markdown</span>(<span class="v">page</span>.<span class="p">body</span>, <span class="a">safe</span><span class="o">=</span><span class="k">True</span>)</span>
+</pre>
+<pre class="only-today"><span class="ln hunk" data-n="">@@ -40,6 +40,7 @@ def render(page):</span>
+<span class="ln" data-n="40">    Its body <span class="k">is</span> read <span class="k">as</span> Markdown. Don<span class="s">'t</span></span>
+<span class="ln add" data-n="41">    rely on <span class="s">"quotes"</span> here: they<span class="s">'re prose, and 3 is just a word.</span></span>
+<span class="ln" data-n="42">    <span class="s">""</span><span class="s">"</span></span>
+<span class="ln" data-n="43">    <span class="k">return</span> markdown(page.body, safe=<span class="k">True</span>)</span>
+</pre>
+</div>
+</div>
+
+<h2>Four engines</h2>
+<p>All four color both views. They differ in where the grammar runs and in what else that place gives you.</p>
+
+<section class="vision" id="a">
+  <h3><span class="tag new">A</span> Native tree-sitter in the app <span class="tag rec">recommended</span></h3>
+  <p class="true">The Mac app links tree-sitter and its grammars. It parses the old and new files whole, then colors each Diff row by its line number. The same parser recolors the Files editor as you type.</p>
+  <p>SyntaxColors.swift (230 lines) is replaced by a <code>Grammar</code> that wraps a SwiftTreeSitter parser and its <code>highlights.scm</code> query. Each grammar's capture names (<code>@keyword</code>, <code>@type</code>, <code>@function</code>, <code>@property</code>, <code>@markup.heading</code> …) map to theme inks in one table. While a file's full text loads, a row is colored by parsing its hunk alone. That's the same quality as today, and it upgrades in place when the full parse arrives.</p>
+  <dl class="cost">
+    <dt>Demo</dt><dd>Open a Task's Diff on a Swift, Rust or TypeScript change and see types, calls and properties in color, in Flexoki Dark and Light. In Files, type <code>/*</code> in a 5,000-line file and see the rest of the file recolor at once.</dd>
+    <dt>Needs</dt><dd>The old side's full text, from <code>lf task file &lt;issue&gt; &lt;path&gt; --base &lt;rev&gt;</code>, a new served read. The rendered diffs need it too.</dd>
+    <dt>Cost</dt><dd>About 1–1.5k lines of Swift. SPM dependencies: SwiftTreeSitter plus one package per grammar (about 14 for the languages this repository uses). The app grows by an estimated 8–15 MB. A follow-up could move the editor to incremental parsing and drop the 200k-unit limit.</dd>
+    <dt>Risk</dt><dd>Grammar packages vary in quality and in which tree-sitter ABI they target, so they need pinning. Upstream <code>highlights.scm</code> files name captures inconsistently, so some languages need a local query. Two parses per file near the view is fine, but it has to stay lazy.</dd>
+    <dt>Appeal</dt><dd>One highlighter for the Diff and the editor. No wire change. Works the same on a peer Machine's checkout, because the app colors text it already has. iOS gets it if <code>Grammar</code> lives in the shared <code>Loopflow</code> library.</dd>
+  </dl>
 </section>
 
-<section id="questions" class="col" style="margin-top:64px">
-<h2>Questions</h2>
-<div class="q"><b class="n">1</b>Which of the twelve would you undo or push further? Numbers are enough.</div>
-<div class="q"><b class="n">2</b>The file list.
-<div class="opts"><b>a</b> A menu on the file name, as shown.<br><b>b</b> Stay inline at the top, collapsed to one line.<br><b>c</b> A column down the left when the pane is wide enough.</div></div>
-<div class="q"><b class="n">3</b>Three of these add a small behaviour: dragging line numbers to select (10), a key for Ask (10), and the "new change below" chip (12). Keep all three, or hold to looks only?</div>
-<div class="q"><b class="n">4</b>Files' Diff uses the same reader. Should it take the same bar and title, or stay as it is until Changes is settled?</div>
-<p class="sub" style="font-size:13.5px;margin-top:10px">Earlier rounds are kept beside this page: <code>scratch/explore-diff-pane.html</code> and <code>scratch/explore-follow-agent.html</code>.</p>
+<section class="vision" id="b">
+  <h3><span class="tag new">B</span> lf colors it: spans on the wire</h3>
+  <p class="true"><code>lf task diff --json</code> returns each line with its highlight spans, computed in Rust with <code>tree-sitter-highlight</code>. Desktop, iOS and <code>lf task diff</code> in a terminal all show the same colors.</p>
+  <pre class="diff" style="padding:10px 12px;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap">{"line": 33, "kind": "added",
+ "text": "    static func grammar(for path: String) -&gt; Grammar? {",
+ "spans": [[4,10,"keyword"],[11,15,"keyword"],[16,23,"function"],
+           [24,27,"label"],[28,32,"variable.parameter"],[34,40,"type"],[45,52,"type"]]}</pre>
+  <dl class="cost">
+    <dt>Demo</dt><dd><code>lf task diff c9fbcb</code> in a terminal prints grammar colors, and Desktop's Diff matches it token for token.</dd>
+    <dt>Cost</dt><dd>Rust grammars are cargo crates, so that half is easy. The wire DTO grows: a new required field, fixtures in <code>tests/fixtures/dto/</code>, and Swift decoding. Payloads get 3–5× larger. The Files editor still needs a native highlighter for typing, so either there are two highlighters or the editor keeps SyntaxColors.</dd>
+    <dt>Risk</dt><dd>“One implementation” breaks at the editor. Every theme change is a client concern anyway, so the spans carry capture names, not colors.</dd>
+    <dt>Appeal</dt><dd>Follows the rule that state the CLI and Desktop both show is written once in Rust. The terminal diff gets better for free.</dd>
+  </dl>
 </section>
+
+<section class="vision" id="c">
+  <h3><span class="tag new">C</span> The Diff becomes a web view: Shiki through Pierre</h3>
+  <p class="true">The Diff stream renders in a bundled, offline WKWebView using <code>@pierre/diffs</code> and Shiki, which is how T3 Code does it. Highlighting uses VS Code's TextMate grammars. Rendered Markdown and HTML come almost free.</p>
+  <dl class="cost">
+    <dt>Demo</dt><dd>Desktop's Diff looks like T3 Code's, with VS Code-grade colors in every language Shiki ships.</dd>
+    <dt>Cost</dt><dd>Replaces ReviewStreamView (758 lines) and rebuilds what LOO-515 just made native inside it, bridged through JavaScript messages: keyboard stepping, selection, comments, Viewed, the step menu and the lazy stream. The JS bundle is 2–5 MB with Oniguruma WASM. The Files editor still needs its own highlighter.</dd>
+    <dt>Risk</dt><dd>High. It throws away a reviewed native pane, and WebKit crashes in this app have surfaced as silent <code>exit 1</code> before. Pierre is young and its API may move.</dd>
+    <dt>Appeal</dt><dd>The best grammar coverage and the least highlighting code of our own.</dd>
+  </dl>
+</section>
+
+<section class="vision" id="d">
+  <h3><span class="tag new">D</span> Radical: the Diff understands structure</h3>
+  <p class="true">The tree-sitter parse from A also drives the diff itself. Reindents, reflowed arguments and moved functions stop showing as changes, and a change is marked at the node that changed (difftastic's idea). Every document opens as what it is: prose rendered with redlines, images compared, pages live.</p>
+  <div class="diff">
+    <div class="head"><span><b>task.rs</b> <span class="muted">· structural</span></span><span class="mono muted">1 change · 14 lines reindented, hidden</span></div>
+<pre><span class="ln" data-n="88">    <span class="k">let</span> <span class="v">runs</span> <span class="o">=</span> <span class="v">store</span>.<span class="f">graph_runs</span>(<span class="o">&amp;</span><span class="v">task</span>.<span class="p">id</span>, <span class="w-add"><span class="t">Order</span>::<span class="t">Newest</span></span>)<span class="o">?</span>;</span>
+<span class="ln hunk" data-n="">  ⋯ 14 lines moved into `if let Some(run)` unchanged</span>
+</pre>
+  </div>
+  <dl class="cost">
+    <dt>Demo</dt><dd>A Task that wraps a block in <code>if let</code> shows as one marked line, not 30 red and green ones.</dd>
+    <dt>Cost</dt><dd>Everything in A, plus a structural diff. Difftastic isn't published as a library. Its <code>--display json</code> output is experimental, so it would mean vendoring code or shelling out to an unstable format. Its Dijkstra search also gets slow on large files and falls back to line diffs. Several weeks of work.</dd>
+    <dt>Risk</dt><dd>Comments, step menus and line selection all assume lines. Node-level changes need their own anchors.</dd>
+    <dt>Appeal</dt><dd>No other agent workbench does this, and agent diffs are full of mechanical reindentation.</dd>
+  </dl>
+</section>
+
+<div class="scroll">
+<table class="compare">
+  <tr><th></th><th>A native</th><th>B wire spans</th><th>C web view</th><th>D structural</th></tr>
+  <tr><td>Colors the editor too</td><td>yes</td><td>no, needs a second highlighter</td><td>no</td><td>yes</td></tr>
+  <tr><td>Hunk fragments correct</td><td>yes, after the full-file parse</td><td>yes</td><td>yes, with full files</td><td>yes</td></tr>
+  <tr><td>Wire change</td><td>one new read</td><td>diff DTO and fixtures</td><td>one new read</td><td>new diff shape</td></tr>
+  <tr><td>Keeps LOO-515's pane</td><td>yes</td><td>yes</td><td>no</td><td>mostly</td></tr>
+  <tr><td>Rough size</td><td>1–1.5k lines Swift</td><td>~800 Rust, ~400 Swift</td><td>JS app and bridge</td><td>A plus weeks</td></tr>
+</table>
+</div>
+
+<h2>Rendered diffs <span class="tag new">Proposed</span></h2>
+<p>These are the same under A, B and D. Files already renders Markdown through <code>MarkdownBlocks</code> and HTML through an offline <code>WebPage</code>, but only for the new version. The Diff shows a binary file as “Binary file · no text to compare.” All three readers below need the old side, from the same <code>lf task file --base</code> read that A needs. Source stays one click away in each file's header.</p>
+
+<h3>Markdown</h3>
+<p>The old and new versions are parsed into blocks. Blocks are matched in order, and words are marked inside a block that changed. Try both layouts.</p>
+<div class="diff">
+  <div class="head">
+    <span><b>README.md</b> <span class="muted">swift</span></span>
+    <span class="seg" role="group" aria-label="Markdown view" style="margin:0">
+      <button data-md="inline" aria-pressed="true">Redline</button>
+      <button data-md="side" aria-pressed="false">Side by side</button>
+      <button data-md="source" aria-pressed="false">Source</button>
+    </span>
+  </div>
+  <div id="md-inline" class="md">
+    <h4>Reading a Task's diff</h4>
+    <p>Diff shows every file the Task changed as one stream. Press <code>j</code> and <code>k</code> to step through changes<del>, and</del><ins>;</ins> <code>v</code> marks a file viewed<ins> and folds it until its lines change again</ins>.</p>
+    <p class="blk-del">Syntax colors cover comments, strings, numbers and keywords.</p>
+    <p class="blk-add">Code is colored by its grammar, in every theme. Markdown, images and HTML open rendered, with what changed marked.</p>
+    <table>
+      <tr><th>Key</th><th>Does</th></tr>
+      <tr><td><code>j</code> / <code>k</code></td><td>Next and previous change</td></tr>
+      <tr class="row-add"><td><code>r</code></td><td>Rendered or source</td></tr>
+    </table>
+  </div>
+  <div id="md-side" class="md side" hidden>
+    <div><div class="label">Base</div>
+      <h4>Reading a Task's diff</h4>
+      <p>Diff shows every file the Task changed as one stream. Press <code>j</code> and <code>k</code> to step through changes<del>, and</del> <code>v</code> marks a file viewed.</p>
+      <p><del>Syntax colors cover comments, strings, numbers and keywords.</del></p>
+    </div>
+    <div><div class="label">This Task</div>
+      <h4>Reading a Task's diff</h4>
+      <p>Diff shows every file the Task changed as one stream. Press <code>j</code> and <code>k</code> to step through changes<ins>;</ins> <code>v</code> marks a file viewed<ins> and folds it until its lines change again</ins>.</p>
+      <p><ins>Code is colored by its grammar, in every theme. Markdown, images and HTML open rendered, with what changed marked.</ins></p>
+    </div>
+  </div>
+<pre id="md-source" hidden><span class="ln" data-n="12"><span class="k">## Reading a Task's diff</span></span>
+<span class="ln" data-n="13"></span>
+<span class="ln del" data-n="14">Diff shows every file the Task changed as one stream. Press <span class="s">`j`</span> and <span class="s">`k`</span> to step through changes<span class="w-del">, and</span> <span class="s">`v`</span> marks a file viewed.</span>
+<span class="ln add" data-n="14">Diff shows every file the Task changed as one stream. Press <span class="s">`j`</span> and <span class="s">`k`</span> to step through changes<span class="w-add">;</span> <span class="s">`v`</span> marks a file viewed<span class="w-add"> and folds it until its lines change again</span>.</span>
+<span class="ln" data-n="15"></span>
+<span class="ln del" data-n="16">Syntax colors cover comments, strings, numbers and keywords.</span>
+<span class="ln add" data-n="16">Code is colored by its grammar, in every theme. Markdown, images and HTML open rendered, with what changed marked.</span>
+<span class="ln add" data-n="22">| <span class="s">`r`</span> | Rendered or source |</span>
+</pre>
+</div>
+
+<h3>Images</h3>
+<p>PNG, JPEG, GIF, WebP and SVG open as images, with their old and new sizes in the header. Drag the slider.</p>
+<div class="diff">
+  <div class="head">
+    <span><b>logo.svg</b> <span class="muted">swift/LoopflowMac · 512×350 → 512×350</span></span>
+    <span class="seg" role="group" aria-label="Image view" style="margin:0">
+      <button data-img="side" aria-pressed="false">Side by side</button>
+      <button data-img="swipe" aria-pressed="true">Swipe</button>
+      <button data-img="onion" aria-pressed="false">Onion skin</button>
+      <button data-img="difference" aria-pressed="false">Difference</button>
+    </span>
+  </div>
+  <div class="imgcmp" id="img-side" hidden>
+    <figure><svg viewBox="0 0 300 205"><use href="#before"/></svg>Base</figure>
+    <figure><svg viewBox="0 0 300 205"><use href="#after"/></svg>This Task</figure>
+  </div>
+  <div class="imgcmp" id="img-stack">
+    <div>
+      <div class="stack">
+        <svg viewBox="0 0 300 205"><use href="#before"/></svg>
+        <svg viewBox="0 0 300 205" class="top" id="img-top"><use href="#after"/></svg>
+        <div class="handle" id="img-handle"></div>
+      </div>
+      <input type="range" class="range" id="img-range" min="0" max="100" value="50" aria-label="Compare">
+    </div>
+  </div>
+  <div class="imgnote" id="img-note">Left of the line is the base, right is this Task.</div>
+</div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="before">
+      <rect width="300" height="205" fill="#f2f0e5"/>
+      <circle cx="150" cy="96" r="58" fill="#4385be"/>
+      <path d="M118 96 l22 22 l42 -46" stroke="#fff" stroke-width="12" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="150" y="186" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="20" fill="#100f0f">loopflow</text>
+    </g>
+    <g id="after">
+      <rect width="300" height="205" fill="#f2f0e5"/>
+      <rect x="92" y="38" width="116" height="116" rx="30" fill="#d0a215"/>
+      <path d="M118 108 q32 -54 64 0" stroke="#100f0f" stroke-width="11" fill="none" stroke-linecap="round"/>
+      <circle cx="150" cy="80" r="7" fill="#100f0f"/>
+      <text x="150" y="186" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="20" font-weight="600" fill="#100f0f">loopflow</text>
+    </g>
+  </defs>
+</svg>
+
+<h3>HTML</h3>
+<p>Both versions run as offline pages, like Files does today: scripts run, the network is blocked, and links open in the browser.</p>
+<div class="diff">
+  <div class="head"><span><b>explore.html</b> <span class="muted">scratch · +6 −3</span></span><span class="mono muted">rendered</span></div>
+  <div class="htmlcmp">
+    <div><div class="md label" style="padding:0 0 4px">Base</div><iframe sandbox="" title="Base page" id="html-old"></iframe></div>
+    <div><div class="md label" style="padding:0 0 4px">This Task</div><iframe sandbox="" title="Task page" id="html-new"></iframe></div>
+  </div>
+</div>
+
+<h2>Questions</h2>
+<ol class="questions">
+  <li>Which engine colors the code?
+    <ol><li>A: native tree-sitter in the app, for the Diff and the editor</li><li>B: lf computes spans and sends them on the wire, and the terminal diff gets colors too</li><li>C: the Diff becomes a web view with Shiki and Pierre</li><li>D: A plus a structural diff</li></ol></li>
+  <li>Where do syntax colors come from in each of the 24 themes?
+    <ol><li>From the theme's terminal palette (ANSI 1–6), so a custom theme just works</li><li>A hand-tuned syntax set per built-in theme, falling back to (a) for custom themes</li><li>One set for light themes and one for dark</li></ol></li>
+  <li>How does a changed Markdown file open in the Diff?
+    <ol><li>Rendered, with source one click away</li><li>As source, with rendered one click away</li><li>Whichever you used last for Markdown</li></ol></li>
+  <li>How are Markdown changes marked?
+    <ol><li>Redline: one rendered document with removed text struck and added text filled</li><li>Side by side: base and Task rendered in two columns</li><li>Redline by default, with side by side one click away</li></ol></li>
+  <li>How does a changed image open?
+    <ol><li>Side by side</li><li>Swipe</li><li>Onion skin</li><li>Side by side, with swipe, onion skin and difference as modes in the header</li></ol></li>
+  <li>How does a changed HTML file open?
+    <ol><li>Two live pages side by side</li><li>One live page, toggled between base and Task</li><li>As source, with rendered one click away</li></ol></li>
+  <li>Which languages are in the first slice?
+    <ol><li>This repository's: Swift, Rust, Python, TypeScript/TSX, JavaScript, Markdown, YAML, TOML, JSON, SQL, shell, HTML, CSS</li><li>(a) plus Go, C/C++, Ruby, Java and Kotlin, which today's list covers</li></ol></li>
+</ol>
+<p class="muted">Sources for the rivals: <code>scratch/diff-tools-guide.html</code>, <code>scratch/explore-diff-rivals.html</code>. Code read: <code>swift/LoopflowMac/SyntaxColors.swift</code>, <code>Views/ReviewStreamView.swift</code>, <code>Views/TaskFilesView.swift</code>, <code>Views/MarkdownBlocks.swift</code>.</p>
 </main>
 
 <script>
-'use strict';
-const $=s=>document.querySelector(s);
-const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-const em=t=>esc(t).replace(/«/g,'<mark>').replace(/»/g,'</mark>');
-// line: [kind, old, new, text]
-const files=[
- {dir:'swift/LoopflowMac/',name:'TaskFilesStore.swift',add:9,del:6,blocks:[
-  {gap:85,fn:'final class TaskFilesStore',raw:'@@ -86,5 +86,5 @@ final class TaskFilesStore {'},
-  {ctx:[['c',86,86,'    // Where each reader is in its diff.']]},
-  {chg:[['-',87,null,'    var «changesAnchor: Anchor?»'],['+',null,87,'    var «places: [ReviewReader: ReviewPlace] = [:]»']]},
-  {ctx:[['c',88,88,'']]},
-  {gap:121,fn:'func step(_:)',raw:'@@ -209,6 +209,10 @@ final class TaskFilesStore {'},
-  {ctx:[['c',210,210,'    func step(_ direction: StepDirection) {']]},
-  {chg:[['-',211,null,'        «place.stop +=» direction.delta'],['+',null,211,'        «let next = place.stop +» direction.delta'],['+',null,212,'        guard stops.indices.contains(next) else {'],['+',null,213,'            return openNeighbour(direction)'],['+',null,214,'        }'],['+',null,215,'        place.stop = next']]},
-  {ctx:[['c',212,216,'    }'],['c',213,217,'']]},
-  {mov:{from:164,lines:[['c',164,218,'    func restore(_ anchor: ReadingAnchor) {'],['c',165,219,'        scroll(to: document.line(anchor.id))'],['c',166,220,'    }']]}},
-  {ctx:[['c',214,221,'']]},
-  {chg:[['-',215,null,'    func scrollToTop() {'],['-',216,null,'        scroll(to: 0)'],['-',217,null,'    }']]}]},
- {dir:'swift/LoopflowMac/Views/',name:'ReviewStreamView.swift',add:2,del:1,blocks:[
-  {gap:49,fn:'struct ReviewStepper',raw:'@@ -50,5 +50,6 @@ struct ReviewStepper: View {'},
-  {ctx:[['c',50,50,'struct ReviewStepper: View {']]},
-  {chg:[['-',51,null,'    «@Binding var stop: Int»'],['+',null,51,'    «let reader: ReviewReader»'],['+',null,52,'    @Bindable var store: TaskFilesStore']]},
-  {ctx:[['c',52,53,'    let isFocused: Bool']]}]},
- {dir:'swift/LoopflowTests/',name:'TaskFilesTests.swift',add:5,del:0,blocks:[
-  {gap:400,fn:'struct TaskFilesTests',raw:'@@ -400,3 +400,8 @@ struct TaskFilesTests {'},
-  {ctx:[['c',401,401,'']]},
-  {chg:[['+',null,402,'    @Test func diffStepsIntoNextChangedFile() async {'],['+',null,403,'        store.open(.file("a.swift"), stop: .last)'],['+',null,404,'        store.step(.next)'],['+',null,405,'        #expect(store.reader == .file("b.swift"))'],['+',null,406,'    }']]}]},
- {dir:'rust/loopflow/src/lf/commands/',name:'read.rs',add:1,del:0,blocks:[
-  {gap:139,fn:'fn dispatch',raw:'@@ -140,3 +140,4 @@ fn dispatch(read: Read, args: &Args) -> Result<Value> {'},
-  {ctx:[['c',140,140,'        Read::TaskChanges => task_changes(args),']]},
-  {chg:[['+',null,141,'        «Read::TaskFiles => task_files(args),»']]},
-  {ctx:[['c',141,142,'        Read::TaskDiff => task_diff(args),']]}]}];
-
-/* ---------- before ---------- */
-(()=>{
-const bl=([k,o,n,t],cur)=>`<div class="bl ${k==='+'?'add':k==='-'?'del':''} ${cur?'b-cur':''}"><i>${o??''}</i><i>${n??''}</i><b>${k==='+'?'+':k==='-'?'−':' '}</b><span>${em(t)}</span></div>`;
-let stop=0;
-const stream=files.map(f=>`<div class="b-fh"><span class="grow" style="font-weight:600;font-size:11px">${f.dir+f.name}</span><span class="g">+${f.add}</span><span class="r">−${f.del}</span><span>▤</span></div>`+f.blocks.map(b=>{
- if(b.gap)return `<div class="b-hunk">${esc(b.raw)}</div>`;
- if(b.ctx)return b.ctx.map(l=>bl(l)).join('');
- if(b.mov){stop++;return `<div class="b-move">›&nbsp; Moved from L${b.mov.from} · ${b.mov.lines.length} lines, unchanged</div>`}
- stop++;const cur=stop===2;return b.chg.filter(l=>l[0]==='-').map(l=>bl(l,cur)).join('')+b.chg.filter(l=>l[0]==='+').map(l=>bl(l,cur)).join('')}).join('')).join('');
-$('#before').innerHTML=`<div class="b-bar"><span>⌃</span><span>⌄</span><span style="color:var(--muted)">2 of 7</span><span class="grow"></span><span>Focus file</span><span>Unified ⌄</span></div>
-<div class="scroll"><div class="b-card"><div style="display:flex;gap:8px"><b class="grow" style="font-size:12px">⑂ Open #1949 · 2 passed, 15 skipped · read 20 s ago</b><span>↻</span><span style="font-size:11px;text-decoration:underline">Open on GitHub ↗</span></div><div style="margin-top:4px">Make Task PR, file-browser and brief views useful beside the conversation</div><div class="cap2">› 2 passed, 15 skipped</div><div class="cap2">› Description</div></div>
-<div class="b-files"><b>4 changed files</b>${files.map(f=>`<div><span class="grow">${f.dir+f.name}</span><span class="g">+${f.add}</span><span class="r">−${f.del}</span></div>`).join('')}</div>
-${stream}<div class="b-foot">Compared with main at a0548bf · includes uncommitted changes<br><span style="font-family:-apple-system,sans-serif;font-size:11px;text-decoration:underline">Open saved versions ↗</span></div></div>
-<div class="b-sel"><span class="mono grow" style="font-size:10px">swift/LoopflowMac/TaskFilesStore.swift:211-215 · new</span><span>Copy</span><span>Ask in conversation</span><span>✕</span></div>`;
-})();
-
-/* ---------- after ---------- */
-(()=>{
-const scroll=$('#scroll');let cur=0,focus=false,sel=null,drag=false,g=0,stops=[];const openMoves=new Set();let extra=false;
-const ln=([k,o,n,t],f)=>{const i=g++;return `<div class="ln ${k==='+'?'add':k==='-'?'del':''}" data-i="${i}" data-n="${k==='-'?o:n}" data-side="${k==='-'?'old':'new'}" data-f="${f}"><i>${k==='-'?o:n}</i><b>${k==='+'?'+':k==='-'?'−':''}</b><span>${em(t)}</span></div>`};
-const all=()=>extra?files.concat([{dir:'swift/LoopflowMac/Views/',name:'TaskChangesView.swift',add:1,del:1,fresh:true,blocks:[{gap:61,fn:'var toolbar'},{chg:[['-',62,null,'            ReviewStepper(store: store, «isFocused: isFocused»)'],['+',null,62,'            ReviewStepper(store: store, «reader: .changes, isFocused: isFocused»)']]}]}]):files;
-const render=()=>{g=0;stops=[];const fs=all();
- fs.forEach((f,fi)=>f.blocks.forEach(b=>{if(b.chg||b.mov)stops.push({fi,b})}));
- const curFile=stops[cur].fi;
- scroll.innerHTML=fs.map((f,fi)=>{if(focus&&fi!==curFile)return '';
-  return `<div class="file" data-fi="${fi}"><div class="fhead"><span class="dir">&lrm;${f.dir}</span><b>${f.name}</b><span class="grow"></span><span class="stat"><span class="g">+${f.add}</span> <span class="r">−${f.del}</span></span><a title="Read in Files">Open</a></div>`+f.blocks.map(b=>{
-   if(b.gap)return `<div class="gap">${b.gap} unchanged lines · <em>${esc(b.fn)}</em></div>`;
-   if(b.ctx)return b.ctx.map(l=>ln(l,fi)).join('');
-   const k=stops.findIndex(s=>s.b===b),c=k===cur?'cur':'';
-   if(b.mov){const o=openMoves.has(k);return `<div class="chg mov ${c}" data-stop="${k}"><div class="movrow" data-mv="${k}"><span>⇄</span><span>Moved here from L${b.mov.from} · ${b.mov.lines.length} lines, unchanged</span><span>${o?'▾':'▸'}</span></div>${o?b.mov.lines.map(l=>ln(l,fi)).join(''):''}</div>`}
-   return `<div class="chg ${c} ${f.fresh?'fresh':''}" data-stop="${k}">${b.chg.filter(l=>l[0]==='-').map(l=>ln(l,fi)).join('')+b.chg.filter(l=>l[0]==='+').map(l=>ln(l,fi)).join('')}</div>`}).join('')+`</div>`}).join('')+`<div class="end">End of changes · ${stops.length} of ${stops.length}<br><a id="top">Back to the first change</a></div>`;
- const f=fs[curFile];$('#pos').textContent=`${cur+1} of ${stops.length}`;$('#filename').textContent=f.name;
- $('#focus').classList.toggle('on',focus);
- const fn=$('#focusnote');fn.classList.toggle('hidden',!focus);if(focus)fn.innerHTML=`Only <b>${f.name}</b> · ${fs.length-1} other files hidden<button title="Show all files">✕</button>`;
- document.querySelector('.a-title b').textContent=`${stops.length} changes in ${fs.length} files`;
- paintSel();const t=$('#top');if(t)t.onclick=()=>go(0)};
-const reveal=(flash)=>{const el=scroll.querySelector(`[data-stop="${cur}"]`);if(!el)return;scroll.scrollTo({top:Math.max(0,el.offsetTop-76),behavior:'smooth'});if(flash){el.classList.add('land');setTimeout(()=>el.classList.remove('land'),900)}};
-const go=k=>{cur=Math.max(0,Math.min(stops.length-1,k));render();reveal(true);$('#newchip').classList.add('hidden')};
-$('#prev').onclick=()=>go(cur-1);$('#next').onclick=()=>go(cur+1);
-$('#after').onkeydown=e=>{if(e.key===']'){go(cur+1)}else if(e.key==='['){go(cur-1)}else if(e.key==='Escape'){sel=null;paintSel()}else if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)&&sel){ask()}};
-$('#focus').onclick=()=>{focus=!focus;render();reveal(false)};
-$('#focusnote').onclick=e=>{if(e.target.closest('button')){focus=false;render();reveal(false)}};
-$('#prpill').onclick=()=>$('#deliv').classList.toggle('hidden');
-// file menu
-const menu=$('#menu');
-$('#filebtn').onclick=e=>{e.stopPropagation();const fs=all(),cf=stops[cur].fi,max=Math.max(...fs.map(f=>f.add+f.del));
- menu.innerHTML=fs.map((f,i)=>`<div data-fi="${i}" class="${i===cf?'cur':''}"><span class="dir">${f.dir}</span><b class="grow">${f.name}</b><span class="bars" style="width:${Math.max(10,44*(f.add+f.del)/max)}px"><u style="width:${100*f.add/(f.add+f.del)}%"></u><s style="width:${100*f.del/(f.add+f.del)}%"></s></span><span class="stat"><span class="g">+${f.add}</span> <span class="r">−${f.del}</span></span></div>`).join('');
- menu.classList.toggle('hidden')};
-menu.onclick=e=>{const d=e.target.closest('[data-fi]');if(!d)return;menu.classList.add('hidden');go(stops.findIndex(s=>s.fi===+d.dataset.fi))};
-document.addEventListener('click',()=>menu.classList.add('hidden'));
-// moves
-scroll.addEventListener('click',e=>{const m=e.target.closest('[data-mv]');if(!m)return;const k=+m.dataset.mv;openMoves.has(k)?openMoves.delete(k):openMoves.add(k);const top=scroll.scrollTop;cur=k;render();scroll.scrollTop=top});
-// selection by dragging the line numbers
-const paintSel=()=>{scroll.querySelectorAll('.ln').forEach(l=>{const i=+l.dataset.i;l.classList.toggle('sel',!!sel&&i>=Math.min(sel.a,sel.b)&&i<=Math.max(sel.a,sel.b))});
- const fl=$('#float');if(!sel||drag){fl.classList.add('hidden');return}
- const ls=[...scroll.querySelectorAll('.ln.sel')];if(!ls.length){fl.classList.add('hidden');return}
- const a=ls[0],z=ls[ls.length-1],f=all()[+a.dataset.f];sel.ref=`${f.dir}${f.name}:L${a.dataset.n}${ls.length>1?'-'+z.dataset.n:''} (${z.dataset.side}, main@a0548bf)`;
- fl.innerHTML=`<span>${ls.length} line${ls.length>1?'s':''} · L${a.dataset.n}${ls.length>1?'–'+z.dataset.n:''}</span><button id="copy">Copy</button><button class="pri" id="ask">Ask in conversation <kbd>⌘↩</kbd></button><button id="clr" title="Clear">✕</button>`;fl.classList.remove('hidden');
- $('#ask').onclick=ask;$('#copy').onclick=()=>{$('#toast').textContent='Copied the selected lines.'};$('#clr').onclick=()=>{sel=null;paintSel()}};
-const ask=()=>{$('#toast').innerHTML=`Typed into the conversation, unsent: <span class="mono">${esc(sel.ref)}</span>`;sel=null;paintSel()};
-scroll.addEventListener('mousedown',e=>{const i=e.target.closest('.ln i');if(!i)return;e.preventDefault();const n=+i.parentNode.dataset.i;sel=e.shiftKey&&sel?{a:sel.a,b:n}:{a:n,b:n};drag=true;paintSel()});
-scroll.addEventListener('mouseover',e=>{if(!drag)return;const l=e.target.closest('.ln');if(l){sel.b=+l.dataset.i;paintSel()}});
-document.addEventListener('mouseup',()=>{if(drag){drag=false;paintSel()}});
-// live edit arriving outside the view
-$('#sim').onclick=()=>{if(extra)return;extra=true;const top=scroll.scrollTop;render();scroll.scrollTop=top;$('#sim').disabled=true;$('#sim').textContent='Edit arrived';
- const el=scroll.querySelector('.fresh');if(el&&el.offsetTop>scroll.scrollTop+scroll.clientHeight){const c=$('#newchip');c.classList.remove('hidden');c.onclick=()=>go(stops.length-1)}
- $('#toast').textContent='The agent changed TaskChangesView.swift. Your place did not move.'};
-scroll.addEventListener('scroll',()=>{const el=scroll.querySelector('.fresh');if(el&&el.offsetTop<scroll.scrollTop+scroll.clientHeight)$('#newchip').classList.add('hidden')});
-cur=1;render();
+(function () {
+  function press(group, attr, value) {
+    document.querySelectorAll('[' + attr + ']').forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute(attr) === value)); });
+  }
+  document.querySelectorAll('[data-set-theme]').forEach(function (b) {
+    b.addEventListener('click', function () { document.documentElement.setAttribute('data-theme', b.dataset.setTheme); press(null, 'data-set-theme', b.dataset.setTheme); });
+  });
+  var target = document.querySelector('.hl-target');
+  document.querySelectorAll('[data-hl]').forEach(function (b) {
+    b.addEventListener('click', function () { target.classList.toggle('today', b.dataset.hl === 'today'); press(null, 'data-hl', b.dataset.hl); });
+  });
+  document.querySelectorAll('[data-md]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      ['inline', 'side', 'source'].forEach(function (m) { document.getElementById('md-' + m).hidden = m !== b.dataset.md; });
+      press(null, 'data-md', b.dataset.md);
+    });
+  });
+  var range = document.getElementById('img-range'), top = document.getElementById('img-top'), handle = document.getElementById('img-handle'), note = document.getElementById('img-note');
+  var mode = 'swipe';
+  function apply() {
+    var v = range.value;
+    top.style.clipPath = mode === 'swipe' ? 'inset(0 0 0 ' + v + '%)' : 'none';
+    top.style.opacity = mode === 'onion' ? v / 100 : 1;
+    top.style.mixBlendMode = mode === 'difference' ? 'difference' : 'normal';
+    handle.style.display = mode === 'swipe' ? 'block' : 'none';
+    handle.style.left = v + '%';
+    range.style.display = mode === 'difference' ? 'none' : 'block';
+  }
+  var notes = { swipe: 'Left of the line is the base, right is this Task.', onion: 'Slide to fade from the base to this Task.', difference: 'Unchanged pixels go black; what changed lights up.', side: '' };
+  document.querySelectorAll('[data-img]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      mode = b.dataset.img;
+      document.getElementById('img-side').hidden = mode !== 'side';
+      document.getElementById('img-stack').hidden = mode === 'side';
+      note.textContent = notes[mode];
+      press(null, 'data-img', mode); apply();
+    });
+  });
+  range.addEventListener('input', apply); apply();
+  var page = function (button, extra) {
+    return '<!doctype html><body style="font:14px -apple-system,sans-serif;margin:14px;color:#100f0f">' +
+      '<h3 style="margin:0 0 6px">Diff v2</h3><p style="margin:0 0 10px;color:#6f6e69">Four engines, one decision.</p>' + button + extra + '</body>';
+  };
+  document.getElementById('html-old').srcdoc = page('<button style="font:inherit;padding:4px 12px;border:1px solid #999;background:#eee;border-radius:3px">Pick one</button>', '');
+  document.getElementById('html-new').srcdoc = page('<button style="font:inherit;padding:6px 16px;border:0;background:#d0a215;color:#100f0f;border-radius:8px;font-weight:600">Build this</button>',
+    '<p style="margin:10px 0 0;font-size:12px;color:#66800b">Answers like “1a, 3a” are complete.</p>');
 })();
 </script>
-</body></html>
+</body>
+</html>

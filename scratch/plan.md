@@ -11,6 +11,24 @@ Slices 1 to 7 are built and were looked at in the Dev app
 there: a file the diff could not read, and skipped lines that did not load.
 **Next:** the gate checks and one look at "Not started." on an unlocked
 display (questions 48). Nothing is left to build.
+
+The sync with main (6197582ea4) moved `LoopflowButtonStyle`, `StatusMark`,
+`TaskRow` and `WorkflowLine` to `swift/Loopflow/Design/` and brought the
+phone's `StateView` there; paths below that say `LoopflowMac/Design/` for
+those four are from before it. `Design/EmptyState.swift` stayed on the Mac.
+`scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|BacklogViewTests|TaskFilesTests|WorkflowLineTests|NewTaskTests'`
+passed after the sync (85 tests in 6 suites).
+
+**Open choice, not built:** the repository now has two drawings of
+`DESIGN.md`'s one "Empty or failed state". `StateView` (phone) draws its
+title in `palette.text` and its sentence in `textSecondary` at `Spacing.md`;
+`EmptyState` (Mac) draws `emphasisInk` and `text` at `Spacing.sm`, holds
+the sentence to a 400 pt measure, and adds the Machine's message and the
+dashboard's one-line form. Either `EmptyState`'s full form draws
+`StateView` and adds its two parts (one of the two platforms changes ink
+and spacing, and the Mac screens in `scratch/qa.html` were looked at with
+the Mac's), or the two stay apart (questions 77, 78). Which ink is right is
+the decision; its own Task either way, since it touches the phone.
 A Task started from New Task opens beside "Files did not open" (Task ea8659,
 outside this change); a demo meets it on the first Start.
 

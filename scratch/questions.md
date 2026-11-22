@@ -302,3 +302,10 @@ Made while building slice 8, with nobody present.
 77. During the sync with main, the Mac keeps its compact dashboard and
     machine-error layouts in `EmptyState`; the phone keeps `StateView`.
     The shared workflow line wraps its sentence wherever its container allows.
+
+Made at the realign after the sync, with nobody present.
+
+78. After 77 the phone's `StateView` and the Mac's `EmptyState` draw the
+    same state in different inks and spacing (plan, "Open choice"). Left
+    apart in this change; folding one onto the other changes a platform's
+    screens. Which ink does the state's title and sentence take?

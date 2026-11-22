@@ -14,6 +14,7 @@ use std::process::Command;
 use crate::ops::error::OpsResult;
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::store::SharedStore;
+use base64::Engine as _;
 use loopflow_storage::child::ChildRef;
 use loopflow_storage::work::task::{PrPhase, Task, TaskPr};
 use sha2::{Digest, Sha256};
@@ -415,7 +416,21 @@ pub fn task_workspace_context(task: &Task) -> OpsResult<String> {
     ))
 }
 
-pub fn task_file(issue: &str, path: &str, inspect_recovery: bool) -> OpsResult<TaskFileSnapshot> {
+/// Largest binary file whose bytes a read carries, base64, in `data`.
+pub const MAX_BINARY_DATA_BYTES: usize = 16 * 1024 * 1024;
+
+/// One file of a Task: the working tree, or the version at `at` (`parent`,
+/// `head` or a resolved commit SHA), which is read-only and has no recoveries.
+pub fn task_file(
+    issue: &str,
+    path: &str,
+    at: Option<&str>,
+    inspect_recovery: bool,
+) -> OpsResult<TaskFileSnapshot> {
+    if let Some(at) = at {
+        let (checkout, commit) = comparison_context(issue, at)?;
+        return committed_file_snapshot(TaskWorkspace::from(&checkout), &commit, path);
+    }
     let checkout = file_context(&file_store()?, issue)?;
     let workspace = TaskWorkspace::from(&checkout);
     let mut file = file_snapshot(workspace, path)?;
@@ -423,6 +438,21 @@ pub fn task_file(issue: &str, path: &str, inspect_recovery: bool) -> OpsResult<T
         file.recoveries = file_save::recoveries(workspace, &file.path)?;
     }
     Ok(file)
+}
+
+fn missing_snapshot(workspace: TaskWorkspace<'_>, path: String) -> TaskFileSnapshot {
+    TaskFileSnapshot {
+        recoveries: Vec::new(),
+        issue_identifier: workspace.issue_identifier.to_string(),
+        task_id: workspace.task_id.to_string(),
+        path,
+        content: None,
+        data: None,
+        state: TaskFileState::Missing,
+        revision: None,
+        read_only_reason: None,
+        size_bytes: 0,
+    }
 }
 
 pub(super) fn file_snapshot(
@@ -434,17 +464,7 @@ pub(super) fn file_snapshot(
         .worktree
         .canonicalize()
         .map_err(|error| task_error(format!("cannot resolve Task worktree: {error}")))?;
-    let mut snapshot = TaskFileSnapshot {
-        recoveries: Vec::new(),
-        issue_identifier: workspace.issue_identifier.to_string(),
-        task_id: workspace.task_id.to_string(),
-        path: relative.clone(),
-        content: None,
-        state: TaskFileState::Missing,
-        revision: None,
-        read_only_reason: None,
-        size_bytes: 0,
-    };
+    let mut snapshot = missing_snapshot(workspace, relative.clone());
     let absolute = match root.join(&relative).canonicalize() {
         Ok(path) => path,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(snapshot),
@@ -477,21 +497,103 @@ pub(super) fn file_snapshot(
     {
         snapshot.read_only_reason = Some("Git metadata is read-only.".into());
     }
-    let (size, bytes) = crate::observe::file_bytes(&absolute, MAX_FILE_BYTES + 1)
-        .map_err(|error| task_error(format!("cannot read Task file {relative:?}: {error}")))?;
+    let read = |limit| {
+        crate::observe::file_bytes(&absolute, limit)
+            .map_err(|error| task_error(format!("cannot read Task file {relative:?}: {error}")))
+    };
+    let (size, bytes) = read(MAX_FILE_BYTES + 1)?;
     snapshot.size_bytes = size;
-    snapshot.state = if bytes.len() > MAX_FILE_BYTES {
-        TaskFileState::Truncated
-    } else if bytes.contains(&0) {
-        TaskFileState::Binary
+    read_contents(&mut snapshot, bytes, || Ok(read(MAX_BINARY_DATA_BYTES)?.1))?;
+    Ok(snapshot)
+}
+
+pub(super) fn committed_file_snapshot(
+    workspace: TaskWorkspace<'_>,
+    commit: &str,
+    path: &str,
+) -> OpsResult<TaskFileSnapshot> {
+    let relative = validate_task_relative_path(path)?;
+    let mut snapshot = missing_snapshot(workspace, relative.clone());
+    snapshot.read_only_reason = Some("A committed version is read-only.".into());
+    // `<mode> <type> <object> <size>\t<path>`; nothing when the commit has no such path.
+    let listing = git_output_bytes(
+        workspace.worktree,
+        &["ls-tree", "-l", "-z", commit, "--", &relative],
+    )?;
+    let Some(entry) = listing
+        .split(|byte| *byte == 0)
+        .find(|entry| !entry.is_empty())
+    else {
+        return Ok(snapshot);
+    };
+    let header =
+        String::from_utf8_lossy(entry.split(|byte| *byte == b'\t').next().unwrap_or(entry))
+            .into_owned();
+    let fields = header.split_whitespace().collect::<Vec<_>>();
+    let [_, "blob", object, size] = fields[..] else {
+        return Err(task_error(format!(
+            "Task file {relative:?} is not a file at {commit}"
+        )));
+    };
+    snapshot.size_bytes = size
+        .parse()
+        .map_err(|_| task_error(format!("Git listed no size for {relative:?}")))?;
+    let bytes = git_blob_prefix(workspace.worktree, object, MAX_FILE_BYTES + 1)?;
+    read_contents(&mut snapshot, bytes, || {
+        git_output_bytes(workspace.worktree, &["cat-file", "blob", object])
+    })?;
+    Ok(snapshot)
+}
+
+/// Classifies a file from its first bytes (at most `MAX_FILE_BYTES + 1`).
+/// `whole` reads the rest of a binary file small enough to carry in `data`.
+fn read_contents(
+    snapshot: &mut TaskFileSnapshot,
+    bytes: Vec<u8>,
+    whole: impl FnOnce() -> OpsResult<Vec<u8>>,
+) -> OpsResult<()> {
+    if bytes.contains(&0) {
+        snapshot.state = TaskFileState::Binary;
+        if snapshot.size_bytes <= MAX_BINARY_DATA_BYTES as u64 {
+            let bytes = if bytes.len() as u64 >= snapshot.size_bytes {
+                bytes
+            } else {
+                whole()?
+            };
+            snapshot.data = Some(base64::engine::general_purpose::STANDARD.encode(bytes));
+        }
+    } else if bytes.len() > MAX_FILE_BYTES {
+        snapshot.state = TaskFileState::Truncated;
     } else if let Ok(content) = String::from_utf8(bytes) {
         snapshot.revision = Some(hex::encode(Sha256::digest(content.as_bytes())));
         snapshot.content = Some(content);
-        TaskFileState::Text
+        snapshot.state = TaskFileState::Text;
     } else {
-        TaskFileState::UnsupportedEncoding
-    };
-    Ok(snapshot)
+        snapshot.state = TaskFileState::UnsupportedEncoding;
+    }
+    Ok(())
+}
+
+/// The first `limit` bytes of a blob, without reading a large one whole.
+fn git_blob_prefix(worktree: &Path, object: &str, limit: usize) -> OpsResult<Vec<u8>> {
+    use std::io::Read as _;
+    let mut child = Command::new("git")
+        .current_dir(worktree)
+        .args(["cat-file", "blob", object])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    let mut bytes = Vec::new();
+    child
+        .stdout
+        .take()
+        .expect("stdout is piped")
+        .take(limit as u64)
+        .read_to_end(&mut bytes)?;
+    // A blob longer than the limit leaves git blocked on a full pipe.
+    let _ = child.kill();
+    child.wait()?;
+    Ok(bytes)
 }
 
 pub(super) fn resolve_file_base(

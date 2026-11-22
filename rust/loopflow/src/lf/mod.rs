@@ -2451,6 +2451,9 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     File {
         issue: String,
         path: String,
+        /// Read the file at this commit (parent, head or a resolved SHA) instead of the working tree
+        #[arg(long, conflicts_with = "recoveries")]
+        at: Option<String>,
         /// Inspect retained versions, including late writes; omitted for fast content reads
         #[arg(long)]
         recoveries: bool,

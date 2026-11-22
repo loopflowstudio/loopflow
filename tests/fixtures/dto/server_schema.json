@@ -6856,8 +6856,14 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task file <issue> <path>`: one file of a Task's checkout.",
+          "description": "`lf task file <issue> <path> [--at <rev>]`: one file of a Task's\ncheckout, or its version at a commit.",
           "properties": {
+            "at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "issue": {
               "type": "string"
             },
@@ -6872,7 +6878,8 @@
           "required": [
             "kind",
             "issue",
-            "path"
+            "path",
+            "at"
           ],
           "type": "object",
           "x-result": {
@@ -13199,6 +13206,13 @@
             "null"
           ]
         },
+        "data": {
+          "description": "A `binary` file's bytes, base64, up to `MAX_BINARY_DATA_BYTES`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "issue_identifier": {
           "type": "string"
         },
@@ -13241,6 +13255,7 @@
         "task_id",
         "path",
         "content",
+        "data",
         "state",
         "revision",
         "read_only_reason",

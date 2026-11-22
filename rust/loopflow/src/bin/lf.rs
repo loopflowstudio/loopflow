@@ -1328,10 +1328,12 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::File {
             issue,
             path,
+            at,
             recoveries,
             json,
         } => {
-            let snapshot = loopflow_execution::ops::task::task_file(issue, path, *recoveries)?;
+            let snapshot =
+                loopflow_execution::ops::task::task_file(issue, path, at.as_deref(), *recoveries)?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             } else if snapshot.state != loopflow_execution::ops::task::TaskFileState::Text {

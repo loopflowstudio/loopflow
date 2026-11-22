@@ -962,6 +962,12 @@ fn server_operations_match_their_lf_commands() {
                 Read::TaskFile {
                     issue: "INF-123".into(),
                     path: "edit.txt".into(),
+                    at: None,
+                },
+                Read::TaskFile {
+                    issue: "INF-123".into(),
+                    path: "edit.txt".into(),
+                    at: Some("parent".into()),
                 },
                 Read::TaskFiles {
                     issue: "INF-123".into(),
@@ -1193,6 +1199,7 @@ fn server_operations_match_their_lf_commands() {
         let file = Read::TaskFile {
             issue: "INF-123".into(),
             path: "edit.txt".into(),
+            at: None,
         }
         .read()
         .unwrap();

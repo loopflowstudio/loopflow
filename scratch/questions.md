@@ -36,3 +36,11 @@ Made during concept review with nobody present; the page is
     feature when it starts" goes.
 12. The unstarted state's wording is two sentences, the second Rust's
     ("You take part at …"), where the prototype joins them with "and".
+
+Made while writing the docs with nobody present.
+
+13. With a Wave chosen, the sheet today says "Product's default" (the scope's
+    name), and the plan's unstarted pane says "the Wave's default". The docs
+    show both as written. Should one phrase serve both, and which?
+14. `docs/surfaces.md` draws the unstarted Task's bar with its neutral Start
+    beside the pane's accent Start, as the plan keeps both.

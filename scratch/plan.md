@@ -394,3 +394,17 @@ demo: not headless; qa or demo runs it.
    `SessionSlotOffer` goes. The empty, failed and unstarted view tests.
 4. **Every remaining `ContentUnavailableView`, the plain `Text` empties and
    inline failures**, then the source scan and `DESIGN.md`.
+
+## Docs written ahead of the build
+
+They describe the behaviour above; implement reads them as the wording to
+match.
+
+- `docs/surfaces.md`: "New Task", "A Task that has not started", "When
+  nothing is there, or something failed" (replaces "File without starting").
+- `docs/orchestration.md`: `lf graph list --json`'s `workflow` under
+  "Describe a Graph".
+- `docs/work.md`: `graph.steps[].interactive` covers a stop inside the step.
+
+Open: `scratch/questions.md` 13, whether the sheet ("Product's default") and
+the unstarted pane ("the Wave's default") share one phrase.

@@ -1,0 +1,75 @@
+<!doctype html><html><head><meta charset="utf-8"><title>c9fbcb QA: Diff v2</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em;color:#222}
+img{max-width:100%;border:1px solid #ccc;border-radius:6px}h2{margin-top:2em}code{background:#f2f0ec;padding:1px 4px;border-radius:3px}
+.fix{color:#1a6b3a}.bad{color:#9b2c2c}td,th{padding:4px 10px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}</style></head><body>
+<h1>c9fbcb QA: grammar colors, rendered Markdown, image and HTML diffs</h1>
+<p>The branch's Dev build (an isolated bundle) ran against a branch <code>lf server</code> on a private home: first a fenced copy of the live store, for Task c9fbcb itself, then a disposable repository and Task (57e933) whose working tree was edited one scenario at a time. Synthetic clicks, keys and scrolls are blocked for this shell, so the app was driven through <code>lf desktop</code> and captured with <code>screencapture -l</code>.</p>
+
+<h2>1. <code>lf task file --at</code> (CLI)</h2>
+<pre>lf task file c9fbcb swift/LoopflowMac/SyntaxColors.swift --at parent --json  → text / content / "A committed version is read-only." / 0 recoveries
+lf task file c9fbcb swift/LoopflowMac/SyntaxColors.swift --json              → missing
+lf task file c9fbcb swift/LoopflowMac/dmg-background.png --json              → binary, data 13,872 base64 chars, size_bytes 10,404
+lf task file c9fbcb nosuch.txt --at nonsense                                 → Error: Comparison must be parent, head, or a resolved commit SHA</pre>
+<p class="fix">Fixed: <code>--at</code> names a version, not a comparison. The message now reads "A revision must be parent, head, or a resolved commit SHA" (<code>snapshot.rs</code>).</p>
+
+<h2>2. Building the app: stale third-party inventory</h2>
+<p class="fix">Packaging the bundle failed with "Third-party inputs changed": <code>swift/Package.swift</code> (the grammar archive checksum) had changed without <code>scripts/third_party.py refresh</code>, so any app packaging on this branch would fail. Fixed by refreshing <code>ThirdPartyNotices/inventory.json</code>; <code>test_third_party.py</code> passes.</p>
+
+<h2>3. Task c9fbcb's own Diff</h2>
+<p>197 changes in 91 files. The tour puts <code>swift/README.md</code> first; it opens rendered with a Source button.</p>
+<img src="qa/02-diff.png"><img src="qa/03-zoom.png">
+
+<h2>4. Markdown redline (New code)</h2>
+<p>A heading edit, a reworded sentence, an inserted paragraph and a deleted table row. Added words are filled, the new paragraph is filled with a bar beside it, and the removed row is struck in the removed tone.</p>
+<img src="qa/10-md-redline.png">
+
+<h2>5. Markdown in Side by side</h2>
+<p>The layout picker is in-memory state with no control command, so this was a throwaway build defaulting to Side by side (reverted). Old on the left, new on the right, aligned pair by pair.</p>
+<img src="qa/20-md-split.png">
+
+<h2>6. Image diff</h2>
+<p class="bad">Before: only the old picture showed, filling the visible pane; the new one was stacked below the fold. <code>ViewThatFits</code> measured the HStack at its ideal width, which for a resizable image is its natural size (1320 pt), so any image wider than about half the pane fell back to stacking. A muted backing also letterboxed the picture.</p>
+<img src="qa/12-image.png">
+<p class="fix">Fixed in <code>ReviewRenderedView.swift</code>: each side has no ideal width, so only the pane's 640 pt decides; the picture takes its height from its width, so its backing hugs it. Old (1320×800) beside new (rotated, 800×1320; caption below the fold).</p>
+<img src="qa/13-image-fixed.png">
+
+<h2>7. HTML diff</h2>
+<p>Two live pages, offline: the remote <code>&lt;img&gt;</code> shows only its alt text.</p>
+<img src="qa/15-html.png">
+
+<h2>8. Python by grammar, docstring from the whole file</h2>
+<p>The hunk starts inside a docstring; line 7 reads as a string because colors come from the whole file. Keywords, numbers, strings and the comment each have their own ink.</p>
+<img src="qa/17-after-events.png">
+
+<h2>9. Files: Swift in Read, an image in Read</h2>
+<p>Keywords, types, properties and calls are colored; comments sample at (102,95,89) against (41,38,36) for plain text. <code>banner.png</code> opens as a picture with its size.</p>
+<img src="qa/18-files-swift.png"><img src="qa/19-files-image.png">
+
+<h2>Stale list (observed, not fixed)</h2>
+<p>Twice, after <code>git checkout</code> of one file plus an edit to another, the file list stayed on the old file (its sides read again, so here both pages show "Old page") until the next file event. The server's <code>task.changes</code> answered correctly at 150 ms. This branch doesn't touch the watcher path.</p>
+<img src="qa/16-python.png">
+
+<h2>Checks</h2>
+<table><tr><th>Check</th><th>Result</th></tr>
+<tr><td><code>swift test --filter 'GrammarTests|MarkdownRedlineTests|TaskFilesTests'</code></td><td>60 tests in 3 suites passed</td></tr>
+<tr><td><code>uv run pytest python/tests/test_third_party.py</code></td><td>9 passed</td></tr>
+<tr><td>Linear from the copied store</td><td>14 requests, all <code>failed</code> at the proxy, 0 mutations</td></tr></table>
+
+<h2>Works now</h2>
+<ul><li>Grammar colors in the Diff and Files (Swift, Python), docstrings colored from the whole file.</li>
+<li>Markdown redline and Side by side; the Source button in rendered headers.</li>
+<li>Image diffs side by side with sizes; images in Files Read.</li>
+<li>HTML as two offline pages.</li>
+<li><code>lf task file --at</code>, <code>missing</code>, and <code>binary</code> with <code>data</code>.</li></ul>
+
+<h2>Not reached</h2>
+<ul><li>Clicking <b>Source</b> and the layout picker, and a step's skipped lines: these need clicks, and synthetic input is blocked for this shell. Store tests cover the step's skipped lines (<code>aStepOpensSkippedLinesFromItsHeadCommit</code>).</li>
+<li>Typing in the Files editor (comment-coloring while typing). <code>theEditorColorsByGrammarAsYouType</code> covers it.</li>
+<li>Flexoki Dark and Light: the private config used Loopflow Light.</li></ul>
+
+<h2>Still wrong, worst first</h2>
+<ol><li>An image-only change reads "0 changes in 1 file", "No changes", "+0 −0".</li>
+<li>The occasionally stale file list above.</li>
+<li>Rendered Markdown keeps hard-wrapped line breaks (Files' existing choice), so prose reads ragged, worse in two columns.</li>
+<li>Code blocks wrap in Side by side's half-width columns.</li></ol>
+</body></html>

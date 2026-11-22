@@ -63,8 +63,10 @@ struct ReviewRendered: View {
             page(sides.new, absent: "Deleted", baseURL: sides.commits.last == "" && store.query.remoteMachine == nil
                  ? URL(fileURLWithPath: store.cwd).appendingPathComponent(file.path) : nil)
         } else {
-            TaskImage(file: sides.old, absent: "Added").frame(maxWidth: .infinity)
-            TaskImage(file: sides.new, absent: "Deleted").frame(maxWidth: .infinity)
+            // No ideal width: a picture's natural size must not decide whether the
+            // two sides fit beside each other; only the pane's width does.
+            TaskImage(file: sides.old, absent: "Added").frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity)
+            TaskImage(file: sides.new, absent: "Deleted").frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity)
         }
     }
     @ViewBuilder private func page(_ side: TaskFileSnapshot?, absent: String, baseURL: URL? = nil) -> some View {
@@ -210,7 +212,8 @@ struct TaskImage: View {
             if let file, file.state != .missing {
                 if let data = Self.bytes(of: file), let image = NSImage(data: data) {
                     Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: image.size.width, maxHeight: image.size.height)
+                        // Its height follows its width, so the backing hugs the picture.
+                        .frame(maxWidth: image.size.width).fixedSize(horizontal: false, vertical: true)
                         .background(palette.surfaceMuted)
                         .accessibilityLabel("\((file.path as NSString).lastPathComponent), \(Self.size(of: image))")
                     caption("\(Self.size(of: image)) · \(Self.bytes(file.sizeBytes))")

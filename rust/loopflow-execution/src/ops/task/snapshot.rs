@@ -607,7 +607,7 @@ pub(super) fn resolve_file_base(
         sha if sha.len() == 40 && sha.bytes().all(|byte| byte.is_ascii_hexdigit()) => sha,
         _ => {
             return Err(task_error(
-                "Comparison must be parent, head, or a resolved commit SHA",
+                "A revision must be parent, head, or a resolved commit SHA",
             ))
         }
     };

@@ -144,3 +144,41 @@ packaged app with its signed helper or launch a Dev bundle with `LF_HOME` and `L
 after clearing inherited `LF_*`. Use the app's bundle ID in `LF_DESKTOP` and
 issue its control commands with that same private home. Stop the private
 server, holders and providers afterwards as described in [resume](resume.md).
+
+# Diff and Files without clicks
+
+A headless run's shell may lack Accessibility and event-posting rights:
+`osascript` keystrokes fail with error 1002, and CGEvent clicks and scrolls
+silently do nothing. `lf desktop` still selects Work and pages:
+`lf --task <id> desktop do details page=diff|files|brief`,
+`lf --task <id> desktop zoom --on -p files` (the details pane) and
+`lf --task <id> desktop do files path=<file>`. Capture just the app's window
+with `screencapture -x -o -l <CGWindowID>`; get the ID from
+`CGWindowListCopyWindowInfo` filtered on the owner name. The ID changes on
+relaunch. "could not create image from window" means the display slept:
+`caffeinate -u -t 1` wakes it.
+
+The Diff can't be scrolled without input, so put the scenario first. Use a
+disposable repository with a `qa` Graph (see the Task setup in the qa skill), run
+the Task once for a checkout, then edit its working tree. The Diff includes
+uncommitted changes, so one edited file at a time is the whole stream. The
+store reads again on file events. Twice a list stayed stale after a `git
+checkout` of one file plus an edit to another; the next write to any file
+cleared it.
+
+In-memory view state (the layout picker's `reviewLayout`, Source) has no
+control command. To see a non-default state, change the default in a
+throwaway build and revert it before committing.
+
+A Dev build whose served reads take new fields (`task.file`'s `at`) needs a
+branch server. To use real Tasks, copy the store into a private home
+(`sqlite3 ~/.lf/loopflow.db ".backup <home>/loopflow.db"`, same for
+`history.db`, and copy `config.yaml`). Then fence it off: run
+`update task_auto set state='off'` in the copy, put stand-in `claude`, `gh` and
+`launchctl` first on `PATH`, and set `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY` to
+`http://127.0.0.1:9`. Tracker tokens live in the keychain, not the home.
+`<home>/logs/linear-requests.jsonl` should show only `"outcome":"failed"`.
+Start `lf server run` from that environment and open the bundle with
+`open -n --env …` for each variable. Building the bundle runs
+`scripts/third_party.py package`, which fails when `swift/Package.swift`
+changed without `uv run python scripts/third_party.py refresh`.

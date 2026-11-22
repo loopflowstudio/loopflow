@@ -65,7 +65,7 @@
     "swift/LoopflowMac/GhosttyResources/share/terminfo/78/xterm-ghostty": "7b9448b1abe6f0f36410f424fd269da67116e31aea600dfbbfca863d09a5bc20",
     "swift/LoopflowMac/GhosttyResources/share/terminfo/ghostty.terminfo": "e5e9cc4e9fddf6aab3088b40ec42fafe8309ef1ae5d3764d0bbf2fc44105ccf0",
     "swift/Package.resolved": "fba287731e05b06de2440f822a9c8648d29f60706fc4d96eab4dac6f7609431d",
-    "swift/Package.swift": "8e5458a9a3576036cdcf4d6af4fd19593ac49f86b947a6ea054b21e107b4fe9d",
+    "swift/Package.swift": "f0441d2599e973dbbf49b13a3ec65f875a1ebf8916f269f776e33a8f24334031",
     "third_party/README.md": "9d2661253b7c6152672de67cab7f676399f71b43eaff8788aa540d4fa9e04f25",
     "third_party/manifest.json": "262773678eb22feac0b268d0671fa45adc80e494339d18d854e925305432be34",
     "third_party/notices/app-fonts.txt": "17b912df78b4ed923a1b2d3a03def226afeb47279cd1e54823c13f3f0964c2e1",

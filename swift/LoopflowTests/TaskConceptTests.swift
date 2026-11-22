@@ -55,7 +55,8 @@ struct TaskConceptTests {
                 let label = try header.inspect().find(viewWithAccessibilityIdentifier: "task-lifecycle-status").text().string()
                 if task.task.identifier == "FIX-2" {
                     #expect(task.lifecycle == .active)
-                    #expect(label == "Active")
+                    // Its worktree is missing, so the page says Blocked, as its row does.
+                    #expect(label == "Blocked")
                     #expect(!task.awaitsStart)
                     #expect(!task.isCompleted)
                     #expect(TaskHistoryFilter().includes(task, now: .now))
@@ -65,7 +66,7 @@ struct TaskConceptTests {
                         try TaskActionItems(model: model, task: task, wave: nil, work: nil).inspect().find(button: "Reopen Task")
                     }
                 } else if task.isCompleted {
-                    #expect(label == (task.lifecycle == .done ? "Completed" : "Canceled"))
+                    #expect(label == (task.lifecycle == .done ? "Done, date unavailable" : "Abandoned"))
                     _ = try TaskActionItems(model: model, task: task, wave: nil, work: nil).inspect().find(button: "Reopen Task")
                     #expect(!task.awaitsStart)
                     #expect(!task.opensConversationAutomatically)
@@ -110,8 +111,12 @@ struct TaskConceptTests {
             #expect(model.jumpRows(.wave(wave.wave.id), filter: "").map(\.id) == phase.tasks.map { .task($0.id) })
             let active = try #require(phase.tasks.first { $0.task.identifier == "FIX-2" })
             let picker = try #require(model.jumpRows(.wave(wave.wave.id), filter: "FIX-2").first)
-            #expect(picker.detail.contains("Active"))
-            #expect(!picker.detail.contains("Not started"))
+            // The picker says the word the Task's row says.
+            #expect(picker.detail == "FIX-2 · \(try #require(TaskStanding(task: active, status: model.programStatus(task: active.id)).word))")
+            for task in phase.tasks where task.awaitsStart && task.need == nil {
+                let row = model.jumpRows(.wave(wave.wave.id), filter: "").first { $0.id == .task(task.id) }
+                #expect(row?.detail == "\(task.task.identifier) · Unstarted")
+            }
             let projection = WorkProjection(roadmaps: roadmap.waves, inventory: phase.tasks, sessions: phase.sessions)
             let projected = try #require(projection.waves.first?.tasks)
             #expect(projected.map { $0.task.id } == phase.tasks.map(\.id))

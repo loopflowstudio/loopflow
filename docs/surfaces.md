@@ -56,9 +56,11 @@ The native macOS app reads the same local store as `lf`; it keeps no copy of its
 - **Dashboards:** saved side-by-side grids of Tasks selected by query. Each
   tile is headed by the Task's sidebar row, with the sentence saying where its
   workflow stands.
-- **One row for a Task:** the sidebar, a Dashboard tile, the title bar and the
-  Portfolio show the same status word for a Task, and the same line when it
-  needs someone. Click the row anywhere and the Task opens.
+- **One row for a Task:** the sidebar, a Dashboard tile, the title bar, the
+  Task's own page and the Portfolio show the same status word for a Task, and
+  the same line when it needs someone. The Portfolio's Now list holds the
+  Tasks that need someone; one that waits only to be started is in the
+  backlog. Click the row anywhere and the Task opens.
 - **Wave and repository views:** the scope's conversation beside its
   [backlog](#the-backlog) and Task tiles below; a Task with auto on carries an
   Auto badge on its tile.

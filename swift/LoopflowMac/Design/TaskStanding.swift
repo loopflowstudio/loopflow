@@ -27,22 +27,15 @@ struct TaskStanding: Equatable {
 
     /// A screen with no Session readings passes `.unknown`.
     init(task: RoadmapTask?, status: SessionProgramStatus) {
-        // An unstarted Task whose next move is Start waits for nothing but that; its row offers Start.
-        let needs = task.map { task in
-            switch task.condition.state {
-            case .clear: false
-            case .waiting: !(task.awaitsStart && task.actions.recommended == .run)
-            case .blocked, .unknown: true
-            }
-        } ?? false
-        let reason = needs ? task?.condition.reason : nil
+        let need = task?.need
+        let reason = need == nil ? nil : task?.condition.reason
         line = status.ask ?? reason.flatMap { $0.isEmpty ? nil : $0 }
         if let label = status.label {
             (source, word, tone, help) = (.program, label, status.tone, status.help)
         } else if case .unavailable = status {
             (source, word, tone, help) = (.unavailable, nil, nil, status.help)
-        } else if let task, needs, task.condition.state != .unknown {
-            (source, word, tone, help) = (.condition, task.condition.state.title, .warning, task.condition.reason)
+        } else if let task, let need, need != .unknown {
+            (source, word, tone, help) = (.condition, need.title, .warning, task.condition.reason)
         } else if let task {
             let undated = task.lifecycle == .done && task.task.completedAt == nil
             (source, word, tone, help) = (.lifecycle, undated ? "Done, date unavailable" : task.lifecycle.label.capitalized, nil, nil)

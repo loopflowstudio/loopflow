@@ -203,6 +203,13 @@ struct DashboardTile: View {
     @Environment(\.palette) private var palette
     @State private var frame = TileFrame()
 
+    /// Where the Task's workflow stands, in its sentence. It yields only to
+    /// what a program asks, which the row above already prints; a condition's
+    /// reason on the row does not hide it.
+    static func workflow(_ graph: TaskGraph, status: SessionProgramStatus, auto: Bool, setup: String?) -> WorkflowLine? {
+        status.ask == nil ? WorkflowLine(graph: graph, auto: auto, setup: setup, sentenceOnly: true) : nil
+    }
+
     var body: some View {
         let content = plan.contents.first { $0.work == member.work }
         let entry = workspaces.retained(member.work)
@@ -242,12 +249,10 @@ struct DashboardTile: View {
                     .foregroundStyle(palette.textSecondary).fixedSize().layoutPriority(1)
                     .padding([.top, .trailing], Spacing.sm)
                 }
-                // The row's own line says what the Task asks; otherwise where its workflow stands.
-                if let task, TaskStanding(task: task.task, status: status).line == nil,
-                   let workflow = model.taskWork[task.task.id].value?.graph {
-                    WorkflowLine(graph: workflow, auto: model.taskExecution[task.task.id].value?.auto?.state == .on,
-                                 setup: task.task.setupPosition, sentenceOnly: true)
-                        .padding(.horizontal, Spacing.md).padding(.bottom, Spacing.sm)
+                if let task, let workflow = model.taskWork[task.task.id].value?.graph,
+                   let line = Self.workflow(workflow, status: status, auto: model.taskExecution[task.task.id].value?.auto?.state == .on,
+                                            setup: task.task.setupPosition) {
+                    line.padding(.horizontal, Spacing.md).padding(.bottom, Spacing.sm)
                 }
             }.background(palette.surface)
                 .foregroundStyle(palette.text, palette.textSecondary)

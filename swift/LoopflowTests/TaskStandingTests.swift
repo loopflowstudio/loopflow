@@ -27,6 +27,13 @@ struct TaskStandingTests {
         #expect(blocked.word == "Blocked" && blocked.line == "the next launch is misconfigured")
     }
 
+    @Test("A finished Task waits for nobody, whatever its condition says")
+    func finishedIsNotWaiting() throws {
+        let standing = TaskStanding(task: try task(condition: "waiting", reason: "ready", lifecycle: "abandoned"), status: .unknown)
+        #expect(standing.word == "Abandoned")
+        #expect(standing.line == nil)
+    }
+
     @Test("A clear Task shows its lifecycle word and no line")
     func clearShowsLifecycle() throws {
         let standing = TaskStanding(task: try task(condition: "clear", reason: "ready", lifecycle: "idle"), status: .unknown)

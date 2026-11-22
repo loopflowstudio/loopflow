@@ -45,6 +45,19 @@ enum TaskBrief {
         return (lead, why.isEmpty || why.hasSuffix(".") ? why : why + ".")
     }
 
+    /// What the Task's row says it needs, under the word the row would show
+    /// with no program reporting: "Blocked: reason". Nil when the state line
+    /// above already ends with that reason.
+    static func need(_ task: RoadmapTask) -> String? {
+        let standing = TaskStanding(task: task, status: .unknown)
+        func bare(_ text: String) -> String {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.hasSuffix(".") ? String(trimmed.dropLast()) : trimmed
+        }
+        guard let line = standing.line, bare(line) != bare(task.nextMove.reason) else { return nil }
+        return standing.source == .condition ? "\(standing.word ?? ""): \(line)" : line
+    }
+
     /// Names separated by commas, each a link, so a narrow pane wraps the list.
     static func links(_ items: [(title: String, url: URL)], mono: Bool) -> AttributedString {
         var result = AttributedString()
@@ -125,10 +138,8 @@ struct TaskBriefView: View {
             Text("\(lead)\(reason)")
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("brief-state")
-            // The line the Task's row shows, under the word it would show with no program reporting.
-            let standing = TaskStanding(task: task, status: .unknown)
-            if let line = standing.line {
-                Text(verbatim: standing.source == .condition ? "\(standing.word ?? ""): \(line)" : line)
+            if let need = TaskBrief.need(task) {
+                Text(verbatim: need)
                     .font(Typography.text).foregroundStyle(palette.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }

@@ -70,13 +70,13 @@ look needs a display, so it belongs to qa and review, not to build.
 
 ## What the code is today
 
-Slices 1 to 4 are built. The acceptance grep prints nothing (seen again
+Slices 1 to 5 are built. The acceptance grep prints nothing (seen again
 after slice 4's commit, 6fe53188bb) and the Checks table has
-`DesignDisciplineTests` passing. Slice 5 remains: the review of the built
-screens (`scratch/concept-review.html`, at 021b28484a) found four places
-that still answer "where does this Task stand, and does it need someone"
-apart from `TaskStanding`. They are listed under "Where a Task stands, said
-once" and in slice 5.
+`DesignDisciplineTests` passing. Slice 5 moved the four readers the review
+of the built screens found (`scratch/concept-review.html`, at 021b28484a)
+onto `RoadmapTask.need` and `TaskStanding`. Nothing is left to build; what
+remains is the look on an unlocked display and the three Tasks under
+"Outside this change".
 
 - At the base, 177 lines passed a literal padding and 132 a literal non-zero
   `spacing:`, with off-scale values 1, 3, 5, 6, 7, 9, 10, 14, 15, 17, 18, 22,
@@ -150,8 +150,9 @@ Two deciders on one screen.
 - `RoadmapTask.need` (in `WaveWorkMap.swift`, beside `awaitsStart`) returns
   the condition state when the Task needs someone and nil when it does not:
   nil for `clear`, nil for `waiting` on an unstarted Task whose recommended
-  action is Start, the state otherwise. It is the rule now inline in
-  `TaskStanding.init`, moved, not changed.
+  action is Start or on a finished Task, the state otherwise. It is the rule
+  that was inline in `TaskStanding.init`, moved, plus the finished case the
+  build found.
 - `TaskStanding` reads `need`. `nowGroup` returns `need`, so the Now list
   omits Tasks that wait only to be started; the backlog is where those are
   listed and started. `NowProjectionTests` gains that case.
@@ -566,19 +567,37 @@ or `lf desktop` reads unless its view is deleted.
    - Not seen on a display: the browser's three bordered icon buttons, the
      review comment box at the `text` step where it was `.controlSize(.small)`
      with `meta`, and every snapped padding.
-5. **One answer, on the remaining four readers.** Next. In this order, each
-   with its test:
-   1. `RoadmapTask.need`; `TaskStanding` and `nowGroup` read it
-      (`TaskStandingTests`, `NowProjectionTests`: an unstarted Task whose
-      next move is Start is in no Now group; one waiting on a merge is).
-   2. `TaskWorkflowHeader` and the palette print `TaskStanding`'s word
-      (`TaskConceptTests`, `WorkCLISubscriptionTests`, `WorkPaletteTests`).
-   3. The tile's sentence yields only to a program's ask
-      (`DashboardWorkspaceTests`); the Brief drops the repeated line
-      (`TaskBriefTests`).
-   Then `swift/README.md` line 148 ("Not started") and `docs/surfaces.md`
-   where they name these words. No Rust. Run
-   `scripts/test_desktop.sh --filter 'TaskStandingTests|NowProjectionTests|TaskConceptTests|WorkCLISubscriptionTests|WorkPaletteTests|DashboardWorkspaceTests|TaskBriefTests|RoadmapViewTests'`.
+5. **One answer, on the remaining four readers.** Built.
+   `RoadmapTask.need` (`WaveWorkMap.swift`) says whether a Task needs
+   someone; `TaskStanding` and `nowGroup` read it, so the Now list omits
+   Tasks that wait only to be started. `TaskWorkflowHeader` and the jump
+   menu print `TaskStanding`'s word. A tile's workflow sentence yields only
+   to a program's ask (`DashboardTile.workflow`), and the Brief prints what
+   the Task needs only when its state line has not said it
+   (`TaskBrief.need`). Deleted: `lifecycleLabel`, the palette's "Not
+   started", `nowGroup`'s own switch.
+
+   What it taught:
+   - The server also calls an abandoned Task `waiting`, reason "ready"
+     (`tests/fixtures/dto/task_concepts.json`, FIX-3), so its row and its
+     page read "Waiting" over "ready". `need` is nil for `waiting` on a
+     finished Task; a third case for the Rust Task under "Outside this
+     change". An active Task whose worktree is missing reads "Blocked" on
+     its page, where the page said "Active".
+   - The header takes the row's tone as well as its word, so "Done" and
+     "Abandoned" are in secondary ink, semibold, on the header's green or
+     red tint and stripe, where the word itself was green or red. Whether
+     that reads weak is for the Dev app look.
+   - The header and the jump menu read the Task's programs, so an open Task
+     whose program reports reads "Busy" or "Available" on its page, as its
+     row does, where the page said "Active" or "Idle". When Session
+     readings fail the header has no word, as the row has none.
+   - The Brief compares the standing's line with `nextMove.reason` without
+     their closing full stops. A blocked Task's reason differs from its next
+     move, so "Blocked: reason" stays.
+   - The tile and the Brief are each held by a test of the function that
+     decides, not of the mounted view: a tile needs a workspace registry and
+     a Task work reading no fixture seeds.
 
 ## Outside this change
 
@@ -618,3 +637,4 @@ or `lf desktop` reads unless its view is deleted.
 | `scripts/test_desktop.sh --skip-build --filter 'BacklogViewTests\|DashboardWorkspaceTests\|RoadmapViewTests\|CreateWaveSheetTests\|TaskRowTests\|TaskStandingTests\|WorkflowLineTests\|WorkNavigationTests\|WorkModelTests\|WaveDetailReadingTests'` | passed after slice 4 (162 tests) | build; CI runs the rest |
 | Dev app in light, dark and an imported theme | looked at with the screen locked, on a private Machine: backlog, Portfolio Wave page, dashboard and Choose Theme in Loopflow Light, Loopflow Dark and Dracula (`scratch/qa.html`). Three fixes followed. Title bar, menus, hover, drag and terminal faces need an unlocked display | qa; review for the rest |
 | `scripts/test_desktop.sh --filter 'TaskStandingTests\|TaskRowTests\|BacklogViewTests\|DashboardWorkspaceTests\|DesignDisciplineTests\|RoadmapViewTests'` | passed after the qa fixes (51 tests) | qa; CI runs the rest |
+| `scripts/test_desktop.sh --filter 'TaskStandingTests\|NowProjectionTests\|TaskConceptTests\|WorkCLISubscriptionTests\|WorkPaletteTests\|DashboardWorkspaceTests\|TaskBriefTests\|RoadmapViewTests\|TaskRowTests'` | passed after slice 5 (64 tests; the first run failed `TaskConceptTests` on an abandoned Task reading "Waiting", fixed in `RoadmapTask.need`) | build; CI runs the rest, `WorkNavigationTests` and `DesktopHeadlessTests` among them, which mount the header |

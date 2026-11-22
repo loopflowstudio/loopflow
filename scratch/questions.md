@@ -149,3 +149,15 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
     only the tile regains its workflow sentence. The line is the server's
     reason (question 38). Drop the line when it is the bare status word, or
     wait for the wire to carry the sentence?
+43. **A finished Task is never "Waiting".** The server marks an abandoned
+    Task `waiting` with the reason "ready", so its row and its page read
+    "Waiting" over "ready". `RoadmapTask.need` now returns nil for `waiting`
+    on a done or abandoned Task; `blocked` and `unknown` still show. Found
+    in slice 5 when the page took the row's word. Should a finished Task
+    show a blocked condition either?
+44. **A Task's page reads its programs.** `TaskWorkflowHeader` prints the
+    row's word, so an open Task whose program reports says "Busy" or
+    "Available" where the page said "Active" or "Idle", and "Done" and
+    "Abandoned" are in secondary ink on the tinted header, where the word
+    was green or red. Keep the lifecycle word and its color on the page
+    instead?

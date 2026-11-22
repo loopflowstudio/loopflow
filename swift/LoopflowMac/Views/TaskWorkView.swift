@@ -10,14 +10,6 @@ struct TaskWorkflowHeader: View {
     let work: Reading<TaskOverview>
     @Environment(\.palette) private var palette
 
-    private var lifecycleLabel: String {
-        switch task.lifecycle {
-        case .done: "Completed"
-        case .abandoned: "Canceled"
-        default: task.lifecycle.label.capitalized
-        }
-    }
-
     /// What the Task's Workflow reading says, or why there is none yet.
     private var position: String? {
         if let workflow = work.value?.graph { return workflow.sentence }
@@ -31,11 +23,15 @@ struct TaskWorkflowHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-                Text(lifecycleLabel)
-                    .fontWeight(task.isCompleted ? .semibold : .regular)
-                    .foregroundStyle(task.lifecycle == .done ? palette.success
-                        : task.lifecycle == .abandoned ? palette.failure : palette.textSecondary)
-                    .accessibilityIdentifier("task-lifecycle-status")
+                // The word the Task's row and the title bar say.
+                let standing = TaskStanding(task: task, status: model.programStatus(task: task.id))
+                if let word = standing.word {
+                    Text(verbatim: word)
+                        .fontWeight(task.isCompleted ? .semibold : .regular)
+                        .foregroundStyle(standing.tone?.ink(in: palette) ?? palette.textSecondary)
+                        .help(Text(verbatim: standing.help ?? word))
+                        .accessibilityIdentifier("task-lifecycle-status")
+                }
                 if task.isUnassigned {
                     Text("Unassigned").foregroundStyle(palette.textSecondary)
                 }

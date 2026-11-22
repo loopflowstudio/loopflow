@@ -11,17 +11,8 @@ public extension TaskConditionState {
     }
 }
 
-/// NOW shows non-clear Task conditions from the one `lf wave show` read. Rust
-/// owns the condition; Swift only omits clear rows and groups the rest.
-public func nowGroup(for task: RoadmapTask) -> TaskConditionState? {
-    switch task.condition.state {
-    case .waiting: return .waiting
-    case .blocked: return .blocked
-    case .unknown: return .unknown
-    case .clear:
-        return nil
-    }
-}
+/// NOW lists the Tasks that need someone, under the word their rows say.
+public func nowGroup(for task: RoadmapTask) -> TaskConditionState? { task.need }
 
 /// The row's spoken contract uses the exact shared reason rendered by the CLI.
 public func taskConditionAccessibilityLabel(_ task: RoadmapTask) -> String {

@@ -41,6 +41,30 @@ struct TaskBriefTests {
         #expect(TaskBrief.state(runtime: nil, graph: nil, reason: "").lead == "Unstarted.")
     }
 
+    @Test("The Brief says what the Task needs once: not again when the state line ends with it")
+    func needIsSaidOnce() throws {
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
+        let wire = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as? [String: Any])
+        let items = try #require((wire["tasks"] as? [String: Any])?["items"] as? [[String: Any]])
+        func task(state: String, reason: String, nextMove: String) throws -> RoadmapTask {
+            var row = try #require(items.first)
+            var condition = try #require(row["condition"] as? [String: Any])
+            condition["state"] = state
+            condition["reason"] = reason
+            row["condition"] = condition
+            var move = try #require(row["next_move"] as? [String: Any])
+            move["reason"] = nextMove
+            row["next_move"] = move
+            row["lifecycle"] = "idle"
+            return try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
+        }
+        #expect(TaskBrief.need(try task(state: "waiting", reason: "ready", nextMove: "ready")) == nil)
+        #expect(TaskBrief.need(try task(state: "blocked", reason: "checkout has uncommitted changes", nextMove: "ready"))
+            == "Blocked: checkout has uncommitted changes")
+        #expect(TaskBrief.need(try task(state: "clear", reason: "ready", nextMove: "ready")) == nil)
+    }
+
     @Test func relatedTasksAndOutlineAreCommaSeparatedLinks() throws {
         let one = try #require(URL(string: "loopflow://loopflow/task/LOO-497"))
         let two = try #require(URL(string: "loopflow://loopflow/task/LOO-416"))

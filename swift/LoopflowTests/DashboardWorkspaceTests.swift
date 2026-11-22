@@ -26,6 +26,26 @@ struct DashboardWorkspaceTests {
         #expect(FocusSizing.shares([0.7, 0.3], focused: 1) == [1 - FocusSizing.golden, FocusSizing.golden])
     }
 
+    @Test("A tile's workflow sentence yields only to what a program asks")
+    func tileKeepsItsWorkflowSentenceUnlessAProgramAsks() throws {
+        let graph = TaskGraph(name: "code", interactiveSteps: [], position: .at(step: "demo"),
+                              steps: [.init(name: "build", interactive: false), .init(name: "demo", interactive: true)],
+                              currentStep: 1, sentence: "You are next needed at demo.")
+        // No program reporting, whatever the row's own line says: the sentence shows.
+        #expect(DashboardTile.workflow(graph, status: .unknown, auto: false, setup: nil)?.sentence == "You are next needed at demo.")
+        let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto")
+        var wire = try #require(JSONSerialization.jsonObject(
+            with: Data(contentsOf: fixtures.appendingPathComponent("session.json"))) as? [String: Any])
+        let ask = ProgramStatusReport(state: .blocked, id: nil, kind: nil, progress: nil, app: nil, title: nil, msg: "Approve the plan?")
+        wire["program_status"] = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(ProgramStatusRecords(seen: true, records: [ask])))
+        let session = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
+        let asking = SessionProgramStatus(sessions: [session], unavailable: nil)
+        #expect(asking.ask == "Approve the plan?")
+        #expect(DashboardTile.workflow(graph, status: asking, auto: false, setup: nil) == nil)
+    }
+
     /// Rust's `SlotLayout::golden`, as every built-in plan reports it.
     static let golden = DashboardSlotLayout(root: .split(.horizontal, [0.618, 0.382], [
         .split(.vertical, [0.618, 0.382], [.slot(0), .split(.vertical, [1, 1], [.slot(1), .slot(2)])]),

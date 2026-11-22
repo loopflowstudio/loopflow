@@ -145,7 +145,7 @@ shown across Desktop. Completing or canceling a never-started Task instead shows
 it as completed or abandoned and offers **Reopen**.
 
 Ownership is separate. Unassigning a started, unfinished Task puts it in **Backlog** while
-keeping its lifecycle, checkout, PR and conversations. **Start** and **Not started**
+keeping its lifecycle, checkout, PR and conversations. **Start** and **Unstarted**
 apply to work that has never started; an unassigned running Task remains Active.
 
 A Task is **Available** when one of its conversations is available for your next
@@ -176,13 +176,16 @@ The word is the first of these that applies:
    **Done**. A blocked program's line is what it asked.
 2. **Blocked** or **Waiting**, when the Task's condition says so and no
    program reports. The line is the condition's reason, the one
-   `lf plan list` prints.
-3. Its lifecycle word: **Idle**, **Active**, **Done**.
+   `lf plan list` prints. A Task that waits only to be started is not
+   waiting on anyone: it reads **Unstarted** and its row offers Start.
+3. Its lifecycle word: **Unstarted**, **Idle**, **Active**, **Done**,
+   **Abandoned**.
 
 A Task whose condition could not be read adds no word for it. The row is the
 same in the sidebar, the title bar, a Dashboard tile's header, the roadmap,
-the Now list and a Wave's Portfolio page, so a Task never says two things
-about itself. The Portfolio has no program reports, so its rows start at the
+the Now list and a Wave's Portfolio page, and the Task's own page and the
+jump menu print its word, so a Task never says two things about itself. The
+Now list holds the Tasks whose rows say they need someone, under that word. The Portfolio has no program reports, so its rows start at the
 second rule. Click the row on any of them and the Task opens.
 
 The selected row is filled; rows carry no stripe or border. A Wave's count
@@ -419,7 +422,8 @@ Shell holds retained shell tabs. The Task's pane has one row of tabs: **Brief**,
 them. Hidden tools keep their clients and drafts.
 
 **Brief** opens on the Task's title, then one sentence with its state and why
-("Moving, at build. The loop chose another pass on the concept review."), then its PR, the Tasks the brief names
+("Moving, at build. The loop chose another pass on the concept review."), a line for what it
+needs when that sentence has not already said it ("Blocked: checkout has uncommitted changes"), then its PR, the Tasks the brief names
 (click one to open it) and an outline when the brief has headings or an
 `Acceptance:` lead, as a two-column table that wraps in a narrow pane. Its
 scroll position survives page and Task switches in this window; a brief that
@@ -691,7 +695,7 @@ feedback stays inside the terminal area. Resolving a conversation installs its
 record and pane before ending preparation, including explicit Session links.
 Cached switches reuse their panes and drafts without preparing again.
 When the selected Task's lifecycle becomes completed or abandoned, it stays
-visible with a green **Completed** or red **Canceled** header. Navigating away restores the ordinary
+visible with a green **Done** or red **Abandoned** header. Navigating away restores the ordinary
 sidebar filters. **Back** (⌘[) returns to the retained workspace and its sidebar
 row, preserving conversations, files and drafts without starting execution.
 **Start from…** in **…** lists `start` and the Task's interactive steps; picking
@@ -1545,8 +1549,8 @@ lf desktop view 'query:attention'             # open a saved one
 
 A Dashboard is headed by its name, with its query beside it. Each tile is
 headed by the Task's row, the same one the sidebar shows, with open in full,
-more and hide at its end. Under the row is one sentence for the workflow, or
-what the Task is asking when it needs you:
+more and hide at its end. Under the row is one sentence for the workflow,
+unless the Task's program is asking something, which the row already prints:
 
 ```text
 Needs you   state:available or state:blocked        Default Slots  Edit Dashboard

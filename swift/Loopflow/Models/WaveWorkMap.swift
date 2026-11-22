@@ -276,6 +276,18 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// open, and its Session slot offers Start instead.
     public var awaitsStart: Bool { lifecycle == .unstarted }
 
+    /// Whether the Task needs someone, and how: nil when its condition is clear,
+    /// when it waits only to be started, which its row offers as Start, or
+    /// when it is finished and so waits for nobody.
+    public var need: TaskConditionState? {
+        switch condition.state {
+        case .clear: nil
+        case .waiting: isCompleted || (awaitsStart && actions.recommended == .run) ? nil : .waiting
+        case .blocked: .blocked
+        case .unknown: .unknown
+        }
+    }
+
     /// Where a Task that never ran its Graph stands, as the server reads it:
     /// starting that Graph, or why its setup stopped.
     public var setupPosition: String? {

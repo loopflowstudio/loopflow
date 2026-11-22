@@ -5,8 +5,12 @@ first:
   - path: swift/README.md
     why: the screens as a person meets them
   - path: docs/surfaces.md
+  - path: swift/Loopflow/Models/WaveWorkMap.swift
+    why: RoadmapTask.need, whether a Task needs someone
   - path: swift/LoopflowMac/Design/TaskStanding.swift
     why: the one answer to where a Task stands
+  - path: swift/Loopflow/Models/NowProjection.swift
+    why: the Now list reads the same predicate
   - path: swift/LoopflowMac/Design/TaskRow.swift
     why: the row every list draws it with
   - path: swift/LoopflowTests/DesignDisciplineTests.swift

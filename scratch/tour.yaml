@@ -1,0 +1,9 @@
+at: b203eee0564318424c042047da9bc173b1454df1
+first:
+  - path: swift/README.md
+    why: Terminal appearance and the personal opt-in
+  - path: swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift
+    why: Shared shell and Session font defaults
+  - path: swift/LoopflowTests/ThemeTests.swift
+    why: Effective stroke weight across personal settings and themes
+hide: []

@@ -44,11 +44,9 @@ struct NewTaskSheet: View {
                 .accessibilityIdentifier("new-task-request")
             NewTaskWorkflow(model: model, waveID: $waveID, graph: $graph)
             if let fileError {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                    Text("Not filed.").font(Typography.textStrong).foregroundStyle(palette.failure).fixedSize()
-                    Text(fileError).font(Typography.mono).foregroundStyle(palette.textSecondary)
-                        .textSelection(.enabled).accessibilityIdentifier("new-task-file-error")
-                }
+                FailureLine("Not filed.", machine: fileError)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("new-task-file-error")
             }
             HStack(spacing: Spacing.sm) {
                 Spacer()
@@ -185,11 +183,9 @@ struct StartingTaskView: View {
                     .font(Typography.lede)
                     .textSelection(.enabled)
                 if let error = starting.error {
-                    HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                        Text("Not started.").font(Typography.textStrong).foregroundStyle(palette.failure).fixedSize()
-                        Text(error).font(Typography.mono).foregroundStyle(palette.textSecondary)
-                            .textSelection(.enabled).accessibilityIdentifier("new-task-error")
-                    }
+                    FailureLine("Not started.", machine: error)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("new-task-error")
                     HStack(spacing: Spacing.sm) {
                         Button("Try again") {
                             Self.start(model: model, request: starting.request, wave: starting.wave, graph: starting.graph)

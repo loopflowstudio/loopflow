@@ -198,8 +198,9 @@ alone with the sentence or message as help. No `systemImage`.
 
 A compact state with no button keeps its title, cut short where the slot
 ends. Beside it in the same file: `.emptyLine()` for a list with nothing in
-it, and `FailureLine` (what failed, the message in mono, the way to retry)
-for a failure beside content that stays.
+it, and `FailureLine` (what failed, strong in the failure ink, the message in
+mono, the way to retry) for a failure beside content that stays. New Task's
+"Not filed." and "Not started." are `FailureLine`s too (questions 43).
 
 ### New Task sheet
 

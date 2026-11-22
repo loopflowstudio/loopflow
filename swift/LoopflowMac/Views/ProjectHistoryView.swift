@@ -3,7 +3,6 @@ import Loopflow
 import SwiftUI
 
 struct ProjectHistoryView: View {
-    @Environment(\.palette) private var palette
     let wave: String
     let repo: String
     var sourceReference: String? = nil

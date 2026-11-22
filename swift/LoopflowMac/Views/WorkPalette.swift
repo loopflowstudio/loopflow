@@ -367,7 +367,6 @@ struct WorkPaletteShortcut: NSViewRepresentable {
 }
 
 struct GraphCatalogInspector: View {
-    @Environment(\.palette) private var palette
     let entry: GraphCatalogEntry?
     @Bindable var navigation: WorkNavigation
     let model: WorkModel
@@ -402,7 +401,6 @@ struct GraphCatalogInspector: View {
 }
 
 struct WorkflowCatalogInspector: View {
-    @Environment(\.palette) private var palette
     let entry: GraphCatalogEntry?
     let model: WorkModel
     @State private var sourceError: String?

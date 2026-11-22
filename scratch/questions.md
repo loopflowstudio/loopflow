@@ -146,3 +146,13 @@ Made while building slice 5 with nobody present.
     included, and `lf desktop capture -p backlog` prints the same line.
 42. The prototype's CSS for the deleted sections stays in `desktop.css`,
     which `desktop.html` shares.
+
+Made at compress after slice 5 with nobody present.
+
+43. "Not filed." and "Not started." in New Task were hand-built copies of
+    `FailureLine` in a strong face, as the prototype's `.bad` draws them.
+    Both are `FailureLine` now, and `FailureLine` is strong everywhere, so
+    the ten failures beside content ("Latest read failed.", "Project
+    unavailable." and the rest) went from regular to semibold. Not seen in
+    the Dev app. Passed over: a regular `FailureLine` in the sheet, which
+    would have undone the weight qa saw there.

@@ -98,8 +98,9 @@ private struct EmptyLine: ViewModifier {
     }
 }
 
-/// A failure beside content that stays on screen: what failed in the reading
-/// face, the Machine's message in mono and selectable, then the way to try again.
+/// A failure beside content that stays on screen: what failed, strong in the
+/// failure ink, the Machine's message in mono and selectable, then the way to
+/// try again.
 struct FailureLine<Actions: View>: View {
     let what: String
     let machine: String
@@ -114,7 +115,7 @@ struct FailureLine<Actions: View>: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-            Text(what).font(Typography.text).foregroundStyle(palette.failure)
+            Text(what).font(Typography.textStrong).foregroundStyle(palette.failure)
             Text(machine).font(Typography.mono).foregroundStyle(palette.textSecondary)
                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             actions

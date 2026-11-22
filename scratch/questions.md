@@ -21,3 +21,13 @@
 - The workflow card's `code` line will show two highlighted stops
   (human-review, verify) under `<small>` copy that begins "One stop." The
   copy stays word for word; it now contradicts the line beside it.
+
+# Implement (2026-11-21)
+
+- `homepage.install.links` ("Getting started ↗", "Source ↗") was read by no
+  page, so the merged top-level `install` block drops it instead of carrying it.
+- Docs and download lose the old bar's `target="_blank"` on GitHub; the shared
+  bar opens it in the same tab, as the homepage always did.
+- fast_app loads Pico before `style.css`; the bar's `details`/`summary` rules
+  undo Pico's chevron and margins. Turning Pico off (`pico=False`) would delete
+  many such resets across the stylesheet, but changes every page's base styles.

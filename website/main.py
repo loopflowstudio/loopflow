@@ -22,7 +22,8 @@ STATIC_DIR = Path(__file__).parent / "static"
 STYLE_VERSION = hashlib.sha256((STATIC_DIR / "style.css").read_bytes()).hexdigest()[:12]
 
 app, rt = fast_app(
-    htmlkw={"lang": "en"},
+    # Pico would follow OS dark mode; the site has no dark scheme.
+    htmlkw={"lang": "en", "data-theme": "light"},
     hdrs=(
         Meta(name="viewport", content="width=device-width, initial-scale=1"),
         Link(rel="icon", href="/static/logo.svg", type="image/svg+xml"),

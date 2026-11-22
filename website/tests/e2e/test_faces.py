@@ -97,3 +97,18 @@ def test_workflow_card_shows_the_steps_the_graph_runs(homepage: Page, graph: str
     )
     expected = _graph_steps(yaml.safe_load((GRAPHS / f"{graph}.yaml").read_text()))
     assert [tuple(step) for step in shown] == expected
+
+
+COLORS = """() => [...document.querySelectorAll('body *')].map(el => {
+    const style = getComputedStyle(el);
+    return [style.color, style.backgroundColor, style.borderTopColor].join(' ');
+})"""
+
+
+@pytest.mark.parametrize("path", ["/", "/docs", "/download"])
+def test_os_dark_mode_shows_the_light_site(page: Page, base_url: str, path: str) -> None:
+    page.goto(f"{base_url}{path}")
+    page.emulate_media(color_scheme="light")
+    light = page.evaluate(COLORS)
+    page.emulate_media(color_scheme="dark")
+    assert page.evaluate(COLORS) == light

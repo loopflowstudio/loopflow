@@ -253,6 +253,40 @@ Then look at `/`, `/docs`, `/docs/orchestration`, `/download` at 1440 and
 4. **Workflow card and DESIGN.md.** Card lines from the YAML plus its test;
    DESIGN.md pointers and "Tokens today" to what shipped.
 
+## Built (implement, 2026-11-21)
+
+All four slices are in, one commit each. Acceptance greps pass (0
+`!important`, 0 raw colors below `:root`, no Google Fonts host), the
+architecture export is current, and `pytest tests/` passes (92) in
+`website/`. Screenshots at 1440 and 390, light and OS-dark, are in
+`scratch/shots/`.
+
+What the build taught:
+
+- fast_app's default static route (`/{fname}.{ext:static}`) answers
+  `/static/*` before main.py's own `/static/{fname:path}` handler, so the
+  font route with CORS and a year's cache is a `Route` inserted at the front
+  of `app.routes`, like the machine-readable routes.
+- fast_app loads Pico before `style.css`. Pico styles `summary::after`
+  (chevron), `article` padding and `article > header` negative margins; the
+  bar keeps its resets and `.docs-page-header` pins its margin. Pico is the
+  reason many old resets exist (`questions.md`).
+- The download page's "Then, inside a project" CSS was written for
+  `.next-steps*` while the markup says `.next-skills*`; renamed, so that
+  block now gets its border and smaller label.
+- A computed-style diff of every element (before/after slice 3) showed `/`,
+  `/studio` and `/fantasia` unchanged by the duplicate-rule merges apart from
+  the skip link snapping to `--t-small`.
+- The mobile docs disclosure also set its page name and `+` in mono; both
+  went to sans with the md and public links.
+- In OS dark mode Pico recolored unstyled text (the drawings' run titles
+  faded). `data-theme="light"` on `<html>` makes OS-dark computed colors
+  identical to light on every page; `test_os_dark_mode_shows_the_light_site`
+  fails without it.
+
+Left for gate: `cargo test -p loopflow --test integration documented_commands::`
+(DESIGN.md's one-token edit), and a look in real Chrome.
+
 ## Docs written first (write-docs, 2026-11-21)
 
 `DESIGN.md` already describes the shipped website: prototypes paragraph,

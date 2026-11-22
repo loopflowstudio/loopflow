@@ -7,9 +7,11 @@
 
 - Round 2: `ThemeSample` is deleted rather than kept beside the cards. What it showed that no card does: a terminal line and the secondary text on the selected row.
 - Round 2: the chosen card is a 2 pt ring in the window's focus color instead of the old selection fill and edge. Passed over: both.
-- Round 2: `ThemeDefinition.retired` has no removal date; it is the sentence a person with an old setting sees, not a file-shape fallback. No removal Task filed.
 
 - QA round 2: the third-party inventory went stale a second time (a README edit after the refresh) and only the bundle build noticed. Not added: a `test_third_party.py` case calling `third_party.check()`, which would catch it in CI but also fail every PR that bumps `Cargo.lock` without a refresh.
 
 - Concept review round 2: importing a dark file while in Light mode switches the preview to Dark mode rather than refusing. Passed over: switching to System (changes two sides), or filing it under dark Yours without previewing (the person sees nothing happen).
 - Concept review round 2: the side buttons go; the chosen name moves into each section heading. Lost: in Light mode, seeing the dark side's name without switching to System.
+
+- Round 3: in System mode an import previews the file on its side even when macOS is on the other side (as a card click does); Light/Dark mode switches the mode instead.
+- Round 3: the Import tile's accessibility identifier is `appearance-import-theme` in both sections (the `-dark` variant went with the side).

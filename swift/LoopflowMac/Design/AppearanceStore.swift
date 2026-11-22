@@ -120,7 +120,7 @@ final class AppearanceStore {
         catch { if reading == generation { notice = error.localizedDescription }; return }
         guard reading == generation else { return }
         switch selection(from: raw) {
-        case let .success((choice, notes)): selection = choice; problems.insert(contentsOf: notes, at: 0)
+        case let .success(choice): selection = choice
         case let .failure(error): problems.insert(error.message, at: 0)
         }
         notice = problems.isEmpty ? nil : problems.joined(separator: "\n")
@@ -130,38 +130,27 @@ final class AppearanceStore {
         }
     }
 
-    /// The choice `theme:` states, and a sentence for each removed built-in it still names.
-    private func selection(from raw: String?) -> Result<(AppearanceSelection, [String]), ThemeError> {
-        guard let raw, let value = ThemeConfig.parse(raw) else { return .success((AppearanceSelection(), [])) }
+    private func selection(from raw: String?) -> Result<AppearanceSelection, ThemeError> {
+        guard let raw, let value = ThemeConfig.parse(raw) else { return .success(AppearanceSelection()) }
         let config = paths.config.path
         func unknown(_ name: String) -> ThemeError {
             ThemeError("No theme named “\(name)”: keeping \(effectiveTheme.name). Fix theme: in \(config) with a built-in name or a file in \(paths.themes.path).")
         }
-        var notes: [String] = []
-        /// The name to show and its side: a removed built-in becomes Loopflow's theme for its side.
-        func current(_ name: String) throws(ThemeError) -> (name: String, dark: Bool) {
-            if let theme = library.resolve(name) { return (name, theme.isDark) }
-            guard let dark = ThemeDefinition.retired[name] else { throw unknown(name) }
-            let replacement: ThemeDefinition = dark ? .dark : .light
-            notes.append("“\(name)” is no longer built in, so \(replacement.name) is showing.")
-            return (replacement.name, dark)
-        }
         var choice = selection
-        do throws(ThemeError) {
-            switch value {
-            case let .single(name):
-                let theme = try current(name)
-                choice.mode = theme.dark ? .dark : .light
-                if theme.dark { choice.dark = theme.name } else { choice.light = theme.name }
-            case let .pair(light, dark):
-                choice.mode = .system
-                choice.light = ThemeDefinition.light.name
-                choice.dark = ThemeDefinition.dark.name
-                if let light { choice.light = try current(light).name }
-                if let dark { choice.dark = try current(dark).name }
+        switch value {
+        case let .single(name):
+            guard let theme = library.resolve(name) else { return .failure(unknown(name)) }
+            choice.mode = theme.isDark ? .dark : .light
+            if theme.isDark { choice.dark = name } else { choice.light = name }
+        case let .pair(light, dark):
+            for name in [light, dark].compactMap({ $0 }) where library.resolve(name) == nil {
+                return .failure(unknown(name))
             }
-        } catch { return .failure(error) }
-        return .success((choice, notes))
+            choice.mode = .system
+            choice.light = light ?? ThemeDefinition.light.name
+            choice.dark = dark ?? ThemeDefinition.dark.name
+        }
+        return .success(choice)
     }
 
     private func currentFingerprint() -> [String] {

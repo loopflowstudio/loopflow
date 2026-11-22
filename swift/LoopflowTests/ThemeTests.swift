@@ -248,24 +248,6 @@ struct ThemeTests {
         }
     }
 
-    @Test func aRemovedBuiltinShowsLoopflowsThemeForItsSideAndSaysWhy() async throws {
-        try await withThemeServer { location in
-            let paths = ThemePaths.temporary()
-            try paths.writeConfig("theme: Gruvbox Dark\n")
-            let store = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
-            #expect(store.effectiveTheme.name == "Loopflow Dark")
-            #expect(store.selection.mode == .dark)
-            #expect(store.notice?.contains("“Gruvbox Dark” is no longer built in, so Loopflow Dark is showing") == true)
-            try paths.writeConfig("theme: light:Linen,dark:Harbor\n")
-            await store.reload()
-            #expect(store.selection.light == "Loopflow Light")
-            #expect(store.selection.dark == "Harbor")
-            #expect(store.notice?.contains("“Linen”") == true)
-            // The file keeps its words until the person applies a choice.
-            #expect(paths.configText()?.contains("light:Linen,dark:Harbor") == true)
-        }
-    }
-
     @Test func customizingABuiltinWritesYourCopyAndDeletingRevertsIt() async throws {
         try await withThemeServer { location in
             let paths = ThemePaths.temporary()

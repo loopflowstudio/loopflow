@@ -339,10 +339,8 @@ theme: "Fig"                    # Dark (or Light) mode: one name
 
 **Apply** rewrites only that line; **Cancel**, Escape or closing writes nothing.
 Edit it by hand and every window follows; a misspelled name keeps the last theme
-and names the fix. Absent means Loopflow Light/Dark. A name from the old
-catalogue (Gruvbox Dark, Linen…) shows Loopflow's theme for that side, with a
-sentence on importing the old one. A repository's `.lf/config.yaml` never sets
-the theme.
+and names the fix. Absent means Loopflow Light/Dark. A repository's
+`.lf/config.yaml` never sets the theme.
 
 Built-ins are 13 families, each a light and a dark theme. **Loopflow Light** keeps
 the original cream/burgundy; **Loopflow Dark** is blue-grey with rose headings and

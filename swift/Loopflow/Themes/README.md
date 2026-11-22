@@ -36,6 +36,4 @@ secondary text reads at 4.5:1.
 Colors are seeds, never activity. Missing ANSI colors come
 from the matching Loopflow preset; 16–255 default to xterm's.
 
-Both SwiftPM and Xcode ship the catalogue offline. A `theme:` setting that
-names a built-in from before the families (Gruvbox Dark, Linen…) shows Loopflow
-Light or Dark for that side and says so.
+Both SwiftPM and Xcode ship the catalogue offline.

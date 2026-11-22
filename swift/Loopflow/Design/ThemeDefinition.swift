@@ -114,16 +114,6 @@ public struct ThemeDefinition: Identifiable, Sendable {
         } catch { preconditionFailure("Invalid bundled theme: \(error)") }
     }()
 
-    /// Built-ins the 13 families replaced, and whether each was dark. A setting that names one
-    /// shows Loopflow's theme for that side instead.
-    public static let retired: [String: Bool] = [
-        "Linen": false, "Catppuccin Latte": false, "Celadon": false, "Clay": false, "Flexoki Light": false,
-        "Frost": false, "Gruvbox Light": false, "Noctis Lilac": false, "Pewter": false, "Sea Glass": false,
-        "Vellum": false, "Hearth": true, "Aubergine": true, "Catppuccin Mocha": true, "Flexoki Dark": true,
-        "Gruvbox Dark": true, "Night Owl": true, "Onyx": true, "Phosphor": true, "Rosewood": true,
-        "Solarized Dark": true,
-    ]
-
     private static func builtin(_ name: String) -> Self {
         guard let theme = builtins.first(where: { $0.name == name }) else { preconditionFailure("Missing bundled theme \(name)") }
         return theme

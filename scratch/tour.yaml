@@ -1,4 +1,4 @@
-at: ab2b8ba76a20db1cf5043203432262550d9fbce6
+at: 66440129497efc4462fe9c83e6485586171224e0
 first:
   - path: swift/README.md
     why: What a person gets: families, cards, title bar role
@@ -8,18 +8,18 @@ first:
   - path: swift/Loopflow/Themes/Catalogue/Loopflow Dark
     why: The rebuilt default, every value
   - path: swift/Loopflow/Themes/Catalogue/Loopflow Light
-  - path: swift/Loopflow/Design/ThemeDefinition.swift
-    why: Catalogue order, counts, retired names
-  - path: swift/LoopflowMac/Design/AppearanceStore.swift
-    why: A retired name falls back and says why
-  - path: swift/LoopflowMac/Views/ThemeChooser.swift
-    why: The card grid replacing tiles and sample
   - path: swift/Loopflow/Design/BrandColors.swift
     why: The titlebar role and its readability check
   - path: swift/Loopflow/Design/GhosttyThemeMapping.swift
     why: The rule that fills a missing bar
   - path: swift/Loopflow/Design/ThemeFile.swift
     why: Where a file's own accent decides its bar
+  - path: swift/Loopflow/Design/ThemeDefinition.swift
+    why: Catalogue order and counts
+  - path: swift/LoopflowMac/Design/AppearanceStore.swift
+    why: A theme lands on the side its colors say
+  - path: swift/LoopflowMac/Views/ThemeChooser.swift
+    why: The card grid replacing tiles and sample
   - path: swift/LoopflowTests/ThemeTests.swift
   - path: swift/LoopflowTests/ThemeWorkflowTests.swift
   - path: python/tests/test_theme_catalogue.py

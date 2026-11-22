@@ -1351,14 +1351,12 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .needs a, .home-page .install-links a { text-decoration: underline; }
 .home-page .work-row .term { font-size: var(--t-meta); padding: var(--space-16) var(--space-16); }
 .home-page .work-row > * { min-width: 0; }
-.home-page nav details { position: relative; }
-.home-page nav summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; min-height: 32px; }
+.home-page nav details { position: relative; margin: 0; padding: 0; border: 0; }
+.home-page nav summary, .home-page nav details[open] > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; min-height: 32px; margin: 0; color: inherit; line-height: inherit; }
 .home-page nav summary::-webkit-details-marker { display: none; }
-.home-page nav details { margin: 0; padding: 0; border: 0; }
-.home-page nav summary { margin: 0; color: inherit; line-height: inherit; }
 .home-page nav summary::after { content: "▾"; float: none; width: auto; height: auto; margin-inline-start: var(--space-8); background: none; transform: none; font-size: var(--t-meta); color: var(--text-secondary); }
 .home-page nav summary:focus-visible { outline: 3px solid var(--wine); outline-offset: 5px; }
-.home-page nav .menu { position: absolute; right: 0; top: 100%; z-index: 10; min-width: 190px; display: flex; flex-direction: column; padding: var(--space-8) var(--space-16); background: var(--bg, var(--bg)); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: 0 18px 40px -22px #722f3755; }
+.home-page nav .menu { position: absolute; right: 0; top: 100%; z-index: 10; min-width: 190px; display: flex; flex-direction: column; padding: var(--space-8) var(--space-16); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: 0 18px 40px -22px #722f3755; }
 .home-page nav .menu a { min-height: 40px; }
 .home-page nav a[aria-current] { color: var(--burgundy); }
 .home-page nav .button { min-height: 44px; padding: var(--space-12) var(--space-16); }

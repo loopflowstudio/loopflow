@@ -9,8 +9,9 @@
 
 ## Checks
 
-- Website suite: 73 passed (implement pass).
-- Swift build of `GhosttyManager.swift`: not run here; gate/CI builds it.
+- Website suite: 73 passed (after the QA nav fix and regenerating `docs/dev/index.html`).
+- QA (`scratch/qa.html`): 14 pages at desktop and phone widths, copy button, nav menu, `docs/dev/index.html`; Ghostty `+validate-config` accepts the new terminal defaults.
+- Swift build of `GhosttyManager.swift` and a look at the terminal rendering: not run here; gate/CI builds it, a person looks.
 
 ## Remains
 

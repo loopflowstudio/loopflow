@@ -5,7 +5,7 @@ Made during kickoff with nobody present; each is reversible and marked in
 
 1. The brief says of the shared components "Use them; add none", and also
    "becomes the shared state component". No state component exists on main.
-   Taken: `PaneEmptyState` is rewritten and renamed `StateView` in `Design/`,
+   Taken: `PaneEmptyState` is rewritten and renamed `EmptyState` in `Design/`,
    so the count of components does not grow.
 2. The sheet's workflow popover (search field, a summary line per workflow)
    becomes an ordinary `Menu` of `StartFlowItems`. Search and summaries go.
@@ -15,11 +15,24 @@ Made during kickoff with nobody present; each is reversible and marked in
    branch's `lf`.
 5. Compact dashboard slots lose their icon-only fallback; the action alone
    stays, with the title as its help.
-6. The prototype's "A Task that has not started" state is placed in the
-   unstarted Task's conversation pane ("Conversation not open" today); the
-   workflow bar keeps its own Start.
+6. The prototype's "A Task that has not started" state replaces
+   `TaskStartOffer`, in the Task's pane and in dashboard tiles; the workflow
+   bar keeps its own Start.
 7. The two prototype sections are not deleted in this change's first pass;
    they go once the Dev app check has compared the screens against them.
 8. "Open its conversations" and "Open another repository…" are the
    prototype's proposals. Each ships only if the view can already reach that
    action; otherwise the state has one button.
+
+Made during concept review with nobody present; the page is
+`scratch/concept-review.html`, and its numbered questions match these.
+
+9. An unstarted Task's second button reads "Start with…", not the
+   prototype's "Choose workflow": picking an item starts the Task.
+10. A top-level step that contains a stop (inside an XOR path) is marked with
+    the person icon, on started Tasks' lines too, so the line, the sentence
+    and the menu's stop count come from one list.
+11. An unstarted Task's bar draws the step line from the catalog; "Takes up
+    feature when it starts" goes.
+12. The unstarted state's wording is two sentences, the second Rust's
+    ("You take part at …"), where the prototype joins them with "and".

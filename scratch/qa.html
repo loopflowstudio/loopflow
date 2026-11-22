@@ -1,0 +1,33 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>LOO-912 QA: interrupted pastes</title>
+<style>body{font:16px/1.55 -apple-system,sans-serif;max-width:960px;margin:40px auto;padding:0 20px;color:#1d1c1a;background:#fbfaf7}
+pre{background:#f1eee7;padding:10px 12px;border-radius:6px;overflow-x:auto;font-size:13px}code{background:#f1eee7;padding:1px 4px;border-radius:3px}
+td,th{border-top:1px solid #dcd8cf;padding:8px 10px;vertical-align:top;text-align:left}table{border-collapse:collapse;width:100%}
+.ok{color:#1f7a45;font-weight:600}.note{color:#8a6100;font-weight:600}</style></head><body>
+<h1>LOO-912 QA: interrupted pastes no longer swallow Session input</h1>
+<p>Ran the installed <code>lf 0.16.0+31fc852dc</code> (contains #1944 <code>19872301e3</code>) on a private Machine (<code>/tmp/lfqp</code>, own <code>HOME</code>/<code>LF_HOME</code>, <code>lf server run</code> in the foreground). The held program was a Python stand-in that turns on bracketed paste, behaves like Codex (Enter inside a paste is content, Enter outside submits) and logs every read from its tty. Views were real <code>lf desktop shell</code> processes on Python PTYs.</p>
+<table><tr><th>Scenario</th><th>What the agent read</th><th>Result</th></tr>
+<tr><td>1. View killed (SIGKILL) mid-paste, new view types <code>after⏎</code></td><td><pre>read '\x1b[200~pasted line one\rline two'   paste open
+read '\x1b[201~'                             paste closed
+read 'after\r'
+submit 'pasted line one\rline twoafter'</pre></td><td class="ok">works</td></tr>
+<tr><td>2. Paste start split across writes, Ctrl+] inside the paste, second view attaches while the first stays and types <code>from B⏎</code>, then the first types</td><td><pre>read '\x1b[20' / '0~split start with ctrl-] \x1d inside'   paste open
+read '\x1b[201~from B\r'                     paste closed
+submit 'split start with ctrl-] \x1d insidefrom B'
+read 'from A\r'  submit 'from A'</pre>Ctrl+] reached the agent and did not detach the view.</td><td class="ok">works</td></tr>
+<tr><td>3. Server SIGKILLed mid-paste; terminal finishes the paste (<code>tail…ESC[201~</code>) while it is down; server restarted; same view types <code>typed⏎</code>; then Ctrl+] outside a paste</td><td><pre>read '\x1b[200~head of paste\r'   paste open
+read '\x1b[201~'                   paste closed   (holder, on writer loss)
+read ' typed\r'
+submit 'head of paste\r typed'</pre>The held child (same PID) survived both server kills. Ctrl+] then detached the view (exit 0).</td><td class="ok">works</td></tr>
+</table>
+<h2>Notes</h2>
+<ul>
+<li class="note">In scenario 3 the paste tail typed while no server was up never reached the agent. That is documented behaviour (<code>reconnect_held</code>: "What is typed meanwhile is discarded"). It isn't new, and input was not stuck.</li>
+<li>A first run of scenario 3 whose driver never sent <code>ESC[201~</code> led the reconnected view to frame later typing as paste. A real terminal always sends the end, so this was the driver's fault and needed no fix.</li>
+<li><code>lf desktop shell</code> on a Task without a checkout prints <code>Error: Task has no checkout</code>, and adopting the main checkout is refused. QA used a linked worktree. The steps are in <code>.lf/qa/held-terminals.md</code>.</li>
+</ul>
+<h2>Not reached</h2>
+<ul><li>Real Codex or Claude. The private home has no provider login, so the stand-in stands for the provider's paste handling. The bytes lf delivers are what this run checked.</li>
+<li>Revision 1 holders, which keep their old writer semantics. The plan's live-holder check covers those (all live holders started after the merge).</li>
+<li>The cargo regressions (plan step 1). The real path covered the same three interruptions, and they passed CI on #1944.</li></ul>
+<p>Fixed: nothing. No defects in scope.</p>
+</body></html>

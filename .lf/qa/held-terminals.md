@@ -90,3 +90,18 @@ and prefixes the last argument, lf's remote command, with `. <remote env>;`.
 remote-TTY view is `ssh -tt <host> '<env>; lf resume --task <id>'`; read the
 stand-in's log over SSH. Stop the remote server by `lsof -t` on its store,
 then its `lf holder run`, and delete the directory: that disk is nearly full.
+
+# Pastes across interruptions
+
+`lf desktop shell <task> --checkout <wt> --id <id> --create -- python3 standin.py`
+holds any program without a provider login; the Task needs an adopted linked
+worktree (`git worktree add`, then `lf task create --worktree`; the main
+checkout is refused, and a Task without one says "Task has no checkout").
+Later views omit `--create` and the command. A stand-in that sets raw mode,
+writes `ESC[?2004h` and logs every `/dev/tty` read shows the bytes the agent
+gets: after an interrupted `ESC[200~…` it should read a lone `ESC[201~`, then
+the next view's keys. For a server restart, `SIGKILL` the server (`lsof -t`
+on the store) and have the driver send the paste tail ending in `ESC[201~`,
+as a real terminal does. A driver that never sends the end leaves the view
+inside the paste, so its later typing arrives framed as paste. Input typed
+while no server is up is dropped, as `reconnect_held` documents.

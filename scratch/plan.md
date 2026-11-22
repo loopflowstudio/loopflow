@@ -3,6 +3,10 @@
 PR #1944 merged as `19872301e3`. This checkout now includes `origin/main`
 at `891d9a9b92` and matches its product files. Verification can run here.
 
+QA on 2026-11-21 drove disconnect, a second view and a server restart
+mid-paste through the installed `lf` on a private Machine. All three closed
+the paste and let the next keys submit ([qa.html](qa.html)).
+
 1. Run the paste regressions with the launcher's environment cleared and stdin closed.
 
    ```bash

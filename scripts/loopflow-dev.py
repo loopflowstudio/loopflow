@@ -11,6 +11,7 @@ Commands:
     test            Build and run tests
     ghostty-build   Build the pinned patched GhosttyKit
     ghostty-vt-build  Build the libghostty-vt archives lf links (--publish uploads)
+    grammars-build  Build TreeSitterGrammars.xcframework (--queries copies upstream queries)
     run             Build and launch Loopflow Dev on the live Machine
     run-debug       The same, with stdout visible
     release         Build release .app and .dmg (delegates to release-loopflow.py)
@@ -45,6 +46,7 @@ import boto3
 import botocore.exceptions
 from app_bundle import install_app_executable
 from bundle_version import read_build_revision, read_release_version, stamp_bundle_version
+from third_party import download as download_source
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
@@ -68,6 +70,10 @@ LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
 GHOSTTY_VT_PIN = REPO_ROOT / "rust" / "loopflow-terminal" / "ghostty-vt.json"
 GHOSTTY_REVISION = json.loads(GHOSTTY_VT_PIN.read_text())["revision"]
 GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf8.xcframework.zip"
+# The tree-sitter grammars Desktop colors with, pinned with their notices.
+THIRD_PARTY_MANIFEST = REPO_ROOT / "third_party" / "manifest.json"
+GRAMMARS_SCOPE = "TreeSitterGrammars"
+GRAMMAR_QUERIES = SWIFT_DIR / "LoopflowMac" / "Grammars"
 # Rust target → Zig target for the libghostty-vt archives `lf` links.
 GHOSTTY_VT_TARGETS = {
     "aarch64-apple-darwin": "aarch64-macos",
@@ -304,6 +310,95 @@ def cmd_ghostty_build() -> int:
     print(f"Artifact: {artifact}")
     print(f"SwiftPM checksum: {checksum.stdout.strip()}")
     return 0
+
+
+def _grammar_components() -> list[dict]:
+    manifest = json.loads(THIRD_PARTY_MANIFEST.read_text())
+    return [c for c in manifest["components"] if c["scope"] == GRAMMARS_SCOPE]
+
+
+def _extract_grammar_source(component: dict, build_root: Path) -> Path:
+    """The component's source tree, with a single top-level directory stripped."""
+    archive = download_source(component["source"], REPO_ROOT / ".lf/tmp/third-party")
+    root = build_root / component["id"]
+    if root.exists():
+        shutil.rmtree(root)
+    root.mkdir(parents=True)
+    with tarfile.open(archive) as source:
+        source.extractall(root, filter="data")
+    entries = [p for p in root.iterdir() if p.name != "pax_global_header"]
+    return entries[0] if len(entries) == 1 and entries[0].is_dir() else root
+
+
+def _compile_grammar(name: str, source: Path, objects: Path) -> list[Path]:
+    built = []
+    for file in ["parser.c", "scanner.c"]:
+        if not (source / file).is_file():
+            continue
+        output = objects / f"{name}-{Path(file).stem}.o"
+        command = ["xcrun", "clang", "-c", "-Os", "-std=c11", "-w", "-arch", "arm64"]
+        command += ["-mmacosx-version-min=26.0", "-I", str(source), str(source / file), "-o"]
+        run([*command, str(output)])
+        built.append(output)
+    return built
+
+
+def cmd_grammars_build(queries: bool = False) -> int:
+    """Build every pinned grammar into one static xcframework the app links."""
+    build_root = SWIFT_DIR / ".build" / "grammars"
+    local_framework = SWIFT_DIR / ".build" / "local" / "TreeSitterGrammars.xcframework"
+    objects = build_root / "objects"
+    include = build_root / "include"
+    for directory in [objects, include]:
+        if directory.exists():
+            shutil.rmtree(directory)
+        directory.mkdir(parents=True)
+
+    names = []
+    built: list[Path] = []
+    for component in _grammar_components():
+        root = _extract_grammar_source(component, build_root)
+        for grammar in component["grammars"]:
+            print(f"Compiling {grammar['name']}...", flush=True)
+            built += _compile_grammar(grammar["name"], root / grammar["path"], objects)
+            names.append(grammar["name"])
+            if queries and "queries" in grammar:
+                destination = GRAMMAR_QUERIES / grammar["name"]
+                destination.mkdir(parents=True, exist_ok=True)
+                for query in (root / grammar["queries"]).glob("highlights*.scm"):
+                    shutil.copyfile(query, destination / query.name)
+
+    library = build_root / "libTreeSitterGrammars.a"
+    library.unlink(missing_ok=True)
+    run(["xcrun", "libtool", "-static", "-o", str(library), *map(str, built)])
+    declarations = "".join(f"const TSLanguage *tree_sitter_{n}(void);\n" for n in names)
+    (include / "TreeSitterGrammars.h").write_text(
+        "#pragma once\n\ntypedef struct TSLanguage TSLanguage;\n\n" + declarations
+    )
+    (include / "module.modulemap").write_text(
+        'module TreeSitterGrammars {\n    header "TreeSitterGrammars.h"\n    export *\n}\n'
+    )
+    if local_framework.exists():
+        shutil.rmtree(local_framework)
+    local_framework.parent.mkdir(parents=True, exist_ok=True)
+    run(
+        ["xcodebuild", "-create-xcframework", "-library", str(library), "-headers", str(include)]
+        + ["-output", str(local_framework)]
+    )
+    run(
+        [sys.executable, str(REPO_ROOT / "scripts/third_party.py"), "package"]
+        + [str(local_framework), "--scope", GRAMMARS_SCOPE]
+    )
+
+    artifact = SWIFT_DIR / ".build" / "artifacts" / "TreeSitterGrammars.xcframework.zip"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.unlink(missing_ok=True)
+    run(["ditto", "-c", "-k", "--keepParent", str(local_framework), str(artifact)])
+    checksum = run_capture(["swift", "package", "compute-checksum", str(artifact)])
+    print(f"{len(names)} grammars in {local_framework}")
+    print(f"Artifact: {artifact}")
+    print(f"SwiftPM checksum: {checksum.stdout.strip()}")
+    return checksum.returncode
 
 
 def _download_ghostty_source(build_root: Path) -> Path:
@@ -777,6 +872,7 @@ COMMANDS = {
     "test": (cmd_test, "Build and run tests"),
     "ghostty-build": (cmd_ghostty_build, "Build the pinned patched GhosttyKit"),
     "ghostty-vt-build": (cmd_ghostty_vt_build, "Build the libghostty-vt archives lf links"),
+    "grammars-build": (cmd_grammars_build, "Build the tree-sitter grammars Desktop colors with"),
     "run": (cmd_run, "Build and launch the app"),
     "run-debug": (cmd_run, "Build and run with stdout visible"),
     "release": (cmd_release, "Build release .app and .dmg"),
@@ -814,6 +910,12 @@ def main() -> int:
                 action="store_true",
                 help="upload each archive to bin.loopflow.studio (R2 credentials from Doppler)",
             )
+        if name == "grammars-build":
+            sub.add_argument(
+                "--queries",
+                action="store_true",
+                help="overwrite swift/LoopflowMac/Grammars with each grammar's upstream highlights",
+            )
         if name == "setup":
             sub.add_argument(
                 "--install",
@@ -847,6 +949,8 @@ def main() -> int:
         return func(output=args.output)
     if args.command == "ghostty-vt-build":
         return func(publish=args.publish)
+    if args.command == "grammars-build":
+        return func(queries=args.queries)
     return func()
 
 

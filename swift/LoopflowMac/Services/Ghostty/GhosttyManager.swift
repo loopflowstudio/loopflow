@@ -44,21 +44,7 @@ struct GhosttyTerminalTitle {
 enum GhosttyRuntimeResources {
     static let sourceRevision = "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
 
-    static var directoryURL: URL? {
-        #if SWIFT_PACKAGE
-        if let resources = Bundle.main.resourceURL,
-           let bundle = Bundle(url: resources.appendingPathComponent(
-               "LoopflowSwift_LoopflowMac.bundle",
-               isDirectory: true
-           )),
-           let directory = directoryURL(in: bundle) {
-            return directory
-        }
-        return directoryURL(in: .module)
-        #else
-        return directoryURL(in: .main)
-        #endif
-    }
+    static var directoryURL: URL? { directoryURL(in: .loopflowMacResources) }
 
     static func directoryURL(in bundle: Bundle) -> URL? {
         guard let resources = bundle.resourceURL else { return nil }

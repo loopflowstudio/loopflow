@@ -60,6 +60,22 @@ struct GrammarTests {
          [("class", .keyword), ("Store", .type), ("read", .function), ("42", .constant), ("// done", .comment)]),
         ("Store.kt", "fun read(path: String): Int = 42 // done",
          [("fun", .keyword), ("read", .function), ("String", .type), ("42", .constant), ("// done", .comment)]),
+        ("Dockerfile", "# done\nFROM alpine:3.20\nENV NAME=\"x\"\nRUN echo hi\n",
+         [("# done", .comment), ("FROM", .keyword), ("RUN", .keyword), (#""x""#, .string)]),
+        ("Makefile", "# done\nbuild: main.o\n\tcc -o app main.o\n",
+         [("# done", .comment), ("build", .function)]),
+        ("justfile", "# done\nbuild target:\n    cargo build {{target}}\n",
+         [("# done", .comment), ("build", .function)]),
+        ("setup.cfg", "; done\n[metadata]\nname = x\n",
+         [("; done", .comment), ("metadata", .type), ("name", .property)]),
+        ("Store.m", "@interface Store : NSObject\n- (int)read;\n@end // done",
+         [("@interface", .keyword), ("Store", .type), ("int)", .type), ("read", .function), ("// done", .comment)]),
+        ("Store.cs", #"class Store { int Read() { return 42; } string S = "x"; } // done"#,
+         [("class", .keyword), ("Store", .type), ("Read", .function), ("42", .constant), (#""x""#, .string),
+          ("// done", .comment)]),
+        ("main.zig", #"pub fn read(path: []const u8) u32 { return 42; } // done"#,
+         [("pub", .keyword), ("fn", .keyword), ("read", .function), ("u32", .type), ("42", .constant),
+          ("// done", .comment)]),
     ]
 
     @Test(arguments: fixtures.indices)
@@ -72,12 +88,14 @@ struct GrammarTests {
     }
 
     @Test func everyGrammarLoadsAndUnknownFilesStayPlain() {
-        #expect(Grammar.languages.count == 20)
+        #expect(Grammar.languages.count == 27)
         for name in Grammar.languages {
             let path = Self.fixtures.map(\.path).first { Grammar.named($0)?.name == name }
             #expect(path != nil, "\(name) has no loaded fixture")
         }
-        #expect(Grammar.named("Dockerfile") == nil && Grammar.named("notes.txt") == nil)
+        #expect(Grammar.named("notes.txt") == nil)
+        #expect(Grammar.named("Containerfile")?.name == "dockerfile" && Grammar.named("rules.mk")?.name == "make")
+        #expect(Grammar.named("build.zig.zon")?.name == "zig" && Grammar.named("View.mm")?.name == "objc")
         #expect(Grammar.named("build.gradle.kts")?.name == "kotlin")
     }
 

@@ -109,16 +109,22 @@ final class Grammar: Sendable {
         "bash": Spec(parser: { tree_sitter_bash() }, queries: ["bash/highlights"]),
         "c": Spec(parser: { tree_sitter_c() }, queries: ["c/highlights"]),
         "cpp": Spec(parser: { tree_sitter_cpp() }, queries: ["c/highlights", "cpp/highlights"]),
+        "c_sharp": Spec(parser: { tree_sitter_c_sharp() }, queries: ["c_sharp/highlights"]),
         "css": Spec(parser: { tree_sitter_css() }, queries: ["css/highlights"]),
+        "dockerfile": Spec(parser: { tree_sitter_dockerfile() }, queries: ["dockerfile/highlights"]),
         "go": Spec(parser: { tree_sitter_go() }, queries: ["go/highlights"]),
         "html": Spec(parser: { tree_sitter_html() }, queries: ["html/highlights"]),
+        "ini": Spec(parser: { tree_sitter_ini() }, queries: ["ini/highlights"]),
         "java": Spec(parser: { tree_sitter_java() }, queries: ["java/highlights"]),
         "javascript": Spec(parser: { tree_sitter_javascript() },
                            queries: ["javascript/highlights", "javascript/highlights-jsx"]),
         "json": Spec(parser: { tree_sitter_json() }, queries: ["json/highlights"]),
+        "just": Spec(parser: { tree_sitter_just() }, queries: ["just/highlights"]),
         "kotlin": Spec(parser: { tree_sitter_kotlin() }, queries: ["kotlin/highlights"]),
+        "make": Spec(parser: { tree_sitter_make() }, queries: ["make/highlights"]),
         "markdown": Spec(parser: { tree_sitter_markdown() }, queries: ["markdown/highlights"], inline: "markdown_inline"),
         "markdown_inline": Spec(parser: { tree_sitter_markdown_inline() }, queries: ["markdown_inline/highlights"]),
+        "objc": Spec(parser: { tree_sitter_objc() }, queries: ["c/highlights", "objc/highlights"]),
         "python": Spec(parser: { tree_sitter_python() }, queries: ["python/highlights"]),
         "ruby": Spec(parser: { tree_sitter_ruby() }, queries: ["ruby/highlights"]),
         "rust": Spec(parser: { tree_sitter_rust() }, queries: ["rust/highlights"]),
@@ -130,6 +136,7 @@ final class Grammar: Sendable {
         "typescript": Spec(parser: { tree_sitter_typescript() },
                            queries: ["javascript/highlights", "typescript/highlights"]),
         "yaml": Spec(parser: { tree_sitter_yaml() }, queries: ["yaml/highlights"]),
+        "zig": Spec(parser: { tree_sitter_zig() }, queries: ["zig/highlights"]),
     ]
 
     static let languages: [String] = specs.keys.filter { $0 != "markdown_inline" }.sorted()
@@ -143,12 +150,15 @@ final class Grammar: Sendable {
         "json": "json", "kt": "kotlin", "kts": "kotlin", "md": "markdown", "markdown": "markdown",
         "py": "python", "pyi": "python", "rb": "ruby", "rs": "rust", "sql": "sql", "swift": "swift",
         "toml": "toml", "ts": "typescript", "mts": "typescript", "cts": "typescript", "tsx": "tsx",
-        "yaml": "yaml", "yml": "yaml",
+        "yaml": "yaml", "yml": "yaml", "zig": "zig", "zon": "zig",
+        "cs": "c_sharp", "dockerfile": "dockerfile", "ini": "ini", "cfg": "ini", "conf": "ini",
+        "just": "just", "mk": "make", "m": "objc", "mm": "objc",
     ]
 
     private static let byName: [String: String] = [
         ".bashrc": "bash", ".zshrc": "bash", ".zprofile": "bash", ".bash_profile": "bash",
-        "gemfile": "ruby", "rakefile": "ruby",
+        "gemfile": "ruby", "rakefile": "ruby", "dockerfile": "dockerfile", "containerfile": "dockerfile",
+        "makefile": "make", "gnumakefile": "make", "justfile": "just", ".justfile": "just",
     ]
 
     /// Each grammar's query compiles once, on its first use; one that fails

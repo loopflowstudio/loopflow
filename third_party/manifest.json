@@ -779,6 +779,153 @@
           "sha256": "948495f61768f7de26bcc61113d8cd95f50bbc15adb678c28c941c6c8fcd5903"
         }
       ]
+    },
+    {
+      "id": "tree-sitter-dockerfile",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/camdencheek/tree-sitter-dockerfile/archive/refs/tags/v0.2.0.tar.gz",
+        "sha256": "8cbdf50838cc55e841aa9585a1a09e5b8c41454ae30ce0a93a7bd71adb140818"
+      },
+      "grammars": [
+        {
+          "name": "dockerfile",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-dockerfile.txt",
+          "sha256": "806b8fcd19c1cdf23e178eb25942acc844a38669e36b2c896c7baf5f8bcecbb4"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-make",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter-grammars/tree-sitter-make/releases/download/v1.1.1/tree-sitter-make.tar.xz",
+        "sha256": "cac625af12a155a06fb4e2a2ade6b8476e579b5ebd493701dc08de894871fdb5"
+      },
+      "grammars": [
+        {
+          "name": "make",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-make.txt",
+          "sha256": "28eecdb75b6de2d9020603531461444bf54db827ee2fb345a8fcf4dbee7c2ad1"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-just",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/IndianBoy42/tree-sitter-just/archive/refs/tags/v0.2.0.tar.gz",
+        "sha256": "52a6f2617f770997a602d9dfce6bac720eaaa6e1b377f0267e3a503492a693b4"
+      },
+      "grammars": [
+        {
+          "name": "just",
+          "path": "src",
+          "queries": "queries/just"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-just.txt",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-ini",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/justinmk/tree-sitter-ini/archive/refs/tags/v1.4.0.tar.gz",
+        "sha256": "300adc8b5db7604dff2b156a3962c1fbc955d89dc8be6da90e6dfe2adc950d9b"
+      },
+      "grammars": [
+        {
+          "name": "ini",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-ini.txt",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-objc",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter-grammars/tree-sitter-objc/releases/download/v3.0.2/tree-sitter-objc.tar.xz",
+        "sha256": "9f9d0c5ea456166d10d68fa34f7730761d8e0ac4ec8d1d6d6b3b17a372e9df83"
+      },
+      "grammars": [
+        {
+          "name": "objc",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-objc.txt",
+          "sha256": "099c44248f8cf353123211318680e93465587c005a4b3730ce8cb5334de043d6"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-c-sharp",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter-c-sharp/releases/download/v0.24.0/tree-sitter-c-sharp.tar.gz",
+        "sha256": "f916b4014ba2ae21c536177a95dde75b0553fd4740718c79dda7057e44fc5f58"
+      },
+      "grammars": [
+        {
+          "name": "c_sharp",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-c-sharp.txt",
+          "sha256": "778fb7d63b8c1844da315648c02f325c4713a6f4a5d19644fd413421422776d3"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-zig",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter-grammars/tree-sitter-zig/releases/download/v1.1.2/tree-sitter-zig.tar.xz",
+        "sha256": "80cbc2cae284b539930f9958003f8f28d4c056ddc3bed912f61bf64e7d6fd680"
+      },
+      "grammars": [
+        {
+          "name": "zig",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-zig.txt",
+          "sha256": "0eea8dc45e89deeb03c7799bbbc7b4688f365fb274562f4540ecfebdea82e727"
+        }
+      ]
     }
   ],
   "crate_notices": {

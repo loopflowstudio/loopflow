@@ -372,8 +372,9 @@ keywords, types, functions, properties, strings, numbers and comments each
 have their own, readable on every row. A hunk is colored by its own lines
 first and by the whole file once both sides are read, so a hunk that opens
 inside a Python docstring colors as a docstring. Swift, Rust, Python,
-TypeScript, JavaScript, Go, C, C++, Ruby, Java, Kotlin, SQL, shell, HTML, CSS,
-Markdown, YAML, TOML and JSON have grammars; other files stay plain. The page fits a pane 360 pt wide: the toolbar keeps the
+TypeScript, JavaScript, Go, C, C++, Objective-C, C#, Zig, Ruby, Java, Kotlin,
+SQL, shell, HTML, CSS, Markdown, YAML, TOML, JSON, INI, Dockerfiles, Makefiles
+and justfiles have grammars; other files stay plain. The page fits a pane 360 pt wide: the toolbar keeps the
 sidebar toggle, the stepper and the **…** menu, which holds what has no room,
 layout first, then order and tour, then Focus, and **Wrap long lines**. Under
 the title, **Whole Task** opens a menu of the Graph steps in the branch's

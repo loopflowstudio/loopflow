@@ -309,3 +309,12 @@ Made at the realign after the sync, with nobody present.
     same state in different inks and spacing (plan, "Open choice"). Left
     apart in this change; folding one onto the other changes a platform's
     screens. Which ink does the state's title and sentence take?
+
+Made at the fifth compress, with nobody present.
+
+79. `FailureLine` gives its buttons the neutral `LoopflowButtonStyle`, as
+    `EmptyState` does, so three sites drop their own. Three buttons that had
+    the system look take it too and were not looked at in the Dev app:
+    "Reload saved intent" (Layout not saved.), "OK" (Workspace did not
+    open.) and "Retry Project preparation" inside "Project not prepared."
+    The Files tree's Retry keeps its link style.

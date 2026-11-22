@@ -726,7 +726,7 @@ struct ReviewFileNote: View {
             ReviewNotice(text: "Cut at 1 MB. The rest of this file is not shown.")
         case .failed(let reason):
             FailureLine("File not read.", machine: reason) {
-                Button("Retry", action: retry).buttonStyle(LoopflowButtonStyle())
+                Button("Retry", action: retry)
             }
             .reviewNoticeInset()
         }

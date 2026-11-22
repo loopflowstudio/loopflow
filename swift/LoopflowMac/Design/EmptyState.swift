@@ -106,7 +106,7 @@ struct Failure: Equatable {
 
 /// A failure beside content that stays on screen: what failed, strong in the
 /// failure ink, the Machine's message in mono and selectable, then the way to
-/// try again. One row where it fits; in a narrow pane the message goes under
+/// try again as the neutral button. One row where it fits; in a narrow pane the message goes under
 /// what failed, so it wraps at the pane's width and not beside it. A caller
 /// that asks for one line keeps the row, cut short.
 struct FailureLine<Actions: View>: View {
@@ -145,7 +145,7 @@ struct FailureLine<Actions: View>: View {
             .fixedSize(horizontal: false, vertical: true)
         Text(failure.machine).font(Typography.mono).foregroundStyle(palette.textSecondary)
             .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-        actions
+        actions.buttonStyle(LoopflowButtonStyle())
     }
 }
 

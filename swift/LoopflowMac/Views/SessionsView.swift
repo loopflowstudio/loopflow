@@ -1791,7 +1791,6 @@ struct SessionsContentView: View {
                    !ConversationPlaceholder.namesFailure(in: entry, model: model, sessions: store) {
                     FailureLine("The conversation did not open.", machine: error) {
                         Button("Retry") { Task { await model.openConversation(in: entry, store: store) } }
-                            .buttonStyle(LoopflowButtonStyle())
                     }.padding(Spacing.sm).background(theme.terminal.background.color)
                 }
             }

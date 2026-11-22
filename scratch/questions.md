@@ -98,3 +98,7 @@
 ## QA second pass (2026-11-22, headless)
 
 - Waiting at an interactive step, the Brief reads "Active, at ship-review. ready." then "Waiting: ready": `task.reason` and the condition reason are the bare status word. Left as Rust wording; a real conversation with hooks may report better. Alternative: the Brief drops the condition line when it repeats the reason.
+
+## Concept review, second pass after the build (2026-11-22, headless)
+
+- Nothing more to change in the model. The Brief's repeated "ready." / "Waiting: ready" is Rust's wording plus LOO-515's condition line; it is question 4 on `scratch/concept-review.html`.

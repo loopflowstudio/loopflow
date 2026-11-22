@@ -51,6 +51,8 @@ th{font-weight:600;color:var(--soft)}code{font:13px ui-monospace,monospace}
 <p><span class="proposed">Proposed:</span> <code>TaskBrief.state</code> takes the step from the Task's <code>TaskGraph</code> — <code>steps[current_step].name</code>, the place Rust already computes — and drops the "at" clause when <code>current_step</code> is null (start, end, no Graph). <code>TaskExecutionSnapshot.step</code> stops being read for display. The test feeds a <code>TaskGraph</code> standing in <code>build</code> while running <code>implement</code> and expects "Moving, at build."; with the old wiring it reads "Moving, at implement." and fails.</p>
 <p><span class="proposed">Also proposed:</span> on the Task page, <code>GraphProcessLog</code> gets no position line when its host already shows <code>TaskWorkflowHeader</code>; the standalone Graph-log pane keeps it.</p>
 
+<h2>Second pass after the build (2026-11-22)</h2>
+<p>Existing: the Brief reads "Moving, at make." under a bar that makes <code>make</code> strong, and the Task page prints the sentence once (QA, <code>scratch/qa.html</code>). Concepts and code line up for place and next step. One leftover, not a model change: waiting at an interactive step the Brief shows "Active, at ship-review. ready." then "Waiting: ready". The bare word is Rust's <code>task.reason</code>, and the condition line comes from LOO-515's Brief.</p>
 <h2>Outside this work</h2>
 <p>The raw step UUID in <code>TaskExecutionSnapshot.reason</code> ("Step c9b373a4-… is running help graph.") is shared with <code>lf task status</code>; naming the step there is an execution change in Rust, a Task of its own.</p>
 
@@ -59,6 +61,7 @@ th{font-weight:600;color:var(--soft)}code{font:13px ui-monospace,monospace}
 <li>Brief's place: (a) the top-level step from <code>TaskGraph</code>, chosen; (b) the concrete step ("Moving, at implement."), as built; (c) the whole Rust sentence in place of the lead.</li>
 <li>The Task page's second sentence: (a) gone when the header shows, chosen; (b) kept.</li>
 <li>The Diff pill still reads <code>TaskDelivery.headline</code> ("Open #1949"), not "#1949 open, 1 check failed": (a) leave for review, as now; (b) reword <code>TaskDelivery</code> here.</li>
+<li>Waiting at an interactive step: (a) leave Rust's bare status word for review, as now; (b) the Brief drops the condition line when it repeats the reason; (c) Rust writes a sentence for <code>WorkStatus::Ready</code>'s reason.</li>
 </ol>
 </body>
 </html>

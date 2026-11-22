@@ -274,3 +274,18 @@ Made at the fourth qa with nobody present; `scratch/qa.html` has the captures.
 70. Seen, not from this change: Dashboard tiles about 185 pt wide drop their
     title and cut the zoom button. Its own Task?
 
+
+Made at the concept review of the built change, fourth pass, with nobody
+present; the page is `scratch/concept-review.html`.
+
+71. Settles 69: the diff stream's failed file and failed gap become
+    `FailureLine`s (slice 8). The third pass's sweep looked for the warning
+    ink and missed them: both are drawn in the secondary ink.
+72. `BacklogNotice.failed`'s pair, `HiddenPathsFailure` and the gap's error
+    become one `Failure` value beside `FailureLine`. The fourth compress
+    left the first two apart; the gap is a third holder. Passed over: a
+    third small type.
+73. The sweep ends with slice 8. Window notices, an icon's help, a file's
+    save message, the tour's status and form checks stay as they are.
+74. `ConversationPlaceholder.namesFailure` repeats the placeholder's two
+    conditions; left.

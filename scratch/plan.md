@@ -7,10 +7,9 @@ once their screens shipped; `git show fd90d7e6ad:design/prototypes/desktop-more.
 has them, and `docs/surfaces.md` holds the wording now.
 
 Slices 1 to 7 are built and were looked at in the Dev app
-(`scratch/qa.html`, four runs); of slice 7's lines the order, Dashboard,
-hidden-paths and diff-settings ones were seen, the brief and roadmap-card
-ones were not. **Next:** the gate checks and one look at "Not started." on
-an unlocked display (questions 48).
+(`scratch/qa.html`, four runs). **Next:** slice 8, the diff stream's two
+failures and one `Failure` value; it is the last. Then the gate checks and
+one look at "Not started." on an unlocked display (questions 48).
 A Task started from New Task opens beside "Files did not open" (Task ea8659,
 outside this change); a demo meets it on the first Start.
 
@@ -602,6 +601,41 @@ demo: not headless; qa or demo runs it.
      `scripts/test_desktop.sh --filter 'WorkflowLineTests|NewTaskTests'`
      passed after it (11 tests in 2 suites).
 
+8. **The diff stream's two failures, and one value for a kept failure.**
+   Swift only. The fourth as-built concept review found the one listed site
+   slice 6 passed by (`ReviewStreamView:69` in the inline failures above)
+   and what sits beside it. Closed list; the sweep ends here.
+   - `Design/EmptyState.swift`: `struct Failure: Equatable { let what:
+     String; let machine: String }` and `FailureLine(_ failure:)` with and
+     without actions. `BacklogNotice.failed` carries a `Failure`;
+     `HiddenPathsFailure` goes and `hiddenNotice` is a `Failure?`. The
+     other sites keep passing the pair inline.
+   - `Views/ReviewStreamView.swift:64`: a file whose read failed draws
+     `FailureLine("File not read.", machine: reason) { Retry }` with the
+     note's padding and the Retry it has (`store.retryFile`), as a
+     `LoopflowButtonStyle` button. `FileNote.failed` holds the reason;
+     `FileNote.text`'s "Could not be read: …" goes. `.cut` stays a
+     `ReviewNotice`.
+   - `Views/ReviewStreamView.swift:24`: `store.gapError` is a `Failure?`,
+     "Skipped lines of <path> did not load." with the message, drawn as a
+     `FailureLine` with the note's padding
+     (`TaskFilesTests.swift:1132` reads it as nil; unchanged).
+   - `Views/WaveDetailPane.swift:179`: `closed.error` holds the message
+     alone, so the line stops reading "Completed Tasks did not load.
+     Completed Tasks unavailable: …".
+   - Stay, and are not looked at again: window `Notice`s ("Could not change
+     pane: …"), an icon whose help holds the reason
+     (`WorkNavigator.swift:214`, `WorkspacePanesView.swift:466`), a file's
+     save message, the tour's status, form checks, the Files pane's
+     "Latest read failed." over "Live file observation unavailable: …"
+     (questions 54), and `ConversationPlaceholder.namesFailure` repeating
+     the placeholder's two conditions.
+   - Checks: one view test (a stream file with `.failed` shows "File not
+     read.", the reason, and a Retry), then
+     `scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|BacklogViewTests|TaskFilesTests'`.
+     Dev app: the failed file shows in the Diff tab with the server
+     stopped (`scratch/qa.html`, fourth run, item 2); qa looks.
+
 Outside this change, on the page for whoever wants it: a stopped Graph's
 reason is one string on the wire, so the Machine's part of "kickoff:
 execution failed: …" cannot be set apart in mono without Rust sending the
@@ -652,7 +686,7 @@ Fourth qa (at 406697d19c): four fixes. `FailureLine` stacks its message
 under what failed when the row does not fit (questions 65); the line above a
 workspace's panes stays away while a pane says the conversation failed
 (66); the Changes pane's failed comparison is a `FailureLine` (67); the
-Dashboard's line is at the leading edge (68). Left on the page: the diff
-stream's "Could not be read: …" note (69).
+Dashboard's line is at the leading edge (68). The diff stream's "Could not be read: …"
+note (69) is slice 8.
 `scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|NewTaskTests|WorkNavigationTests|BacklogViewTests|TaskFilesTests|workStates|ProjectActivationTests|RenameWaveSheetTests|RemoveWaveSheetTests|PullRequestTests|WorkCacheTests'`
 passed after them (167 tests in 12 suites); qa ran it.

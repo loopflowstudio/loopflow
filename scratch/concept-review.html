@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<title>Concept review, third pass as built: empty and failed states (923677)</title>
+<title>Concept review, fourth pass as built: empty and failed states (923677)</title>
 <style>
   :root { --bg:#f8f6f1; --ink:#1f1b18; --soft:#6a625b; --line:#d9d2c7; --card:#fffdf9; --accent:#6d2b35;
           --yes:#2f6b3f; --no:#a23a2a; --new:#8a5a00; --newbg:#fbf1d8; --mono: ui-monospace, Menlo, monospace; }
@@ -32,43 +32,43 @@
   .taken { color:var(--yes); font-weight:600; }
 </style>
 <h1>Nothing there, or something failed: do the product's concepts and the code's line up?</h1>
-<p class="soft">Task 923677, third review of the built change. The branch at <code>6d0e161730</code> against its base
-<code>fd90d7e6ad</code>, read with the three Dev app runs in <code>scratch/qa.html</code>. The second as-built page is in
-git at <code>80284bb62c</code>.</p>
+<p class="soft">Task 923677, fourth review of the built change. The branch at <code>ebdd99744a</code> against its base
+<code>fd90d7e6ad</code>, read with the four Dev app runs in <code>scratch/qa.html</code>. The third as-built page is in
+git at <code>3e64ef7c07</code>.</p>
 
 <p><b>The area taken.</b> What Loopflow for Mac shows before work is running and when a read or write fails: the New
 Task sheet, a filed Task that has not started, a pane with nothing in it, a list with nothing in it, and a failure,
-whether it fills a pane or sits beside content that stays. All six slices in it.</p>
+whether it fills a pane or sits beside content that stays. All seven slices in it.</p>
 
-<p><b>Since the last pass.</b> It planned one thing: every failure beside content drawn as a
-<code>FailureLine</code>. Slice 6 built it at thirteen sites; 70 view tests passed at <code>3c4b0d4025</code>; the
-third Dev app run saw two of the lines on a real failure, found the Open Work window grown to 1,989 pt by one of them
-and fixed it, and joined the workspace's "Layout not saved" to the tile's. <code>FailureLine</code> is at 27 sites.
-This pass read every remaining error text and warning icon in <code>swift/LoopflowMac</code>. The three forms hold.
-Five sites still draw a failure another way, and one of them is a failure that already has its line on the next
-screen.</p>
+<p><b>Since the last pass.</b> It planned five failures as <code>FailureLine</code>s. Slice 7 built them; the fourth
+Dev app run saw four on a real failure and fixed four things it met: the line stacks in a narrow pane, a failed
+conversation is said once, the Changes pane's failed comparison is the line, and the Dashboard's sits at the leading
+edge. 167 view tests passed after them. <code>FailureLine</code> is at 33 sites, <code>EmptyState</code> at 22,
+<code>.emptyLine()</code> at 18. The three forms hold, and so does everything about New Task and the unstarted Task.
+What is left is in one place: the diff stream.</p>
 
 <p><span class="yes">yes</span> lines up &nbsp; <span class="no">no</span> does not &nbsp;
 <span class="new">proposed</span> not in the code yet; dashed boxes are proposed too</p>
 
 <h2>One interaction, walked in the built app</h2>
-<p>Someone files a Task, the Machine loses a Wave's plan, and they look for the Wave's Tasks in two places.</p>
+<p>Someone opens a Task's Changes with the Machine going away under them.</p>
 <table>
   <tr><th>What they see</th><th>Where it comes from</th><th></th></tr>
-  <tr><td>⌘N, the sentence with two menus, the step line, <i>Start ⌘↩</i>; with the Machine away, “<b>Not filed.</b>”
-      and the message in mono.</td>
-      <td><code>NewTaskWorkflow</code> over <code>GraphCatalogEntry.workflow</code>; <code>FailureLine</code>.</td>
+  <tr><td>The comparison fails: “<b>Comparison unavailable.</b>” and the reason in mono, where the count was.</td>
+      <td><code>TaskChangesView</code>, <code>FailureLine</code> over <code>store.changesError</code>.</td>
       <td class="yes">yes</td></tr>
-  <tr><td>The Wave's page: “<b>Tasks did not load.</b>” and the reason in mono.</td>
-      <td><code>WaveDetailPane.swift:248</code>, <code>FailureLine</code>.</td><td class="yes">yes</td></tr>
-  <tr><td>The roadmap's card for the same Wave: a warning triangle and the bare reason in the warning ink.</td>
-      <td><code>RoadmapView.swift:273</code>, <code>Label(reason, systemImage:)</code> over the same
-      <code>roadmap.tasks</code>.</td><td class="no">no</td></tr>
-  <tr><td>In the backlog they edit a brief and the save fails: “Brief not saved · store is locked” in the secondary
-      ink, the face that says “Filed fc6ad0”.</td>
-      <td><code>BacklogState.notice</code>, one string for a success and a failure.</td><td class="no">no</td></tr>
-  <tr><td>Recovery: the plan reads again and both lines go; the next save replaces the notice.</td>
-      <td>Each site's own state, unchanged.</td><td class="yes">yes</td></tr>
+  <tr><td>The sidebar's hidden paths fail to save: “<b>Hidden paths were not saved.</b>” and the message, stacked in
+      the 236 pt column.</td>
+      <td><code>HiddenPathsFailure</code>, <code>FailureLine</code>.</td><td class="yes">yes</td></tr>
+  <tr><td>One file in the stream fails to read: “Could not be read: connection refused.” in the secondary ink, the
+      face of “No textual changes.”, with a small Retry.</td>
+      <td><code>FileNote.failed</code> through <code>ReviewNotice</code>, <code>ReviewStreamView.swift:64</code>.</td>
+      <td class="no">no</td></tr>
+  <tr><td>They press a gap to show skipped lines and it fails: “Skipped lines of a.swift unavailable: …” in the same
+      face.</td>
+      <td><code>store.gapError</code>, one string, <code>ReviewStreamView.swift:24</code>.</td><td class="no">no</td></tr>
+  <tr><td>Recovery: Retry reads the file and the note goes; the next gap that opens clears the other.</td>
+      <td>The store's own state, unchanged.</td><td class="yes">yes</td></tr>
 </table>
 
 <h2>Product concepts and code concepts</h2>
@@ -80,90 +80,103 @@ screen.</p>
   <tr><td>Whose default the workflow is</td>
       <td><code>workflowChoice</code>, <code>workflowSelection</code></td><td class="yes">yes</td><td></td></tr>
   <tr><td>A pane with nothing in it, or one that did not open</td>
-      <td><code>EmptyState</code> at 22 sites; no <code>ContentUnavailableView</code>, and a test fails on a new
-      one</td><td class="yes">yes</td><td></td></tr>
-  <tr><td>A list with nothing in it</td><td><code>.emptyLine()</code> at 17 sites</td><td class="yes">yes</td><td></td></tr>
+      <td><code>EmptyState</code>; no <code>ContentUnavailableView</code>, and a test fails on a new one</td>
+      <td class="yes">yes</td><td></td></tr>
+  <tr><td>A list with nothing in it</td><td><code>.emptyLine()</code></td><td class="yes">yes</td><td></td></tr>
   <tr><td>An empty repository</td><td><code>repositoryIsEmpty</code>, <code>NoPlannedWork</code></td>
       <td class="yes">yes</td><td></td></tr>
+  <tr><td>A conversation that failed to open</td>
+      <td>The pane's <code>EmptyState</code>, or the line above the panes when no pane says it
+      (<code>ConversationPlaceholder.namesFailure</code>)</td><td class="yes">yes</td>
+      <td>Said once now. <code>namesFailure</code> repeats the placeholder's two conditions beside it in the same
+      type; a third condition would be the time to make them one.</td></tr>
   <tr><td>Something failed beside what I am looking at</td>
-      <td><code>FailureLine</code> at 27 sites; five others</td><td class="no">no</td>
-      <td>One failure under two forms (the roadmap card and the Wave page). One name for two ideas: the backlog's
-      notice is both “Filed fc6ad0” and “Brief not saved”. Three more draw the message alone in the warning ink.</td></tr>
-  <tr><td>What I typed is not valid yet (a range, a Wave's name, a theme file)</td>
+      <td><code>FailureLine</code> at 33 sites; two in the diff stream drawn as notes</td><td class="no">no</td>
+      <td>One name for two ideas: <code>ReviewNotice</code> is both “No textual changes.” and a failed read with
+      Retry. The plan lists the file's note among the failures; slice 6 passed it by, and the third pass's sweep,
+      which looked for the warning ink, could not see a failure drawn in the secondary ink.</td></tr>
+  <tr><td>The failure a pane keeps until the next try</td>
+      <td><code>BacklogNotice.failed(what, machine:)</code>, <code>HiddenPathsFailure(what, machine)</code>, and
+      strings with the words baked in (<code>gapError</code>, <code>FileNote.failed</code>,
+      <code>closed.error</code>)</td><td class="no">no</td>
+      <td>One idea under two types and three string shapes. A baked string cannot be split again:
+      the Wave page reads “Completed Tasks did not load. Completed Tasks unavailable: …”.</td></tr>
+  <tr><td>An action that did not go through, said in passing</td>
+      <td><code>Notice</code> posted to the window (“Could not change pane: …”)</td><td class="yes">yes</td>
+      <td>A different thing: nothing stays on screen to sit beside. Not in this change.</td></tr>
+  <tr><td>What I typed is not valid yet</td>
       <td>Text in the warning or failure ink under the field</td><td class="yes">yes</td>
-      <td>Not a failure: nothing was asked of the Machine. These stay, with the Create Wave forms, settings and
-      telemetry the plan excludes.</td></tr>
+      <td>Nothing was asked of the Machine. Stays.</td></tr>
   <tr><td>A Graph that stopped, and why</td><td>Rust's position line, one string</td><td class="no">no</td>
       <td>Outside this change: the wire carries one sentence.</td></tr>
 </table>
 
-<h2>The biggest mismatch: five failures still drawn another way</h2>
+<h2>The biggest mismatch: the diff stream's two failures read as notes</h2>
 <div class="pair">
-  <div class="win"><div class="cap">Built: the roadmap's card, a Wave whose Tasks did not load</div>
-    <div class="pane"><span class="warn">⚠ linear: request timed out after 5s</span></div></div>
-  <div class="win proposed"><div class="cap">Proposed: as the Wave's page says it</div>
-    <div class="pane"><b style="color:var(--no)">Tasks did not load.</b> <code>linear: request timed out after 5s</code></div></div>
-</div>
-<div class="pair">
-  <div class="win"><div class="cap">Built: a brief that did not save, in the backlog</div>
-    <div class="pane"><span class="soft">Brief not saved · store is locked by another writer</span></div></div>
+  <div class="win"><div class="cap">Built: a file the diff could not read</div>
+    <div class="pane"><span class="soft">Could not be read: connection refused.</span> <u class="soft">Retry</u></div></div>
   <div class="win proposed"><div class="cap">Proposed</div>
-    <div class="pane"><b style="color:var(--no)">Brief not saved.</b> <code>store is locked by another writer</code></div></div>
+    <div class="pane"><b style="color:var(--no)">File not read.</b> <code>connection refused</code> &nbsp;[Retry]</div></div>
 </div>
-<p><span class="new">proposed</span> Slice 7 in <code>scratch/plan.md</code>, a closed list:</p>
+<div class="pair">
+  <div class="win"><div class="cap">Built: the Wave page, completed Tasks that did not load</div>
+    <div class="pane"><b style="color:var(--no)">Completed Tasks did not load.</b>
+      <code>Completed Tasks unavailable: request timed out</code></div></div>
+  <div class="win proposed"><div class="cap">Proposed</div>
+    <div class="pane"><b style="color:var(--no)">Completed Tasks did not load.</b> <code>request timed out</code></div></div>
+</div>
+<p><span class="new">proposed</span> Slice 8 in <code>scratch/plan.md</code>, three sites and one value:</p>
 <table>
   <tr><th>Site</th><th>Today</th><th>After</th></tr>
-  <tr><td><code>RoadmapView.swift:273</code></td><td>warning triangle, bare reason</td>
-      <td><code>FailureLine("Tasks did not load.", machine: reason)</code></td></tr>
-  <tr><td><code>RoadmapView.swift:283</code></td><td>“LOO-1: reason · recovery” in the warning ink</td>
-      <td><code>FailureLine("LOO-1 is unavailable.", machine: reason)</code> with the recovery sentence after it</td></tr>
-  <tr><td><code>BacklogView.swift:465, :530, :551</code></td><td>“Order not saved · …”, “Brief not saved · …”,
-      “Brief not restored · …” in the notice's face</td>
-      <td>the backlog's notice says which it is, and a failed one draws a <code>FailureLine</code></td></tr>
-  <tr><td><code>DashboardView.swift:99</code></td><td>the first reason alone, warning ink</td>
-      <td><code>FailureLine("Some Work did not load.", machine: …)</code>, one line, the rest in its help</td></tr>
-  <tr><td><code>TaskChangesView.swift:194, :754</code></td><td>“Diff settings unavailable: …” in the warning ink</td>
-      <td><code>FailureLine("Diff settings did not load.", machine: …)</code></td></tr>
+  <tr><td><code>ReviewStreamView.swift:64</code></td><td>“Could not be read: …” as a <code>ReviewNotice</code>, small
+      Retry</td>
+      <td><code>FailureLine("File not read.", machine: reason) { Retry }</code>; <code>.cut</code> stays a note</td></tr>
+  <tr><td><code>ReviewStreamView.swift:24</code></td><td>“Skipped lines of a.swift unavailable: …” as a note</td>
+      <td><code>FailureLine("Skipped lines of a.swift did not load.", machine: …)</code></td></tr>
+  <tr><td><code>WaveDetailPane.swift:179</code></td><td>the message stored with “Completed Tasks unavailable:” in
+      front of it</td><td>the message alone</td></tr>
+  <tr><td><code>Design/EmptyState.swift</code></td><td><code>BacklogNotice.failed(String, machine:)</code>,
+      <code>HiddenPathsFailure</code></td>
+      <td>one <code>Failure</code> (what, machine) that <code>FailureLine</code> draws; the backlog's notice, the
+      hidden paths and the gap hold it; <code>HiddenPathsFailure</code> goes</td></tr>
 </table>
 <table>
   <tr><th>Tested on</th><th>What happens</th></tr>
-  <tr><td>Normal path</td><td>“Filed fc6ad0”, “Moved 3 Tasks” read as they do now.</td></tr>
-  <tr><td>Failure</td><td>What failed in the failure ink, the message in mono and selectable.</td></tr>
-  <tr><td>Recovery</td><td>The next notice replaces a failed one; each other line goes when its own read succeeds.</td></tr>
-  <tr><td>Counterexample kept</td><td>“Partial: searching the 400 loaded”, “Older Tasks are truncated.”, “Brief
-      changed since; not undone” and “The brief changed since you last read it.” say where things stand; nothing
-      failed. They stay. So does the sidebar's triangle beside a Wave's name, where a line has no room.</td></tr>
-  <tr><td>Counterexample kept</td><td>A <code>FailureLine</code> as a narrow container's whole content sets its
-      smallest size (the 1,989 pt window). All five sites sit beside rows that set the width.</td></tr>
+  <tr><td>Normal path</td><td>“No textual changes.”, “Binary file.”, “Cut at 1 MB.” read as they do now.</td></tr>
+  <tr><td>Failure</td><td>What failed in the failure ink, the message in mono, Retry in the line.</td></tr>
+  <tr><td>Recovery</td><td>Retry reads the file and the line goes, as the note does now.</td></tr>
+  <tr><td>Counterexample kept</td><td>The stream is the widest pane; in a narrow split the line stacks, which
+      slice 7's fourth run added.</td></tr>
+  <tr><td>Counterexample kept</td><td>The Files pane's “Latest read failed.” over “Live file observation
+      unavailable: …” keeps its prefix: one stored string carries two different failures there, and the prefix is
+      what tells them apart (questions 54).</td></tr>
+  <tr><td>Counterexample that stops the sweep</td><td>Each pass has found fewer (13, 5, 2). After slice 8 the
+      failures not drawn as a line are named and stay: window notices, an icon's help where a line has no room, a
+      file's save message, form checks. The next pass looks only at what slice 8 changed.</td></tr>
 </table>
-<p>After slice 7 no failure the Machine reported is drawn outside <code>FailureLine</code> or <code>EmptyState</code>
-except in the plan's exclusions. The sweep that found these five read every <code>Text(error)</code>,
-<code>palette.warning</code>, <code>palette.failure</code> and <code>exclamationmark</code> in the target, so the list
-is closed.</p>
 
 <h2>Outside this change</h2>
 <ul>
   <li>A new Task's Files pane pointing at the repository after Start: Task ea8659.</li>
-  <li>A Start the Machine refused going to creation recovery's notice, not to “Not started.”: its own Task in
-      creation recovery.</li>
+  <li>A Start the Machine refused going to creation recovery's notice, not to “Not started.”: its own Task.</li>
   <li>A stopped Graph's reason in mono: Rust would send what stopped and the Machine's message as two fields.</li>
+  <li>Dashboard tiles about 185 pt wide cutting their header (questions 70): not from this change.</li>
 </ul>
 
 <h2>Questions</h2>
 <p class="soft">Each was decided with nobody present; the choice taken is marked. “2b” is a complete answer.</p>
 <ol class="q">
-  <li>The five failures still drawn another way:
-    <ol><li><span class="taken">Taken:</span> convert them in this change (slice 7), then stop sweeping.</li>
-      <li>Ship as built; the roadmap card and the Wave page differ for the same failure.</li></ol></li>
-  <li>The backlog's notice, one string for “Filed fc6ad0” and “Brief not saved”:
-    <ol><li><span class="taken">Taken:</span> the notice says whether it is a failure, and a failed one is a
-        <code>FailureLine</code>.</li>
-      <li>Keep one string and only replace the middle dot with a colon.</li></ol></li>
-  <li><code>FailureLine</code> as a window's whole content (questions 56):
-    <ol><li><span class="taken">Taken:</span> the site sets its width, as Open Work does now; the line has no floor
-        of its own.</li>
-      <li>A minimum width inside <code>FailureLine</code>, which could squeeze it in a narrow tile.</li></ol></li>
-  <li><code>ProjectReadinessView</code>'s readiness sentences with no Machine message (questions 53):
-    <ol><li><span class="taken">Taken:</span> they stay text; they say where the Project stands.</li>
-      <li>Draw “Project activation failed.” as a failure with no message.</li></ol></li>
+  <li>The diff stream's failed file and failed gap (questions 69):
+    <ol><li><span class="taken">Taken:</span> draw both as <code>FailureLine</code>s in this change (slice 8).</li>
+      <li>Ship as built and take the file's note off the plan's list.</li></ol></li>
+  <li>The failure a pane keeps, held as two small types and three strings:
+    <ol><li><span class="taken">Taken:</span> one <code>Failure</code> value beside <code>FailureLine</code>; the
+        fourth compress left two types alone, and a third holder is what changes that.</li>
+      <li>A third small type for the gap, each next to its pane.</li></ol></li>
+  <li>When the sweep ends:
+    <ol><li><span class="taken">Taken:</span> with slice 8. What stays drawn another way is named above.</li>
+      <li>Keep reading every stored error string each pass.</li></ol></li>
+  <li><code>namesFailure</code> repeating the placeholder's conditions:
+    <ol><li><span class="taken">Taken:</span> leave it; two conditions in one type, covered by the fourth run.</li>
+      <li>One value the placeholder and the line above both read.</li></ol></li>
 </ol>

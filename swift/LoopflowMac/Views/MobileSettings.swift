@@ -9,7 +9,7 @@ struct MobileSettings: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: Spacing.xl) {
                 Text("Take your work with you").font(Typography.lede)
                 Text("Open Tasks and continue their Sessions from Loopflow on your iPhone. Sign in to the same Tailscale account on both devices.")
                     .foregroundStyle(palette.textSecondary)
@@ -30,7 +30,7 @@ struct MobileSettings: View {
                         Text("Uses this Machine’s signed-in Tailscale account.")
                             .font(Typography.meta).foregroundStyle(palette.textSecondary)
                     }
-                    Text(configuration.endpoint).font(Typography.meta).textSelection(.enabled)
+                    Text(configuration.endpoint).font(Typography.mono).textSelection(.enabled)
                         .foregroundStyle(palette.textSecondary)
                     HStack {
                         Button("Copy address", systemImage: "doc.on.doc") {
@@ -49,8 +49,7 @@ struct MobileSettings: View {
                         .font(Typography.meta).foregroundStyle(palette.textSecondary)
                 } else {
                     Button("Enable mobile access") { setup.enable() }
-                        .buttonStyle(.borderedProminent)
-                        .tint(palette.accent).foregroundStyle(palette.accentText)
+                        .buttonStyle(LoopflowButtonStyle(.accent))
                         .disabled(setup.busy)
                         .accessibilityIdentifier("mobile-enable")
                     Text("Loopflow detects Tailscale and prepares a private connection automatically.")
@@ -62,7 +61,8 @@ struct MobileSettings: View {
                 }
                 Button("Refresh", systemImage: "arrow.clockwise") { setup.refresh() }.disabled(setup.busy)
             }
-            .padding(24)
+            .buttonStyle(LoopflowButtonStyle())
+            .padding(Spacing.xxl)
         }
         .frame(minWidth: 560, idealWidth: 620, minHeight: 500)
         .foregroundStyle(palette.text).background(palette.background)

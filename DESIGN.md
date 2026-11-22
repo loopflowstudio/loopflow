@@ -105,14 +105,10 @@ map. Remove a pointer when its code is fixed.
 **Small tracked uppercase labels.** No eyebrow above a heading, no caps
 section label, no caps kicker, no caps "or". A section is named by a heading
 in sentence case or not at all. The one allowed use of capitals is an acronym.
-- Desktop: two hand-made variants (`WaveDetailPane.swift`,
-  `WorkActivityView.swift`).
 
 **Monospace as decoration.** Mono is for things a person could paste into a
 terminal: commands, paths, IDs, SHAs, diffs, and numbers in a column. It is
 not for prose, section titles, links, captions or buttons.
-- Desktop: "Page 1 of N" (`DashboardSlotGrid.swift`), "builtin Graph"
-  (`WorkPalette.swift`).
 - Website: agent names and statuses in the homepage's app drawings.
 
 **A stripe down the side of a rounded row.** A colored leading edge means
@@ -125,14 +121,10 @@ thing, or show nothing. "Coming soon" over a drawing is two problems.
   initials circles, a diagonal stripe wash and a rotated dashed stamp.
 
 **Values outside the scale.** See [How the system works](#how-the-system-works).
-- Desktop: 172 literal paddings.
 
 **Two of the same thing.** One component per job, on every surface.
-- Desktop has two workflow renderers: `WorkflowLine` for a Task and New
-  Task's `WorkflowSteps` (`NewTaskSheet.swift`) for a Graph definition, which
-  has no top-level steps on the wire. It has two Create Wave forms
-  (`WavesView.swift`, `WorkNavigator.swift`).
-- Desktop draws each empty and failed state by hand; iPhone uses `StateView`.
+- An empty or failed state is drawn twice: `EmptyState` on the Mac and
+  `StateView` on iPhone, in different inks and spacing.
 
 **Tiny text.** Nothing a person is meant to read is under 11 pt on Desktop,
 12 pt on iPhone or 12 px on the web.
@@ -155,8 +147,6 @@ page at most.
 
 **Glyphs as icons.** "⚠", "✓", "✗" and "↗" typed into strings sit beside SF
 Symbols. Use the icon set, or a word.
-- Desktop: "✓"/"✗" before key results (`BacklogView.swift`), "⚠" before a
-  changed previous version (`TaskFilesView.swift`).
 
 ### We don't do these; keep it that way
 
@@ -205,7 +195,7 @@ covered.
    shown as unknown, not as idle.
 8. **Measured, not asserted.** A claim in this file that can be checked has a
    check: palette contrast in `WorkPaletteTests`, site accessibility in
-   `website/tests/`, sizes and faces in `TypographyDisciplineTests`.
+   `website/tests/`, sizes, faces, padding, spacing and radius in `DesignDisciplineTests`.
 9. **Real content.** Design against the longest Task title, the slowest
    Machine and an empty repository, not placeholder text.
 
@@ -234,9 +224,9 @@ has one name and a size on each platform, so a shared component that names
 
 | Step | Face | Mac | iPhone | Use |
 |------|------|-----|--------|-----|
-| `display` | Old Standard 400 | 34 | 34 | Wave page title, "What do you want?" on the phone (`.serif(.display)`) |
+| `display` | Old Standard 400 | 34 | 34 | Wave page title, "What do you want?" in New Task (`.serif(.display)`) |
 | `title` | Old Standard 400 | 26 | 26 | Task title in the Brief, a state's title (`.serif(.title)`) |
-| `lede` | Atkinson 600 | 17 | 20 | Wave objective, a document's first heading, what you type in New Task on the phone |
+| `lede` | Atkinson 600 | 17 | 20 | Wave objective, a document's first heading, the request you type in New Task |
 | `text` | Atkinson 400 | 13 | 17 | Everything else |
 | `textStrong` | Atkinson 600 | 13 | 17 | Selected row titles, Session names |
 | `meta` | Atkinson 400 | 11 | 13 | Meta, ranks, a row's second line |
@@ -250,27 +240,36 @@ it. The phone's body is 17 because that is the platform's reading size, its
 `meta` is one above the 12 pt floor, and its terminal is 12 because 13 costs
 columns on a 375 pt screen.
 
+`DesignDisciplineTests` checks typography in both apps and the shared library.
+Padding, non-zero spacing and corner radii use named steps. Frame widths and
+heights size the controls themselves.
+
 Components, in `swift/Loopflow/Design/`, for both apps: `TaskRow`,
 `StatusMark`, `WorkflowLine`, `LoopflowButtonStyle` (`.neutral`, `.accent`,
-`.destructive`) and `StateView`. `TitleBar` is the Mac's, in
+`.destructive`) and `StateView`. The Mac also has `TitleBar` and `EmptyState` in
 `swift/LoopflowMac/Design/`.
 
 - `TaskRow` takes its status as a `TaskRowStatus`, never a string, so a
   surface cannot bring its own word. The word is what the Task's conversation
-  reports (Blocked, Busy, Available, Done, Error), else its lifecycle word.
+  reports (Blocked, Busy, Available, Done, Error). When no program reports, a
+  Mac row shows a blocked or waiting condition if the Task needs someone.
+  Otherwise the row shows its lifecycle word.
 - `WorkflowLine`'s steps, running step and sentence come from Rust
   (`TaskGraph.steps`, `current_step`, `sentence`), so `lf task status` prints
   the same sentence. Where the steps do not fit, the sentence stands alone and
-  wraps.
+  wraps. Before a Task starts, the line draws the catalog’s workflow steps
+  (`lf graph list --json`). New Task shows where you take part beneath them.
 - `TaskActions` (beside `WorkflowLine`) is what a Task offers: Start or Run,
   Auto-Ship or Stop Auto-Ship, and Rust's reason when a run cannot start. The
   Mac's Workflow bar and the phone's "Task actions" menu draw it; neither
   decides what to offer, and the Notice names an action by its button's words.
 - `LoopflowButtonStyle` is as tall as the platform's control height. On the
   phone the accent button fills the width it is offered; a screen has one.
-- `StateView` is every empty and failed state: left-aligned, a serif title,
-  then a sentence and buttons where the state has them. No icon over a
-  centred title.
+- On iPhone, `StateView` shows a left-aligned serif title, a sentence and
+  any actions. On Mac, `EmptyState` also shows the Machine’s error in mono
+  and fits dashboard slots. An empty list uses `.emptyLine()`, and a failure
+  beside retained content uses `FailureLine`. `DesignDisciplineTests`
+  checks both apps for `ContentUnavailableView`.
 
 Website ramp, for every page (`:root` in `website/static/style.css`):
 

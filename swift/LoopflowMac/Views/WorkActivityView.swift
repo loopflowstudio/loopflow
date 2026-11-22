@@ -41,7 +41,7 @@ struct WorkActivityView: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(LoopflowButtonStyle())
                     .help("Show all Activity")
                     .accessibilityLabel("Show all Activity")
                 }
@@ -83,11 +83,8 @@ struct WorkActivityView: View {
             }
             .accessibilityIdentifier("loopflow-activity-list")
         } else {
-            ContentUnavailableView(
-                "No Activity in this window",
-                systemImage: "clock.arrow.circlepath",
-                description: Text("Work creation, Runs, PRs, and Steers will appear here.")
-            )
+            EmptyState(title: "No activity in this window",
+                       sentence: "Work creation, runs, PRs and steers appear here.")
             .accessibilityIdentifier("loopflow-activity-empty")
         }
     }
@@ -106,14 +103,13 @@ struct WorkActivityView: View {
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                    Text("\(entry.work.kind.rawValue.uppercased()) · \(entry.subject)")
+                    Text("\(entry.work.kind.rawValue.capitalized), \(entry.subject)")
                         .font(Typography.textStrong)
-                        .tracking(0.6)
                         .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     Text(activityTime(entry.recordedAt))
-                        .font(Typography.mono)
+                        .font(Typography.meta).monospacedDigit()
                         .foregroundStyle(palette.textSecondary)
                         .help(exactTime(entry.recordedAt))
                 }
@@ -159,7 +155,7 @@ struct WorkActivityView: View {
             case .project:
                 model.waveForProject(projectId: work.id)?.wave.goal
             case .task:
-                model.task(id: work.id)?.task.condition.reason
+                model.task(id: work.id).flatMap { TaskRowStatus(task: $0.task).line }
             }
         }
     }

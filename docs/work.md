@@ -97,8 +97,10 @@ LOO-12  moving
 With auto on, the second clause names auto: "Auto stands in next at
 ship-review." A stopped Graph reads "Stopped at build. `lf task run` starts it
 again." `--json` carries the parts: `graph.steps` (each top-level step's
-`name` and `interactive`), `graph.current_step` (its index, null before the
-start and at the end) and `graph.sentence`.
+`name` and `interactive`, true when a person takes part anywhere inside the
+step), `graph.current_step` (its index, null before the start and at the end)
+and `graph.sentence`. Before a Task starts, Desktop draws the same steps from
+[`lf graph list --json`](orchestration.md#describe-a-graph).
 
 Every read queries this machine's local store, so it answers instantly and
 works offline.

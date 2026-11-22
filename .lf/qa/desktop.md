@@ -20,9 +20,9 @@ For Desktop in a headless run, follow `swift/README.md`'s Testing section:
 `scripts/test_desktop.sh --filter '<affected suites>'` builds the app and CLI,
 then runs model and production-view checks with WindowServer access denied.
 Unset inherited `LF_*` and close stdin as described in `scripts/testing.md`.
-`DesktopHeadlessTests/workStates` checks loading, unavailable, empty and selected
-Work and taps the production navigation button. Report these as automated
-checks. With a display, `uv run python scripts/loopflow-dev.py
+`DesktopHeadlessTests/workStates` checks loading, unavailable and selected Work
+and taps the production navigation button; `EmptyStateTests` checks the empty
+repository. Report these as automated checks. With a display, `uv run python scripts/loopflow-dev.py
 run-debug` builds and launches the development app; use `lf desktop state --json`
 and the commands in `docs/surfaces.md` to inspect and drive it.
 
@@ -95,7 +95,8 @@ To build the isolated bundle, import `scripts/loopflow-dev.py`, set
 `DEV_APP.stem` and `DEV_BUNDLE_ID` to a unique ID ending in `.dev`. Run
 `cmd_build()` and, if it succeeds, `_install_dev_app()`.
 Run that script with `uv run python` from the checkout: the module imports
-`boto3`, which only the project environment has.
+`boto3`, which only the project environment has, and `app_bundle` from
+`scripts/`, so put `scripts` on `sys.path` before loading it.
 LaunchServices won't resolve a bundle ID under `/tmp`, so `lf desktop view`
 fails there with `LSCopyApplicationURLsForBundleIdentifier`. Register with
 `lsregister -f`, open it with `LOOPFLOW_DEV_WAVE_REPO` and `--repo` after
@@ -188,3 +189,218 @@ concrete step. Run the wrapper and `lf` through a script that does
 - Skew: restart the private server from a copy of the installed `lf` on the
   same `LF_HOME` (no migrations between them) to see the branch app read
   older responses.
+
+# Driving the app with the screen locked
+
+A production-mode launch (no `-ui-test-mode`) on a private Machine renders the
+real windows, and a file-driven hook inside the app can snapshot and click
+them. Nothing here needs WindowServer focus.
+
+- Copy `.lf/qa/QAHook.swift` into `swift/LoopflowMac/` and call
+  `QAHook.start()` in `LoopflowApp.init` after the appearance store is set.
+  Delete both before committing. Build the isolated bundle as above, with
+  `sys.path.insert(0, "scripts")` before importing `loopflow-dev.py`.
+- Open with `--env LOOPFLOW_QA_HOOK_DIR=<dir>` beside the private `HOME`,
+  `LF_HOME`, `LF_BIN` and `PATH`. Write one line to `<dir>/<name>.cmd`; the
+  answer appears in `<name>.cmd.out`.
+- `snap <prefix>` writes every window with `cacheDisplay` (no title bar) and
+  lists index, title and size. Indices change as windows open: read the list
+  before each click.
+- `click <window> <x> <y>` takes points from the top left. Scale from the
+  PNG: a 1280 pt window is 2560 px. The hook posts the mouse-up to the queue
+  before sending the mouse-down; sent the other way a segmented control spins
+  in `trackMouse` and the app hangs. Don't `activate` or `makeKey` in the
+  hook: every later click goes dead. The first click after a launch is often
+  swallowed; send it twice and look.
+- `menu Settings…` performs a main-menu item, which is how Choose Theme
+  opens. `close <window>` closes one.
+- Theme: `lf set --global theme "<name>"` on the private Machine, then
+  relaunch. An imported theme is a file in `$LF_HOME/themes/`; Ghostty.app's
+  `Contents/Resources/ghostty/themes/` has many.
+- A Wave's backlog: `open -g -b <bundle id> 'loopflow://<repo>/wave/<wave>'`.
+  The Portfolio: `loopflow://portfolio`. It lists Waves only for repositories
+  under its folder (`$HOME/src`); a symlink there works, but a Task click then
+  opens a second repository window for the symlinked path that stays on
+  "Updating…". Sidebar Wave rows did not answer hook clicks.
+- `lf desktop <tile-or-dashboard>` with `LF_DESKTOP` set to the bundle ID
+  works in this mode (`lf desktop working-tasks`, `lf desktop back`).
+- Navigate with `lf desktop goto <n>`, `working-tasks`, `back` and `forward`;
+  `lf --task <id> desktop do details page=brief` switches the Task pane. A tile
+  shows its workflow sentence only after its Task was visited in that window.
+  `lf desktop do new-task` opens the New Task sheet, and `snap` lists a sheet
+  as its own untitled window. Apply in Choose Theme answers a doubled click.
+- Opening a Task changes it: a link to an unstarted Task places its checkout
+  (the server then calls it `idle`), and opening a Task whose worktree was
+  moved away puts the worktree back. Read `lf plan list --json` for what a
+  row is drawn from.
+- Relaunching: a window the app restores is titled with the bundle's name and
+  stays on "Updating…" while the screen is locked; a link then opens a second
+  window on the same repository and the two draw each other's selection. Before
+  quitting, close the Portfolio and leave one repository window on a Task that
+  is not finished. Stop the app by PID (`osascript` quit is refused while a
+  sheet is up), `defaults delete <bundle id>`, relaunch, and use the window
+  titled with the repository's name; if none appears in 15 s, open
+  `loopflow://<repo>`. Never send a finished Task's link to a relaunched app.
+- A theme set from the CLI reaches the running app, but relaunch before
+  judging Choose Theme: its tiles were blank once after a live change.
+- Not reachable: the title bar, hover, drag, the jump menu (its shortcut needs
+  a key window, and setting `navigation.palette = .search` draws nothing),
+  popovers and sheets opened from a "+" (New Wave never appeared), file panels
+  and Ghostty faces. The in-process accessibility tree is empty, so there is no
+  finding a control by name.
+- A private Machine can be kept for the next run: `rm` its `lf` copy, copy
+  the new build in and start `lf server run` again. A Task whose held step
+  was running when the old server stopped comes back blocked ("process left
+  no exit record"), and opening it does not unblock it: that is the route to
+  a blocked Task's page and Brief.
+- Window indices move whenever a window opens or the app restores one. Read
+  the index by title from `snap` before each `click` or `close`
+  (`awk '$2=="Portfolio" {print $1}'`). `lf desktop working-tasks` answers in
+  whichever repository window is first; in a restored one it drew "Dashboard
+  unavailable". Close Appearance and the Portfolio before quitting.
+- Portfolio buttons answer hook clicks: Start on a Roadmap row runs the Graph.
+  With the `LF_BIN` wrapper holding `help graph`, the row reads "Moving" until
+  `touch <dir>/go`, then "Waiting".
+- Stand-in providers exit at once here, so a Session pane shows "Process
+  exited" under its opening overlay. That is the stand-in, not the pane.
+
+# Driving sheets and captures with the screen locked
+
+One capture per launch is slow. For a run with many states, add a loop to
+`uiTestSnapshot()` in `LoopflowApp.swift` for the local build only and revert
+it before committing: with an env variable naming a directory, poll it, and
+for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
+`<name>.png` and `window.attachedSheet` to `<name>-sheet.png`. Start
+`DesktopServer` under the same variable so `lf desktop` works in `live` mode.
+
+- The loop also needs every other visible window written out (`<name>-w<n>.png`):
+  the Open Work window is its own window, not a sheet. Send clicks and keys to
+  `window.attachedSheet ?? window`.
+- Relaunch with `--args -ApplePersistenceIgnoreState YES --repo <path>`. After
+  the first quit the bundle restores "no windows" and a later launch sits with
+  none (`desktop state` lists `"windows": []`, the log shows only
+  `config.theme`).
+- With a sheet open, `osascript … quit` fails with "User canceled"; stop that
+  one PID. `open -n` beside a live instance leaves two; check `pgrep` first.
+- New Task: `lf desktop do new-task` opens the sheet. Type with
+  `(sheet.firstResponder as? NSTextView)?.insertText(…)`; ⌘↩ and Esc work as
+  `sheet.performKeyEquivalent(with:)` on a synthesized key event.
+- A synthesized click presses SwiftUI buttons, sidebar rows and backlog rows.
+  Post the mouse-up with `NSApp.postEvent` before sending the mouse-down
+  through `window.sendEvent`: a text field or other control that tracks the
+  mouse waits for the up event in the queue, and the app hangs without it.
+- To type into a SwiftUI `TextField`, find its `NSTextField` by placeholder in
+  the content view, `makeFirstResponder` it, then insert into the window's
+  first responder (the field editor) and send Return.
+- Menus cannot be opened or read: an `NSPopUpButton` behind a SwiftUI `Menu`
+  has no items until it tracks. Change the repository's `graph:` to see the
+  sheet on another workflow.
+- With `LF_DESKTOP` set to the QA bundle ID, `lf desktop view 'task:<id>'
+  --repo <repo>` opens its Dashboard in the QA app, and `lf desktop enter
+  '<title>'` then selects the Task without opening a conversation. That is
+  the way to an unstarted Task's pane: a `loopflow://<repo>/task/<id>` link
+  opens its conversation, which claims and places it, and so does
+  `lf open --task <id> --link`.
+- A fresh `git init` directory with no conversation opens on "No planned Work
+  in this repository"; **Open the repository conversation** starts the
+  conversation and brings the page, whose backlog reads "Nothing is waiting
+  in this repository." beside **New**. Filing a Task brings the page too.
+- "Not filed." and "Not started.": stop the private server (`kill` its PID),
+  wait five seconds, then `lf desktop do new-task`, type, and press File or ⌘↩.
+  The sheet then shows "running …" with no step line. Start the server again
+  and **Try again** starts the Task. An unwritable `.git` or a repository
+  default naming a missing Graph ends in creation recovery (a notice, and the
+  Task is filed), not in "Not started.".
+- A SwiftUI `ScrollView` that meets the title bar comes back white from
+  `cacheDisplay`, background included ("Not started." with no Task selected).
+  To see it, build once with the scroll view padded 60 pt from the top; do not
+  commit that.
+- A stand-in `claude` must answer `--version` (exit 0) and then stay alive
+  (`cat > /dev/null; while :; do sleep 5; done`). One that exits fails the
+  Graph at its first step with "claude --version failed", and a repository
+  conversation reads "Session ended."
+- For what a released build does, install a second bundle whose ID does not
+  end in `.dev`: it opens a repository's conversation on arrival, so a fresh
+  repository shows its page and never the empty state.
+- `lf desktop state --json` is one long document; read it through `jq`. A
+  pane's `location.worktree` and `attachment` say where it points and whether
+  it opened.
+- A window's size comes back from the bundle's defaults. Before measuring one,
+  quit and `defaults delete <bundle id> "NSWindow Frame open-work"` (or
+  `workspace-AppWindow-1`); otherwise a frame from an earlier build is what
+  opens.
+- "Workspace did not open.": `open -g -b <bundle id>
+  'loopflow://nosuchrepo/task/abc123'` opens the Open Work window on it.
+- "Latest read failed." in the Files pane: open a started Task with its
+  `loopflow://<repo name>/task/<id>` link, run `lf --task <id> desktop do files
+  path=<file>` from its checkout, then `chmod 000` the checkout for a few
+  seconds and restore it.
+- A synthesized click does not give a SwiftUI `TextEditor` the keyboard (the
+  backlog's brief editor), so text cannot be typed there; New Task's field
+  works because the sheet opens with it focused.
+- Moving a repository's `.git` away under an open window shows nothing: the
+  page keeps its last read.
+- Stopping the private server leaves its holder, the stand-in providers and any
+  `lf task run` alive. List them with `ps -axo pid,ppid,command | grep
+  <private dir>` and stop those PIDs, children first.
+- Give the isolated `HOME` a `src/` directory, or the status line shows
+  "Read …/home/src: No such file or directory".
+- Launched while the private server is stopped, the app registers a launchd
+  job for that Machine (`launchctl list | grep com.loopflow.server.`, the
+  label ends in the socket directory's hash) and the server comes back on its
+  own. To keep it stopped, `launchctl bootout gui/$(id -u)/<label>`; boot it
+  out at the end too.
+- Do not name the bare origin `<repo>.repo`: the repository conversation's
+  checkout takes that path, and opening it fails with "git worktree add:
+  worktree path already exists". (Useful when a real refusal is wanted.)
+- Failure lines, each with the private server stopped (kill it, wait five
+  seconds) unless said otherwise:
+  - "…'s order not saved.": on a Wave's page (`lf wave create`, two `lf task
+    create --wave`; a repository's backlog cannot reorder), select a row and
+    press the up arrow. A read-only `.git` does not stop a rank.
+  - "Some Work did not load.": server running, `lf desktop view 'wave:<real>
+    or wave:nosuch'`. Three members give two tiles about 185 pt wide.
+  - "Hidden paths were not saved.": a started Task's Diff tab, the sidebar
+    toggle, a pattern typed into the "tests/, *.lock…" field, then stop the
+    server and send Return.
+  - "Diff settings did not load." and "Comparison unavailable.": stop the
+    server, then open the Diff tab (from Files, with the sidebar open).
+    Captures of this state take 20 to 30 seconds each.
+  - "Conversation failed to open": select a repository or Wave whose
+    conversation this launch has not opened, or press **Open conversation**.
+  A broken `.lf/config.yaml` in the Task's checkout fails none of these.
+- "File not read." in the Diff tab: `echo x > new.txt; chmod 000 new.txt` in
+  a started Task's checkout, then open the tab. `chmod 644` and **Retry**
+  reads it.
+- "Skipped lines did not load." under a file's header: the Task's base needs
+  a long file (commit one to the repository before `lf task create … --run`), two edits
+  far apart in the checkout, then `chmod 000` the file and click an
+  "N unchanged lines" row. The stream moves down when "Comparison
+  unavailable." arrives, so capture first and take the row's position from
+  that capture.
+  A press within a second of the `chmod` can win the race and open the
+  lines; press the file's other row. Open rows are gone after a relaunch.
+- On an unlocked display that someone is using, launch with `open -n -g`:
+  in `live` mode the window mounts behind the others and the capture loop
+  and `lf desktop` work as they do locked. Starting a Task brings the app to
+  the front once.
+- A real screen capture of that window, title bar included, needs no focus:
+  take the window number from `CGWindowListCopyWindowInfo` (owner name is
+  the bundle's name, `kCGWindowIsOnscreen` 1) and run `screencapture -x -o
+  -l <number> out.png`. This is the way to see a `ScrollView` that meets the
+  title bar ("Not started." with no Task selected).
+- `lf desktop do files path=<file>` follows a file: with another file being
+  read it opens a tab and leaves the selection. The Read/Diff control is a
+  menu, so a file's own Diff in Files needs a local-only line setting
+  `store.mode = .diff` after `presentFile`.
+- After a `chmod` back, "Comparison unavailable." goes on its own in 12 to 40
+  seconds; wait for it before reading the stream.
+- A capture right after a change in the checkout can take 15 seconds or more
+  to arrive; wait for its `.out` before reading the image.
+- The run's quit script stops the QA app by the PID `pgrep -f` finds for the
+  bundle's full executable path, never `pkill`.
+- `lf desktop do details page=diff` fails with "The Task file location
+  changed" in the window a Task was started in (Task ea8659); quit, relaunch
+  and open the Task by its link first.
+- Stop the run's processes by PID (`ps -axo pid,ppid,command | grep <private
+  dir>`), never by pattern.

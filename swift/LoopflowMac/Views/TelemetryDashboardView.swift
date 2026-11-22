@@ -84,7 +84,7 @@ struct TelemetryDashboardView: View {
 
     private var header: some View {
         HStack(spacing: Spacing.lg) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text("Telemetry")
                     .serif(.title)
                     .foregroundStyle(palette.text)
@@ -227,7 +227,7 @@ struct TelemetryDashboardView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(title)
                     .font(Typography.lede)
                     .foregroundStyle(palette.text)

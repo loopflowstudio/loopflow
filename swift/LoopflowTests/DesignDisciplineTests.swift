@@ -1,11 +1,8 @@
 import Foundation
 import Testing
 
-/// Mac and iPhone text is set on the ramp in `Design/DesignSystem.swift`. A size picked at a
-/// call site, a system text style or a sized helper puts a face on screen the
-/// design does not have.
-@Suite("Typography discipline")
-struct TypographyDisciplineTests {
+@Suite("Design discipline")
+struct DesignDisciplineTests {
     private static let swiftRoot = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()
         .deletingLastPathComponent()
@@ -44,6 +41,25 @@ struct TypographyDisciplineTests {
             (#"\.system\("#, "a system font", false),
             (#"\.font\(\.(largeTitle|title|title2|title3|headline|subheadline|body|callout|footnote|caption|caption2)\b"#, "a system text style", false),
             (#"Typography\.\w+\("#, "a sized Typography call", false),
+        ])
+        #expect(violations.isEmpty, "\(violations.joined(separator: "\n"))")
+    }
+
+    @Test("LoopflowMac draws every empty or failed pane as EmptyState")
+    func noGreyIconOverACentredTitle() throws {
+        let violations = try Self.violations(in: ["LoopflowMac"], [
+            (#"ContentUnavailableView"#, "a centred icon and title; use EmptyState", false),
+        ])
+        #expect(violations.isEmpty, "\(violations.joined(separator: "\n"))")
+    }
+
+    @Test("Loopflow and LoopflowMac take every font size, padding, spacing and radius from the design system")
+    func everyMeasureIsNamed() throws {
+        let violations = try Self.violations(in: ["Loopflow", "LoopflowMac"], [
+            (#"(fixedS|s)ize: *[0-9]"#, "a font size outside the ramp", true),
+            (#"\.padding\(([^)]*, *)?-?[0-9]"#, "a padding outside Spacing", false),
+            (#"spacing: *[1-9]"#, "a spacing outside Spacing", false),
+            (#"[cC]ornerRadius: *[0-9]"#, "a radius outside CornerRadius", true),
         ])
         #expect(violations.isEmpty, "\(violations.joined(separator: "\n"))")
     }

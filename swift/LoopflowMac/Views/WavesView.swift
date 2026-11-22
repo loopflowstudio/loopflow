@@ -231,7 +231,7 @@ struct WavesView: View {
             }
             .buttonStyle(.plain)
             .disabled(repos.isEmpty)
-            .help("New wave")
+            .help("New Wave")
             .accessibilityIdentifier("new-wave-button")
         }
         .padding(.horizontal, Spacing.lg)
@@ -252,7 +252,7 @@ struct WavesView: View {
                 .accessibilityIdentifier("portfolio-mode")
 
                 if selected.mode == .folder {
-                    Text(selected.root).font(Typography.meta).textSelection(.enabled)
+                    Text(selected.root).font(Typography.mono).textSelection(.enabled)
                     Button("Choose Folder…") { choosePortfolioPaths(folder: true) }
                         .accessibilityIdentifier("portfolio-folder")
                     ForEach(selected.repos.filter { $0.error != nil }) { repo in
@@ -294,6 +294,7 @@ struct WavesView: View {
                 if portfolioService.isPending { ProgressView().controlSize(.small) }
             }
         }
+        .buttonStyle(LoopflowButtonStyle())
         .foregroundStyle(palette.text)
         .padding(.horizontal, Spacing.lg)
         .padding(.bottom, Spacing.md)
@@ -353,11 +354,9 @@ struct WavesView: View {
                 Button {
                     isShowingCreate = true
                 } label: {
-                    Label("New wave", systemImage: "plus")
-                        .font(Typography.meta)
+                    Label("New Wave", systemImage: "plus")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .buttonStyle(LoopflowButtonStyle(.accent))
                 .accessibilityIdentifier("wave-empty-create")
             }
         }
@@ -381,7 +380,9 @@ struct WavesView: View {
                 onClose: { selectedWaveId = nil },
                 onOpenTask: { id in
                     openTask(waveRepoPath(for: wave), id)
-                }
+                },
+                onTaskAction: { task, action in model.perform(action, task: task) },
+                onOpenWorktree: model.openWorktree
             )
             .id(wave.id)
             .task(id: wave.id) {
@@ -576,9 +577,10 @@ struct WavesView: View {
     }
 }
 
-/// Minimal create-wave graph: pick a target repo, name the wave, submit. Adds
-/// the Wave through `lf wave create`. An add with leftovers (its files uncommitted
-/// on main) keeps the sheet open showing the receipt's lines; a clean add closes it.
+/// The one New Wave form: a name, an optional objective, and a repository picker
+/// when there is more than one to choose from. Adds the Wave through
+/// `lf wave create`. An add with leftovers (its files uncommitted on main) keeps
+/// the form's place showing the receipt's lines; a clean add closes it.
 struct CreateWaveSheet: View {
     let repos: [PortfolioRepo]
     let initialRepoPath: String?
@@ -618,78 +620,51 @@ struct CreateWaveSheet: View {
 
     private var form: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            Text("New wave")
-                .font(Typography.lede)
-                .foregroundStyle(palette.text)
+            Text("New Wave")
+                .serif(.title)
+                .foregroundStyle(palette.emphasisInk)
 
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Repository")
-                    .font(Typography.meta)
-                    .foregroundStyle(palette.textSecondary)
-
-                Picker("Repository", selection: $selectedRepoPath) {
-                    ForEach(repos) { repo in
-                        Text(repo.displayName).tag(repo.path)
+            if repos.count > 1 {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    caption("Repository")
+                    Picker("Repository", selection: $selectedRepoPath) {
+                        ForEach(repos) { repo in
+                            Text(repo.displayName).tag(repo.path)
+                        }
                     }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .font(Typography.text)
+                    .tint(palette.actionInk)
+                    .disabled(isCreating)
+                    .accessibilityIdentifier("new-wave-repository")
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .font(Typography.text)
-                .tint(palette.actionInk)
-                .padding(.horizontal, Spacing.md)
-                .padding(.vertical, Spacing.sm)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(palette.surfaceMuted)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
-                .disabled(isCreating)
             }
 
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Wave name")
-                    .font(Typography.meta)
-                    .foregroundStyle(palette.textSecondary)
-
-                TextField("Wave name", text: $waveName)
-                    .textFieldStyle(.plain)
-                    .font(Typography.text)
-                    .foregroundStyle(palette.text)
-                    .padding(Spacing.md)
-                    .background(palette.surfaceMuted)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
-                    .focused($isNameFocused)
-                    .onSubmit(submit)
-                    .disabled(isCreating)
-            }
+            field("Wave name", text: $waveName)
+                .focused($isNameFocused)
+                .accessibilityIdentifier("new-wave-name")
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Objective (optional)")
-                    .font(Typography.meta)
-                    .foregroundStyle(palette.textSecondary)
-
-                TextField("What this Wave is for", text: $objective)
+                caption("Objective (optional)")
+                field("What this Wave is for", text: $objective)
                     .accessibilityIdentifier("new-wave-objective")
-                    .textFieldStyle(.plain)
-                    .font(Typography.text)
-                    .foregroundStyle(palette.text)
-                    .padding(Spacing.md)
-                    .background(palette.surfaceMuted)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
-                    .onSubmit(submit)
-                    .disabled(isCreating)
             }
 
             if let errorMessage {
                 Text(errorMessage)
                     .font(Typography.meta)
                     .foregroundStyle(palette.failure)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("new-wave-error")
             }
 
-            HStack(spacing: Spacing.md) {
+            HStack(spacing: Spacing.sm) {
                 Spacer()
 
                 Button("Cancel", action: onCancel)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(palette.textSecondary)
+                    .buttonStyle(LoopflowButtonStyle())
+                    .keyboardShortcut(.cancelAction)
                     .disabled(isCreating)
 
                 Button {
@@ -698,13 +673,29 @@ struct CreateWaveSheet: View {
                     if isCreating {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("Create wave")
+                        Text("Create")
                     }
                 }
                 .buttonStyle(LoopflowButtonStyle(.accent))
                 .disabled(isCreating || trimmedName.isEmpty || selectedRepoPath.isEmpty)
+                .accessibilityIdentifier("new-wave-create")
             }
         }
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text).font(Typography.meta).foregroundStyle(palette.textSecondary)
+    }
+
+    private func field(_ prompt: String, text: Binding<String>) -> some View {
+        TextField(prompt, text: text)
+            .textFieldStyle(.plain)
+            .font(Typography.text)
+            .foregroundStyle(palette.text)
+            .padding(Spacing.sm)
+            .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: CornerRadius.control))
+            .onSubmit(submit)
+            .disabled(isCreating)
     }
 
     private func submit() {

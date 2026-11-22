@@ -56,27 +56,23 @@ struct TaskCommentsView: View {
             .font(Typography.text)
             .foregroundStyle(palette.textSecondary)
             .textSelection(.enabled)
-            .padding(.leading, 17)
+            .padding(.leading, Spacing.lg)
             .accessibilityIdentifier("task-comments-status")
     }
 
     private func threadView(_ thread: TaskComments) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if let reason = thread.refreshError {
-                Text("Latest read failed: \(reason)")
-                    .font(Typography.text)
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
+                FailureLine("Latest read failed.", machine: reason)
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("task-comments-status")
             }
             if thread.comments.isEmpty {
-                Text("No comments.")
-                    .font(Typography.text)
-                    .foregroundStyle(palette.textSecondary)
+                Text("No comments.").emptyLine()
                     .accessibilityIdentifier("task-comments-empty")
             }
             ForEach(Array(thread.comments.enumerated()), id: \.element.id) { index, comment in
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                         Text(Self.author(comment.author))
                             .font(Typography.textStrong)
@@ -97,7 +93,7 @@ struct TaskCommentsView: View {
                     }
                     let body = Self.readableBody(comment.body)
                     if body.isEmpty {
-                        Text("Empty comment").font(Typography.text).foregroundStyle(palette.textSecondary)
+                        Text("Empty comment.").emptyLine()
                     } else {
                         MarkdownBlocks(source: body).equatable()
                     }
@@ -110,7 +106,7 @@ struct TaskCommentsView: View {
                 .accessibilityIdentifier("task-comment-\(comment.id)")
             }
         }
-        .padding(.leading, 17)
+        .padding(.leading, Spacing.lg)
         .frame(maxWidth: 680, alignment: .leading)
         .accessibilityIdentifier("task-comments-thread")
     }

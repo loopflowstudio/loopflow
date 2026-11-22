@@ -42,43 +42,6 @@ struct WaveLensTests {
         #expect(WaveLensColor.unknown.tone.ink(in: .light) != WaveLensColor.black.tone.ink(in: .light))
     }
 
-    // MARK: - Task row (shared condition, verbatim)
-
-    @Test("task lens is the shared level and reason, verbatim")
-    func taskLensIsVerbatim() throws {
-        let condition = try makeCondition(
-            state: "blocked",
-            reason: "local Task progress requires recovery"
-        )
-        let lens = WaveLens.forTask(condition)
-        #expect(lens.color == .red)
-        #expect(lens.reason == "local Task progress requires recovery")
-    }
-
-    @Test("unavailable task evidence stays unknown with its reason, never black")
-    func unavailableTaskIsUnknown() throws {
-        let condition = try makeCondition(state: "unknown", reason: "failed to inspect Task worktree")
-        let lens = WaveLens.forTask(condition)
-        #expect(lens.color == .unknown)
-        #expect(lens.reason == "failed to inspect Task worktree")
-    }
-
-    @Test("the shared W2-123 fixture maps every state verbatim")
-    func sharedFixtureMapsVerbatim() throws {
-        let tasks = try loadConditionFixture()
-        for (_, task) in tasks {
-            let lens = WaveLens.forTask(task.condition)
-            #expect(lens.color == WaveLensColor(task.condition.state))
-            #expect(lens.reason == task.condition.reason)
-        }
-        // The unavailable row is the one that must not collapse to black.
-        let unavailable = try #require(tasks["unavailable"])
-        #expect(WaveLens.forTask(unavailable.condition).color == .unknown)
-        // Off-and-clean rows are genuinely black — the fixture proves both.
-        #expect(WaveLens.forTask(try #require(tasks["clean_backlog"]).condition).color == .black)
-        #expect(WaveLens.forTask(try #require(tasks["completed"]).condition).color == .black)
-    }
-
     // MARK: - Project row (derived from Task conditions)
 
     @Test("a red Task wins over a black sibling")
@@ -139,7 +102,6 @@ struct WaveLensTests {
             ),
             WaveLens.forWave(activeTasks: 1),
             WaveLens.forWave(activeTasks: 0),
-            WaveLens.forTask(try makeCondition(state: "unknown", reason: "unread")),
             WaveLens.forTasks(tasks: []),
         ]
         for lens in lenses {
@@ -148,25 +110,6 @@ struct WaveLensTests {
     }
 
     // MARK: - Fixtures
-
-    private func loadConditionFixture(sourceFile: String = #filePath) throws -> [String: RoadmapTask] {
-        let fixture = URL(fileURLWithPath: sourceFile)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto/task_condition_states.json")
-        return try JSONDecoder().decode(
-            [String: RoadmapTask].self,
-            from: Data(contentsOf: fixture)
-        )
-    }
-
-    private func makeCondition(state: String, reason: String) throws -> TaskConditionSnapshot {
-        let json = """
-        {"state":"\(state)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null},"unresolved_execution":false}
-        """
-        return try JSONDecoder().decode(TaskConditionSnapshot.self, from: Data(json.utf8))
-    }
 
     private func makeTask(state: String, reason: String) throws -> RoadmapTask {
         let json = """

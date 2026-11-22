@@ -57,10 +57,12 @@ struct TaskGraphTests {
     @Test("Separate catalogs retain invalid entries and compiled composition")
     func graphFixtures() throws {
         let catalog = try JSONDecoder().decode([GraphCatalogEntry].self, from: fixture("graph_catalog.json"))
-        let workflows = catalog.map(WorkflowCatalogEntry.init)
         #expect(catalog.map(\.id) == ["feature", "broken"])
-        #expect(workflows[0].workflow?.steps.isEmpty == false)
-        #expect(workflows[1].source == ".lf/graphs/broken.yaml" && workflows[1].unavailable != nil && workflows[1].workflow == nil)
+        let outline = try #require(catalog[0].workflow)
+        #expect(outline.steps.map(\.name) == ["design", "pursue", "xor-route", "queue"])
+        #expect(outline.steps.map(\.interactive) == [false, true, false, false])
+        #expect(outline.interactiveSteps.map(\.name) == ["demo"] && outline.sentence == "You take part at demo.")
+        #expect(catalog[1].source == ".lf/graphs/broken.yaml" && catalog[1].unavailable != nil && catalog[1].workflow == nil)
         #expect(catalog[0].compiled?.steps.count == 8 && catalog[1].unavailable != nil)
         let compiled = try #require(catalog[0].compiled)
         let composition = try #require(catalog[0].composition)
@@ -87,6 +89,11 @@ struct TaskGraphTests {
         #expect(all.compiled.node(3)?.label == "implement")
 
         var missing = try #require(JSONSerialization.jsonObject(with: fixture("graph_composition.json")) as? [String: Any])
+        var absent = missing
+        absent.removeValue(forKey: "workflow")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(GraphCatalogEntry.self, from: JSONSerialization.data(withJSONObject: absent))
+        }
         var body = try #require(missing["composition"] as? [String: Any])
         body.removeValue(forKey: "items")
         missing["composition"] = body
@@ -520,7 +527,7 @@ struct TaskGraphProofTests {
             try press("\r", keyCode: 36, in: window)
             try await settle(window)
             #expect(expanded("empty"))
-            #expect(try find("composition-group-\(prefix)empty").find(text: "No steps").string() == "No steps")
+            #expect(try find("composition-group-\(prefix)empty").find(text: "No steps.").string() == "No steps.")
             try press("\u{f702}", keyCode: 123, in: window)
             try await settle(window)
             #expect(!expanded("empty"))

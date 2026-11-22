@@ -322,6 +322,16 @@ final class WorkModel {
         return task.opensConversationAutomatically && taskWorkspaceIdentity(task) != nil
     }
 
+    /// A repository whose plan was read and holds nothing, with no conversation
+    /// attached, opening or failed: `NoPlannedWork` stands in for its page until
+    /// a conversation opens or a Task exists.
+    func repositoryIsEmpty(_ workspace: SessionsWorkspace) -> Bool {
+        workspace.key.kind == .repository && roadmap.value != nil && !showsSavedWork
+            && visibleWaves.isEmpty && visibleTasks.isEmpty
+            && workspace.conversationError == nil && !conversationIsOpening(workspace)
+            && !workspace.multiplexer.layout.allPanes.contains { $0.sessionId != nil }
+    }
+
     private func taskWorkspaceIdentity(_ task: RoadmapTask) -> WorkspaceIdentity? {
         navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
     }
@@ -1277,10 +1287,6 @@ final class WorkModel {
     private var graphCatalogKey: String { repoPath ?? "" }
     var graphCatalog: Reading<[GraphCatalogEntry]> {
         graphCatalogReadings[graphCatalogKey] ?? .loading
-    }
-    /// The same read, each graph seen as a Workflow.
-    var workflowCatalog: Reading<[WorkflowCatalogEntry]> {
-        graphCatalog.map { $0.map(WorkflowCatalogEntry.init) }
     }
     /// Comment threads, read on demand for the shown Task.
     private(set) var comments = TaskReadings<TaskComments>()
@@ -2259,6 +2265,11 @@ final class WorkModel {
         return (sessions.value ?? []).filter { $0.names(task: id) }
     }
 
+    /// What a Task's programs report, for its row and the title bar.
+    func programStatus(task id: String) -> SessionProgramStatus {
+        SessionProgramStatus(sessions: taskSessions(id), unavailable: sessions.failure)
+    }
+
     /// ⌘N: the Nth Task row on screen.
     func selectSidebarTask(slot: Int) {
         let ids = sidebarTaskIDs
@@ -2645,7 +2656,7 @@ final class WorkModel {
         state.query = ""
         state.selection = []
         state.select(created.receipt.task.id)
-        state.notice = "Filed \(created.receipt.task.identifier)"
+        state.notice = .did("Filed \(created.receipt.task.identifier)")
         navigation.backlogs[view] = state
         // Its backlog row is the Task's presentation; nothing opens.
         await CreationRecovery.shared.presented([requestID])
@@ -3662,5 +3673,34 @@ enum TaskOrderDrag {
     static func token(_ workID: String) -> String { "task-order:" + workID }
     static func taskID(_ token: String) -> String? {
         token.hasPrefix("task-order:") ? String(token.dropFirst("task-order:".count)) : nil
+    }
+}
+
+extension WorkModel {
+    /// The Wave a Task is filed in, else the repository.
+    func scopeName(_ wave: WaveSnapshot?) -> String { wave?.displayName ?? repositoryName }
+
+    /// Whose choice a workflow is, from the layer Rust says chose it: "your
+    /// default", "loopflow's default" for the scope it follows, "the default"
+    /// for the builtin, and "for this Task only" when the Task has its own.
+    func workflowChoice(source: String?, wave: WaveSnapshot?) -> String {
+        switch source {
+        case nil: "for this Task only"
+        case "personal": "your default"
+        case "repository": "\(scopeName(wave))'s default"
+        default: "the default"
+        }
+    }
+
+    /// The named workflow as the catalog outlines it; nil until the catalog is
+    /// read, or for a Graph that does not load.
+    func workflowOutline(_ name: String?) -> WorkflowOutline? {
+        name.flatMap { name in graphCatalog.value?.first { $0.name == name }?.workflow }
+    }
+
+    /// The workflow a Task's first run takes up and whose choice it is:
+    /// "feature, loopflow's default".
+    func workflowSelection(_ task: RoadmapTask) -> String? {
+        task.graphName.map { "\($0), \(workflowChoice(source: task.graphSource, wave: self.task(id: task.id)?.wave?.wave))" }
     }
 }

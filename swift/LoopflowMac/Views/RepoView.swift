@@ -63,8 +63,7 @@ struct RepoView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .foregroundStyle(palette.text)
             if let error = portfolioService.error {
-                Text(error).font(Typography.meta).foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled).padding(Spacing.sm)
+                FailureLine("Repositories did not load.", machine: error).padding(Spacing.sm)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

@@ -9,7 +9,7 @@ struct SessionActionSheet: View {
         if model.navigation.binding != nil {
             bindingForm
         } else if let draft = model.navigation.renaming {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: Spacing.md) {
                 Text("Rename Session").font(Typography.textStrong)
                 TextField("Session name", text: Binding(
                     get: { model.navigation.renaming?.text ?? draft.text },
@@ -19,15 +19,16 @@ struct SessionActionSheet: View {
                 HStack {
                     Button("Cancel") { model.cancelSessionRename() }.keyboardShortcut(.cancelAction)
                     Button("Save") { model.commitSessionRename() }.keyboardShortcut(.defaultAction)
+                        .buttonStyle(LoopflowButtonStyle(.accent))
                 }
-            }.padding(20).frame(width: 380)
+            }.buttonStyle(LoopflowButtonStyle()).padding(Spacing.xl).frame(width: 380)
         }
     }
 
     @ViewBuilder
     private var bindingForm: some View {
         if let draft = model.navigation.binding {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: Spacing.md) {
                 Text(draft.assignedTaskId == nil ? "Bind “\(draft.title)” to a Task" : "Make “\(draft.title)” primary")
                     .font(Typography.textStrong)
                 if draft.assignedTaskId == nil {
@@ -73,12 +74,13 @@ struct SessionActionSheet: View {
                 }
                 Text("Creation keeps this conversation in place. Binding sets its directory to the Task worktree immediately. Already-running clients may keep their original directory. Files stay where they are.")
                 if let error = draft.error {
-                    Text(error).foregroundStyle(palette.warning)
+                    FailureLine("Not bound.", machine: error)
                         .accessibilityIdentifier("session-bind-error")
                 }
                 Button("Cancel") { model.cancelSessionBinding() }.disabled(draft.submitting)
             }
-            .padding(16)
+            .buttonStyle(LoopflowButtonStyle())
+            .padding(Spacing.lg)
             .frame(width: 380)
             .lineLimit(nil)
             .fixedSize(horizontal: false, vertical: true)

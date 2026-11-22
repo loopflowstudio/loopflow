@@ -17,10 +17,12 @@ struct BacklogViewTests {
     private enum Holder { case you, someone, nobody }
 
     /// A backlog Task from the shared row fixture, in `wave` on `workflow`. `step`
-    /// makes it a started Task standing at that step; `pr` puts its PR on GitHub.
+    /// makes it a started Task standing at that step; `pr` puts its PR on GitHub;
+    /// `blocked` is why its condition is blocked.
     private func task(_ id: String, rank: Int, holder: Holder = .nobody, wave: String = "wave-a",
                       workflow: String? = "feature", brief: String = "", section: String = "backlog",
-                      step: String? = nil, pr: Int? = nil, unavailable: String? = nil) throws -> RoadmapTask {
+                      step: String? = nil, pr: Int? = nil, unavailable: String? = nil,
+                      blocked: String? = nil) throws -> RoadmapTask {
         let rows = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("task_history_rows.json"))) as? [[String: Any]])
         var row = rows[0]
@@ -39,6 +41,10 @@ struct BacklogViewTests {
         row["section"] = section
         row["graph_name"] = workflow.map { $0 as Any } ?? NSNull()
         row["lifecycle"] = step == nil ? "unstarted" : "idle"
+        var condition = try #require(row["condition"] as? [String: Any])
+        condition["state"] = blocked == nil ? "clear" : "blocked"
+        condition["reason"] = blocked ?? ""
+        row["condition"] = condition
         row["run_control"] = ["unavailable": unavailable.map { $0 as Any } ?? NSNull()]
         row["execution"] = step.map { ["state": "idle", "reason": "Stopped at \($0)", "step": $0, "captured": NSNull(),
                                               "died": NSNull(), "outlook": NSNull()] as Any }
@@ -91,9 +97,40 @@ struct BacklogViewTests {
         #expect(list.waveLabel(list.rows[1]) == "Infrastructure" && list.waveLabel(list.rows[0]) == nil)
         #expect(self.list(try tasks()) { $0.filter = .available }.ids == ["A-1", "B-1", "A-3", "A-4", "A-5"])
         #expect(self.list(try tasks()) { $0.query = "brief-word" }.ids == ["A-2"])
-        #expect(list.text(heading: ["Product"]).contains("  A-1 Task A-1 ●\n  B-1 Task B-1 · Infrastructure ◌\n  A-2 Task A-2 ○"))
-        // A started Task nobody holds says where it stands.
-        #expect(list.text(heading: ["Product"]).contains("  A-5 Task A-5 · at demo · PR #12 ◌"))
+        // Ownership is a word, and an unclaimed row says nothing.
+        #expect(list.text(heading: ["Product"]).contains(
+            "  A-1 Task A-1 · claimed by you\n  B-1 Task B-1 · Infrastructure\n  A-2 Task A-2 · claimed by Ada Lovelace\n  A-3 Task A-3\n"))
+        // A started Task nobody holds leads with the word its row shows everywhere.
+        #expect(list.text(heading: ["Product"]).contains("  A-5 Task A-5 · Idle, at demo, PR #12"))
+        #expect(BacklogList.standing(list.rows[0]) == nil)
+        // A Task in another Wave that someone claimed names both.
+        let theirs = try task("B-2", rank: 1, holder: .someone, wave: "wave-b")
+        #expect(list.ownership(theirs) == "Infrastructure, claimed by Ada Lovelace")
+    }
+
+    @Test func aRowSaysItsStandingOwnershipAndReasonAndItsChevronClosesTheBrief() throws {
+        let stuck = try task("A-6", rank: 5, blocked: "merge the PR on GitHub")
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("passive") }, repoPath: try roadmap().wave.repo)
+        let view = WorkNavigation.Board.wave(try roadmap().wave.id)
+        model.applyFixture(roadmap: .available(try snapshot()), waves: .available([]), workActivity: .loading, repos: [])
+        // An unstarted Task that is blocked still says so, with the reason on its own line.
+        #expect(BacklogList.standing(stuck) == "Blocked")
+        #expect(TaskRowStatus(task: stuck).line == "merge the PR on GitHub")
+        // The bar begins with what it acts on.
+        let none = BacklogToolbar(model: model, view: view, list: list(try tasks()), perform: { _ in })
+        #expect(try none.inspect().find(viewWithAccessibilityIdentifier: "backlog-selected").text().string() == "Nothing selected")
+        let two = BacklogToolbar(model: model, view: view, list: list(try tasks()) { $0.selection = ["A-1", "A-3"] },
+                                 perform: { _ in })
+        #expect(try two.inspect().find(viewWithAccessibilityIdentifier: "backlog-selected").text().string() == "2 selected")
+        #expect(throws: (any Error).self) { try two.inspect().find(viewWithAccessibilityIdentifier: "backlog-position") }
+        // The chevron opens a row's brief and closes it again.
+        let first = try #require(model.backlog(view).rows.first)
+        let backlog = BacklogView(model: model, view: view)
+        try backlog.inspect().find(viewWithAccessibilityIdentifier: "backlog-row-brief-\(first.id)").button().tap()
+        #expect(model.backlog(view).opened?.id == first.id)
+        try BacklogView(model: model, view: view).inspect()
+            .find(viewWithAccessibilityIdentifier: "backlog-row-brief-\(first.id)").button().tap()
+        #expect(model.backlog(view).opened == nil)
     }
 
     @Test func aStartedRowNobodyHoldsOpensAndStartReachesOnlyTheUnstarted() async throws {
@@ -117,7 +154,7 @@ struct BacklogViewTests {
         #expect(model.selection == .task(id: "A-5"))
         // A selection of both counts the unstarted, says why the other is left, and starts only those.
         let mixed = list(tasks) { $0.selection = ["A-3", "A-4", "A-5"] }
-        #expect(mixed.startLabel == "Start 2 · feature")
+        #expect(mixed.startLabel == "Start 2 with feature")
         #expect(BacklogList.startedNote(mixed.selected) == "1 started Task: open it to continue")
         #expect(BacklogList.startUnavailable(mixed.selected) == nil)
         model.navigation.backlogs[view] = mixed.state
@@ -127,7 +164,7 @@ struct BacklogViewTests {
         for _ in 0..<200 where await runs.calls.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await runs.calls.map { $0.joined(separator: " ") }.sorted() == [
             "task run A-3 auto --json", "task run A-4 auto --json"])
-        #expect(model.navigation.backlogs[view]?.notice == "Started 2")
+        #expect(model.navigation.backlogs[view]?.notice == .did("Started 2"))
         #expect(model.navigation.backlogs[view]?.selection == ["A-5"])
         // Several started Tasks leave Start off and say why.
         let both = [try task("A-6", rank: 5, step: "demo"), try task("A-7", rank: 6, step: "gate")]
@@ -138,7 +175,7 @@ struct BacklogViewTests {
         #expect(BacklogList.startUnavailable(stuck) == "Task checkout is on another Machine")
         // Claiming a started Task says where it went.
         model.claimBacklog(started.selected, in: view)
-        #expect(model.navigation.backlogs[view]?.notice == "Claimed A-5 · now in Working")
+        #expect(model.navigation.backlogs[view]?.notice == .did("Claimed A-5, now in Working"))
     }
 
     @Test func filterAndSearchDropHiddenRowsAndAbandonNamesWhatItRemoves() throws {
@@ -165,13 +202,13 @@ struct BacklogViewTests {
         var state = BacklogState()
         state.select("A-1")
         let one = list(tasks) { $0 = state }
-        #expect(one.opened?.id == "A-1" && one.startLabel == "Start · feature")
+        #expect(one.opened?.id == "A-1" && one.startLabel == "Start with feature")
         state.step(1, extending: true, rows: one.ids)
         state.step(1, extending: true, rows: one.ids)
         let three = list(tasks) { $0 = state }
         #expect(three.selected.map(\.id) == ["A-1", "B-1", "A-2"])
         #expect(three.opened == nil)
-        #expect(three.startLabel == "Start 3 · feature 2 · code 1")
+        #expect(three.startLabel == "Start 3: feature 2, code 1")
         // Nothing selected: Start names no workflow, and the bar is off.
         #expect(list(tasks).startLabel == "Start")
         // A Task Rust sent no Graph for is started without a name.
@@ -212,8 +249,7 @@ struct BacklogViewTests {
         let view = WorkNavigation.Board.wave("wave-a")
         let change = try #require(await model.rankBacklog(list(tasks).nudge(["A-1"], by: 1), in: view))
         await model.revertBacklog(change, in: view)
-        let notice = try #require(model.navigation.backlogs[view]?.notice)
-        #expect(notice.hasPrefix("Order not saved · A-1"), "\(notice)")
+        #expect(model.navigation.backlogs[view]?.notice == .failed(Failure(what: "A-1's order not saved.", machine: "store is locked")))
     }
 
     @Test func claimIsOffForSomeoneElsesTaskAndMineOffersAvailable() throws {
@@ -229,14 +265,17 @@ struct BacklogViewTests {
         let mine = list(unclaimed) { $0.filter = .mine }
         #expect(mine.rows.isEmpty && mine.empty.step == .showAvailable)
         #expect(list(tasks) { $0.query = "nothing like this" }.empty.step == .clearSearch)
-        #expect(list([]).empty.step == .new && list([]).empty.title == "Nothing is waiting in this Wave")
+        #expect(list([]).empty.step == .new && list([]).empty.title == "Nothing is waiting in this Wave.")
     }
 
     @Test func startFlowsReadStopsMergesAndPiecesFromTheCatalog() throws {
         func entry(_ name: String, _ description: String?, _ steps: [[String: Any]], includedBy: [String] = [],
                    runs: String = "task") throws -> GraphCatalogEntry {
+            let stops = steps.filter { $0["interactive"] as? Bool == true }
+                .map { ["name": $0["label"], "skill": $0["label"], "description": NSNull()] }
             let json: [String: Any] = ["name": name, "description": description ?? NSNull(), "source": NSNull(),
                                        "compiled": ["name": name, "steps": steps], "composition": NSNull(), "unavailable": NSNull(),
+                                       "workflow": ["steps": [[String: Any]](), "interactive_steps": stops, "sentence": ""],
                                        "included_by": includedBy, "runs": runs]
             return try JSONDecoder().decode(GraphCatalogEntry.self, from: JSONSerialization.data(withJSONObject: json))
         }
@@ -283,6 +322,25 @@ struct BacklogViewTests {
             _ = try backlogView.inspect().find(viewWithAccessibilityIdentifier: "backlog-brief-\(first.id)")
         }
         #expect(model.backlog(view).text(heading: []).contains("› \(first.task.identifier)"))
+    }
+
+    @Test func aFailedBriefSaveIsAFailureLineAndAFiledTaskStaysText() async throws {
+        let roadmap = try roadmap()
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("store is locked") },
+                              repoPath: roadmap.wave.repo)
+        model.applyFixture(roadmap: .available(try snapshot()), waves: .available([]), workActivity: .loading, repos: [])
+        let view = WorkNavigation.Board.wave(roadmap.wave.id)
+        let task = try #require(model.backlog(view).rows.first)
+        #expect(await model.saveBacklogBrief(task, text: "New brief", in: view) == nil)
+        let failed = try BacklogView(model: model, view: view).inspect().find(FailureLine<EmptyView>.self)
+        _ = try failed.find(text: "Brief not saved.")
+        _ = try failed.find(text: "store is locked")
+
+        model.navigation.backlogs[view]?.notice = .did("Filed \(task.task.identifier)")
+        let filed = try BacklogView(model: model, view: view).inspect()
+        #expect(try filed.find(viewWithAccessibilityIdentifier: "backlog-notice").find(ViewType.Text.self).string()
+            == "Filed \(task.task.identifier)")
+        #expect(throws: (any Error).self) { try filed.find(FailureLine<EmptyView>.self) }
     }
 
     @Test func wavePartsHideOnHoverAndTheBacklogHeaderShowsThem() throws {

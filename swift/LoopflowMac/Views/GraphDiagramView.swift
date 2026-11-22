@@ -95,7 +95,7 @@ private struct CompositionDisclosures: View {
                     get: { expanded.contains(id) },
                     set: { if $0 { expanded.insert(id) } else { expanded.remove(id) } }
                 )) {
-                    if children.isEmpty { Text("No steps").font(Typography.meta) }
+                    if children.isEmpty { Text("No steps.").emptyLine() }
                     AnyView(CompositionDisclosures(items: children, compiled: compiled, expanded: $expanded))
                 } label: {
                     Text("\(name) · \(item.nodeKeys.count) steps").font(Typography.mono)
@@ -125,7 +125,7 @@ private struct TemplateDisclosureStyle: DisclosureGroupStyle {
     func makeBody(configuration: Configuration) -> some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Button { configuration.isExpanded.toggle() } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: Spacing.xs) {
                     Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
                         .font(Typography.meta).fontWeight(.semibold)
                         .frame(width: 12)
@@ -146,7 +146,7 @@ private struct TemplateDisclosureStyle: DisclosureGroupStyle {
             }
             .accessibilityValue(configuration.isExpanded ? "Expanded" : "Collapsed")
             if configuration.isExpanded {
-                configuration.content.padding(.leading, 16)
+                configuration.content.padding(.leading, Spacing.lg)
             }
         }
     }
@@ -429,8 +429,8 @@ struct GraphDiagram: View {
             Text(title)
                 .font(Typography.textStrong)
                 .foregroundStyle(color)
-                .padding(.horizontal, 10)
-                .padding(.top, 1)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.top, Spacing.xxs)
                 .help(span.evidence.map { "\($0.traversals) returns along this arrow" } ?? "Loop")
                 .accessibilityIdentifier("task-graph-loop-\(span.decider)")
         }
@@ -446,7 +446,7 @@ struct GraphDiagram: View {
         return Button {
             inspected = selected ? nil : node.key
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: Spacing.xs) {
                 Text("\(number)")
                     .font(Typography.meta)
                     .monospacedDigit()
@@ -458,8 +458,8 @@ struct GraphDiagram: View {
                     .lineLimit(1)
                     .foregroundStyle(tone == .neutral ? palette.text : tone.text(in: palette))
             }
-            .padding(.leading, 6)
-            .padding(.trailing, 8)
+            .padding(.leading, Spacing.xs)
+            .padding(.trailing, Spacing.sm)
             .frame(width: width, height: Self.nodeHeight, alignment: .leading)
             // An opaque base keeps state colors legible over the loop tint.
             .background(shape.fill(tone == .neutral ? palette.surface : tone.fill(in: palette)))
@@ -479,7 +479,7 @@ struct GraphDiagram: View {
             }
             .overlay {
                 if selected {
-                    RoundedRectangle(cornerRadius: CornerRadius.row + 3).stroke(palette.selectionEdge, lineWidth: 2).padding(-3)
+                    RoundedRectangle(cornerRadius: CornerRadius.pane).stroke(palette.selectionEdge, lineWidth: 2).padding(-Spacing.xs)
                 }
             }
             .contentShape(Rectangle())
@@ -560,7 +560,7 @@ private struct GraphNodeDetail: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
             HStack(spacing: Spacing.sm) {
                 Text(node.label).font(Typography.mono)
                 Text(GraphPalette.describe(state)).font(Typography.meta).foregroundStyle(palette.textSecondary)

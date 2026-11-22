@@ -125,8 +125,9 @@ extension WorkModel {
             rows = waves + tasks
         case .wave(let id):
             rows = (wave(id: id)?.tasks.items ?? []).map { task in
-                WorkPaletteRow(id: .task(task.id), title: task.task.name,
-                    detail: task.task.identifier + (task.awaitsStart ? " · Not started" : " · \(task.lifecycle.label.capitalized)"), key: task.task.identifier)
+                let word = TaskRowStatus(task: task, status: programStatus(task: task.id)).word
+                return WorkPaletteRow(id: .task(task.id), title: task.task.name,
+                    detail: task.task.identifier + (word.map { " · \($0)" } ?? ""), key: task.task.identifier)
             }
         }
         guard !query.isEmpty else { return rows }
@@ -181,12 +182,12 @@ struct WorkPalette: View {
         let rows = rows
         let working = Set(model.workingTaskIDs)
         let selection = rows.first(where: { $0.id == highlighted })?.id ?? rows.first?.id
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Spacing.md) {
             if sidebarOnly {
                 HStack {
                     Text("Search sidebar").font(Typography.meta)
                     Spacer()
-                    Button("Search all Work") { model.navigation.palette = .search }
+                    Button("Search all Work") { model.navigation.palette = .search }.buttonStyle(LoopflowButtonStyle())
                 }
             }
             PaletteSearchField(text: $search, move: move, submit: {
@@ -214,18 +215,18 @@ struct WorkPalette: View {
             }
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 2) {
+                    LazyVStack(spacing: Spacing.xxs) {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                             if search.isEmpty, index == 0 || group(rows[index - 1], working: working) != group(row, working: working) {
                                 Text(group(row, working: working)).font(Typography.meta).foregroundStyle(palette.textSecondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                                    .frame(maxWidth: .infinity, alignment: .leading).padding(Spacing.sm)
                             }
                             Button { activate(row.id) } label: {
-                                VStack(alignment: .leading, spacing: 3) {
+                                VStack(alignment: .leading, spacing: Spacing.xxs) {
                                     Text(row.title).font(Typography.text)
                                     Text(row.detail).font(Typography.meta).foregroundStyle(palette.textSecondary)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(Spacing.sm)
                                 .background(selection == row.id ? palette.surfaceMuted : .clear)
                             }.buttonStyle(.plain).id(row.id)
                         }
@@ -236,7 +237,7 @@ struct WorkPalette: View {
             }
             Text("↑↓ Select    ↩ Open    Esc Cancel").font(Typography.meta).foregroundStyle(palette.textSecondary)
         }
-        .padding(20).frame(width: 560, height: 420).background(palette.background)
+        .padding(Spacing.xl).frame(width: 560, height: 420).background(palette.background)
         .onChange(of: search) { _, _ in highlighted = rows.first?.id }
         .onExitCommand { model.navigation.palette = nil }
         .task {
@@ -261,11 +262,11 @@ struct WorkPalette: View {
 struct TaskLinkView: View {
     @Bindable var model: WorkModel
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
             Text("Open Task").serif(.title)
             if let result = model.taskLinkReading.value {
                 if result.tasks.items.isEmpty { Text("No exact Task found in available planning.") }
-                if let reason = result.tasks.unavailableReason { Text(reason) }
+                if let reason = result.tasks.unavailableReason { FailureLine("Planning is unavailable.", machine: reason) }
                 ForEach(result.tasks.items) { task in
                     let wave = result.waves.first { $0.wave.id == task.task.waveId }
                     Button("\(task.task.identifier) · \(task.task.name)\n\(task.task.repo)") {
@@ -278,8 +279,8 @@ struct TaskLinkView: View {
                 Button("Retry") {
                     Task { await model.retryTaskLink() }
                 }
-            }
-        }.padding(24).frame(width: 560).font(Typography.text)
+            }.buttonStyle(LoopflowButtonStyle())
+        }.padding(Spacing.xxl).frame(width: 560).font(Typography.text)
     }
 }
 
@@ -367,17 +368,16 @@ struct WorkPaletteShortcut: NSViewRepresentable {
 }
 
 struct GraphCatalogInspector: View {
-    @Environment(\.palette) private var palette
     let entry: GraphCatalogEntry?
     @Bindable var navigation: WorkNavigation
     let model: WorkModel
     @State private var sourceError: String?
     @Environment(\.dismiss) private var dismiss
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
             Text(entry?.name ?? "Graph unavailable").serif(.title)
             if let entry {
-                Text(entry.source ?? "builtin Graph").font(Typography.mono)
+                Text(entry.source ?? "Built-in Graph").font(entry.source == nil ? Typography.text : Typography.mono)
                 Button(entry.source == nil ? "Customize" : "Edit") {
                     Task {
                         do {
@@ -389,7 +389,7 @@ struct GraphCatalogInspector: View {
                 }
             }
             if let error = sourceError {
-                Text(error).foregroundStyle(palette.warning)
+                FailureLine("The definition did not open.", machine: error)
             }
             Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }
             if let compiled = entry?.compiled, let composition = entry?.composition {
@@ -397,21 +397,20 @@ struct GraphCatalogInspector: View {
 
             } else { Text(entry?.unavailable ?? "Refresh the Graph catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
-        }.padding(24).frame(width: 780)
+        }.buttonStyle(LoopflowButtonStyle()).padding(Spacing.xxl).frame(width: 780)
     }
 }
 
 struct WorkflowCatalogInspector: View {
-    @Environment(\.palette) private var palette
-    let entry: WorkflowCatalogEntry?
+    let entry: GraphCatalogEntry?
     let model: WorkModel
     @State private var sourceError: String?
     @Environment(\.dismiss) private var dismiss
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
             Text(entry?.name ?? "Workflow unavailable").serif(.title)
             if let entry {
-                Text(entry.source ?? "builtin Workflow").font(Typography.mono)
+                Text(entry.source ?? "Built-in Workflow").font(entry.source == nil ? Typography.text : Typography.mono)
                 Button(entry.source == nil ? "Customize" : "Edit") {
                     Task {
                         do {
@@ -423,14 +422,14 @@ struct WorkflowCatalogInspector: View {
                 }
             }
             if let error = sourceError {
-                Text(error).foregroundStyle(palette.warning)
+                FailureLine("The definition did not open.", machine: error)
             }
             Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }
-            if let workflow = entry?.workflow {
-                WorkflowSteps(workflow: workflow)
+            if let outline = entry?.workflow {
+                WorkflowLine(outline: outline)
             } else { Text(entry?.unavailable ?? "Refresh the Workflow catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
-        }.padding(24).frame(width: 780)
+        }.buttonStyle(LoopflowButtonStyle()).padding(Spacing.xxl).frame(width: 780)
     }
 }
 
@@ -449,7 +448,7 @@ private struct PaletteSearchField: NSViewRepresentable {
         field.isBordered = false
         field.focusRingType = .none
         field.drawsBackground = false
-        field.font = NSFont(name: Typography.sansFace, size: 13) ?? .systemFont(ofSize: 13)
+        field.font = NSFont(name: Typography.sansFace, size: Typography.textSize) ?? .systemFont(ofSize: Typography.textSize)
         field.placeholderString = "Go to a Task, Wave or repository"
         field.setAccessibilityIdentifier("work-palette-search")
         field.delegate = context.coordinator

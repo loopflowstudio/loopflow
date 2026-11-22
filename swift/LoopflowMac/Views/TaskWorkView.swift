@@ -10,20 +10,11 @@ struct TaskWorkflowHeader: View {
     let work: Reading<TaskOverview>
     @Environment(\.palette) private var palette
 
-    private var lifecycleLabel: String {
-        switch task.lifecycle {
-        case .done: "Completed"
-        case .abandoned: "Canceled"
-        default: task.lifecycle.label.capitalized
-        }
-    }
-
     /// What the Task's Workflow reading says, or why there is none yet.
     private var position: String? {
         if let workflow = work.value?.graph { return workflow.sentence }
         if work.value != nil {
-            // The shared resolver reports the first-run default and its owner.
-            return task.graphName.map { "\($0) · \(task.graphSource ?? "")" } ?? "No workflow selected"
+            return model.workflowSelection(task)
         }
         return work.isLoading ? task.setupPosition ?? "Reading workflow…" : nil
     }
@@ -31,11 +22,15 @@ struct TaskWorkflowHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-                Text(lifecycleLabel)
-                    .fontWeight(task.isCompleted ? .semibold : .regular)
-                    .foregroundStyle(task.lifecycle == .done ? palette.success
-                        : task.lifecycle == .abandoned ? palette.failure : palette.textSecondary)
-                    .accessibilityIdentifier("task-lifecycle-status")
+                // The word the Task's row and the title bar say.
+                let standing = TaskRowStatus(task: task, status: model.programStatus(task: task.id))
+                if let word = standing.word {
+                    Text(verbatim: word)
+                        .fontWeight(task.isCompleted ? .semibold : .regular)
+                        .foregroundStyle(standing.tone?.ink(in: palette) ?? palette.textSecondary)
+                        .help(Text(verbatim: standing.detail ?? word))
+                        .accessibilityIdentifier("task-lifecycle-status")
+                }
                 if task.isUnassigned {
                     Text("Unassigned").foregroundStyle(palette.textSecondary)
                 }
@@ -55,8 +50,8 @@ struct TaskWorkflowHeader: View {
             }
         }
         .font(Typography.text)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             palette.background
@@ -126,12 +121,15 @@ struct TaskWorkflowBar: View {
             if let workflow = work.value?.graph {
                 // One line in a 34 pt bar: a sentence that does not fit is cut, with the whole of it in the tooltip.
                 let line = WorkflowLine(graph: workflow, auto: actions.auto == .on, setup: task.setupPosition)
-                line.lineLimit(1).truncationMode(.tail).help(line.sentence)
-            } else {
-                Text(placeholder)
+                line.lineLimit(1).truncationMode(.tail).help(line.sentence ?? workflow.sentence)
+            } else if work.value == nil {
+                Text(work.isLoading ? task.setupPosition ?? "Reading workflow…" : "")
                     .lineLimit(1).truncationMode(.tail)
                     .foregroundStyle(palette.textSecondary)
                     .accessibilityIdentifier("task-workflow-bar-live")
+            } else if let name = task.graphName {
+                // Not started: the workflow its first run takes up, as the catalog outlines it.
+                WorkflowLine(name: name, outline: model.workflowOutline(name))
             }
             Spacer(minLength: 0)
             if let run = actions.run {
@@ -156,67 +154,56 @@ struct TaskWorkflowBar: View {
             .accessibilityLabel("Task actions")
             .accessibilityIdentifier("task-actions")
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, Spacing.md)
         .frame(height: 34)
         .font(Typography.text)
         .background(palette.background)
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("task-workflow-bar")
-        // "Start with…" in "…" lists the workflows a Task without one can take up.
+        // A Task without a Graph draws its workflow from the catalog, and "Start with…" lists the others.
         .task(id: work.value != nil && work.value?.graph == nil) {
             if work.value != nil, work.value?.graph == nil { await model.loadGraphCatalog() }
         }
     }
-
-    /// What the bar says before the Task has a Graph.
-    private var placeholder: String {
-        if work.value == nil { return work.isLoading ? task.setupPosition ?? "Reading workflow…" : "" }
-        return task.graphName.map { "Takes up \($0) when it starts" } ?? "No workflow selected"
-    }
 }
 
-/// A Task's identity wherever it heads Work: the window trail and Dashboard tiles.
-/// Its container sets the primary and secondary text styles.
-struct TaskHeading: View {
-    let task: RoadmapTask
-
-    /// The Task's lifecycle, the state Working Tasks list by; Linear's planning
-    /// state never overrides it. What its run is doing now reads in the Workflow bar.
-    var state: String { task.lifecycle.label.capitalized }
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text(task.task.identifier).font(Typography.mono).fixedSize()
-            // The title truncates first; identifier and state keep their width.
-            Text(task.task.name).lineLimit(1).truncationMode(.tail)
-                .frame(minWidth: 0, alignment: .leading).help(task.task.name)
-            Text(state).foregroundStyle(.secondary).fixedSize()
-                .accessibilityIdentifier("task-heading-state")
-        }
-    }
-}
-
-/// An unstarted Task's Session slot. Showing it starts nothing; Start runs the
-/// Task's Workflow through the same path as `lf task run`.
+/// An unstarted Task's Session slot, in the New Task sheet's words: the
+/// workflow Start will run, whose choice it is and where a person takes part.
+/// Showing it starts nothing; Start runs the same path as `lf task run`.
 struct TaskStartOffer: View {
     let model: WorkModel
     let task: RoadmapTask
+    @Environment(\.compactPanes) private var compact
+
+    private var sentence: String? {
+        let parts = [model.workflowSelection(task).map { "It will run \($0)." },
+                     model.workflowOutline(task.graphName)?.sentence].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
 
     var body: some View {
-        SessionSlotOffer(
-            title: "Not started", systemImage: "play.circle",
-            action: "Start", actionImage: "play.fill",
-            note: "Starts this Task’s Workflow and its first conversation.",
-            unavailable: model.runRefusal(task), help: "lf task run \(task.task.identifier)",
-            accessibilityLabel: "Start \(task.task.identifier)",
-            actionIdentifier: "task-start-\(task.id)",
-            perform: { model.startTaskFromInput(nil, task: task) }
-        ) {
-            Text(task.task.description.isEmpty ? "No description recorded." : task.task.description)
-                .lineLimit(8)
+        let refusal = model.runRefusal(task)
+        // The brief beside the pane and a Dashboard tile's header already name the Task.
+        EmptyState(title: "Not started", sentence: sentence) {
+            Button("Start") { model.startTaskFromInput(nil, task: task) }
+                .buttonStyle(LoopflowButtonStyle(.accent))
+                .disabled(refusal != nil)
+                .help(refusal ?? "lf task run \(task.task.identifier)")
+                .accessibilityLabel("Start \(task.task.identifier)")
+                .accessibilityIdentifier("task-start-\(task.id)")
+            if !compact {
+                Menu("Start with…") {
+                    StartFlowItems(model: model, chosen: task.graphName) { model.startTaskFromInput($0, task: task) }
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .disabled(refusal != nil)
+                .accessibilityIdentifier("task-start-with-\(task.id)")
+            }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("task-start-offer-\(task.id)")
+        .task { await model.loadGraphCatalog() }
     }
 }
 
@@ -381,17 +368,17 @@ struct GraphProcessLog: View {
                     HStack {
                         if let work {
                             Text(work.graph?.sentence ?? (readsWindow ? task?.execution : captured?.row?.execution)?.reason
-                                 ?? "No workflow selected")
+                                 ?? task.flatMap(model.workflowSelection) ?? "")
                                 .accessibilityIdentifier("task-run-position")
                         } else {
                             Text(task?.setupPosition ?? "Reading workflow…")
                         }
                         Spacer()
-                        if let openFiles { Button("Files", action: openFiles) }
-                    }.padding(.vertical, 8)
+                        if let openFiles { Button("Files", action: openFiles).buttonStyle(LoopflowButtonStyle()) }
+                    }.padding(.vertical, Spacing.sm)
                 }
                 if !readsWindow {
-                    Button("Refresh") { refresh += 1 }
+                    Button("Refresh") { refresh += 1 }.buttonStyle(LoopflowButtonStyle())
                 }
                 if let graphs {
                     if let graph = graphs.last {
@@ -406,19 +393,20 @@ struct GraphProcessLog: View {
                                     run: details[graph.id])
                             }
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, Spacing.sm)
                         .accessibilityIdentifier("task-earlier-runs")
                     }
                     if graphs.isEmpty {
-                        Text("No Graph has run.").padding(.vertical, 6)
+                        Text("No Graph has run.").emptyLine()
                             .accessibilityIdentifier("task-graph-processes-empty")
+                            .padding(.vertical, Spacing.xs)
                     }
                 } else if readError == nil {
-                    Text(task == nil ? "Task unavailable" : "Reading Graph processes…").padding(.vertical, 6)
+                    Text(task == nil ? "Task unavailable." : "Reading Graph processes…").emptyLine().padding(.vertical, Spacing.xs)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(Typography.text)
@@ -495,16 +483,20 @@ struct TaskWorkView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
+            let sessions = model.taskExecution[task.id].value?.work.sessions
             WorkSectionHeading(title: "Work") {
-                Button("Refresh") { model.rescanWork() }
+                if sessions?.isEmpty != true { Button("Refresh") { model.rescanWork() }.buttonStyle(LoopflowButtonStyle()) }
             }
-            if let work = model.taskExecution[task.id].value?.work {
-                ForEach(work.sessions) { session in
+            if let sessions {
+                ForEach(sessions) { session in
                     row(session.interactive ? "Session" : "Run", id: session.id, name: session.title,
                         state: session.completedAt == nil ? "open" : "completed")
                 }
-                if work.sessions.isEmpty {
-                    Text("No recorded work.")
+                if sessions.isEmpty {
+                    HStack(spacing: Spacing.sm) {
+                        Text("No recorded work.")
+                        Button("Refresh") { model.rescanWork() }.buttonStyle(LoopflowButtonStyle())
+                    }
                 }
             }
         }
@@ -580,9 +572,9 @@ struct GraphProcessView: View {
             .buttonStyle(WorkPlainButtonStyle())
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             .accessibilityIdentifier("task-work-\(graph.id)")
-            if expanded { detail.padding(.leading, 18) }
+            if expanded { detail.padding(.leading, Spacing.lg) }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, Spacing.xs)
     }
 
     private var tone: WorkTone? {

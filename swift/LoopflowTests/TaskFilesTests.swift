@@ -817,7 +817,7 @@ struct TaskFilesTests {
 
     /// A store over two changed files, each with two separate changes.
     /// `word` is the first hunk's new line, read on every file read.
-    private func twoFileStore(failingOnce: String? = nil,
+    private func twoFileStore(failingOnce: String? = nil, calledOff: Bool = false,
                               word: OSAllocatedUnfairLock<String> = .init(initialState: "uno")) throws -> TaskFilesStore {
         let failed = OSAllocatedUnfairLock(initialState: false)
         let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
@@ -825,14 +825,19 @@ struct TaskFilesTests {
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
         let reply: @Sendable ([String]) throws -> String = { args in
             let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
-            var value = root[args[1] == "changes" ? "changes" : "diff"] as! [String: Any]
-            if args[1] == "changes" {
+            var value = root[args[1]] as! [String: Any]
+            switch args[1] {
+            case "changes":
                 let file = (value["files"] as! [[String: Any]])[0]
                 value["files"] = ["a.swift", "b.swift"].map { path in
                     file.merging(["path": path, "old_path": NSNull(), "changes": 2]) { $1 }
                 }
-            } else {
+            case "file":
+                // No tour. Any other file is the fixture's one line, shorter than a second hunk expects.
+                if args[3] == DiffTour.path { throw RegistryQueryError("no such file") }
+            default:
                 if args[3] == failingOnce, !failed.withLock({ let was = $0; $0 = true; return was }) {
+                    if calledOff { throw CancellationError() }
                     throw RegistryQueryError("the server restarted")
                 }
                 // No path argument is the whole comparison.
@@ -921,6 +926,14 @@ struct TaskFilesTests {
         #expect(store.position(.changes) == "2 of 4")
 
         await store.retryFile("b.swift")
+        #expect(store.fileNotes.isEmpty && store.unread.isEmpty)
+        #expect(store.review?.file("b.swift")?.stops.count == 2)
+    }
+
+    /// A read that was called off is not a failure: the file stays unread and is read again.
+    @Test func aFileReadCalledOffIsNotAFailure() async throws {
+        let store = try twoFileStore(failingOnce: "b.swift", calledOff: true)
+        await store.loadReview()
         #expect(store.fileNotes.isEmpty && store.unread.isEmpty)
         #expect(store.review?.file("b.swift")?.stops.count == 2)
     }
@@ -1129,7 +1142,7 @@ struct TaskFilesTests {
             return nil
         }.first)
         await store.openGap(header, gap: try #require(file.gaps[index]), path: "a.swift", reader: .changes)
-        #expect(store.gapError == nil)
+        #expect(store.openedGaps["a.swift"]?.failure == nil)
         #expect(store.opened(file).lines.compactMap(\.new).contains(5))
         store.reviewSelection = ReviewSelection(path: "a.swift", side: .new, first: 5, last: 5)
         store.commentDraft = "what is five?"
@@ -1138,6 +1151,25 @@ struct TaskFilesTests {
         #expect(store.comments.map(\.anchor) == [["five"]])
         await store.loadReview()
         #expect(store.comments.map(\.detached) == [false])
+    }
+
+    /// Skipped lines that do not load say so under their own file, and the
+    /// words go when that file's opened rows go.
+    @Test func aFailedSkippedLinesOpenBelongsToItsFile() async throws {
+        let store = try twoFileStore()
+        await store.loadReview()
+        let file = try #require(store.review?.file("a.swift"))
+        let (index, header) = try #require(file.blocks.enumerated().compactMap { index, block -> (Int, String)? in
+            if case .hunk(let header) = block, index > 0 { return (index, header) }
+            return nil
+        }.first)
+        await store.openGap(header, gap: try #require(file.gaps[index]), path: "a.swift", reader: .changes)
+        #expect(store.openedGaps["a.swift"]?.failure?.contains("the file changed since this comparison was read") == true)
+        #expect(store.openedGaps["b.swift"] == nil)
+        #expect(store.opened(file) == file)
+
+        store.showStep(ReviewStep(name: "implement", base: "a", commits: [], head: "b"))
+        #expect(store.openedGaps["a.swift"] == nil)
     }
 
     /// A store over `a.swift` and `z.swift` whose checkout holds `tour`.

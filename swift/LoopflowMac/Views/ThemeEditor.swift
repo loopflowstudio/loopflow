@@ -7,7 +7,7 @@ struct ThemeEditor: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
             Text(appearance.selectedName).font(Typography.lede)
                 .accessibilityIdentifier("appearance-theme-name")
             colors("Surfaces", fields: [
@@ -85,8 +85,8 @@ struct ThemeEditor: View {
     }
 
     private func colorGrid<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 10, content: content)
-            .padding(.vertical, 8)
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: Spacing.sm, content: content)
+            .padding(.vertical, Spacing.sm)
     }
 }
 

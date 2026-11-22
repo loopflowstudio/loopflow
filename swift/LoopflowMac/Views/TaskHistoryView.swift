@@ -59,9 +59,7 @@ struct TaskHistoryView: View {
         VStack(alignment: .leading, spacing: 0) {
             if history.isEmpty {
                 Text("No Session history recorded for this Task.")
-                    .font(Typography.text)
-                    .foregroundStyle(palette.textSecondary)
-                    .accessibilityIdentifier("task-history-empty")
+                    .accessibilityIdentifier("task-history-empty").emptyLine()
             }
             if let totals = context?.totals, let line = Self.sources(totals) {
                 contextLine("Task context  \(line)", flagged: totals.contains(where: \.overBudget))
@@ -90,7 +88,7 @@ struct TaskHistoryView: View {
                         .textSelection(.enabled)
                         .help(input.id)
                 }
-                .padding(.vertical, 5)
+                .padding(.vertical, Spacing.xs)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("task-history-input-\(input.id)")
                 if let step = context?.steps.first(where: { $0.input == (input.artifactKey ?? input.sessionId) }) {
@@ -98,7 +96,7 @@ struct TaskHistoryView: View {
                         Self.summary(step),
                         flagged: step.sources.contains(where: \.overBudget)
                     )
-                    .padding(.bottom, 5)
+                    .padding(.bottom, Spacing.xs)
                     .accessibilityIdentifier("task-history-input-context-\(input.id)")
                 }
             }

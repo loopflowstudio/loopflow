@@ -390,6 +390,12 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    selection border. `TaskRowMetadataTests` is `TaskRowTests`. Passed:
    `scripts/test_desktop.sh --filter 'DesktopHeadlessTests|WorkflowLineTests|TypographyDisciplineTests|WorkPaletteTests|TaskRowTests|WaveRowTests|WaveLensTests|ProgramStatusTests|TaskConceptTests|ConsoleWorkspaceTests|WorkModelTests|WorkNavigationTests|BacklogViewTests'`
    (184 tests) except the ⌘⌥1 check above. Not seen in the Dev app.
-6. **Next:** Session strip (agent name `textStrong`, no sparkle; the strip's
-   `StatusMark` is in) and the notice line; then Brief/Diff/Files; DESIGN.md
-   once cfadc6 is on main; QA in three themes at the narrowest width.
+   Realign checked: `git grep` finds none of the replaced styles or views
+   outside `swift/DESIGN.md` (cfadc6's to delete).
+6. **Next:** Session strip: agent name `textStrong`, no provider symbol
+   (`SessionProgramStatus.swift:91–105` `symbol`, "sparkle" for Claude; drop
+   the field if nothing else reads it); the strip's `StatusMark` is in. The
+   notice line: `SessionTransition.explanation` (`SessionRecord.swift:186`)
+   is drawn over the terminal at `SessionsView.swift:2116`; it moves to a
+   `meta` line above the terminal. Then Brief/Diff/Files; DESIGN.md once
+   cfadc6 is on main; QA in three themes at the narrowest width.

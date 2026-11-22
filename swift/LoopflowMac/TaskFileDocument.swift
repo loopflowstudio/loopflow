@@ -1522,15 +1522,21 @@ final class TaskFilesStore {
         }
     }
 
-    /// "2 of 5" once a change is current; the count before.
+    /// "2 of 5" once a change is current; the count before. While the
+    /// comparison's files are still being read the count would climb, so it
+    /// shows how many files are read instead, and "2 of …".
     func position(_ reader: ReviewReader) -> String {
         guard let diff = diff(reader) else { return "" }
         let stops = diff.stops
-        guard !stops.isEmpty else { return "No changes" }
-        guard let current = self[place: reader].current, let index = stops.firstIndex(where: { $0.id == current }) else {
-            return stops.count == 1 ? "1 change" : "\(stops.count) changes"
+        let unread = reader == .changes ? unreadShown : 0
+        let current = self[place: reader].current.flatMap { current in stops.firstIndex { $0.id == current } }
+        if unread > 0 {
+            let shown = shownReview?.files.count ?? 0
+            return current.map { "\($0 + 1) of …" } ?? "\(shown - unread)/\(shown) files"
         }
-        return "\(index + 1) of \(stops.count)"
+        guard !stops.isEmpty else { return "No changes" }
+        guard let current else { return stops.count == 1 ? "1 change" : "\(stops.count) changes" }
+        return "\(current + 1) of \(stops.count)"
     }
 
     /// Move to the next or previous change in a reader. Changes crosses files

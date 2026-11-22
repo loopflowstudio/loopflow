@@ -34,10 +34,12 @@ let package = Package(
             url: "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf8.xcframework.zip",
             checksum: "306d53ebe8604121ca0e371f01d5f7eeabf788a78e615ff21572eb25bfaaaa99"
         ),
-        // Built by `scripts/loopflow-dev.py grammars-build`; not yet hosted.
+        // Built by `scripts/loopflow-dev.py grammars-build`; a new grammar set
+        // uploads under a new name, never over this one.
         .binaryTarget(
             name: "TreeSitterGrammars",
-            path: ".build/local/TreeSitterGrammars.xcframework"
+            url: "https://bin.loopflow.studio/TreeSitterGrammars-615f7a1.xcframework.zip",
+            checksum: "c4838b1f4d066a651715f75f9a4ce04ef9e10f48d6042431bf27f6d41b7fd686"
         ),
         .executableTarget(
             name: "LoopflowMac",

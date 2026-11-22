@@ -858,7 +858,8 @@ struct TaskFilesTests {
     /// A store over two changed files, each with two separate changes.
     /// `word` is the first hunk's new line, read on every file read.
     private func twoFileStore(failingOnce: String? = nil,
-                              word: OSAllocatedUnfairLock<String> = .init(initialState: "uno")) throws -> TaskFilesStore {
+                              word: OSAllocatedUnfairLock<String> = .init(initialState: "uno"),
+                              before: @escaping @Sendable (String) async -> Void = { _ in }) throws -> TaskFilesStore {
         let failed = OSAllocatedUnfairLock(initialState: false)
         let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -884,9 +885,31 @@ struct TaskFilesTests {
             }
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         }
-        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in try reply(args) })
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
+            if args[1] == "diff" { await before(args[3]) }
+            return try reply(args)
+        })
         store.autosave = false
         return store
+    }
+
+    /// While files are still being read the stepper shows how many are read,
+    /// not a change count that would climb as you watch.
+    @Test func theChangeCountWaitsForEveryFile() async throws {
+        let (released, release) = AsyncStream<Void>.makeStream()
+        let store = try twoFileStore(before: { path in
+            if path == "b.swift" { for await _ in released {} }
+        })
+        let load = Task { await store.loadReview() }
+        while store.shownReview?.file("a.swift")?.blocks.isEmpty != false {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(store.position(.changes) == "1/2 files")
+        #expect(store.step(1, in: .changes)?.path == "a.swift")
+        #expect(store.position(.changes) == "1 of …")
+        release.finish()
+        await load.value
+        #expect(store.position(.changes) == "1 of 4")
     }
 
     /// Each shown file's lines are read on their own, so one file's size never

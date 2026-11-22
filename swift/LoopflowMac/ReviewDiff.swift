@@ -153,10 +153,8 @@ struct ReviewStop: Equatable, Sendable {
 
 /// Where a change sits along the stream, for the marks beside its scrollbar.
 struct ReviewMark: Equatable, Sendable {
-    enum Kind: Sendable { case added, removed, changed, moved }
     let id: String
     let path: String
-    let kind: Kind
     /// 0 at the top of the stream, 1 at its end, counted in rows.
     let position: Double
 }
@@ -175,11 +173,10 @@ extension ReviewDiff {
                 switch block {
                 case .hunk, .context: rows += 1
                 case .moved(let move):
-                    marks.append(ReviewMark(id: move.id, path: file.path, kind: .moved, position: Double(rows)))
+                    marks.append(ReviewMark(id: move.id, path: file.path, position: Double(rows)))
                     rows += 1
                 case .change(let change):
-                    let kind: ReviewMark.Kind = change.removed.isEmpty ? .added : change.added.isEmpty ? .removed : .changed
-                    marks.append(ReviewMark(id: change.id, path: file.path, kind: kind, position: Double(rows)))
+                    marks.append(ReviewMark(id: change.id, path: file.path, position: Double(rows)))
                     let drawn = switch layout {
                     case _ where file.status == .added: change.added.count
                     case .new: change.added.count + (change.removed.isEmpty ? 0 : 1)
@@ -191,7 +188,7 @@ extension ReviewDiff {
             }
         }
         let total = Double(max(rows, 1))
-        return marks.map { ReviewMark(id: $0.id, path: $0.path, kind: $0.kind, position: $0.position / total) }
+        return marks.map { ReviewMark(id: $0.id, path: $0.path, position: $0.position / total) }
     }
 }
 

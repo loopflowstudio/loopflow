@@ -264,12 +264,25 @@ struct ReviewDiffTests {
     @Test func changeMarksFollowTheRowsTheStreamDraws() {
         let review = ReviewDiff.parse(Self.patch)
         let marks = review.marks(layout: .unified, collapsed: { _ in false })
-        #expect(marks.map(\.kind) == [.moved, .changed, .moved, .added])
+        #expect(marks.map(\.path) == ["a.swift", "a.swift", "a.swift", "b.swift"])
         #expect(marks.map(\.position) == marks.map(\.position).sorted())
         #expect(marks.allSatisfy { (0..<1).contains($0.position) })
         let folded = review.marks(layout: .unified, collapsed: { $0.path == "a.swift" })
         #expect(folded.map(\.path) == ["b.swift"])
         #expect(folded[0].position < marks[3].position)
+    }
+
+    /// A long diff's marks merge into ticks a few points apart rather than a
+    /// solid bar; clicking a tick lands on the first change it stands for.
+    @Test func denseChangeMarksMergeIntoTicks() {
+        let marks = (0..<200).map { ReviewMark(id: "c\($0)", path: "a.swift", position: Double($0) / 200) }
+        let ticks = ChangeMarks.merged(marks, height: 400)
+        #expect(ticks.count < marks.count / 2)
+        #expect(zip(ticks, ticks.dropFirst()).allSatisfy { $1.y - $0.y >= ChangeMarks.merge })
+        #expect(ticks.flatMap(\.marks) == marks)
+        #expect(ticks.first?.first.id == "c0")
+        // Sparse marks each keep a tick of their own.
+        #expect(ChangeMarks.merged(Array(marks.prefix(3)), height: 40_000).count == 3)
     }
 
     /// The bar under the file's name reads the declaration the top line is

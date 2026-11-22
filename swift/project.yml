@@ -66,8 +66,8 @@ targets:
       - target: Loopflow
       - package: Sparkle
       - package: SwiftTreeSitter
-      # Built by `scripts/loopflow-dev.py grammars-build`, as Package.swift links it.
-      - framework: .build/local/TreeSitterGrammars.xcframework
+      # Package.swift's TreeSitterGrammars pin; `swift package resolve` downloads it.
+      - framework: .build/artifacts/swift/TreeSitterGrammars/TreeSitterGrammars.xcframework
         embed: false
     postBuildScripts:
       - name: Stamp app build identity

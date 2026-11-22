@@ -548,39 +548,44 @@ struct TaskChangesView: View {
     }
 }
 
-/// A mark beside the scrollbar for every change in the stream, at its place
-/// counted in rows: green added, red removed, the accent for both, quiet for a
-/// move; comments add a dot. Click one to land on its change.
-private struct ChangeMarks: View {
+/// A quiet mark beside the scrollbar for every change in the stream, at its
+/// place counted in rows. Marks within a few points of a tick merge into it,
+/// so a long diff reads as ticks rather than a bar; only the current change takes the
+/// accent, and a commented file adds a dot. Click one to land on its change.
+struct ChangeMarks: View {
     let store: TaskFilesStore
     let layout: TaskFilesStore.ReviewLayout
     let jump: (ReviewMark) -> Void
     @Environment(\.palette) private var palette
+
+    /// Marks closer than this to a tick, in points, draw as that tick.
+    static let merge: CGFloat = 6
 
     var body: some View {
         if let review = store.shownReview {
             let files = store.focusedPath.map { path in review.files.filter { $0.path == path } } ?? review.files
             let marks = ReviewDiff(files: files).marks(layout: layout, collapsed: store.isViewed)
             let commented = Set(store.comments.map(\.selection.path))
-            // Each commented file's dot sits on its first mark.
-            var seen = Set<String>()
-            let dotted = Set(marks.filter { commented.contains($0.path) && seen.insert($0.path).inserted }.map(\.id))
+            let current = store[place: .changes].current
             GeometryReader { proxy in
-                ForEach(marks, id: \.id) { mark in
-                    Button { jump(mark) } label: {
-                        RoundedRectangle(cornerRadius: 1).fill(color(mark.kind))
+                let height = max(proxy.size.height - 8, 0)
+                ForEach(Self.merged(marks, height: height), id: \.first.id) { group in
+                    let isCurrent = group.marks.contains { $0.id == current }
+                    Button { jump(group.first) } label: {
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(isCurrent ? palette.accent : palette.textTertiary.opacity(0.55))
                             .frame(width: 4, height: 3)
-                            .frame(width: 10, height: 7)
-                            .overlay(alignment: .leading) {
-                                if dotted.contains(mark.id) {
+                            .frame(width: 10)
+                            .overlay(alignment: .topLeading) {
+                                if group.marks.contains(where: { commented.contains($0.path) }) {
                                     Circle().fill(palette.accent).frame(width: 3, height: 3)
                                 }
                             }
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help((mark.path as NSString).lastPathComponent)
-                    .position(x: proxy.size.width - 5, y: 4 + mark.position * max(proxy.size.height - 8, 0))
+                    .help((group.first.path as NSString).lastPathComponent)
+                    .position(x: proxy.size.width - 5, y: 4 + group.y)
                 }
             }
             .frame(width: 10)
@@ -588,13 +593,26 @@ private struct ChangeMarks: View {
         }
     }
 
-    private func color(_ kind: ReviewMark.Kind) -> Color {
-        switch kind {
-        case .added: palette.successTone.ink
-        case .removed: palette.failureTone.ink
-        case .changed: palette.accent
-        case .moved: palette.textTertiary
+    /// One tick: the marks it stands for, in stream order, and where it sits.
+    struct Group {
+        let marks: [ReviewMark]
+        let y: CGFloat
+        var first: ReviewMark { marks[0] }
+    }
+
+    /// Marks in stream order, each joining the tick above it when it lands
+    /// within `merge` points of it.
+    static func merged(_ marks: [ReviewMark], height: CGFloat) -> [Group] {
+        var groups: [Group] = []
+        for mark in marks {
+            let y = mark.position * height
+            if let group = groups.last, y - group.y < merge {
+                groups[groups.count - 1] = Group(marks: group.marks + [mark], y: group.y)
+            } else {
+                groups.append(Group(marks: [mark], y: y))
+            }
         }
+        return groups
     }
 }
 

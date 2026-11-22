@@ -74,7 +74,7 @@ look needs a display, so it belongs to qa and review, not to build.
 
 ## What the code is today
 
-Slices 1 to 5 are built. The acceptance grep prints nothing (seen again
+Slices 1 to 6 are built. The acceptance grep prints nothing (seen again
 after slice 4's commit, 6fe53188bb) and the Checks table has
 `DesignDisciplineTests` passing. Slice 5 moved the four readers the review
 of the built screens found (`scratch/concept-review.html`, at 021b28484a)
@@ -82,8 +82,8 @@ onto `RoadmapTask.need` and `TaskStanding`, and the second qa run saw one
 word per Task on the Now list, the roadmap, a Wave's page, a Task's page and
 a tile. The review after it (`scratch/concept-review.html`, at 7df8f8fcaa)
 found the predicate keyed on the wrong fact and three readers still outside
-it. **Slice 6 is next**, Swift only; after it what remains is the look on an
-unlocked display and the three Tasks under "Outside this change".
+it; slice 6 moved them. What remains is the look on an unlocked display and
+the three Tasks under "Outside this change".
 
 - At the base, 177 lines passed a literal padding and 132 a literal non-zero
   `spacing:`, with off-scale values 1, 3, 5, 6, 7, 9, 10, 14, 15, 17, 18, 22,
@@ -650,8 +650,23 @@ or `lf desktop` reads unless its view is deleted.
      decides, not of the mounted view: a tile needs a workspace registry and
      a Task work reading no fixture seeds.
 
-6. **Awaiting Start by the Graph, and the last three readers.** Next. In
-   order, each with its test:
+6. **Awaiting Start by the Graph, and the last three readers.** Built. What
+   it taught:
+   - The fact holds: a stopped Graph keeps its `latest_graph_process`
+     (`rust/loopflow/tests/work/graph_tests.rs:2050`), so a parked Task is
+     still "Waiting"; the `execution?.step == nil` fallback was not needed.
+     No DTO fixture holds a Task parked at an interactive step, so the Swift
+     cases set the field on `roadmap_snapshot.json`'s first Task
+     (`roadmapTask(graphHasRun:)`).
+   - The fact has one name, `RoadmapTask.graphHasRun`, read by `need` and by
+     the Portfolio row's verb.
+   - `taskConditionAccessibilityLabel` stays in `Loopflow`: with no Session
+     readings the standing's line is `condition.reason` whenever `need` is
+     set, so it reads `need` and never `TaskStanding`.
+   - The backlog still splits rows by `awaitsStart` (no checkout), so a Task
+     opened and never run counts there as started. Not changed here.
+
+   As planned, in order, each with its test:
    1. `RoadmapTask.need` reads `latestGraphProcess == nil` in place of
       `awaitsStart`. `NowProjectionTests` and `TaskStandingTests` gain a
       Task with lifecycle `idle`, condition `waiting`, recommended `run` and
@@ -714,3 +729,6 @@ or `lf desktop` reads unless its view is deleted.
 | `scripts/test_desktop.sh --filter 'TaskStandingTests\|NowProjectionTests\|TaskBriefTests\|DashboardWorkspaceTests\|ThemeWorkflowTests\|RoadmapViewTests\|DesignDisciplineTests'` | passed after compress moved four suites onto `TaskStandingFixtures.swift` and dropped `NowRow.group` and `ThemeSample.width` (43 tests) | compress; CI runs the rest |
 | Dev app after slice 5, light, dark and Dracula | looked at with the screen locked on a new private Machine (`scratch/qa.html`, "Second run"): Now list, roadmap, Wave page, five Task pages, tiles, Brief, backlog, New Task, Choose Theme with Apply. One fix: the Wave page's Completed control sits on its heading (`WorkSectionHeading`). Jump menu, a blocked Task's page, New Wave and the title bar need an unlocked display | qa; review for the rest |
 | `scripts/test_desktop.sh --filter 'RoadmapViewTests\|WaveDetailReadingTests\|WorkNavigationTests\|DesktopHeadlessTests\|DesignDisciplineTests'` | passed after the second qa run's fix (77 tests) | qa; CI runs the rest |
+| `scripts/test_desktop.sh --filter 'NowProjectionTests\|TaskStandingTests\|TaskBriefTests\|RoadmapViewTests\|TaskConceptTests\|TaskRowTests\|WorkNavigationTests'` | passed after slice 6 (89 tests) | build; CI runs the rest |
+| `scripts/test_desktop.sh --filter 'BacklogViewTests\|WorkCacheTests\|DashboardWorkspaceTests\|WorkPaletteTests\|DesignDisciplineTests\|WorkCLISubscriptionTests'` | passed after slice 6 (65 tests) | build; CI runs the rest |
+| Dev app after slice 6 | not run: an opened, never-run Task reading "Idle" off the Now list, "Run" on a parked Task's Portfolio row, and the Brief's "Waiting, at demo." | qa |

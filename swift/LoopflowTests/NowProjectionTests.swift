@@ -22,17 +22,21 @@ struct NowProjectionTests {
 
     @Test("A Task that waits only to be started is in no group; one waiting on someone is")
     func awaitingStartIsNotANowRow() throws {
-        func task(lifecycle: String, recommended: String) throws -> RoadmapTask {
-            try roadmapTask(condition: "waiting", reason: "ready", lifecycle: lifecycle, recommended: recommended)
+        func task(lifecycle: String, recommended: String, graphHasRun: Bool) throws -> RoadmapTask {
+            try roadmapTask(condition: "waiting", reason: "ready", lifecycle: lifecycle, recommended: recommended,
+                            graphHasRun: graphHasRun)
         }
-        let unstarted = try task(lifecycle: "unstarted", recommended: "run")
-        let parked = try task(lifecycle: "idle", recommended: "run")
-        let merge = try task(lifecycle: "unstarted", recommended: "open_pr")
+        let unstarted = try task(lifecycle: "unstarted", recommended: "run", graphHasRun: false)
+        // Opened by its link: it has a checkout, so the server calls it idle, and no Graph has run.
+        let opened = try task(lifecycle: "idle", recommended: "run", graphHasRun: false)
+        let parked = try task(lifecycle: "idle", recommended: "run", graphHasRun: true)
+        let merge = try task(lifecycle: "unstarted", recommended: "open_pr", graphHasRun: false)
         #expect(unstarted.need == nil)
+        #expect(opened.need == nil)
         #expect(parked.need == .waiting)
         #expect(merge.need == .waiting)
-        #expect(try task(lifecycle: "abandoned", recommended: "run").need == nil)
-        #expect(nowSections(from: [unstarted, parked], waves: []).flatMap(\.rows).map(\.task) == [parked])
+        #expect(try task(lifecycle: "abandoned", recommended: "run", graphHasRun: true).need == nil)
+        #expect(nowSections(from: [unstarted, opened, parked], waves: []).flatMap(\.rows).map(\.task) == [parked])
     }
 
     @Test("NOW flattens across waves and drops empty groups")
@@ -66,8 +70,11 @@ struct NowProjectionTests {
 
         let dirty = try #require(tasks["dirty"])
         let spoken = taskConditionAccessibilityLabel(dirty)
-        #expect(spoken.contains(dirty.condition.reason))
+        #expect(spoken.contains("Blocked. \(dirty.condition.reason)."))
         #expect(spoken.contains("Next owner: task"))
+        // A Task that needs nobody speaks its ID and name, not "ready".
+        let backlog = try #require(tasks["clean_backlog"])
+        #expect(taskConditionAccessibilityLabel(backlog) == "\(backlog.task.identifier), \(backlog.task.name).")
     }
 
     // MARK: - Fixtures

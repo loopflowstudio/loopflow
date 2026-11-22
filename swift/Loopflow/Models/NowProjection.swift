@@ -11,10 +11,12 @@ public extension TaskConditionState {
     }
 }
 
-/// The row's spoken contract uses the exact shared reason rendered by the CLI.
+/// What a Task's row speaks: its ID and name, then, when it needs someone, the
+/// word its row says, the shared reason the CLI prints and who moves next.
 public func taskConditionAccessibilityLabel(_ task: RoadmapTask) -> String {
-    "\(task.task.identifier), \(task.task.name). \(task.condition.state.rawValue). "
-        + "\(task.condition.reason). Next owner: \(task.nextMove.owner.rawValue)."
+    let name = "\(task.task.identifier), \(task.task.name)."
+    guard let need = task.need else { return name }
+    return "\(name) \(need.title). \(task.condition.reason). Next owner: \(task.nextMove.owner.rawValue)."
 }
 
 /// One flat NOW row: a Task lifted out of the tree, carrying its Wave only as

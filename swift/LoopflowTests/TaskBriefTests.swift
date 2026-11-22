@@ -26,19 +26,26 @@ struct TaskBriefTests {
         #expect(TaskBrief.related(in: "", excluding: "LOO-515").isEmpty)
     }
 
-    @Test func stateNamesTheTopLevelStepTheBarMakesStrong() {
+    @Test func stateNamesTheTopLevelStepTheBarMakesStrong() throws {
         let steps: [TaskGraph.Step] = [.init(name: "plan", interactive: false), .init(name: "build", interactive: false),
                                        .init(name: "ship-review", interactive: true)]
         let building = TaskGraph(name: "code", interactiveSteps: [],
             position: .run(step: "plan", at: "implement", lfProcessId: "p", running: true),
             steps: steps, currentStep: 1, sentence: "build is running implement.")
-        let state = TaskBrief.state(runtime: "moving", graph: building, reason: "The loop chose another pass on the concept review")
+        let moving = try roadmapTask(condition: "clear", reason: "ready", lifecycle: "moving",
+                                     nextMove: "The loop chose another pass on the concept review")
+        let state = TaskBrief.state(moving, graph: building)
         #expect(state.lead == "Moving, at build.")
         #expect(state.reason == "The loop chose another pass on the concept review.")
+        // Parked at a step it waits on someone: the row's word, not the runtime's.
+        let parked = try roadmapTask(condition: "waiting", reason: "ready", lifecycle: "active", recommended: "run")
+        #expect(TaskBrief.state(parked, graph: building).lead == "Waiting, at build.")
         let unstarted = TaskGraph(name: "code", interactiveSteps: [], position: .at(step: TaskGraph.start),
             steps: steps, currentStep: nil, sentence: "Not started.")
-        #expect(TaskBrief.state(runtime: nil, graph: unstarted, reason: "").lead == "Unstarted.")
-        #expect(TaskBrief.state(runtime: nil, graph: nil, reason: "").lead == "Unstarted.")
+        let fresh = try roadmapTask(condition: "waiting", reason: "ready", lifecycle: "unstarted", recommended: "run",
+                                    nextMove: "", graphHasRun: false)
+        #expect(TaskBrief.state(fresh, graph: unstarted).lead == "Unstarted.")
+        #expect(TaskBrief.state(fresh, graph: nil) == ("Unstarted.", ""))
     }
 
     @Test("The Brief says what the Task needs once: not again when the state line ends with it")

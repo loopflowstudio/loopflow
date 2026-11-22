@@ -16,14 +16,16 @@ struct TaskStandingTests {
         #expect(standing.line == "merge the PR on GitHub")
     }
 
-    @Test("A Task nobody has started is not waiting on anyone: its word is Unstarted, with no line")
-    func unstartedIsNotWaiting() throws {
-        let standing = TaskStanding(task: try roadmapTask(condition: "waiting", reason: "ready", lifecycle: "unstarted"), status: .unknown)
-        #expect(standing.word == "Unstarted")
+    @Test("A Task whose Graph has never run is not waiting on anyone, opened or not: its lifecycle word, with no line",
+          arguments: [("unstarted", "Unstarted"), ("idle", "Idle")])
+    func awaitingItsFirstRunIsNotWaiting(lifecycle: String, word: String) throws {
+        let standing = TaskStanding(task: try roadmapTask(condition: "waiting", reason: "ready", lifecycle: lifecycle,
+                                                          recommended: "run", graphHasRun: false), status: .unknown)
+        #expect(standing.word == word)
         #expect(standing.tone == nil)
         #expect(standing.line == nil)
-        let blocked = TaskStanding(task: try roadmapTask(condition: "blocked", reason: "the next launch is misconfigured", lifecycle: "unstarted"),
-                                   status: .unknown)
+        let blocked = TaskStanding(task: try roadmapTask(condition: "blocked", reason: "the next launch is misconfigured",
+                                                         lifecycle: lifecycle, graphHasRun: false), status: .unknown)
         #expect(blocked.word == "Blocked" && blocked.line == "the next launch is misconfigured")
     }
 

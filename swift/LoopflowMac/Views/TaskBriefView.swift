@@ -35,13 +35,14 @@ enum TaskBrief {
         return headings.count >= 2 ? headings : []
     }
 
-    /// "Moving, at build." then why: the state word, the top-level step the
-    /// workflow bar makes strong, the reason in one sentence.
-    static func state(runtime: String?, graph: TaskGraph?, reason: String) -> (lead: String, reason: String) {
-        let word = (runtime ?? "unstarted").capitalized
+    /// "Waiting, at demo." then why: the word the Task's row says with no
+    /// program reporting, the top-level step the workflow bar makes strong, the
+    /// next move's reason in one sentence.
+    static func state(_ task: RoadmapTask, graph: TaskGraph?) -> (lead: String, reason: String) {
+        let word = TaskStanding(task: task, status: .unknown).word ?? ""
         let step = graph.flatMap { graph in graph.currentStep.map { graph.steps[$0].name } }
         let lead = step.map { "\(word), at \($0)." } ?? "\(word)."
-        let why = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        let why = task.nextMove.reason.trimmingCharacters(in: .whitespacesAndNewlines)
         return (lead, why.isEmpty || why.hasSuffix(".") ? why : why + ".")
     }
 
@@ -131,7 +132,7 @@ struct TaskBriefView: View {
     }
 
     private var status: some View {
-        let state = TaskBrief.state(runtime: task.runtime?.status.label, graph: graph, reason: task.nextMove.reason)
+        let state = TaskBrief.state(task, graph: graph)
         return VStack(alignment: .leading, spacing: Spacing.xs) {
             let lead = Text(state.lead).font(Typography.textStrong).foregroundStyle(palette.text)
             let reason = Text(state.reason.isEmpty ? "" : " " + state.reason).font(Typography.text).foregroundStyle(palette.textSecondary)

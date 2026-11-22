@@ -17,6 +17,8 @@ struct RoadmapViewTests {
         // or interrupt action.
         #expect(tasks[0].actions.recommended == .run)
         #expect(roadmapTaskAction(tasks[0]) == .run)
+        // Its Graph has run, so the row says what its page says.
+        #expect(RoadmapTaskAction.run.label(tasks[0]) == "Run")
 
         // An explicit User merge request advertises Open PR: the server
         // recommends the exact head, and the app does not re-derive it.
@@ -25,6 +27,7 @@ struct RoadmapViewTests {
 
         // No Task Work yet, and a terminal Task offers nothing.
         #expect(roadmapTaskAction(tasks[2]) == .run)
+        #expect(RoadmapTaskAction.run.label(tasks[2]) == "Start")
         #expect(roadmapTaskAction(tasks[3]) == nil)
     }
 

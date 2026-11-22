@@ -176,8 +176,8 @@ The word is the first of these that applies:
    **Done**. A blocked program's line is what it asked.
 2. **Blocked** or **Waiting**, when the Task's condition says so and no
    program reports. The line is the condition's reason, the one
-   `lf plan list` prints. A Task that waits only to be started is not
-   waiting on anyone: it reads **Unstarted** and its row offers Start.
+   `lf plan list` prints. A Task whose Graph has never run waits on nobody,
+   opened or not: it reads its lifecycle word and its row offers Start.
 3. Its lifecycle word: **Unstarted**, **Idle**, **Active**, **Done**,
    **Abandoned**.
 
@@ -421,8 +421,10 @@ Shell holds retained shell tabs. The Task's pane has one row of tabs: **Brief**,
 **Diff** and **Files** (Option-Command-1/2/3), then anything else open beside
 them. Hidden tools keep their clients and drafts.
 
-**Brief** opens on the Task's title, then one sentence with its state and why
-("Moving, at build. The loop chose another pass on the concept review."), a line for what it
+**Brief** opens on the Task's title, then one sentence with the word its row
+says when no program reports, its step and why
+("Moving, at build. The loop chose another pass on the concept review.",
+"Waiting, at demo. ready."), a line for what it
 needs when that sentence has not already said it ("Blocked: checkout has uncommitted changes"), then its PR, the Tasks the brief names
 (click one to open it) and an outline when the brief has headings or an
 `Acceptance:` lead, as a two-column table that wraps in a narrow pane. Its
@@ -951,8 +953,9 @@ decisions, deliveries, and actionable failures remain visible. The detail pane
 reads the Wave's plan, Tasks, decisions, PR delivery, and Task conditions
 from `lf wave plan <wave> --json`.
 
-Beside each Task's row, **Start**, **Open PR** and **Worktree** start its
-legal Graph, open its PR, and open the recorded checkout in Warp.
+Beside each Task's row, **Start** (**Run** once its Graph has run),
+**Open PR** and **Worktree** start its legal Graph, open its PR, and open the
+recorded checkout in Warp.
 Rows show the shared condition and reason from `lf plan list` as their status
 word and line; an unknown condition adds no word, because
 the required evidence could not be read.

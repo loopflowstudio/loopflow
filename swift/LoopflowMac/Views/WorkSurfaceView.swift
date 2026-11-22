@@ -109,10 +109,12 @@ struct WorkSurfaceView: View {
                         }
                     }
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                        Text(task.condition.reason)
-                            .font(Typography.text)
-                            .foregroundStyle(palette.textSecondary)
-                            .accessibilityLabel(taskConditionAccessibilityLabel(task))
+                        if let line = TaskStanding(task: task, status: .unknown).line {
+                            Text(line)
+                                .font(Typography.text)
+                                .foregroundStyle(palette.textSecondary)
+                                .accessibilityLabel(taskConditionAccessibilityLabel(task))
+                        }
                         Spacer()
                         if let workspace = task.reference.workspace {
                             Button("Worktree") { model.openWorktree(workspace) }

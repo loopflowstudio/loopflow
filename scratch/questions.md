@@ -191,3 +191,8 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
 52. **"ready" is no longer printed for a Task that needs nobody** on the
     Task detail's line and the activity pane (slice 6). A parked Task still
     reads "Waiting" over "ready" (question 42).
+53. **The backlog still calls an opened, never-run Task started** (slice 6).
+    Its rows, counts and action bar split on `awaitsStart` (no checkout),
+    not on `graphHasRun`, so such a Task shows its word there and is not
+    offered in the bar's Start. Left as it is; move the backlog to
+    `graphHasRun` too?

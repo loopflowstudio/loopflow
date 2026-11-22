@@ -7,9 +7,10 @@ enum RoadmapTaskAction: Equatable {
     case run
     case openPr
 
-    var label: String {
+    /// "Start" for a Task's first run and "Run" after, as its page says.
+    func label(_ task: RoadmapTask) -> String {
         switch self {
-        case .run: "Start"
+        case .run: task.graphHasRun ? "Run" : "Start"
         case .openPr: "Open PR"
         }
     }
@@ -327,7 +328,7 @@ struct TaskActionCluster: View {
     var body: some View {
         HStack(spacing: Spacing.xs) {
             if let action = roadmapTaskAction(task) {
-                Button(action.label) { onAction(action) }
+                Button(action.label(task)) { onAction(action) }
             }
             if let workspace = task.reference.workspace {
                 Button("Worktree") { onOpenWorktree(workspace) }

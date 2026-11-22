@@ -400,5 +400,16 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    pane's own Session, `meta` in `textSecondary`. Passed:
    `scripts/test_desktop.sh --filter 'WorkspacePanesTests|DesktopHeadlessTests|ProgramStatusTests|ConsoleWorkspaceTests|TypographyDisciplineTests|ProviderTransitionTests|TaskRowTests'`
    (58) with the new `sessionStripAndNotice`. Not seen in the Dev app.
-7. **Next:** Brief/Diff/Files; DESIGN.md once cfadc6 is on main; QA in three
-   themes at the narrowest width.
+   Realign checked: `git grep` finds no `sparkle` or `programHeading.symbol`
+   left in `LoopflowMac/` (only Sparkle the updater); `swift/README.md:710`
+   already describes the notice line.
+7. **Next: Brief, Diff, Files** (Screens above; prototype `desktop-more.html`
+   notes 1–11, `desktop.html` notes 10–11). Sources:
+   `LoopflowMac/Views/TaskBriefView.swift`, `TaskChangesView.swift` (with
+   `ReviewStreamView`), `TaskFilesView.swift`, `MarkdownBlocks.swift`.
+   Expected: their headless tests and `TypographyDisciplineTests` pass, and
+   the words the Screens list names (title "N changed files", "12 of 85
+   viewed", "Viewed", "Open on GitHub" without "↗", Files' "1 of 3") are
+   asserted in tests.
+8. DESIGN.md once cfadc6 is on main (blocked until then); QA in three themes
+   at the narrowest width.

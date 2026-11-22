@@ -1,10 +1,11 @@
-"""Write the generated built-in themes and the prototype's theme table.
+"""Write the generated built-in themes, the prototype's theme table and the website's colors.
 
 Twelve families, a light and a dark theme each, come from the specs below; Loopflow
-Light and Loopflow Dark are written by hand and only read here. Change a theme by
-editing its spec and rerunning; never edit a generated file.
+Light and Loopflow Dark are written by hand and only read here. loopflow.studio is
+drawn in Loopflow Light. Change a theme by editing its spec and rerunning; never
+edit a generated file.
 
-    uv run python scripts/theme_catalogue.py           # rewrite Catalogue/ and desktop-themes.js
+    uv run python scripts/theme_catalogue.py           # rewrite Catalogue/, desktop-themes.js and theme.css
     uv run python scripts/theme_catalogue.py --check   # fail if a committed file differs from a fresh run
 """
 from __future__ import annotations
@@ -16,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CATALOGUE = ROOT / "swift/Loopflow/Themes/Catalogue"
 PROTOTYPE = ROOT / "design/prototypes/desktop-themes.js"
+WEBSITE = ROOT / "website/static/theme.css"
 HANDWRITTEN = ("Loopflow Light", "Loopflow Dark")
 
 TERMINAL_KEYS = ["background", "foreground", "cursor-color", "cursor-text", "selection-background", "selection-foreground"]
@@ -38,6 +40,13 @@ PROTOTYPE_ROLES = {
     "working": "working-ink", "waiting": "warning-ink", "available": "available-ink",
     "failure": "failure-ink", "success": "success-ink",
 }
+# The roles the website paints, under their own names.
+WEBSITE_ROLES = [
+    "background", "surface", "surface-muted", "surface-element", "border", "border-strong", "border-active",
+    "shadow", "text", "text-secondary", "text-tertiary", "accent", "accent-hover", "accent-pressed",
+    "accent-text", "accent-ink", "working-ink", "working-fill", "warning-ink", "warning-fill",
+    "failure-ink", "failure-fill", "success-ink", "success-fill",
+]
 # `PaletteDefinition.titlebarSecondaryText`: the title bar's second text level.
 TITLEBAR_SECONDARY = 0.72
 
@@ -413,10 +422,38 @@ def prototype(themes):
     return header + "var THEMES = {\n" + ",\n".join(blocks) + "\n};\n"
 
 
+def read_terminal(path):
+    """A theme file's terminal colors and its 16 ANSI colors."""
+    term, ansi = {}, {}
+    for raw in path.read_text().splitlines():
+        if "=" not in raw or raw.lstrip().startswith("#"):
+            continue
+        key, value = [p.strip() for p in raw.split("=", 1)]
+        if key == "palette":
+            index, color = value.split("=", 1)
+            ansi[int(index)] = color.strip().lower()
+        elif key in TERMINAL_KEYS:
+            term[key] = value.lower()
+    return term, [ansi[i] for i in range(16)]
+
+
+def website():
+    """`theme.css`: Loopflow Light's roles and light terminal, the only colors the site has."""
+    path = CATALOGUE / "Loopflow Light"
+    _, roles = read_roles(path)
+    term, ansi = read_terminal(path)
+    rows = [f"    --{role}: {roles[role]};" for role in WEBSITE_ROLES]
+    rows += [f"    --terminal-background: {term['background']};", f"    --terminal-foreground: {term['foreground']};"]
+    rows += [f"    --terminal-{i}: {c};" for i, c in enumerate(ansi)]
+    header = "/* Written by scripts/theme_catalogue.py from Loopflow Light; do not edit. */\n"
+    return header + ":root {\n" + "\n".join(rows) + "\n}\n"
+
+
 def outputs():
     themes = catalogue()
     files = {CATALOGUE / t["name"]: theme_file(t) for t in themes}
     files[PROTOTYPE] = prototype(themes)
+    files[WEBSITE] = website()
     return files
 
 

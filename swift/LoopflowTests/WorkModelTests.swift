@@ -548,10 +548,10 @@ struct WorkModelStreamTests {
             unavailable: "sqlite: no such column: t.paused", content: .planning(nil), wire: nil))
         try await eventually { model.roadmap.failure != nil }
         #expect(model.taskWork[found.task.id].value?.graph == workflow)
-        let header = TaskWorkflowHeader(model: model, task: found.task, work: model.taskWork[found.task.id])
-        #expect(throws: (any Error).self) { try header.inspect().find(text: "No workflow yet") }
+        let bar = TaskWorkflowBar(model: model, task: found.task, work: model.taskWork[found.task.id])
+        #expect(throws: (any Error).self) { try bar.inspect().find(text: "No workflow yet") }
         // Changes still show at once: a failed read is no reason to refuse one.
-        #expect(try !header.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move").isDisabled())
+        #expect(try !bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move").isDisabled())
         #expect(model.navigation.notices.current?.text == "The plan couldn't be read: sqlite: no such column: t.paused")
         await feed.fail(RegistryQueryError("reader exited"))
         try await eventually { model.taskWork[found.task.id].failure == "reader exited" }

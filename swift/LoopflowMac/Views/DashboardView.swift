@@ -206,7 +206,8 @@ struct DashboardTile: View {
                 }.buttonStyle(.plain)
                 Spacer(minLength: 0)
                 if let task {
-                    Menu { TaskActionItems(model: model, task: task.task, wave: task.wave?.wave) }
+                    Menu { TaskActionItems(model: model, task: task.task, wave: task.wave?.wave,
+                                                     work: model.taskWork[task.task.id].value) }
                         label: { Image(systemName: "ellipsis") }
                         .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
                 }

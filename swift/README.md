@@ -350,13 +350,14 @@ When the Task can move, one button says how: **Start** before it has run,
 **Run** once its Graph has stopped. **Auto-Ship** turns the Task's auto setting
 on and runs it, as `lf task auto on` does: its run stands in at each
 interactive step and lands the PR. Turning it on raises the Notice "LOO-5 Auto
-on requested · Undo"; Undo is auto off (`lf task auto off`). While auto is on,
+on requested · Undo"; Undo is auto off (`lf task auto off`), and so is the
+button, which reads **Stop Auto-Ship** while auto is on. While auto is on,
 the sentence names auto instead of you, and the Task's board card and sidebar
 row carry an Auto badge. Open a Dashboard with `state:auto` to watch those Tasks.
 
 Everything else is in **…**, the same list as the sidebar row's context menu:
-**Start from…**, Complete or Reopen, Claim or Unassign, Move, Copy ID and
-link, and **Abandon…**.
+**Start from…** (or **Start with…** before the Task has a Graph), Complete or
+Reopen, Claim or Unassign, Move, Copy ID and link, and **Abandon…**.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool
@@ -626,7 +627,7 @@ long lines retain the native editor's known responsiveness limitation.
 
 Select a repository, then a Task to open its conversation. Its workspace retains
 conversations, shells, file drafts and layout across visits. Use **+** for supporting
-panes; expand **Overview** for Task details. Opening a conversation a native
+panes; **Task details** holds its description. Opening a conversation a native
 client holds takes it over here; that client ends.
 
 Exiting a disposable CLI conversation retires it from navigation while keeping

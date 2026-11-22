@@ -356,8 +356,26 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    (97 tests). Not run: clippy and the lifecycle fixture regeneration
    (`task_lifecycle.json` edited by hand: its live test compares only
    position, status and Graph steps); gate.
-4. **Next:** the bar's next-step button, Auto-Ship button and "…" menu
-   (moving the header's Complete/Claim/Abandon/Start from… and Overview into
-   it). Then: Task row + status mark + button + title bar; Session strip and
-   notice line; Brief/Diff/Files; DESIGN.md once cfadc6 is on main; QA in
-   three themes at the narrowest width.
+4. **Built.** `TaskWorkflowBar` is the line, the next step (**Start** with no
+   Graph, else `runAction`: **Start** at `start`, **Run** when stopped or
+   waiting at an interactive step, none while running or at `end`), Auto-Ship
+   (`TaskAutoControl`, a neutral `WorkOutlineButtonStyle` button reading
+   **Stop Auto-Ship** while on) and "…" (`task-actions`), which is
+   `TaskActionItems` over the bar's reading. `TaskActionItems` gained "Start
+   from…" (or "Start with…" without a Graph), the ids `task-complete`,
+   `task-reopen`, `task-claim-unassign`, and Abandon…, which sets
+   `navigation.abandoning`; `TaskAbandonConfirmation` on the window asks.
+   It takes the `work` reading from its host, so sidebar, Dashboard, ⌘/ and
+   the bar list the same items. `WorkModel.changeRefusal` replaces three copies
+   of the away/saved check. `TaskWorkflowHeader` (pane and details page) is
+   the lifecycle word, the sentence, planning facts and completion conflict;
+   its buttons, Overview disclosure and hover Claim/Abandon are gone. Passed:
+   `scripts/test_desktop.sh --filter 'DesktopHeadlessTests|WorkflowLineTests|TaskHistoryFilterTests'`
+   (30) with the new `workflowBarMenuIsTheSidebarMenu`; TaskConcept,
+   SessionControls, WorkModel suites pass. `WorkNavigationTests` "Navigation
+   shortcuts…" fails on ⌘⌥1 → `details brief`, a shortcut this slice does not
+   touch (gate looks). Not seen in the Dev app.
+5. **Next:** Task row + status mark + button (`LoopflowButtonStyle` replaces
+   the bar's `WorkOutlineButtonStyle`) + title bar; Session strip and notice
+   line; Brief/Diff/Files; DESIGN.md once cfadc6 is on main; QA in three
+   themes at the narrowest width.

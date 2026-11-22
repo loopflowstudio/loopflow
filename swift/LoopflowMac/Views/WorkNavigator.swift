@@ -318,6 +318,7 @@ struct WorkNavigator: View {
     @ViewBuilder private func actions(for id: String) -> some View {
         if let found = model.task(id: id) {
             TaskActionItems(model: model, task: found.task, wave: found.wave?.wave,
+                work: model.taskWork[id].value,
                 newConversation: onNewTaskSession.map { action in { action(id) } },
                 openSession: onOpenSession)
         }

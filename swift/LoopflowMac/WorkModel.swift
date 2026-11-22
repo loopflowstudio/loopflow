@@ -2821,6 +2821,18 @@ final class WorkModel {
         change(task, .reopen(task: issue), .taskReopen(directory: directory(task), issue: issue), "reopened")
     }
 
+    /// Why no change to Work can be requested now; nil when one can.
+    var changeRefusal: String? {
+        if !pendingChanges.acceptsChanges { return PendingChanges.awayText }
+        if showsSavedPlanning { return WorkCache.savedReason }
+        return nil
+    }
+
+    /// Abandon… asks first: the window confirms before `abandonTask`.
+    func beginAbandon(_ task: RoadmapTask) {
+        navigation.abandoning = task.id
+    }
+
     /// The row leaves every list and the selection moves on in the click; PR,
     /// branch and checkout cleanup finish after. A refusal puts the row back.
     func abandonTask(_ task: RoadmapTask) {

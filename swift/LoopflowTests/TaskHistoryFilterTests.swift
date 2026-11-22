@@ -260,15 +260,15 @@ struct TaskHistoryFilterTests {
         }
         #expect(model.selection == .wave(id: wave.wave.id))
         // Every Task can still be inspected; Rust's admission decision
-        // governs Start in its workspace header.
+        // governs Start in its workflow bar.
         var work = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
         work["graph"] = NSNull()
         let unstarted = try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: work))
         for id in ["LOO-318", "recent", "LOO-309"] {
             let task = try #require(model.task(id: id)?.task)
-            let header = TaskWorkflowHeader(model: model, task: task, work: .available(unstarted))
-            let start = try header.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start").button()
+            let bar = TaskWorkflowBar(model: model, task: task, work: .available(unstarted))
+            let start = try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start").button()
             #expect(start.isDisabled() == (id != "LOO-309"))
         }
     }

@@ -62,13 +62,12 @@ struct TaskConceptTests {
                     #expect(TaskHistoryFilter().includes(task, now: .now))
                     #expect(task.opensConversationAutomatically)
                     #expect(task.isUnassigned == (phase.name == "unassigned_working"))
-                    #expect(throws: (any Error).self) { try header.inspect().find(button: "Reopen") }
                     #expect(throws: (any Error).self) {
-                        try TaskActionItems(model: model, task: task, wave: nil).inspect().find(button: "Reopen Task")
+                        try TaskActionItems(model: model, task: task, wave: nil, work: nil).inspect().find(button: "Reopen Task")
                     }
                 } else if task.isCompleted {
                     #expect(label == (task.lifecycle == .done ? "Completed" : "Canceled"))
-                    _ = try header.inspect().find(button: "Reopen")
+                    _ = try TaskActionItems(model: model, task: task, wave: nil, work: nil).inspect().find(button: "Reopen Task")
                     #expect(!task.awaitsStart)
                     #expect(!task.opensConversationAutomatically)
                 } else if task.lifecycle == .unstarted {

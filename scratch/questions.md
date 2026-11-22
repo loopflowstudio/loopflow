@@ -93,3 +93,14 @@
 - 2026-11-21 slice 3: the Workflow catalog inspector shows `WorkflowSteps` instead of a definition-built `WorkflowLine`; a definition-built line needs top-level labels from Rust in the graph catalog (or a Swift copy of the `sources[1]` rule).
 - 2026-11-21 slice 3: sentences chosen beyond the plan: an At at a non-interactive step (a landing wait) reads "Waiting at land."; a run with no interactive step ahead ends after "X is running." with no second clause.
 - Sync kept this Task’s concept review at its existing path. LOO-515’s twelfth-pass page is in f4c8e99c48.
+
+## Slice 4 (bar actions), choices made headless
+
+- Auto-Ship while on reads **Stop Auto-Ship** and turns auto off; the
+  prototype shows only the off state. Alternative: keep "Auto-Ship" with a
+  checkmark.
+- Waiting at an interactive step, the next-step button reads **Run** (was
+  "Continue"), as swift/README.md says ("Run once its Graph has stopped"); the
+  help text still says "continue after <step>".
+- A completed Task with no Graph still shows a disabled **Start** carrying
+  Rust's refusal ("Reopen the Task"), as the header did.

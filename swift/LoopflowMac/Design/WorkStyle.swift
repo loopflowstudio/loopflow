@@ -126,23 +126,12 @@ struct WorkOutlineButtonStyle: ButtonStyle {
     }
 }
 
-/// Auto-Ship, the one green action: it hands the Task off to land on its own.
-struct WorkShipButtonStyle: ButtonStyle {
-    @Environment(\.palette) private var palette
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Typography.body(12.5).weight(.semibold))
-            .foregroundStyle(isEnabled ? palette.surface : palette.textTertiary)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isEnabled ? palette.success.opacity(configuration.isPressed ? 0.85 : 1) : palette.surfaceMuted)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 6))
-            .workFocusRing()
+/// Marks a Task whose auto setting is on, on its board card and sidebar row.
+struct AutoBadge: View {
+    var body: some View {
+        WorkChip(text: "Auto", tone: .done)
+            .help("Auto is on: the run takes the interactive steps and lands the Task")
+            .accessibilityLabel("Auto on")
     }
 }
 

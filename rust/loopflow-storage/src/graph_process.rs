@@ -30,8 +30,6 @@ pub enum RunOwner {
     /// `task_graphs`: the lf carrying a Task's run. It records no result of
     /// its own; its Graph run's is the Task's.
     TaskCarrier,
-    /// `task_ship_events`: the lf that approved or carries a Task's shipping.
-    ShipCarrier,
 }
 
 /// How a run ended, derived from its end, exit code and error.
@@ -76,7 +74,7 @@ pub struct ExecutionStart {
     pub pid: Option<u32>,
     pub os_started_at: Option<i64>,
     /// The Session whose agent started this run, when one did. Owners that
-    /// show who started them (Graph runs, Auto-Ship) record it.
+    /// show who started them (Graph runs, auto) record it.
     pub caller_session: Option<loopflow_model::id::LfSessionId>,
 }
 

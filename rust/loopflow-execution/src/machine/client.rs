@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
@@ -38,6 +38,9 @@ pub struct Status {
     pub instance: Option<String>,
     /// The newest protocol revision the server speaks.
     pub revision: Option<u32>,
+    /// The server's own executable; `lf install server` replaces a server
+    /// whose executable is not the selected installation's.
+    pub executable_sha256: Option<String>,
     /// Every welcomed connection still open; empty when no server answered.
     pub clients: Vec<ConnectedClient>,
     pub error: Option<String>,
@@ -50,6 +53,7 @@ pub fn status() -> Result<Status> {
         listening: false,
         instance: None,
         revision: None,
+        executable_sha256: None,
         clients: Vec::new(),
         error: None,
     };
@@ -75,24 +79,13 @@ pub fn status() -> Result<Status> {
             status.instance = Some(answer.instance);
             status.revision = Some(answer.revision);
             status.clients = answer.clients;
-            let expected = crate::installation::ArtifactIdentity::capture(
-                crate::installation::ArtifactRole::Cli,
-                &std::env::current_exe()?,
-            )?
-            .sha256;
-            if answer.executable_sha256 != expected {
-                Some(
-                    "Loopflow server uses another executable; obtain the selected installation"
-                        .into(),
-                )
-            } else if answer.min_revision > REVISION || answer.revision < MIN_REVISION {
-                Some(format!(
+            status.executable_sha256 = Some(answer.executable_sha256);
+            (answer.min_revision > REVISION || answer.revision < MIN_REVISION).then(|| {
+                format!(
                     "Loopflow server speaks protocol revisions {}–{}; this build speaks {MIN_REVISION}–{REVISION}; update the selected installation",
                     answer.min_revision, answer.revision
-                ))
-            } else {
-                None
-            }
+                )
+            })
         }
         Ok(Some(ServerMessage::Error { code, message, .. })) => Some(format!("{code}: {message}")),
         Ok(Some(_)) => Some("Server did not answer the readiness request".into()),
@@ -170,6 +163,8 @@ pub struct Connection {
     pending: VecDeque<ServerMessage>,
     /// Where ticketed connections for bulk messages open.
     carrier: Carrier,
+    /// When the caller stops waiting for another Machine's answers.
+    until: Option<Instant>,
 }
 
 impl Connection {
@@ -188,13 +183,17 @@ impl Connection {
     /// `machine`'s server, over SSH. Its `lf server connect` starts the
     /// server when none is running. Every operation sent here runs there,
     /// with what `sender` says this `lf` runs with.
-    pub fn open_on(machine: &Machine, sender: Sender) -> Result<Self> {
-        let connection = Self::start(
+    ///
+    /// With `until`, the welcome and every answer have what is left of it,
+    /// and [`ANSWER`] at most.
+    pub fn open_on(machine: &Machine, sender: Sender, until: Option<Instant>) -> Result<Self> {
+        let mut connection = Self::start(
             Carrier::Ssh(machine.clone(), Box::new(sender)),
             identity(super::wire::MACHINE_CLIENT, "lf"),
             // The entry may start the server first.
-            ANSWER,
+            left(until),
         )?;
+        connection.until = until;
         connection.set_read_timeout(None)?;
         Ok(connection)
     }
@@ -227,6 +226,7 @@ impl Connection {
                 welcome,
                 pending: VecDeque::new(),
                 carrier,
+                until: None,
             }),
             Some(ServerMessage::Error {
                 code,
@@ -307,9 +307,10 @@ impl Connection {
         let answer = match &self.carrier {
             Carrier::Ssh(machine, _) => {
                 let machine = machine.clone();
-                self.set_read_timeout(Some(ANSWER))?;
+                let within = left(self.until);
+                self.set_read_timeout(Some(within))?;
                 let answer = self.wait(|message| answers(message, &id)).map_err(|error| {
-                    unanswered(error, &machine, ANSWER, ErrorCode::OutcomeUnknown)
+                    unanswered(error, &machine, within, ErrorCode::OutcomeUnknown)
                 });
                 self.set_read_timeout(None)?;
                 answer?
@@ -553,6 +554,16 @@ pub fn attach(path: &Path, session: &LfSessionId) -> Result<UnixStream> {
     Ok(stream)
 }
 
+/// How long another Machine's server has to answer for a caller that stops
+/// waiting at `until`. Never zero, which a read takes as no limit.
+fn left(until: Option<Instant>) -> Duration {
+    until.map_or(ANSWER, |until| {
+        until
+            .saturating_duration_since(Instant::now())
+            .clamp(Duration::from_millis(1), ANSWER)
+    })
+}
+
 /// A wait for another Machine's answer that `within` cut short. `code` says
 /// whether the work may have happened there.
 fn unanswered(
@@ -567,7 +578,7 @@ fn unanswered(
     let message = anyhow::anyhow!(
         "{} did not answer within {}s; check `ssh {} lf server status`",
         machine.name(),
-        within.as_secs(),
+        within.as_secs_f64().ceil(),
         machine.route
     );
     match code {

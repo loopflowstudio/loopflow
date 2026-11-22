@@ -184,6 +184,14 @@ pub struct TaskOwnershipEntry {
     /// Absent from entries lf before `task_machine_local` wrote, which name no writer.
     pub writer_machine_id: Option<MachineId>,
     pub at: i64,
+    /// Where the entry sorts in the Task's log on every Machine, from its
+    /// writer's plan clock. Absent with Linear or Asana, whose comment order
+    /// decides, and from entries written before claims were first-wins.
+    pub order: Option<i64>,
+    /// The entry in effect when this one was written, or this entry itself
+    /// when there was none. Present exactly when `order` is. A claim whose
+    /// writer had not seen the claim holding the Task loses to it.
+    pub seen: Option<OwnershipEntryId>,
 }
 
 /// A Machine for display; a missing id reads as "Machine unknown".

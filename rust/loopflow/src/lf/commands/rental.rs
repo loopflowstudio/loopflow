@@ -739,7 +739,7 @@ fn prepare(
         .planning_transport();
     if matches!(
         planning,
-        loopflow_execution::config::TrackerConfig::Linear { .. }
+        Some(loopflow_execution::config::TrackerConfig::Linear { .. })
     ) {
         runtime.block_on(loopflow_execution::machine::credentials::connect(
             &machine,
@@ -795,7 +795,7 @@ fn checkout_script(
         .collect();
     let script = format!(
         "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf config repo --bind {repository}",
-        loopflow_execution::machine::ssh::REMOTE_PATH,
+        loopflow_execution::machine::ssh::remote_path(),
         dir = q(directory),
     );
     Ok((origin, script))

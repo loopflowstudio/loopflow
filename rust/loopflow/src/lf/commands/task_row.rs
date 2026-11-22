@@ -69,9 +69,26 @@ pub struct TaskDetail {
     /// abandoned; `null` while it never has.
     #[serde(deserialize_with = "Option::deserialize")]
     pub summary: Option<loopflow_storage::sqlite::task_summaries::TaskSummary>,
+    /// The Task's auto setting: on or off, and who set it when; `null`
+    /// when nobody has.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub auto: Option<loopflow_storage::sqlite::Auto>,
     /// The Task this one is stacked on; `null` when it builds on the default branch.
     #[serde(deserialize_with = "Option::deserialize")]
     pub stack_parent: Option<loopflow_execution::ops::task::TaskStackParent>,
+}
+
+/// What `lf task status` adds to a Task's state line: " · auto: on by Maya, Nov 18 09:04".
+pub fn auto_phrase(auto: &loopflow_storage::sqlite::Auto) -> String {
+    use loopflow_storage::process::Starter;
+    // A mark an earlier lf wrote may name nobody.
+    let by = match &auto.by {
+        Starter::Person { name: None } => String::new(),
+        by => format!(" by {by}"),
+    };
+    let state = auto.state.as_str();
+    let at = loopflow_execution::output::format_time(auto.at);
+    format!(" · auto: {state}{by}, {at}")
 }
 
 /// One of the Task's Graph runs; `lf graph show <id>` draws it.
@@ -170,10 +187,7 @@ impl TaskNames {
             identifier: summary.identifier,
             title: summary.name,
             state,
-            // An approved Task waits on its ship, whatever its next move says.
-            reason: task
-                .shipping
-                .map_or(task.next_move.reason, |shipping| shipping.reason),
+            reason: task.next_move.reason,
             graph: task.graph_name.map(|name| TaskRowGraph {
                 name,
                 step: task.step,
@@ -194,7 +208,7 @@ impl TaskNames {
 fn next_command(task: &RoadmapTask) -> Option<String> {
     let id = &task.task.identifier;
     match task.lifecycle {
-        TaskState::Done | TaskState::Abandoned | TaskState::Moving | TaskState::Shipping => None,
+        TaskState::Done | TaskState::Abandoned | TaskState::Moving => None,
         _ if task
             .pr
             .as_ref()

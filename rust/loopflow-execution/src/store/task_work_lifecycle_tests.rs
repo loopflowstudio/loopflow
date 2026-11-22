@@ -7,7 +7,7 @@ use rusqlite::params;
 use std::num::NonZeroU32;
 
 #[test]
-fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
+fn defer_holds_the_lifecycle_and_a_run_is_moving_whatever_its_auto_setting() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("db");
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
@@ -105,14 +105,13 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
         Some(std::path::PathBuf::from("/repo/task"))
     );
 
-    // No interactive step remains ahead: running it hands the Task off.
+    // A run moves the Task.
     assert!(crate::store::task_work::start_task_graph_run(
         &store,
         &task,
         &row,
         &start,
         (&by, &carrier),
-        true
     )
     .unwrap());
     // A second run reading the same position cannot also set out.
@@ -122,92 +121,35 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
         &row,
         &start,
         (&LfProcessId::new(), &carrier),
-        true
     )
     .unwrap());
     let state = || store.task_state(&task).unwrap();
-    assert_eq!(state(), crate::durable::TaskState::Shipping);
-    let shipping = store.task_shipping(&task).unwrap().unwrap();
-    assert_eq!(shipping.carrier.as_ref().map(|run| &run.id), Some(&by));
-    // Only the checkout's Machine restarts its ship process.
-    let checkout = |sql: &str| {
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(sql, [task.as_str()])
-            .unwrap()
+    assert_eq!(state(), crate::durable::TaskState::Moving);
+    let mark = |state| loopflow_storage::sqlite::Auto {
+        state,
+        at: loopflow_storage::rows::now_unix(),
+        by: crate::process::Starter::Person { name: None },
     };
-    checkout("DELETE FROM task_checkouts WHERE task_id=?1");
-    assert!(store.local_shipping_tasks().unwrap().is_empty());
-    checkout("INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/task')");
-    assert_eq!(
-        store.local_shipping_tasks().unwrap(),
-        [(task.clone(), shipping.clone())]
-    );
-    // Shipping again keeps when it began.
-    let again = store.ship_task(&task, (&by, &carrier), "again").unwrap();
-    assert_eq!(again.shipped_at, shipping.shipped_at);
-    // Stop withdraws the approval; the run still going keeps it moving.
-    assert_eq!(shipping.approved_by, Some(by.clone()));
-    let stopper = LfProcessId::new();
-    assert_eq!(
-        store
-            .stop_shipping(
-                &task,
-                "stop",
-                Some(loopflow_storage::sqlite::task_work::ShipStop {
-                    at: loopflow_storage::rows::now_unix(),
-                    by: Some(stopper.clone()),
-                    person: None,
-                    session: None,
-                })
-            )
-            .unwrap(),
-        Some(shipping)
-    );
-    assert_eq!(state(), crate::durable::TaskState::Moving);
-    assert_eq!(store.stop_shipping(&task, "stop", None).unwrap(), None);
-    // The person's stop stands: a relaunch running to the end does not approve it.
-    let relaunch = crate::store::task_work::task_graph_row(&store, &task)
-        .unwrap()
-        .unwrap();
-    assert!(crate::store::task_work::start_task_graph_run(
-        &store,
-        &task,
-        &relaunch,
-        &start,
-        (&by, &carrier),
-        true
-    )
-    .unwrap());
-    assert!(store.task_shipping(&task).unwrap().is_none());
-    assert_eq!(state(), crate::durable::TaskState::Moving);
-    assert_eq!(
-        store.task_ship_stop(&task).unwrap().unwrap().by,
-        Some(stopper)
-    );
-    // Only `lf ship` lifts the stop. Approved again, it ships while its
-    // carrier runs, then is idle until its ship process restarts.
-    store.ship_task(&task, (&by, &carrier), "again").unwrap();
-    assert!(store.task_ship_stop(&task).unwrap().is_none());
-    assert_eq!(state(), crate::durable::TaskState::Shipping);
-    // The carrier exits: its end clears both the run's and the ship's OS process.
-    for owner in [RunOwner::TaskCarrier, RunOwner::ShipCarrier] {
-        store.finish_run(owner, &by, 2, Some(0), None).unwrap();
+    // State says what is happening, whoever takes the interactive steps:
+    // the running Task is moving with auto off and with it on.
+    for setting in [
+        loopflow_storage::sqlite::AutoState::Off,
+        loopflow_storage::sqlite::AutoState::On,
+    ] {
+        store.set_task_auto(&task, &mark(setting), false).unwrap();
+        assert_eq!(state(), crate::durable::TaskState::Moving);
     }
-    assert_eq!(state(), crate::durable::TaskState::Idle);
-    let carrier = store
-        .task_shipping(&task)
-        .unwrap()
-        .unwrap()
-        .carrier
+    // The carrier exits and nothing runs.
+    store
+        .finish_run(RunOwner::TaskCarrier, &by, 2, Some(0), None)
         .unwrap();
-    assert_eq!((carrier.pid, carrier.ended_at), (None, Some(2)));
+    assert_eq!(state(), crate::durable::TaskState::Idle);
+    // Recovery can hold an observation from before the carrier cleared its pid.
+    assert!(!store.count_task_run_restart(&task, &by, 0).unwrap());
 }
 
 #[test]
-fn reaching_end_without_remaining_steps_approves_shipping() {
+fn reaching_end_without_remaining_steps_requests_completion_once() {
     let dir = tempfile::tempdir().unwrap();
     let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
     let task = TaskId::new();
@@ -241,20 +183,10 @@ fn reaching_end_without_remaining_steps_approves_shipping() {
     )
     .unwrap();
     store.set_task_graph_step(&task, "review").unwrap();
-    assert!(store.task_shipping(&task).unwrap().is_none());
-    let reserved = loopflow_storage::graph_process::ExecutionStart::reserved(1);
-    assert!(store.end_task_graph(&task, (&by, &reserved)).unwrap());
+    assert!(store.end_task_graph(&task).unwrap());
     assert!(store.task_completion_pending(&task).unwrap().is_some());
-    assert_eq!(
-        store
-            .task_shipping(&task)
-            .unwrap()
-            .unwrap()
-            .carrier
-            .map(|run| run.id),
-        Some(by.clone())
-    );
-    assert!(!store.end_task_graph(&task, (&by, &reserved)).unwrap());
+    assert_eq!(store.task_auto(&task).unwrap(), None);
+    assert!(!store.end_task_graph(&task).unwrap());
 }
 
 #[tokio::test]

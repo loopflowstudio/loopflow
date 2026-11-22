@@ -83,7 +83,7 @@ final class TaskFeed {
         }
     }
 
-    /// Start, Auto-Ship and Stop Auto-Ship: the Notice says the change was requested.
+    /// Start, Auto on and Auto off: the Notice says the change was requested.
     func request(_ name: String, _ task: WorkViewPlan.Content, _ write: (String, String) -> ServedWrite) {
         guard let directory = directory(of: task) else { return }
         let issue = task.identifier ?? task.work.id

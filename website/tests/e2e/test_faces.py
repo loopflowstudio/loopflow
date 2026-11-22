@@ -95,7 +95,7 @@ def test_workflow_card_shows_the_steps_the_graph_runs(homepage: Page, graph: str
         """el => [...el.querySelectorAll('span, b')].map(step =>
             [step.textContent.replace('→', '').trim(), step.tagName === 'B'])"""
     )
-    expected = _graph_steps(yaml.safe_load((GRAPHS / f"{graph}.yaml").read_text()))
+    expected = _graph_steps(yaml.safe_load((GRAPHS / f"{graph}.yaml").read_text())["steps"])
     assert [tuple(step) for step in shown] == expected
 
 

@@ -330,7 +330,9 @@
         "state": "idle",
         "reason": "Waiting for your review at demo",
         "step": null,
-        "captured": null
+        "captured": null,
+        "died": null,
+        "outlook": null
       },
       "run_control": {
         "unavailable": null
@@ -365,10 +367,7 @@
       },
       "graph_source": null,
       "section": "done",
-      "ship_control": {
-        "unavailable": null
-      },
-      "shipping": null,
+      "owned_by_you": false,
       "lifecycle": "done",
       "selection_states": [
         "done"

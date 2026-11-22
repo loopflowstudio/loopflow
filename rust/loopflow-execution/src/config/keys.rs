@@ -282,6 +282,12 @@ pub fn fold(document: &mut Value) {
             }
         }
     }
+    // Released lf's `graph: auto` is `code` with auto on. Remove once the
+    // release reading `auto:` is installed (Task d3af77).
+    if map.get("graph").and_then(Value::as_str) == Some("auto") {
+        map.insert("graph".into(), "code".into());
+        map.entry("auto".into()).or_insert_with(|| "on".into());
+    }
     if let Some(waves) = map.get_mut("waves").and_then(Value::as_mapping_mut) {
         for value in waves.values_mut() {
             fold(value);
@@ -431,9 +437,9 @@ mod tests {
             let config: Config = serde_yaml_ng::from_value(document).unwrap();
             assert_eq!(
                 config.planning_transport(),
-                TrackerConfig::Linear {
+                Some(TrackerConfig::Linear {
                     team: Some("team-id".into())
-                },
+                }),
                 "{spelling}"
             );
         }
@@ -524,6 +530,16 @@ mod tests {
         let mut wave_file = yaml("graph: code\nid: abc\n");
         assert_eq!(gather(&mut wave_file, &["graph"], Root::Wave), ["graph"]);
         assert_eq!(wave_file, yaml("graph: code\nid: abc\n"));
+    }
+
+    #[test]
+    fn a_released_auto_graph_reads_as_code_with_auto_on() {
+        let mut document = yaml("graph: auto\nwaves:\n  abc: {graph: auto}\n");
+        fold(&mut document);
+        assert_eq!(
+            document,
+            yaml("graph: code\nauto: on\nwaves:\n  abc: {graph: code, auto: on}\n")
+        );
     }
 
     #[test]

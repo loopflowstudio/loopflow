@@ -104,8 +104,8 @@ public final class PendingChanges {
         return requestID
     }
 
-    /// Start, Auto-Ship and Stop Auto-Ship change nothing on screen: the Notice
-    /// says "LOO-5 Auto-Ship requested" in the click and the Machine's readings
+    /// Start, Auto on and Auto off change nothing on screen: the Notice
+    /// says "LOO-5 Auto on requested" in the click and the Machine's readings
     /// show the rest. A refusal posts over it.
     public func request(_ name: String, subject: String, write: ServedWrite, notices: NoticeCenter,
                         undo: Notice.Action? = nil, answered: @escaping @MainActor () async -> Void = {},
@@ -336,7 +336,7 @@ public final class PendingChanges {
     }
 
     private static func started(_ states: Set<WorkSelectionState>) -> Bool {
-        !states.isDisjoint(with: [.idle, .active, .moving, .shipping])
+        !states.isDisjoint(with: [.idle, .active, .moving])
     }
 
     private func prune() {
@@ -357,7 +357,7 @@ extension [WorkViewPlan.Content] {
     /// reading's own states replace these.
     fileprivate mutating func updateStates(of members: Set<WorkWorkspaceKey>,
                                            _ update: (Set<WorkSelectionState>) -> Set<WorkSelectionState>) {
-        let sections: Set<WorkSelectionState> = [.backlog, .working, .autonomous, .done]
+        let sections: Set<WorkSelectionState> = [.backlog, .working, .done]
         for index in indices where members.contains(self[index].work) {
             let current = Set(self[index].states)
             let next = update(current)
@@ -371,7 +371,7 @@ extension [WorkViewPlan.Content] {
 extension WorkSelectionState {
     /// Declaration order, so patched states keep a stable order.
     fileprivate static let allOrdered: [WorkSelectionState] = [
-        .open, .available, .busy, .blocked, .unstarted, .idle, .active, .moving, .shipping,
-        .backlog, .working, .autonomous, .done,
+        .open, .available, .busy, .blocked, .unstarted, .idle, .active, .moving,
+        .backlog, .working, .done, .auto,
     ]
 }

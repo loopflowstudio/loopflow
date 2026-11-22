@@ -297,8 +297,12 @@ pub fn emit(repo_root: &Path, node: LfNode, event: LfEventType, fields: LfEventF
 
 /// Own the actual CLI return, without opening a store before command admission.
 ///
+/// A unit test that called this would make every later test in its process
+/// look like the CLI, skipping admission; only the `lf` binary may.
+///
 /// # Panics
 /// Panics if called more than once in the same process.
+#[cfg(not(test))]
 pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<()> {
     PROCESS_STARTED_AT
         .set(OffsetDateTime::now_utc().unix_timestamp())

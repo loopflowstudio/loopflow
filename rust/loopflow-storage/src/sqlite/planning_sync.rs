@@ -1,17 +1,13 @@
 //! What a Project or Task has waiting for its tracker, and what the tracker
-//! won: open and lost tracker actions, the losing heads Git's journal keeps,
-//! and a person's answer to a lost value.
-use std::collections::{BTreeMap, HashMap};
+//! won: open and lost tracker actions, and a person's answer to a lost value.
+use std::collections::HashMap;
 
 use rusqlite::Connection;
 
 use super::children::ids_json;
-use super::tracker_actions::{change_word, read_action, ActionKind, ActionPhase, COLUMNS, IN_REPO};
+use super::tracker_actions::{read_action, COLUMNS, IN_REPO};
 use super::{planning_write, SqliteStore};
-use crate::planning_exchange::{winning_heads, PlanningMutation};
-use crate::planning_sync::{
-    ActionOwnerKind, LostAnswer, TrackerActionStatus, TrackerActions, TrackerKind,
-};
+use crate::planning_sync::{LostAnswer, TrackerActionStatus, TrackerActions};
 use crate::work::edit::{WorkEdit, WorkValue};
 use crate::StoreResult;
 use loopflow_model::durable::{ProjectId, TaskId};
@@ -43,43 +39,16 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         let ids = ids_json([project.as_str()]);
-        let mut actions = owned_actions(&tx, "project_id", &ids, false)?
+        let actions = owned_actions(&tx, "project_id", &ids, false)?
             .remove(project.as_str())
             .unwrap_or_default();
-        actions.extend(
-            git_conflicts(&tx, &ids)?
-                .remove(project.as_str())
-                .unwrap_or_default(),
-        );
         tx.commit()?;
         Ok(TrackerActions { repo, actions })
     }
 
-    /// What `lf repo tracker` lists: on Linear and Asana every open and lost
-    /// action in send order; on Git each value its journal lost.
-    pub fn repository_tracker_actions(
-        &self,
-        repo: &str,
-        tracker: TrackerKind,
-    ) -> StoreResult<Vec<TrackerActionStatus>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        if tracker == TrackerKind::Git {
-            let tx = conn.savepoint()?;
-            let ids: Vec<String> = tx
-                .prepare(
-                    "SELECT t.id FROM tasks t JOIN repository_plans r ON r.id=t.repository_id WHERE r.repo=?1
-                     UNION ALL SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1",
-                )?
-                .query_map([repo], |row| row.get(0))?
-                .collect::<rusqlite::Result<_>>()?;
-            let mut lost: Vec<_> = git_conflicts(&tx, &ids_json(ids.iter().map(String::as_str)))?
-                .into_values()
-                .flatten()
-                .collect();
-            tx.commit()?;
-            lost.sort_by(|a, b| (&a.owner_id, &a.subject).cmp(&(&b.owner_id, &b.subject)));
-            return Ok(lost);
-        }
+    /// What `lf repo tracker` lists: every open and lost action in send order.
+    pub fn repository_tracker_actions(&self, repo: &str) -> StoreResult<Vec<TrackerActionStatus>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
         // Two arms so each reads its own partial index.
         let mut query = conn.prepare(&format!(
             "SELECT {COLUMNS} FROM tracker_actions e WHERE e.phase IN ('queued','sent') AND {IN_REPO} AND {SHOWN}
@@ -98,8 +67,8 @@ impl SqliteStore {
     }
 
     /// Answer lost lines, whoever owns them: keep the tracker's value, or
-    /// save the local one again, which queues it (Git records either as the
-    /// field's merge). A line answered meanwhile is left as it is.
+    /// save the local one again, which queues it. A line answered meanwhile
+    /// is left as it is.
     pub fn answer_lost(
         &self,
         lines: &[TrackerActionStatus],
@@ -108,10 +77,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         for line in lines {
-            match line.tracker {
-                TrackerKind::Git => answer_git(&tx, &line.id, answer)?,
-                _ => answer_queued(&tx, &line.id, answer)?,
-            }
+            answer_queued(&tx, &line.id, answer)?;
         }
         tx.commit()?;
         Ok(())
@@ -156,35 +122,6 @@ fn answer_queued(conn: &Connection, id: &str, answer: LostAnswer) -> StoreResult
     Ok(())
 }
 
-/// Git keeps the field's competing heads; the answer is a save of the chosen
-/// value that names all of them as parents.
-fn answer_git(conn: &Connection, id: &str, answer: LostAnswer) -> StoreResult<()> {
-    let mutation: String = conn.query_row(
-        "SELECT mutation FROM git_tracker_changes WHERE id=?1",
-        [id],
-        |row| row.get(0),
-    )?;
-    let lost = serde_json::from_str::<PlanningMutation>(&mutation)?.edit;
-    let edit = match answer {
-        LostAnswer::UseMine => {
-            planning_write::local(conn, std::slice::from_ref(&lost))?;
-            lost
-        }
-        LostAnswer::KeepTheirs => {
-            let table = planning_write::table(&lost.change);
-            let change = planning_write::read(conn, table, &lost.target)?
-                .into_iter()
-                .find(|value| value.field() == lost.change.field())
-                .ok_or(crate::StoreError::NotFound)?;
-            WorkEdit {
-                target: lost.target,
-                change,
-            }
-        }
-    };
-    planning_write::settle(conn, &edit)
-}
-
 /// Each Task's open and lost tracker actions, in one statement per kind
 /// across all repositories.
 pub(super) fn task_tracker_actions_in(
@@ -212,7 +149,6 @@ pub(super) fn task_tracker_actions_in(
             .filter_map(|(_, _, project)| project.as_deref()),
     );
     let mut task_actions = owned_actions(conn, "task_id", &task_ids, false)?;
-    let mut task_conflicts = git_conflicts(conn, &task_ids)?;
     let project_actions = owned_actions(conn, "project_id", &project_ids, true)?;
     let mut open = HashMap::new();
     for (task, repo, project) in owners {
@@ -223,7 +159,6 @@ pub(super) fn task_tracker_actions_in(
         {
             actions.extend(order.iter().cloned());
         }
-        actions.extend(task_conflicts.remove(&task).unwrap_or_default());
         open.insert(TaskId::from_raw(task), TrackerActions { repo, actions });
     }
     Ok(open)
@@ -252,79 +187,4 @@ fn owned_actions(
         }
     }
     Ok(owners)
-}
-
-/// Git keeps a field's concurrent values as competing heads of its journal;
-/// every head but the winner is a value that lost, shown until a later save of
-/// the field names all of them as parents.
-fn git_conflicts(
-    conn: &Connection,
-    ids: &str,
-) -> StoreResult<HashMap<String, Vec<TrackerActionStatus>>> {
-    let mut query = conn.prepare(
-        "SELECT c.record_table,c.id,c.mutation FROM git_tracker_changes c
-         WHERE c.object_id IN (SELECT value FROM json_each(?1)) AND NOT EXISTS(
-             SELECT 1 FROM git_tracker_changes child,json_each(child.mutation,'$.parents') parent
-             WHERE child.object_id=c.object_id AND child.field=c.field AND parent.value=c.id)",
-    )?;
-    let mut heads = Vec::new();
-    for row in query.query_map([ids], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-        ))
-    })? {
-        let (table, id, mutation) = row?;
-        heads.push((
-            table,
-            id,
-            serde_json::from_str::<PlanningMutation>(&mutation)?,
-        ));
-    }
-    let winners: BTreeMap<_, _> = winning_heads(
-        heads
-            .iter()
-            .map(|(_, id, mutation)| (id.as_str(), mutation)),
-    )
-    .map(|(id, mutation)| (mutation.edit.key(), (id, mutation)))
-    .collect();
-    let mut conflicts = HashMap::<_, Vec<_>>::new();
-    for (table, id, mutation) in &heads {
-        let (winner, won) = winners[&mutation.edit.key()];
-        if winner == id {
-            continue;
-        }
-        let kind = ActionKind::of(&mutation.edit.change).unwrap_or(ActionKind::Field);
-        let shown = |mutation: &PlanningMutation| -> StoreResult<serde_json::Value> {
-            let value = mutation.edit.change.value()?;
-            Ok(match kind {
-                ActionKind::State => value["planning_state"].clone(),
-                _ => value,
-            })
-        };
-        let field = mutation.edit.change.field();
-        let local_value = shown(mutation)?;
-        conflicts
-            .entry(mutation.edit.target.clone())
-            .or_default()
-            .push(TrackerActionStatus {
-                id: id.clone(),
-                seq: None,
-                owner_kind: match table.as_str() {
-                    "projects" => ActionOwnerKind::Project,
-                    _ => ActionOwnerKind::Task,
-                },
-                owner_id: mutation.edit.target.clone(),
-                kind,
-                change: change_word(kind, Some(field), local_value.as_str()),
-                subject: Some(field.to_owned()),
-                phase: ActionPhase::Conflicted,
-                tracker: TrackerKind::Git,
-                error: None,
-                local_value,
-                tracker_value: Some(shown(won)?),
-            });
-    }
-    Ok(conflicts)
 }

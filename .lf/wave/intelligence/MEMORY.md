@@ -404,11 +404,8 @@ a present evidence gap. Git retains the pre-chapter memory.
 
 ## Running the Mac dashboard
 
-`RegistryQueryLocal` shells out to `lf runs/trace/doctor/usage/tokens --json`, so
-the app must resolve **this branch's** `lf` — it prefers the one in its own
-bundle over `PATH`. `uv run python scripts/loopflow-dev.py run-debug` builds
-`lf`, `lfd`, and the app, installs `~/Applications/Loopflow Dev.app`, and
-launches it. Three ways this has actually gone wrong:
+Use [Loopflow Dev](../../../swift/README.md) to view changes to the dashboard
+on the installed Machine. Three ways this has actually gone wrong:
 
 1. A *different* app — `/Applications/Loopflow.app` predates the dashboard.
 2. `swift build` names the product `LoopflowMac` but `Info.plist` declares

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Score · Loopflow design exploration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Old+Standard+TT:ital,wght@0,400;0,700;1,400&family=Noto+Music&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #fffefb; --ink: #14110f; --faint: #6a625c; --staff: #2a2623; --mark: #8a1b3d; --wash: #f3efe9;
+    --s1: 6px; --s2: 12px; --s3: 24px; --s4: 48px; --s5: 96px;
+    --t-title: 84px; --t-head: 34px; --t-lede: 21px; --t-text: 17px; --t-small: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--paper); color: var(--ink); font: var(--t-text)/1.5 "Old Standard TT", "Century Schoolbook", Georgia, serif; }
+  .note { font: 13px/1.4 -apple-system, sans-serif; color: #777; background: #f4f4f4; padding: 8px 24px; display: flex; gap: 20px; }
+  .note a { color: inherit; } .note b { color: #222; font-weight: 600; }
+  .page { max-width: 1120px; margin: 0 auto; padding: 0 var(--s4); }
+  .specimen { padding: var(--s5) 0 0; }
+  .specimen > .what { font: 13px/1.4 -apple-system, sans-serif; color: #888; margin-bottom: var(--s3); }
+  music { font-family: "Noto Music", serif; font-style: normal; }
+
+  /* Title page */
+  .titlepage { padding-top: var(--s5); text-align: center; }
+  .titlepage h1 { font-size: var(--t-title); font-weight: 400; line-height: 1; letter-spacing: -.01em; }
+  .titlepage .for { font-style: italic; font-size: var(--t-lede); margin-top: var(--s3); }
+  .titlepage .sub { max-width: 34em; margin: var(--s3) auto 0; font-size: var(--t-lede); line-height: 1.4; }
+  .get { margin-top: var(--s4); display: inline-flex; align-items: baseline; gap: var(--s3); text-align: left; }
+  .get a.dl { color: var(--paper); background: var(--ink); padding: 10px 22px; text-decoration: none; font-weight: 700; }
+  .get code { font: 15px/1 ui-monospace, Menlo, monospace; border-bottom: 1px solid var(--staff); padding-bottom: 4px; }
+  .get i { color: var(--faint); }
+  a:focus-visible, button:focus-visible, textarea:focus-visible { outline: 2px solid var(--mark); outline-offset: 3px; }
+
+  /* A system: Tasks are parts, steps are bars */
+  .system { margin-top: var(--s4); position: relative; padding-left: 14px; text-align: left; }
+  .system::before { content: ""; position: absolute; left: 0; top: 22px; bottom: 22px; width: 5px; background: var(--ink); }
+  .system::after { content: ""; position: absolute; left: 9px; top: 22px; bottom: 22px; width: 1px; background: var(--ink); }
+  .head, .part { display: grid; grid-template-columns: 390px minmax(0, 1fr) 180px; column-gap: var(--s3); align-items: center; }
+  .head { font-style: italic; font-size: var(--t-small); color: var(--faint); height: 28px; }
+  .head .bars, .part .bars { display: grid; grid-template-columns: 1.1fr 1fr 1.6fr 1fr 1fr; }
+  .head .bars span { padding-left: 8px; }
+  .part { min-height: 62px; }
+  .part .name { line-height: 1.25; }
+  .part .name small { display: block; font-style: italic; font-size: var(--t-small); color: var(--faint); }
+  .part .bars { height: 44px; position: relative; }
+  .part .bars::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid var(--staff); }
+  .bar { position: relative; border-left: 1px solid var(--staff); display: flex; align-items: center; gap: 9px; padding-left: 10px; }
+  .bar:last-child { border-right: 1px solid var(--staff); }
+  .n { width: 10px; height: 7.5px; background: var(--ink); border-radius: 50%; transform: rotate(-22deg); position: relative; flex: none; }
+  .n::after { content: ""; position: absolute; right: -.5px; bottom: 3px; width: 1px; height: 19px; background: var(--ink); transform: rotate(22deg); transform-origin: bottom; }
+  .rest { width: 11px; height: 4px; background: var(--faint); margin-top: 4px; opacity: .55; }
+  .now .n:last-of-type { background: none; box-shadow: inset 0 0 0 1.5px var(--ink); }
+  .hold { color: var(--mark); }
+  .hold music { position: absolute; top: -9px; left: 50%; transform: translateX(-50%); font-size: 26px; line-height: 1; }
+  .hold .n { background: none; box-shadow: inset 0 0 0 1.5px var(--mark); margin: 0 auto; }
+  .hold .n::after { display: none; }
+  .fine .bar:last-child { border-right: 7px double var(--ink); }
+  .part .state { font-size: var(--t-small); font-style: italic; text-align: right; }
+  .part .state b { font-style: normal; color: var(--mark); display: block; }
+  .part.tacet .name, .part.tacet .state { color: var(--faint); }
+  .part.sel { background: linear-gradient(to right, transparent 8px, var(--wash) 8px); }
+  .part .name { padding-left: 14px; } .part .state { padding-right: 10px; }
+
+  /* The Graph, engraved */
+  .engraving { text-align: left; }
+  .engraving .tempo { font-weight: 700; font-size: var(--t-lede); }
+  .engraving .tempo i { font-weight: 400; margin-left: var(--s2); }
+  .staff5 { margin-top: var(--s4); display: grid; grid-template-columns: 1.1fr 1fr 2.2fr 1fr 1fr; height: 64px; position: relative;
+    background: repeating-linear-gradient(to bottom, var(--staff) 0 1px, transparent 1px 16px) top / 100% 65px no-repeat; }
+  .staff5 .bar { align-items: flex-start; padding: 0 0 0 16px; gap: 14px; }
+  .staff5 .n { width: 17px; height: 13px; margin-top: var(--y, 26px); }
+  .staff5 .n::after { height: 44px; bottom: 5px; width: 1.5px; }
+  .staff5 .hold music { top: -46px; font-size: 44px; }
+  .staff5 .hold .n { margin: 26px auto 0; }
+  .staff5 .rep::before, .staff5 .rep::after { font-family: "Noto Music"; position: absolute; top: -3px; font-size: 62px; line-height: 64px; }
+  .staff5 .rep::before { content: "\1D106"; left: -2px; }
+  .staff5 .rep::after { content: "\1D107"; right: -1px; }
+  .staff5 .rep { padding-left: 44px; }
+  .staff5 .times { position: absolute; top: -40px; left: 0; right: 0; border-top: 1px solid var(--ink); border-left: 1px solid var(--ink); height: 14px; padding: 2px 8px; font-style: italic; font-size: var(--t-small); }
+  .staff5 .bar:last-child { border-right: 9px double var(--ink); }
+  .lyrics { display: grid; grid-template-columns: 1.1fr 1fr 2.2fr 1fr 1fr; margin-top: var(--s2); }
+  .lyrics div { padding: 0 var(--s2) 0 16px; }
+  .lyrics b { display: block; font-size: var(--t-lede); font-weight: 400; }
+  .lyrics i { font-size: var(--t-small); color: var(--faint); display: block; line-height: 1.35; }
+  .lyrics .yours b, .lyrics .yours i { color: var(--mark); }
+
+  /* New Task */
+  .sheet { max-width: 720px; border: 1px solid var(--ink); padding: var(--s4); text-align: left; }
+  .sheet h2 { font-size: var(--t-head); font-weight: 400; }
+  .sheet textarea { display: block; width: 100%; margin-top: var(--s3); border: 0; border-bottom: 1px solid var(--staff); background:
+    repeating-linear-gradient(to bottom, transparent 0 31px, #d9d3cc 31px 32px); font: inherit; font-size: var(--t-lede); line-height: 32px; height: 96px; resize: none; color: var(--ink); }
+  .sheet .where { margin-top: var(--s3); font-style: italic; }
+  .sheet .where u { text-decoration-thickness: 1px; text-underline-offset: 4px; font-style: normal; }
+  .sheet .go { margin-top: var(--s3); display: flex; justify-content: space-between; align-items: baseline; }
+  .sheet button { font: inherit; font-weight: 700; background: var(--ink); color: var(--paper); border: 0; padding: 10px 22px; cursor: pointer; }
+  .sheet kbd { font: inherit; font-style: italic; color: var(--faint); }
+  footer { padding: var(--s5) 0; font-style: italic; color: var(--faint); font-size: var(--t-small); max-width: 46em; }
+  @media (max-width: 980px) {
+    .page { padding: 0 16px; } .titlepage h1 { font-size: 52px; }
+    .head { display: none; } .part { grid-template-columns: 1fr; row-gap: 4px; padding: 10px 0; } .part .state { text-align: left; }
+    .get { flex-direction: column; gap: var(--s2); } .lyrics i { display: none; } .lyrics b { font-size: 14px; } .lyrics div { padding-left: 4px; }
+  }
+</style>
+</head>
+<body>
+<p class="note"><b>Score</b><a href="index.html">All directions</a><a href="terminal.html">Terminal-native</a><a href="panel.html">Instrument panel</a></p>
+<div class="page">
+
+<section class="titlepage">
+  <h1>Loopflow</h1>
+  <p class="for">for coding agents and one conductor</p>
+  <p class="sub">Your agents play the parts. You come in at the holds: the design, the demo, and nowhere else.</p>
+  <p class="get"><a class="dl" href="#">Download for Mac</a><i>or</i><code>curl -fsSL https://loopflow.studio/install.sh | sh</code></p>
+
+  <div class="system" aria-label="Today's Tasks, each drawn as a part">
+    <div class="head"><span></span><div class="bars"><span>task-design</span><span>design</span><span>pursue</span><span>demo</span><span>ship</span></div><span></span></div>
+    <div class="part sel"><p class="name">Make Task PR, file-browser and brief views useful beside the conversation<small>LOO-515, Claude</small></p>
+      <div class="bars"><div class="bar"><i class="n"></i><i class="n"></i></div><div class="bar"><i class="n"></i></div><div class="bar"><i class="n"></i><i class="n"></i><i class="n"></i><i class="n"></i></div><div class="bar hold"><music>&#x1D110;</music><i class="n"></i></div><div class="bar"><i class="rest"></i></div></div>
+      <p class="state"><b>Hold: try the demo</b>since 12:07</p></div>
+    <div class="part"><p class="name">Keep interrupted terminal pastes from swallowing Session input<small>LOO-912, Codex</small></p>
+      <div class="bars"><div class="bar"><i class="n"></i><i class="n"></i></div><div class="bar"><i class="n"></i></div><div class="bar now"><i class="n"></i><i class="n"></i><i class="n"></i></div><div class="bar"><i class="rest"></i></div><div class="bar"><i class="rest"></i></div></div>
+      <p class="state">implementing, second pass</p></div>
+    <div class="part"><p class="name">Keep Desktop scrolling responsive under build load<small>LOO-910, Claude</small></p>
+      <div class="bars"><div class="bar"><i class="n"></i><i class="n"></i></div><div class="bar hold"><music>&#x1D110;</music><i class="n"></i></div><div class="bar"><i class="rest"></i></div><div class="bar"><i class="rest"></i></div><div class="bar"><i class="rest"></i></div></div>
+      <p class="state"><b>Hold: answer the design</b>since 11:40</p></div>
+    <div class="part fine tacet"><p class="name">Keep one plan at every size<small>LOO-938, Claude</small></p>
+      <div class="bars"><div class="bar"><i class="n"></i><i class="n"></i></div><div class="bar"><i class="n"></i></div><div class="bar"><i class="n"></i><i class="n"></i></div><div class="bar"><i class="n"></i></div><div class="bar"><i class="n"></i><i class="n"></i></div></div>
+      <p class="state">landed, #1983</p></div>
+  </div>
+</section>
+
+<section class="specimen engraving">
+  <p class="what">The workflow line. A stop that is yours is a fermata; a loop is a repeat.</p>
+  <p class="tempo">feature <i>the default Graph. Two holds.</i></p>
+  <div class="staff5">
+    <div class="bar"><i class="n" style="--y:34px"></i><i class="n" style="--y:26px"></i></div>
+    <div class="bar hold"><music>&#x1D110;</music><i class="n"></i></div>
+    <div class="bar rep"><span class="times">3 times at most</span><i class="n" style="--y:42px"></i><i class="n" style="--y:34px"></i><i class="n" style="--y:26px"></i><i class="n" style="--y:18px"></i></div>
+    <div class="bar hold"><music>&#x1D110;</music><i class="n"></i></div>
+    <div class="bar"><i class="n" style="--y:26px"></i><i class="n" style="--y:42px"></i></div>
+  </div>
+  <div class="lyrics">
+    <div><b>task-design</b><i>research, then a design to react to</i></div>
+    <div class="yours"><b>design</b><i>you jam on it until it is right</i></div>
+    <div><b>pursue</b><i>implement, review, and again while the review finds something</i></div>
+    <div class="yours"><b>demo</b><i>you try the change</i></div>
+    <div><b>ship</b><i>gate, publish, land</i></div>
+  </div>
+</section>
+
+<section class="specimen">
+  <p class="what">New Task.</p>
+  <div class="sheet">
+    <h2>What do you want?</h2>
+    <textarea aria-label="What do you want?">Sidebar rows stop clipping the Task ID and status</textarea>
+    <p class="where">In <u>loopflow</u>, played as <u>feature</u>, by <u>Claude</u>.</p>
+    <p class="go"><kbd>Return to start, Shift-Return for a new line</kbd><button>Start</button></p>
+  </div>
+</section>
+
+<footer>Old Standard, one weight and its italic, on white. Black for everything the agents do; one red for everything that is yours. No panels, no chips, no rounded corners, no second typeface outside commands.</footer>
+</div>
+</body>
+</html>

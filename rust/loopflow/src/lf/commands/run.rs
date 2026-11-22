@@ -127,7 +127,6 @@ pub fn resume(id: &str, message: &str, cli: &Cli, kind: LaunchKind) -> Result<()
         &session,
         cli.setting_values()?,
         cli.output_schema.as_ref(),
-        cli.batch,
     )?;
     let mut turn = cli.process_options();
     turn.agent = Some(resolved.agent.to_string());
@@ -501,12 +500,6 @@ fn build_prompt_at(
     let subject = cli.task.as_deref().unwrap_or_default();
     loopflow_execution::agent_input_timing::record("prompt_begin", subject);
     let task_input = prepare_task_input(cli)?;
-    let checkout_yolo = match &task_input {
-        Some((_, seed)) if !is_interactive && !cli.context => {
-            loopflow_execution::agent::is_task_checkout(&seed.task, &repo_root)?
-        }
-        _ => false,
-    };
     let task_message = task_input.as_ref().map(|(_, seed)| seed.message.clone());
     let wave = cli.wave.clone().or_else(|| {
         cli.resume
@@ -618,7 +611,6 @@ fn build_prompt_at(
     };
     let mut agent_config = prepared.config;
     agent_config.output_schema = cli.output_schema.clone();
-    agent_config.skip_permissions |= checkout_yolo;
 
     let mut components = prepared.components;
     components.message_context = message_context.or_else(|| {
@@ -710,7 +702,10 @@ fn run_prompt(
         return result
             .and_then(|outcome| {
                 let harness = built.agent_config.agent.harness;
-                let assigned = harness.harness().capabilities().thread.for_kind(kind)
+                let assigned = loopflow_execution::harness::launcher(harness)
+                    .capabilities()
+                    .thread
+                    .for_kind(kind)
                     == loopflow_execution::harness::ThreadName::Assigned;
                 outcome.result(harness, assigned, kind)
             })
@@ -1188,7 +1183,7 @@ for line in sys.stdin:
             agent_config: AgentConfig {
                 task_prompt: task.to_string(),
                 cwd: Some(home.path().to_path_buf()),
-                skip_permissions: true,
+                yolo: true,
                 env,
                 ..AgentConfig::new(loopflow_execution::config::Agent::parse("claude").unwrap())
             },
@@ -1306,7 +1301,7 @@ for line in sys.stdin:
                 agent_config: AgentConfig {
                     task_prompt: task.to_string(),
                     cwd: Some(repo.to_path_buf()),
-                    skip_permissions: true,
+                    yolo: true,
                     env,
                     ..AgentConfig::new(loopflow_execution::config::Agent::parse("claude").unwrap())
                 },

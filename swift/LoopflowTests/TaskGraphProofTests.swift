@@ -121,6 +121,10 @@ struct TaskGraphTests {
         #expect(evidence.state == .stalled)
         let held = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_waiting.json"))
         #expect(held.state == .waiting)
+        let died = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_died.json"))
+        #expect(died.died?.atStep == "implement")
+        #expect(died.outlook?.kind == .waitingForYou && died.outlook?.command == "lf task run LOO-12")
+        #expect(held.died == nil && held.outlook == nil)
         // A preview only marks stages.
         let preview = graphNodeStates(review.compiled, latest: nil)
         #expect(preview[4] == .pendingHuman && preview[1] == .pending)

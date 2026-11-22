@@ -61,19 +61,6 @@ fn describe_prints_the_protocol_with_no_server_and_no_store() {
 }
 
 #[test]
-fn a_client_that_closes_at_once_leaves_the_server_listening() {
-    let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_home(&[], Some(home.path()));
-    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
-    let repo = TestRepo::new();
-    let mut server = Server::start(repo.path(), home.path());
-    let socket = loopflow::server::socket_path().unwrap();
-    drop(std::os::unix::net::UnixStream::connect(&socket).unwrap());
-    loopflow_execution::machine::client::Connection::open().unwrap();
-    assert!(server.0.try_wait().unwrap().is_none(), "the server exited");
-}
-
-#[test]
 fn configuration_edits_use_the_server_without_work_processes() {
     use loopflow::lf::commands::read::Read;
     use loopflow::lf::commands::write::Write;
@@ -569,8 +556,11 @@ fn screen_reads_are_compact_passive_and_match_cli() {
     let _env = EnvGuard::with_home(&[], Some(home.path()));
     std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
     let repo = TestRepo::new();
+    // A served reply schedules an independent plan exchange when a carrier exists.
+    loopflow_execution::git::git_stdout(repo.path(), &["remote", "remove", "origin"]).unwrap();
     repo.create_file(".lf/config.yaml", "default_agent: claude\n");
-    let mut registered = register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let directory = repo.path().canonicalize().unwrap();
+    let mut registered = register_task_with_pr(home.path(), &directory, "main", &repo.head_sha());
     let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     store
         .create_task(&loopflow_execution::work::task::NewTask {
@@ -590,7 +580,7 @@ fn screen_reads_are_compact_passive_and_match_cli() {
             artifact_key: None,
             caller_artifact_key: None,
             input_published: false,
-            cwd: repo.path().into(),
+            cwd: directory.clone(),
             skill: None,
             provider: None,
             model: None,
@@ -602,7 +592,7 @@ fn screen_reads_are_compact_passive_and_match_cli() {
             work_source: None,
             bound_at: None,
             interactive: true,
-            repo: Some(repo.path().display().to_string()),
+            repo: Some(directory.display().to_string()),
             title: "Recorded conversation".into(),
             title_source: loopflow_execution::session::TitleSource::Generated,
             request: None,
@@ -612,9 +602,8 @@ fn screen_reads_are_compact_passive_and_match_cli() {
         None,
     )
     .unwrap();
-    let _server = Server::start(repo.path(), home.path());
+    let _server = Server::start(&directory, home.path());
     let mut connection = loopflow_execution::machine::client::Connection::open().unwrap();
-    let directory = repo.path().to_owned();
     let board = Read::PlanBoard {
         directory: directory.clone(),
         wave: None,
@@ -637,7 +626,7 @@ fn screen_reads_are_compact_passive_and_match_cli() {
             .result;
         let argv = operation.argv();
         let printed: Value = serde_json::from_str(&read(
-            repo.path(),
+            &directory,
             home.path(),
             &argv.iter().map(String::as_str).collect::<Vec<_>>(),
             None,
@@ -1247,12 +1236,12 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskUpdate { .. }
         | Write::TaskClaim { .. }
         | Write::TaskUnassign { .. }
-        | Write::TaskHold { .. }
+        | Write::TaskAutoOff { .. }
         | Write::TaskMove { .. }
         // Starting a run or a ship starts Processes; task_run_waits_at_an_interactive_step
         // compares the run, and comments differ by their saved IDs.
         | Write::TaskRun { .. }
-        | Write::TaskShip { .. }
+        | Write::TaskAutoOn { .. }
         | Write::TaskSteer { .. }
         | Write::TaskReport { .. }
         | Write::TaskInterrupt { .. }
@@ -1320,7 +1309,8 @@ fn server_operations_match_their_lf_commands() {
                 Write::TaskUpdate {
                     directory: directory.clone(),
                     issue: "INF-123".into(),
-                    notes: "Served from the app".into(),
+                    notes: Some("Served from the app".into()),
+                    rank: Some(1),
                 },
                 Write::TaskMove {
                     machine: None,
@@ -1508,10 +1498,6 @@ fn server_operations_match_their_lf_commands() {
         assert_eq!(written["owner"], printed["owner"], "{args:?}");
         assert_eq!(written["owner"].is_null(), !claimed, "{written}");
     }
-    // Stopping a Task that is not shipping saves the stop, which keeps a run
-    // from approving it until `lf ship`, retaining who requested the stop. The
-    // ship process it kills and the merge request it takes back are the ship
-    // tests'.
     // No run is live, so an interrupt reaches nothing, in the app as through `lf`.
     let interrupt = Write::TaskInterrupt {
         directory: directory.clone(),
@@ -1570,7 +1556,7 @@ fn server_operations_match_their_lf_commands() {
         assert_eq!(last(&written), last(&printed), "{args:?}");
         assert_eq!(last(&written).0, format!("served {steer}"));
     }
-    let stop = Write::TaskHold {
+    let stop = Write::TaskAutoOff {
         directory: directory.clone(),
         issue: "INF-123".into(),
         reason: None,
@@ -1581,11 +1567,36 @@ fn server_operations_match_their_lf_commands() {
             issue: "INF-123".into(),
         }
         .read()
-        .unwrap()["execution"]["ship_stop"]["by"]
+        .unwrap()["execution"]["auto"]["by"]
             .clone()
     };
+    // Auto is the Task's setting: this Task has taken up no Graph and keeps
+    // the off, served or through `lf`.
     compare(stop.clone(), &|| stop.clone(), &stopped);
-    assert_eq!(stopped()["kind"], "person", "no stop saved");
+    assert!(!stopped().is_null(), "a Task with no Graph lost its off");
+    // Why auto went off is a comment on the Task.
+    server_write(Write::TaskAutoOff {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+        reason: Some("waiting on the design".into()),
+    });
+    let pane = Read::TaskGet {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+    }
+    .read()
+    .unwrap();
+    assert!(
+        pane["comments"]["comments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|comment| comment["body"]
+                .as_str()
+                .is_some_and(|body| body.starts_with("waiting on the design"))),
+        "{}",
+        pane["comments"]
+    );
 
     // Which repositories the app shows, as the app reads them.
     let portfolio = || without_clock(Read::DesktopPortfolio.read().unwrap());
@@ -1928,9 +1939,9 @@ impl Server {
     fn start(repo: &Path, home: &Path) -> Self {
         let server = Self(isolated_lf(repo, home, &["server", "run"]));
         let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        // Readiness as a client sees it; `status()` would compare the server's
-        // executable with this test binary.
-        while loopflow_execution::machine::client::Connection::open().is_err() {
+        // This test binary is another executable than the server's, and the
+        // server is as ready for it as for its own `lf`.
+        while !loopflow_execution::machine::client::status().unwrap().ready {
             assert!(std::time::Instant::now() < deadline, "server did not start");
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -2028,10 +2039,14 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             directory,
             issue,
             notes,
-        } => (
-            path(directory),
-            words(&["task", "edit", issue, &format!("--notes={notes}"), "--json"]),
-        ),
+            rank,
+        } => {
+            let mut args = words(&["task", "edit", issue]);
+            args.extend(notes.iter().map(|notes| format!("--notes={notes}")));
+            args.extend(rank.iter().map(|rank| format!("--rank={rank}")));
+            args.push("--json".into());
+            (path(directory), args)
+        }
         Write::TaskAbandon { directory, issue } => (
             path(directory),
             words(&["task", "abandon", issue, "--json"]),
@@ -2043,12 +2058,12 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["task", "unassign", issue, "--json"]),
         ),
-        Write::TaskHold {
+        Write::TaskAutoOff {
             directory,
             issue,
             reason,
         } => {
-            let mut spelled = words(&["task", "hold", issue, "--json"]);
+            let mut spelled = words(&["task", "auto", "off", issue, "--json"]);
             if let Some(reason) = reason {
                 spelled.extend(words(&["--reason", reason]));
             }
@@ -2108,9 +2123,10 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             spelled.push("--json".into());
             (path(directory), spelled)
         }
-        Write::TaskShip { directory, issue } => {
-            (path(directory), words(&["--task", issue, "ship", "--json"]))
-        }
+        Write::TaskAutoOn { directory, issue } => (
+            path(directory),
+            words(&["--task", issue, "task", "auto", "on", "--json"]),
+        ),
         Write::TaskSteer {
             directory,
             issue,

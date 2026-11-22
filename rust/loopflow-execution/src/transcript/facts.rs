@@ -14,9 +14,9 @@
 
 use serde_json::{json, Value};
 
-use super::live::TurnState;
-use super::{seconds, Source, Turn};
-use crate::harness::HarnessKind;
+use loopflow_harness::transcript::live::TurnState;
+use loopflow_harness::transcript::{seconds, Source, Turn};
+use loopflow_harness::HarnessKind;
 use loopflow_model::id::AgentSessionId;
 use loopflow_storage::sqlite::{SqliteStore, TurnSpan};
 
@@ -71,7 +71,7 @@ fn record_ended(
     thread: &AgentSessionId,
     source: &Source,
 ) -> anyhow::Result<usize> {
-    let turns = super::live::last_turns(harness, source);
+    let turns = loopflow_harness::transcript::live::last_turns(harness, source);
     let recorded = if harness == HarnessKind::Pi {
         store.session_turn_spans(session, thread)?
     } else {
@@ -102,7 +102,7 @@ fn record(
     thread: &AgentSessionId,
     source: &Source,
 ) -> anyhow::Result<usize> {
-    let turns = super::read(harness, source)?;
+    let turns = loopflow_harness::transcript::read(harness, source)?;
     let last_row = || source.last_written();
     let recorded = store.session_turn_spans(session, thread)?;
     let mut written = 0;
@@ -213,13 +213,9 @@ fn completion(harness: HarnessKind, turn: &Turn, started: Option<i64>, ended: i6
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
-    fn fixture(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/transcript/testdata")
-            .join(name)
-    }
+    use loopflow_harness::transcript::testdata as fixture;
 
     fn store() -> (tempfile::TempDir, SqliteStore) {
         let home = tempfile::tempdir().unwrap();

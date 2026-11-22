@@ -62,7 +62,7 @@ struct RegistryQueryTests {
                 continuation.yield(Data("{\"answers\":null,\"unavailable\":null,\"body\":\(body),\"read_at\":{\"planning\":7}}".utf8))
                 continuation.finish()
             }
-            return LineSubscription(lines: lines, send: { _ in }, cancel: {})
+            return LineSubscription(lines: lines, send: { _ in }, cancel: {}, unreadable: { nil })
         }) { _, _ in throw RegistryQueryError("Unexpected one-shot read") }
         let subscription = try await query.onMachine("peer", repository: "plan").subscribeTask(task: "task")
         var iterator = subscription.lines.makeAsyncIterator()
@@ -124,12 +124,12 @@ struct RegistryQueryTests {
         #expect(try object(move) == object(#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null,"machine":null}"#))
         #expect(move.argv == ["task", "move", "FIX-1", "--no-wave", "--json"])
         #expect(move.cwd == "/r")
-        let stop = ServedWrite.taskHold(directory: "/r", issue: "FIX-1")
-        #expect(try object(stop) == object(#"{"kind":"task.hold","directory":"/r","issue":"FIX-1","reason":null}"#))
+        let off = ServedWrite.taskAutoOff(directory: "/r", issue: "FIX-1")
+        #expect(try object(off) == object(#"{"kind":"task.auto.off","directory":"/r","issue":"FIX-1","reason":null}"#))
         let keep = ServedWrite.repoTrackerAnswer(directory: "/r", action: "a1", answer: .keepTheirs)
         #expect(try object(keep) == object(#"{"kind":"repo.tracker.answer","directory":"/r","action":"a1","answer":"keep_theirs"}"#))
         #expect(keep.argv == ["repo", "tracker", "answer", "a1", "--keep-theirs", "--json"])
-        #expect(stop.argv == ["task", "hold", "FIX-1", "--json"])
+        #expect(off.argv == ["task", "auto", "off", "FIX-1", "--json"])
         let save = ServedWrite.taskSave(directory: "/", issue: "FIX-1", path: "a.txt", revision: "r", content: "text")
         #expect(try object(save) == object(
             #"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#))
@@ -396,7 +396,7 @@ struct RegistryQueryTests {
           "provider": "codex",
           "owner": {"person": "Jack Heart", "person_id": null, "machine": {"id": null, "label": null}}
         },
-        "graph_name":"feature","graph_source":"repository","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
+        "graph_name":"feature","graph_source":"repository","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},
         "next_move": {
           "owner": "task",
           "reason": "ready"
@@ -421,7 +421,8 @@ struct RegistryQueryTests {
           "reason": "resume the parked Task"
         },
         "pr": null,
-        "section": "working"
+        "section": "working",
+        "owned_by_you": false
       }
     ],
     "truncated": false

@@ -31,3 +31,9 @@
 - fast_app loads Pico before `style.css`; the bar's `details`/`summary` rules
   undo Pico's chevron and margins. Turning Pico off (`pico=False`) would delete
   many such resets across the stylesheet, but changes every page's base styles.
+
+## Sync with the design Task
+
+- The shared header takes the open Company menu fix. The consolidated font
+  prototype goes because its faces already ship. This Task keeps its type
+  step names; the upstream suggestion to rename the ramp remains open.

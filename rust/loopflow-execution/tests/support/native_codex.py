@@ -262,7 +262,7 @@ def _record_rollout(home: Path, args: list[str], thread: str) -> None:
     (home / "native-turns.json").write_text(json.dumps([turn]))
 
 
-def _write_rollout(thread: str, cwd: str | None) -> None:
+def _write_rollout(thread: str, cwd: "str | None") -> None:
     native_home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
     sessions = native_home / "sessions" / "2026" / "01" / "01"
     sessions.mkdir(parents=True, exist_ok=True)

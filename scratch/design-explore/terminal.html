@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terminal-native · Loopflow design exploration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+  /* Everything sits on the character grid: widths in ch, heights in lines.
+     Colors are the reader's terminal theme: bg, fg, dim, and four ANSI roles. */
+  :root { --bg: #f7f4f1; --fg: #1c1718; --dim: #7a6f6c; --sel: #e9e2de; --you: #9b1a4a; --run: #2a6e3f; --fail: #b3401a; --rule: #cfc6c1; --lh: 24px; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1c1718; --fg: #efe9e6; --dim: #8f8582; --sel: #2c2426; --you: #f2a7bd; --run: #8fd0a2; --fail: #f0a37f; --rule: #3a3233; } }
+  :root[data-t="dark"] { --bg: #1c1718; --fg: #efe9e6; --dim: #8f8582; --sel: #2c2426; --you: #f2a7bd; --run: #8fd0a2; --fail: #f0a37f; --rule: #3a3233; }
+  :root[data-t="light"] { --bg: #f7f4f1; --fg: #1c1718; --dim: #7a6f6c; --sel: #e9e2de; --you: #9b1a4a; --run: #2a6e3f; --fail: #b3401a; --rule: #cfc6c1; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--fg); font: 15px/var(--lh) "IBM Plex Mono", ui-monospace, Menlo, monospace; font-variant-ligatures: none; }
+  .note { font: 13px/1.4 -apple-system, sans-serif; color: #777; background: #f4f4f4; padding: 8px 24px; display: flex; gap: 20px; align-items: center; }
+  .note a { color: inherit; } .note b { color: #222; font-weight: 600; }
+  .note button { margin-left: auto; font: inherit; padding: 2px 10px; }
+  .page { width: min(118ch, 100% - 4ch); margin: 0 auto; }
+  .specimen { padding-top: calc(var(--lh) * 4); }
+  .what { font: 13px/var(--lh) -apple-system, sans-serif; color: #888; }
+  b, h1, h2 { font-weight: 600; font-size: inherit; }
+  i { font-style: italic; } .dim { color: var(--dim); } .you { color: var(--you); } .run { color: var(--run); }
+  a { color: inherit; text-underline-offset: 4px; } a:focus-visible, button:focus-visible, textarea:focus-visible { outline: 2px solid var(--you); outline-offset: 2px; }
+  pre { font: inherit; white-space: pre; overflow-x: auto; }
+
+  /* Homepage: a manual page that is also the product */
+  .man { padding-top: calc(var(--lh) * 3); display: grid; grid-template-columns: 52ch minmax(0, 1fr); column-gap: 5ch; align-items: start; }
+  .man h1 { font-size: 40px; line-height: calc(var(--lh) * 2); letter-spacing: -.03em; }
+  .man .lede { margin-top: var(--lh); }
+  .man dl { margin-top: calc(var(--lh) * 2); }
+  .man dt { font-weight: 600; margin-top: var(--lh); } .man dd { padding-left: 4ch; }
+  .install { margin-top: calc(var(--lh) * 2); display: grid; gap: var(--lh); }
+  .install a.dl { background: var(--fg); color: var(--bg); text-decoration: none; padding: 0 2ch; line-height: calc(var(--lh) * 2); width: max-content; font-weight: 600; }
+  .screen { border: 1px solid var(--rule); padding: var(--lh) 2ch; margin-top: calc(var(--lh) * 3); }
+
+  /* Task rows: one line each, the same line `lf task status` prints */
+  .rows { margin-top: var(--lh); }
+  .row { display: grid; grid-template-columns: 8ch minmax(0, 1fr) 7ch 7ch 26ch; column-gap: 2ch; padding: 0 1ch; margin: 0 -1ch; }
+  .row > :nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row.sel { background: var(--sel); }
+  .screen .row { grid-template-columns: 8ch minmax(0, 1fr) 6ch 14ch; }
+  .screen .row > :nth-child(3) { display: none; }
+  .row.head { color: var(--dim); }
+  .row .g { letter-spacing: .12ch; white-space: nowrap; }
+  .row.done { color: var(--dim); }
+  .legend { margin-top: var(--lh); color: var(--dim); }
+
+  /* New Task */
+  .prompt { margin-top: var(--lh); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); padding: var(--lh) 0; max-width: 78ch; }
+  .prompt textarea { display: block; width: 100%; height: calc(var(--lh) * 2); border: 0; background: none; font: inherit; color: inherit; resize: none; padding: 0 0 0 2ch; margin-left: -2ch; caret-color: var(--you); }
+  .prompt .line { display: grid; grid-template-columns: 2ch 1fr; }
+  .prompt .set { margin-top: var(--lh); padding-left: 2ch; }
+  .prompt u { text-decoration-thickness: 1px; text-underline-offset: 4px; }
+  footer { padding: calc(var(--lh) * 4) 0; color: var(--dim); max-width: 78ch; }
+  @media (max-width: 900px) {
+    .man { grid-template-columns: 1fr; } .man h1 { font-size: 30px; line-height: calc(var(--lh) * 2); }
+    .row { grid-template-columns: 8ch minmax(0, 1fr); } .row > :nth-child(2) { white-space: normal; } .row > :nth-child(3), .row.head { display: none; }
+    .row > :nth-child(4), .row > :nth-child(5) { grid-column: 2; } .row { padding-bottom: var(--lh); }
+  }
+</style>
+</head>
+<body>
+<p class="note"><b>Terminal-native</b><a href="index.html">All directions</a><a href="score.html">Score</a><a href="panel.html">Instrument panel</a><button type="button" onclick="var r=document.documentElement;r.dataset.t=(r.dataset.t||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'))==='dark'?'light':'dark'">Switch theme</button></p>
+<div class="page">
+
+<section class="man">
+  <div>
+    <h1>lf runs your agents and stops where you said.</h1>
+    <p class="lede">One command line over Claude Code, Codex, OpenCode and Pi. Each change is a Task with its own worktree, branch and pull request. A Task follows the workflow you wrote and waits for you at the steps you marked.</p>
+    <div class="install">
+      <pre><span class="dim">$</span> curl -fsSL https://loopflow.studio/install.sh | sh</pre>
+      <a class="dl" href="#">Download Loopflow for Mac</a>
+      <p class="dim">Free and open source (MIT). macOS and Linux.</p>
+    </div>
+  </div>
+  <div class="screen" aria-label="A terminal session">
+<pre><span class="dim">$</span> <b>lf</b> task create "Sidebar rows stop clipping" --run
+<span class="dim">  LOO-941  feature  worktree loopflow.loo-941</span>
+
+<span class="dim">$</span> <b>lf</b> task status</pre>
+    <div class="rows">
+      <p class="row sel"><b>LOO-515</b><span>Make Task PR and brief views useful</span><span class="dim">claude</span><span class="g you">■■■◆□</span><span class="you">demo, yours</span></p>
+      <p class="row"><b>LOO-912</b><span>Keep interrupted pastes out of input</span><span class="dim">codex</span><span class="g">■■<span class="run">▶</span>□□</span><span>pursue</span></p>
+      <p class="row"><b>LOO-910</b><span>Keep scrolling responsive under load</span><span class="dim">claude</span><span class="g you">■◆□□□</span><span class="you">design, yours</span></p>
+      <p class="row"><b>LOO-941</b><span>Sidebar rows stop clipping the Task ID</span><span class="dim">claude</span><span class="g"><span class="run">▶</span>□□□□</span><span>task-design</span></p>
+    </div>
+<pre>
+
+<span class="dim">$</span> <b>lf</b> connect --task LOO-515<span class="you">▍</span></pre>
+  </div>
+</section>
+
+<section class="specimen">
+  <p class="what">The Task row. The Mac sidebar, the phone list and the terminal print the same line.</p>
+  <div class="rows">
+    <p class="row head"><span>Task</span><span></span><span>agent</span><span>steps</span><span>now</span></p>
+    <p class="row sel"><b>LOO-515</b><span>Make Task PR, file-browser and brief views useful beside the conversation</span><span class="dim">claude</span><span class="g you">■■■◆□</span><span class="you">demo, yours since 12:07</span></p>
+    <p class="row"><b>LOO-912</b><span>Keep interrupted terminal pastes from swallowing Session input</span><span class="dim">codex</span><span class="g">■■<span class="run">▶</span>□□</span><span>pursue, implementing</span></p>
+    <p class="row"><b>LOO-910</b><span>Keep Desktop scrolling responsive under build load</span><span class="dim">claude</span><span class="g you">■◆□□□</span><span class="you">design, yours since 11:40</span></p>
+    <p class="row"><b>LOO-903</b><span>Redesign backlog management so choosing the next work feels clear</span><span class="dim"></span><span class="g dim">□□□□□</span><span class="dim">not started</span></p>
+    <p class="row done"><b>LOO-938</b><span>Keep one plan at every size</span><span>claude</span><span class="g">■■■■■</span><span>landed, #1983</span></p>
+  </div>
+  <p class="legend">■ done &nbsp; <span class="run">▶</span> an agent is here &nbsp; <span class="you">◆ you are needed here</span> &nbsp; □ ahead</p>
+</section>
+
+<section class="specimen">
+  <p class="what">The workflow line. Box-drawing characters, so it pastes into a pull request unchanged.</p>
+<pre>
+<b>feature</b>  <span class="dim">the default Graph</span>
+
+                              <span class="dim">╭──── while the review finds something, 3 at most ────╮</span>
+                              <span class="dim">▼                                                     │</span>
+  task-design ───▶ <span class="you">◆ design</span> ───▶ implement ───▶ concept-review ───▶ loop-or-next ───▶ <span class="you">◆ demo</span> ───▶ ship
+                   <span class="you">you jam on it</span>  <span class="dim">└──────────────────── pursue ───────────────────┘</span>    <span class="you">you try it</span>  <span class="dim">gate, publish, land</span>
+</pre>
+</section>
+
+<section class="specimen">
+  <p class="what">New Task.</p>
+  <div class="prompt">
+    <p><b>What do you want?</b></p>
+    <div class="line"><span class="you">&gt;</span><textarea aria-label="What do you want?">Sidebar rows stop clipping the Task ID and status</textarea></div>
+    <p class="set dim">in <u>loopflow</u> &nbsp; as <u>feature</u> &nbsp; with <u>claude</u> &nbsp;&nbsp; return starts it</p>
+  </div>
+</section>
+
+<footer>IBM Plex Mono in two weights and an italic, at one size except the headline. Every color comes from the reader's terminal theme, so the app, the site and the shell match. No panels: structure is columns, blank lines and one selection fill.</footer>
+</div>
+</body>
+</html>

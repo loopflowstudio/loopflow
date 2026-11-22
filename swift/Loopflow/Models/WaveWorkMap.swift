@@ -242,7 +242,7 @@ public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
 /// Where a Task sits on the Wave board, derived once in Rust: the board, the
 /// sidebar's Working Tasks and every count read it.
 public enum TaskSection: String, Decodable, Sendable, Hashable {
-    case backlog, working, autonomous, done, abandoned
+    case backlog, working, done, abandoned
 }
 
 public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
@@ -263,20 +263,19 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let latestGraphProcess: GraphProcessDetail?
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
-    public let shipControl: TaskRunControl
-    public let shipping: ShippingSnapshot?
     public let pr: PrSnapshot?
     public internal(set) var section: TaskSection
+    /// Whether its owner is you, decided in Rust; false when nobody owns it.
+    public let ownedByYou: Bool
 
     enum CodingKeys: String, CodingKey {
         case task, reference, runtime, condition, actions, execution, section, pr, lifecycle
         case selectionStates = "selection_states"
+        case ownedByYou = "owned_by_you"
         case graphName = "graph_name"
         case graphSource = "graph_source"
         case latestGraphProcess = "latest_graph_process"
         case runControl = "run_control"
-        case shipControl = "ship_control"
-        case shipping
         case nextMove = "next_move"
     }
 
@@ -311,32 +310,6 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// opening claims nothing. Unstarted and finished Tasks open one only when a
     /// person asks, or when Desktop already shows its Session.
     public var opensConversationAutomatically: Bool { lifecycle.isWorking }
-}
-
-/// What a shipped Task is doing, derived in Rust; nothing here waits on a person.
-public struct ShippingSnapshot: Decodable, Sendable, Hashable {
-    public let shippedAt: Int64
-    public let state: State
-    public let reason: String
-
-    public enum State: String, Decodable, Sendable, Hashable {
-        case building, landing, repairing, restarting, unassigned
-    }
-
-    public var label: String {
-        switch state {
-        case .building: "Building"
-        case .landing: "Landing"
-        case .repairing: "Repairing"
-        case .restarting: "Restarting"
-        case .unassigned: "Unassigned"
-        }
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case state, reason
-        case shippedAt = "shipped_at"
-    }
 }
 
 public enum WorkNextMoveOwner: String, Decodable, Sendable, Hashable {
@@ -520,6 +493,12 @@ public enum WorkEvidence<Item: Decodable & Sendable & Hashable>: Decodable, Send
     public var unavailableReason: String? {
         if case let .unavailable(reason) = self { return reason }
         return nil
+    }
+
+    /// Whether more items exist than were read.
+    public var truncated: Bool {
+        if case let .available(_, truncated) = self { return truncated }
+        return false
     }
 
     /// The items that pass `isIncluded`; unavailable evidence stays unavailable.

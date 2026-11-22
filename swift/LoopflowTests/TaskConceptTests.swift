@@ -124,15 +124,6 @@ struct TaskConceptTests {
             }
             let siblings = try #require(projection.breadcrumb(selection: nil, sessionId: "checkout")?.siblings)
             #expect(Set(siblings.map(\.id)) == ["bound", "checkout", "unknown"])
-            let board = model.standup(phase.tasks, doneDays: 0)
-            for section in [WaveBoardSection.backlog, .working, .autonomous] {
-                #expect(board.rows(section).map(\.id) == phase.tasks.filter { $0.section.rawValue == section.rawValue }.map(\.id))
-            }
-            let row = (board.working + board.backlog).first { $0.id == active.id }
-            if active.section == .working {
-                #expect(row?.session == (active.selectionStates.contains(.available) ? .available
-                    : active.selectionStates.contains(.busy) ? .busy : nil))
-            }
         }
     }
 
@@ -153,9 +144,6 @@ struct TaskConceptTests {
         let phase = try #require(phases().first { $0.name == "reclaimed_available_and_busy" })
         let task = try #require(phase.tasks.first { $0.task.identifier == "FIX-2" })
         let conversation = try #require(phase.sessions.first { $0.id == "bound" })
-        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
-        let board = try #require(model.standup(phase.tasks, doneDays: 0).working.first { $0.id == task.id })
-        #expect(board.session == .available)
         #expect(task.selectionStates.contains(.busy))
         let status = SessionProgramStatus(sessions: [conversation], unavailable: nil)
         let row = TaskRowMetadata(id: task.id, task: task, status: status)
@@ -180,18 +168,6 @@ struct TaskConceptTests {
         #expect(!task.isCompleted)
     }
 
-    @Test(arguments: ["restarting", "unassigned"])
-    func handoffsRemainStoppableBetweenRuns(state: String) throws {
-        var row = try activeTaskWire()
-        row["lifecycle"] = "idle"
-        row["shipping"] = ["shipped_at": 1, "state": state, "reason": "Handoff remains active"]
-        let task = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
-        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
-        let control = TaskShipControl(model: model, task: task)
-        _ = try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop")
-        #expect(throws: (any Error).self) { try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship") }
-    }
-
     @Test func missingKeysFailAndSavedActivityCannotReturn() throws {
         var row = try activeTaskWire()
         for key in ["lifecycle", "selection_states"] {
@@ -207,7 +183,6 @@ struct TaskConceptTests {
         let restored = try JSONDecoder().decode(RoadmapTask.self, from: Data(quiet.utf8))
         #expect(restored.selectionStates == [.active, .working])
         #expect(restored.runControl.unavailable != nil)
-        #expect(restored.shipControl.unavailable != nil)
     }
 }
 #endif

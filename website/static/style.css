@@ -7,18 +7,13 @@
 
 :root {
     --burgundy: #722f37;
-    --burgundy-hover: #8b3d47;
     --wine: #9B1A4A;
     --wine-hover: #b42058;
-    --info: #0ab3cc;
     --text: #1a1a1a;
     --text-secondary: #555555;
     --bg: #ffffff;
     --bg-subtle: #f8f8f8;
     --border: #e5e5e5;
-    --green: #16a34a;
-    --yellow: #92400e;
-    --orange: #c2410c;
 
     --font-serif: 'Old Standard TT', Georgia, serif;
     --font-sans: 'Atkinson Hyperlegible Next', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -1017,7 +1012,7 @@ h3:hover .anchor-link,
 .site-header nav a[aria-current] { color: var(--burgundy); }
 /* Pico, which fast_app loads first, styles details and summary; these undo it. */
 .site-header nav details { position: relative; margin: 0; padding: 0; border: 0; }
-.site-header nav summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; min-height: 32px; margin: 0; color: inherit; line-height: inherit; }
+.site-header nav summary, .site-header nav details[open] > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; min-height: 32px; margin: 0; color: inherit; line-height: inherit; }
 .site-header nav summary::-webkit-details-marker { display: none; }
 .site-header nav summary::after { content: "▾"; float: none; width: auto; height: auto; margin-inline-start: var(--space-8); background: none; transform: none; font-size: var(--t-meta); color: var(--text-secondary); }
 .site-header nav .menu { position: absolute; right: 0; top: 100%; z-index: 10; min-width: 190px; display: flex; flex-direction: column; padding: var(--space-8) var(--space-16); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-menu); }

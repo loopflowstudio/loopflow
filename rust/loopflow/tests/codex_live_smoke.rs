@@ -78,7 +78,7 @@ async fn codex_live_one_turn_smoke() {
     };
     let mut harness = CodexDriver::new(
         &loopflow_execution::harness::launch_for_test(
-            loopflow_execution::harness::HarnessKind::Codex,
+            loopflow_harness::HarnessKind::Codex,
             &config,
             &loopflow_execution::harness::Recording {
                 store,

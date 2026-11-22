@@ -47,73 +47,41 @@ fn initialize(home: &Path) {
 }
 
 #[test]
-fn default_git_plan_is_the_shared_main_ref() {
+fn without_a_tracker_the_plan_is_on_this_machine() {
     let repo = TestRepo::new();
+    loopflow_execution::git::git_stdout(repo.path(), &["remote", "remove", "origin"]).unwrap();
     let home = tempfile::tempdir().unwrap();
     initialize(home.path());
-    let status: Value =
-        serde_json::from_str(&run(repo.path(), home.path(), &["status", "--json"])).unwrap();
-    assert_eq!(status["tracker"], "git");
-    assert_eq!(
-        status["destinations"][0]["reference"],
-        "refs/loopflow/planning/shared/main"
-    );
-    assert_eq!(status["destinations"][0]["active"], true);
-    assert!(!invoke(repo.path(), home.path(), &["key"]).status.success());
+    // `provider: git` is the released shape; it reads as no tracker.
+    for config in [
+        None,
+        Some("planning:\n  provider: git\n  shared: employees\n"),
+    ] {
+        if let Some(config) = config {
+            std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
+            std::fs::write(repo.path().join(".lf/config.yaml"), config).unwrap();
+        }
+        let status: Value =
+            serde_json::from_str(&run(repo.path(), home.path(), &["status", "--json"])).unwrap();
+        assert_eq!(status["tracker"], Value::Null, "{config:?}");
+        assert_eq!(
+            status["plan"],
+            serde_json::json!({ "git": null, "hub": null }),
+            "{config:?}"
+        );
+        assert_eq!(
+            run(repo.path(), home.path(), &["status"]),
+            "Plan: this Machine."
+        );
+    }
 }
 
 #[test]
-fn personal_git_is_explicit_and_key_recovery_selects_the_same_ref() {
-    let repo = TestRepo::new();
-    std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
-    std::fs::write(
-        repo.path().join(".lf/config.yaml"),
-        "planning:\n  provider: git\n  personal: true\n",
-    )
-    .unwrap();
-    let left = tempfile::tempdir().unwrap();
-    let right = tempfile::tempdir().unwrap();
-    initialize(left.path());
-    initialize(right.path());
-    let status: Value =
-        serde_json::from_str(&run(repo.path(), left.path(), &["status", "--json"])).unwrap();
-    assert_eq!(status["tracker"], "git");
-    let key = run(repo.path(), left.path(), &["key"]);
-    assert!(uuid::Uuid::parse_str(&key).is_ok());
-    run(repo.path(), right.path(), &["key", "--recover", &key]);
-    let other: Value =
-        serde_json::from_str(&run(repo.path(), right.path(), &["status", "--json"])).unwrap();
-    assert_eq!(
-        status["destinations"][0]["reference"],
-        format!("refs/loopflow/planning/users/{key}")
-    );
-    assert_eq!(
-        status["destinations"][0]["reference"],
-        other["destinations"][0]["reference"]
-    );
-    assert_eq!(status["destinations"][0]["active"], true);
-    assert!(status["destinations"][0]["publication_revision"].is_null());
-    assert!(status["destinations"][0].get("endpoint").is_none());
-}
-
-#[test]
-fn repository_selects_shared_git_or_linear_without_manual_enrollment() {
+fn a_linear_repository_reports_its_tracker() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     initialize(home.path());
     std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
-    std::fs::write(
-        repo.path().join(".lf/config.yaml"),
-        "planning:\n  provider: git\n  shared: employees\n",
-    )
-    .unwrap();
-    let status: Value =
-        serde_json::from_str(&run(repo.path(), home.path(), &["status", "--json"])).unwrap();
-    assert_eq!(
-        status["destinations"][0]["reference"],
-        "refs/loopflow/planning/shared/employees"
-    );
-    assert!(!invoke(repo.path(), home.path(), &["key"]).status.success());
     std::fs::write(
         repo.path().join(".lf/config.yaml"),
         "planning:\n  provider: linear\n",
@@ -122,15 +90,8 @@ fn repository_selects_shared_git_or_linear_without_manual_enrollment() {
     let status: Value =
         serde_json::from_str(&run(repo.path(), home.path(), &["status", "--json"])).unwrap();
     assert_eq!(status["tracker"], "linear");
-    assert_eq!(status["destinations"], serde_json::json!([]));
-    let refs = Command::new("git")
-        .current_dir(repo.path())
-        .args(["ls-remote", "origin", "refs/loopflow/planning/*"])
-        .output()
-        .unwrap();
-    assert!(refs.status.success());
-    assert!(refs.stdout.is_empty());
-    for retired in ["connect", "use", "select", "associate"] {
+    assert_eq!(status["plan"], Value::Null);
+    for retired in ["connect", "use", "select", "associate", "key", "journal"] {
         assert!(!invoke(repo.path(), home.path(), &[retired])
             .status
             .success());
@@ -138,7 +99,7 @@ fn repository_selects_shared_git_or_linear_without_manual_enrollment() {
 }
 
 #[test]
-fn unavailable_linear_saves_locally_without_publishing_a_git_plan() {
+fn unavailable_linear_saves_locally() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     initialize(home.path());
@@ -169,30 +130,15 @@ fn unavailable_linear_saves_locally_without_publishing_a_git_plan() {
         .unwrap();
     assert_eq!(title, "Buffered follow-up");
     assert_eq!(
-        conn.query_row("SELECT count(*) FROM git_tracker_destinations", [], |r| r
-            .get::<_, i64>(
-            0
-        ))
-        .unwrap(),
-        0
-    );
-    assert_eq!(
         conn.query_row("SELECT count(*) FROM task_creation_intents", [], |r| r
             .get::<_, i64>(0))
             .unwrap(),
         1
     );
-    let refs = Command::new("git")
-        .current_dir(repo.path())
-        .args(["ls-remote", "origin", "refs/loopflow/planning/*"])
-        .output()
-        .unwrap();
-    assert!(refs.status.success());
-    assert!(refs.stdout.is_empty());
 }
 
 #[test]
-fn git_checkout_miss_does_not_fall_back_to_retained_linear_bindings() {
+fn a_checkout_miss_without_a_tracker_ignores_retained_linear_bindings() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     initialize(home.path());
@@ -207,7 +153,7 @@ fn git_checkout_miss_does_not_fall_back_to_retained_linear_bindings() {
     let output = invoke_lf(repo.path(), home.path(), &["checkout", "MISSING-1"]);
     assert!(!output.status.success());
     let error = String::from_utf8_lossy(&output.stderr);
-    assert!(error.contains("not found in the Git tracker"), "{error}");
+    assert!(error.contains("not found"), "{error}");
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     assert_eq!(
         conn.query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0))

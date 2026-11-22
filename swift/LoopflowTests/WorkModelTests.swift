@@ -558,8 +558,8 @@ struct WorkModelStreamTests {
         #expect(model.taskWork[found.task.id].value?.graph == workflow)
     }
 
-    @Test("Peer status updates independently, preserves failures and rejects old scopes")
-    func gitDestinationsFrames() async throws {
+    @Test("The plan's home updates independently, preserves failures and rejects old scopes")
+    func planHomeFrames() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
         let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
@@ -567,48 +567,45 @@ struct WorkModelStreamTests {
         defer { keeping.cancel() }
         try await feed.opened(1)
         let scope = try await feed.request(1)
-        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto/git_destinations.json")
-        let statuses = String(decoding: try Data(contentsOf: url), as: UTF8.self)
-        func destinationFrame(_ sequence: Int, _ answers: Int, repo: String, statuses: String) throws -> WorkFrame {
-            let body = #"{"tracker":"git","destinations":\#(statuses)}"#
-            return try fixture.frame("git_destinations", sequence: sequence, answers: answers,
-                                     scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: nil),
-                                     body: body)
+        let onHub = #"{"tracker":null,"plan":{"git":null,"hub":{"machine":"mini","unsent":1,"records":["3e1c9a07"],"error":null,"failing_since":null,"not_taken":null}},"actions":[]}"#
+        let here = #"{"tracker":null,"plan":{"git":null,"hub":null},"actions":[]}"#
+        func planFrame(_ sequence: Int, _ answers: Int, repo: String, body: String) throws -> WorkFrame {
+            try fixture.frame("plan_home", sequence: sequence, answers: answers,
+                              scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: nil),
+                              body: body)
         }
         await feed.send(try fixture.planningFrame(sequence: 1, answers: scope.id))
-        await feed.send(try destinationFrame(2, scope.id, repo: "/src/loopflow", statuses: statuses))
-        try await eventually { model.gitDestinations.value?.count == 2 }
-        #expect(model.gitDestinations.value?[0].pendingLocal == true)
-        #expect(model.gitDestinations.value?[1].active == true)
+        await feed.send(try planFrame(2, scope.id, repo: "/src/loopflow", body: onHub))
+        try await eventually { model.repositoryPlan.value?.plan?.hub?.line == "Hub mini, 1 unsent." }
         #expect(model.roadmap.value != nil)
 
         await feed.send(WorkFrame(sequence: 3, answers: scope.id,
-                                 unavailable: "sync read failed", content: .gitDestinations(nil), wire: nil))
-        try await eventually { model.gitDestinations.failure == "sync read failed" }
-        #expect(model.gitDestinations.value?.count == 2)
+                                 unavailable: "sync read failed", content: .planHome(nil), wire: nil))
+        try await eventually { model.repositoryPlan.failure == "sync read failed" }
+        #expect(model.repositoryPlan.value?.plan?.hub?.standing.unsent == 1)
         #expect(model.roadmap.failure == nil)
-        await feed.send(try destinationFrame(4, scope.id, repo: "/src/loopflow", statuses: statuses))
-        try await eventually { model.gitDestinations.failure == nil }
+        await feed.send(try planFrame(4, scope.id, repo: "/src/loopflow", body: onHub))
+        try await eventually { model.repositoryPlan.failure == nil }
 
         model.setRepoPath("/src/context")
         model.syncWorkScope()
         let changed = try await feed.request(2)
         // Even a later sequence cannot publish an answer from the old scope.
-        await feed.send(try destinationFrame(5, scope.id, repo: "/src/loopflow", statuses: statuses))
-        await feed.send(try destinationFrame(6, changed.id, repo: "/src/loopflow", statuses: statuses))
+        await feed.send(try planFrame(5, scope.id, repo: "/src/loopflow", body: onHub))
+        await feed.send(try planFrame(6, changed.id, repo: "/src/loopflow", body: onHub))
         try await Task.sleep(for: .milliseconds(50))
-        #expect(model.gitDestinations.value == nil)
-        await feed.send(try destinationFrame(7, changed.id, repo: "/src/context", statuses: "[]"))
-        try await eventually { model.gitDestinations.value == [] }
+        #expect(model.repositoryPlan.value == nil)
+        await feed.send(try planFrame(7, changed.id, repo: "/src/context", body: here))
+        try await eventually { model.repositoryPlan.value?.line == "Plan: this Machine." }
         await feed.fail(RegistryQueryError("reader exited"))
-        try await eventually { model.gitDestinations.failure == "reader exited" }
-        #expect(model.gitDestinations.value == [])
+        try await eventually { model.repositoryPlan.failure == "reader exited" }
+        #expect(model.repositoryPlan.value?.line == "Plan: this Machine.")
         try await feed.opened(2, within: .seconds(5))
         let reopened = try await feed.request(3)
-        await feed.send(try destinationFrame(1, reopened.id, repo: "/src/context", statuses: statuses))
-        try await eventually { model.gitDestinations.value?.count == 2 && model.gitDestinations.failure == nil }
+        await feed.send(try planFrame(1, reopened.id, repo: "/src/context", body: onHub))
+        try await eventually {
+            model.repositoryPlan.value?.plan?.hub?.machine == "mini" && model.repositoryPlan.failure == nil
+        }
     }
 
     @Test("Frames update planning in place and an older frame cannot replace a newer one")
@@ -1116,7 +1113,7 @@ private struct WorkTestFixture {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "plan" where args.dropFirst().first == "list": return roadmapJSON
-            case "repo" where args.dropFirst().first == "tracker": return #"{"destinations":[]}"#
+            case "repo" where args.dropFirst().first == "tracker": return #"{"tracker":null,"plan":{"git":null,"hub":null},"actions":[]}"#
             case "desktop" where args.dropFirst().prefix(2) == ["view", "show"]:
                 return String(decoding: try JSONEncoder().encode(fixtureViewPlan(
                     owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [])), as: UTF8.self)
@@ -1201,10 +1198,10 @@ private struct WorkTestFixture {
                   scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: nil), body: entries)
     }
 
-    /// A repository-destinations reading: a frame that confirms and changes no Work.
+    /// A reading of where the plan travels: a frame that confirms and changes no Work.
     func unrelatedFrame(sequence: Int) throws -> WorkFrame {
-        try frame("git_destinations", sequence: sequence, answers: nil,
-                  body: #"{"destinations":[]}"#)
+        try frame("plan_home", sequence: sequence, answers: nil,
+                  body: #"{"actions":[],"plan":{"git":null,"hub":null},"tracker":null}"#)
     }
 
     func sessionEntries(sourceFile: String = #filePath) throws -> (json: String, ids: [String]) {
@@ -1398,8 +1395,8 @@ struct TaskPlanningReadabilityTests {
         #expect(model.selectionPlans.failure == nil)
     }
 
-    @Test("Loaded empty descriptions omit the preview; shipping remains visible while updating", arguments: [false, true])
-    func emptyDescription(shipping: Bool) throws {
+    @Test("Loaded empty descriptions omit the preview, also while updating", arguments: [false, true])
+    func emptyDescription(saved: Bool) throws {
         let fixture = try WorkTestFixture.load()
         var root = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
         var tasks = try #require(root["tasks"] as? [String: Any])
@@ -1408,7 +1405,6 @@ struct TaskPlanningReadabilityTests {
         task["description"] = ""
         items[0]["task"] = task
         items[0]["section"] = "working"
-        items[0]["shipping"] = shipping ? ["shipped_at": 1, "state": "landing", "reason": "Checks passed"] : NSNull()
         tasks["items"] = items
         root["tasks"] = tasks
         let wire = try JSONSerialization.data(withJSONObject: root)
@@ -1417,23 +1413,22 @@ struct TaskPlanningReadabilityTests {
         let cache = WorkCache(directory: directory)
         cache.saveRoadmap(String(decoding: wire, as: UTF8.self))
         cache.flush()
-        let model = WorkModel(query: fixture.query, repoPath: "/src/loopflow", cache: shipping ? cache : nil)
-        if !shipping {
+        let model = WorkModel(query: fixture.query, repoPath: "/src/loopflow", cache: saved ? cache : nil)
+        if !saved {
             model.applyFixture(roadmap: .available(try JSONDecoder().decode(RoadmapSnapshot.self, from: wire)),
                 waves: .available(fixture.waves), workActivity: .available(fixture.workActivity), repos: [], fixed: true)
         }
         let record = try #require(model.task(id: "issue-now")?.task)
         let member = WorkViewPlan.Content(
             work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
-            title: record.task.name, states: shipping ? [.autonomous] : [.working], identifier: record.task.identifier,
+            title: record.task.name, states: [.working], identifier: record.task.identifier,
             primarySession: nil, location: nil, argv: nil, unavailable: [])
         model.applyTaskList(fixtureViewPlan(owner: key, members: [member]), wave: nil, reason: "")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         #expect(try navigator.inspect().find(text: record.task.name).string() == record.task.name)
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: "Loading planning…") }
-        if shipping {
+        if saved {
             #expect(try navigator.inspect().find(text: "Updating…").string() == "Updating…")
-            #expect(try navigator.inspect().find(text: "Landing · Checks passed").string() == "Landing · Checks passed")
         }
     }
 

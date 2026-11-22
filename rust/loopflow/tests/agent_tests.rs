@@ -34,7 +34,7 @@ for line in sys.stdin:
 fn base_launch() -> AgentConfig {
     AgentConfig {
         task_prompt: "prompt".to_string(),
-        skip_permissions: true,
+        yolo: true,
         ..AgentConfig::new(loopflow_execution::config::Agent::parse("claude").unwrap())
     }
 }

@@ -120,7 +120,7 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
             exports.insert(
                 name.clone(),
                 Export {
-                    content: render_skill(skill, name, vendor)?,
+                    content: render_skill(skill, name)?,
                     ..Export::default()
                 },
             );
@@ -128,10 +128,7 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
         for (name, graph) in project_names(graphs.iter().map(String::as_str)) {
             if skills.contains_key(&name) {
                 let path = root.join(&name).join(SKILL_FILE_NAME);
-                eprintln!(
-                    "warning: skipping Graph {graph:?}: skill owns the native name {name:?} at {}",
-                    path.display()
-                );
+                tracing::debug!(%graph, path = %path.display(), "skill owns the Graph export name");
                 report.skipped.push(path);
                 continue;
             }
@@ -324,10 +321,7 @@ fn write_targets(
         let content = &export.content;
         let path = target_root.join(name).join(SKILL_FILE_NAME);
         if blocked.contains(name) {
-            eprintln!(
-                "warning: skipping export at {}: destination is occupied or needed as a namespace",
-                path.display()
-            );
+            tracing::debug!(path = %path.display(), "skill export destination is occupied");
             report.skipped.push(path);
             continue;
         }
@@ -438,13 +432,7 @@ fn remove_owned_input(directory: &Path, name: &str) -> Result<(), LoadError> {
     Ok(())
 }
 
-fn render_skill(skill: &SkillSource, name: &str, vendor: Vendor) -> Result<String, LoadError> {
-    if matches!(
-        (skill.dialect, vendor),
-        (SkillDialect::Claude, Vendor::Codex) | (SkillDialect::Codex, Vendor::Claude)
-    ) {
-        eprintln!("warning: exporting {} across harnesses; native argument and control declarations are retained, not translated", skill.name);
-    }
+fn render_skill(skill: &SkillSource, name: &str) -> Result<String, LoadError> {
     let content = skill.read()?;
     let (original_frontmatter, body) = split_frontmatter(&content).unwrap_or(("", &content));
     let description = skill_description(&content)

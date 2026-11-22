@@ -69,14 +69,12 @@ struct DesktopHeadlessTests {
         #expect(try view.inspect().find(text: "demo · available for review").string() == view.label)
     }
 
-    @Test("The repository roadmap reads Git planning through the ordinary query")
-    func roadmapGitDestinations() async throws {
-        let data = try Data(contentsOf: fixtures.appendingPathComponent("git_destinations.json"))
-        let status = String(decoding: data, as: UTF8.self)
+    @Test("The repository roadmap shows where its plan lives through the ordinary query")
+    func roadmapRepositoryPlan() async throws {
         let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery { args, cwd in
             if args == ["repo", "tracker", "--json"], cwd == "/src/loopflow" {
-                return "{\"destinations\":\(status)}"
+                return #"{"tracker":null,"plan":{"git":null,"hub":{"machine":"mini","unsent":1,"records":["3e1c9a07"],"error":null,"failing_since":null,"not_taken":null}},"actions":[]}"#
             }
             if args.first == "roadmap" { return roadmap }
             if args.first == "wave" { return "[]" }
@@ -84,10 +82,12 @@ struct DesktopHeadlessTests {
             throw RegistryQueryError("Unexpected command: \(args)")
         }, repoPath: "/src/loopflow")
         await model.refresh()
-        #expect(model.gitDestinations.value?.count == 2)
+        #expect(model.repositoryPlan.value?.plan?.hub?.machine == "mini")
         let view = RoadmapView(model: model, onOpenWave: { _ in }, onOpenTask: { _, _ in })
-        let statusView = try view.inspect().find(GitDestinationsView.self)
-        #expect(try statusView.find(text: "Local changes pending").string() == "Local changes pending")
+        let planView = try view.inspect().find(RepositoryPlanView.self)
+        #expect(try planView.find(text: "Plan: this Machine.").string() == "Plan: this Machine.")
+        #expect(try planView.find(text: "Hub mini, 1 unsent.").string() == "Hub mini, 1 unsent.")
+        #expect(try planView.find(text: "3e1c9a07").string() == "3e1c9a07")
     }
 
     @Test("Tracker sync shows queued, sent and conflicted actions, then clears confirmed work")
@@ -207,9 +207,9 @@ struct DesktopHeadlessTests {
 
         // `lf task status`: its work, Graph processes, comments and recorded execution.
         feed.send(try frame("task", sequence: 2, answers: 2, task: task.task.identifier,
-                            body: ["overview": work, "graph_processes": [run], "execution": ["work": work, "ship_approval": ["at": 1793266000, "by": ["kind": "person", "name": "Maya"]],
+                            body: ["overview": work, "graph_processes": [run], "execution": ["work": work,
                                                  "started_by": ["kind": "session", "id": "session_1", "name": "LOO-1 task", "requester": "Maya"],
-                                                 "ship_stop": ["at": 1793266380, "by": ["kind": "person", "name": "Maya"]],
+                                                 "auto": ["state": "on", "at": 1793266000, "by": ["kind": "person", "name": "Maya"]],
                                                  "stack_parent": ["identifier": "LOO-0", "branch": "maya/loo-0-parent", "pr_number": 7]],
                                    "comments": ["identifier": task.task.identifier, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]))
         try await eventually { model.taskWork[task.id].value != nil }
@@ -220,15 +220,14 @@ struct DesktopHeadlessTests {
         for id in diagnostics.sessions.map(\.id) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(id)")
         }
-        // The shipping line names who approved it.
+        // The Workflow line names who turned auto on, and the Auto toggle reads on.
         let bar = TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
-        #expect(bar.live == "\(try #require(task.shipping).reason) · approved by Maya")
-        // A person's stop says why the Task isn't shipping and how to approve it again.
-        let stop = try #require(model.taskExecution[task.id].value?.shipStop)
-        #expect(stop.by == .person(name: "Maya"))
-        let line = TaskWorkflowBar.notShipping(stop, issue: task.task.identifier)
-        #expect(line.hasPrefix("Not shipping: Maya stopped it "))
-        #expect(line.hasSuffix(" · lf ship \(task.task.identifier) approves it again"))
+        #expect(bar.live.hasSuffix(" · auto on, by Maya"))
+        let control = TaskAutoControl(model: model, task: task)
+        #expect(try control.inspect().find(viewWithAccessibilityIdentifier: "task-auto").toggle().isOn())
+        // Turning it off says who did and when.
+        let line = TaskWorkflowBar.autoLine(Auto(state: .off, at: 1793266380, by: .person(name: "Maya")))
+        #expect(line.hasPrefix("auto off by Maya "))
         // A stacked Task names its parent by Task beside its PR line.
         let parent = try #require(model.taskExecution[task.id].value?.stackParent)
         let stacked = TaskStackParentLabel(parent: parent)
@@ -359,7 +358,7 @@ struct DesktopHeadlessTests {
         let planning = try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: planning)
         let wave = try #require(roadmap.waves.first)
-        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && $0.shipping == nil })
+        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && !$0.selectionStates.contains(.auto) })
         var wire = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
         let started = Recorder()
@@ -367,7 +366,7 @@ struct DesktopHeadlessTests {
             run: { args, _ in
                 if args.prefix(2) == ["plan", "list"] { return String(decoding: planning, as: UTF8.self) }
                 if args.prefix(2) == ["task", "run"] || args.prefix(2) == ["task", "complete"]
-                    || args.contains("ship") || args.prefix(2) == ["task", "hold"] {
+                    || args.contains("auto") {
                     await started.add(args)
                 }
                 return "{}"
@@ -404,7 +403,7 @@ struct DesktopHeadlessTests {
         #expect(try stopped.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run").button()
             .labelView().text().string() == "Run again")
 
-        // At `demo` the one action continues after it; going into `end` is Auto-Ship's too.
+        // At `demo` the one action continues after it; going into `end` is auto's too.
         let waiting = try view(position: ["kind": "at", "step": "demo"])
         #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position").text().string() == "feature · demo")
         #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
@@ -413,13 +412,16 @@ struct DesktopHeadlessTests {
         #expect(try next.labelView().text().string() == "Continue")
         try next.tap()
         #expect(try await tapped(1) == ["task", "run", task.task.identifier, "--json"])
-        // Auto-Ship sits in the Workflow bar, not in the detail page's Workflow header.
+        // The Auto toggle sits in the Workflow bar, not in the detail page's Workflow header.
         #expect(throws: (any Error).self) {
-            try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
+            try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-auto")
         }
-        let control = TaskShipControl(model: model, task: task)
-        try control.inspect().find(viewWithAccessibilityIdentifier: "task-ship").button().tap()
-        #expect(try await tapped(2) == ["--task", task.task.identifier, "ship", "--json"])
+        // Off until someone turns it on with `lf task auto on`.
+        let control = TaskAutoControl(model: model, task: task)
+        let toggle = try control.inspect().find(viewWithAccessibilityIdentifier: "task-auto").toggle()
+        #expect(try !toggle.isOn())
+        try toggle.tap()
+        #expect(try await tapped(2) == ["--task", task.task.identifier, "task", "auto", "on", "--json"])
 
         // At its end nothing remains to run.
         let ended = try view(position: ["kind": "at", "step": "end"])
@@ -444,25 +446,15 @@ struct DesktopHeadlessTests {
         for _ in 0..<200 where await started.calls.last?.contains("complete") != true { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["task", "complete", task.task.identifier, "--json"])
 
-        // A shipping Task offers Stop Auto-Ship in place of Auto-Ship.
-        let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
-        let shipped = TaskShipControl(model: model, task: shipping)
-        #expect(throws: (any Error).self) {
-            try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
-        }
-        try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop").button().tap()
-        for _ in 0..<200 where await started.calls.last?.contains("hold") != true { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls.last == ["task", "hold", shipping.task.identifier, "--json"])
-
-        // Auto-Ship says it was requested, never that it shipped; its Undo stops Auto-Ship.
-        model.shipTask(task)
+        // Auto on says it was requested, never that it shipped; its Undo is auto off.
+        model.turnAutoOn(task)
         let notice = try #require(model.navigation.notices.current)
-        #expect(notice.text == "\(task.task.identifier) Auto-Ship requested")
+        #expect(notice.text == "\(task.task.identifier) Auto on requested")
         let view = NoticeView(center: model.navigation.notices)
         let sent = await started.calls.count
         try view.inspect().find(viewWithAccessibilityIdentifier: "notice-action").button().tap()
         for _ in 0..<200 where await started.calls.count == sent { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls.last == ["task", "hold", task.task.identifier, "--json"])
+        #expect(await started.calls.last == ["task", "auto", "off", task.task.identifier, "--json"])
     }
 
     @Test("Task lifecycle controls remain available without a Workflow", arguments: ["unstarted", "completed", "canceled"])
@@ -501,14 +493,23 @@ struct DesktopHeadlessTests {
         }
     }
 
-    @Test("A shipping Task says what shipping is doing and cannot be shipped again")
-    func shippingRow() throws {
+    @Test("A Task with auto on reads on and switches off with lf task auto off")
+    func autoOnRow() async throws {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
-        let shipped = try #require(snapshot.waves.first?.tasks.items.first { $0.shipping != nil })
-        #expect(shipped.runtime?.status == .shipping)
-        #expect(shipped.shipping?.label == "Landing")
-        #expect(shipped.shipControl.unavailable == "Task is already shipping")
+        let task = try #require(snapshot.waves.first?.tasks.items.first { $0.selectionStates.contains(.auto) })
+        let sent = Recorder()
+        let model = WorkModel(query: RegistryQuery(run: { args, _ in
+            if args.prefix(2) == ["task", "auto"] { await sent.add(args) }
+            return "{}"
+        }))
+        // Rust's refusal to turn it on again never disables turning it off.
+        let toggle = try TaskAutoControl(model: model, task: task).inspect()
+            .find(viewWithAccessibilityIdentifier: "task-auto").toggle()
+        #expect(try toggle.isOn())
+        try toggle.tap()
+        for _ in 0..<200 where await sent.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(await sent.calls.last == ["task", "auto", "off", task.task.identifier, "--json"])
     }
 
     @Test("A workflow is drawn as a graph: circles, described interactive steps, a loop arc and an arrow per run")
@@ -516,7 +517,7 @@ struct DesktopHeadlessTests {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
         let wave = try #require(roadmap.waves.first)
-        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && $0.shipping == nil })
+        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && !$0.selectionStates.contains(.auto) })
         let started = Recorder()
         let model = WorkModel(query: RegistryQuery(run: { args, _ in
             if args.prefix(2) == ["task", "run"] { await started.add(args) }
@@ -649,7 +650,7 @@ struct DesktopHeadlessTests {
         // The clicked row darkens before the selection moves it.
         for _ in 0..<50 where model.selection != .wave(id: wave.id) { try await Task.sleep(for: .milliseconds(20)) }
         #expect(model.selection == .wave(id: wave.id))
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-standup-board")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-backlog")
         let title = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string()
         #expect(title == "Product")
         let task = try #require(roadmap.waves.first?.tasks.items.first)

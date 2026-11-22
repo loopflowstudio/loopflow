@@ -146,17 +146,18 @@ reduction. The best fix makes the system smaller.
 Waves hold durable objectives, memory, cadence and budget under
 `.lf/wave/<name>/`; top-level `wave/` is ordinary content. A Wave's current
 Project is its In Progress Linear Project, which holds Tasks, KRs and targets.
-Linear, Asana or a Git ref is the repository's tracker. A Task belongs to a repository
+Linear or Asana is the repository's tracker; without one each Machine's store
+holds the plan, carried by Git and a hub when one is named. A Task belongs to a repository
 and optionally a Project.
 
 A Task takes up one Graph on its first `lf task run` (its own, else the Wave's
 default, else repository `graph:`, else `code`) and stands at a step of it.
-Only `lf task run` and `lf ship` move that position. `interactive:` steps are
+Only `lf task run` and `lf task auto on` move that position. `interactive:` steps are
 where a person takes part. Task state (`unstarted · idle · active · moving ·
-shipping · done · abandoned`) is derived, not stored. `TaskSection` is the
+done · abandoned`) is derived, not stored; the auto setting (`lf task auto
+on|off`) says who takes the interactive steps and never changes it. `TaskSection` is the
 one board bucketing every surface reads: Backlog (unstarted or unassigned),
-Working (owned idle, active or moving), Autonomous (owned shipping), Done,
-Abandoned. A stopped Graph is history; nothing resumes it. Started Tasks keep their identity, worktree and PR
+Working (owned idle, active or moving), Done, Abandoned. A stopped Graph is history; nothing resumes it. Started Tasks keep their identity, worktree and PR
 across replanning, and unreviewed backlog stays until someone decides.
 
 The full model, including LfProcess, AgentProcess, LfSession and GraphProcess,
@@ -264,6 +265,9 @@ user-facing behavior changes.
 plan, code and memory and keeps open findings with the work.
 
 **SQLite schema:**
+- Shallow checkouts lack first-parent migration history. For local builds set
+  `LOOPFLOW_MIGRATION_ORDER` to the merged slugs in first-parent order for
+  the checkout's base. Check that the packaged list covers that base.
 - One migration per Task: `uv run python scripts/new_migration.py <name>` creates `migrations/<name>.sql` or prints the branch's existing one.
 - Edit it in place until it merges; `build.rs` orders it by origin/main's first-parent history. Once on origin/main it is immutable: fix forward.
 - Destructive change is staged: a new migration is additive against origin/main's schema, or a contract (`-- expand: <migration>`, `-- exports: <where>`) that drops only what its expand step superseded once that step has been on origin/main for the window `check_migrations.py` measures (`STAGING_DAYS`), exporting the data first. A rebuild that keeps every column is additive. CI measures; nothing at runtime refuses.
@@ -278,7 +282,7 @@ recorded Tasks and every steer, turn and event they wrote. Every agent shares
 one SQLite write lock. Check new queries with `EXPLAIN QUERY PLAN` against a
 store that size.
 
-**Harness, transport and hook code (`rust/loopflow-execution/src/harness/**`, `transport*`):**
+**Harness, transport and hook code (`rust/loopflow-execution/src/harness/**`, `rust/loopflow-harness/**`, `transport*`):**
 lf is a session manager, context adder and hook interjector on top of a
 harness, never a middleman that can break the conversation. It is never in the
 byte path between a person and their provider except as a pass-through that
@@ -290,6 +294,10 @@ gap is one type, `store::RecordingGap` (`note` once per changed failure,
 Session history as a `store-gap` observation when the store answers again.
 Codex clients reach their private app-server directly; lf only observes beside
 them.
+
+A harness's permission and sandbox choices are settled in this order: the
+agent is not handcuffed, then the simplest, then what the other harnesses do.
+Make the choice; don't leave it as a question.
 
 **`*.rs`:**
 - Delete dead code; don't comment it out. Intentionally unused code (FFI, PyO3) gets `#[allow(dead_code)]` with a comment saying why.
@@ -336,7 +344,7 @@ them.
   unification cannot change the CLI runtime. Execution fixtures live under
   `loopflow_execution::test_support`; parser and presentation assertions stay in
   the application. Do not include library source again in application fixtures.
-- Bare `task run` returns once the Graph registers; `lf -b task run` waits but runs interactive steps headless. A test reading state a stopping run writes waits for that run. `lf ship` and `-b` share one path. Changing when a command returns means updating its test callers (`grep -rn '"task", "run"' rust/loopflow/tests/`).
+- Bare `task run` returns once the Graph registers; `lf -b task run` waits but runs interactive steps headless. A test reading state a stopping run writes waits for that run. `lf task auto on` and `-b` share one path. Changing when a command returns means updating its test callers (`grep -rn '"task", "run"' rust/loopflow/tests/`).
 - Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
 - From an lf-launched shell, run `cargo test` with `LF_*` unset and `< /dev/null`: fixtures follow `LF_HOME`, and `lf task create` reads open stdin. In zsh: `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test …`. A leftover `LF_CAPTURE_KEY` fails store writes with CannotOpen or "capture does not belong to a recorded Session".
 - Account routing fixtures read personal preferences scoped to this checkout's repository, so on a Machine with its own routes they fail with "has no resident login". Run the built test binary from an empty directory with `HOME` pointed at another, keeping `CARGO_HOME` for fixtures that build `lf`.

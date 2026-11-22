@@ -254,7 +254,7 @@ def _production_rust(source: str) -> str:
 def _rust_sources(root: Path) -> list[Path]:
     return sorted(
         path
-        for crate in ("loopflow", "loopflow-execution", "loopflow-storage")
+        for crate in ("loopflow", "loopflow-execution", "loopflow-harness", "loopflow-storage")
         for path in (root / "rust" / crate / "src").rglob("*.rs")
     )
 

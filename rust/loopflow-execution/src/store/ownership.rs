@@ -5,10 +5,10 @@ use loopflow_model::durable::{
     MachineId, MachineRef, MachineSetting, RepositoryId, TaskId, TaskOwner, TaskOwnershipEntry,
 };
 use loopflow_storage::sqlite::scope_defaults::TaskScope;
-use loopflow_storage::sqlite::task_ownership::{label_owner, OwnershipFacts, Person};
+use loopflow_storage::sqlite::task_ownership::{label_owner, OwnershipFacts, Person, You};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::task::{NewTask, Task, TaskPr};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
@@ -57,6 +57,18 @@ pub fn viewer(
             label: Some(local_label()),
         },
     }))
+}
+
+/// You in `repo`, whose Git `user.email` is your person key. Reading it
+/// spawns `git` and loads Machine configuration: read once per repository.
+pub fn you(store: &SqliteStore, repository: &RepositoryId, repo: &Path) -> StoreResult<You> {
+    let scope = store.placement_scope(None, Some(repository))?;
+    let mut machines: HashSet<MachineId> = machine_names(store)?.into_keys().collect();
+    machines.insert(scope.local_machine);
+    Ok(You {
+        person: claimant(repo, scope.person_id)?,
+        machines,
+    })
 }
 
 fn prepare(

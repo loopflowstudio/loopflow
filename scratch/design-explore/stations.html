@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stations · Loopflow for Mac exploration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&family=Overpass+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  /* A Task is a line; a step is a station; a step that is yours is an interchange.
+     Every Task shares the same station positions, so the sidebar is a map. */
+  :root {
+    --ground: #ffffff; --ink: #121212; --soft: #5e5a57; --ahead: #c9c5c1; --wash: #f2f0ed; --wine: #9b1a4a;
+    --t-title: 24px; --t-text: 15px; --t-meta: 13px; --t-small: 12px; --track: 4px;
+    --term-bg: #1c1718; --term-fg: #efe9e6; --term-dim: #9a908d; --term-acc: #f2a7bd;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #e9e8e6; color: var(--ink); font: var(--t-text)/1.35 "Overpass", -apple-system, sans-serif; }
+  .note { font: 13px/1.4 -apple-system, sans-serif; color: #666; background: #f4f4f4; padding: 8px 24px; display: flex; gap: 20px; }
+  .note a { color: inherit; } .note b { color: #222; font-weight: 600; }
+  .what { font: 13px/1.4 -apple-system, sans-serif; color: #666; width: 1280px; margin: 40px auto 12px; }
+  a:focus-visible, button:focus-visible, textarea:focus-visible { outline: 3px solid var(--wine); outline-offset: 2px; }
+  .id { font: var(--t-small)/1 "Overpass Mono", ui-monospace, monospace; color: var(--soft); }
+
+  .win { width: 1280px; height: 800px; margin: 0 auto; background: var(--ground); border: 1px solid #aaa5a0; border-radius: 10px; overflow: hidden; display: grid; grid-template-columns: 440px minmax(0, 1fr); grid-template-rows: 44px minmax(0, 1fr); }
+  .bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-bottom: 2px solid var(--ink); }
+  .lights { display: flex; gap: 8px; } .lights span { width: 12px; height: 12px; border-radius: 50%; border: 1px solid #a8a09a; }
+  .jump { display: flex; gap: 10px; align-items: baseline; }
+  .jump button { font: inherit; background: none; border: 0; color: inherit; cursor: pointer; }
+  .jump button:last-child { font-weight: 800; } .jump span { color: var(--soft); }
+
+  .side { border-right: 2px solid var(--ink); display: flex; flex-direction: column; }
+  .names { display: grid; grid-template-columns: repeat(6, 1fr); padding: 14px 24px 10px; font-size: var(--t-small); line-height: 1.15; color: var(--soft); text-align: center; align-items: end; border-bottom: 1px solid var(--ahead); }
+  .task { padding: 10px 24px 9px; }
+  .task.sel { background: var(--wash); }
+  .task .t { font-weight: 600; line-height: 1.3; }
+  .task.sel .t { font-weight: 800; }
+  .task .st { font-size: var(--t-meta); color: var(--soft); margin-top: 2px; display: flex; gap: 10px; align-items: baseline; }
+  .task .st .id { flex: none; }
+  .task .st.you { color: var(--wine); font-weight: 600; }
+  .ln { position: relative; display: grid; grid-template-columns: repeat(6, 1fr); height: 24px; margin-top: 5px; --at: 0; }
+  .ln::before, .ln::after { content: ""; position: absolute; top: calc(50% - var(--track) / 2); left: 8.333%; height: var(--track); }
+  .ln::before { right: 8.333%; background: var(--ahead); }
+  .ln::after { width: calc(var(--at) / 5 * 83.333%); background: var(--ink); }
+  .ln i { position: relative; z-index: 1; justify-self: center; align-self: center; width: 10px; height: 10px; border-radius: 50%; background: var(--ground); border: 2px solid var(--ahead); }
+  .task.sel .ln i { background: var(--wash); }
+  .ln i.done { background: var(--ink); border-color: var(--ink); }
+  .ln i.x { width: 18px; height: 18px; border-width: 4px; }
+  .ln i.x.done { background: var(--ground); }
+  .ln i.you { width: 22px; height: 22px; border: 4px solid var(--wine); background: radial-gradient(circle, var(--wine) 0 4.5px, var(--ground) 5px); }
+  .ln i.train { width: 26px; height: 12px; border-radius: 6px; background: var(--ink); border-color: var(--ink); }
+  .ln i.end { width: 14px; height: 18px; border-radius: 0; background: var(--ink); border-color: var(--ink); }
+  .task.off .t, .task.off .st { color: var(--soft); font-weight: 400; }
+  .legend { margin-top: auto; padding: 12px 24px 14px; border-top: 1px solid var(--ahead); font-size: var(--t-small); color: var(--soft); display: flex; gap: 16px; align-items: center; white-space: nowrap; }
+  .legend span { display: inline-flex; gap: 7px; align-items: center; }
+  .legend i { display: inline-block; flex: none; border-radius: 50%; }
+  .legend .k1 { width: 22px; height: 22px; border: 4px solid var(--wine); background: radial-gradient(circle, var(--wine) 0 4.5px, var(--ground) 5px); }
+  .legend .k2 { width: 26px; height: 12px; border-radius: 6px; background: var(--ink); }
+  .legend .k3 { width: 18px; height: 18px; border: 4px solid var(--ink); }
+
+  .main { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-width: 0; }
+  .title { padding: 22px 32px 0; }
+  .title h1 { font-size: var(--t-title); font-weight: 800; line-height: 1.2; letter-spacing: -.01em; max-width: 30em; }
+  .title p { color: var(--soft); margin-top: 6px; }
+  .map { display: block; width: 100%; height: auto; padding: 0 16px; }
+  .map text { font-family: "Overpass", sans-serif; }
+  .term { margin: 0; background: var(--term-bg); color: var(--term-fg); padding: 16px 24px; font: 13px/20px "Overpass Mono", ui-monospace, monospace; white-space: pre; overflow: hidden; }
+  .term .p { color: var(--term-dim); } .term b { color: var(--term-acc); font-weight: 600; } .term .cur { background: var(--term-fg); }
+
+  .sheet { width: 720px; margin: 0 auto 80px; background: var(--ground); border: 2px solid var(--ink); }
+  .sheet h2 { font-size: var(--t-title); font-weight: 800; padding: 24px 28px 0; }
+  .sheet textarea { display: block; width: 100%; height: 96px; margin-top: 10px; padding: 0 28px; border: 0; resize: none; font: inherit; font-size: 19px; line-height: 1.45; color: var(--ink); }
+  .sheet .ln { margin: 0 28px; height: 30px; }
+  .sheet .names { padding: 6px 28px 16px; border: 0; align-items: start; }
+  .sheet .names .mine { color: var(--wine); font-weight: 600; }
+  .sheet .foot { display: flex; justify-content: space-between; align-items: center; border-top: 2px solid var(--ink); padding: 14px 28px; }
+  .sheet u { text-decoration-thickness: 2px; text-underline-offset: 4px; }
+  .sheet button { font: inherit; font-weight: 800; background: var(--ink); color: var(--ground); border: 0; height: 40px; padding: 0 24px; cursor: pointer; }
+</style>
+</head>
+<body>
+<p class="note"><b>Stations</b><a href="desktop.html">Desktop directions</a><a href="ledger.html">Ledger</a><a href="tide.html">Tide</a><a href="index.html">Earlier directions</a></p>
+<p class="what">Loopflow for Mac. A Task is a line and a step is a station. Every Task shares the same station positions, so the sidebar reads as a map: look down a column to see who is where.</p>
+<div class="win">
+  <div class="bar"><div class="lights"><span></span><span></span><span></span></div>
+    <div class="jump"><button>loopflow</button><span>›</span><button>desktop</button><span>›</span><button>LOO-515</button></div></div>
+
+  <div class="side" aria-label="Tasks">
+    <p class="names" aria-hidden="true"><span>explore</span><span>plan</span><span>build</span><span>human-review</span><span>deliver</span><span>verify</span></p>
+    <div class="task sel"><p class="t">Make Task PR, file-browser and brief views useful beside the conversation</p>
+      <div class="ln" style="--at:3"><i class="x done"></i><i class="done"></i><i class="done"></i><i class="you"></i><i></i><i class="x"></i></div>
+      <p class="st you"><span class="id">LOO-515</span>At your stop since 12:07. Review the change.</p></div>
+    <div class="task"><p class="t">Keep Desktop scrolling responsive under build load</p>
+      <div class="ln" style="--at:0"><i class="you"></i><i></i><i></i><i class="x"></i><i></i><i class="x"></i></div>
+      <p class="st you"><span class="id">LOO-910</span>At your stop since 11:40. Choose what to build.</p></div>
+    <div class="task"><p class="t">Keep interrupted terminal pastes from swallowing Session input</p>
+      <div class="ln" style="--at:2"><i class="x done"></i><i class="done"></i><i class="train"></i><i class="x"></i><i></i><i class="x"></i></div>
+      <p class="st"><span class="id">LOO-912</span>Codex is building.</p></div>
+    <div class="task"><p class="t">Sidebar rows stop clipping the Task ID and status</p>
+      <div class="ln" style="--at:1"><i class="x done"></i><i class="train"></i><i></i><i class="x"></i><i></i><i class="x"></i></div>
+      <p class="st"><span class="id">LOO-941</span>Claude is planning.</p></div>
+    <div class="task off"><p class="t">Redesign backlog management so choosing the next work feels clear</p>
+      <div class="ln" style="--at:0"><i class="x"></i><i></i><i></i><i class="x"></i><i></i><i class="x"></i></div>
+      <p class="st"><span class="id">LOO-903</span>Not started.</p></div>
+    <div class="task off"><p class="t">Keep one plan at every size</p>
+      <div class="ln" style="--at:5"><i class="x done"></i><i class="done"></i><i class="done"></i><i class="x done"></i><i class="done"></i><i class="end"></i></div>
+      <p class="st"><span class="id">LOO-938</span>Arrived. Landed as #1983.</p></div>
+    <p class="legend"><span><i class="k1"></i>at your stop</span><span><i class="k2"></i>an agent moving</span><span><i class="k3"></i>a stop that is yours</span></p>
+  </div>
+
+  <div class="main">
+    <div class="title"><h1>Make Task PR, file-browser and brief views useful beside the conversation</h1><p>LOO-515 on the feature line, with Claude. Pull request #1949.</p></div>
+    <svg class="map" viewBox="0 0 840 212" role="img" aria-label="The feature line: explore, plan, build, human-review, deliver, verify. The Task is at human-review, which is yours. It has been back to build once.">
+      <g fill="none" stroke-linecap="butt">
+        <path d="M790,84 V160 a14,14 0 0 1 -14,14 H304 a14,14 0 0 1 -14,-14 V98 a14,14 0 0 1 14,-14 H330" stroke="#c9c5c1" stroke-width="6"/>
+        <path d="M500,84 H790" stroke="#c9c5c1" stroke-width="6"/>
+        <path d="M50,84 H500 V118 a14,14 0 0 1 -14,14 H344 a14,14 0 0 1 -14,-14 V84" stroke="#121212" stroke-width="6"/>
+      </g>
+      <path d="M409,132 l12,-7 v14 z" fill="#121212"/>
+      <path d="M534,174 l12,-7 v14 z" fill="#c9c5c1"/>
+      <g stroke-width="5">
+        <circle cx="50" cy="84" r="11" fill="#fff" stroke="#121212"/>
+        <circle cx="190" cy="84" r="7" fill="#121212" stroke="#121212"/>
+        <circle cx="330" cy="84" r="7" fill="#121212" stroke="#121212"/>
+        <circle cx="500" cy="84" r="14" fill="#fff" stroke="#9b1a4a"/>
+        <circle cx="650" cy="84" r="6" fill="#fff" stroke="#c9c5c1" stroke-width="3"/>
+        <circle cx="790" cy="84" r="11" fill="#fff" stroke="#c9c5c1"/>
+      </g>
+      <circle cx="500" cy="84" r="6" fill="#9b1a4a"/>
+      <g font-size="15" font-weight="600" text-anchor="middle" fill="#121212">
+        <text x="50" y="56" text-anchor="start" dx="-12">explore</text><text x="190" y="56">plan</text><text x="330" y="56">build</text>
+        <text x="500" y="56" fill="#9b1a4a" font-weight="800">human-review</text>
+        <text x="650" y="56" fill="#5e5a57" font-weight="400">deliver</text><text x="790" y="56" fill="#5e5a57" font-weight="400" text-anchor="end" dx="12">verify</text>
+      </g>
+      <text x="500" y="32" font-size="13" font-weight="600" text-anchor="middle" fill="#9b1a4a">Your stop, since 12:07</text>
+      <text x="38" y="112" font-size="13" fill="#5e5a57">you chose the second sketch</text>
+      <text x="415" y="154" font-size="13" text-anchor="middle" fill="#121212">back to build, taken once</text>
+      <text x="560" y="198" font-size="13" fill="#5e5a57">back to build if main shows a problem</text>
+    </svg>
+<pre class="term" tabindex="0" aria-label="The Task's conversation"><span class="p">⏺</span> The review page is ready: <u>scratch/review/index.html</u>
+
+  Changed since your last pass
+    PR pane keeps its scroll position while the conversation streams
+    File browser opens at the Task's worktree, not the repository root
+    Brief view wraps long titles instead of clipping them
+
+  Checks
+    swift build LoopflowMac        <b>ok</b>   48.2s
+    WorkPaneLayoutTests            <b>ok</b>   12 passed
+    mounted terminal frame checks  <span class="p">not run here, needs a display</span>
+
+  Two things to look at before I deliver:
+    1. The PR pane takes 38% of the split. Wider hides the conversation at 1280.
+    2. The brief view shows the plan first, then the brief. Swap them?
+
+<span class="p">&gt;</span> <span class="cur"> </span></pre>
+  </div>
+</div>
+
+<p class="what">New Task. The line you pick shows where it will stop for you before you start it.</p>
+<div class="sheet">
+  <h2>What do you want?</h2>
+  <textarea aria-label="What do you want?">Sidebar rows stop clipping the Task ID and status</textarea>
+  <div class="ln" style="--at:0"><i class="x"></i><i></i><i></i><i class="x"></i><i></i><i class="x"></i></div>
+  <p class="names"><span class="mine">explore</span><span>plan</span><span>build</span><span class="mine">human-review</span><span>deliver</span><span class="mine">verify</span></p>
+  <p class="foot"><span>On the <u>feature</u> line, in <u>loopflow</u>, with <u>Claude</u>. Three stops are yours.</span><button>Start</button></p>
+</div>
+</body>
+</html>

@@ -2,9 +2,10 @@
 //
 // GUI-launched apps inherit a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that
 // doesn't include Homebrew, ~/.local/bin, or ~/.cargo/bin. Anything Loopflow
-// shells out to — git and the bundled lf — inherits that, so execvp can't
+// shells out to — git and lf — inherits that, so execvp can't
 // find user-installed binaries. Pipe child envs through `enrichedPath` so they
-// resolve the same binaries the user's shell would.
+// resolve the same binaries the user's shell would. This covers only what Swift
+// starts: lf repairs its own PATH from `os_process::TOOL_DIRS`.
 
 import Foundation
 
@@ -33,10 +34,12 @@ enum GUIProcessEnvironment {
         var copy = env
         // Launches select this app's protocol, including nested commands.
         copy["PATH"] = enrichedPath(from: env["PATH"])
-        copy.removeValue(forKey: "LF_BIN")
-        if let helper = Bundle.main.url(forAuxiliaryExecutable: "lf") {
-            copy["LF_BIN"] = helper.path
-            copy["PATH"] = helper.deletingLastPathComponent().path + ":" + (copy["PATH"] ?? "")
+        let lf = LocalWaveAgentLauncher.machineLf(environment: env)
+        if let helper = try? lf.path {
+            copy["LF_BIN"] = helper
+            copy["PATH"] = URL(filePath: helper).deletingLastPathComponent().path + ":" + (copy["PATH"] ?? "")
+        } else if !lf.startsServer {
+            copy.removeValue(forKey: "LF_BIN")
         }
         // The GUI is a new human control surface, not a continuation of the
         // Work process that opened it. Retain Machine routing and native provider configuration.

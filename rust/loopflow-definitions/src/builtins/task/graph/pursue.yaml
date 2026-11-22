@@ -1,3 +1,4 @@
-# Plan, then build: the whole path from a direction to a published PR.
+description: Plan, then build, from a direction to a published PR with no person.
+steps:
 - graph: plan
 - graph: build

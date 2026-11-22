@@ -56,7 +56,7 @@ fn resolve(repo: &Path, skill: Skill) -> settings::ResolvedSettings {
         prepared.config.agent.to_string(),
         inspection.config.agent().unwrap()
     );
-    assert_eq!(prepared.config.skip_permissions, inspection.config.yolo);
+    assert_eq!(prepared.config.yolo, inspection.config.yolo);
     assert_eq!(prepared.config.chrome, inspection.config.chrome);
     for path in &inspection.config.context.docs {
         assert!(prepared.components.docs.iter().any(|doc| &doc.path == path));

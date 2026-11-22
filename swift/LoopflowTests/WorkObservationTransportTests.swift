@@ -182,7 +182,7 @@ private final class FakeSubscriptions: @unchecked Sendable {
             return LineSubscription(lines: lines, send: { [self] line in
                 lock.withLock { subscriptions[index].sent.append(String(decoding: line, as: UTF8.self)
                     .trimmingCharacters(in: .newlines)) }
-            }, cancel: { continuation.finish() })
+            }, cancel: { continuation.finish() }, unreadable: { nil })
         }
     }
 

@@ -62,9 +62,7 @@ struct TaskWorkflowHeader: View {
                     Text(task.graphName.map { "\($0) · \(task.graphSource ?? "")" } ?? "No workflow selected")
                         .foregroundStyle(palette.textSecondary)
                     Menu("Choose workflow") {
-                        ForEach(model.workflowCatalog.value ?? [], id: \.name) { choice in
-                            Button(choice.name) { model.startTaskFromInput(choice.name, task: task) }
-                        }
+                        StartFlowItems(model: model, chosen: task.graphName) { model.startTaskFromInput($0, task: task) }
                     }.task { await model.loadGraphCatalog() }
                     Button("Start") { model.startTaskFromInput(nil, task: task) }
                         .buttonStyle(WorkOutlineButtonStyle())
@@ -214,10 +212,11 @@ struct TaskWorkflowHeader: View {
     }
 }
 
-/// Auto-Ship at the right end of the Workflow bar, always visible; while
-/// shipping the same spot holds Stop Auto-Ship. Rust decides whether shipping
-/// can start. Sidebar rows and menus carry no ship control.
-struct TaskShipControl: View {
+/// The Auto toggle at the right end of the Workflow bar. On: the Task's run
+/// takes its interactive steps and lands it. Turning it on is `lf task auto on`, which
+/// also runs the Task; Rust decides whether that can start. Sidebar rows and
+/// menus carry no auto control.
+struct TaskAutoControl: View {
     let model: WorkModel
     let task: RoadmapTask
 
@@ -230,18 +229,19 @@ struct TaskShipControl: View {
         return nil
     }
 
+    /// The Task reading's own mark; until it arrives, the state its row carries.
+    private var on: Bool {
+        guard let execution = model.taskExecution[task.id].value else { return task.selectionStates.contains(.auto) }
+        return execution.auto?.state == .on
+    }
+
     var body: some View {
         Group {
-            if task.shipping != nil {
-                Button("Stop Auto-Ship") { model.stopShipping(task) }
-                    .buttonStyle(WorkOutlineButtonStyle())
-                    .disabled(readingUnavailable != nil)
-                    .help("lf --task \(task.task.identifier) ship --stop: withdraw it and disarm auto-merge")
-                    .accessibilityIdentifier("task-ship-stop")
+            if on {
+                toggle(refusal: readingUnavailable)
             } else if !task.isCompleted {
-                let refusal = readingUnavailable ?? task.shipControl.unavailable
                 HStack(spacing: Spacing.sm) {
-                    // Hovering Auto-Ship offers the other ways out of this Task.
+                    // Hovering Auto offers the other ways out of this Task.
                     if hovered {
                         let owned = task.runtime?.owner != nil
                         Button(owned ? "Unassign" : "Claim") {
@@ -255,13 +255,9 @@ struct TaskShipControl: View {
                         Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                             .buttonStyle(WorkOutlineButtonStyle(destructive: true))
                             .disabled(readingUnavailable != nil)
-                            .accessibilityIdentifier("task-ship-abandon")
+                            .accessibilityIdentifier("task-abandon")
                     }
-                    Button("Auto-Ship") { model.shipTask(task) }
-                        .buttonStyle(WorkShipButtonStyle())
-                        .disabled(refusal != nil)
-                        .help(refusal ?? "lf --task \(task.task.identifier) ship: run every remaining step and land it")
-                        .accessibilityIdentifier("task-ship")
+                    toggle(refusal: readingUnavailable ?? task.runControl.unavailable)
                 }
                 .onHover { inside in withAnimation(.easeOut(duration: 0.12)) { hovered = inside } }
             }
@@ -275,12 +271,26 @@ struct TaskShipControl: View {
             Text("Cancels the Task, closes its PRs and deletes its branches. Unassign it instead to keep its work for later.")
         }
     }
+
+    private func toggle(refusal: String?) -> some View {
+        let issue = task.task.identifier
+        return Toggle("Auto", isOn: Binding(get: { on }, set: { turnOn in
+            if turnOn { model.turnAutoOn(task) } else { model.turnAutoOff(task) }
+        }))
+        .toggleStyle(.switch).controlSize(.small)
+        .font(Typography.body(12.5))
+        .disabled(refusal != nil)
+        .help(refusal ?? (on
+            ? "lf task auto off \(issue): the run waits at its next interactive step for you, and auto-merge is disarmed"
+            : "lf task auto on \(issue): run every remaining step and land it"))
+        .accessibilityIdentifier("task-auto")
+    }
 }
 
 /// The selected Task's Workflow under the jump bar: its interactive steps as dots, what
-/// is happening now, and Auto-Ship or Stop Auto-Ship. Clicking the dots opens a
+/// is happening now, and the Auto toggle. Clicking the dots opens a
 /// row with each interactive step, who takes part there and where the Task is. Rust owns the
-/// graph, the position and the shipping reason; this only arranges them.
+/// graph, the position and whether auto can start; this only arranges them.
 struct TaskWorkflowBar: View {
     let model: WorkModel
     let task: RoadmapTask
@@ -295,7 +305,7 @@ struct TaskWorkflowBar: View {
         enum Place: Equatable { case passed, here, going, ahead }
         let name: String
         let place: Place
-        /// You, or a stand-in while shipping; `end` has no one.
+        /// You, or a stand-in while auto is on; `end` has no one.
         let who: String?
         let note: String
         /// Where the Task stands now or is headed.
@@ -312,11 +322,11 @@ struct TaskWorkflowBar: View {
                 }
                 Text(live)
                     .lineLimit(1).truncationMode(.tail)
-                    .foregroundStyle(task.shipping?.state == .restarting ? palette.warning : palette.textSecondary)
+                    .foregroundStyle(palette.textSecondary)
                     .help(live)
                     .accessibilityIdentifier("task-workflow-bar-live")
                 Spacer(minLength: 0)
-                TaskShipControl(model: model, task: task)
+                TaskAutoControl(model: model, task: task)
             }
             .padding(.horizontal, 14)
             .frame(height: 34)
@@ -376,30 +386,31 @@ struct TaskWorkflowBar: View {
         switch place {
         case .passed: palette.textTertiary
         case .here: palette.text
-        case .going: task.shipping != nil ? palette.success : palette.working
+        case .going: auto?.state == .on ? palette.success : palette.working
         case .ahead: .clear
         }
     }
 
     private var stages: [Stage] {
-        work.value?.graph.map { Self.stages($0, shipping: task.shipping != nil) } ?? []
+        work.value?.graph.map { Self.stages($0, auto: auto?.state == .on) } ?? []
     }
 
-    /// What is happening now, in one line: shipping and who approved it, or
-    /// the stop that keeps it from shipping.
+    private var auto: Auto? { model.taskExecution[task.id].value?.auto }
+
+    /// What is happening now, in one line: where the Task stands, and its
+    /// auto setting when someone set one.
     var live: String {
-        let execution = model.taskExecution[task.id].value
-        if let shipping = task.shipping {
-            guard let approval = execution?.shipApproval else { return shipping.reason }
-            return "\(shipping.reason) · approved by \(approval.by.label)"
-        }
-        guard let stop = execution?.shipStop else { return position }
-        return "\(Self.notShipping(stop, issue: task.task.identifier)) · \(position)"
+        guard let auto else { return position }
+        return "\(position) · \(Self.autoLine(auto))"
     }
 
-    static func notShipping(_ stop: ShipMark, issue: String) -> String {
-        let when = Date(timeIntervalSince1970: TimeInterval(stop.at)).formatted(date: .abbreviated, time: .shortened)
-        return "Not shipping: \(stop.by.label) stopped it \(when) · lf ship \(issue) approves it again"
+    static func autoLine(_ mark: Auto) -> String {
+        switch mark.state {
+        case .on: return "auto on, by \(mark.by.label)"
+        case .off:
+            let when = Date(timeIntervalSince1970: TimeInterval(mark.at)).formatted(date: .abbreviated, time: .shortened)
+            return "auto off by \(mark.by.label) \(when)"
+        }
     }
 
     private var position: String {
@@ -421,8 +432,8 @@ struct TaskWorkflowBar: View {
     }
 
     /// The Workflow's interactive steps in order, then `end`, each placed
-    /// against the Task's position. While shipping, stand-ins take the steps ahead.
-    static func stages(_ workflow: TaskGraph, shipping: Bool) -> [Stage] {
+    /// against the Task's position. While auto is on, stand-ins take the steps ahead.
+    static func stages(_ workflow: TaskGraph, auto: Bool) -> [Stage] {
         let names = workflow.interactiveSteps.map(\.name) + [TaskGraph.end]
         let (at, going): (String, Bool) = switch workflow.position {
         case .at(let step): (step, false)
@@ -432,12 +443,12 @@ struct TaskWorkflowBar: View {
         let here = names.firstIndex(of: at) ?? -1
         return names.enumerated().map { index, name in
             let place: Stage.Place = index < here ? .passed : index == here ? (going ? .going : .here) : .ahead
-            let who: String? = name == "end" ? nil : (shipping && index >= here ? "stand-in" : "you")
+            let who: String? = name == "end" ? nil : (auto && index >= here ? "stand-in" : "you")
             let note: String = switch place {
             case .here: "here now"
             case .going: "on the way"
             case .passed: "passed"
-            case .ahead: shipping ? "agents will run it" : "ahead"
+            case .ahead: auto ? "agents will run it" : "ahead"
             }
             return Stage(name: name, place: place, who: who, note: note)
         }
@@ -449,9 +460,8 @@ struct TaskWorkflowBar: View {
 struct TaskHeading: View {
     let task: RoadmapTask
 
-    /// The Task's lifecycle, the state Working Tasks and Shipping list by;
-    /// Linear's planning state never overrides it. What shipping is doing
-    /// now reads in the Workflow bar.
+    /// The Task's lifecycle, the state Working Tasks list by; Linear's planning
+    /// state never overrides it. What its run is doing now reads in the Workflow bar.
     var state: String { task.lifecycle.label.capitalized }
 
     var body: some View {

@@ -213,7 +213,7 @@ impl Status {
         terminal: &loopflow_model::id::TerminalId,
         session: &loopflow_model::id::LfSessionId,
         initial: bool,
-        paste: &mut super::input::Paste,
+        input: &mut super::RelayInput,
     ) -> Result<Option<(UnixStream, bool)>> {
         self.generation += 1;
         self.reading.native_ready = false;
@@ -223,7 +223,7 @@ impl Status {
             "connecting"
         };
         self.publish(waiting, None);
-        super::discard_reconnect_input(paste)?;
+        super::discard_reconnect_input(input)?;
         let mut recovered = !initial;
         // Readiness belongs to this first call, never to a Retry cycle. A failed
         // setup consumes it too; installation must repair availability separately.
@@ -243,7 +243,7 @@ impl Status {
         // Each cycle is bounded; a native Retry action starts another cycle.
         loop {
             self.publish(waiting, setup_error.as_deref());
-            super::discard_reconnect_input(paste)?;
+            super::discard_reconnect_input(input)?;
             let mut reason = "The held terminal did not acknowledge its connection".to_owned();
             while self.attempts < MAX_ATTEMPTS {
                 let attempt = self.attempts;

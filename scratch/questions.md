@@ -84,9 +84,33 @@ Made in implement (slice 2) with nobody present; each is reversible.
 - **The scanner's state leads with "Enter an address instead"** as its accent
   button; "Open Settings" is neutral beside it when the camera is denied.
 
+Made in implement (slice 3) with nobody present; each is reversible.
+
+- **Auto-Ship is offered to a Task the list calls working**, as "Auto on"
+  was; an unstarted Task gets only Start. The Mac shows its Auto-Ship control
+  on every Task and lets Rust refuse.
+- **A Task with no Graph offers Start only while its row is unstarted.** The
+  Mac offers Start after any reading with no Graph.
+- **The phone asks for the Task from `/`**, as the Mac's `subscribeTask`
+  does, not from the repository the list read it in.
+- **The stop Notice reads "LOO-5 Stop Auto-Ship requested".**
+- **While the Machine is away the sentence is hidden**, and comes back with
+  the next reading; while the app is in the background the last sentence
+  stays until the screen reads again.
+- **`WorkflowLineTests` reads `WorkflowLine.swift` for `lineLimit`** to hold
+  "the sentence wraps"; ViewInspector does not expose a line limit a
+  container sets.
+
 Checks (slices 1 and 2):
 
 - `swift test --filter 'TaskRowTests|TaskStatusTests|TypographyDisciplineTests|ProgramStatusTests|TaskConceptTests|WorkPaletteTests|WorkflowLineTests'`: passed, 2026-11-22. Gate reruns.
 - `uv run python scripts/test_ios.py`: TEST SUCCEEDED, 2026-11-22. CI reruns.
 - `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed.
 - Simulator look on an iPhone SE, light and dark: not done; slice 4.
+
+Checks (slice 3):
+
+- `swift test --filter 'WorkflowLineTests|TaskRowTests|ProgramStatusTests|WorkPaletteTests|TypographyDisciplineTests|WaveRowTests|TaskConceptTests|DesktopHeadlessTests'`: 66 tests passed, 2026-11-22. Gate reruns.
+- `uv run python scripts/test_ios.py`: TEST SUCCEEDED, 45 tests, 2026-11-22. CI reruns.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed.
+- The Task screen on a phone against a real Machine (sentence, Run, Auto-Ship): not done; demo.

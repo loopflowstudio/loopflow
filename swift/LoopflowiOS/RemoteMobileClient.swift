@@ -58,6 +58,15 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         }
     }
 
+    /// One Task as `lf task show` reads it, kept current: each update is a whole reading as sent.
+    func observeTask(issue: String) -> ServerWatch<RawJSON> {
+        // The Machine finds a Task by its ID from any directory, as Desktop asks.
+        ServerLink.subscribe(.taskGet(directory: "/", issue: issue), connect: { [self] in try await connection() }, map: { update in
+            guard case .reading(let frame) = update else { return nil }
+            return frame
+        })
+    }
+
     /// The Machine's Waves that are still in use.
     func waves() async throws -> [Wave] {
         try await query.allWaves().filter { $0.status != .abandoned }

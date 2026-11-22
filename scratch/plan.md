@@ -19,32 +19,21 @@ says the Task waits, the screen offers the Run that moves it.
 
 ## What the code is today
 
-After slices 1 and 2 (f29d6f1f31, 258123e89b). Built: the per-platform ramp,
-`HitTarget.control`, `TaskRow` and `TaskRowStatus`, `LoopflowButtonStyle`,
-`StateView`, all in `swift/Loopflow/Design/`; the phone's list, buttons and
-states draw them; one status vocabulary, held by `TaskStatusTests`. Still to
-change:
+After slices 1 to 3. Built: the per-platform ramp, `HitTarget.control`,
+`TaskRow` and `TaskRowStatus`, `LoopflowButtonStyle`, `StateView`,
+`StatusMark`, `WorkflowLine` and `TaskGraph.runAction(issue:)`, all in
+`swift/Loopflow/Design/`; the phone's list, buttons and states draw them; the
+Task screen watches `ServedRead.taskGet`, shows the sentence in full and has
+"Task actions" (Start or Run, Auto-Ship, Stop Auto-Ship); one status
+vocabulary, held by `TaskStatusTests`. Still to change:
 
-- 43 lines in `swift/LoopflowiOS` pass a literal padding, spacing or radius
+- 44 lines in `swift/LoopflowiOS` pass a literal padding, spacing or radius
   (`MobileNewTaskView` 18, `SessionView` 10, `MachineConnectionView` 5,
   `TaskWorkspaceView` 5, `MobileRepositoryPicker` 3, one each in
-  `TaskListView` and `MachineCodeScanner`), and 4 in
-  `swift/Loopflow/Services/Notice.swift`. `TypographyDisciplineTests` does
-  not scan for them yet, though `swift/LoopflowiOS/README.md` says it does.
-- `WorkflowLine` and `StatusMark` are still in `swift/LoopflowMac/Design/`;
-  the phone shows no workflow.
-- The Task screen's toolbar still says "Auto on" / "Auto off"
-  (`TaskWorkspaceView.swift:32-43`) and has no Run. What moves a Task is
-  still decided twice: the Mac asks the Graph (`TaskWorkflowBar.runAction`:
-  Start, Run, or nothing while a run carries it); the phone asks the list's
-  states.
-- `WorkflowLine`'s sentence-alone form is one line, truncated, with the full
-  sentence in a tooltip. A phone has no tooltip, and the probed sentence (66
-  characters) does not fit 375 pt at 17 pt.
-- The phone's link subscribes to any served read
-  (`ServerLink.subscribe(_ query: ServedRead, …)`, which
-  `RemoteTaskObservation` uses for the list), so one Task can be watched the
-  way the Mac watches it (`subscribeTask`, `TaskWorkView.swift:481`).
+  `TaskListView` and `MachineCodeScanner`, and the workflow line's 1 pt
+  rule), and 4 in `swift/Loopflow/Services/Notice.swift`.
+  `TypographyDisciplineTests` does not scan for them yet, though
+  `swift/LoopflowiOS/README.md` says it does.
 - The terminal reads `Typography.terminalSize` but lacks the Mac's
   `adjust-cell-height = 10%` (`GhosttyManager.swift:132`).
 - The Session state "unavailable" has no "Changes" button of its own.
@@ -369,11 +358,20 @@ and New Task screens other than the New Task question.
    environment. Left for slice 4: the spacing rule in the scan (the literals
    are still there), and "unavailable offers Changes" as a button in the
    state (the toolbar's Changes is the only way in today).
-3. **Workflow sentence and the step that moves the Task.** Next. Move
-   `WorkflowLine` (and `StatusMark`) and `runAction`; the sentence wraps;
-   subscribe to the Task in the Task screen; show the line; the "Task
-   actions" menu with Start or Run and Auto-Ship.
-4. **New Task, pairing, terminal, spacing sweep.** The New Task field in
+3. **Workflow sentence and the step that moves the Task.** Built.
+   `StatusMark` and `WorkflowLine` are public in `swift/Loopflow/Design/`;
+   the line sets no limit and `TaskWorkflowBar` limits it to one line with
+   its tooltip; `TaskGraph.runAction(issue:)` serves both surfaces. The
+   phone's Task screen subscribes with `RemoteMobileClient.observeTask`
+   while it shows and the app is active, and `TaskWorkspaceView.actions`
+   chooses the menu from the Graph reading and the row.
+   What it taught: the Task frame decodes on the phone with the Mac's
+   `WorkFrame.decode(part: .task, …)` unchanged, so there is no phone copy of
+   the reading. The link's watch resumes silently after a loss, so the screen
+   hides the sentence from `PendingChanges.acceptsChanges` (the Machine is
+   away), not from the watch. Not yet seen on a device or Simulator: the
+   wrapped sentence above the terminal (slice 4's look).
+4. **New Task, pairing, terminal, spacing sweep.** Next. The New Task field in
    `lede`, the pairing screen's buttons and field, terminal cell height
    (its size already reads `Typography.terminalSize`), the remaining literals;
    DESIGN.md and the two READMEs; the Simulator look, light and dark.

@@ -131,8 +131,10 @@ struct TaskWorkflowBar: View {
     var body: some View {
         HStack(spacing: Spacing.md) {
             if let workflow = work.value?.graph {
-                WorkflowLine(graph: workflow, auto: model.taskExecution[task.id].value?.auto?.state == .on,
-                             setup: task.setupPosition)
+                // One line in a 34 pt bar: a sentence that does not fit is cut, with the whole of it in the tooltip.
+                let line = WorkflowLine(graph: workflow, auto: model.taskExecution[task.id].value?.auto?.state == .on,
+                                        setup: task.setupPosition)
+                line.lineLimit(1).truncationMode(.tail).help(line.sentence)
             } else {
                 Text(placeholder)
                     .lineLimit(1).truncationMode(.tail)
@@ -185,26 +187,12 @@ struct TaskWorkflowBar: View {
     private var next: (label: String, help: String, identifier: String)? {
         let issue = task.task.identifier
         if let workflow = work.value?.graph {
-            return Self.runAction(workflow, issue: issue).map { ($0.label, $0.help, "task-workflow-run") }
+            return workflow.runAction(issue: issue).map { ($0.label, $0.help, "task-workflow-run") }
         }
         // Only a successful reading with no Workflow offers Start; Rust says when it can't.
         guard work.value != nil else { return nil }
         return ("Start", "lf task run \(issue)", "task-workflow-start")
     }
-
-    /// What `lf task run` does from here, named for it; `nil` while a run
-    /// carries the Task or once it is at `end`.
-    static func runAction(_ workflow: TaskGraph, issue: String) -> (label: String, help: String)? {
-        let help = "lf task run \(issue)"
-        switch workflow.position {
-        case .at(TaskGraph.start): return ("Start", help)
-        case .at(TaskGraph.end): return nil
-        case .at(let step): return ("Run", "\(help): continue after \(step)")
-        case .run(_, _, _, true): return nil
-        case .run(_, let at, _, false): return ("Run", "\(help): run again at \(at)")
-        }
-    }
-
 }
 
 /// A Task's identity wherever it heads Work: the window trail and Dashboard tiles.

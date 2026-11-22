@@ -249,7 +249,7 @@ As the prototype notes say, keeping what the app can show:
 - Brief (`TaskBriefView`): `.serif(.title)` Task name; state and reason in
   one `text` sentence; PR, Related and outline as a two-column `text` table
   that wraps; "The brief changed…" at `text` in warning ink (more notes 1–4).
-- Diff (`TaskChangesView`, `ReviewStreamView`): title "N changed files" with
+- Diff (`TaskChangesView`, `ReviewStream` in `ReviewStreamView.swift`): title "N changed files" with
   the step menu beside it; comparison line wraps, ref and SHA mono; delivery
   button unclipped, "Open on GitHub" without "↗"; layout choices as words;
   file rows `text`/`meta` never clipped, "12 of 85 viewed", "Viewed" as a
@@ -405,8 +405,8 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    already describes the notice line.
 7. **Next: Brief, Diff, Files** (Screens above; prototype `desktop-more.html`
    notes 1–11, `desktop.html` notes 10–11). Sources:
-   `LoopflowMac/Views/TaskBriefView.swift`, `TaskChangesView.swift` (with
-   `ReviewStreamView`), `TaskFilesView.swift`, `MarkdownBlocks.swift`.
+   `LoopflowMac/Views/TaskBriefView.swift`, `TaskChangesView.swift`, `ReviewStreamView.swift` (`ReviewStream`, shared
+   with Files), `TaskFilesView.swift`, `MarkdownBlocks.swift`.
    Expected: their headless tests and `TypographyDisciplineTests` pass, and
    the words the Screens list names (title "N changed files", "12 of 85
    viewed", "Viewed", "Open on GitHub" without "↗", Files' "1 of 3") are

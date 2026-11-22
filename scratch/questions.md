@@ -37,3 +37,5 @@
 - Implement round 6: the parse sentence is matched on the refusal's shape (`invalid`, `data.kind`, "<kind>: " prefix) because released servers send no other marker.
 
 - QA round 6: a failed `config.theme` read retries every second rather than waiting for a reconnect or a file change, so updating the server clears the banner by itself. Passed over: retrying on reconnect only (ServerLink exposes no reconnect signal to AppearanceStore).
+
+- Implement round 7: Customize and Delete/Revert moved to the bottom bar as proposed at the demo, before any reply to the proposal. Delete/Revert also shows while editing (the old row was hidden then). Passed over: reserving the row's height under every card (keeps the buttons by the card, costs a blank strip per card).

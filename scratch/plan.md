@@ -1,6 +1,6 @@
 # 50f7f9: review the bundled themes
 
-Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. Round 3's concept review found two leftovers of the per-side picker; round 4 removed them: `previewTheme` and `importTheme` share one assignment that takes the side from the theme's own colors, `showPicker` is gone and `picker` is `previewSide`. Round 4 QA passed. Concept review round 4 shaped the steer's iPhone and website pieces; implement built them and round 5 QA passed them, with one open Desktop glitch. Concept review round 5 sent one change back to implement (the notice split); round 6 built it, and round 6 QA passed it after making a failed read retry. Concept review round 6 found nothing to change (`scratch/concept-review.html`). Next: ship-review.
+Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. Round 3's concept review found two leftovers of the per-side picker; round 4 removed them: `previewTheme` and `importTheme` share one assignment that takes the side from the theme's own colors, `showPicker` is gone and `picker` is `previewSide`. Round 4 QA passed. Concept review round 4 shaped the steer's iPhone and website pieces; implement built them and round 5 QA passed them, with one open Desktop glitch. Concept review round 5 sent one change back to implement (the notice split); round 6 built it, and round 6 QA passed it after making a failed read retry. Concept review round 6 found nothing to change (`scratch/concept-review.html`). The demo (`scratch/demo.md`) asked for three changes; implement round 7 built them: Harbor dropped (12 families, 24 themes), Arcade Day on the Paper ground, Customize and Delete in the bottom bar. Next: ship-review.
 
 ## What people said
 
@@ -8,15 +8,16 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 - Round 2, at ship-review after `scratch/theme-audit/explore.html`: "i like the 13 damilies"; of the page's cards, "our theme chooser should be more like this so you cab preview and scan"; then "jusr put all this stifg in this one task".
 - Steers on round 3: "can we swap verdigris for somethig more moss like"; on removed names, "not worried about any existing users".
 - Steer f4ce64ed, during round 4 QA: "make sure to make ipgone app respecy themes and the website he in loopflow light".
+- Demo, 2026-11-22: "Arcade day's background is too bubblegum"; of Cream and Paper, "i tink i prefer Paper"; "i also dont like how the Customize button makes the rows jump"; "let's drop harbor also", "to get down to 12".
 - Rex steer (54d66633): "Inspiration only: take ideas, never copy theme files, color values or code." Answered in the "What Rex does" section of `scratch/theme-audit/index.html`.
 
 ## What exists
 
 - **Defaults.** Loopflow Light is the audit repair (21 values). Loopflow Dark is Light's burgundy as rose ink on blue-grey `#2b2d30` (`dark_pair(..., cool=0.67)` in `scratch/theme-audit/proposals.py`). Both state title bar `#722f37`. The generator reads these two files and never rewrites them.
 - **Title bar role.** `loopflow-titlebar` in `PaletteDefinition`/`ThemeFile`/editor ("Title bar" row). Missing bar: `GhosttyThemeMapping.titlebar` takes the old color (accent; in dark, 65% ground mixed in) and darkens it (or lightens it, under black text) until the 72% text reaches 4.5:1. It is applied after a file's stated roles. `readabilityErrors` checks both text levels on the bar. Why a role and not a new mix: no single mix gave Dark a burgundy bar and kept the other dark bars' secondary text at 4.5:1 (table in git history, `8ae51f65b9:scratch/plan.md`).
-- **Catalogue.** 13 families, 13 light and 13 dark. `scripts/theme_catalogue.py` writes the 24 generated files and `design/prototypes/desktop-themes.js`; `--check` lists drift, run by `python/tests/test_theme_catalogue.py`. Its `titlebar()` mirrors `GhosttyThemeMapping.titlebar`, so a spec's `titlebar="accent"` is the bar the app would derive (compress moved Signal Light, Tannin Light and Fjord Light by one or two steps). Sorting by name after the Loopflow pair keeps each family's pair together. The companions, `Sources.md` and `Licenses/` are gone.
+- **Catalogue.** 12 families, 12 light and 12 dark (Harbor dropped at the demo; Arcade Day's ground is Paper, oklch 0.975 0.006 300, `#f7f6fa`). `scripts/theme_catalogue.py` writes the 22 generated files and `design/prototypes/desktop-themes.js`; `--check` lists drift, run by `python/tests/test_theme_catalogue.py`. Its `titlebar()` mirrors `GhosttyThemeMapping.titlebar`, so a spec's `titlebar="accent"` is the bar the app would derive (compress moved Signal Light, Tannin Light and Fjord Light by one or two steps). Sorting by name after the Loopflow pair keeps each family's pair together. The companions, `Sources.md` and `Licenses/` are gone.
 - **Removed names.** A setting naming a pre-family built-in (Gruvbox Dark, Linen…) is an unknown name, as on main: "No theme named …: keeping …".
-- **Chooser.** `ThemeCard` grid in `ThemeChooser.swift`, each card drawn in its own roles. The chosen card gets a 2 pt ring in `keyboardFocus`. Each section heading names its chosen theme ("Light themes · Fjord Light"); the Light/Dark theme buttons are gone. `importTheme` files a theme on the side its colors say and, in Light or Dark mode, switches the preview mode; there is no refusal.
+- **Chooser.** `ThemeCard` grid in `ThemeChooser.swift`, each card drawn in its own roles. The chosen card gets a 2 pt ring in `keyboardFocus`. Each section heading names its chosen theme ("Light themes · Fjord Light"); the Light/Dark theme buttons are gone. Customize and Delete/Revert sit in the bottom bar beside Cancel/Apply and act on the chosen theme, so choosing a card never changes a row's height. `importTheme` files a theme on the side its colors say and, in Light or Dark mode, switches the preview mode; there is no refusal.
 - **Moss** replaces Verdigris (spec in `scripts/theme_catalogue.py`; both pass the audit).
 
 ## Checks
@@ -48,9 +49,12 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 
 ## Demo
 
-Dev app → Settings → Choose Theme: 13 cards per side in their own colors, both sides in System mode. Click Fig and the window turns plum with lime; Fig Leaf is the light half. Import a dark file from the light section in Light mode: the mode switches to Dark and the file previews there.
+Dev app → Settings → Choose Theme: 12 cards per side in their own colors, both sides in System mode. Click Fig and the window turns plum with lime; Fig Leaf is the light half. Import a dark file from the light section in Light mode: the mode switches to Dark and the file previews there.
 
 ## Remaining
+
+- 2026-11-22, implement round 7: `swift test … 'ThemeTests|ThemeWorkflowTests'` 27 passed (before the bottom-bar move), then `ThemeWorkflowTests` 4 passed after it; `theme_catalogue.py --check` and `test_theme_catalogue.py` passed. The runtime 13/13 count precondition in `ThemeDefinition.builtins` is deleted; `catalogueIsTwelveFamiliesWithALightAndADarkTheme` names the list. Not run: `documented_commands::` for the `swift/README.md` edit (gate), the chooser on a display (ship-review: does any row move when a card is chosen?).
+
 
 Concept review round 4 made the theme choice one Machine fact (`theme:` in the serving Machine's `~/.lf/config.yaml`), read through that Machine's server and resolved by one shared parser; the website consumes the Loopflow Light file. Implement built all three pieces:
 

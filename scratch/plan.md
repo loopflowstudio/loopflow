@@ -27,11 +27,10 @@ Task screen watches `ServedRead.taskGet`, shows the sentence in full and has
 "Task actions" (Start or Run, Auto-Ship, Stop Auto-Ship); one status
 vocabulary, held by `TaskStatusTests`. Still to change:
 
-- 44 lines in `swift/LoopflowiOS` pass a literal padding, spacing or radius
+- 43 lines in `swift/LoopflowiOS` pass a literal padding, spacing or radius
   (`MobileNewTaskView` 18, `SessionView` 10, `MachineConnectionView` 5,
   `TaskWorkspaceView` 5, `MobileRepositoryPicker` 3, one each in
-  `TaskListView` and `MachineCodeScanner`, and the workflow line's 1 pt
-  rule), and 4 in `swift/Loopflow/Services/Notice.swift`.
+  `TaskListView` and `MachineCodeScanner`), and 4 in `swift/Loopflow/Services/Notice.swift`.
   `TypographyDisciplineTests` does not scan for them yet, though
   `swift/LoopflowiOS/README.md` says it does.
 - The terminal reads `Typography.terminalSize` but lacks the Mac's

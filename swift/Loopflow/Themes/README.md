@@ -4,7 +4,7 @@
 theme. **Loopflow Light** is the original cream/burgundy; **Loopflow Dark** puts
 the same burgundy title bar over blue-grey, with rose headings and links. The
 other twelve families (Arcade, Contrast, Fig, Fjord, Folio, Graphite, Harbor,
-Signal, Sorbet, Tannin, Terracotta, Verdigris) are Loopflow's own, written by
+Moss, Signal, Sorbet, Tannin, Terracotta) are Loopflow's own, written by
 `scripts/theme_catalogue.py` from a short spec each:
 
 ```bash

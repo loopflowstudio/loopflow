@@ -101,9 +101,9 @@ struct ThemeTests {
         let light = ThemeDefinition.builtins.filter { !$0.isDark }.map(\.name)
         let dark = ThemeDefinition.builtins.filter(\.isDark).map(\.name)
         #expect(light == ["Loopflow Light", "Arcade Day", "Contrast Light", "Fig Leaf", "Fjord Light", "Folio", "Graphite Light",
-                          "Harbor Light", "Signal Light", "Sorbet Day", "Tannin Light", "Terracotta Light", "Verdigris Light"])
+                          "Harbor Light", "Moss Light", "Signal Light", "Sorbet Day", "Tannin Light", "Terracotta Light"])
         #expect(dark == ["Loopflow Dark", "Arcade", "Contrast", "Fig", "Fjord", "Folio Night", "Graphite",
-                         "Harbor", "Signal", "Sorbet", "Tannin", "Terracotta", "Verdigris"])
+                         "Harbor", "Moss", "Signal", "Sorbet", "Tannin", "Terracotta"])
         for theme in ThemeDefinition.builtins {
             let palette = theme.palette.definition
             // Headings are the text or the accent ink, never a third color.

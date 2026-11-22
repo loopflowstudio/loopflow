@@ -120,7 +120,7 @@ public struct ThemeDefinition: Identifiable, Sendable {
         "Linen": false, "Catppuccin Latte": false, "Celadon": false, "Clay": false, "Flexoki Light": false,
         "Frost": false, "Gruvbox Light": false, "Noctis Lilac": false, "Pewter": false, "Sea Glass": false,
         "Vellum": false, "Hearth": true, "Aubergine": true, "Catppuccin Mocha": true, "Flexoki Dark": true,
-        "Gruvbox Dark": true, "Moss": true, "Night Owl": true, "Onyx": true, "Phosphor": true, "Rosewood": true,
+        "Gruvbox Dark": true, "Night Owl": true, "Onyx": true, "Phosphor": true, "Rosewood": true,
         "Solarized Dark": true,
     ]
 

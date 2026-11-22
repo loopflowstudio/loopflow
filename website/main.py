@@ -14,8 +14,6 @@ from markdown import markdown as markdown_to_html
 from starlette.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from starlette.routing import Route
 
-from internal_pages import colors_page, design_page, fonts_page
-
 BASE_URL = "https://loopflow.studio"
 RELEASE_TAG = os.environ.get("LOOPFLOW_RELEASE_TAG", "development")
 STATIC_DIR = Path(__file__).parent / "static"
@@ -1198,21 +1196,6 @@ def get():
         ),
         SiteFooter(),
     )
-
-
-@rt("/fonts")
-def get():
-    return fonts_page()
-
-
-@rt("/colors")
-def get():
-    return colors_page()
-
-
-@rt("/design")
-def get():
-    return design_page()
 
 
 def _llms_txt_handler(request):

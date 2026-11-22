@@ -30,8 +30,8 @@ struct MobileRepositoryPicker: View {
                         model.selectRepository(repository.path)
                         if model.saveDraft() { dismiss() }
                     } label: {
-                        HStack(alignment: .top, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .top, spacing: Spacing.md) {
+                            VStack(alignment: .leading, spacing: Spacing.xs) {
                                 Text(repository.displayName).font(Typography.textStrong)
                                     .foregroundStyle(theme.palette.text)
                                 Text(repository.path).font(Typography.meta)
@@ -48,9 +48,9 @@ struct MobileRepositoryPicker: View {
                                     .accessibilityHidden(true)
                             }
                         }
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: HitTarget.touch, alignment: .leading)
                         .contentShape(Rectangle())
-                        .padding(.vertical, 4)
+                        .padding(.vertical, Spacing.xs)
                     }
                     .disabled(repository.error != nil || model.busy)
                     .accessibilityAddTraits(repository.path == model.draft.directory ? .isSelected : [])

@@ -21,7 +21,7 @@ struct MachineCodeScanner: View {
                         .overlay(alignment: .bottom) {
                             Text(message ?? "Point your camera at the code in Loopflow’s Mobile settings.")
                                 .font(Typography.text)
-                                .padding(20).frame(maxWidth: .infinity)
+                                .padding(Spacing.xl).frame(maxWidth: .infinity)
                                 .background(.regularMaterial)
                         }
                 } else {

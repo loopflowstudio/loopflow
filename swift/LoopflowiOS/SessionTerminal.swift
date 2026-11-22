@@ -146,15 +146,15 @@ final class SessionTerminalController: UIViewController, UIScrollViewDelegate {
         NSLayoutConstraint.activate([
             terminal.topAnchor.constraint(equalTo: view.topAnchor),
             terminal.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            terminal.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 8),
-            terminal.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -8),
+            terminal.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: Spacing.sm),
+            terminal.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -Spacing.sm),
             scroller.topAnchor.constraint(equalTo: terminal.topAnchor),
             scroller.bottomAnchor.constraint(equalTo: terminal.bottomAnchor),
             scroller.leadingAnchor.constraint(equalTo: terminal.leadingAnchor),
             scroller.trailingAnchor.constraint(equalTo: terminal.trailingAnchor),
             latest.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            latest.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
-            latest.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
+            latest.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -Spacing.sm),
+            latest.heightAnchor.constraint(greaterThanOrEqualToConstant: HitTarget.touch),
         ])
         applyAppearance()
     }

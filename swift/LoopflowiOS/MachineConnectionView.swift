@@ -84,7 +84,7 @@ struct MachineAddressView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: Spacing.xxl) {
                         if replacing == nil && !enteringAddress {
                             Text("Your work,\nwithin reach.")
                                 .serif(.display)
@@ -102,7 +102,7 @@ struct MachineAddressView: View {
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textSelection(.enabled)
                         } else if !enteringAddress {
-                            VStack(alignment: .leading, spacing: 14) {
+                            VStack(alignment: .leading, spacing: Spacing.md) {
                                 Label("Sign in to the same Tailscale account on both devices.", systemImage: "1.circle")
                                 Label("On your Mac, open Loopflow → Settings → Mobile.", systemImage: "2.circle")
                                 Label("Enable mobile access, then scan its code here.", systemImage: "3.circle")
@@ -150,7 +150,7 @@ struct MachineAddressView: View {
                                 enteringAddress = true
                                 addressFocused = true
                             }
-                                .frame(minHeight: 44)
+                                .frame(minHeight: HitTarget.touch)
                                 .disabled(connecting)
                         }
                         if let error {
@@ -164,12 +164,12 @@ struct MachineAddressView: View {
                             .font(Typography.meta)
                             .foregroundStyle(theme.palette.textSecondary)
                     }
-                    .padding(28)
+                    .padding(Spacing.xxl)
                 }
                 .background(theme.palette.background)
                 .safeAreaInset(edge: .bottom) {
                     if enteringAddress {
-                        VStack(spacing: 8) {
+                        VStack(spacing: Spacing.sm) {
                             Button("Continue") { accept(address) }
                             .buttonStyle(LoopflowButtonStyle(.accent))
                             .disabled(connecting || address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -178,7 +178,7 @@ struct MachineAddressView: View {
                                 .buttonStyle(LoopflowButtonStyle())
                                 .disabled(connecting)
                         }
-                        .padding(16)
+                        .padding(Spacing.lg)
                         .background(theme.palette.background)
                     }
                 }

@@ -129,7 +129,7 @@ struct TaskWorkspaceView: View {
 
     @ViewBuilder private var content: some View {
         if let session = task.primarySession {
-            SessionView(client: client, task: task, session: session, theme: theme, draft: $draft)
+            SessionView(client: client, task: task, session: session, theme: theme, draft: $draft) { showsChanges = true }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Changes", systemImage: "plusminus") { showsChanges = true }
@@ -182,7 +182,7 @@ struct TaskChangesView: View {
                     NavigationLink {
                         TaskDiffView(client: client, task: task, path: file.path, theme: theme)
                     } label: {
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
                             Text((file.path as NSString).lastPathComponent)
                                 .font(Typography.textStrong)
                                 .foregroundStyle(theme.palette.text)
@@ -239,7 +239,7 @@ struct TaskFileView: View {
                             .font(Typography.mono)
                             .foregroundStyle(theme.palette.text)
                             .textSelection(.enabled)
-                            .padding(12)
+                            .padding(Spacing.md)
                     }
                 } else {
                     StateView(file.state.title)
@@ -285,7 +285,7 @@ struct TaskDiffView: View {
                             Text(lines[index].text.isEmpty ? " " : String(lines[index].text))
                                 .font(Typography.mono)
                                 .foregroundStyle(theme.palette.text)
-                                .padding(.horizontal, 12)
+                                .padding(.horizontal, Spacing.md)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(tint(lines[index].kind))
                         }
@@ -293,7 +293,7 @@ struct TaskDiffView: View {
                             Text("The rest of this diff is too long to show.")
                                 .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
-                                .padding(12)
+                                .padding(Spacing.md)
                         }
                     }
                 }

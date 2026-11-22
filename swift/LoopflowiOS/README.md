@@ -102,7 +102,8 @@ ever sent twice: after an uncertain send the app says so and waits.
 
 When there is no terminal to draw (the Session ended, is saved but not
 running, is open on another device, or the connection dropped), the screen
-says which in a line of serif and offers the one button that fits. Changes,
+says which in a line of serif and offers the one button that fits. A Task
+whose Session cannot be reached from here offers **Changes**. Changes,
 a diff and a file do the same when they are empty or fail to load; a failure
 keeps **Try again**.
 

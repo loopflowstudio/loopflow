@@ -4,6 +4,7 @@ import SwiftUI
 /// One Task's Session: the live terminal, and a reply field under your thumb.
 struct SessionView: View {
     let theme: ThemeDefinition
+    let showChanges: () -> Void
     @Binding var draft: String
     @State private var link: SessionLink
     @State private var actions = TerminalActions()
@@ -11,8 +12,10 @@ struct SessionView: View {
     @FocusState private var replying: Bool
     @Environment(\.scenePhase) private var scenePhase
 
-    init(client: RemoteMobileClient, task: MobileTask, session: String, theme: ThemeDefinition, draft: Binding<String>) {
+    init(client: RemoteMobileClient, task: MobileTask, session: String, theme: ThemeDefinition, draft: Binding<String>,
+         showChanges: @escaping () -> Void) {
         self.theme = theme
+        self.showChanges = showChanges
         _draft = draft
         _link = State(initialValue: SessionLink(client: client, task: task, session: session))
     }
@@ -20,7 +23,9 @@ struct SessionView: View {
     var body: some View {
         VStack(spacing: 0) {
             if case .unavailable(let reason) = link.state {
-                StateView("No Session here", sentence: reason)
+                StateView("No Session here", sentence: reason) {
+                    Button("Changes", action: showChanges).buttonStyle(LoopflowButtonStyle(.accent))
+                }
             } else {
                 SessionTerminal(link: link, actions: actions, theme: theme)
                     .overlay { notice }
@@ -71,39 +76,40 @@ struct SessionView: View {
         HStack(spacing: 0) {
             ForEach(DesktopKey.phoneRow, id: \.self) { key in
                 Button { actions.press(key) } label: {
-                    Image(systemName: key.symbol).frame(maxWidth: .infinity, minHeight: 44)
+                    Image(systemName: key.symbol).frame(maxWidth: .infinity, minHeight: HitTarget.touch)
                 }
                 .accessibilityLabel(key.title)
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, Spacing.sm)
     }
 
     private var replyBar: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: .bottom, spacing: Spacing.sm) {
             Button { showingKeys.toggle() } label: {
                 Image(systemName: showingKeys ? "keyboard.chevron.compact.down" : "arrow.up.arrow.down")
-                    .frame(width: 44, height: 44)
+                    .frame(width: HitTarget.touch, height: HitTarget.touch)
             }
             .accessibilityLabel(showingKeys ? "Hide keys" : "Arrow and menu keys")
             TextField("Reply", text: $draft, axis: .vertical)
                 .lineLimit(1...6)
                 .font(Typography.text)
                 .focused($replying)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(theme.palette.surface, in: RoundedRectangle(cornerRadius: 20))
-                .overlay(RoundedRectangle(cornerRadius: 20).stroke(theme.palette.border))
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
+                .frame(minHeight: HitTarget.touch)
+                .background(theme.palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.pane))
+                .overlay(RoundedRectangle(cornerRadius: CornerRadius.pane).stroke(theme.palette.border))
             Button {
                 actions.reply(draft)
                 draft = ""
             } label: {
-                Image(systemName: "arrow.up.circle.fill").font(Typography.lede).imageScale(.large).frame(width: 44, height: 44)
+                Image(systemName: "arrow.up.circle.fill").font(Typography.lede).imageScale(.large).frame(width: HitTarget.touch, height: HitTarget.touch)
             }
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .accessibilityLabel("Send reply")
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, Spacing.xs)
     }
 }

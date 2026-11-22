@@ -19,17 +19,17 @@ struct MobileNewTaskView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: Spacing.xxl) {
                     if !model.draft.savedRequests.isEmpty {
                         NavigationLink {
                             MobileSavedRequestsView(model: model, theme: theme, onOpen: onOpen)
                         } label: {
                             Label("Saved requests (\(model.draft.savedRequests.count))", systemImage: "tray")
                                 .font(Typography.textStrong)
-                                .frame(minHeight: 44)
+                                .frame(minHeight: HitTarget.touch)
                         }
                     }
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: Spacing.md) {
                         Text("What do you want?")
                             .serif(.display)
                             .accessibilityAddTraits(.isHeader)
@@ -37,12 +37,12 @@ struct MobileNewTaskView: View {
                             .font(Typography.meta)
                             .foregroundStyle(theme.palette.textSecondary)
                         TextEditor(text: Binding(get: { model.draft.text }, set: { model.editText($0) }))
-                            .font(Typography.text)
+                            .font(Typography.lede)
                             .scrollContentBackground(.hidden)
                             .frame(minHeight: 170)
-                            .padding(8)
-                            .background(theme.palette.surface, in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.palette.border))
+                            .padding(Spacing.sm)
+                            .background(theme.palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.pane))
+                            .overlay(RoundedRectangle(cornerRadius: CornerRadius.pane).stroke(theme.palette.border))
                             .focused($editing)
                             .disabled(model.draft.submission != nil || model.storageUnavailable)
                             .accessibilityLabel("Task instructions")
@@ -63,7 +63,7 @@ struct MobileNewTaskView: View {
                             .accessibilityLabel("\(error)")
                     }
                 }
-                .padding(20)
+                .padding(Spacing.xl)
             }
             .scrollDismissesKeyboard(.interactively)
             .background(theme.palette.background)
@@ -95,7 +95,7 @@ struct MobileNewTaskView: View {
     }
 
     private var destination: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Spacing.md) {
             Text("On your Machine").font(Typography.meta).foregroundStyle(theme.palette.textSecondary)
             Label(model.draft.submission?.machineName ?? model.context?.name
                 ?? (model.busy ? "Connecting…" : "Machine unavailable"), systemImage: "desktopcomputer")
@@ -104,7 +104,7 @@ struct MobileNewTaskView: View {
                 NavigationLink {
                     MobileRepositoryPicker(model: model, theme: theme)
                 } label: {
-                    HStack(spacing: 12) {
+                    HStack(spacing: Spacing.md) {
                         Text(context.repositories.first(where: { $0.path == model.draft.directory })?.displayName
                             ?? "Choose a repository")
                             .font(Typography.textStrong)
@@ -112,7 +112,7 @@ struct MobileNewTaskView: View {
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.right").font(Typography.meta).fontWeight(.semibold)
                     }
-                    .frame(minHeight: 44)
+                    .frame(minHeight: HitTarget.touch)
                     .contentShape(Rectangle())
                 }
                 .disabled(model.busy || model.storageUnavailable)
@@ -130,16 +130,16 @@ struct MobileNewTaskView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(theme.palette.surface, in: RoundedRectangle(cornerRadius: 12))
+        .padding(Spacing.lg)
+        .background(theme.palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.pane))
     }
 
     private var actions: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Spacing.sm) {
             if model.busy {
                 ProgressView(model.starting ? "Starting…"
                     : model.draft.submission == nil ? "Loading destinations…" : "Checking your Task…")
-                    .frame(minHeight: 44)
+                    .frame(minHeight: HitTarget.touch)
             } else if model.settled {
                 Button("Open Task") { action = Task { if let task = await model.openTask() { onOpen(task) } } }
                     .buttonStyle(LoopflowButtonStyle(.accent))
@@ -160,7 +160,7 @@ struct MobileNewTaskView: View {
                     .buttonStyle(LoopflowButtonStyle())
             }
         }
-        .frame(maxWidth: .infinity).padding(16)
+        .frame(maxWidth: .infinity).padding(Spacing.lg)
         .background(theme.palette.background)
     }
 
@@ -176,7 +176,7 @@ private struct MobileCreationResult: View {
     let outcome: MobileTaskOutcome
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
             Label(Self.title(outcome), systemImage: outcome.state == .started ? "checkmark.circle" : "info.circle")
                 .font(Typography.textStrong)
             if let receipt = outcome.receipt {
@@ -208,7 +208,7 @@ struct MobileSavedRequestsView: View {
                     NavigationLink {
                         MobileSavedTaskRequestView(id: request.id, model: model, theme: theme, onOpen: onOpen)
                     } label: {
-                        VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
                             Text(request.outcome?.receipt?.task.title ?? request.submission.request)
                                 .font(Typography.textStrong).lineLimit(3)
                             Label(request.submission.machineName, systemImage: "desktopcomputer")
@@ -216,7 +216,7 @@ struct MobileSavedRequestsView: View {
                             Text(request.outcome.map(MobileCreationResult.title) ?? "Result not confirmed")
                                 .font(Typography.meta).foregroundStyle(theme.palette.textSecondary)
                         }
-                        .padding(.vertical, 6)
+                        .padding(.vertical, Spacing.xs)
                     }
                     .listRowBackground(theme.palette.surface)
                 }
@@ -243,7 +243,7 @@ struct MobileSavedTaskRequestView: View {
     var body: some View {
         ScrollView {
             if let request = model.savedRequest(id) {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: Spacing.xl) {
                     Label(request.submission.machineName, systemImage: "desktopcomputer")
                         .font(Typography.textStrong)
                     Text(request.submission.directory)
@@ -264,7 +264,7 @@ struct MobileSavedTaskRequestView: View {
                         Text(error).font(Typography.text).foregroundStyle(theme.palette.warning)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading).padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(Spacing.xl)
             }
         }
         .background(theme.palette.background)
@@ -274,7 +274,7 @@ struct MobileSavedTaskRequestView: View {
         .safeAreaInset(edge: .bottom) {
             VStack {
                 if model.busy {
-                    ProgressView("Checking your Task…").frame(minHeight: 44)
+                    ProgressView("Checking your Task…").frame(minHeight: HitTarget.touch)
                 } else if let request = model.savedRequest(id) {
                     if let outcome = request.outcome, outcome.state != .inProgress {
                         Button("Open Task") { action = Task { await open() } }
@@ -290,7 +290,7 @@ struct MobileSavedTaskRequestView: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity).padding(16).background(theme.palette.background)
+            .frame(maxWidth: .infinity).padding(Spacing.lg).background(theme.palette.background)
         }
         .onAppear { model.clearError() }
         .onDisappear { action?.cancel(); model.clearError() }

@@ -42,11 +42,15 @@ struct TypographyDisciplineTests {
         #expect(violations.isEmpty, "\(violations.joined(separator: "\n"))")
     }
 
-    @Test("LoopflowiOS draws buttons and states with the shared components")
-    func thePhoneUsesTheSharedButtonAndStateView() throws {
+    /// `spacing: 0` passes: it says "no gap", which is not a step on the scale.
+    @Test("LoopflowiOS draws buttons, states and spacing from the shared design")
+    func thePhoneUsesTheSharedButtonStateViewAndSteps() throws {
         let rules = [
             (#"\.borderedProminent"#, "a hand-made primary button; use LoopflowButtonStyle(.accent)"),
             (#"ContentUnavailableView"#, "a stock empty view; use StateView"),
+            (#"padding\((\.\w+, *)?\d|EdgeInsets\([^)]*\d"#, "a literal padding; use a Spacing step"),
+            (#"spacing: *[1-9]"#, "a literal spacing; use a Spacing step"),
+            (#"ornerRadius: *\d"#, "a literal radius; use a CornerRadius step"),
         ]
         var violations: [String] = []
         let root = Self.swiftRoot.appendingPathComponent("LoopflowiOS")

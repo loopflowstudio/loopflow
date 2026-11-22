@@ -111,3 +111,7 @@ Open Task c9fbcb in the Dev build's Diff. `TaskFileDocument.swift` and `ReviewSt
 2. **Editor and deletion.** Files editor on `Grammar` in the background; `SyntaxColors.swift` and its tests go; notices for SwiftTreeSitter, tree-sitter and each grammar through `scripts/third_party.py refresh`.
 3. **`lf task file --at` and `data`.** Rust, served read, both DTOs and fixtures; `FileSides` in the store; Diff rows recolored from whole-file parses; skipped lines read from `sides.new` and `canOpenGaps` deleted; images side by side in the Diff and shown in Files Read.
 4. **Markdown redline, then HTML side by side**, with the per-file Source toggle and the layout picker arranging both.
+
+## Docs
+
+Written ahead of the build: `swift/README.md` (Diff: grammar colors, skipped lines in step comparisons, rendered Markdown, image and HTML diffs and **Source**; Files Read shows images) and `docs/workspaces.md` (`lf task file ENG-123 README.md --at parent`). The `documented_commands` check fails on that `--at` example until slice 3 adds the flag to Clap.

@@ -366,8 +366,14 @@ those near the top of the pane first, so a large file never cuts another short
 and a hidden file is never read. A new file reads as its contents. Size
 collapses nothing: a line past 1,000 characters shows its start and **N more
 characters · Show**, a file past 1 MB shows its first 1 MB and says it was cut,
-and a file that could not be read offers **Retry**. Code is in syntax colors,
-here and in Files. The page fits a pane 360 pt wide: the toolbar keeps the
+and a file that could not be read offers **Retry**. Code is colored by its
+language's grammar, here and in Files, in your theme's terminal colors:
+keywords, types, functions, properties, strings, numbers and comments each
+have their own, readable on every row. A hunk is colored by its own lines
+first and by the whole file once both sides are read, so a hunk that opens
+inside a Python docstring colors as a docstring. Swift, Rust, Python,
+TypeScript, JavaScript, Go, C, C++, Ruby, Java, Kotlin, SQL, shell, HTML, CSS,
+Markdown, YAML, TOML and JSON have grammars; other files stay plain. The page fits a pane 360 pt wide: the toolbar keeps the
 sidebar toggle, the stepper and the **…** menu, which holds what has no room,
 layout first, then order and tour, then Focus, and **Wrap long lines**. Under
 the title, **Whole Task** opens a menu of the Graph steps in the branch's
@@ -452,12 +458,26 @@ one to land there. Press `]`
 and `[` (or the arrows around the position) to step through changes across
 files; the change you land on pulses once. **Focus** shows one file and still
 steps into the next. Between hunks the stream says how many lines it skipped
-and which declaration follows; click that row to read the lines in place.
+and which declaration follows; click that row to read the lines in place,
+in a step's comparison as in the whole Task's.
 Edited lines emphasize the changed words. A block moved within a file collapses
 to one row, "Moved here from L12", that expands to its old and new lines.
 The stream opens on **New code**: the file as it is now, removed lines folded
 to "N old lines · Show". **Unified** shows both; **Side by side** needs a
 stream at least 640 pt wide.
+
+Markdown, images and HTML open rendered. A changed `.md` reads as a redline:
+added words filled, removed words struck, a new paragraph filled whole and a
+deleted list item struck whole. **Side by side** puts the old document left
+and the new one right, block beside block. A changed PNG, JPEG, GIF, WebP or
+SVG shows old and new side by side, each with its pixel and byte size
+(`1200×800 · 84 KB`); an added image says "Added" on the old side. A changed
+`.html` shows both pages live, side by side, each scrolling on its own and
+neither reaching the network. Images and pages stay two panes in every
+layout, stacked old above new in a pane under 640 pt. **Source** in a
+Markdown, SVG or HTML file's header shows its line Diff instead, until you
+switch back or close the window. An image too large to show says so with its
+size, and one that can't be decoded says that; the other side still shows.
 
 Click a line number (Shift-click extends) to write a comment under those lines;
 Return keeps it there. **Send to conversation** (Command-Return) puts every
@@ -533,7 +553,8 @@ Graph processes and http(s) pages. ⌘W closes the selected tab, or hides the pa
 and jobs; New Shell starts fresh execution.
 
 **Read** is where documents open: Markdown renders formatted, HTML as a live
-page that runs its scripts but never reaches the network. Links open in the
+page that runs its scripts but never reaches the network, and an image as the
+picture, whatever its extension. Links open in the
 browser. **Edit** retains editable UTF-8 drafts and selection in this window;
 **Diff** shows the draft comparison read-only.
 

@@ -11,9 +11,6 @@ public extension TaskConditionState {
     }
 }
 
-/// NOW lists the Tasks that need someone, under the word their rows say.
-public func nowGroup(for task: RoadmapTask) -> TaskConditionState? { task.need }
-
 /// The row's spoken contract uses the exact shared reason rendered by the CLI.
 public func taskConditionAccessibilityLabel(_ task: RoadmapTask) -> String {
     "\(task.task.identifier), \(task.task.name). \(task.condition.state.rawValue). "
@@ -52,14 +49,14 @@ public struct NowSection: Identifiable, Sendable, Hashable {
     }
 }
 
-/// Flatten the roadmap into the NOW shape: every Task across every visible Wave,
-/// bucketed by condition, oldest-first within each bucket, with empty buckets
+/// Flatten the roadmap into the NOW shape: every Task that needs someone
+/// across every visible Wave, bucketed by the word its row says, oldest-first within each bucket, with empty buckets
 /// dropped. Age uses the Work record's `updated_at` (RFC3339, so lexical order
 /// is chronological); NOW rows always have runtime evidence.
 public func nowSections(from tasks: [RoadmapTask], waves: [WaveRoadmap]) -> [NowSection] {
     var rowsByGroup: [TaskConditionState: [NowRow]] = [:]
     for task in tasks {
-        guard let group = nowGroup(for: task) else { continue }
+        guard let group = task.need else { continue }
         let wave = waves.first { $0.wave.id == task.task.waveId }?.wave
         rowsByGroup[group, default: []].append(NowRow(wave: wave, task: task, group: group))
     }

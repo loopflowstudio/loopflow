@@ -5,19 +5,19 @@ import Testing
 @Suite("NOW condition projection")
 struct NowProjectionTests {
     @Test("Each Task lands in the group its shared evidence dictates")
-    func nowGroupFollowsSharedEvidence() throws {
+    func needFollowsSharedEvidence() throws {
         let snapshot = try loadRoadmapFixture()
         let wave = try #require(snapshot.waves.first)
         let tasks = wave.tasks.items
 
         // A clear Task condition is not a NOW row.
-        #expect(nowGroup(for: tasks[0]) == nil)
+        #expect(tasks[0].need == nil)
         // An explicit User merge request is waiting on another actor.
-        #expect(nowGroup(for: tasks[1]) == .waiting)
+        #expect(tasks[1].need == .waiting)
         // No Work record at all → Available, not a NOW row.
-        #expect(nowGroup(for: tasks[2]) == nil)
+        #expect(tasks[2].need == nil)
         // Completed → done, not a NOW row.
-        #expect(nowGroup(for: tasks[3]) == nil)
+        #expect(tasks[3].need == nil)
     }
 
     @Test("A Task that waits only to be started is in no group; one waiting on someone is")
@@ -39,10 +39,10 @@ struct NowProjectionTests {
         let unstarted = try task(lifecycle: "unstarted", recommended: "run")
         let parked = try task(lifecycle: "idle", recommended: "run")
         let merge = try task(lifecycle: "unstarted", recommended: "open_pr")
-        #expect(nowGroup(for: unstarted) == nil)
-        #expect(nowGroup(for: parked) == .waiting)
-        #expect(nowGroup(for: merge) == .waiting)
-        #expect(nowGroup(for: try task(lifecycle: "abandoned", recommended: "run")) == nil)
+        #expect(unstarted.need == nil)
+        #expect(parked.need == .waiting)
+        #expect(merge.need == .waiting)
+        #expect(try task(lifecycle: "abandoned", recommended: "run").need == nil)
         #expect(nowSections(from: [unstarted, parked], waves: []).flatMap(\.rows).map(\.task) == [parked])
     }
 
@@ -65,15 +65,15 @@ struct NowProjectionTests {
         let tasks = try loadConditionFixture()
 
         #expect(tasks.count == 7)
-        #expect(nowGroup(for: try #require(tasks["user_wait"])) == .waiting)
-        #expect(nowGroup(for: try #require(tasks["stale"])) == .blocked)
-        #expect(nowGroup(for: try #require(tasks["dirty"])) == .blocked)
+        #expect(try #require(tasks["user_wait"]).need == .waiting)
+        #expect(try #require(tasks["stale"]).need == .blocked)
+        #expect(try #require(tasks["dirty"]).need == .blocked)
         #expect(tasks["dirty"]?.condition.localProgress.dirty == true)
         #expect(tasks["authored_commits"]?.condition.localProgress.authoredCommits == true)
-        #expect(nowGroup(for: try #require(tasks["clean_backlog"])) == nil)
-        #expect(nowGroup(for: try #require(tasks["completed"])) == nil)
+        #expect(try #require(tasks["clean_backlog"]).need == nil)
+        #expect(try #require(tasks["completed"]).need == nil)
         #expect(tasks["stale"]?.condition.localProgress.recoveryRequired == true)
-        #expect(nowGroup(for: try #require(tasks["unavailable"])) == .unknown)
+        #expect(try #require(tasks["unavailable"]).need == .unknown)
 
         let dirty = try #require(tasks["dirty"])
         let spoken = taskConditionAccessibilityLabel(dirty)

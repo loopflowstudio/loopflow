@@ -153,7 +153,7 @@ Two deciders on one screen.
   action is Start or on a finished Task, the state otherwise. It is the rule
   that was inline in `TaskStanding.init`, moved, plus the finished case the
   build found.
-- `TaskStanding` reads `need`. `nowGroup` returns `need`, so the Now list
+- `TaskStanding` and `nowSections` read `need`, so the Now list
   omits Tasks that wait only to be started; the backlog is where those are
   listed and started. `NowProjectionTests` gains that case.
 - Choice made for review: the Now list gets shorter. Passed over: keeping
@@ -569,13 +569,13 @@ or `lf desktop` reads unless its view is deleted.
      with `meta`, and every snapped padding.
 5. **One answer, on the remaining four readers.** Built.
    `RoadmapTask.need` (`WaveWorkMap.swift`) says whether a Task needs
-   someone; `TaskStanding` and `nowGroup` read it, so the Now list omits
+   someone; `TaskStanding` and `nowSections` read it, so the Now list omits
    Tasks that wait only to be started. `TaskWorkflowHeader` and the jump
    menu print `TaskStanding`'s word. A tile's workflow sentence yields only
    to a program's ask (`DashboardTile.workflow`), and the Brief prints what
    the Task needs only when its state line has not said it
    (`TaskBrief.need`). Deleted: `lifecycleLabel`, the palette's "Not
-   started", `nowGroup`'s own switch.
+   started", `nowGroup`.
 
    What it taught:
    - The server also calls an abandoned Task `waiting`, reason "ready"
@@ -638,3 +638,4 @@ or `lf desktop` reads unless its view is deleted.
 | Dev app in light, dark and an imported theme | looked at with the screen locked, on a private Machine: backlog, Portfolio Wave page, dashboard and Choose Theme in Loopflow Light, Loopflow Dark and Dracula (`scratch/qa.html`). Three fixes followed. Title bar, menus, hover, drag and terminal faces need an unlocked display | qa; review for the rest |
 | `scripts/test_desktop.sh --filter 'TaskStandingTests\|TaskRowTests\|BacklogViewTests\|DashboardWorkspaceTests\|DesignDisciplineTests\|RoadmapViewTests'` | passed after the qa fixes (51 tests) | qa; CI runs the rest |
 | `scripts/test_desktop.sh --filter 'TaskStandingTests\|NowProjectionTests\|TaskConceptTests\|WorkCLISubscriptionTests\|WorkPaletteTests\|DashboardWorkspaceTests\|TaskBriefTests\|RoadmapViewTests\|TaskRowTests'` | passed after slice 5 (64 tests; the first run failed `TaskConceptTests` on an abandoned Task reading "Waiting", fixed in `RoadmapTask.need`) | build; CI runs the rest, `WorkNavigationTests` and `DesktopHeadlessTests` among them, which mount the header |
+| `scripts/test_desktop.sh --filter 'NowProjectionTests\|TaskStandingTests\|RoadmapViewTests'` | passed after realign deleted `nowGroup` for `RoadmapTask.need` (18 tests) | realign; CI runs the rest |

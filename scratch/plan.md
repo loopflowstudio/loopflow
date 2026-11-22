@@ -42,6 +42,8 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 
 - 2026-11-22, implement round 6: `swift test … 'AppAppearanceTests|ServerClientTests'` 25 passed, including `failedRead` and both cases of `aRequestTheServerCannotParseNamesBothBuilds`. Not run: the Dev app against the live 0.16.0 server (ship-review), clippy (gate).
 
+- 2026-11-22, compress round 6: the parse sentence folded into `ServerLink.answered` (no public `unparsed`). `swift test … 'AppAppearanceTests|aRequestTheServerCannotParseNamesBothBuilds'` 5 and 2 cases passed.
+
 ## Demo
 
 Dev app → Settings → Choose Theme: 13 cards per side in their own colors, both sides in System mode. Click Fig and the window turns plum with lime; Fig Leaf is the light half. Import a dark file from the light section in Light mode: the mode switches to Dark and the file previews there.

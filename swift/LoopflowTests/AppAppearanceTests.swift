@@ -115,5 +115,4 @@ private struct AppearanceProbe: View {
         Text("Work").foregroundStyle(palette.text).background(palette.surface)
     }
 }
-
 #endif

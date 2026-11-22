@@ -113,18 +113,14 @@ public actor ServerLink {
         "This Loopflow (\(endpoint.client.version)) can't read what the server (\(welcome.build)) sent."
     }
 
-    /// What a window says when the server can't decode a request it knows by
-    /// name: the two are different builds, and either may be the older one.
-    public nonisolated var unparsed: String {
-        "The server (\(welcome.build)) can't read what this Loopflow (\(endpoint.client.version)) asked. Update the older one."
-    }
-
     /// The server (`refused_operation` in `rust/loopflow/src/server/service.rs`) refuses a
     /// request it can't decode as `invalid`, with the operation's `kind` and a message
     /// starting "<kind>: ". Released servers send that shape, so it is matched as sent.
+    /// Either build may be the older one, so the sentence names both.
     private func answered(_ code: String, _ message: String, _ data: JSONValue, _ revisions: Revisions?) -> ServerError {
+        var message = message
         if code == ServerErrorCode.invalid.rawValue, case .string(let kind) = data["kind"], message.hasPrefix("\(kind): ") {
-            return ServerError(code: code, message: unparsed, data: data, revisions: revisions)
+            message = "The server (\(welcome.build)) can't read what this Loopflow (\(endpoint.client.version)) asked. Update the older one."
         }
         return ServerError(code: code, message: message, data: data, revisions: revisions)
     }

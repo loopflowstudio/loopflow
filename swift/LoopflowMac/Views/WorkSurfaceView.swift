@@ -167,7 +167,9 @@ struct WorkSurfaceView: View {
                         .id(task.id)
                 }
                 if let unavailable = found.wave?.unavailableTasks.first(where: { $0.taskId == task.id }) {
-                    evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)
+                    FailureLine("Planning is unavailable for this Task.", machine: unavailable.reason)
+                        .padding(.horizontal, Spacing.xl)
+                        .padding(.vertical, Spacing.sm)
                 }
                 TaskHistoryView(model: model, task: task)
                     .id(task.id)
@@ -244,26 +246,6 @@ struct WorkSurfaceView: View {
                 .buttonStyle(LoopflowButtonStyle(.accent))
                 .accessibilityIdentifier("loopflow-work-reread")
         }
-    }
-
-    private func evidenceBanner(title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: Spacing.sm) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(palette.warning)
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(title)
-                    .font(Typography.textStrong)
-                    .foregroundStyle(palette.text)
-                Text(detail)
-                    .font(Typography.meta)
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, Spacing.xl)
-        .padding(.vertical, Spacing.sm)
-        .background(palette.warning.opacity(0.12))
     }
 }
 

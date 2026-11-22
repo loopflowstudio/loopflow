@@ -268,8 +268,9 @@ beside the sentence where the app has the action.
 - Inline failures (`RepositoryWorkspaceContent`'s error beside a retained
   workspace, "Latest read failed: …", `TaskFilesView:297`,
   `ReviewStreamView:69`, `SessionsView:1787`, `WorkPalette` source errors,
-  `RemoveWaveSheet:74`): what failed in sans, the machine's message in mono,
-  Retry kept.
+  `RemoveWaveSheet:74`, the "planning unavailable" notice on a retained
+  Task's page): what failed in sans, the machine's message in mono, Retry
+  kept.
 
 ## Absent and error states
 
@@ -423,10 +424,22 @@ demo: not headless; qa or demo runs it.
    - No "We do these now" pointer named code this change fixed.
    - Not seen in the Dev app: any of these, in either theme. qa or demo
      looks, then deletes the two prototype sections.
+   - Realign found one failure the slice's list missed: a retained Task
+     whose planning is unavailable drew a tinted banner with a warning icon
+     and "Retained Task · planning unavailable". It is a `FailureLine` now
+     and `evidenceBanner` is gone (questions 26). No view test covers it.
    - Checks: `scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|RemoveWaveSheetTests|PullRequestTests'`
-     passed (14 tests). `TaskGraphProofTests` ("No steps."),
-     `TaskHistoryProofTests` and `documented_commands::` (a `docs/surfaces.md`
-     row) were not run; gate runs them.
+     passed (14 tests); after the banner change
+     `--filter 'EmptyStateTests|TypographyDisciplineTests'` passed (8 tests).
+     `TaskGraphProofTests` ("No steps."), `TaskHistoryProofTests` and
+     `documented_commands::` (a `docs/surfaces.md` row) were not run; gate
+     runs them.
+
+Nothing remains to build. Left for later steps: the gate checks above, the
+Dev app look in both themes (qa or demo), then deleting the two prototype
+sections. `lf desktop capture -p backlog` still prints "Wave planning
+unavailable · …" (`WorkModel.swift:1035`); it is capture text, not a drawn
+state, and was left.
 
 ## Docs written ahead of the build
 

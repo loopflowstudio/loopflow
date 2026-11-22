@@ -87,3 +87,10 @@ Made while building the remaining states with nobody present.
     fixed, so none was removed.
 25. "Task is unavailable" and "Session location unavailable" fill a pane, so
     they became `EmptyState` titles, not one-line sentences.
+
+Made at realign after the remaining states with nobody present.
+
+26. A retained Task whose planning is unavailable said so in a tinted banner
+    with a warning icon ("Retained Task · planning unavailable"). It reads
+    "Planning is unavailable for this Task." as a `FailureLine` with the
+    reason in mono, and has no Retry: the page has no re-read of its own.

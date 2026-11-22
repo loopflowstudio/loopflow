@@ -25,6 +25,12 @@ struct ReviewDiff: Equatable, Sendable {
 
     func file(_ path: String) -> ReviewFile? { files.first { $0.path == path } }
 
+    /// The index of the file a row belongs to: its header (`file:` and its
+    /// path) or one of its blocks (its path, `#`, the block).
+    func fileIndex(holding id: String) -> Int? {
+        files.firstIndex { id == "file:\($0.path)" || id.hasPrefix($0.path + "#") }
+    }
+
     // MARK: Parsing
 
     static func parse(_ patch: String) -> ReviewDiff {

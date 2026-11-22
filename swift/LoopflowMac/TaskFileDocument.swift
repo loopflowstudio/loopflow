@@ -885,20 +885,15 @@ final class TaskFilesStore {
     private(set) var topPath: String?
 
     private func refreshTopPath() {
-        let path = Self.topPath(focused: focusedPath, files: shownReview?.files ?? [],
-                                at: anchors[.changes] ?? currents[.changes])
+        let path: String? = {
+            if let focusedPath { return focusedPath }
+            let files = shownReview?.files ?? []
+            guard let id = anchors[.changes] ?? currents[.changes] else { return files.first?.path }
+            if id == "footer" { return files.last?.path }
+            guard let index = shownReview?.fileIndex(holding: id) else { return files.first?.path }
+            return files[id.hasPrefix("file:") ? max(0, index - 1) : index].path
+        }()
         if path != topPath { topPath = path }
-    }
-
-    private static func topPath(focused: String?, files: [ReviewFile], at id: String?) -> String? {
-        if let focused { return focused }
-        guard let id else { return files.first?.path }
-        if id.hasPrefix("file:") {
-            let index = files.firstIndex { $0.path == id.dropFirst("file:".count) } ?? 0
-            return files.isEmpty ? nil : files[max(0, index - 1)].path
-        }
-        if id == "footer" { return files.last?.path }
-        return files.first { id.hasPrefix($0.path + "#") }?.path ?? files.first?.path
     }
     /// The file next/previous crossed into, and from which end its first stop is taken.
     @ObservationIgnored private var entering: (path: String, offset: Int)?
@@ -1435,9 +1430,7 @@ final class TaskFilesStore {
     /// Start the window at the file holding `id` when the window lacks it or
     /// holds it more than a budget's rows down.
     private func reveal(_ id: String?) {
-        guard let id, let files = shownReview?.files,
-              let index = files.firstIndex(where: { id == "file:\($0.path)" || id.hasPrefix($0.path + "#") })
-        else { return }
+        guard let id, let files = shownReview?.files, let index = shownReview?.fileIndex(holding: id) else { return }
         let window = self.window
         if window.contains(index), files[window.lowerBound..<index].reduce(0, { $0 + $1.rows }) <= Self.windowBudget {
             return
@@ -1467,7 +1460,7 @@ final class TaskFilesStore {
         let total = diff.files.reduce(0) { $0 + count($1) }
         guard total > 0 else { return "No changes" }
         guard let current = current(reader),
-              let file = diff.files.firstIndex(where: { current.hasPrefix($0.path + "#") && $0.stops.contains(current) }),
+              let file = diff.files.firstIndex(where: { $0.stops.contains(current) }),
               let index = diff.files[file].stops.firstIndex(of: current) else {
             return total == 1 ? "1 change" : "\(total) changes"
         }

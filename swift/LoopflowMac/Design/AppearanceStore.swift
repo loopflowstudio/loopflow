@@ -10,6 +10,7 @@ struct AppearanceSelection: Equatable {
     var dark = ThemeDefinition.dark.name
 
     func name(dark: Bool) -> String { dark ? self.dark : light }
+    mutating func setName(_ name: String, dark: Bool) { if dark { self.dark = name } else { light = name } }
     func isDark(systemDark: Bool) -> Bool { mode == .dark || (mode == .system && systemDark) }
 
     /// System writes the pair; Light or Dark writes only that side's name.
@@ -141,7 +142,7 @@ final class AppearanceStore {
         case let .single(name):
             guard let theme = library.resolve(name) else { return .failure(unknown(name)) }
             choice.mode = theme.isDark ? .dark : .light
-            if theme.isDark { choice.dark = name } else { choice.light = name }
+            choice.setName(name, dark: theme.isDark)
         case let .pair(light, dark):
             for name in [light, dark].compactMap({ $0 }) where library.resolve(name) == nil {
                 return .failure(unknown(name))
@@ -200,7 +201,7 @@ final class AppearanceStore {
     func previewTheme(_ name: String) {
         guard let theme = currentLibrary.resolve(name) else { notice = "No theme named “\(name)”."; return }
         beginPreview()
-        if picker == .dark { draft?.selection.dark = name } else { draft?.selection.light = name }
+        draft?.selection.setName(name, dark: picker == .dark)
         diagnostics = []
         update(theme)
     }
@@ -227,7 +228,7 @@ final class AppearanceStore {
         let builtin = currentLibrary.isBuiltin(name)
         stage(nil, for: name)
         if !builtin {
-            if picker == .dark { draft?.selection.dark = ThemeDefinition.dark.name } else { draft?.selection.light = ThemeDefinition.light.name }
+            draft?.selection.setName(picker == .dark ? ThemeDefinition.dark.name : ThemeDefinition.light.name, dark: picker == .dark)
         }
         update(selectedTheme)
     }
@@ -237,11 +238,11 @@ final class AppearanceStore {
         beginPreview()
         do {
             let file = try ThemeFile.read(url)
-            let side: AppearanceMode = file.theme.isDark ? .dark : .light
-            if current.mode != .system { draft?.selection.mode = side }
-            picker = side
+            let dark = file.theme.isDark
+            if current.mode != .system { draft?.selection.mode = dark ? .dark : .light }
+            picker = dark ? .dark : .light
             stage(file.theme, for: file.theme.name)
-            if side == .dark { draft?.selection.dark = file.theme.name } else { draft?.selection.light = file.theme.name }
+            draft?.selection.setName(file.theme.name, dark: dark)
             diagnostics = file.diagnostics
             update(file.theme)
         } catch { notice = error.localizedDescription }

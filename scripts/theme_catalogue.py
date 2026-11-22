@@ -338,9 +338,8 @@ def generate(spec, dark):
     roles["titlebar"] = bar
 
     # Terminal: the same ground and text as the window; the accent ink is the cursor.
-    tb = bg
     def ansi(name, L, C, r=4.5):
-        return readable(ok(L, C, hues[name]), [tb], dark, r)
+        return readable(ok(L, C, hues[name]), [bg], dark, r)
     normal_L, bright_L = (0.74, 0.83) if dark else (0.50, 0.44)
     bright_C = 1.1 if dark else 1.3
     a = [None] * 16
@@ -349,13 +348,13 @@ def generate(spec, dark):
         a[i] = ansi(name, normal_L, c)
         a[i + 8] = ansi(name, bright_L, c * bright_C)
     if dark:
-        a[0], a[8], a[7], a[15] = ok(L0 + 0.09, C0, h0), readable(ok(0.62, C0 * 1.4, h0), [tb], True, 4.5), secondary, text
+        a[0], a[8], a[7], a[15] = ok(L0 + 0.09, C0, h0), readable(ok(0.62, C0 * 1.4, h0), [bg], True, 4.5), secondary, text
     else:
-        a[0], a[8], a[7], a[15] = text, readable(ok(0.56, C0 * 2, h0), [tb], False, 4.5), ok(0.84, C0, h0), ok(0.995, C0 * 0.5, h0)
+        a[0], a[8], a[7], a[15] = text, readable(ok(0.56, C0 * 2, h0), [bg], False, 4.5), ok(0.84, C0, h0), ok(0.995, C0 * 0.5, h0)
     return {
         "name": spec["name"], "dark": dark, "ansi": a, "selection-opacity": opacity, "roles": roles,
-        "term": {"background": tb, "foreground": text, "cursor-color": ink, "cursor-text": tb,
-                 "selection-background": text, "selection-foreground": tb},
+        "term": {"background": bg, "foreground": text, "cursor-color": ink, "cursor-text": bg,
+                 "selection-background": text, "selection-foreground": bg},
     }
 
 

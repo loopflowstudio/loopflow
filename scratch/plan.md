@@ -6,10 +6,10 @@ Task 923677. Reference: `DESIGN.md` ("The language", "What we avoid") and the
 once their screens shipped; `git show fd90d7e6ad:design/prototypes/desktop-more.html`
 has them, and `docs/surfaces.md` holds the wording now.
 
-Every slice is built and slice 5 was looked at in the Dev app
-(`scratch/qa.html`). What remains is the gate checks, one look at "Not
-started." on an unlocked display (questions 48), and the open choice under
-"Open choice" below.
+Slices 1 to 5 are built and were looked at in the Dev app
+(`scratch/qa.html`). Slice 6 is next: the failures beside content that are
+still bare text. After it: the gate checks and one look at "Not started." on
+an unlocked display (questions 48).
 
 ## Outcome
 
@@ -34,7 +34,7 @@ talk it through first.", "New Task ⌘N" and "Open the repository
 conversation". Either button leads to the ordinary repository page. The
 state stands only while no conversation is open, so it is what the Dev app
 shows on a fresh repository and what the released app shows once the
-conversation is closed (see "Open choice").
+conversation is closed (see "When the empty repository's state shows").
 
 Anywhere the app has nothing to show or something failed, the pane is
 left-aligned: a 26 pt serif title saying what happened, one sentence, then
@@ -340,20 +340,22 @@ filing is refused, every accessibility identifier tests and `lf` Desktop
 actions use other than the two named above, compact dashboard slots staying
 one line.
 
-## Open choice
+## When the empty repository's state shows
 
-Should an empty repository hold its conversation back until "Open the
-repository conversation" is pressed, in every build? As built, the state
-shows while no conversation is attached, opening or failed. The released app
-opens a repository's conversation on its own
-(`SessionsWorkspace.opensConversationAutomatically`), so a fresh `git init`
-directory goes straight to its page there, with a terminal and "Nothing is
-waiting in this repository." beside New, and reads "No planned Work in this
-repository" only after the conversation is closed. Holding the conversation
-back changes when a repository's agent starts, which this Task's brief does
-not ask for; nobody has said which is wanted (questions 39). Qa ran the
-build under a bundle ID that does not end in `.dev` and saw exactly that
-(questions 46).
+**Choice made for review:** the state stands while no conversation is
+attached, opening or failed, in every build, and nothing holds a
+repository's conversation back. The released app opens that conversation on
+its own (`SessionsWorkspace.opensConversationAutomatically`), so a fresh
+`git init` directory goes straight to its page there, with a terminal and
+"Nothing is waiting in this repository." beside New, and reads "No planned
+Work in this repository" once the conversation is closed; the Dev app opens
+nothing until a visit and arrives on the state. Qa saw both (questions 39,
+46). The state's second button is "Open the repository conversation", so the
+prototype draws a repository whose conversation is not open; a repository
+with a live conversation has something there. Passed over: holding the
+conversation back until the button is pressed, which changes when a
+repository's agent starts and belongs to whoever owns that rule
+(questions 49).
 
 ## Acceptance check at gate
 
@@ -386,6 +388,10 @@ View tests (ViewInspector, headless):
   error text, and a Retry that calls `retry`.
 - Source scan beside `TypographyDisciplineTests`: no `ContentUnavailableView`
   under `swift/LoopflowMac`.
+
+- One failure beside content with a way to retry
+  (`ProjectReadinessView`): what failed, the message, and a Retry that calls
+  `retry`.
 
 Dev app in Loopflow Light and Loopflow Dark, each state reachable from the
 demo: not headless; qa or demo runs it.
@@ -507,11 +513,60 @@ demo: not headless; qa or demo runs it.
      passed (21 tests in 5 suites). `documented_commands::` after the
      `docs/surfaces.md` and prototype edits was not run; gate runs it.
 
-Outside this change, on the page for whoever wants it: a Start the Machine
+6. **Every failure beside content is a `FailureLine`. Next.** Swift only.
+   A failure beside content is one thing to a person and two in the code:
+   13 `FailureLine`s and about a dozen bare `Text(error)`s in the warning,
+   secondary or body ink, most without a word for what failed (questions
+   47, 50). Each of these becomes
+   `FailureLine("<what failed>.", machine: <the message>)`, keeping the
+   button it has and every accessibility identifier:
+
+   | Site | What failed |
+   |------|-------------|
+   | `Views/ProjectReadinessView.swift:36` | "Project not prepared." with its "Retry Project preparation" |
+   | `Views/DashboardView.swift:238` | "Layout not saved." |
+   | `Views/WorkSurfaceView.swift:281` | "Not saved." |
+   | `Views/TaskFilesView.swift:344` | "File not read." |
+   | `Views/WaveDetailPane.swift:262` | "Completed Tasks did not load." |
+   | `Views/RepoView.swift:66` | "Repositories did not load." |
+   | `Views/RepositoryPlanView.swift:39` | "Not sent." |
+   | `Views/WorkPalette.swift:268` | "Planning is unavailable." |
+   | `CreationSubmissions.swift:177` | "Current work did not read." |
+   | `Views/RepositoryWorkspaceView.swift:140` | "Workspace did not open." |
+   | `Views/RenameWaveSheet.swift:55` | "Not renamed." (`rename-wave-error` stays) |
+   | `Views/SessionActionSheet.swift:76` | "Not bound." (`session-bind-error` stays) |
+
+   Read each site before wording it: the phrase names what that read or
+   write was, in the form "Not filed." has, and a site whose text turns out
+   to be advice and not a failure stays as it is, noted in
+   `scratch/questions.md`. Not converted: `TaskHistoryFilter.swift:78` (it
+   checks a typed range; nothing failed), `TaskFilesView.swift:347` and
+   `:356` (a read-only reason and a save message are facts about the file),
+   `WorkNavigator.swift:475` and `WavesView` (Create Wave forms),
+   `MobileSettings` and `TelemetryDashboardView` (exclusions).
+
+   With it, three wordings qa saw (`Views/WorkNavigator.swift:43`, `:44`,
+   `:98`): "No working Tasks in this Wave." and "No working Tasks in this
+   list." take the full stop every other one-sentence empty has, and "Show
+   working tasks" reads "Show working Tasks".
+
+   Shows soonest whether it holds: `ProjectReadinessView`, the one with a
+   Retry, and its view test. Checks:
+   `scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|RemoveWaveSheetTests|WorkNavigationTests'`,
+   and `grep -rn 'No working Tasks in this\|Show working tasks' swift/`
+   for tests and captures that quote the old wording. None of these sites
+   was reached on screen at qa; qa or demo looks at whichever it can reach.
+
+Outside this change, on the page for whoever wants it: a stopped Graph's
+reason is one string on the wire, so the Machine's part of "kickoff:
+execution failed: …" cannot be set apart in mono without Rust sending the
+two parts; its own Task. Also a Start the Machine
 refused goes to `CreationRecovery`'s notice (a request UUID, cut off at the
 window's edge) and not to `StartingTaskView`'s "Not started." with Try
 again, which shows only when the request never reached the Machine. Telling
-a refusal from a lost answer is a change to creation recovery, its own Task.
+a refusal from a lost answer is a change to creation recovery, its own Task. A new Task's Files pane pointing at the repository
+(questions 45) is `SessionsWorkspace.files(for:)`, untouched here; its own
+Task.
 Seen at qa and left: the chevron between a menu's name and its comma in the
 sheet; "No Graph has run." under "Waiting for you at explore.".
 `lf desktop capture -p backlog` still prints "Wave planning unavailable · …"
@@ -524,8 +579,9 @@ Wave's default read as designed. The second run fixed one state the slices
 missed (a Files pane that could not open is "Files did not open", questions
 44) and left three findings on the page: a new Task's Files pane pointing at
 the repository (questions 45), about twenty bare failure texts beside content
-(questions 47), and the released build never arriving on the empty state
-(questions 46). Left for later steps: the gate checks above.
+(questions 47; slice 6 takes them), and the released build never arriving
+on the empty state (questions 46; settled above). Left for later steps: the
+gate checks above.
 `scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|NewTaskTests'`
 passed after the fix (12 tests).
 

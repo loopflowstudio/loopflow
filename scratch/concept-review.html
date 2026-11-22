@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<title>Concept review, as built: before a Task runs (923677)</title>
+<title>Concept review, second pass as built: empty and failed states (923677)</title>
 <style>
   :root { --bg:#f8f6f1; --ink:#1f1b18; --soft:#6a625b; --line:#d9d2c7; --card:#fffdf9; --accent:#6d2b35;
           --yes:#2f6b3f; --no:#a23a2a; --new:#8a5a00; --newbg:#fbf1d8; --mono: ui-monospace, Menlo, monospace; }
@@ -37,208 +37,132 @@
   ol.q > li { margin:14px 0; } ol.q ol { list-style:lower-alpha; margin-top:4px; }
   .taken { color:var(--yes); font-weight:600; }
 </style>
+<h1>Nothing there, or something failed: do the product's concepts and the code's line up?</h1>
+<p class="soft">Task 923677, second review of the built change. The branch at <code>4ffc9a1e43</code> against its base
+<code>fd90d7e6ad</code>, read with both Dev app runs in <code>scratch/qa.html</code>. The first as-built page is in git at
+<code>26d6ae279b</code>.</p>
 
-<h1>Before a Task runs, as built: do the product's concepts and the code's line up?</h1>
-<p class="soft">Task 923677. The branch at <code>bfd10c984d</code> against its base <code>fd90d7e6ad</code>, read with
-<code>scratch/qa.html</code>'s Dev app captures. The page written before the build is in git at <code>f1a67a6019</code>.</p>
+<p><b>The area taken.</b> What Loopflow for Mac shows before work is running and when a read or write fails: the New
+Task sheet, a filed Task that has not started, a pane with nothing in it, and a failure, whether it fills a pane or
+sits beside content that stays. Reviewed with all five slices in it, as someone opening the app for the first time.</p>
 
-<p><b>The area taken.</b> The same one as before the build: what a person sees in Loopflow for Mac before work is
-running. That is the New Task sheet, a filed Task that has not started, Start wherever it is offered, a pane with
-nothing in it and a pane whose read failed. It is reviewed here as it stands with all four slices in it, as someone
-opening the Dev app for the first time.</p>
+<p><b>Since the last pass.</b> It planned one thing, the empty repository's single state, and settled six wordings.
+Slice 5 built all of it; the second Dev app run saw the state in both themes, both of its buttons working, "Not
+filed." and "Not started." with the Machine away, and a Wave's default read the same in the sheet and the pane. The
+four mismatches that page marked <span class="no">no</span> are <span class="yes">yes</span> now.</p>
 
 <p><span class="yes">yes</span> lines up &nbsp; <span class="no">no</span> does not &nbsp;
 <span class="new">proposed</span> not in the code yet; dashed boxes are proposed too</p>
 
 <h2>One interaction, walked in the built app</h2>
-<p>Someone opens a repository Loopflow has never seen, reads what is there, presses ⌘N, files a Task, opens it and
-presses Start.</p>
+<p>Someone opens a fresh repository, files a Task with ⌘N, starts it; then the Machine goes away and a save fails.</p>
 <table>
   <tr><th>What they see</th><th>Where it comes from</th><th></th></tr>
-  <tr><td>Two panes. Left: “Conversation not open”, “Open the conversation here.”, <i>Open conversation</i>.
-      Right: “Nothing is waiting in this repository” in bold and an accent <i>New</i>.</td>
-      <td><code>ConversationPlaceholder</code> and <code>BacklogView.emptyState</code>. The prototype's state for this
-      screen, <code>NoPlannedWork</code>, is built and tested and is not on this path.</td><td class="no">no</td></tr>
-  <tr><td>⌘N: “What do you want?”, “In demo, running feature, demo's default”, the step line, “You take part at
-      explore, ship-review and verify.”, <i>Start ⌘↩</i>.</td>
-      <td><code>NewTaskWorkflow</code> over <code>GraphCatalogEntry.workflow</code>, Rust's outline and sentence.</td>
-      <td class="yes">yes</td></tr>
-  <tr><td>The filed Task: its bar draws the same step line; its pane says “Not started. It will run feature, demo's
-      default. You take part at explore, ship-review and verify.”</td>
-      <td>The same outline, through <code>workflowOutline</code> and <code>workflowSelection</code>.</td>
-      <td class="yes">yes</td></tr>
-  <tr><td>The Task's name in serif twice, side by side, and a third time under Description.</td>
-      <td><code>TaskStartOffer</code>'s title is the Task's name; the brief beside it already has it.</td>
-      <td class="no">no</td></tr>
-  <tr><td>Start: the line gains a position, “Waiting for you at explore.”</td>
-      <td><code>TaskGraph</code>, the same steps and stops as the outline (a Rust test holds them equal).</td>
-      <td class="yes">yes</td></tr>
+  <tr><td>Dev app: “No planned Work in this repository”, one sentence, <i>New Task ⌘N</i>, <i>Open the repository
+      conversation</i>. Released app: the repository's page with its conversation already open.</td>
+      <td><code>WorkModel.repositoryIsEmpty</code>, <code>NoPlannedWork</code>; the conversation opens on its own
+      through <code>SessionsWorkspace.opensConversationAutomatically</code>.</td>
+      <td class="yes">yes (question 1)</td></tr>
+  <tr><td>⌘N: the question, the sentence with two menus, the step line, “You take part at …”, <i>Start ⌘↩</i>.</td>
+      <td><code>NewTaskWorkflow</code> over <code>GraphCatalogEntry.workflow</code>.</td><td class="yes">yes</td></tr>
+  <tr><td>The filed Task: “Not started”, “It will run code, the default. You take part at ship-review and verify.”,
+      <i>Start</i>, <i>Start with…</i>.</td>
+      <td><code>TaskStartOffer</code> as an <code>EmptyState</code>, the same outline.</td><td class="yes">yes</td></tr>
+  <tr><td>File with the Machine away: the sheet stays, “<b>Not filed.</b>” and the message in mono.</td>
+      <td><code>FailureLine</code>.</td><td class="yes">yes</td></tr>
+  <tr><td>⌘↩ with the Machine away: the request, “<b>Not started.</b>”, the message in mono, <i>Try again</i>,
+      <i>Discard</i>. Try again starts it once the Machine is back.</td>
+      <td><code>StartingTaskView</code> with a <code>FailureLine</code>.</td><td class="yes">yes</td></tr>
+  <tr><td>A directive that does not save, a dashboard layout that does not save, a Project that is not prepared: the
+      message alone, in the warning ink or the body ink, with no word for what failed.</td>
+      <td>Bare <code>Text(error)</code> at about a dozen sites.</td><td class="no">no</td></tr>
 </table>
-<p><b>Failure and recovery.</b> A path that is not a repository: “This repository did not open”, the Machine's message
-in mono, Retry; after <code>git init</code>, Retry opens it. That one is right. A Start that fails is two things in the
-code, and QA only ever met the second: see “A Start that failed” below.</p>
 
-<h2>Product concepts against code concepts</h2>
+<h2>Product concepts and code concepts</h2>
 <table>
-  <tr><th style="width:24%">What a person knows</th><th style="width:30%">In the code, as built</th><th style="width:6%"></th><th>What is wrong, and the change</th></tr>
-  <tr><td>What a workflow asks of me: its steps and where I take part</td>
-      <td><code>WorkflowOutline</code> on the catalog; <code>workflow()</code> and <code>interactive_summary()</code> shared with <code>TaskGraph</code></td>
-      <td class="yes">yes</td><td>One derivation. The menu's stop count, the line, the sentence and a started Task agree on a stop inside an XOR path.</td></tr>
-  <tr><td>The workflow this Task will run, and whose choice it is</td>
-      <td><code>workflowChoice</code>, <code>workflowSelection</code>, <code>scopeName</code></td>
-      <td class="yes">yes</td><td>“Product's default” names the scope whose new Tasks take the workflow up, which is true whether the Wave's file or the repository's set it. The earlier open question (should Rust send the layer) is closed: no.</td></tr>
-  <tr><td>An empty repository</td>
-      <td><code>NoPlannedWork</code> (the prototype's, reached only where no Wave view is shown); <code>ConversationPlaceholder</code>; <code>BacklogView.emptyState</code></td>
-      <td class="no">no</td><td>One idea, three views, and the one drawn for it is the one nobody meets. The biggest mismatch; below.</td></tr>
+  <tr><th>What a person knows</th><th>What the code has</th><th></th><th>What is wrong</th></tr>
+  <tr><td>The workflow a Task will run, and where they take part</td>
+      <td><code>WorkflowOutline</code> on the catalog, drawn by <code>WorkflowLine</code> in the sheet, the bar and
+      the inspector</td><td class="yes">yes</td><td></td></tr>
+  <tr><td>Whose default the workflow is</td>
+      <td><code>workflowChoice</code>, <code>workflowSelection</code></td><td class="yes">yes</td><td></td></tr>
+  <tr><td>A pane with nothing in it, or one that did not open</td>
+      <td><code>EmptyState</code>; no <code>ContentUnavailableView</code> left, and a test fails on a new one</td>
+      <td class="yes">yes</td><td></td></tr>
   <tr><td>A list with nothing in it</td>
-      <td><code>.emptyLine()</code> at 20 sites; <code>BacklogView.emptyState</code> with its own bold title and accent button</td>
-      <td class="no">no</td><td>The backlog's is a fourth form beside <code>EmptyState</code>, <code>.emptyLine()</code> and <code>FailureLine</code>. It keeps its four steps (Clear search, Show available, Show all, New) and is drawn as the line and a neutral button, like “No planned or started Tasks.”</td></tr>
-  <tr><td>A Task that has not started</td>
-      <td><code>TaskStartOffer</code>: title is the Task's name in a pane, “Not started” in a tile</td>
-      <td class="no">no</td><td>The component's title says what happened; here it says the Task's name, which the bar's line and the brief beside it already carry. The title is “Not started” in both sizes and the <code>compact ?</code> branch goes.</td></tr>
-  <tr><td>Start</td>
-      <td>Bar (neutral), pane (accent), “…” and backlog row, and since slice 4 a third on the same screen beside “No Graph has run.”</td>
-      <td class="no">no</td><td>The Graph log sits under the bar that already has Start. The third one goes; the sentence stays.</td></tr>
-  <tr><td>A conversation that is not open here</td>
-      <td><code>ConversationPlaceholder</code>: “Conversation not open”, “Open the conversation here.”, <i>Open conversation</i></td>
-      <td class="no">no</td><td>One fact said three times. The default sentence goes; the two that add something (“Closed here. …”, the saved-work reason) stay.</td></tr>
-  <tr><td>Nothing here, or it failed, and what to do next</td>
-      <td><code>EmptyState</code>, <code>FailureLine</code></td>
-      <td class="yes">yes</td><td>No <code>ContentUnavailableView</code> is left and a test fails on a new one.</td></tr>
-  <tr><td>A Start that failed</td>
-      <td><code>StartingTask.error</code> (“Not started.”, Try again, Discard) when the request never reached the Machine; <code>CreationRecovery</code>'s notice once it did</td>
-      <td class="no">no</td><td>Outside this work; below.</td></tr>
-  <tr><td>File, and Start from the sheet</td><td><code>fileTask</code>, <code>createTask</code></td>
-      <td class="yes">yes</td><td>One owner each.</td></tr>
+      <td><code>.emptyLine()</code></td><td class="yes">yes</td>
+      <td>Two sidebar lines lack the full stop the rest have (question 3).</td></tr>
+  <tr><td>An empty repository</td>
+      <td><code>repositoryIsEmpty</code>, one state in place of the page</td><td class="yes">yes</td>
+      <td>It holds only while no conversation is open, which is what its second button says.</td></tr>
+  <tr><td>Something failed beside what I am looking at</td>
+      <td><code>FailureLine</code> at 13 sites; bare <code>Text(error)</code> at about 12 more</td>
+      <td class="no">no</td><td>One idea in two forms. The bare ones carry no word for what failed, differ in ink
+      (warning, failure, secondary, body) and half cannot be selected.</td></tr>
+  <tr><td>A Graph that stopped, and why</td>
+      <td>Rust's position line, one string</td><td class="no">no</td>
+      <td>The Machine's message cannot be set apart: the wire carries one sentence. Outside this change
+      (question 4).</td></tr>
 </table>
 
-<h2>The biggest mismatch: an empty repository</h2>
-<p>The Task's own demo says: open an empty repository and read “No planned Work in this repository” with <i>New Task ⌘N</i>
-and <i>Open the repository conversation</i>. The view exists and has a test. Opening an empty repository shows something
-else, because a repository opens on its page (conversation, backlog, tiles) and <code>NoPlannedWork</code> is mounted
-only where no Wave view is shown. Its second button calls <code>jump(to: .repository)</code>, which selects the page
-the person would already be on; it opens nothing.</p>
-<p>What the built screen says is the prototype's sentence cut in two. “Say what you want built” is the backlog's
-<i>New</i>; “or talk it through first” is the pane's <i>Open conversation</i>. Neither says the other exists, and the
-first screen of a new repository has two empties in two faces.</p>
-
+<h2>The biggest mismatch: a failure beside content has two forms</h2>
+<p>The brief says “Failures say what failed, show the machine's message in mono, and keep Retry.” The slices
+converted the failures their list named and the ones qa reached. The second run counted what the list missed. To a
+person these are the same event as “Not filed.”: something they asked for did not happen, and the Machine said why.</p>
 <div class="pair">
-  <div class="win">
-    <div class="cap">Built</div>
-    <div class="row">
-      <div class="pane" style="width:34%">
-        <div class="serif">Conversation not open</div>
-        <div>Open the conversation here.</div>
-        <div><span class="btn">Open conversation</span></div>
-      </div>
-      <div class="pane" style="flex:1; justify-content:flex-start">
-        <div class="soft" style="margin-bottom:14px">All 0 &nbsp; Mine 0 &nbsp; Available 0 &nbsp;&nbsp; Start &nbsp; Claim &nbsp; Edit</div>
-        <div><b>Nothing is waiting in this repository</b></div>
-        <div><span class="btn a">New</span></div>
-      </div>
-    </div>
-  </div>
-  <div class="win proposed">
-    <div class="cap">Proposed: while the plan is empty and no conversation is open</div>
-    <div class="row">
-      <div class="pane" style="flex:1">
-        <div class="serif">No planned Work in this repository</div>
-        <div>Say what you want built, or talk it through first.</div>
-        <div><span class="btn a">New Task ⌘N</span><span class="btn">Open the repository conversation</span></div>
-      </div>
-    </div>
-  </div>
+  <div class="win"><div class="cap">Built: a directive that did not save</div>
+    <div class="pane"><span style="color:var(--new)">store is locked by another writer (SQLITE_BUSY)</span></div></div>
+  <div class="win proposed"><div class="cap">Proposed: the same, as New Task says it</div>
+    <div class="pane"><span><b style="color:var(--no)">Not saved.</b>
+      <code>store is locked by another writer (SQLITE_BUSY)</code></span></div></div>
 </div>
 <div class="pair">
-  <div class="win proposed">
-    <div class="cap">Proposed: after “Open the repository conversation”</div>
-    <div class="row">
-      <div class="pane soft" style="width:44%; font:13px var(--mono)">the conversation's terminal</div>
-      <div class="pane" style="flex:1; justify-content:flex-start">
-        <div class="soft" style="margin-bottom:14px">All 0 &nbsp; Mine 0 &nbsp; Available 0</div>
-        <div><span class="soft">Nothing is waiting in this repository.</span> <span class="btn" style="margin-top:0">New</span></div>
-      </div>
-    </div>
-  </div>
-  <div class="win proposed">
-    <div class="cap">Proposed: a filed Task, not started</div>
-    <div class="bar"><span>feature</span><span class="soft">☻explore plan build ☻ship-review deliver ☻verify</span><span style="margin-left:auto" class="btn" >Start</span></div>
-    <div class="row" style="min-height:160px">
-      <div class="pane" style="width:60%">
-        <div class="serif">Not started</div>
-        <div>It will run feature, demo's default. You take part at explore, ship-review and verify.</div>
-        <div><span class="btn a">Start</span><span class="btn" style="border-color:transparent">Start with… ⌄</span></div>
-      </div>
-      <div class="pane" style="flex:1; justify-content:flex-start">
-        <div style="font:400 19px/1.15 Georgia, serif">Stream metrics from rented machines</div>
-        <div class="soft">Unstarted &nbsp; feature, demo's default</div>
-      </div>
-    </div>
-  </div>
+  <div class="win"><div class="cap">Built: a Project that was not prepared</div>
+    <div class="pane"><span style="color:var(--new)">linear: team not found</span>
+      <span><span class="btn">Retry Project preparation</span></span></div></div>
+  <div class="win proposed"><div class="cap">Proposed</div>
+    <div class="pane"><span><b style="color:var(--no)">Project not prepared.</b> <code>linear: team not found</code>
+      <span class="btn">Retry Project preparation</span></span></div></div>
 </div>
-
-<h3>Traced through the layers</h3>
-<p>No wire or Rust change. <code>SessionsView</code>'s repository-page branch shows <code>NoPlannedWork</code> alone
-while the plan has been read, has no Waves and no Tasks, and the repository's workspace has no conversation attached,
-opening or failed. Its second button runs what <code>ConversationOpenButton</code> runs. From then on the page is the
-ordinary one. <code>BacklogView.emptyState</code> becomes the line and a neutral button. <code>TaskStartOffer</code>
-loses its title branch. <code>docs/surfaces.md</code> follows.</p>
-
-<h3>Tested on three paths</h3>
+<p><span class="new">proposed</span> Slice 6 in <code>scratch/plan.md</code>: twelve sites become
+<code>FailureLine("<i>what failed</i>.", machine:)</code>, each keeping its button and its accessibility identifier.
+The plan lists them with a phrase each. It adds no type and no action.</p>
 <table>
-  <tr><th style="width:18%">Path</th><th>What happens</th></tr>
-  <tr><td>Normal</td><td>A new repository opens on one title, one sentence and two buttons. <i>New Task ⌘N</i> opens the sheet; filing makes the plan non-empty and the page appears with the Task in its backlog. <i>Open the repository conversation</i> opens it and the page appears with the conversation and an empty backlog that says so in one line.</td></tr>
-  <tr><td>Failure</td><td>The conversation does not open: the workspace has an error, so the page shows with “Conversation failed to open”, the message in mono and Retry, as today. The plan read is still running or failed: the page as today, never this state on a guess.</td></tr>
-  <tr><td>Recovery</td><td>Retry in the pane. Closing the conversation in an empty repository brings the one state back, which is the same offer.</td></tr>
-  <tr><td>Counterexample kept</td><td>The backlog's toolbar (filters, search, Show…) is not on the first screen. With nothing to filter that loses nothing, and the sidebar keeps New Task.</td></tr>
-  <tr><td>Counterexample kept</td><td>A repository with one Wave and no Tasks is not this state: the plan has a Wave, so the page shows and the backlog's line carries New.</td></tr>
-  <tr><td>Counterexample kept</td><td>“One serif thing per screen” still does not hold where an <code>EmptyState</code> pane sits beside a brief (two panes, two titles). It held before this pass too; the change here only stops the two titles saying the same words.</td></tr>
+  <tr><th>Tested on</th><th>What happens</th></tr>
+  <tr><td>Normal path</td><td>No failure, nothing drawn; unchanged.</td></tr>
+  <tr><td>Failure</td><td>What failed in the failure ink, the message in mono and selectable, the existing button.</td></tr>
+  <tr><td>Recovery</td><td>The line goes when the site's own error clears, as today; Retry stays where there is one.</td></tr>
+  <tr><td>Counterexample kept</td><td>A typed range that does not parse (<code>TaskHistoryFilter</code>), a file's
+      read-only reason and its save message are not failures: nothing was attempted and refused by the Machine. They
+      stay as they are. So do the Create Wave forms, settings and telemetry, the plan's exclusions.</td></tr>
+  <tr><td>Risk</td><td>None of the twelve was reached on screen. A site whose text turns out to be advice stays and
+      is noted.</td></tr>
 </table>
 
-<h2>What changed in the plan</h2>
-<p><code>scratch/plan.md</code> gains slice 5, each item a choice made for review:</p>
-<ol>
-  <li>An empty repository's page is <code>NoPlannedWork</code> until a conversation opens or a Task exists; its second button opens the conversation.</li>
-  <li>The backlog's empty is the one-line form with a neutral button.</li>
-  <li>An unstarted Task's pane is titled “Not started”.</li>
-  <li>The Start beside “No Graph has run.” goes.</li>
-  <li>“Open the conversation here.” goes.</li>
-  <li>The typed request stays semibold, as <code>DESIGN.md</code>'s <code>lede</code> has it.</li>
-  <li>The two prototype sections are deleted in this slice: every difference from them is now a recorded choice.</li>
-</ol>
-
-<h2>Outside this work</h2>
-<p><b>A Start that failed after the request reached the Machine.</b> QA broke Start two ways and both times the sheet
-closed, the words left the screen, and a notice at the bottom read “Creation 3E68…: … It may have happened; refresh
-before retrying.”, cut off at the window's edge. The prototype's “Not started.” with Try again was never seen. That is
-<code>CreationRecovery</code>, which exists so a lost answer cannot file a Task twice, and it treats a plain refusal
-from Rust the same as a lost answer. Making it tell the two apart (a refusal keeps the words and Try again; only a lost
-answer goes to recovery), and drawing recovery's notice as a failure with its message readable, would take a change to
-<code>SubmittedCreationError</code>'s cases and the notice. It is a separate outcome with its own risk; nothing in this
-change made it worse. The “Task created · Show result” notice that stayed up across repositories is the same subsystem.</p>
-<p><b>Smaller, seen at QA and left:</b> the chevron between a menu's name and its comma in the sheet; “No Graph has
-run.” under “Waiting for you at explore.”, which is true of Graph processes and reads oddly beside the bar.</p>
+<h2>Outside this change</h2>
+<ul>
+  <li>A new Task's Files pane pointing at the repository after Start (<code>SessionsWorkspace.files(for:)</code>,
+      untouched here). Its own Task: find why the pane's recorded location is not the Task's checkout.</li>
+  <li>A Start the Machine refused going to creation recovery's notice and not to “Not started.” with Try again. Its
+      own Task in creation recovery.</li>
+  <li>A stopped Graph's reason in mono: Rust would send what stopped and the Machine's message as two fields.</li>
+</ul>
 
 <h2>Questions</h2>
+<p class="soft">Each was decided with nobody present; the choice taken is marked. “2b” is a complete answer.</p>
 <ol class="q">
-  <li>An empty repository's first screen.
-    <ol><li><span class="taken">Taken:</span> the prototype's one state fills the page until a conversation opens or a Task exists.</li>
-        <li>The prototype's state inside the conversation pane, with the backlog beside it saying so in one line.</li>
-        <li>As built: two panes, two empties.</li></ol></li>
-  <li>The title of an unstarted Task's pane.
-    <ol><li><span class="taken">Taken:</span> “Not started”; the brief beside it has the name.</li>
-        <li>The Task's name, as the prototype draws it alone.</li></ol></li>
-  <li>The backlog's empty.
-    <ol><li><span class="taken">Taken:</span> one line in the secondary ink and a neutral button, for all four of its steps.</li>
-        <li>Bold with an accent button, as built.</li></ol></li>
-  <li>The request you type in New Task.
-    <ol><li><span class="taken">Taken:</span> semibold, <code>Typography.lede</code> as <code>DESIGN.md</code> lists it.</li>
-        <li>Regular at 17, as the prototype's textarea; <code>DESIGN.md</code>'s table would change with it.</li></ol></li>
-  <li>The two prototype sections.
-    <ol><li><span class="taken">Taken:</span> deleted in this slice.</li>
-        <li>Kept until someone has looked at the Dev app again.</li></ol></li>
-  <li>A Start the Machine refused.
-    <ol><li><span class="taken">Taken:</span> outside this work; a separate Task if wanted.</li>
-        <li>In this change: a refusal keeps the words and Try again, and only a lost answer goes to recovery.</li></ol></li>
+  <li>When should “No planned Work in this repository” show?
+    <ol><li><span class="taken">Taken:</span> while no conversation is open, in every build. The released app keeps
+        opening a repository's conversation on its own, so it shows there after the conversation is closed.</li>
+      <li>Hold the conversation back in an empty repository until its button is pressed. Changes when a repository's
+        agent starts.</li></ol></li>
+  <li>The dozen failures beside content that are still bare text:
+    <ol><li><span class="taken">Taken:</span> convert them in this change (slice 6).</li>
+      <li>Leave them to a later sweep; this change ships with two forms.</li></ol></li>
+  <li>The sidebar's “No working Tasks in this Wave” and “… in this list”, and “Show working tasks”:
+    <ol><li><span class="taken">Taken:</span> full stops, and “Show working Tasks”.</li>
+      <li>Leave the sidebar's wording alone.</li></ol></li>
+  <li>A stopped Graph's reason:
+    <ol><li><span class="taken">Taken:</span> stays one sentence; outside this change.</li>
+      <li>Rust sends the two parts and the pane draws a <code>FailureLine</code>, in this change.</li></ol></li>
 </ol>
-</html>

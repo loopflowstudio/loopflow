@@ -177,3 +177,21 @@ Made at the second qa with nobody present; `scratch/qa.html` has the captures.
     committed: its scroll view meets the title bar and `cacheDisplay` returns
     white. Two local builds showed the view is drawn. Needs one look at an
     unlocked display.
+
+Made at the concept review of the built change, second pass, with nobody
+present; the page is `scratch/concept-review.html`, and its questions 1 to 4
+are these.
+
+49. Settles 39 and 46: the empty repository's state shows while no
+    conversation is open, in every build, and the released app keeps opening
+    a repository's conversation on its own. Passed over: holding the
+    conversation back until "Open the repository conversation" is pressed.
+50. Settles 47: the dozen failures beside content that are still bare text
+    become `FailureLine`s in this change (slice 6), each with a word for
+    what failed. Form checks, a file's read-only reason, the Create Wave
+    forms, settings and telemetry stay.
+51. The sidebar's "No working Tasks in this Wave" and "… in this list" take
+    a full stop, and "Show working tasks" reads "Show working Tasks".
+52. A stopped Graph's reason stays one sentence in the body face: Rust sends
+    it as one string. Setting the Machine's part in mono needs two fields on
+    the wire; outside this change.

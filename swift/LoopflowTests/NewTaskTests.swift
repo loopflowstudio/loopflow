@@ -125,7 +125,7 @@ struct NewTaskTests {
         }
         func item(_ name: String) throws -> InspectableView<ViewType.Toggle> {
             try sentence().find(ViewType.Toggle.self, where: { toggle in
-                (try? toggle.find(textWhere: { text, _ in text.hasPrefix("\(name) ") })) != nil
+                (try? toggle.find(textWhere: { text, _ in text.hasPrefix("\(name), ") })) != nil
             })
         }
         try item("quick").tap()

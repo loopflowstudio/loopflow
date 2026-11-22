@@ -14,13 +14,15 @@ struct TaskStatusTests {
         #expect(content([.working, .available]).status?.word == ProgramStatusState.idle.label)
         #expect(content([.working, .idle, .auto]).status == .lifecycle(.idle))
         #expect(content([.working, .moving]).status?.word == "Moving")
-        // A Task with no conversation says its lifecycle too.
-        #expect(content([.backlog, .unstarted], session: nil).status?.word == "Unstarted")
+        // A Task with no conversation says its lifecycle too, as the Machine reads it.
+        #expect(content([.unstarted, .backlog], session: nil, unavailable: [
+            "No primary Session is recorded", "Recorded execution location is unavailable",
+        ]).status?.word == "Unstarted")
         #expect(content([.working]).status == nil)
     }
 
-    @Test func anUnavailableReadingSaysSoWithItsReasons() {
-        let status = content([.busy], unavailable: ["gone"]).status
+    @Test func aReadingWithNoStateSaysUnavailableWithItsReasons() {
+        let status = content([.working], unavailable: ["gone"]).status
         #expect(status?.word == "Unavailable")
         #expect(status?.detail == "gone")
     }

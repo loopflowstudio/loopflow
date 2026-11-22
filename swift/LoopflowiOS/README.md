@@ -42,8 +42,8 @@ LOO-5  Busy  Auto
 The word is the one the Mac shows for that Task: what its conversation reports
 (**Blocked**, **Busy**, **Available**), or its lifecycle word (**Unstarted**,
 **Idle**, **Active**, **Moving**, **Done**) while nothing reports. **Auto**
-follows while Auto-Ship is on. A Task the Machine cannot read says
-**Unavailable**. The row carries no stripe: colour is on the word.
+follows while Auto-Ship is on. A Task whose reading carries
+neither says **Unavailable**. The row carries no stripe: colour is on the word.
 
 **+** opens New Task. Under "What do you want?", describe the work, pick a
 repository, **Create & start**. The Task's conversation opens as soon as the
@@ -84,7 +84,9 @@ Each shows a line like "LOO-5 Auto-Ship requested" at the bottom of the
 screen; if the Machine refuses, the same line says why.
 
 **Changes** lists the files the Task changed; each opens its diff, and the diff
-opens the whole file. A Task with no conversation opens on its Changes.
+opens the whole file. A Task with no conversation opens on its Changes; one
+that has not started says "No changes yet" and offers **Start**. Task actions
+follow the Task itself, so they stay when the list's filter no longer shows it.
 
 The device touched last has the terminal. When another device takes it, the
 phone stops drawing and offers **Continue here**.

@@ -10,15 +10,15 @@ struct TaskWorkspaceView: View {
     let theme: ThemeDefinition
     @Binding var draft: String
     @State private var showsChanges = false
-    /// The Task's Graph as the Machine last read it; a Task that has taken up none reads nil.
-    @State private var graph = Loaded<TaskGraph?>.loading
+    /// The Task as the Machine last read it.
+    @State private var reading = Loaded<Reading>.loading
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(spacing: 0) {
             // While the Machine is away the sentence would be an old one.
-            if case .value(let graph?) = graph, feed.pendingChanges.acceptsChanges {
-                WorkflowLine(graph: graph, auto: row?.states.contains(.auto) == true)
+            if case .value(let reading) = reading, let graph = reading.graph, feed.pendingChanges.acceptsChanges {
+                WorkflowLine(graph: graph, auto: states.contains(.auto))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Spacing.lg)
@@ -35,10 +35,34 @@ struct TaskWorkspaceView: View {
         .task(id: scenePhase == .active) { await watchGraph() }
     }
 
-    /// The feed's row for this Task, with pending changes made; a Task opened
-    /// from its creation answer has none until the feed lists it.
+    /// What the Machine read of one Task: its Graph (nil until it takes one up),
+    /// the states its row carries, and its checkout once it has one.
+    struct Reading: Equatable {
+        let graph: TaskGraph?
+        let states: [WorkSelectionState]
+        let checkout: String?
+    }
+
+    /// The feed's row for this Task, with pending changes made. The list's
+    /// filter decides whether it has one: a Task just started leaves Backlog,
+    /// and one opened from its creation answer may never have been listed.
     private var row: WorkViewPlan.Content? {
         feed.shownRepositories.lazy.flatMap(\.tasks).first { $0.work.id == task.id }
+    }
+
+    /// The Task's states from its own reading, which no filter hides; the
+    /// list's row stands in until that reading arrives.
+    private var states: [WorkSelectionState] {
+        if case .value(let reading) = reading { return reading.states }
+        return row?.states ?? []
+    }
+
+    /// Where on the Machine a write for this Task runs: its repository while
+    /// the list shows it, else its own checkout.
+    private var directory: String? {
+        if let row, let path = feed.directory(of: row) { return path }
+        if case .value(let reading) = reading { return reading.checkout }
+        return nil
     }
 
     /// Follow the Task's reading while the screen shows and the app is active.
@@ -49,23 +73,25 @@ struct TaskWorkspaceView: View {
         let watch = client.observeTask(issue: task.id)
         defer { watch.cancel() }
         do {
-            for try await frame in watch.updates { graph = Self.graph(in: frame, task: task.id) }
+            for try await frame in watch.updates { reading = Self.reading(in: frame, task: task.id) }
         } catch is CancellationError {
             return
         } catch {
-            graph = .failed(machineConnectionMessage(error))
+            reading = .failed(machineConnectionMessage(error))
         }
     }
 
-    /// The Graph in one frame of the Task's reading.
-    static func graph(in frame: RawJSON, task: String) -> Loaded<TaskGraph?> {
+    /// One frame of the Task's reading.
+    static func reading(in frame: RawJSON, task: String) -> Loaded<Reading> {
         do {
             let scope = WorkScope(repo: nil, headless: false, task: task, activity: nil, taskListWave: nil)
             let frame = try WorkFrame.decode(part: .task, scope: scope, sequence: 0, line: frame.bytes)
-            guard case .task(let reading?) = frame.content else {
+            guard case .task(let part?) = frame.content else {
                 return .failed(frame.unavailable ?? "Task reading is unavailable")
             }
-            return .value(reading.work.graph)
+            return .value(Reading(graph: part.work.graph,
+                                  states: part.row.map { $0.selectionStates.sorted { $0.rawValue < $1.rawValue } } ?? [],
+                                  checkout: part.row?.reference.workspace?.worktree))
         } catch {
             return .failed(error.localizedDescription)
         }
@@ -104,16 +130,15 @@ struct TaskWorkspaceView: View {
 
     /// What "Task actions" offers: the step that moves the Task from where its
     /// Graph stands, which needs a current reading, and its auto setting, which
-    /// needs only the row.
-    static func actions(graph: Loaded<TaskGraph?>, states: [WorkSelectionState], issue: String) -> [Action] {
+    /// needs only its states.
+    static func actions(reading: Loaded<Reading>, states: [WorkSelectionState], issue: String) -> [Action] {
         var actions: [Action] = []
-        switch graph {
-        case .value(let graph?):
-            if let run = graph.runAction(issue: issue) { actions.append(.run(run.label)) }
-        case .value(nil):
-            if states.contains(.unstarted) { actions.append(.run("Start")) }
-        case .loading, .failed:
-            break
+        if case .value(let reading) = reading {
+            if let graph = reading.graph {
+                if let run = graph.runAction(issue: issue) { actions.append(.run(run.label)) }
+            } else if states.contains(.unstarted) {
+                actions.append(.run("Start"))
+            }
         }
         if states.contains(.auto) {
             actions.append(.stopAutoShip)
@@ -124,14 +149,13 @@ struct TaskWorkspaceView: View {
     }
 
     @ViewBuilder private var actions: some View {
-        if let row {
-            let actions = Self.actions(graph: graph, states: row.states, issue: row.identifier ?? row.work.id)
-            if !actions.isEmpty {
-                Menu("Task actions", systemImage: "ellipsis.circle") {
-                    ForEach(actions, id: \.label) { action in
-                        Button(action.label, systemImage: action.symbol) {
-                            feed.request(action.label, row, action.write)
-                        }
+        let issue = task.identifier ?? task.id
+        let actions = Self.actions(reading: reading, states: states, issue: issue)
+        if let directory, !actions.isEmpty {
+            Menu("Task actions", systemImage: "ellipsis.circle") {
+                ForEach(actions, id: \.label) { action in
+                    Button(action.label, systemImage: action.symbol) {
+                        feed.request(action.label, issue: issue, write: action.write(directory: directory, issue: issue))
                     }
                 }
             }
@@ -159,9 +183,20 @@ struct TaskWorkspaceView: View {
                     .presentationDetents([.medium, .large])
                 }
         } else {
-            TaskChangesView(client: client, task: task, theme: theme)
-                .navigationTitle(task.title)
-                .navigationBarTitleDisplayMode(.inline)
+            Group {
+                switch reading {
+                case .loading:
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .value(let reading) where reading.checkout == nil:
+                    // Nothing is checked out until the Task starts, so there is nothing to ask the Machine for.
+                    StateView("No changes yet")
+                case .value, .failed:
+                    TaskChangesView(client: client, task: task, theme: theme)
+                }
+            }
+            .background(theme.palette.background)
+            .navigationTitle(task.title)
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
@@ -227,6 +262,20 @@ struct TaskChangesView: View {
     }
 }
 
+/// Code that scrolls both ways and starts at the top left, as the states beside it do.
+/// A two-axis scroll view centres content shorter or narrower than itself.
+private struct CodeScroll<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        GeometryReader { proxy in
+            ScrollView([.vertical, .horizontal]) {
+                content.frame(minWidth: proxy.size.width, minHeight: proxy.size.height, alignment: .topLeading)
+            }
+        }
+    }
+}
+
 /// One file as it stands in the Task's checkout.
 struct TaskFileView: View {
     let client: RemoteMobileClient
@@ -245,7 +294,7 @@ struct TaskFileView: View {
                 }
             case .value(let file):
                 if let content = file.content {
-                    ScrollView([.vertical, .horizontal]) {
+                    CodeScroll {
                         Text(content)
                             .font(Typography.mono)
                             .foregroundStyle(theme.palette.text)
@@ -289,7 +338,7 @@ struct TaskDiffView: View {
             case .value(let diff) where diff.binary:
                 StateView("Binary file")
             case .value(let diff):
-                ScrollView([.vertical, .horizontal]) {
+                CodeScroll {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         let lines = Self.lines(diff.patch)
                         ForEach(lines.indices, id: \.self) { index in

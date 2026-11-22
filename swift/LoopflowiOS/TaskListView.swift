@@ -84,16 +84,14 @@ final class TaskFeed {
     }
 
     /// Start, Run, Auto-Ship and Stop Auto-Ship: the Notice says the change was requested.
-    func request(_ name: String, _ task: WorkViewPlan.Content, _ write: (String, String) -> ServedWrite) {
-        guard let directory = directory(of: task) else { return }
-        let issue = task.identifier ?? task.work.id
-        pendingChanges.request(name, subject: issue, write: write(directory, issue), notices: notices) { [weak self] in
+    func request(_ name: String, issue: String, write: ServedWrite) {
+        pendingChanges.request(name, subject: issue, write: write, notices: notices) { [weak self] in
             try? await self?.observation?.refresh()
         }
     }
 
     /// The repository on the Machine whose reading listed `task`.
-    private func directory(of task: WorkViewPlan.Content) -> String? {
+    func directory(of task: WorkViewPlan.Content) -> String? {
         repositories.first { $0.tasks.contains { $0.work == task.work } }?.path
     }
 
@@ -308,6 +306,7 @@ struct TaskListView: View {
                 }
             }
             .searchable(text: $search, prompt: "Search Tasks")
+            .textInputAutocapitalization(.never)
             .onChange(of: feed.reading) { _, _ in feed.observed() }
             .navigationDestination(isPresented: Binding(get: { selectedTask != nil }, set: { if !$0 { selectedTask = nil } })) {
                 if let selectedTask { workspace(selectedTask) }
@@ -404,7 +403,8 @@ struct TaskListView: View {
                     .tint(theme.palette.success)
                     .disabled(!feed.pendingChanges.acceptsChanges)
             }
-            .listRowInsets(EdgeInsets(top: Spacing.xs, leading: Spacing.sm, bottom: Spacing.xs, trailing: Spacing.sm))
+            // With the row's own padding the title starts where the section header does.
+            .listRowInsets(EdgeInsets(top: Spacing.xs, leading: Spacing.xs, bottom: Spacing.xs, trailing: Spacing.xs))
             .listRowBackground(theme.palette.background)
     }
 

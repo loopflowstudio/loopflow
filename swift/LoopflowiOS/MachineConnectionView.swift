@@ -139,7 +139,11 @@ struct MachineAddressView: View {
                                 .keyboardType(.URL)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
-                                .textFieldStyle(.roundedBorder)
+                                .font(Typography.text)
+                                .padding(.horizontal, Spacing.md)
+                                .frame(minHeight: HitTarget.touch)
+                                .background(theme.palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.pane))
+                                .overlay(RoundedRectangle(cornerRadius: CornerRadius.pane).stroke(theme.palette.border))
                                 .focused($addressFocused)
                                 .submitLabel(.continue)
                                 .onSubmit { accept(address) }

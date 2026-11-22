@@ -13,23 +13,27 @@ final class TaskActionsTests: XCTestCase {
         ] as [String: Any]))
     }
 
-    private func actions(_ graph: Loaded<TaskGraph?>, _ states: [WorkSelectionState]) -> [TaskWorkspaceView.Action] {
-        TaskWorkspaceView.actions(graph: graph, states: states, issue: "LOO-5")
+    private func read(_ graph: TaskGraph?) -> Loaded<TaskWorkspaceView.Reading> {
+        .value(TaskWorkspaceView.Reading(graph: graph, states: [], checkout: nil))
+    }
+
+    private func actions(_ reading: Loaded<TaskWorkspaceView.Reading>, _ states: [WorkSelectionState]) -> [TaskWorkspaceView.Action] {
+        TaskWorkspaceView.actions(reading: reading, states: states, issue: "LOO-5")
     }
 
     func testATaskWaitingAtAStepCanBeRunAndAutoShipped() throws {
         let waiting = try graph(["kind": "at", "step": "ship-review"])
-        XCTAssertEqual(actions(.value(waiting), [.working, .idle]), [.run("Run"), .autoShip])
+        XCTAssertEqual(actions(read(waiting), [.working, .idle]), [.run("Run"), .autoShip])
     }
 
     func testATaskARunCarriesOffersNoRun() throws {
         let running = try graph(["kind": "run", "step": "plan", "at": "implement", "lf_process_id": "p", "running": true])
-        XCTAssertEqual(actions(.value(running), [.working, .active, .auto]), [.stopAutoShip])
+        XCTAssertEqual(actions(read(running), [.working, .active, .auto]), [.stopAutoShip])
     }
 
     func testATaskWithNoGraphStartsOnlyWhileUnstarted() {
-        XCTAssertEqual(actions(.value(nil), [.unstarted, .backlog]), [.run("Start")])
-        XCTAssertEqual(actions(.value(nil), [.done]), [])
+        XCTAssertEqual(actions(read(nil), [.unstarted, .backlog]), [.run("Start")])
+        XCTAssertEqual(actions(read(nil), [.done]), [])
     }
 
     func testWithoutAGraphReadingOnlyTheAutoSettingIsOffered() {
@@ -39,7 +43,7 @@ final class TaskActionsTests: XCTestCase {
 
     func testAReadingTheMachineCouldNotMakeShowsNoGraph() throws {
         let frame = RawJSON(Data(#"{"answers":null,"unavailable":"store is busy","body":null,"read_at":null}"#.utf8))
-        guard case .failed(let reason) = TaskWorkspaceView.graph(in: frame, task: "LOO-5") else {
+        guard case .failed(let reason) = TaskWorkspaceView.reading(in: frame, task: "LOO-5") else {
             return XCTFail("an unavailable reading must not yield a Graph")
         }
         XCTAssertEqual(reason, "store is busy")

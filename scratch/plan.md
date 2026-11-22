@@ -28,10 +28,14 @@ fails on one in `LoopflowiOS` (`spacing: 0` passes); the phone terminal has
 unavailable Session state has a "Changes" button; pairing was looked at on an
 iPhone SE Simulator in light and dark (`scratch/look/`). Still to do:
 
-- Look at the Task list, a Task and New Task on a phone or Simulator against
-  a real Machine (demo). Mobile access and `~/.lf/mobile-same-device` are on
-  here, but nothing on this Mac can tap in a Simulator (no `idb`), so pairing
-  could not be driven past its first screen.
+- Qa drove every screen on an iPhone SE Simulator against the installed
+  Machine (`.lf/qa/iphone-simulator.md`, `scratch/qa.html`) and repaired what
+  it found: the Session decoder's three newer frame tags (broken on main),
+  "Unavailable" on every Task without a conversation, Task actions lost when
+  the list's filter stops showing the Task, the unstarted Task's failed
+  Changes, short diffs centred in their sheet, the 34 pt address field, the
+  picker's header under its empty state, the list rows 4 pt off their headers.
+- Not looked at: landscape and iPad, the QR scanner, a physical phone (demo).
 - Open choice, not blocking: the Mac's Notice
   (`LoopflowMac/WorkModel.swift:2698`) says "Auto on requested" while the
   phone's says "Auto-Ship requested" (`scratch/questions.md`).
@@ -109,9 +113,10 @@ same thing").
   `blocked` → "Blocked" (warning), `busy` → "Busy" (running), `available` →
   "Available" (available); otherwise the lifecycle state the reading
   carries (`unstarted`, `idle`, `active`, `moving`, `done`), capitalized, in
-  secondary ink with no tone, exactly the Mac row's fallback. A row whose
-  reading lists `unavailable` says "Unavailable" with the reasons as its
-  detail (the phone has no hover for the Mac's info icon). "Running",
+  secondary ink with no tone, exactly the Mac row's fallback. A reading's
+  `unavailable` lists why no conversation opens from here ("No primary
+  Session is recorded" on every Task without one), so it is the word only
+  when the reading carries no state: "Unavailable", the reasons as detail. "Running",
   "Ready", "Open" and "No conversation yet" are deleted; a Task with no
   conversation says its lifecycle word, and the list already folds those
   rows under "N without a conversation". The property sits with
@@ -281,7 +286,7 @@ tests' stand-in client only, and the live look moves to demo.
 | Task | Graph reading failed or the link dropped | no workflow line and no Start or Run; Auto-Ship stays (it needs only the row); terminal unaffected; the line returns when the link does |
 | Task | a run carries it | the sentence; no Start or Run |
 | Task | stopped or waiting at a step | the sentence; "Run" |
-| Task list | a row's reading is unavailable | the word "Unavailable" |
+| Task list | a row's reading carries no state, only reasons | the word "Unavailable" |
 | Session | elsewhere / ended / not running / disconnected / unavailable | state view with its one action; "unavailable" offers Changes |
 | Changes, diff, file | loading / failed / empty / binary | progress; state view with "Try again"; state view with its sentence |
 | Repository picker | none on the Machine / no match | state view, "Refresh" / "Clear search" |

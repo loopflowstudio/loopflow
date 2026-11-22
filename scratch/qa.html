@@ -1,0 +1,48 @@
+<!doctype html><meta charset="utf-8"><title>e166ff qa</title>
+<style>
+body{font:15px/1.5 -apple-system,sans-serif;max-width:1040px;margin:32px auto;padding:0 20px;color:#2a2622;background:#faf8f4}
+h1{font:400 30px Georgia,serif}h2{font:400 22px Georgia,serif;margin-top:40px;border-top:1px solid #ddd6cc;padding-top:20px}
+dt{font-weight:600;margin-top:10px}dd{margin:0}
+.shots{display:flex;flex-wrap:wrap;gap:14px;margin-top:14px}figure{margin:0;width:190px}figure img{width:190px;border:1px solid #ddd6cc;border-radius:8px}
+figcaption{font-size:12px;color:#6b635a}code{font:13px ui-monospace,monospace}li{margin:4px 0}
+</style>
+<h1>Loopflow for iPhone, used</h1>
+<p>iPhone SE (3rd generation) Simulator, iOS 26.2, driven with AXe against the installed Machine (lf 0.16.0+0fa6a4e20) over its mobile address, 2026-11-22. Writes went only to Tasks in a disposable repository, since deleted.</p>
+<h2>Fresh install: pairing</h2><dl><dt>Did</dt><dd>Launched with no saved Machine, tapped Enter address, typed “not an address”, then the real endpoint, then Connect Machine.</dd><dt>Saw</dt><dd>A wrong address says “Enter the Tailscale address shown in Desktop’s Mobile settings.” and stays put. The real one verifies and opens the list.</dd>
+<dt>Fixed</dt><dd>The address field was the system rounded field, 34 pt tall. It now has the New Task field’s shape at 44 pt.</dd>
+</dl>
+<div class="shots"><figure><img src="qa/03-bad-address.png"><figcaption>wrong address</figcaption></figure><figure><img src="qa/02-enter-address.png"><figcaption>before: 34 pt field</figcaption></figure><figure><img src="qa/67-address-field-dark.png"><figcaption>after, dark</figcaption></figure></div>
+<h2>Task list</h2><dl><dt>Did</dt><dd>Read the Started list in light and dark, searched for something absent, switched to Backlog and Done.</dd><dt>Saw</dt><dd>Rows are the shared row: whole title, ID, status word. Done rows say Done; real Tasks say Idle and Available.</dd>
+<dt>Fixed</dt><dd>Row titles started 4 pt right of their section headers; they line up now. Every Backlog row said “Unavailable” because the Machine lists “No primary Session is recorded” on any Task without a conversation; the lifecycle word wins now (Unstarted). Search no longer capitalizes the term.</dd>
+</dl>
+<div class="shots"><figure><img src="qa/05-list-light.png"><figcaption>before: rows 4 pt off</figcaption></figure><figure><img src="qa/58-started-three.png"><figcaption>after</figcaption></figure><figure><img src="qa/06-list-dark.png"><figcaption>dark</figcaption></figure><figure><img src="qa/07-search-none.png"><figcaption>no match</figcaption></figure><figure><img src="qa/44-backlog.png"><figcaption>before: Unavailable</figcaption></figure><figure><img src="qa/48-backlog-fixed.png"><figcaption>after: Unstarted</figcaption></figure></div>
+<h2>New Task</h2><dl><dt>Did</dt><dd>Tapped +, typed a request, opened the repository picker, searched it, picked a disposable repository, Create &amp; start.</dd><dt>Saw</dt><dd>“What do you want?” in serif, the field in lede, one accent button. The Task was created and its screen opened.</dd>
+<dt>Fixed</dt><dd>The picker’s empty state drew over the Machine’s name; the header now leaves with the rows.</dd>
+</dl>
+<div class="shots"><figure><img src="qa/14-newtask-ready.png"><figcaption>ready</figcaption></figure><figure><img src="qa/15-newtask-dark.png"><figcaption>dark</figcaption></figure><figure><img src="qa/12-repo-search.png"><figcaption>before: overlap</figcaption></figure><figure><img src="qa/64-picker-none-fixed.png"><figcaption>after</figcaption></figure></div>
+<h2>A Task’s conversation</h2><dl><dt>Did</dt><dd>Opened the new Task, sent a reply, opened the key row, backgrounded the app and came back, attached a second view from the Mac.</dd><dt>Saw</dt><dd>After the repair: the terminal draws in the theme, the reply round-trips (“pong”), the draft survives backgrounding, and a second view shows “This Session is open on another device.” until it leaves.</dd>
+<dt>Fixed</dt><dd>Every conversation ended in “Disconnected: Unsupported Session frame”. The phone’s decoder rejected the position, aside and close frames the server has sent since 2026-11-12; this is broken on main too. It reads all three now, with a test.</dd>
+</dl>
+<div class="shots"><figure><img src="qa/17-created.png"><figcaption>before: first screen after Create &amp; start</figcaption></figure><figure><img src="qa/21-task-light.png"><figcaption>after</figcaption></figure><figure><img src="qa/25-task-dark.png"><figcaption>dark</figcaption></figure><figure><img src="qa/37-key-row.png"><figcaption>reply and key row</figcaption></figure><figure><img src="qa/62-second-view.png"><figcaption>second view</figcaption></figure></div>
+<h2>Workflow sentence and Task actions</h2><dl><dt>Did</dt><dd>On Tasks waiting at a step: Run, Auto-Ship, Stop Auto-Ship. On an unstarted Task from Backlog: Start.</dd><dt>Saw</dt><dd>The sentence matched <code>lf task status</code> each time (“Waiting for you at pause#2.”) and wraps to two lines when long. Each action posts a line like “787aa8 Auto-Ship requested” and the sentence changes within a second or two.</dd>
+<dt>Fixed</dt><dd>After Start the Task left Backlog, the list had no row for it and Task actions vanished while the sentence said “Waiting for you”. Actions now read the Task’s own reading. The unstarted Task’s screen said “Couldn’t load: Task task_… is not checked out on this Machine”; it says “No changes yet”.</dd>
+</dl>
+<div class="shots"><figure><img src="qa/22-task-actions.png"><figcaption>Run and Auto-Ship</figcaption></figure><figure><img src="qa/23-run-notice.png"><figcaption>Run requested</figcaption></figure><figure><img src="qa/41-actions-auto-on.png"><figcaption>auto on, wrapped</figcaption></figure><figure><img src="qa/52-start-menu.png"><figcaption>unstarted: Start</figcaption></figure><figure><img src="qa/54-actions-after-start.png"><figcaption>after Start</figcaption></figure><figure><img src="qa/56-task-ax-large.png"><figcaption>accessibility-large</figcaption></figure></div>
+<h2>Changes, diff, file</h2><dl><dt>Did</dt><dd>Changed three files in the Task’s checkout, opened Changes, a diff, the whole file and a binary file.</dd><dt>Saw</dt><dd>Files list with their state; the binary file says “Binary file”.</dd>
+<dt>Fixed</dt><dd>Short diffs and files sat in the middle of the sheet with a stray wrap. They start top left and tints run the full width.</dd>
+</dl>
+<div class="shots"><figure><img src="qa/27-changes-list.png"><figcaption>Changes</figcaption></figure><figure><img src="qa/28-diff.png"><figcaption>before</figcaption></figure><figure><img src="qa/34-diff-fixed.png"><figcaption>after</figcaption></figure><figure><img src="qa/30-binary.png"><figcaption>binary</figcaption></figure></div>
+<h2>Complete</h2><dl><dt>Did</dt><dd>Swiped a row left and tapped Complete.</dd><dt>Saw</dt><dd>The row left at once and <code>lf task status</code> reads done.</dd>
+</dl>
+<h2>Where it stands</h2>
+<dl><dt>Works now</dt><dd>Pairing, the list and its filters and search, New Task through Create &amp; start, the conversation with reply and keys, the sentence, Start, Run, Auto-Ship, Stop Auto-Ship, Changes, diff, file, Complete, background and return, a second view, light, dark and large text. 45 phone tests and 51 Mac-side tests pass.</dd>
+<dt>Not reached</dt><dd><ul>
+<li>Landscape and iPad, where the Graph’s steps stand before the sentence: AXe rotates only the Duo and physical devices. A short Graph did show its steps in portrait.</li>
+<li>The QR scanner: a Simulator has no camera.</li>
+<li>A network lost mid-Session: the carrier is the Machine’s one Tailscale endpoint.</li>
+<li>A physical phone, the touch keyboard and dictation.</li></ul></dd>
+<dt>Still wrong, worst first</dt><dd><ol>
+<li>A Task started from its own screen keeps showing Changes; its conversation opens only after going back to the list.</li>
+<li>The Notice covers the Reply field for the seconds it shows.</li>
+<li>In dark, “Available” is nearly the secondary ink, so the tone barely reads. The value is the shared palette’s.</li>
+<li>The disposable repository left five Tasks in the Machine’s store (two Done, three abandoned).</li></ol></dd></dl>

@@ -139,3 +139,52 @@ Checks (slice 4):
 - `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed.
 - Pairing on an iPhone SE (3rd generation) Simulator, iOS 26.2, light and dark: looked at, `scratch/look/pairing-{light,dark}.png`.
 - Task list, a Task, New Task against a real Machine: not done; demo. `lf server mobile --status` reported ready and `~/.lf/mobile-same-device` exists, but no tool here taps in a Simulator.
+
+Made in qa with nobody present; each is reversible.
+
+- **The phone's Session decoder reads the three newer frame tags** (position,
+  aside, close). This was broken on main, not by this Task: every held
+  conversation ended in "Disconnected: Unsupported Session frame". Fixed here
+  because no Task screen could be checked without it.
+- **A close frame's words on the phone**: `finished` is the ended state;
+  `replaced` says "This Session’s terminal was replaced."; `retired` says
+  "This Session’s terminal was put away." Both offer Reconnect. Rust's CLI
+  says "Session terminal replaced; reattach by Session." and "…retired;
+  resume when needed."
+- **"Unavailable" is the row's word only when the reading carries no state.**
+  The Machine lists "No primary Session is recorded" on every Task without a
+  conversation, so the earlier rule put "Unavailable" on all of Backlog.
+- **Task actions read the Task's own reading** (its states and checkout), so
+  they stay after Start moves the Task out of the list's filter. A write for a
+  Task the list no longer shows runs from the Task's checkout.
+- **An unstarted Task's screen says "No changes yet"** where it said
+  "Couldn’t load: Task "task_…" is not checked out on this Machine".
+- **Search fields do not capitalize** ("No results for “zzqq”", not “Zzqq”).
+- **The address field is the New Task field's shape**, 44 pt tall; the system
+  rounded field was 34.
+
+Open after qa:
+
+- A Task started from its screen keeps showing Changes; its conversation
+  opens after going back to the list.
+- The Notice sits over the Reply field for its few seconds.
+- In dark, "Available" is close to the secondary ink; the tone is the shared
+  palette's.
+- The disposable repository left five Tasks in the Machine's store: ef7cbe
+  and 299983 Done, 167dc9, 787aa8 and 2e2436 abandoned. Their repository and
+  checkouts are deleted.
+
+Checks (qa):
+
+- iPhone SE (3rd generation) Simulator, iOS 26.2, against the installed
+  Machine (lf 0.16.0+0fa6a4e20), driven with AXe: pairing, list, search,
+  filters, New Task, Create & start, conversation, reply, key row, Run,
+  Auto-Ship, Stop Auto-Ship, Start, Changes, diff, file, binary, Complete,
+  background and return, a second view from the Mac, light, dark and
+  accessibility-large text. `scratch/qa.html`.
+- `swift test --filter 'OwnerStreamTests|TaskStatusTests|TypographyDisciplineTests|TaskRowTests|WorkflowLineTests|ProgramStatusTests|WorkPaletteTests'`: 51 tests passed, 2026-11-22. Gate reruns.
+- `uv run python scripts/test_ios.py`: TEST SUCCEEDED, 45 tests, 2026-11-22. CI reruns.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py`: passed.
+- Not reached: landscape and iPad (AXe rotates only the Duo and physical
+  devices), the QR scanner (no camera), a lost network mid-Session (the
+  carrier is the person's one endpoint), a physical phone.

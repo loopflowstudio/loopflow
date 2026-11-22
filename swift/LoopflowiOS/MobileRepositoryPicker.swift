@@ -57,8 +57,11 @@ struct MobileRepositoryPicker: View {
                     .listRowBackground(theme.palette.background)
                 }
             } header: {
-                Text(model.context?.name ?? "Paired Machine")
-                    .font(Typography.meta).foregroundStyle(theme.palette.textSecondary).textCase(nil)
+                // An empty list is the state's to describe; a header would sit under its title.
+                if !repositories.isEmpty {
+                    Text(model.context?.name ?? "Paired Machine")
+                        .font(Typography.meta).foregroundStyle(theme.palette.textSecondary).textCase(nil)
+                }
             }
         }
         .listStyle(.plain)
@@ -79,6 +82,7 @@ struct MobileRepositoryPicker: View {
             }
         }
         .searchable(text: $search, prompt: "Repository name or path")
+        .textInputAutocapitalization(.never)
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await model.prepare() }
         .navigationTitle("Repository")

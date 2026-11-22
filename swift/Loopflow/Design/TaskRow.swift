@@ -201,12 +201,14 @@ extension ProgramStatusState {
 extension WorkViewPlan.Content {
     /// A Task's status from the states its list reading carries: what its
     /// conversation reports, else its lifecycle. The reading carries no time
-    /// the status began and no ask, so neither is shown.
+    /// the status began and no ask, so neither is shown. `unavailable` says why
+    /// no conversation opens from here, which every Task without one lists, so
+    /// it is the word only when the reading gives no other.
     public var status: TaskRowStatus? {
-        if !unavailable.isEmpty { return .unavailable(unavailable) }
         if states.contains(.blocked) { return .program(.blocked) }
         if states.contains(.busy) { return .program(.working) }
         if states.contains(.available) { return .program(.idle) }
-        return states.lazy.compactMap { TaskState(rawValue: $0.rawValue) }.first.map { .lifecycle($0) }
+        if let state = states.lazy.compactMap({ TaskState(rawValue: $0.rawValue) }).first { return .lifecycle(state) }
+        return unavailable.isEmpty ? nil : .unavailable(unavailable)
     }
 }

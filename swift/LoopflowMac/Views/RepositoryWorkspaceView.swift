@@ -144,6 +144,10 @@ struct WorkspaceOpeningFeedback: View {
                 Text("No pending workspace requests")
                 Button("Close") { dismiss() }
             }
-        }.padding()
+        }
+        .padding()
+        // The window's smallest size is this view's: without a width the
+        // message wraps to a letter a line and the window opens taller than the screen.
+        .frame(minWidth: 440, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }

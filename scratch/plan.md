@@ -6,10 +6,13 @@ Task 923677. Reference: `DESIGN.md` ("The language", "What we avoid") and the
 once their screens shipped; `git show fd90d7e6ad:design/prototypes/desktop-more.html`
 has them, and `docs/surfaces.md` holds the wording now.
 
-Slices 1 to 5 are built and were looked at in the Dev app
-(`scratch/qa.html`). Slice 6, every failure beside content as a
-`FailureLine`, is built and unseen on screen. Next: the gate checks and one look at "Not started." on
-an unlocked display (questions 48).
+Slices 1 to 6 are built and were looked at in the Dev app
+(`scratch/qa.html`, three runs). Of slice 6's lines, two were seen on a real
+failure ("Workspace did not open.", "Latest read failed."); the rest have
+view tests or nothing (the page lists which). Next: the gate checks and one
+look at "Not started." on an unlocked display (questions 48). A Task started
+from New Task opens beside "Files did not open" (Task ea8659, outside this
+change); a demo meets it on the first Start.
 
 ## Outcome
 
@@ -578,3 +581,9 @@ match.
   "Describe a Graph".
 - `docs/work.md`: `graph.steps[].interactive` covers a stop inside the step.
 
+Third qa (at 09351ba8ac): the Open Work window had grown to 480 by 1,989 pt
+with slice 6's `FailureLine` as its whole content; it has a minimum width
+now (questions 56). The workspace's "Layout not saved: …" became the same
+`FailureLine` the Dashboard tile draws (questions 57).
+`scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|NewTaskTests|WorkNavigationTests|workStates'`
+passed after both (63 tests in 5 suites); qa ran it.

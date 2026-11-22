@@ -209,3 +209,23 @@ Made while building slice 6 with nobody present.
     "Current work did not read."
 55. `Views/WaveDetailPane.swift:248`, the Wave page's unavailable Tasks, was
     not in the plan's list and became "Tasks did not load." with the rest.
+
+Made at the third qa with nobody present; `scratch/qa.html` has the captures.
+
+56. The Open Work window opened 480 by 1,989 pt after slice 6 (240 before
+    it): a `FailureLine` was the window's whole content and set its smallest
+    size. Fixed with a minimum width on `WorkspaceOpeningFeedback`. Not done:
+    a floor inside `FailureLine` itself, which would cover "The latest read
+    of this repository failed." and "Layout not saved." in the main window
+    without each site minding it, and could squeeze the line in a narrow
+    tile. Neither of those two was seen on screen. Which?
+57. The workspace's "Layout not saved: …" (`SessionsView.swift`) was plain
+    text beside the Dashboard tile's `FailureLine` for the same failure. It
+    is the same line now.
+58. Question 45, seen again on the first Start in a fresh window, so every
+    Start from New Task opens beside "Files did not open". Filed as Task
+    ea8659; nothing in this change touches it.
+59. The backlog's "Brief not saved · …", "Brief not restored · …" and "Order
+    not saved · …" share the one-string notice that says "Filed fc6ad0".
+    Left: a `FailureLine` there needs the notice to carry a failure apart
+    from its message. Convert them in this change?

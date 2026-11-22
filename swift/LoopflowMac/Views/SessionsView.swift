@@ -1721,8 +1721,7 @@ struct SessionsContentView: View {
         return VStack(spacing: 0) {
             if entry.isRestoringIntent { ProgressView("Restoring workspace") }
             if let error = entry.persistenceError {
-                HStack {
-                    Text("Layout not saved: " + error).foregroundStyle(palette.warning).textSelection(.enabled)
+                FailureLine("Layout not saved.", machine: error) {
                     Button("Reload saved intent") { Task { await entry.loadPaneIntent() } }
                 }.padding(8)
             }

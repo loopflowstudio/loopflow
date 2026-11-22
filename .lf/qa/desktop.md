@@ -199,6 +199,9 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
 `<name>.png` and `window.attachedSheet` to `<name>-sheet.png`. Start
 `DesktopServer` under the same variable so `lf desktop` works in `live` mode.
 
+- The loop also needs every other visible window written out (`<name>-w<n>.png`):
+  the Open Work window is its own window, not a sheet. Send clicks and keys to
+  `window.attachedSheet ?? window`.
 - Relaunch with `--args -ApplePersistenceIgnoreState YES --repo <path>`. After
   the first quit the bundle restores "no windows" and a later launch sits with
   none (`desktop state` lists `"windows": []`, the log shows only
@@ -243,5 +246,23 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
 - `lf desktop state --json` is one long document; read it through `jq`. A
   pane's `location.worktree` and `attachment` say where it points and whether
   it opened.
+- A window's size comes back from the bundle's defaults. Before measuring one,
+  quit and `defaults delete <bundle id> "NSWindow Frame open-work"` (or
+  `workspace-AppWindow-1`); otherwise a frame from an earlier build is what
+  opens.
+- "Workspace did not open.": `open -g -b <bundle id>
+  'loopflow://nosuchrepo/task/abc123'` opens the Open Work window on it.
+- "Latest read failed." in the Files pane: open a started Task with its
+  `loopflow://<repo name>/task/<id>` link, run `lf --task <id> desktop do files
+  path=<file>` from its checkout, then `chmod 000` the checkout for a few
+  seconds and restore it.
+- A synthesized click does not give a SwiftUI `TextEditor` the keyboard (the
+  backlog's brief editor), so text cannot be typed there; New Task's field
+  works because the sheet opens with it focused.
+- Moving a repository's `.git` away under an open window shows nothing: the
+  page keeps its last read.
+- Stopping the private server leaves its holder, the stand-in providers and any
+  `lf task run` alive. List them with `ps -axo pid,ppid,command | grep
+  <private dir>` and stop those PIDs, children first.
 - Give the isolated `HOME` a `src/` directory, or the status line shows
   "Read …/home/src: No such file or directory".

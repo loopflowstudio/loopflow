@@ -13,17 +13,113 @@
 </style>
 
 <h1>QA: New Task and the empty and failed states</h1>
-<p>Task 923677. Two runs are on this page. The second, on 2026-11-22 at 8361af6d79 plus its one fix, went through the
-empty repository (slice 5), the failures New Task shows when the Machine is away, a Wave's default, and what a
-released build does on a fresh repository. The first run's page follows it unchanged.</p>
-<p>Both used the branch's Loopflow for Mac in an isolated bundle with its own bundle ID, a private Machine
+<p>Task 923677. Three runs are on this page, newest first. The third, on 2026-11-22 at 09351ba8ac plus its two
+fixes, looked at what slice 6 and the compress after it changed (every failure beside content as one line, the empty
+repository's state as the repository's form only) and went through the main path again from a fresh repository.</p>
+<p>Every run used the branch's Loopflow for Mac in an isolated bundle with its own bundle ID, a private Machine
 (<code>LF_HOME=/tmp/lfq923b/lf</code>, the branch's <code>lf server run</code>, a stand-in <code>claude</code>) and
 <code>git init</code> directories made for the run. The screen was locked throughout: windows were captured from the
 app's own rendering (<code>cacheDisplay</code>) and driven through <code>lf desktop</code> and a capture loop added to
-<code>LoopflowApp.swift</code> for the run only (type into the sheet, ⌘↩, a click at a point). That loop is reverted
-and not committed. Nothing touched the installed app, the shared Loopflow Dev bundle, its server or <code>~/.lf</code>.</p>
+the app for the run only (type into the sheet, ⌘↩, a click at a point). That loop is removed and not committed.
+Nothing touched the installed app, the shared Loopflow Dev bundle, its server or <code>~/.lf</code>.</p>
 
-<h2>What works now</h2>
+<h2>The third run: what works now</h2>
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>A fresh <code>git init</code> directory, Loopflow Light</td><td>"No planned Work in this repository" with its two buttons. The sidebar reads "No working Tasks in this list." with its full stop.</td></tr>
+<tr><td><b>New Task ⌘N</b> from the state, a request, <b>File</b></td><td>The sheet as before (<code>code</code>, "the default", five steps, "You take part at ship-review and verify."). File closes it and brings the page with the Task selected and "Filed fc6ad0"; <code>lf task list</code> has it.</td></tr>
+<tr><td>A path that is not a repository, Loopflow Dark, then <code>git init</code> and <b>Retry</b></td><td>"This repository did not open", the message in mono, Retry; Retry opens the repository on its empty state. The compress moved this branch of <code>RepositoryWorkspaceContent</code>; it reads the same.</td></tr>
+<tr><td>Coming back to a repository with a started Task</td><td>The repository's page: the Task under the sidebar, "Nothing is waiting in this repository." beside <b>New</b>.</td></tr>
+<tr><td>A link to a repository this Machine does not know (<code>loopflow://nosuchrepo/task/abc123</code>)</td><td>The Open Work window: "Workspace did not open." strong in the failure ink, the Machine's message in mono, OK. Fixed in this run (below).</td></tr>
+<tr><td>A file open in a Task's Files pane, then its checkout made unreadable</td><td>"Latest read failed." above the last text read, with "cannot open Task file "NOTES.md": Permission denied (os error 13)" in mono, wrapping inside the 410 pt pane. The first slice 6 line seen on a real failure.</td></tr>
+</table>
+<div class="pair">
+  <div><img src="qa/s6-empty-light.jpg"><p class="cap">Fresh repository.</p></div>
+  <div><img src="qa/s6-filed-light.jpg"><p class="cap">After New Task and File.</p></div>
+  <div><img src="qa/s6-notrepo-dark.jpg"><p class="cap">Not a repository, Loopflow Dark.</p></div>
+  <div><img src="qa/s6-retried-dark.jpg"><p class="cap">After <code>git init</code> and Retry.</p></div>
+  <div><img src="qa/s6-files-read-failed.jpg"><p class="cap">"Latest read failed." in the Files pane.</p></div>
+  <div><img src="qa/s6-returning-light.jpg"><p class="cap">Reopened on a repository with one started Task.</p></div>
+</div>
+<div class="sheet"><img src="qa/s6-sheet.jpg"><p class="cap">The sheet at 09351ba8ac.</p></div>
+
+<h2>The third run: fixed</h2>
+<h3>The Open Work window opened 1,989 pt tall</h3>
+<p>Slice 6 drew the failed link's message as a <code>FailureLine</code>. The window takes its smallest size from its
+content, and a <code>FailureLine</code>'s message keeps its full height at whatever width it is offered, so at no
+width it wrapped to a letter a line: the window opened 480 by 1,989, taller than the display, with the line in a band
+across its middle. Measured three ways with the saved frame cleared each time
+(<code>defaults delete &lt;bundle&gt; "NSWindow Frame open-work"</code>): the file as it was before slice 6 gives 480 by
+240, slice 6 gives 480 by 1,989, and the fix gives 480 by 240. The fix is a minimum width on the window's content
+(<code>WorkspaceOpeningFeedback</code>, <code>RepositoryWorkspaceView.swift</code>), which also sets the line at the
+window's top-left.</p>
+<div class="pair">
+  <div><img src="qa/s6-openwork-before.jpg" style="max-height:520px;width:auto"><p class="cap">Before: the whole window, 480 by 1,989 pt.</p></div>
+  <div><img src="qa/s6-openwork-after-light.jpg"><img src="qa/s6-openwork-dark.jpg"><p class="cap">After, Loopflow Light and Dark: 480 by 240 pt.</p></div>
+</div>
+<h3>A workspace whose layout was not saved still read "Layout not saved: …" as plain text</h3>
+<p>A Dashboard tile draws the same failure as <code>FailureLine("Layout not saved.", …)</code>; the workspace's own
+line (<code>SessionsView.swift</code>) was missed by slice 6. It is the same line now, with <b>Reload saved intent</b>
+inside it. Not seen on screen: nothing in a locked session makes a layout write fail.</p>
+<pre>scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|NewTaskTests|WorkNavigationTests|workStates'
+✔ Test run with 63 tests in 5 suites passed</pre>
+
+<h2>The third run: still wrong or open, worst first</h2>
+<h3>1. A Task started from New Task opens beside "Files did not open"</h3>
+<p>Seen again, this time in a fresh window on the first ⌘↩ in a fresh repository, so the second run's guess (a browser
+pane opened earlier through <code>lf desktop do graph-log</code>) is ruled out. Every Start from New Task ends here
+until the app is reopened. <code>lf desktop state</code> shows the Files pane at the repository
+(<code>/private/tmp/lfq923b/notrepo3</code>) and the conversation at the checkout
+(<code>…/notrepo3.a0254c-add-a-license</code>). This branch's diff touches nothing in how a new Task's workspace is made
+or in <code>SessionsWorkspace.files(for:)</code>; what it changed is that the failure now has a title. Filed as Task
+ea8659. Someone demoing this change will meet it on the first Start.</p>
+<img src="qa/s6-started-dark.jpg" style="max-width:700px">
+<p class="cap">The first Start in a fresh window.</p>
+<h3>2. A <code>FailureLine</code> can set a window's smallest size</h3>
+<p>The Open Work window was the one place a <code>FailureLine</code> was a window's whole content. "The latest read of
+this repository failed." and "Layout not saved." sit in a stack directly under the main window, outside any scroll
+view, and neither could be made to appear, so whether a long message there pushes the window's minimum height was not
+seen. The Files pane's line did not move the window (1280 by 800 before and after).</p>
+<h3>3. The backlog's own failures are a notice with a middle dot</h3>
+<p>"Brief not saved · …", "Brief not restored · …" and "Order not saved · fc6ad0: …" go to the same one-string notice
+that says "Filed fc6ad0" (<code>BacklogView.swift:465</code>, <code>:530</code>, <code>:551</code>). They are failures
+beside content and not on slice 6's list. Read in the code only: with the server stopped, a click on Save did not
+reach the editor (a synthesized click does not give a SwiftUI <code>TextEditor</code> the keyboard, so the brief could
+not be changed first). Making them <code>FailureLine</code>s means the notice carrying a failure apart from its
+message; left for a decision.</p>
+<h3>4. Smaller things seen</h3>
+<ul>
+<li>"This repository did not open" in Loopflow Dark stands on a darker ground than the workspace it opens into
+(captures above): the launch window and the workspace window differ.</li>
+<li>The Open Work window's OK is a system button; the states' buttons are <code>LoopflowButtonStyle</code>.</li>
+<li>"Start · code" in the backlog still has its middle dot.</li>
+</ul>
+
+<h2>The third run: not reached, and why</h2>
+<ul>
+<li><b>"The latest read of this repository failed."</b> Moving the repository's <code>.git</code> away under the open
+window changed nothing on screen in eight seconds; the page kept its last read. Stopping the server gives the "Machine
+is away" notice instead (second run).</li>
+<li><b>"Not renamed.", "Not removed.", "Not bound."</b> Their sheets open from menus, which need a pointer.
+<code>RenameWaveSheetTests</code> and <code>RemoveWaveSheetTests</code> read them headless; all three sheets have a
+fixed width, so the line wraps inside it.</li>
+<li><b>"Not saved." (a Task's description), "Project not prepared.", "Tasks did not load.", "Planning is
+unavailable.", "Repositories did not load.", "Current work not read.", "Not sent."</b> No way found to make each
+fail from a private Machine in a locked session. <code>ProjectActivationTests</code> covers the Project one.</li>
+<li><b>"Not started." with no Task selected, menus, terminal faces, real keys.</b> As in the second run: an unlocked
+display.</li>
+</ul>
+
+<h2>The third run: left behind</h2>
+<p>The private server, its holder, the Graph run and every stand-in provider are stopped (the second run's holder and
+four stand-ins were still alive and are stopped too). The QA bundle is deleted, unregistered and its defaults removed.
+<code>/tmp/lfq923b</code> is still on disk.</p>
+
+<h2>The second run (at 8361af6d79)</h2>
+<p>It went through the empty repository (slice 5), the failures New Task shows when the Machine is away, a Wave's
+default, and what a released build does on a fresh repository. Its items 1 and 3 were settled by the second concept
+review and slice 6; item 2 is item 1 above.</p>
+<h3>What works now</h3>
 <table>
 <tr><th>Scenario</th><th>Result</th></tr>
 <tr><td>A fresh <code>git init</code> directory in the Dev app, Light and Dark</td><td>"No planned Work in this repository", "Say what you want built, or talk it through first.", <b>New Task ⌘N</b> (accent) and <b>Open the repository conversation</b>.</td></tr>
@@ -57,8 +153,8 @@ and not committed. Nothing touched the installed app, the shared Loopflow Dev bu
   <div><img src="qa/s5-wave-page-dark.jpg"><p class="cap">The Wave's page with nothing filed.</p></div>
 </div>
 
-<h2>Fixed in this run</h2>
-<h3>A Files pane that could not open showed the bare message, centred</h3>
+<h3>Fixed in this run</h3>
+<h4>A Files pane that could not open showed the bare message, centred</h4>
 <p>The pane drew <code>Text(error.localizedDescription)</code> with no title, in the middle of the pane. It is the
 shared state now: "Files did not open", the Machine's message in mono (<code>WorkspacePanesView.swift</code>). It has
 no button: the pane has no re-read of its own, and it opens once the Task is reopened.</p>
@@ -69,9 +165,9 @@ no button: the pane has no re-read of its own, and it opens once the Task is reo
 <pre>scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|NewTaskTests'
 ✔ Test run with 12 tests in 3 suites passed</pre>
 
-<h2>Still wrong or open, worst first</h2>
+<h3>Still wrong or open, worst first</h3>
 
-<h3>1. A released build never opens on "No planned Work in this repository"</h3>
+<h4>1. A released build never opens on "No planned Work in this repository"</h4>
 <p>The same fresh <code>git init</code> directory, opened in the same build under a bundle ID that does not end in
 <code>.dev</code>, goes straight to the repository's page with its conversation started. The state the prototype
 draws is what only the Dev app shows on arrival; a released build shows it after the conversation is closed. This is
@@ -80,7 +176,7 @@ every build changes when a repository's agent starts, so it is left for a decisi
 <img src="qa/s5-released-light.jpg" style="max-width:700px">
 <p class="cap">Fresh repository, bundle ID <code>com.loopflow.mac.qa923677rel</code>: no empty state.</p>
 
-<h3>2. A Task started from New Task opens beside "Files did not open"</h3>
+<h4>2. A Task started from New Task opens beside "Files did not open"</h4>
 <p>Seen three times in one window, twice after Try again and once on an ordinary ⌘↩ with the server up: the new
 Task's Files pane reads "The Task file location changed. Its previous drafts are retained, not redirected." and stays
 that way. <code>lf desktop state</code> shows why: the pane's recorded location is the repository
@@ -91,7 +187,7 @@ cause is its own Task. The window had earlier opened a browser pane on another T
 <code>lf desktop do graph-log</code>, which may be what a new Task's layout copied; a first Start in a fresh window
 was not tried.</p>
 
-<h3>3. About twenty failures beside content are still bare text</h3>
+<h4>3. About twenty failures beside content are still bare text</h4>
 <p>The plan's list of inline failures missed these; none was reached on screen in either run, so none was changed
 blind. In files this change touches: <code>TaskFilesView.swift:344</code> (a document's error),
 <code>:347</code> (read-only reason), <code>DashboardView.swift:238</code> (layout not saved),
@@ -102,7 +198,7 @@ window). Elsewhere: <code>WorkNavigator.swift:475</code>, <code>WorkPalette.swif
 <code>SessionActionSheet.swift:76</code>, <code>RenameWaveSheet.swift:55</code>, <code>RepoView.swift:66</code>.
 The Wave page, the Create Wave forms, settings and telemetry are the plan's exclusions.</p>
 
-<h3>4. A stopped Graph's reason reads as body text with two plain buttons</h3>
+<h4>4. A stopped Graph's reason reads as body text with two plain buttons</h4>
 <p>When the stand-in <code>claude</code> failed its version check, the Graph processes pane read "kickoff: execution
 failed: claude --version failed (exit status: 1): … . Inspect its history and effects, then launch fresh work" in the
 sentence face, with <b>Files</b> and <b>Refresh</b> as system buttons. The sentence is Rust's position line, so the
@@ -110,7 +206,7 @@ Machine's part is not set apart in mono, and the two buttons are not <code>Loopf
 is one string on the wire.</p>
 <img src="qa/s5-graph-failed-dark.jpg" style="max-width:700px">
 
-<h3>5. Smaller things seen</h3>
+<h4>5. Smaller things seen</h4>
 <ul>
 <li>The sidebar's "No working Tasks in this list" and "No working Tasks in this Wave" have no full stop; every other
 one-sentence empty got one.</li>
@@ -128,7 +224,7 @@ above the new request's "Not started." pane.</li>
 <img src="qa/s5-server-down-dark.jpg" style="max-width:700px">
 <p class="cap">Server stopped: the conversation pane's line is cut short; the stale "Filed 8f9bad" is above the backlog.</p>
 
-<h2>Not reached, and why</h2>
+<h3>Not reached, and why</h3>
 <ul>
 <li><b>The real face of "Not started." under the title bar.</b> With no Task selected, the pane's scroll view meets
 the title bar and <code>cacheDisplay</code> returns it white (below). Two local builds, never committed, showed the
@@ -150,7 +246,7 @@ Task's planning failure.</b> View tests only.</li>
 <img src="qa/s5-not-started-white.jpg" style="max-width:700px">
 <p class="cap">What <code>cacheDisplay</code> returns for the "Not started." pane as committed, Loopflow Dark.</p>
 
-<h2>Left behind</h2>
+<h3>Left behind</h3>
 <p>The private server, holders and stand-in providers are stopped. Both QA bundles (Dev and the non-Dev one) are
 deleted, unregistered from LaunchServices and their defaults removed. <code>/tmp/lfq923b</code> (repositories, store,
 full-size captures) and the first run's <code>/tmp/lfq923</code> are still on disk.</p>

@@ -1,0 +1,29 @@
+at: c7506e875313e2f57bd25996d01eb5998107bb45
+first:
+  - path: swift/LoopflowiOS/README.md
+    why: What the phone shows, screen by screen
+  - path: DESIGN.md
+    why: The iPhone ramp and the shared components
+  - path: swift/Loopflow/Design/DesignSystem.swift
+    why: One ramp, a size per platform
+  - path: swift/Loopflow/Design/TaskRow.swift
+    why: The shared row and its one status vocabulary
+  - path: swift/Loopflow/Design/TaskActions.swift
+    why: What a Task offers, for both surfaces
+  - path: swift/Loopflow/Design/StateView.swift
+    why: Every empty and failed state on the phone
+  - path: swift/LoopflowiOS/TaskWorkspaceView.swift
+    why: The Task screen, read live from the Machine
+  - path: swift/LoopflowMac/Views/TaskWorkView.swift
+    why: The Mac's bar draws TaskActions
+  - path: swift/LoopflowiOS/TaskListView.swift
+    why: The list draws the shared row
+  - path: swift/Loopflow/Services/OwnerProtocol.swift
+    why: Three Session frame tags the phone could not read
+  - path: swift/LoopflowTests/TaskActionsTests.swift
+    why: The rule for Start, Run and Auto-Ship
+  - path: swift/LoopflowTests/TypographyDisciplineTests.swift
+    why: The source scan that keeps literals out
+hide:
+  - path: swift/LoopflowMac/Design/TaskRow.swift
+    why: Moved to the shared library

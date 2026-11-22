@@ -2651,7 +2651,7 @@ final class WorkModel {
         state.query = ""
         state.selection = []
         state.select(created.receipt.task.id)
-        state.notice = "Filed \(created.receipt.task.identifier)"
+        state.notice = .did("Filed \(created.receipt.task.identifier)")
         navigation.backlogs[view] = state
         // Its backlog row is the Task's presentation; nothing opens.
         await CreationRecovery.shared.presented([requestID])

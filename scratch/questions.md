@@ -242,3 +242,13 @@ present; the page is `scratch/concept-review.html`.
 61. Settles 56: `FailureLine` gets no minimum width of its own; a site where
     it is the whole content sets the width, as Open Work does.
 62. Settles 53: readiness sentences with no Machine message stay text.
+
+Made while building slice 7, with nobody present.
+
+63. The Changes sidebar's one notice held two failures: the settings read
+    (on slice 7's list) and the hidden-paths save ("Hidden paths are not
+    saved: …", not on it). Both reach the one draw site, so the save is a
+    `FailureLine` too: "Hidden paths were not saved." Holding "the error
+    alone", as the plan said, would have called a failed save a failed load.
+64. A refused rank reads "A-1's order not saved." with the Machine's message
+    in mono. The plan said only that the identifier stays in `what`.

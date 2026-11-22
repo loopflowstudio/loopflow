@@ -270,7 +270,7 @@ private struct RoadmapWaveCard: View {
             if let project = roadmap.currentProject { WaveProjectView(project: project, repo: roadmap.wave.repo) }
             switch roadmap.tasks {
             case .unavailable(let reason):
-                Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(palette.warning)
+                FailureLine("Tasks did not load.", machine: reason)
             case .available(let tasks, let truncated):
                 if tasks.isEmpty { Text("No Tasks in this Project.").emptyLine() }
                 ForEach(tasks) { task in
@@ -280,7 +280,9 @@ private struct RoadmapWaveCard: View {
                 if truncated { Text("Older Tasks are truncated.").foregroundStyle(palette.warning) }
             }
             ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
-                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)").foregroundStyle(palette.warning)
+                FailureLine("\(task.taskIdentifier) is unavailable.", machine: task.reason) {
+                    Text(task.recovery).font(Typography.text).foregroundStyle(palette.textSecondary)
+                }
             }
         }
         .padding(Spacing.lg)

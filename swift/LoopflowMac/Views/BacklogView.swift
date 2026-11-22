@@ -31,6 +31,12 @@ enum BacklogOwner: Equatable {
     }
 }
 
+/// What the last backlog action did, or what failed with the Machine's message.
+enum BacklogNotice: Equatable {
+    case did(String)
+    case failed(String, machine: String)
+}
+
 /// What a person has done to one view's backlog; it outlives entering a Task.
 struct BacklogState: Equatable {
     var selection: Set<String> = []
@@ -46,8 +52,7 @@ struct BacklogState: Equatable {
     var editing: String?
     var draft = ""
     var showsObjective = false
-    /// What the last action did, or why it didn't.
-    var notice: String?
+    var notice: BacklogNotice?
 
     /// Select one row alone, or clear it when it is the only one selected.
     mutating func select(_ id: String) {
@@ -449,8 +454,12 @@ enum BacklogChange: Sendable {
 // MARK: - Actions
 
 extension WorkModel {
-    private func backlogNotice(_ view: WorkNavigation.Board, _ notice: String?) {
-        navigation.backlogs[view, default: BacklogState()].notice = notice
+    private func backlogNotice(_ view: WorkNavigation.Board, _ did: String) {
+        navigation.backlogs[view, default: BacklogState()].notice = .did(did)
+    }
+
+    private func backlogFailure(_ view: WorkNavigation.Board, _ what: String, _ error: any Error) {
+        navigation.backlogs[view, default: BacklogState()].notice = .failed(what, machine: error.localizedDescription)
     }
 
     /// Write each rank in turn; the first refusal stops the rest and says so.
@@ -462,7 +471,7 @@ extension WorkModel {
         var landed: [(task: RoadmapTask, rank: Int)] = []
         for write in writes {
             do { try await rankTask(write.task, rank: write.rank) } catch {
-                backlogNotice(view, "Order not saved · \(write.task.task.identifier): \(error.localizedDescription)")
+                backlogFailure(view, "\(write.task.task.identifier)'s order not saved.", error)
                 break
             }
             landed.append(write)
@@ -527,7 +536,7 @@ extension WorkModel {
             backlogNotice(view, "Saved \(task.task.identifier)'s brief")
             return .brief(task: task, previous: task.task.description, written: text)
         } catch {
-            backlogNotice(view, "Brief not saved · \(error.localizedDescription)")
+            backlogFailure(view, "Brief not saved.", error)
             return nil
         }
     }
@@ -548,7 +557,7 @@ extension WorkModel {
             do {
                 try await updateTaskDirective(task: current, text: previous)
                 backlogNotice(view, "Brief restored")
-            } catch { backlogNotice(view, "Brief not restored · \(error.localizedDescription)") }
+            } catch { backlogFailure(view, "Brief not restored.", error) }
         }
     }
 }
@@ -736,11 +745,18 @@ struct BacklogView: View {
     @ViewBuilder
     private var notices: some View {
         if let notice = list.state.notice {
-            Text(notice).font(Typography.text).foregroundStyle(palette.textSecondary).lineLimit(2)
-                .textSelection(.enabled)
-                .accessibilityIdentifier("backlog-notice")
-                .padding(.horizontal, Spacing.xl)
-                .padding(.vertical, Spacing.sm)
+            Group {
+                switch notice {
+                case .did(let did):
+                    Text(did).font(Typography.text).foregroundStyle(palette.textSecondary).lineLimit(2)
+                        .textSelection(.enabled)
+                case .failed(let what, let machine):
+                    FailureLine(what, machine: machine)
+                }
+            }
+            .accessibilityIdentifier("backlog-notice")
+            .padding(.horizontal, Spacing.xl)
+            .padding(.vertical, Spacing.sm)
         }
     }
 
@@ -931,7 +947,7 @@ struct BacklogView: View {
         case .toTop: reorder(list.toTop(tasks.map(\.id)))
         case .nudge(let offset):
             if list.canReorder { reorder(list.nudge(tasks.map(\.id), by: offset)) }
-            else { state.wrappedValue.notice = "Order lives in each Wave" }
+            else { state.wrappedValue.notice = .did("Order lives in each Wave") }
         case .reorder(let writes): reorder(writes)
         case .move(let wave): model.moveBacklog(tasks, toWave: wave, in: view)
         case .save(let task, let text): Task { register(await model.saveBacklogBrief(task, text: text, in: view), "Edit Brief") }

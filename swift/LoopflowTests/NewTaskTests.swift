@@ -67,7 +67,7 @@ struct NewTaskTests {
         let created = try RegistryQuery.decode(TaskCreated.self, from: receipt)
         let state = try #require(model.navigation.backlogs[.repository])
         #expect(state.selection == [created.receipt.task.id] && state.filter == .all && state.query.isEmpty)
-        #expect(state.notice == "Filed \(created.receipt.task.identifier)")
+        #expect(state.notice == .did("Filed \(created.receipt.task.identifier)"))
         #expect(model.navigation.startingTask == nil)
     }
 

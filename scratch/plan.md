@@ -6,10 +6,10 @@ Task 923677. Reference: `DESIGN.md` ("The language", "What we avoid") and the
 once their screens shipped; `git show fd90d7e6ad:design/prototypes/desktop-more.html`
 has them, and `docs/surfaces.md` holds the wording now.
 
-Slices 1 to 6 are built and were looked at in the Dev app
-(`scratch/qa.html`, three runs). **Next: slice 7**, five failures still
-drawn outside `FailureLine` (the list is under "Slices"). After it: the gate
-checks and one look at "Not started." on an unlocked display (questions 48).
+Slices 1 to 7 are built; 1 to 6 were looked at in the Dev app
+(`scratch/qa.html`, three runs) and slice 7's five lines were not (none is
+reachable without breaking the Machine). **Next:** the gate checks and one
+look at "Not started." on an unlocked display (questions 48).
 A Task started from New Task opens beside "Files did not open" (Task ea8659,
 outside this change); a demo meets it on the first Start.
 
@@ -541,7 +541,7 @@ demo: not headless; qa or demo runs it.
    - Checks: `scripts/test_desktop.sh --filter 'EmptyStateTests|TypographyDisciplineTests|RemoveWaveSheetTests|RenameWaveSheetTests|WorkNavigationTests|ProjectActivationTests|emptyListStates'`
      passed at 3c4b0d4025, after the last edit (70 tests in 7 suites).
 
-7. **The last five failures drawn another way. To build.** Swift only; no
+7. **The last five failures drawn another way. Built.** Swift only; no
    new type beyond the backlog's notice saying which it is. The third
    as-built concept review read every `Text(error)`, `palette.warning`,
    `palette.failure` and `exclamationmark` under `swift/LoopflowMac`; this
@@ -582,6 +582,15 @@ demo: not headless; qa or demo runs it.
      `scripts/test_desktop.sh --filter 'BacklogViewTests|EmptyStateTests|TypographyDisciplineTests|WorkNavigationTests'`.
      Dev app: none of the five is reachable without breaking the Machine;
      qa looks at whichever it can.
+   - Check run after the last edit: `scripts/test_desktop.sh --filter 'BacklogViewTests|EmptyStateTests|TypographyDisciplineTests|WorkNavigationTests|NewTaskTests|TaskFilesTests'`
+     passed (124 tests in 6 suites), the new backlog test among them.
+   - As built: the backlog's notice is `BacklogNotice` (`.did` or
+     `.failed(what, machine:)`); a refused rank reads "A-1's order not
+     saved." The Changes sidebar's notice also carried a failed save
+     ("Hidden paths are not saved: …") through the same draw site, so it
+     is a `HiddenPathsFailure` (what, machine) and the save reads "Hidden
+     paths were not saved." (questions 63). The sidebar is 236 pt wide: its
+     line is the one to look at first for wrapping.
 
 Outside this change, on the page for whoever wants it: a stopped Graph's
 reason is one string on the wire, so the Machine's part of "kickoff:

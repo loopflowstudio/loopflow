@@ -127,7 +127,7 @@ struct BacklogViewTests {
         for _ in 0..<200 where await runs.calls.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await runs.calls.map { $0.joined(separator: " ") }.sorted() == [
             "task run A-3 auto --json", "task run A-4 auto --json"])
-        #expect(model.navigation.backlogs[view]?.notice == "Started 2")
+        #expect(model.navigation.backlogs[view]?.notice == .did("Started 2"))
         #expect(model.navigation.backlogs[view]?.selection == ["A-5"])
         // Several started Tasks leave Start off and say why.
         let both = [try task("A-6", rank: 5, step: "demo"), try task("A-7", rank: 6, step: "gate")]
@@ -138,7 +138,7 @@ struct BacklogViewTests {
         #expect(BacklogList.startUnavailable(stuck) == "Task checkout is on another Machine")
         // Claiming a started Task says where it went.
         model.claimBacklog(started.selected, in: view)
-        #expect(model.navigation.backlogs[view]?.notice == "Claimed A-5 · now in Working")
+        #expect(model.navigation.backlogs[view]?.notice == .did("Claimed A-5 · now in Working"))
     }
 
     @Test func filterAndSearchDropHiddenRowsAndAbandonNamesWhatItRemoves() throws {
@@ -212,8 +212,7 @@ struct BacklogViewTests {
         let view = WorkNavigation.Board.wave("wave-a")
         let change = try #require(await model.rankBacklog(list(tasks).nudge(["A-1"], by: 1), in: view))
         await model.revertBacklog(change, in: view)
-        let notice = try #require(model.navigation.backlogs[view]?.notice)
-        #expect(notice.hasPrefix("Order not saved · A-1"), "\(notice)")
+        #expect(model.navigation.backlogs[view]?.notice == .failed("A-1's order not saved.", machine: "store is locked"))
     }
 
     @Test func claimIsOffForSomeoneElsesTaskAndMineOffersAvailable() throws {
@@ -286,6 +285,25 @@ struct BacklogViewTests {
             _ = try backlogView.inspect().find(viewWithAccessibilityIdentifier: "backlog-brief-\(first.id)")
         }
         #expect(model.backlog(view).text(heading: []).contains("› \(first.task.identifier)"))
+    }
+
+    @Test func aFailedBriefSaveIsAFailureLineAndAFiledTaskStaysText() async throws {
+        let roadmap = try roadmap()
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("store is locked") },
+                              repoPath: roadmap.wave.repo)
+        model.applyFixture(roadmap: .available(try snapshot()), waves: .available([]), workActivity: .loading, repos: [])
+        let view = WorkNavigation.Board.wave(roadmap.wave.id)
+        let task = try #require(model.backlog(view).rows.first)
+        #expect(await model.saveBacklogBrief(task, text: "New brief", in: view) == nil)
+        let failed = try BacklogView(model: model, view: view).inspect().find(FailureLine<EmptyView>.self)
+        _ = try failed.find(text: "Brief not saved.")
+        _ = try failed.find(text: "store is locked")
+
+        model.navigation.backlogs[view]?.notice = .did("Filed \(task.task.identifier)")
+        let filed = try BacklogView(model: model, view: view).inspect()
+        #expect(try filed.find(viewWithAccessibilityIdentifier: "backlog-notice").find(ViewType.Text.self).string()
+            == "Filed \(task.task.identifier)")
+        #expect(throws: (any Error).self) { try filed.find(FailureLine<EmptyView>.self) }
     }
 
     @Test func wavePartsHideOnHoverAndTheBacklogHeaderShowsThem() throws {

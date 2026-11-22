@@ -96,7 +96,8 @@ struct DashboardView: View {
                 // One line: membership may be incomplete; every reason stays in its help.
                 if let first = plan.resolution.unavailable.first {
                     let more = plan.resolution.unavailable.count - 1
-                    Text(more == 0 ? first : "\(first) (+\(more) more)").foregroundStyle(palette.warning).lineLimit(1)
+                    FailureLine("Some Work did not load.", machine: more == 0 ? first : "\(first) (+\(more) more)")
+                        .lineLimit(1)
                         .help(plan.resolution.unavailable.joined(separator: "\n"))
                         .accessibilityIdentifier("dashboard-unavailable")
                 }

@@ -486,10 +486,6 @@ struct SessionPaneView: View {
     /// Program identity and a Close control on hover; zoom stays in the context menu.
     private var strip: some View {
         HStack(spacing: 8) {
-            if let tone = programTone {
-                Circle().fill(tone.ink(in: theme.palette)).frame(width: 6, height: 6)
-                    .accessibilityHidden(true)
-            }
             Menu {
                 paneContentChoices
             } label: {
@@ -533,8 +529,10 @@ struct SessionPaneView: View {
                     .help(programHeading.detail)
                     .accessibilityIdentifier("pane-context-\(pane.id)")
             }
-            if let status = _programStatus, status.summary != nil {
-                ProgramStatusLabel(status: status)
+            if let status = _programStatus, let mark = StatusMark(status: status) {
+                mark.frame(maxWidth: 340, alignment: .leading)
+            } else if let tone = programTone {
+                StatusMark(nil, tone: tone)
             }
             if let error = _programStatusSurface?.observationError {
                 Image(systemName: "exclamationmark.circle")
@@ -718,8 +716,7 @@ struct SessionPaneView: View {
     }
 
     private var programTone: WorkTone? {
-        if let report = _programStatus?.summary { return report.state.workTone }
-        return SessionProgramStatus(sessions: paneSessions.map(\.record), unavailable: nil).tone
+        SessionProgramStatus(sessions: paneSessions.map(\.record), unavailable: nil).tone
     }
 
     private var paneSessions: [SessionItem] {

@@ -104,7 +104,7 @@ struct TaskAutoControl: View {
             Button(on ? "Stop Auto-Ship" : "Auto-Ship") {
                 if on { model.turnAutoOff(task) } else { model.turnAutoOn(task) }
             }
-            .buttonStyle(WorkOutlineButtonStyle())
+            .buttonStyle(LoopflowButtonStyle())
             .fixedSize()
             .disabled(refusal != nil)
             .help(refusal ?? (on
@@ -142,7 +142,7 @@ struct TaskWorkflowBar: View {
             Spacer(minLength: 0)
             if let next {
                 Button(next.label) { model.startTaskFromInput(nil, task: task) }
-                    .buttonStyle(WorkOutlineButtonStyle())
+                    .buttonStyle(LoopflowButtonStyle())
                     .fixedSize()
                     .disabled(unavailable != nil)
                     .help(unavailable ?? next.help)

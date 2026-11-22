@@ -670,7 +670,7 @@ struct BacklogView: View {
             ShowHiddenMenu(model: model, view: view)
             if let roadmap { waveMenu(roadmap) }
             Button { model.navigation.palette = .newTask } label: { Label("New", systemImage: "plus") }
-                .buttonStyle(WorkOutlineButtonStyle()).fixedSize().help("File a Task (⌘N)")
+                .buttonStyle(LoopflowButtonStyle()).fixedSize().help("File a Task (⌘N)")
                 .accessibilityIdentifier("backlog-new")
         }
     }
@@ -870,7 +870,7 @@ struct BacklogView: View {
             case .new: Button("New") { model.navigation.palette = .newTask }
             }
         }
-        .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
+        .buttonStyle(LoopflowButtonStyle(.accent))
         .padding(Spacing.xl).frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityIdentifier("backlog-empty")
     }
@@ -1322,10 +1322,10 @@ struct BacklogBrief: View {
                     .accessibilityIdentifier("backlog-brief-editor")
                 HStack(spacing: Spacing.sm) {
                     Button("Save") { perform(.save(task, state.wrappedValue.draft)) }
-                        .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
+                        .buttonStyle(LoopflowButtonStyle(.accent))
                         .disabled(state.wrappedValue.draft == brief)
                         .keyboardShortcut("s", modifiers: .command)
-                    Button("Cancel") { state.wrappedValue.editing = nil }.buttonStyle(WorkOutlineButtonStyle())
+                    Button("Cancel") { state.wrappedValue.editing = nil }.buttonStyle(LoopflowButtonStyle())
                         .keyboardShortcut(.cancelAction)
                 }
             } else if brief.isEmpty {

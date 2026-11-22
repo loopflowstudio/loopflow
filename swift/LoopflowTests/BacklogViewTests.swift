@@ -346,7 +346,7 @@ struct BacklogViewTests {
         let backlogView = HideablePart(part: .backlog, view: view, model: model, workspace: conversation) { Text("Backlog") }
         try backlogView.inspect().find(viewWithAccessibilityIdentifier: "wave-zoom-backlog").button().tap()
         #expect(parts().map(\.zoomed) == [true, false, false])
-        try WorkBreadcrumbs(model: model).inspect().find(viewWithAccessibilityIdentifier: "zoom-out").button().tap()
+        try TitleBar(model: model).inspect().find(viewWithAccessibilityIdentifier: "zoom-out").button().tap()
         #expect(model.zoomedPart(in: view) == nil)
         // The conversation zooms as its session pane, so `-p session` agrees.
         try perform("zoom", ["part": "session", "on": "true"])

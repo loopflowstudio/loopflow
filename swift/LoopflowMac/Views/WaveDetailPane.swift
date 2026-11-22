@@ -66,7 +66,7 @@ struct WaveDetailPane: View {
 
     private var header: some View {
         HStack(spacing: Spacing.sm) {
-            WaveLensView(lens: wave.lens)
+            StatusMark(lens: wave.lens)
             Text(wave.displayName)
                 .font(Typography.lede)
                 .foregroundStyle(palette.text)
@@ -689,7 +689,7 @@ private struct RoadmapTaskView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
-            WaveLensView(lens: WaveLens.forTask(task.condition), diameter: 9, accessibilityId: "task-lens")
+            StatusMark(lens: WaveLens.forTask(task.condition)).accessibilityIdentifier("task-lens")
                 .frame(width: 14)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: Spacing.xxs) {

@@ -34,7 +34,7 @@ struct ThemeChooser: View {
                                 .lineLimit(1).truncationMode(.tail)
                                 .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
                         }
-                        .buttonStyle(WorkOutlineButtonStyle())
+                        .buttonStyle(LoopflowButtonStyle())
                         .workSelection(enabled && appearance.picker == side)
                         .disabled(!enabled)
                         .accessibilityLabel("\(side.menuTitle) theme")
@@ -91,7 +91,7 @@ struct ThemeChooser: View {
                 Button("Cancel") { appearance.cancel() }.disabled(appearance.saving).keyboardShortcut(.cancelAction)
                 Button("Apply") { Task { await appearance.apply() } }.keyboardShortcut(.defaultAction)
                     .disabled(!appearance.canApply)
-            }.buttonStyle(WorkOutlineButtonStyle())
+            }.buttonStyle(LoopflowButtonStyle())
         }
         .disabled(appearance.saving)
         .padding(20).frame(minWidth: 620, minHeight: 560)
@@ -153,7 +153,7 @@ struct ThemeChooser: View {
                     HStack(spacing: 6) { themeActions(entry) }
                     VStack(alignment: .leading, spacing: 6) { themeActions(entry) }
                 }
-                .font(Typography.meta).buttonStyle(WorkOutlineButtonStyle())
+                .font(Typography.meta).buttonStyle(LoopflowButtonStyle())
                 .padding([.horizontal, .bottom], 10)
             }
         }

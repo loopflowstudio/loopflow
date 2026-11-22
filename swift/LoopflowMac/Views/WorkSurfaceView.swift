@@ -102,7 +102,7 @@ struct WorkSurfaceView: View {
                             } label: {
                                 Label("New session", systemImage: "plus.bubble")
                             }
-                            .buttonStyle(WorkOutlineButtonStyle())
+                            .buttonStyle(LoopflowButtonStyle())
                             .disabled(model.navigation.startingTaskSessions.contains(task.id))
                             .help("Open an independent conversation with this Task's context in its worktree. No Graph is started.")
                             .accessibilityIdentifier("task-new-session")

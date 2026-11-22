@@ -951,14 +951,13 @@ struct WorkModelStreamTests {
         #expect(await feed.openCount == 3)
     }
 
-    @Test("New turns clear previews and an ended reader recovers without reviving old output")
+    @Test("New turns replace the Session excerpt and an ended reader recovers without reviving old output")
     func readerEndRecovers() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
         let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
-        let now = Date(timeIntervalSince1970: 1000)
         let entries = try fixture.sessionEntries()
         let original = try #require((JSONSerialization.jsonObject(with: Data(entries.json.utf8)) as? [[String: Any]])?.first)
         var answers = 0
@@ -980,9 +979,8 @@ struct WorkModelStreamTests {
             return try fixture.sessionsFrame(sequence: sequence, answers: answers, repo: "/src/loopflow", entries: json)
         }
         func preview() -> String {
-            let records = model.sessions.value ?? []
-            return SessionProgramStatus(sessions: records, unavailable: model.sessions.failure)
-                .preview(now: now, fallback: "brief", sessions: records).text
+            if model.sessions.failure != nil { return "failed" }
+            return model.sessions.value?.first?.preview?.text ?? "none"
         }
 
         try await feed.opened(1)
@@ -991,13 +989,13 @@ struct WorkModelStreamTests {
         await feed.send(try sessionFrame(2, turn: "Previous result", available: true))
         try await eventually { preview() == "Previous result" }
         await feed.send(try sessionFrame(3, turn: nil))
-        try await eventually { preview() == "Summary · brief" }
+        try await eventually { preview() == "none" }
         await feed.send(try sessionFrame(4, turn: "New turn output"))
         try await eventually { preview() == "New turn output" }
         await feed.fail(RegistryQueryError("reader exited"))
         try await eventually { model.sessions.failure == "reader exited" }
         #expect(model.sessions.value?.first?.preview?.text == "New turn output")
-        #expect(preview() == "Summary · brief")
+        #expect(preview() == "failed")
         #expect(model.roadmap.value != nil)
         #expect(!model.roadmap.isLoading)
 
@@ -1006,10 +1004,10 @@ struct WorkModelStreamTests {
         // Planning recovery alone cannot revive the old Session reading.
         await feed.send(try fixture.planningFrame(sequence: 1, answers: answers, renaming: "After restart"))
         try await eventually { model.task(id: "issue-now")?.task.task.name == "After restart" }
-        #expect(preview() == "Summary · brief")
+        #expect(preview() == "failed")
         await feed.send(try sessionFrame(2, turn: nil))
         try await eventually { model.sessions.failure == nil }
-        #expect(preview() == "Summary · brief")
+        #expect(preview() == "none")
         await feed.send(try sessionFrame(3, turn: "Recovered result", available: true))
         try await eventually { preview() == "Recovered result" }
     }
@@ -1450,7 +1448,7 @@ struct TaskPlanningReadabilityTests {
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: "Planning unavailable") }
         model.select(.task(id: key.id))
         #expect(model.selection == key.reference)
-        #expect(try WorkBreadcrumbs(model: model).inspect().find(text: "Readable local Task").string() == "Readable local Task")
+        #expect(try TitleBar(model: model).inspect().find(text: "Readable local Task").string() == "Readable local Task")
         let row = WorkTaskIdentity(presentation: model.taskPresentation(id: key.id))
         #expect(try row.inspect().find(text: "Readable local Task").string() == "Readable local Task")
         #expect(try row.inspect().find(text: "LOO-905").string() == "LOO-905")
@@ -1487,16 +1485,16 @@ struct TaskPlanningReadabilityTests {
         #expect(model.taskPresentation(id: key.id).title == "Loading Task…")
     }
 
-    @Test("Session status, preview age and keyboard hints do not require a full Task record")
+    @Test("Session status and keyboard hints do not require a full Task record")
     func partialSessionMetadata() throws {
         let fixture = try WorkTestFixture.load()
         let entries = try fixture.sessionEntries()
         let session = try #require(RegistryQuery.decode([SessionRecord].self, from: entries.json).first)
-        let metadata = TaskRowMetadata(id: key.id, task: nil, status: .available(session), sourceAge: "3s")
+        let presentation = WorkModel.TaskPresentation(title: "Loading Task…", identifier: nil, context: nil)
+        let metadata = TaskRow(id: key.id, presentation: presentation, task: nil, status: .available(session))
         #expect(try metadata.inspect().find(text: "Available · inferred").string() == "Available · inferred")
-        #expect(try metadata.inspect().find(text: "3s").string() == "3s")
         #expect(throws: (any Error).self) { try metadata.inspect().find(text: "Unowned") }
-        let shortcut = TaskRowMetadata(id: key.id, task: nil, status: .unknown, slotHint: "⌘1")
+        let shortcut = TaskRow(id: key.id, presentation: presentation, task: nil, status: .unknown, slotHint: "⌘1")
         #expect(try shortcut.inspect().find(text: "⌘1").string() == "⌘1")
     }
 
@@ -1565,7 +1563,7 @@ struct TaskPlanningReadabilityTests {
         for model in windows {
             let own = try #require(model.visibleTasks.first)
             model.select(.task(id: own.id))
-            let crumbs = WorkBreadcrumbs(model: model)
+            let crumbs = TitleBar(model: model)
             #expect(try crumbs.inspect().find(text: own.task.name).string() == own.task.name)
             #expect(try crumbs.inspect().find(text: "Updating…").string() == "Updating…")
             #expect(model.workStatus == .updating)

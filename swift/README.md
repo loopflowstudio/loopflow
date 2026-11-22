@@ -45,7 +45,7 @@ pending.
 
 **Last known** describes the reading supplying the displayed name. A read that
 starts failing raises one Notice for its part; the view keeps its last good
-reading, or stays empty, and the Notice goes when a read succeeds. A Task without a description has no summary line.
+reading, or stays empty, and the Notice goes when a read succeeds.
 If no name is known, the failed row says
 **Task unavailable**. Desktop reconnects automatically. A successful replacement
 updates the rows, retaining the selected workspace, panes and drafts.
@@ -157,14 +157,15 @@ even in a Task checkout. The Task's conversation list and breadcrumb Session
 picker use the same membership.
 
 A sidebar row is the Task's whole title, wrapped rather than cut, then its ID
-and lifecycle word. A Task that is blocked or waiting adds one line with what
-its program last reported:
+and status word: what its program reports (**Busy**, **Blocked**), or its
+lifecycle word (**Active**) while nothing reports. A Task whose program is
+blocked adds one line with what the program asked:
 
 ```text
 Loopflow for Mac's Task workspace matches
 the design prototype
-3d4350 · Active
-Waiting for you: approve the plan
+3d4350  Blocked
+Approve the plan?
 ```
 
 The selected row is filled; rows carry no stripe or border. A Wave's count
@@ -268,12 +269,10 @@ instead of replayed after reconnect.
 Progress posts name the runs that changed, including an earlier run that finishes
 or fails while newer work is running.
 
-Task rows show reported program status, Task IDs, stored PR links and the recorded
-remote Machine. Task IDs link to the issue when its URL is recorded; otherwise they
-remain plain text. Qualified Session excerpts show their source age; stale output
-falls back to a labeled summary. Local Machine names stay hidden. Links open
-separately from the Task row; unknown activity and live clients without reports
-show no activity label.
+Task IDs in the sidebar link to the issue when its URL is recorded; otherwise
+they remain plain text. The link opens separately from the Task row. Unknown
+activity and live clients without reports show the lifecycle word. The PR link
+and owner are in the Task pane, not the row.
 
 Follow a conversation in the pane and sidebar: Busy for a working report,
 Available for an idle report, Blocked for a question or permission request, and
@@ -1296,10 +1295,6 @@ composition must finish first. Missing/exited/replaced surfaces never reopen or
 redirect input. A lost reply is uncertain: do not automatically resend. The native
 fixture covers cursor insertion and submission but has not run here.
 
-Sidebar excerpts use current native-turn evidence when available, with a 30-second
-working-output lifetime. A current Available result shows its source age. Missing,
-stale or disconnected evidence shows a labeled Task summary. Codex currently
-supplies turn-qualified excerpts; providers without that evidence use the summary.
 Repository and Wave navigation displays retained conversation entry without
 starting a provider. Waves group their full inventory as Owned and Unowned; rows read "Jack Heart on mini" or "Unowned".
 

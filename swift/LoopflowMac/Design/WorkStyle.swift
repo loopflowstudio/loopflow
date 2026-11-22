@@ -92,38 +92,6 @@ private struct WorkPanel: ViewModifier {
     }
 }
 
-/// Ordinary actions stay neutral; a deliberately emphasized action uses the theme accent.
-struct WorkOutlineButtonStyle: ButtonStyle {
-    var emphasized = false
-    /// Red, for an action that ends the work.
-    var destructive = false
-    @Environment(\.palette) private var palette
-    @Environment(\.isEnabled) private var isEnabled
-
-    @State private var hovering = false
-
-    private var ink: Color { destructive ? palette.failure : (emphasized ? palette.accentInk : palette.actionInk) }
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Typography.text)
-            .foregroundStyle(isEnabled ? ink : palette.textTertiary)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: CornerRadius.control)
-                    .fill(configuration.isPressed ? palette.surfaceElement : (hovering ? palette.surfaceMuted : palette.surface))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CornerRadius.control)
-                    .strokeBorder(isEnabled && (emphasized || destructive) ? ink : palette.borderStrong, lineWidth: 1)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: CornerRadius.control))
-            .onHover { hovering = $0 }
-            .workFocusRing()
-    }
-}
-
 /// Marks a Task whose auto setting is on, on its board card and sidebar row.
 struct AutoBadge: View {
     var body: some View {

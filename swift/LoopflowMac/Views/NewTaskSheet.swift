@@ -73,7 +73,7 @@ struct NewTaskSheet: View {
                     .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
                     .keyboardShortcut(.cancelAction)
                 Button(filing ? "Filing…" : "File") { file() }
-                    .buttonStyle(WorkOutlineButtonStyle())
+                    .buttonStyle(LoopflowButtonStyle())
                     .disabled(trimmed.isEmpty || filing)
                     .help("Put it in \(scopeName)'s backlog without starting it")
                     .accessibilityIdentifier("new-task-file")

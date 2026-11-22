@@ -42,7 +42,7 @@ struct RepoView: View {
 
     @ToolbarContentBuilder
     private var workToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigation) { WorkBreadcrumbs(model: model) }
+        ToolbarItem(placement: .navigation) { TitleBar(model: model) }
             .sharedBackgroundVisibility(.hidden)
     }
 

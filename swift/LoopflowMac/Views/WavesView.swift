@@ -701,7 +701,7 @@ struct CreateWaveSheet: View {
                         Text("Create wave")
                     }
                 }
-                .buttonStyle(DarkButtonStyle())
+                .buttonStyle(LoopflowButtonStyle(.accent))
                 .disabled(isCreating || trimmedName.isEmpty || selectedRepoPath.isEmpty)
             }
         }

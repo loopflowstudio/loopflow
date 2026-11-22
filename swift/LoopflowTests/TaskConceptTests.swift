@@ -145,9 +145,11 @@ struct TaskConceptTests {
         let conversation = try #require(phase.sessions.first { $0.id == "bound" })
         #expect(task.selectionStates.contains(.busy))
         let status = SessionProgramStatus(sessions: [conversation], unavailable: nil)
-        let row = TaskRowMetadata(id: task.id, task: task, status: status)
+        let row = TaskRow(id: task.id, presentation: .init(title: task.task.name, identifier: task.task.identifier, context: nil),
+                          task: task, status: status)
         #expect(try row.inspect().find(text: "Blocked").string() == "Blocked")
-        let pane = ProgramStatusLabel(status: try #require(conversation.programStatus))
+        let programStatus = try #require(conversation.programStatus)
+        let pane = try #require(StatusMark(status: programStatus))
         #expect(try pane.inspect().find(text: "Blocked").string() == "Blocked")
         #expect(task.lifecycle == .active)
     }

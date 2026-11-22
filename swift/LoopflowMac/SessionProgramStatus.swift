@@ -40,35 +40,17 @@ enum SessionProgramStatus {
         }
     }
 
-    /// Freshness changes presentation only, never the underlying execution status.
-    func preview(now: Date, fallback: String, sessions: [SessionRecord] = []) -> (text: String, help: String, age: String?) {
-        let candidate: SessionRecord?
-        switch self {
-        case .unavailable: candidate = nil
-        case .reported(_, let report) where report.state == .idle || report.state == .done: candidate = nil
-        default: candidate = session ?? sessions.min(by: Self.precedes)
-        }
-        if let session = candidate, session.programStatus?.seen != true || session.programStatus?.summary != nil,
-           session.state == .active || session.state == .detached, let excerpt = session.preview,
-           !excerpt.providerThread.isEmpty, !excerpt.providerTurn.isEmpty,
-           session.agentProcessId != nil {
-            let age = now.timeIntervalSince1970 - Double(excerpt.observedAt)
-            let available = session.availability == .available
-            if age >= 0, available || age <= 30 {
-                let safe = ProgramStatusReport.displaySafe(excerpt.text)
-                if !safe.isEmpty {
-                    let line = safe.split(separator: "\n").last.map(String.init) ?? safe
-                    let label = age < 60 ? "\(Int(age))s" : age < 3600 ? "\(Int(age / 60))m" : "\(Int(age / 3600))h"
-                    return (line, "\(session.title) (\(session.id)) · \(excerpt.source) · \(Int(age))s ago\n\(safe)", label)
-                }
-            }
-        }
-        let summary = fallback.split(separator: "\n").first
-            .map { ProgramStatusReport.displaySafe(String($0)) } ?? "No current activity"
-        let detail: String
-        if case .unavailable(let reason) = self { detail = "Activity unavailable · \(reason)\nSummary · \(summary)" }
-        else { detail = "Summary · \(summary)" }
-        return ("Summary · \(summary)", detail, nil)
+    var isUnavailable: Bool {
+        if case .unavailable = self { return true }
+        return false
+    }
+
+    /// What a blocked program is asking, in its own words.
+    var ask: String? {
+        guard case .reported(_, let report) = self, report.state == .blocked,
+              let text = [report.msg, report.title].compactMap({ $0.map(ProgramStatusReport.displaySafe) })
+                .first(where: { !$0.isEmpty }) else { return nil }
+        return text
     }
 
     var label: String? {

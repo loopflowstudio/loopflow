@@ -88,7 +88,7 @@ private struct WaveRowLabel: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
-            WaveLensView(lens: wave.lens)
+            StatusMark(lens: wave.lens)
                 .padding(.top, 3)
                 .accessibilityIdentifier("wave-status")
 

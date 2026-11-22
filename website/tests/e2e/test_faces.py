@@ -1,6 +1,9 @@
 """The site's three faces load from this server and the serif keeps to display sizes."""
 
+from pathlib import Path
+
 import pytest
+import yaml
 from playwright.sync_api import Page
 
 GOOGLE_FONT_HOSTS = ("fonts.googleapis.com", "fonts.gstatic.com")
@@ -67,3 +70,30 @@ def test_every_page_has_the_same_bar_and_footer(page: Page, base_url: str, width
     home = frames["/"]
     for path in FRAME_PAGES[1:]:
         assert frames[path] == home, path
+
+
+GRAPHS = Path(__file__).resolve().parents[3] / "rust/loopflow-definitions/src/builtins/task/graph"
+
+
+def _graph_steps(items: list[dict]) -> list[tuple[str, bool]]:
+    steps = []
+    for item in items:
+        ((kind, value),) = item.items()
+        if kind == "loop":
+            steps += _graph_steps(value)
+        else:
+            steps.append((value, kind == "interactive"))
+    return steps
+
+
+@pytest.mark.parametrize("graph", ["feature", "code", "research"])
+def test_workflow_card_shows_the_steps_the_graph_runs(homepage: Page, graph: str) -> None:
+    line = homepage.locator(".wfs li", has=homepage.locator("code", has_text=graph)).locator(
+        ".line"
+    )
+    shown = line.evaluate(
+        """el => [...el.querySelectorAll('span, b')].map(step =>
+            [step.textContent.replace('→', '').trim(), step.tagName === 'B'])"""
+    )
+    expected = _graph_steps(yaml.safe_load((GRAPHS / f"{graph}.yaml").read_text()))
+    assert [tuple(step) for step in shown] == expected

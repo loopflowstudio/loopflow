@@ -892,6 +892,29 @@ codebase tree, and registry health.
   renders its reason, and refresh failures leave the last successful planning or
   Activity history visible.
 
+## Work tracking
+
+The sidebar presents the repository's retained working Task order, then direct Wave
+rows. Opening started, unpaused Work appends once. Activity and query refresh never
+reorder slots; explicit pause hides a slot without deleting its stored position.
+Working references are saved through WorkCache; they convey no execution authority.
+Unstarted Tasks show their brief beside a Start offer in the Session slot without
+joining the working set. Only Start runs anything.
+
+The navigator's Working tasks / Available / Running choice filters presentation
+without selecting Work or changing panes, clients, focus or drafts. Missing planning
+keeps an unavailable row. Work observation retains its last reading on failure.
+Wave navigation leaves working positions and the sidebar viewport intact.
+
+Title-bar breadcrumbs follow hierarchy as a jump bar: each name navigates, and the
+› after it lists what is inside (repository › Waves, Wave › Tasks) with a filter
+that searches that scope. Back follows visits, and Cmd+K routes
+cross-repository Work to its own window. Cmd+1–9 and Control+Tab address the same
+stable eligible slots, independent of the filter. Each Work owns one retained
+workspace. Dashboard queries compose those workspaces side by side; ordinary
+navigation selects one destination. Rust owns query membership and arrangement,
+including hidden occurrences and duplicate suppression. Tiles show the primary
+Session or explicit zoom without acquiring a provider.
 
 ## Code map
 

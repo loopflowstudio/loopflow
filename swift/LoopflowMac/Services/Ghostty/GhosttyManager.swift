@@ -126,7 +126,17 @@ final class GhosttyManager: ObservableObject {
     // Current preview plus applied candidate; cancel reuses validated config.
     private nonisolated(unsafe) var themeConfigs: [String: (TerminalPalette, ghostty_config_t)] = [:]
     private(set) var theme = ThemeDefinition.light
-    static let loopflowConfig = "font-size = 13\nminimum-contrast = 3\n"
+    // Defaults a person's own Ghostty config overrides. Ligatures are off so
+    // `->` and `!=` read as the characters an agent printed.
+    static let loopflowConfig = """
+    font-size = 13
+    font-feature = -calt
+    font-feature = -liga
+    font-thicken = true
+    adjust-cell-height = 10%
+    minimum-contrast = 3
+
+    """
 
     func applyTheme(_ theme: ThemeDefinition, retaining appliedID: String? = nil) throws {
         if let baseline {

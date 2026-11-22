@@ -260,9 +260,8 @@ As the prototype notes say, keeping what the app can show:
 ### DESIGN.md
 
 The pointers this change fixes and "Tokens today" are edited in DESIGN.md,
-which exists only on cfadc6's unpublished branch. That edit is the last
-slice and needs cfadc6 on main (then `lf sync` picks it up through
-LOO-515). Until then the slice is blocked, not skipped; the PR body says so.
+which came to main with cfadc6 (#2011). That edit is the last slice, after
+`lf sync` brings main in.
 
 ### Docs (written first, 2026-11-21)
 
@@ -432,6 +431,18 @@ in DESIGN.md "Desktop semantics"; palette contrast.
    `theDiffFitsItsPane` still passes at 360/480/640. Not changed:
    `TaskDelivery` headlines ("Open #1949 · …"), so the pill reads "Open
    #1949" rather than the prototype's "#1949 open, 1 check failed"
-   (questions.md). Not seen in the Dev app.
-8. DESIGN.md once cfadc6 is on main (blocked until then); QA in three themes
-   at the narrowest width.
+   (questions.md). Not seen in the Dev app. Realign checked: no `↗` left in
+   `LoopflowMac/`; tests assert each word above; `swift/README.md:388-512`
+   already describes Brief, Diff and Files this way.
+8. **Next: DESIGN.md.** cfadc6 merged as #2011 (`4cee2ed182`, origin/main's
+   tip on 2026-11-21); LOO-515 (#1949) is still open, so this branch has
+   neither root `DESIGN.md` nor `design/`. Bring main in (`lf sync`, through
+   LOO-515; never `git merge`), resolve the `GhosttyManager` constant (#2011
+   adds `font-thicken = true` and the scalar lines: keep both sets, family
+   line stays after the default files) and the `swift/DESIGN.md` deletion,
+   then edit root `DESIGN.md`'s pointers and "Tokens today" to the ramp,
+   `CornerRadius`, components and `WorkflowLine` as built. Expected: the
+   pointers name files that exist (`git grep` each path), and
+   `scripts/test_desktop.sh --filter 'TypographyDisciplineTests|WorkPaletteTests|WorkflowLineTests'`
+   passes after the sync. QA in three themes at the narrowest width stays
+   for qa.

@@ -65,6 +65,12 @@ after #1954 moved it into <code>loopflow-execution</code> and a later change let
 <p><span class="tag yes">result</span> The paste model holds. Nothing in it needs rebuilding. Four smaller things
 around it do not line up, and none belongs in the merged PR; they are listed as separate outcomes below.</p>
 
+<p><span class="tag yes">second pass</span> Reread after QA drove view loss, a second view and a server kill through the
+installed <code>lf</code> on a private Machine (<a href="qa.html">qa.html</a>). All three closed the paste and the next
+keys submitted, matching the walk below. The revision and log claims were rechecked against the tree and still hold.
+QA used a stand-in for the provider, so the last row of the counterexamples stays open: real Codex and Claude parsers
+were not reached.</p>
+
 <h2>One interaction, walked</h2>
 <p>Someone pastes forty lines into a Session in Rex. Partway through, Rex closes. Later they open the Session in
 Desktop and type.</p>
@@ -97,6 +103,8 @@ Desktop and type.</p>
 <tr><td>One tracker at the holder only, since it is the last hop.</td><td>Fails. The holder cannot see which view wrote, and after it closes a paste the server's unsent tail would arrive as typed keys, with newlines submitting. Each hop that can lose its upstream needs its own count.</td></tr>
 <tr><td>Queue cleared on a write error while the tracker keeps counting.</td><td>Holds. For a held terminal the writer only reports "would block"; the holder closes on loss and the Source restores framing.</td></tr>
 <tr><td>Old and new writer connections overlap at the holder (state is per terminal, not per connection).</td><td>Holds. The server drops the old socket before it connects the new one, so the close precedes the restored start.</td></tr>
+<tr><td>Server killed mid-paste while the view stays; the view's terminal never sends the paste end (QA, 2026-11-21).</td><td>Holds. The surviving view still counts an open paste, so after reconnecting it frames later typing as pasted. Only a driver that omits <code>ESC[201~</code> does this; a terminal always sends it. The count is doing what the bytes say.</td></tr>
+<tr><td>Paste tail sent while no server is up (QA scenario 3).</td><td>Holds, with a loss that predates this work: the tail is discarded (<code>reconnect_held</code>: "What is typed meanwhile is discarded"). The paste is closed and the next keys submit.</td></tr>
 <tr><td>The provider's own parser sticks while lf's count says "closed".</td><td>Not covered, and cannot be from here. See the biggest mismatch.</td></tr>
 </tbody>
 </table>

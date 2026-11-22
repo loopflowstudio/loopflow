@@ -46,7 +46,7 @@ struct ThemeWorkflowTests {
         #expect(appearance.current.dark == "Fig")
     }
 
-    @Test func chooserFiltersEachPickerToItsAppearanceAndWritesTheChoice() async throws {
+    @Test func chooserFiltersEachSideToItsAppearanceAndWritesTheChoice() async throws {
         try await withThemeServer { location in
             let paths = ThemePaths.temporary()
             let appearance = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)

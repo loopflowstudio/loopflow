@@ -196,7 +196,7 @@ final class AppearanceStore {
         guard let theme = currentLibrary.resolve(name) else { notice = "No theme named “\(name)”."; return }
         beginPreview()
         diagnostics = []
-        show(theme, as: name)
+        show(theme)
     }
 
     /// Make the selected theme yours: a built-in or Ghostty theme becomes your file of the same name.
@@ -221,7 +221,8 @@ final class AppearanceStore {
         let builtin = currentLibrary.isBuiltin(name)
         stage(nil, for: name)
         if !builtin {
-            draft?.selection.setName(previewSide == .dark ? ThemeDefinition.dark.name : ThemeDefinition.light.name, dark: previewSide == .dark)
+            let dark = previewSide == .dark
+            draft?.selection.setName((dark ? ThemeDefinition.dark : .light).name, dark: dark)
         }
         update(selectedTheme)
     }
@@ -233,16 +234,16 @@ final class AppearanceStore {
             let file = try ThemeFile.read(url)
             stage(file.theme, for: file.theme.name)
             diagnostics = file.diagnostics
-            show(file.theme, as: file.theme.name)
+            show(file.theme)
         } catch { notice = error.localizedDescription }
     }
 
-    /// Assign `theme` as `name` to the side its own colors say; in Light or Dark mode the preview switches to that side.
-    private func show(_ theme: ThemeDefinition, as name: String) {
+    /// Assign `theme` to the side its own colors say; in Light or Dark mode the preview switches to that side.
+    private func show(_ theme: ThemeDefinition) {
         let dark = theme.isDark
         if current.mode != .system { draft?.selection.mode = dark ? .dark : .light }
         previewSide = dark ? .dark : .light
-        draft?.selection.setName(name, dark: dark)
+        draft?.selection.setName(theme.name, dark: dark)
         update(theme)
     }
 

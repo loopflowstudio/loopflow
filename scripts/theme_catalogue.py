@@ -118,6 +118,17 @@ def readable(color, surfaces, dark, ratio=4.5):
     return end
 
 
+def titlebar(bar):
+    """`GhosttyThemeMapping.titlebar` past its dark mix: away from the bar's text until the second text level reads."""
+    text = "#ffffff" if prefers_light_text(bar) else "#000000"
+    end = "#000000" if text == "#ffffff" else "#ffffff"
+    for step in range(256):
+        v = mix(bar, end, step / 255)
+        if cr(over(text, TITLEBAR_SECONDARY, v), v) >= 4.52:
+            return v
+    return end
+
+
 # ── the families ─────────────────────────────────────────────────────────────
 
 HUES = {"red": 27, "green": 148, "yellow": 88, "blue": 255, "magenta": 330, "cyan": 200}
@@ -328,14 +339,7 @@ def generate(spec, dark):
     roles["stopped-ink"] = secondary
     roles["stopped-fill"] = mix(bg, secondary, 0.1)
 
-    # Title bar: stated, and dark enough (or light enough) for its secondary text.
-    bar = fill if spec["titlebar"] == "accent" else ok(*spec["titlebar"])
-    for _ in range(200):
-        on_bar = "#ffffff" if prefers_light_text(bar) else "#000000"
-        if cr(over(on_bar, TITLEBAR_SECONDARY, bar), bar) >= 4.55:
-            break
-        bar = mix(bar, "#000000" if on_bar == "#ffffff" else "#ffffff", 0.03)
-    roles["titlebar"] = bar
+    roles["titlebar"] = titlebar(fill if spec["titlebar"] == "accent" else ok(*spec["titlebar"]))
 
     # Terminal: the same ground and text as the window; the accent ink is the cursor.
     def ansi(name, L, C, r=4.5):

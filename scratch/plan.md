@@ -13,7 +13,7 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 
 - **Defaults.** Loopflow Light is the audit repair (21 values). Loopflow Dark is Light's burgundy as rose ink on blue-grey `#2b2d30` (`dark_pair(..., cool=0.67)` in `scratch/theme-audit/proposals.py`). Both state title bar `#722f37`. The generator reads these two files and never rewrites them.
 - **Title bar role.** `loopflow-titlebar` in `PaletteDefinition`/`ThemeFile`/editor ("Title bar" row). Missing bar: `GhosttyThemeMapping.titlebar` takes the old color (accent; in dark, 65% ground mixed in) and darkens it (or lightens it, under black text) until the 72% text reaches 4.5:1. It is applied after a file's stated roles. `readabilityErrors` checks both text levels on the bar. Why a role and not a new mix: no single mix gave Dark a burgundy bar and kept the other dark bars' secondary text at 4.5:1 (table in git history, `8ae51f65b9:scratch/plan.md`).
-- **Catalogue.** 13 families, 13 light and 13 dark. `scripts/theme_catalogue.py` writes the 24 generated files and `design/prototypes/desktop-themes.js`; `--check` lists drift (passes at b92c506fe4), run by `python/tests/test_theme_catalogue.py`. Sorting by name after the Loopflow pair keeps each family's pair together. The companions, `Sources.md` and `Licenses/` are gone.
+- **Catalogue.** 13 families, 13 light and 13 dark. `scripts/theme_catalogue.py` writes the 24 generated files and `design/prototypes/desktop-themes.js`; `--check` lists drift, run by `python/tests/test_theme_catalogue.py`. Its `titlebar()` mirrors `GhosttyThemeMapping.titlebar`, so a spec's `titlebar="accent"` is the bar the app would derive (compress moved Signal Light, Tannin Light and Fjord Light by one or two steps). Sorting by name after the Loopflow pair keeps each family's pair together. The companions, `Sources.md` and `Licenses/` are gone.
 - **Removed names.** A setting naming a pre-family built-in (Gruvbox Dark, Linen…) is an unknown name, as on main: "No theme named …: keeping …".
 - **Chooser.** `ThemeCard` grid in `ThemeChooser.swift`, each card drawn in its own roles. The chosen card gets a 2 pt ring in `keyboardFocus`. Each section heading names its chosen theme ("Light themes · Fjord Light"); the Light/Dark theme buttons are gone. `importTheme` files a theme on the side its colors say and, in Light or Dark mode, switches the preview mode; there is no refusal.
 - **Moss** replaces Verdigris (spec in `scripts/theme_catalogue.py`; both pass the audit).
@@ -29,6 +29,7 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 - `swift test … 'ThemeTests|ThemeWorkflowTests|WorkPaletteTests|TerminalColorTests'`: 32 passed, 2026-11-22 (after the Derived fix).
 - `test_third_party.py`: 9 passed.
 - `swift test … 'WorkPaletteTests|TerminalColorTests|ThemeTests|ThemeWorkflowTests'`: 33 passed, 2026-11-22 (round 4, with `previewingADarkThemeFromTheLightSideLandsOnTheDarkSide`).
+- `swift test … 'WorkPaletteTests|TerminalColorTests|ThemeTests|ThemeWorkflowTests'`: 33 passed and `test_theme_catalogue.py` passed, 2026-11-22 (compress: one title bar rule, `show(_:)`).
 - Not run here: the real Import file panel, Apply and Cancel clicked in the chooser, the editor's Title bar row, a key window's bar, the selected Appearance toolbar tab in dark mode (ship-review, unlocked display).
 
 ## Demo

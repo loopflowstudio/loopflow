@@ -2,7 +2,7 @@
 import copy
 import math
 
-from audit import STATUS, cr, de, derived, lch, mix, over, readable
+from audit import STATUS, cr, de, derived, lch, mix, over, readable, titlebar_rule
 
 
 def from_oklch(L, C, h):
@@ -51,6 +51,7 @@ def light_repair(light):
     t = copy.deepcopy(light)
     r = t["roles"]
     r["accent-pressed"] = "#4c1f27"
+    r["titlebar"] = titlebar_rule(r["accent"], r["background"], False)
     # Bright ANSI: the same hues, lighter and more saturated, still 4.5:1 on the ground.
     for i in range(1, 7):
         L, C, h = lch(t["ansi"][i])
@@ -91,6 +92,8 @@ def dark_pair(dark, light, cool=0.0):
     r["border-active"] = mix(bg, r["text-secondary"], 0.5)
     r["accent-ink"] = r["emphasis-ink"] = from_oklch(0.78, 0.085, 15)
     r["accent"], r["accent-hover"], r["accent-pressed"] = "#8a3a44", "#722f37", "#5e2630"
+    # The one bar the rule does not serve: Light's own, so the two defaults share it.
+    r["titlebar"] = light["roles"]["accent"]
     r["available-ink"] = from_oklch(0.80, 0.075, 340)
     r["failure-ink"] = from_oklch(0.78, 0.11, 32)
     t["ansi"][5] = from_oklch(0.72, 0.10, 15)
@@ -107,7 +110,7 @@ def dark_pair(dark, light, cool=0.0):
 def changes(before, after):
     rows = []
     for k, v in after["roles"].items():
-        if before["roles"][k] != v:
+        if k in before["roles"] and before["roles"][k] != v:
             rows.append((k, before["roles"][k], v))
     for k, v in after["term"].items():
         if before["term"][k] != v:

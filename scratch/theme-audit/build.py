@@ -11,6 +11,7 @@ sys.path.insert(0, str(HERE))
 
 from audit import ANSI_NAMES, STATUS, STATUS_WORD, cr, de, derived, findings, hue_gap, lch, load, theme_distance  # noqa: E402
 from proposals import changes, dark_pair, dark_repair, light_repair, pair_facts  # noqa: E402
+from write_defaults import at_base  # noqa: E402
 
 GROUPS = ["Text", "Marks", "Roles", "Terminal", "Diff"]
 LEVEL_WORD = {"fail": "Fails", "close": "Close", "note": "Note"}
@@ -170,7 +171,7 @@ def count(fs, level="fail"):
 def change_table(rows):
     body = "".join(
         f'<tr><td>{e(k)}</td><td>{swatched(a)}</td><td>{swatched(b)}</td></tr>' for k, a, b in rows)
-    return f'<table class="chg"><thead><tr><th>Role</th><th>Now</th><th>Proposed</th></tr></thead><tbody>{body}</tbody></table>'
+    return f'<table class="chg"><thead><tr><th>Role</th><th>Before</th><th>Proposed</th></tr></thead><tbody>{body}</tbody></table>'
 
 
 def variant(title, blurb, t, fs, names, base=None):
@@ -186,7 +187,9 @@ def build():
     names = [t["name"] for t in themes]
     by = {t["name"]: t for t in themes}
     found = {t["name"]: findings(t) for t in themes}
-    light, dark = by["Loopflow Light"], by["Loopflow Dark"]
+    # The proposals start from the two defaults as they were; everything else is the files now.
+    light, dark = at_base("Loopflow Light"), at_base("Loopflow Dark")
+    before = {t["name"]: findings(t) for t in (light, dark)}
     lr, dr, dp = light_repair(light), dark_repair(dark), dark_pair(dark, light)
     b1, b2, b3 = (dark_pair(dark, light, c) for c in (0.34, 0.67, 1.0))
     facts = pair_facts(light, dark)
@@ -244,7 +247,7 @@ def build():
 <style>{CSS}</style></head><body>
 <main>
 <h1>Bundled themes, measured</h1>
-<p class="lede">All 24 themes in <code>swift/Loopflow/Themes/Catalogue/</code> on the same three screens, with what fails beside each. Nothing in the theme files has changed. Colors are read from the files, value for value; the title bar, selection and diff tints are composited the way the app paints them.</p>
+<p class="lede">All 24 themes in <code>swift/Loopflow/Themes/Catalogue/</code> on the same three screens, with what fails beside each. Loopflow Light and Loopflow Dark now hold the chosen proposals (the repair, and B2), every theme states its title bar, and Catppuccin Latte and Solarized Dark have lighter or darker body text so code on a changed word reads; “Before” under the two defaults is the base commit. Colors are read from the files, value for value; the title bar, selection and diff tints are composited the way the app paints them.</p>
 <p>The screens are HTML built for this audit, not the app. They put every role where the app uses it: status words on the sidebar, the selected row, chips, the terminal's 16 colors, added and removed lines, a selected file.</p>
 <nav><a href="#found">What the catalogue shows</a> · <a href="#defaults">The two defaults, before and after</a> · <a href="#all">All 24</a> · <a href="#count">Is 24 the right number</a> · <a href="#rex">What Rex does</a> · <a href="#how">How it was measured</a></nav>
 
@@ -278,11 +281,11 @@ def build():
 <p>That leaves a choice only you can make: Dark stays the slate-and-bronze it has always been and gets repaired, or Dark becomes Light turned over. Both are drawn below. Light has one proposal, since it is the reference.</p>
 
 <h3>Loopflow Light</h3>
-{variant("Now", "As shipped.", light, found["Loopflow Light"], names)}
+{variant("Before", "As it shipped before this change.", light, before["Loopflow Light"], names)}
 {variant("Proposed: repair", "The same theme. Diff and chip fills are strong enough to tell added from removed. A selected file gets a fill: the text color at 5%, which tints every surface equally. Hover and pressed differ. Bright ANSI colors are lighter, more saturated versions of the normal ones, still 4.5:1. The active pane border reaches 3:1. Status inks darken a step so they hold 4.5:1 on the new selection.", lr, findings(lr), names, light)}
 
 <h3>Loopflow Dark</h3>
-{variant("Now", "As shipped.", dark, found["Loopflow Dark"], names)}
+{variant("Before", "As it shipped before this change.", dark, before["Loopflow Dark"], names)}
 {variant("Proposed A: repair, slate and bronze kept", "The identity it has today. The surface ladder is shallower, which makes room for a real tertiary text. Status inks get the chroma Light's have (about 0.09, up from 0.02 to 0.06), so Available is no longer grey. Fills, file selection, active border and ANSI contrast are fixed as in Light. The title bar and button still sink into the slate: that needs burgundy to change, or <code>titlebarBackground</code> to stop mixing 65% of the ground into it.", dr, findings(dr), names, dark)}
 {variant("Proposed B: Light turned over", f"Light's ink {swatched(light['roles']['text'])} becomes the ground and Light's paper stays the text, so the two share one warm neutral. Burgundy comes back as ink: accent ink and emphasis ink are a rose at the burgundy hue ({pf['accent_ink_hue']:.0f}°, Light's is {lf['accent_ink_hue']:.0f}°). The button fill lifts one step to {swatched(dp['roles']['accent'])} with Light's burgundy as its hover. ANSI magenta is burgundy family, as in Light. The bronze goes. The title bar is still mixed into the ground by code ({pf['titlebar_ratio']:.2f}:1).", dp, findings(dp), names, dark)}
 <h3 id="bluer">Dark B's red on a bluer grey</h3>

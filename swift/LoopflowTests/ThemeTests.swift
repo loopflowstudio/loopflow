@@ -84,11 +84,14 @@ struct ThemeTests {
         #expect(light.workSelectedText.hex == 0x2A2624)
         let dark = ThemeDefinition.dark.palette.definition
         #expect(ThemeDefinition.dark.name == "Loopflow Dark")
-        #expect(dark.background.hex == 0x2B3036)
-        #expect(dark.surface.hex == 0x343B44)
-        #expect(dark.accent.hex == 0x722F37)
-        #expect(dark.emphasisInk.hex == 0xCEBFA9)
-        #expect(dark.workSelectedFill.hex == 0x515A65)
+        #expect(dark.background.hex == 0x2B2D30)
+        #expect(dark.surface.hex == 0x323437)
+        #expect(dark.accent.hex == 0x8A3A44)
+        #expect(dark.emphasisInk.hex == 0xEBA8AC)
+        #expect(dark.workSelectedFill.hex == 0x5A5C5F)
+        // One burgundy bar tops both defaults.
+        #expect(light.titlebar.hex == 0x722F37)
+        #expect(dark.titlebar == light.titlebar)
         // Loopflow's authored design is independent of the import conversion.
         #expect(light != GhosttyThemeMapping.palette(ThemeDefinition.light.terminal))
         #expect(dark != GhosttyThemeMapping.palette(ThemeDefinition.dark.terminal))
@@ -144,6 +147,24 @@ struct ThemeTests {
         #expect(first.workSelectedFill != second.workSelectedFill)
         #expect(first.readabilityErrors.isEmpty)
         #expect(second.readabilityErrors.isEmpty)
+    }
+
+    @Test func titleBarFollowsTheFilesOwnAccentUntilItIsStated() throws {
+        let ground = "background=171924\nforeground=CAD2EF"
+        // Dark: the accent mixed into the ground, not the bar ANSI 4 would give.
+        let dark = try imported("\(ground)\nloopflow-accent=#224466").theme.palette.definition
+        #expect(dark.titlebar.hex == 0x1B283B)
+        #expect(dark.titlebar != (try imported(ground).theme.palette.definition.titlebar))
+        // Light: the accent itself, lightened here until black text's second level reads.
+        let light = try imported("background=ffffff\nforeground=000000\nloopflow-accent=#C06000").theme.palette.definition
+        #expect(light.titlebar.hex == 0xCB7B2B)
+        #expect(!light.readabilityErrors.contains { $0.contains("title bar") })
+        // An appearance stated against the ground's own decides the mix.
+        let asLight = try imported("\(ground)\nloopflow-accent=#224466\nloopflow-appearance=light").theme.palette.definition
+        #expect(asLight.titlebar.hex == 0x224466)
+        let stated = try imported("\(ground)\nloopflow-accent=#224466\nloopflow-titlebar=#102030").theme.palette.definition
+        #expect(stated.titlebar.hex == 0x102030)
+        #expect(try imported("\(ground)\nloopflow-titlebar=#808080").theme.readabilityErrors.contains { $0.contains("title bar") })
     }
 
     @Test func loopflowKeysOverrideDerivedAppRoles() throws {

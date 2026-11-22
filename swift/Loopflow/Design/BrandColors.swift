@@ -18,6 +18,7 @@ public struct PaletteDefinition: Equatable, Sendable {
     public var accentPressed: ThemeRGB
     public var accentInk: ThemeRGB
     public var accentText: ThemeRGB
+    public var titlebar: ThemeRGB
     public var emphasisInk: ThemeRGB
     public var workSelectedFill: ThemeRGB
     public var workSelectedText: ThemeRGB
@@ -52,13 +53,11 @@ public struct LoopflowPalette: Sendable {
     public let definition: PaletteDefinition
     public init(_ definition: PaletteDefinition) { self.definition = definition }
     public var isDark: Bool { definition.isDark }
-    public var titlebarColorScheme: ColorScheme { definition.accent.prefersLightText ? .dark : .light }
+    public var titlebarColorScheme: ColorScheme { definition.titlebar.prefersLightText ? .dark : .light }
     /// Titlebar text follows the titlebar, not the window's palette.
-    public var titlebarText: Color { titlebarColorScheme == .dark ? .white : .black }
-    public var titlebarSecondaryText: Color { titlebarText.opacity(0.72) }
-    public var titlebarBackground: Color {
-        (isDark ? definition.accent.mixed(with: definition.background, amount: 0.65) : definition.accent).color
-    }
+    public var titlebarText: Color { definition.titlebarText.color }
+    public var titlebarSecondaryText: Color { titlebarText.opacity(PaletteDefinition.titlebarSecondaryOpacity) }
+    public var titlebarBackground: Color { definition.titlebar.color }
     public var background: Color { definition.background.color }
     public var surface: Color { definition.surface.color }
     public var surfaceMuted: Color { definition.surfaceMuted.color }
@@ -114,6 +113,14 @@ public extension EnvironmentValues {
 }
 
 extension PaletteDefinition {
+    /// The title bar's second text level: its text at this opacity over the bar.
+    public static let titlebarSecondaryOpacity = 0.72
+    /// White or black, whichever reads better on the bar.
+    public var titlebarText: ThemeRGB { ThemeRGB(titlebar.prefersLightText ? 0xFFFFFF : 0) }
+    public var titlebarSecondaryText: ThemeRGB {
+        titlebar.mixed(with: titlebarText, amount: Self.titlebarSecondaryOpacity)
+    }
+
     public var readabilityErrors: [String] {
         let surfaces = [background, surface, surfaceMuted, surfaceElement]
         var errors: [String] = []
@@ -135,6 +142,8 @@ extension PaletteDefinition {
         check("button text", accentText, on: accent)
         check("hover button text", accentText, on: accentHover)
         check("pressed button text", accentText, on: accentPressed)
+        check("title bar text", titlebarText, on: titlebar)
+        check("title bar secondary text", titlebarSecondaryText, on: titlebar)
         for tone in [workingTone, warningTone, availableTone, failureTone, successTone, stoppedTone] {
             check("status text", tone.inkRGB, on: tone.fillRGB)
         }

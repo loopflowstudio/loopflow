@@ -39,6 +39,7 @@ loopflow-accent-hover = #6f6351
 loopflow-accent-pressed = #605546
 loopflow-accent-text = #faf8f5
 loopflow-accent-ink = #ae9e85
+loopflow-titlebar = #46413a
 loopflow-work-selected-fill = #82807d
 loopflow-work-selected-text = #171717
 loopflow-work-selected-secondary-text = #171717

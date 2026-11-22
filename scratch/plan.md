@@ -51,13 +51,15 @@ Their accents and buttons stay. The files state what the Swift rule produces; if
 
 ## Build
 
-Slices, each run before the next.
+All five steps are built. What each one settled:
 
-1. **The two defaults, tested.** Write `changes(before, after)` for both into `swift/Loopflow/Themes/Catalogue/Loopflow Light` and `Loopflow Dark` (every role and ANSI 0–15 stays stated), then `swift test --package-path swift --filter 'WorkPaletteTests|TerminalColorTests|ThemeTests'`. This is the slice that can prove the plan wrong: the proposals were settled by `audit.py`, and the Swift suites also check inks `audit.py` has no name for (`linkInk`, `linkHover`, `actionInk`, `selectionEdge`, terminal `readabilityErrors`). If a derived ink fails, adjust the value in `proposals.py` and regenerate; the files are never hand-tuned away from the script.
-2. **`loopflow-titlebar`** as above, in all 24 files. Tests: `WorkPaletteTests`' contrast test (24 built-ins and the five derived fixtures) expects title bar text and its 72% level to reach 4.5:1 on the bar, through the real palette; `ThemeTests` expects `ThemeDefinition.light` and `.dark` to state the same bar, and a file that states an accent and no `loopflow-titlebar` to get its bar from that accent. No test reads the title bar today. `audit.py`'s `derived()` reads the role so the page agrees with the app.
-3. **Unreadable roles elsewhere:** code on a changed word in Catppuccin Latte and Solarized Dark diffs. Nothing else in the other 22.
-4. **Words and prototype.** `swift/Loopflow/Themes/README.md` ("the original slate with bronze") and `swift/README.md:308` ("slate with warm bronze") describe the old Dark; both gain the title bar role where they list roles. `design/prototypes/desktop-themes.js` carries every theme's values by hand and gets the new ones plus `titlebar`; `desktop.css:83` paints `.titlebar` with `var(--accent)` and moves to the new variable (the prototype never had the dark mix, so its dark bars are wrong today).
-5. `python3 -I scratch/theme-audit/build.py`, so "Now" on the page shows what shipped.
+1. **The two defaults.** `scratch/theme-audit/write_defaults.py` writes both files from `proposals.py`, reading the base commit's files so a rerun writes the same bytes. The Swift suites passed on the first run: no derived ink (`linkInk`, `actionInk`, `selectionEdge`) needed a value moved.
+2. **`loopflow-titlebar`** in all 24 files, the rule in `GhosttyThemeMapping.titlebar`, the check in `readabilityErrors`, the editor row. The Swift rule and `audit.py`'s port agree on every value in the table above.
+3. **Changed words.** Body text moved until code on a changed word reads: Catppuccin Latte `#4f5054` → `#48494d`, Solarized Dark `#9b9e9e` → `#b6b9b9`. `emphasis-ink` moved with it (`ThemeTests` holds headings to the text color in the 22). Solarized Dark's app text is now visibly lighter than its terminal text (`#839496`); see `scratch/questions.md`.
+4. **Words and prototype.** `desktop-themes.js` restates the catalogue again and carries `titlebar`; `.titlebar` and the Choose Theme sample bar paint `var(--titlebar)`. The `swift/README.md` example had comments after values, which `ThemeFile` rejects; they are on their own lines now.
+5. **Page rebuilt.** The 24 sections read the files as they are; "Before" under the two defaults is the base commit.
+
+Left: the Dev app looked at in both defaults.
 
 ## Docs written ahead
 
@@ -83,8 +85,10 @@ A personal theme file without `loopflow-titlebar` gets its bar from its own acce
 
 ## Checks
 
-- `WorkPaletteTests`, `TerminalColorTests`, `ThemeTests`: not run yet.
-- Dev app in both defaults, looked at: not run yet; needs a display, ship-review if not here.
+- `swift test --package-path swift --filter 'WorkPaletteTests|TerminalColorTests|ThemeTests'` (needs `cargo build -p loopflow --bin lf` first): 27 tests in 3 suites passed, 2026-11-22. Gate reruns.
+- `python3 -I scratch/theme-audit/audit.py`: no fail in Loopflow Light or Loopflow Dark, no title bar finding in any theme.
+- `cargo test -p loopflow --test integration documented_commands::` (README edits): not run; gate.
+- Dev app in both defaults, looked at: not run; needs a display, ship-review.
 
 ## Left outside this change (for ship-review)
 

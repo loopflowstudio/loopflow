@@ -320,8 +320,10 @@ picker's appearance; a dark file in the Light picker explains itself instead.
 background = #171924
 foreground = #cad2ef
 palette = 4=#7aa2f7
-loopflow-accent = #3d59a1    # optional app roles; the rest derive from ANSI colors
-loopflow-titlebar = #242f50  # optional; without it the bar follows the accent
+# Optional app roles; the rest derive from ANSI colors.
+loopflow-accent = #3d59a1
+# Optional; without it the bar follows the accent.
+loopflow-titlebar = #242f50
 ```
 
 Files read up to 256 KiB of UTF-8. Six-digit RGB background/foreground are
@@ -330,7 +332,8 @@ optional. Preview explains defaults, repeats and omitted settings. Fonts,
 commands, keybindings, includes and theme references are never followed.
 
 The title bar is its own role. A file that leaves it out gets a bar from its
-accent, darkened where needed so the bar's text stays readable; a theme you made
+accent, darkened where needed (lightened under black text) so the bar's text
+stays readable; a theme you made
 before the role existed may show a slightly darker bar. **Customize** lists
 **Title bar** under Actions and focus, and saving states it: after that,
 changing **Button** leaves the bar alone.

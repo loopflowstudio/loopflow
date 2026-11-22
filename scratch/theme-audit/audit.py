@@ -14,6 +14,9 @@ APP_ROLES = [
     "working-ink", "working-fill", "warning-ink", "warning-fill", "available-ink", "available-fill",
     "failure-ink", "failure-fill", "success-ink", "success-fill", "stopped-ink", "stopped-fill",
 ]
+# The order a theme file states them in; the title bar joined after the audit counted 32.
+FILE_ROLES = APP_ROLES[:17] + ["titlebar"] + APP_ROLES[17:]
+TITLEBAR_SECONDARY = 0.72
 STATUS = ["working", "warning", "available", "failure", "success"]
 STATUS_WORD = {"working": "Busy", "warning": "Blocked", "available": "Available",
                "failure": "Error", "success": "Done", "stopped": "Stopped"}
@@ -85,6 +88,18 @@ def readable(color, surfaces, dark, ratio=4.5):
     for step in range(256):
         v = mix(color, end, step / 255)
         if all(cr(v, s) >= ratio + 0.02 for s in surfaces):
+            return v
+    return end
+
+
+def titlebar_rule(accent, background, dark):
+    """Port of `GhosttyThemeMapping.titlebar`: the bar a theme gets when it states none."""
+    bar = mix(accent, background, 0.65) if dark else accent
+    light_text = prefers_light_text(bar)
+    end, text = ("#000000", "#ffffff") if light_text else ("#ffffff", "#000000")
+    for step in range(256):
+        v = mix(bar, end, step / 255)
+        if cr(over(text, TITLEBAR_SECONDARY, v), v) >= 4.52:
             return v
     return end
 
@@ -179,13 +194,13 @@ def mapping(t):
 def derived(t):
     r = t["roles"]
     surfaces = {k: r[k] for k in ["background", "surface", "surface-muted", "surface-element"]}
-    titlebar = mix(r["accent"], r["background"], 0.65) if t["dark"] else r["accent"]
-    tb_text = "#ffffff" if prefers_light_text(r["accent"]) else "#000000"
+    titlebar = r.get("titlebar") or titlebar_rule(r["accent"], r["background"], t["dark"])
+    tb_text = "#ffffff" if prefers_light_text(titlebar) else "#000000"
     return {
         "surfaces": surfaces,
         "selected": {k: over(r["selection-fill"], t["selection-opacity"], v) for k, v in surfaces.items()},
         "titlebar": titlebar, "titlebar-text": tb_text,
-        "titlebar-secondary": over(tb_text, 0.72, titlebar),
+        "titlebar-secondary": over(tb_text, TITLEBAR_SECONDARY, titlebar),
         "diff-selected": over(r["accent"], 0.16, r["background"]),
     }
 

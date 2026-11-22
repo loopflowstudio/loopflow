@@ -22,7 +22,8 @@ theme files may state any subset. Missing app roles derive once through
 `GhosttyThemeMapping`: ANSI 4 seeds action/focus and Working, 3 Waiting,
 1 failure, 2 success. A missing `loopflow-titlebar` comes from the file's accent:
 the accent itself in a light theme, the accent mixed into the background in a
-dark one, then darkened until the title bar's secondary text reads at 4.5:1.
+dark one, then darkened (lightened, under black text) until the title bar's
+secondary text reads at 4.5:1.
 Colors are seeds, never activity. Missing ANSI colors come
 from the matching Loopflow preset; 16–255 default to xterm's.
 

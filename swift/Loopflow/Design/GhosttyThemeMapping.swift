@@ -3,6 +3,20 @@ import Foundation
 /// Convert terminal colors into the complete app contract at the import boundary.
 /// State selects semantic roles; ANSI values supply seeds, never activity.
 public enum GhosttyThemeMapping {
+    /// The bar a theme gets when it states none: the accent, mixed into the ground in
+    /// dark themes, then moved away from its text until the second text level reads.
+    public static func titlebar(accent: ThemeRGB, background: ThemeRGB, dark: Bool) -> ThemeRGB {
+        let bar = dark ? accent.mixed(with: background, amount: 0.65) : accent
+        let end = ThemeRGB(bar.prefersLightText ? 0 : 0xFFFFFF)
+        let text = ThemeRGB(bar.prefersLightText ? 0xFFFFFF : 0)
+        for step in 0...255 {
+            let value = bar.mixed(with: end, amount: Double(step) / 255)
+            let secondary = value.mixed(with: text, amount: PaletteDefinition.titlebarSecondaryOpacity)
+            if secondary.contrast(value) >= 4.52 { return value }
+        }
+        return end
+    }
+
     public static func palette(_ terminal: TerminalPalette) -> PaletteDefinition {
         let background = terminal.background
         let dark = background.prefersLightText
@@ -52,7 +66,8 @@ public enum GhosttyThemeMapping {
             borderStrong: background.mixed(with: secondary, amount: 0.4), borderActive: accentInk,
             text: text, textSecondary: secondary, textTertiary: tertiary,
             accent: accent, accentHover: accentHover, accentPressed: accentPressed, accentInk: accentInk,
-            accentText: accentText, emphasisInk: text,
+            accentText: accentText,
+            titlebar: titlebar(accent: accent, background: background, dark: dark), emphasisInk: text,
             workSelectedFill: selectedFill, workSelectedText: selectedText,
             workSelectedSecondaryText: selectedText.mixed(with: selectedFill, amount: 0.16).readable(on: [selectedFill], dark: selectedDark),
             shadow: terminal.indexed[0], selectionFill: ThemePaint(rgb: surfaces[1], opacity: 0.72),

@@ -21,7 +21,8 @@ public struct ThemeFile: Sendable {
         ("border-active", \.borderActive), ("shadow", \.shadow), ("text", \.text),
         ("text-secondary", \.textSecondary), ("text-tertiary", \.textTertiary), ("emphasis-ink", \.emphasisInk),
         ("accent", \.accent), ("accent-hover", \.accentHover), ("accent-pressed", \.accentPressed),
-        ("accent-text", \.accentText), ("accent-ink", \.accentInk), ("work-selected-fill", \.workSelectedFill),
+        ("accent-text", \.accentText), ("accent-ink", \.accentInk), ("titlebar", \.titlebar),
+        ("work-selected-fill", \.workSelectedFill),
         ("work-selected-text", \.workSelectedText), ("work-selected-secondary-text", \.workSelectedSecondaryText),
         ("selection-fill", \.selectionFill.rgb),
         ("working-ink", \.workingTone.inkRGB), ("working-fill", \.workingTone.fillRGB),
@@ -159,6 +160,10 @@ public struct ThemeFile: Sendable {
         palette.isDark = dark
         for role in appRoles { if let value = roles["loopflow-\(role.key)"] { palette[keyPath: role.path] = value } }
         if let opacity { palette.selectionFill.opacity = opacity }
+        // A file that states an accent and no title bar gets its bar from that accent.
+        if roles["loopflow-titlebar"] == nil {
+            palette.titlebar = GhosttyThemeMapping.titlebar(accent: palette.accent, background: palette.background, dark: dark)
+        }
         if !complete {
             let derived = terminalKeys.map(\.key).filter { colors[$0] == nil }
             diagnostics.append("Supplied: \(colors.keys.sorted().joined(separator: ", ")); \(indexed.count) indexed colors; \(roles.count) app roles.")

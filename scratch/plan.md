@@ -592,9 +592,14 @@ demo: not headless; qa or demo runs it.
      paths were not saved." (questions 63). The sidebar is 236 pt wide: its
      line is the one to look at first for wrapping: `FailureLine` sets
      `what` and the message side by side, where the old text ran full width.
-   - For compress: `BacklogNotice.failed` and `HiddenPathsFailure` hold the
-     same pair `FailureLine` takes (what, machine). One value for a failure
-     that the line draws would remove a type; neither site needs it to work.
+   - `BacklogNotice.failed` and `HiddenPathsFailure` hold the same pair
+     `FailureLine` takes (what, machine). The fourth compress left them: a
+     shared value swaps one five-line type for another plus a second
+     `FailureLine` initializer, and the other 30 sites pass the pair inline.
+     That pass cut only `WorkflowOutline`'s public initializer (a test was
+     its one caller; `@testable` reaches the memberwise one);
+     `scripts/test_desktop.sh --filter 'WorkflowLineTests|NewTaskTests'`
+     passed after it (11 tests in 2 suites).
 
 Outside this change, on the page for whoever wants it: a stopped Graph's
 reason is one string on the wire, so the Machine's part of "kickoff:

@@ -267,12 +267,6 @@ public struct WorkflowOutline: Decodable, Sendable, Hashable {
         case steps, sentence
         case interactiveSteps = "interactive_steps"
     }
-
-    public init(steps: [TaskGraph.Step], interactiveSteps: [TaskGraph.InteractiveStep], sentence: String) {
-        self.steps = steps
-        self.interactiveSteps = interactiveSteps
-        self.sentence = sentence
-    }
 }
 
 /// Formatting only: order and nesting are supplied by Rust's captured definition.

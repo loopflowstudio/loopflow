@@ -45,6 +45,15 @@ lf task file c9fbcb nosuch.txt --at nonsense                                 →
 <p>Keywords, types, properties and calls are colored; comments sample at (102,95,89) against (41,38,36) for plain text. <code>banner.png</code> opens as a picture with its size.</p>
 <img src="qa/18-files-swift.png"><img src="qa/19-files-image.png">
 
+<h2>10. A rendered file is one change (second run, after the concept-review repair)</h2>
+<p>Fresh isolated bundle (<code>com.loopflow.mac.c9qa.dev</code>) on a private home and disposable repository, Task d051fa, the working tree edited between captures. Screen locked; <code>screencapture -l</code> still worked.</p>
+<p class="fix">Image only (<code>logo.png</code> rotated): "1 change in 1 file", stepper "1 change", no "+0 −0" in the header or the sidebar row. The first run read "0 changes", "No changes", "+0 −0".</p>
+<img src="qa/30-image-only.png">
+<p class="fix">README.md with two hunks, one Swift hunk, the image: "3 changes in 3 files". Counting by patch would read 4.</p>
+<img src="qa/31-mixed.png">
+<p class="fix">README.md with Source on (a throwaway build defaulting <code>sourceFiles</code> to it, reverted): "4 changes in 3 files" (2 + 1 + 1), and the header button reads <b>Rendered</b>.</p>
+<img src="qa/32-source.png">
+<p>Seen in passing: the redline shows "three" → "three and four" as a struck item and a filled item, while Source pairs the same line with "and four" filled. Without the list marker the item shares less than half its words, so <code>ReviewWords.edit</code> declines the pair. Consistent with the threshold; noted in questions.</p>
 <h2>Stale list (observed, not fixed)</h2>
 <p>Twice, after <code>git checkout</code> of one file plus an edit to another, the file list stayed on the old file (its sides read again, so here both pages show "Old page") until the next file event. The server's <code>task.changes</code> answered correctly at 150 ms. This branch doesn't touch the watcher path.</p>
 <img src="qa/16-python.png">
@@ -64,12 +73,12 @@ lf task file c9fbcb nosuch.txt --at nonsense                                 →
 
 <h2>Not reached</h2>
 <ul><li>Clicking <b>Source</b> and the layout picker, and a step's skipped lines: these need clicks, and synthetic input is blocked for this shell. Store tests cover the step's skipped lines (<code>aStepOpensSkippedLinesFromItsHeadCommit</code>).</li>
+<li>Pressing <code>]</code> / next-change to land on a rendered file: the stepper has no <code>lf desktop</code> action and keystrokes fail with 1002. <code>aRenderedFileIsOneChange</code> covers the stepping order.</li>
 <li>Typing in the Files editor (comment-coloring while typing). <code>theEditorColorsByGrammarAsYouType</code> covers it.</li>
 <li>Flexoki Dark and Light: the private config used Loopflow Light.</li></ul>
 
 <h2>Still wrong, worst first</h2>
-<ol><li>An image-only change reads "0 changes in 1 file", "No changes", "+0 −0".</li>
-<li>The occasionally stale file list above.</li>
+<ol><li>The occasionally stale file list above.</li>
 <li>Rendered Markdown keeps hard-wrapped line breaks (Files' existing choice), so prose reads ragged, worse in two columns.</li>
 <li>Code blocks wrap in Side by side's half-width columns.</li></ol>
 </body></html>

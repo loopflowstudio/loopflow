@@ -96,6 +96,9 @@ To build the isolated bundle, import `scripts/loopflow-dev.py`, set
 `cmd_build()` and, if it succeeds, `_install_dev_app()`.
 Run that script with `uv run python` from the checkout: the module imports
 `boto3`, which only the project environment has.
+Load it with `importlib` after `sys.path.insert(0, "scripts")`: it imports
+`app_bundle` from beside itself. The Dev bundle carries no `lf` of its own,
+so pass `LF_BIN` with `open --env`.
 LaunchServices won't resolve a bundle ID under `/tmp`, so `lf desktop view`
 fails there with `LSCopyApplicationURLsForBundleIdentifier`. Register with
 `lsregister -f`, open it with `LOOPFLOW_DEV_WAVE_REPO` and `--repo` after
@@ -166,7 +169,8 @@ store reads again on file events. Twice a list stayed stale after a `git
 checkout` of one file plus an edit to another; the next write to any file
 cleared it.
 
-In-memory view state (the layout picker's `reviewLayout`, Source) has no
+In-memory view state (the layout picker's `reviewLayout`, Source,
+`TaskFilesStore.sourceFiles`) and the change stepper (`]`) have no
 control command. To see a non-default state, change the default in a
 throwaway build and revert it before committing.
 

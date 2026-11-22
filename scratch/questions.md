@@ -83,7 +83,6 @@
 
 ## From qa (November 21)
 
-- An image-only change reads "0 changes in 1 file", the stepper says "No changes" and the file shows "+0 −0". A rendered file isn't a stop. Should a binary or rendered file count as one change, or should the title count files when there are no line stops?
 - Rendered Markdown keeps authored line breaks inside a paragraph (`MarkdownBlocks`, by design since Files had it), so hard-wrapped prose reads ragged in the Diff, especially in two columns. Reflow soft breaks?
 - In Side by side, Markdown code blocks wrap inside the half-width column; in the redline they don't.
 - Twice the Diff's file list stayed stale after a `git checkout` of one file plus an edit to another, until the next file event. The served `task.changes` was correct at 150 ms. Not reproduced deliberately; the display had slept around then.
@@ -92,3 +91,4 @@
 - 2026-11-21 realign (headless): the plan drops the change marks (removed in cfc6c89cc5 after "teh right hand red/green bar is too much, drop it"), states the first-parent step rule, lists the count up front and windowed stream as built and unseen, and keeps one check line. Product memory gains "should know up front". No checks run; code and `swift/README.md` already agreed.
 - 2026-11-21 concept review, twelfth pass (headless), over the count up front and the window: one repair for implement, in the plan under "Twelfth pass". The count and the per-file patch come from two `git diff` calls with different flags (`--find-renames`, explicit prefixes in the count only), so Git config can make them disagree. Chosen by the review, not by Jack, reversible: one argument builder for both reads and a cross-language check that the stops equal the count. Left for the screen: the title counts Viewed files, the stepper's total does not. The five demo questions are unchanged and unanswered.
 - Sync choice: the stepper uses the count from the file list for Source and one change per rendered file.
+- 2026-11-21 qa, second run (headless): the rendered-file stop works in the Dev build (image only "1 change in 1 file", no "+0 −0"; two-hunk README + Swift + image "3 changes"; Source on "4 changes"). `]` not pressed: no desktop action, keystrokes blocked. Open: a list item edited "three" → "three and four" redlines as struck + filled, while Source pairs the line; the marker-less item shares under half its words. Lower the threshold for short blocks?

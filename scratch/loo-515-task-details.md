@@ -101,7 +101,8 @@ file and a builtin skill.
     stream and page at 360, 480 and 640 pt.
   - **Count up front**: `TaskChangedFile.changes` is each file's runs of
     changed lines, counted in Rust (`count_changes`) from the same
-    default-context patch the stream parses (`-U0` aligns some blank lines
+    default-context patch the stream parses: both reads take
+    `comparison_diff_args`, renames found and prefixes pinned (`-U0` aligns some blank lines
     differently: `config/files.rs` read 11 against 12). Title and stepper sum
     it (`TaskFilesStore.changeCount`); a file's own lines count only where no
     count came (Files' Diff, drafts).
@@ -523,7 +524,7 @@ Measured (November 21 evening, `DiffScrollMeasurement`, this Task's Diff with no
 
 Check (November 21 evening): `cargo test -p loopflow-execution --lib task_changes_` 2, `dto_fixtures::` 49, `server::schema::tests::` 8, `documented_commands::` 4 passed; `scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|ReviewDiffTests|DTOFixtureTests|RegistryQueryTests'` 135 passed. Gate/CI: clippy, the full Swift suite (the FSEvents tests `commitInLinkedWorktreeRereadsTheComparison` and `ignoredWritesFromReadsNeverScheduleAnotherRead` failed earlier under a busy `fseventsd`), `global_commands`. Demo: scrolling and jumps on screen.
 
-Check (November 21 night, shared `PINNED_PATCH_FLAGS` for counts, the Diff and untracked files): `cargo test -p loopflow-execution --lib ops::task::` 65 passed, `cargo clippy -p loopflow-execution --all-targets` clean. Gate: `ReviewDiffTests`.
+Check (November 21 night, shared `PINNED_PATCH_FLAGS` for counts, the Diff and untracked files): `cargo test -p loopflow-execution --lib ops::task::` 65 passed, `cargo clippy -p loopflow-execution --all-targets` clean; `scripts/test_desktop.sh --filter ReviewDiffTests` 15 passed, `stopsMatchTheCountsTheServerSends` among them.
 
 ## Diff polish, November 21 — built
 

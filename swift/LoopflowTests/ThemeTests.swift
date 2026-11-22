@@ -183,12 +183,12 @@ struct ThemeTests {
             let store = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
             #expect(store.selection.mode == .dark)
             #expect(store.effectiveTheme.name == "Graphite")
-            store.beginPreview(); store.previewMode(.system); store.showPicker(.light); store.previewTheme("Folio")
+            store.beginPreview(); store.previewMode(.system); store.previewTheme("Folio")
             #expect(paths.configText() == "agent: claude\n# keep me\ntheme: Graphite\nyolo: true\n")
             store.cancel()
             #expect(paths.configText() == "agent: claude\n# keep me\ntheme: Graphite\nyolo: true\n")
             #expect(store.effectiveTheme.name == "Graphite")
-            store.beginPreview(); store.previewMode(.system); store.showPicker(.light); store.previewTheme("Folio"); await store.apply()
+            store.beginPreview(); store.previewMode(.system); store.previewTheme("Folio"); await store.apply()
             let savedTheme1 = try await ThemeConfig.read(paths.config, location: location)
             #expect(savedTheme1 == "light:Folio,dark:Graphite")
             #expect(paths.configText()?.split(separator: "\n").filter { !$0.hasPrefix("theme:") } == ["agent: claude", "# keep me", "yolo: true"])
@@ -265,7 +265,7 @@ struct ThemeTests {
             #expect(saved.palette.definition.accent.hex == 0x224466)
             let relaunched = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
             #expect(relaunched.effectiveTheme.palette.definition.accent.hex == 0x224466)
-            #expect(relaunched.entries(for: relaunched.picker).builtins.first { $0.name == "Folio" }?.source == .yours)
+            #expect(relaunched.entries(for: relaunched.previewSide).builtins.first { $0.name == "Folio" }?.source == .yours)
             relaunched.beginPreview(); relaunched.deleteTheme(); await relaunched.apply()
             #expect(!FileManager.default.fileExists(atPath: paths.themes.appendingPathComponent("Folio").path))
             #expect(relaunched.effectiveTheme.name == "Folio")
@@ -277,11 +277,11 @@ struct ThemeTests {
         try await withThemeServer { location in
             let paths = ThemePaths.temporary()
             let store = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
-            store.beginPreview(); store.showPicker(.light)
+            store.beginPreview()
             store.importTheme(try file("background=171924\nforeground=CAD2EF"))
             #expect(store.canApply)
             #expect(store.current.mode == .system)
-            #expect(store.picker == .dark)
+            #expect(store.previewSide == .dark)
             #expect(store.entries(for: .dark).yours.map(\.name) == ["Personal"])
             #expect(store.entries(for: .light).yours.isEmpty)
             #expect(store.effectiveTheme.name == "Personal")
@@ -290,11 +290,22 @@ struct ThemeTests {
             #expect(savedTheme7 == "light:Loopflow Light,dark:Personal")
             let saved = try ThemeFile.read(paths.themes.appendingPathComponent("Personal"), complete: true).theme
             #expect(saved.terminal.background.hex == 0x171924)
-            store.beginPreview(); store.showPicker(.dark); store.deleteTheme()
+            store.beginPreview(); store.previewTheme("Personal"); store.deleteTheme()
             #expect(store.current.dark == "Loopflow Dark")
             await store.apply()
             #expect(store.library.yours.isEmpty)
         }
+    }
+
+    @Test func previewingADarkThemeFromTheLightSideLandsOnTheDarkSide() {
+        let store = AppearanceStore(paths: .temporary(), systemDark: false)
+        store.beginPreview(); store.previewMode(.system)
+        #expect(store.previewSide == .light)
+        store.previewTheme("Harbor")
+        #expect(store.current.dark == "Harbor")
+        #expect(store.current.light == "Loopflow Light")
+        #expect(store.previewSide == .dark)
+        #expect(store.effectiveTheme.name == "Harbor")
     }
 
     @Test func ghosttyThemesResolveAfterYoursAndBuiltinsAndStayReadOnly() async throws {
@@ -306,7 +317,7 @@ struct ThemeTests {
             let store = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
             #expect(store.effectiveTheme.name == "Midnight")
             #expect(store.selectedSource == .ghostty)
-            #expect(store.entries(for: store.picker).yours.map(\.name) == ["Midnight"])
+            #expect(store.entries(for: store.previewSide).yours.map(\.name) == ["Midnight"])
             #expect(store.library.resolve("Folio")?.palette.definition == ThemeDefinition.builtins.first { $0.name == "Folio" }?.palette.definition)
             #expect(!store.canDelete)
             store.customize(); await store.apply()
@@ -350,7 +361,7 @@ struct ThemeTests {
             try paths.write("background=FFF4DF\nforeground=34291F", theme: "Paper")
             let store = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
             #expect(store.notice?.contains("Broken") == true)
-            #expect(store.entries(for: store.picker).yours.map(\.name) == ["Paper"])
+            #expect(store.entries(for: store.previewSide).yours.map(\.name) == ["Paper"])
         }
     }
 

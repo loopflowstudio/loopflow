@@ -20,7 +20,7 @@ struct ThemePaths: Equatable {
     }
 }
 
-/// One theme a picker can show, with where it came from.
+/// One theme the chooser can show, with where it came from.
 struct ThemeEntry: Identifiable {
     enum Source: Equatable { case builtin, yours, ghostty }
     let theme: ThemeDefinition
@@ -61,7 +61,7 @@ struct ThemeLibrary {
 
     func isBuiltin(_ name: String) -> Bool { ThemeDefinition.builtins.contains { $0.name == name } }
 
-    /// One appearance's picker: built-ins (yours where you override one), then yours and Ghostty's.
+    /// One side's themes: built-ins (yours where you override one), then yours and Ghostty's.
     func entries(dark: Bool) -> (builtins: [ThemeEntry], yours: [ThemeEntry]) {
         let builtins = ThemeDefinition.builtins.filter { $0.isDark == dark }.map { theme in
             yours[theme.name].map { ThemeEntry(theme: $0, source: .yours) } ?? ThemeEntry(theme: theme, source: .builtin)

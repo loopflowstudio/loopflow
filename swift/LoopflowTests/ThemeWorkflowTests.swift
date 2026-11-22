@@ -60,7 +60,7 @@ struct ThemeWorkflowTests {
                     let shown = choice == .system || choice == side
                     #expect(heading == (shown ? "\(side.menuTitle) themes · Loopflow \(side.menuTitle)" : nil))
                 }
-                #expect(appearance.picker == (choice == .dark ? .dark : .light))
+                #expect(appearance.previewSide == (choice == .dark ? .dark : .light))
                 let showsDark = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Harbor")) != nil
                 let showsLight = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Fjord Light")) != nil
                 #expect(showsDark == (choice != .light))

@@ -40,7 +40,7 @@ final class AppearanceStore {
     private(set) var selection = AppearanceSelection()
     private(set) var library = ThemeLibrary()
     private var draft: AppearanceDraft?
-    private(set) var picker: AppearanceMode = .light
+    private(set) var previewSide: AppearanceMode = .light
     private(set) var effectiveTheme = ThemeDefinition.light
     private(set) var systemDark: Bool
     private(set) var diagnostics: [String] = []
@@ -62,7 +62,7 @@ final class AppearanceStore {
         library = ThemeLibrary.load(paths)
         notice = library.problems.isEmpty ? nil : library.problems.joined(separator: "\n")
         effectiveTheme = resolved(selection, in: library)
-        picker = self.systemDark ? .dark : .light
+        previewSide = self.systemDark ? .dark : .light
         do { try publish(effectiveTheme, effectiveTheme.id) } catch { notice = error.localizedDescription }
         if systemDark == nil {
             observation = NSApplication.shared.observe(\.effectiveAppearance) { [weak self] _, _ in
@@ -85,8 +85,8 @@ final class AppearanceStore {
     var current: AppearanceSelection { draft?.selection ?? selection }
     private var currentLibrary: ThemeLibrary { draft?.library ?? library }
     var chooserOpen: Bool { draft != nil }
-    var selectedName: String { current.name(dark: picker == .dark) }
-    var selectedTheme: ThemeDefinition { theme(selectedName, dark: picker == .dark, in: currentLibrary) }
+    var selectedName: String { current.name(dark: previewSide == .dark) }
+    var selectedTheme: ThemeDefinition { theme(selectedName, dark: previewSide == .dark, in: currentLibrary) }
     var selectedSource: ThemeEntry.Source? { currentLibrary.source(of: selectedName) }
     func entries(for side: AppearanceMode) -> (builtins: [ThemeEntry], yours: [ThemeEntry]) {
         currentLibrary.entries(dark: side == .dark)
@@ -100,7 +100,7 @@ final class AppearanceStore {
         }
     }
     var canApply: Bool { !saving && draftErrors.isEmpty }
-    func themeName(for picker: AppearanceMode) -> String { current.name(dark: picker == .dark) }
+    func themeName(for side: AppearanceMode) -> String { current.name(dark: side == .dark) }
 
     private func theme(_ name: String, dark: Bool, in library: ThemeLibrary) -> ThemeDefinition {
         library.resolve(name) ?? (dark ? .dark : .light)
@@ -126,7 +126,7 @@ final class AppearanceStore {
         }
         notice = problems.isEmpty ? nil : problems.joined(separator: "\n")
         if draft == nil {
-            picker = selection.isDark(systemDark: systemDark) ? .dark : .light
+            previewSide = selection.isDark(systemDark: systemDark) ? .dark : .light
             update(resolved(selection, in: library), keepingNotice: true)
         }
     }
@@ -176,34 +176,27 @@ final class AppearanceStore {
         systemDark = dark
         if draft == nil { update(resolved(selection, in: library)) }
         else if current.mode == .system {
-            picker = dark ? .dark : .light
+            previewSide = dark ? .dark : .light
             update(selectedTheme)
         }
     }
     func beginPreview() {
         guard draft == nil else { return }
         draft = AppearanceDraft(selection: selection, library: library)
-        picker = selection.isDark(systemDark: systemDark) ? .dark : .light
+        previewSide = selection.isDark(systemDark: systemDark) ? .dark : .light
         diagnostics = []
-    }
-    func showPicker(_ appearance: AppearanceMode) {
-        guard appearance != .system else { return }
-        beginPreview()
-        picker = appearance
-        update(selectedTheme)
     }
     func previewMode(_ mode: AppearanceMode) {
         beginPreview()
         draft?.selection.mode = mode
-        picker = current.isDark(systemDark: systemDark) ? .dark : .light
+        previewSide = current.isDark(systemDark: systemDark) ? .dark : .light
         update(selectedTheme)
     }
     func previewTheme(_ name: String) {
         guard let theme = currentLibrary.resolve(name) else { notice = "No theme named “\(name)”."; return }
         beginPreview()
-        draft?.selection.setName(name, dark: picker == .dark)
         diagnostics = []
-        update(theme)
+        show(theme, as: name)
     }
 
     /// Make the selected theme yours: a built-in or Ghostty theme becomes your file of the same name.
@@ -228,24 +221,29 @@ final class AppearanceStore {
         let builtin = currentLibrary.isBuiltin(name)
         stage(nil, for: name)
         if !builtin {
-            draft?.selection.setName(picker == .dark ? ThemeDefinition.dark.name : ThemeDefinition.light.name, dark: picker == .dark)
+            draft?.selection.setName(previewSide == .dark ? ThemeDefinition.dark.name : ThemeDefinition.light.name, dark: previewSide == .dark)
         }
         update(selectedTheme)
     }
 
-    /// Import a theme file onto the side its own colors say. In Light or Dark mode the preview switches to that side.
+    /// Import a theme file onto the side its own colors say.
     func importTheme(_ url: URL) {
         beginPreview()
         do {
             let file = try ThemeFile.read(url)
-            let dark = file.theme.isDark
-            if current.mode != .system { draft?.selection.mode = dark ? .dark : .light }
-            picker = dark ? .dark : .light
             stage(file.theme, for: file.theme.name)
-            draft?.selection.setName(file.theme.name, dark: dark)
             diagnostics = file.diagnostics
-            update(file.theme)
+            show(file.theme, as: file.theme.name)
         } catch { notice = error.localizedDescription }
+    }
+
+    /// Assign `theme` as `name` to the side its own colors say; in Light or Dark mode the preview switches to that side.
+    private func show(_ theme: ThemeDefinition, as name: String) {
+        let dark = theme.isDark
+        if current.mode != .system { draft?.selection.mode = dark ? .dark : .light }
+        previewSide = dark ? .dark : .light
+        draft?.selection.setName(name, dark: dark)
+        update(theme)
     }
 
     /// Stage your file `name`: a theme to write, or nil to delete.

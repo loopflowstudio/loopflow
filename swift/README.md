@@ -352,8 +352,8 @@ Your themes are Ghostty theme files in `~/.lf/themes/`; `~/.config/ghostty/theme
 is read too, never written. Names resolve to yours, then built-ins, then Ghostty's.
 A file named like a built-in overrides it. **Customize** on a built-in writes your
 copy; on yours it edits in place. **Delete** removes yours (**Revert to built-in**
-for an override). **Import file…** copies a theme into Yours, accepting only the
-picker's appearance; a dark file in the Light picker explains itself instead.
+for an override). **Import file…** copies a theme into Yours on the side its colors say; in Light
+or Dark mode the preview switches to that side.
 
 ```
 background = #171924

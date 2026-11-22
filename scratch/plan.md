@@ -1,6 +1,6 @@
 # 50f7f9: review the bundled themes
 
-Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. The round 3 concept review found two leftovers of the per-side picker (Remaining 1–2); then ship-review's look at the Dev app on an unlocked display.
+Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1), then the 13 families and a Choose Theme grid of cards (round 2). Round 3 made the concept review's three chooser corrections, swapped Verdigris for Moss and dropped the removed-name fallback. Round 3's concept review found two leftovers of the per-side picker; round 4 removed them: `previewTheme` and `importTheme` share one assignment that takes the side from the theme's own colors, `showPicker` is gone and `picker` is `previewSide`. Left: ship-review's look at the Dev app on an unlocked display.
 
 ## What people said
 
@@ -28,6 +28,7 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 - Round 3 Dev app QA, screen locked: Verdigris as an unknown name, headings without side buttons, a dark file imported in Light mode (switches to Dark) and System mode (stays), Moss applied via `lf set`: passed after dropping the empty "Derived: ." import line (`scratch/qa.html`).
 - `swift test … 'ThemeTests|ThemeWorkflowTests|WorkPaletteTests|TerminalColorTests'`: 32 passed, 2026-11-22 (after the Derived fix).
 - `test_third_party.py`: 9 passed.
+- `swift test … 'WorkPaletteTests|TerminalColorTests|ThemeTests|ThemeWorkflowTests'`: 33 passed, 2026-11-22 (round 4, with `previewingADarkThemeFromTheLightSideLandsOnTheDarkSide`).
 - Not run here: the real Import file panel, Apply and Cancel clicked in the chooser, the editor's Title bar row, a key window's bar, the selected Appearance toolbar tab in dark mode (ship-review, unlocked display).
 
 ## Demo
@@ -36,9 +37,7 @@ Dev app → Settings → Choose Theme: 13 cards per side in their own colors, bo
 
 ## Remaining
 
-1. **A theme lands on the side its own colors say, in one place.** Import already does this; a card click still goes through `showPicker(side)` then `previewTheme(name)`, which writes the name onto whatever side `picker` holds (`previewTheme("Folio")` with `picker == .dark` puts a light theme on the dark side). Make `previewTheme(_ name:)` take the side from `theme.isDark`, share one private assignment with `importTheme` (set the side, switch the mode when not System, stage, update), and delete `showPicker`. The card button becomes one call. Rename `picker` to `previewSide` and `themeName(for picker:)` to `themeName(for side:)`: no per-side picker exists on screen any more, and "picker" also names the mode `Picker`. Tests that used `showPicker(.light)`/`(.dark)` to choose a side preview a theme of that side instead; add one: `previewTheme` of a dark name while previewing light lands on `current.dark`. Check: the `swift test` filter in Checks.
-2. **`swift/README.md` says what import does now.** Lines 354–356 still say import accepts "only the picker's appearance; a dark file in the Light picker explains itself". Replace with: Import file… files a theme with the side its colors say and, in Light or Dark mode, switches the preview to that side. Fix "One appearance's picker" in `ThemeLibrary.swift` the same way.
-3. Ship-review: the Dev app look above, on an unlocked display, including a dark file imported from the light section.
+1. Ship-review: the Dev app look above, on an unlocked display, including a dark file imported from the light section.
 
 ## Left outside this Task
 

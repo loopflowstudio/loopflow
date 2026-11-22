@@ -96,9 +96,9 @@ struct ThemeChooser: View {
     /// The theme drawn in its own roles; the chosen card is ringed in the window's focus color.
     private func card(_ entry: ThemeEntry, side: AppearanceMode) -> some View {
         let assigned = appearance.themeName(for: side) == entry.name
-        let selected = assigned && appearance.picker == side
+        let selected = assigned && appearance.previewSide == side
         return VStack(alignment: .leading, spacing: Spacing.xs) {
-            Button { editing = false; appearance.showPicker(side); appearance.previewTheme(entry.name) } label: {
+            Button { editing = false; appearance.previewTheme(entry.name) } label: {
                 ThemeCard(theme: entry.theme)
                     .overlay(RoundedRectangle(cornerRadius: CornerRadius.row)
                         .strokeBorder(assigned ? palette.keyboardFocus : entry.theme.palette.border, lineWidth: assigned ? 2 : 1))

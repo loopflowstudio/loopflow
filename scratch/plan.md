@@ -67,8 +67,9 @@ look needs a display, so it belongs to qa and review, not to build.
 ## What the code is today
 
 Counts are from `swift/LoopflowMac` at the base commit unless a slice is
-named. After slice 2 the acceptance grep prints 296 lines in 35 files;
-`BacklogView.swift` and `Design/WorkStyle.swift` print none.
+named. After slice 3 the acceptance grep prints 249 lines in 29 files;
+the backlog, the dashboard, the Portfolio's Wave page and roadmap,
+`WavesView.swift`, `WorkNavigator.swift` and `Design/` print none.
 
 - Font sizes are already on the ramp: `TypographyDisciplineTests` holds it.
   One literal remains, the AppKit field at `WorkPalette.swift:452`
@@ -99,10 +100,8 @@ named. After slice 2 the acceptance grep prints 296 lines in 35 files;
   action bar.
 - A Project's key results are drawn once, by `WaveProjectView`, since
   slice 2.
-- New Wave exists twice: `CreateWaveSheet` (`WavesView.swift:582`, with a
-  repository picker) and `NewWaveRow`'s popover form
-  (`WorkNavigator.swift:466`, repository implied). Both end in
-  `WaveAddedLeftovers`.
+- New Wave is one form since slice 3: `CreateWaveSheet` (`WavesView.swift`),
+  a sheet in the Portfolio and a popover under the sidebar's Waves.
 
 ## Design
 
@@ -452,18 +451,35 @@ or `lf desktop` reads unless its view is deleted.
    - The test's failures are the list for slices 3 and 4: 301 lines, all
      outside these three files, `swift/Loopflow/Services/Notice.swift`
      among them.
-3. **The rest of the dashboard and the Portfolio, and New Wave.** Next.
-   `DashboardView.swift` and `DashboardSlotGrid.swift`: the serif header, the
-   tile's workflow as `WorkflowLine`'s sentence, the pager in `text`, the
-   editor's buttons. `WaveDetailPane.swift` and `RoadmapView.swift`: the
-   serif name, `RoadmapWaveCard` without border or fill, the sentence-case
-   metric header, the contract-issue notice with Copy, "Project history" as
-   a button. `CreateWaveSheet` (`WavesView.swift`) as the one form, shown by
-   `NewWaveRow` (`WorkNavigator.swift`) in its popover. Each file touched
-   leaves the discipline test's list (7, 4, 6, 1 and 28 lines today), by the
-   snap table as it stands. Done when `DashboardWorkspaceTests`,
-   `RoadmapViewTests`, `CreateWaveSheetTests` and `WorkflowLineTests` pass
-   and those files print nothing under the grep.
+3. **The rest of the dashboard and the Portfolio, and New Wave.** Built.
+   The dashboard is headed by its name in serif ("Working Tasks" on that
+   board; an unsaved query has none) with the query beside it; a tile shows
+   `WorkflowLine(sentenceOnly:)` under its row unless the row already prints
+   an ask; the pager is `text` with tabular digits; the editor's title is
+   serif and Save is its accent. The Wave page's name is serif at the display
+   step with "Project history" in its header; a Wave on the roadmap is
+   `RoadmapWaveSection`, divided from the next by a line; the metric header
+   is sentence case in `meta`; contract issues are
+   `WaveContractIssueNotice`, above the table, with Copy. `CreateWaveSheet`
+   is the one New Wave form and `NewWaveRow` shows it in its popover.
+   Deleted: `RoadmapWaveCard`'s border and fill, the striped block, the
+   uppercase cell, `NewWaveRow`'s fields, error line and Create button.
+
+   What it taught:
+   - The snap table held again, on 47 more lines, with no new step.
+   - A tile reads its workflow from `model.taskWork`, the reading its "more"
+     menu already used. Whether every tile on a board has that reading
+     without being opened was not seen; a tile without one shows the row
+     alone.
+   - The sidebar's New Wave popover is now the sheet's 420 pt form with a
+     serif title, where it was two 200 pt fields. Whether that reads heavy in
+     a popover is for the Dev app look.
+   - Left for slice 4 in these files, since no grep line names them: the
+     Portfolio's system-styled buttons and pickers (`WavesView`
+     `portfolioControls`, the roadmap's lens picker), `.secondary` in
+     `WorkTaskIdentity`, mono counts and "⌘N" in `WorkNavigator`, and the
+     middle dots in `RoadmapView.swift:293` and `WaveDetailPane`'s metric
+     detail.
 4. **Choose Theme, then the sweep.** The sample, then every remaining file
    to named steps, one button, roles, mono and glyphs, until the test and the
    grep are clean. The test also reads `swift/Loopflow`, which the grep does
@@ -493,5 +509,6 @@ or `lf desktop` reads unless its view is deleted.
 |---------|--------|-------------|
 | `scripts/test_desktop.sh --skip-build --filter 'TaskStandingTests\|TaskRowTests\|RoadmapViewTests\|TaskConceptTests\|WorkNavigationTests\|TaskBriefTests\|ProjectActivationTests\|NowProjectionTests\|DashboardWorkspaceTests\|WorkModelTests\|DesktopHeadlessTests'` | passed after slice 1 | build; CI runs the rest |
 | `scripts/test_desktop.sh --filter 'BacklogViewTests\|DesignDisciplineTests'` | after slice 2: `BacklogViewTests` passed (12 tests); `DesignDisciplineTests` fails on 301 lines in other files, as planned until slice 4 | build |
-| the grep above | 314 lines at base, 309 after slice 1, 296 after slice 2 | build |
+| `scripts/test_desktop.sh --filter 'DashboardWorkspaceTests\|RoadmapViewTests\|CreateWaveSheetTests\|WorkflowLineTests\|WorkModelTests\|WorkNavigationTests'` | passed after slice 3 (125 tests; one new assertion corrected, then `CreateWaveSheetTests` rerun, 4 tests) | build |
+| the grep above | 314 lines at base, 309 after slice 1, 296 after slice 2, 249 after slice 3 | build |
 | Dev app in light, dark and an imported theme | not run; needs a display | qa, review |

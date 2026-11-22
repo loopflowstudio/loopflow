@@ -123,7 +123,7 @@ struct RoadmapView: View {
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(LoopflowButtonStyle())
             .disabled(isRefreshing)
             .help("Refresh work")
             .accessibilityLabel("Refresh work")
@@ -195,8 +195,9 @@ struct RoadmapView: View {
     private var roadmapContent: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.lg) {
-                ForEach(visibleWaves, id: \.wave.id) { roadmap in
-                    waveCard(roadmap)
+                ForEach(Array(visibleWaves.enumerated()), id: \.element.wave.id) { index, roadmap in
+                    if index > 0 { Divider() }
+                    waveSection(roadmap)
                 }
             }
             .padding(Spacing.xl)
@@ -206,8 +207,8 @@ struct RoadmapView: View {
         .accessibilityIdentifier("wave-roadmap")
     }
 
-    private func waveCard(_ roadmap: WaveRoadmap) -> some View {
-        RoadmapWaveCard(
+    private func waveSection(_ roadmap: WaveRoadmap) -> some View {
+        RoadmapWaveSection(
             roadmap: roadmap,
             onOpenWave: { onOpenWave(roadmap.wave) },
             onOpenTask: { onOpenTask(roadmap.wave.repo, $0) },
@@ -238,7 +239,8 @@ extension WorkModel {
     }
 }
 
-private struct RoadmapWaveCard: View {
+/// One Wave on the roadmap: a section under its name, with no frame of its own.
+struct RoadmapWaveSection: View {
     let roadmap: WaveRoadmap
     let onOpenWave: () -> Void
     let onOpenTask: (String) -> Void
@@ -258,7 +260,6 @@ private struct RoadmapWaveCard: View {
                         Text(roadmap.wave.status.label)
                             .font(Typography.meta)
                             .foregroundStyle(palette.textSecondary)
-
                     }
                     if !roadmap.wave.goal.isEmpty {
                         Text(roadmap.wave.goal)
@@ -291,13 +292,6 @@ private struct RoadmapWaveCard: View {
             ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
                 Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)").foregroundStyle(palette.warning)
             }
-        }
-        .padding(Spacing.lg)
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.pane))
-        .overlay {
-            RoundedRectangle(cornerRadius: CornerRadius.pane)
-                .stroke(palette.border, lineWidth: 1)
         }
         .accessibilityIdentifier("loopflow-wave-\(roadmap.wave.id)")
     }
@@ -365,7 +359,7 @@ struct NowSectionView: View {
                     .font(Typography.meta.weight(.semibold))
                     .foregroundStyle(palette.textSecondary)
                     .padding(.horizontal, Spacing.xs)
-                    .padding(.vertical, 1)
+                    .padding(.vertical, Spacing.xxs)
                     .background(palette.surfaceMuted.opacity(0.6))
                     .clipShape(Capsule())
                 Spacer()

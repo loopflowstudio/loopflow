@@ -64,15 +64,15 @@ struct WorkNavigator: View {
                 WorkReadStatus(status: status)
             }
             // The repository tops the sidebar; a selected Wave moves up under it.
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
                 repositoryRow
                 if let wave = model.sidebarWave { waveRow(wave) }
-            }.padding([.horizontal, .top], 8)
+            }.padding([.horizontal, .top], Spacing.sm)
             WorkTaskList(navigation: model.navigation) {
                 // Read once: each read re-filters the plan and every Task's Sessions.
                 let taskIDs = model.sidebarTaskIDs
                 let scope = model.navigation.sidebarScope
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
                     NewTaskRow(model: model)
                     if case .dashboard = scope {
                         HStack {
@@ -80,7 +80,7 @@ struct WorkNavigator: View {
                                 .matchedGeometryEffect(id: scope, in: scopeTitle)
                             Spacer()
                             Text("\(taskIDs.count)").font(Typography.meta).monospacedDigit()
-                        }.foregroundStyle(palette.textTertiary).padding(10)
+                        }.foregroundStyle(palette.textTertiary).padding(Spacing.sm)
                     }
                     // ⌘N counts the rows on screen; sidebar Task IDs are already unique.
                     ForEach(Array(taskIDs.enumerated()), id: \.element) { index, id in
@@ -89,11 +89,11 @@ struct WorkNavigator: View {
                     if taskIDs.isEmpty, let emptyListText {
                         Text(emptyListText)
                             .font(Typography.text)
-                            .foregroundStyle(palette.textSecondary).padding(10)
+                            .foregroundStyle(palette.textSecondary).padding(Spacing.sm)
                     }
                     if let selection = model.selection, selection.kind == .task,
                        !taskIDs.contains(where: { model.isSelected(.task(id: $0)) }) {
-                        VStack(alignment: .leading, spacing: 5) {
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
                             Text("Open Task is outside this list")
                             Button("Show working tasks") {
                                 Perf.userAction(Perf.hierarchyInteraction, scenario: "sidebar_working", id: "outline:\(WorkNavigation.SidebarFilter.working.rawValue)",
@@ -102,9 +102,9 @@ struct WorkNavigator: View {
                                     model.navigation.sidebarWaveID = nil
                                 }
                             }
-                        }.font(Typography.meta).padding(10)
+                        }.font(Typography.meta).padding(Spacing.sm)
                     }
-                }.padding(8).coordinateSpace(.named(TaskOrderDrag.space))
+                }.padding(Spacing.sm).coordinateSpace(.named(TaskOrderDrag.space))
             }
             WaveSectionDivider(navigation: model.navigation)
             waveSection
@@ -164,15 +164,15 @@ struct WorkNavigator: View {
     private var waveSection: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
                     ForEach(model.visibleRoadmaps.filter { $0.wave.id != model.sidebarWave?.wave.id }, id: \.wave.id) { waveRow($0) }
-                }.padding(8)
+                }.padding(Spacing.sm)
             }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
                 wavesHeight = height
             }
             .frame(height: min(wavesHeight, model.navigation.sidebarWavesHeight))
-            NewWaveRow(model: model).padding(.horizontal, 8).padding(.bottom, 8)
+            NewWaveRow(model: model).padding(.horizontal, Spacing.sm).padding(.bottom, Spacing.sm)
         }
         .waveLifecycleSheets(model: model, removing: $removingWave, renaming: $renamingWave)
     }
@@ -215,7 +215,7 @@ struct WorkNavigator: View {
                 } else {
                     Text("\(count)").font(Typography.mono).help("\(count) working Tasks")
                 }
-            }.font(Typography.text).padding(10)
+            }.font(Typography.text).padding(Spacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .foregroundStyle(state == .shown ? palette.workSelectedText : palette.text)
                 .background(SidebarSelectionShape(state: state))
@@ -262,8 +262,8 @@ struct WorkNavigator: View {
             actions(for: id)
         }
         .popover(isPresented: Binding(get: { actionTaskID == id }, set: { if !$0 { actionTaskID = nil } })) {
-            VStack(alignment: .leading, spacing: 10) { actions(for: id) }
-                .padding(12)
+            VStack(alignment: .leading, spacing: Spacing.sm) { actions(for: id) }
+                .padding(Spacing.md)
                 .onExitCommand { actionTaskID = nil }
         }
     }
@@ -303,7 +303,7 @@ struct WorkMachineControl: View {
                     .accessibilityIdentifier("work-machine-" + id)
             }
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: Spacing.xs) {
                 Image(systemName: "desktopcomputer")
                 Text(current.id.map(name) ?? current.label ?? "Machine unknown").lineLimit(1)
             }
@@ -371,28 +371,28 @@ struct WorkJumpMenu: View {
 
     var body: some View {
         let rows = model.jumpRows(scope, filter: filter)
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(title).font(Typography.textStrong).foregroundStyle(palette.textTertiary)
             TextField("Search \(title.lowercased())", text: $filter)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { if let first = rows.first { choose(first.id) } }
                 .accessibilityIdentifier("work-jump-filter")
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
+                LazyVStack(alignment: .leading, spacing: Spacing.xxs) {
                     ForEach(rows) { row in
                         Button { choose(row.id) } label: {
                             HStack {
                                 Text(row.title).lineLimit(1)
                                 Spacer()
                                 Text(row.detail).font(Typography.meta).foregroundStyle(palette.textSecondary).lineLimit(1)
-                            }.padding(6).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            }.padding(Spacing.xs).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         }.buttonStyle(.plain)
                     }
-                    if rows.isEmpty { Text("No matches").font(Typography.meta).foregroundStyle(palette.textSecondary).padding(6) }
+                    if rows.isEmpty { Text("No matches").font(Typography.meta).foregroundStyle(palette.textSecondary).padding(Spacing.xs) }
                 }
             }.frame(maxHeight: 320)
         }
-        .padding(10).frame(width: 380)
+        .padding(Spacing.sm).frame(width: 380)
         .onExitCommand(perform: dismiss)
         .accessibilityIdentifier("work-jump-menu")
     }
@@ -425,7 +425,7 @@ private struct NewTaskRow: View {
                 Text("New Task").lineLimit(1)
                 Spacer()
                 Text("⌘N").font(Typography.mono)
-            }.font(Typography.text).foregroundStyle(palette.textSecondary).padding(10)
+            }.font(Typography.text).foregroundStyle(palette.textSecondary).padding(Spacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
         }.buttonStyle(.plain)
@@ -434,17 +434,12 @@ private struct NewTaskRow: View {
     }
 }
 
-/// Pinned below the scrolling Waves list; names and authors a Wave.
-/// An add with leftovers (its files uncommitted on main) keeps the popover open
-/// showing the receipt's lines; a clean add closes it.
+/// Pinned below the scrolling Waves list; opens the New Wave form for this
+/// window's repository and selects the Wave it adds.
 private struct NewWaveRow: View {
     let model: WorkModel
     @Environment(\.palette) private var palette
     @State private var naming = false
-    @State private var name = ""
-    @State private var objective = ""
-    @State private var error: String?
-    @State private var leftovers: WaveAdded?
 
     var body: some View {
         Button { naming = true } label: {
@@ -452,45 +447,23 @@ private struct NewWaveRow: View {
                 Image(systemName: "plus")
                 Text("New Wave").lineLimit(1)
                 Spacer()
-            }.font(Typography.text).foregroundStyle(palette.textSecondary).padding(10)
+            }.font(Typography.text).foregroundStyle(palette.textSecondary).padding(Spacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
         }.buttonStyle(.plain)
             .accessibilityIdentifier("work-new-wave")
-            .popover(isPresented: $naming, arrowEdge: .trailing) { form }
-    }
-
-    @ViewBuilder
-    private var form: some View {
-        if let leftovers {
-            WaveAddedLeftovers(added: leftovers) {
-                self.leftovers = nil
-                naming = false
-            }.padding(12)
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                TextField("Wave name", text: $name).onSubmit(create).frame(width: 200)
-                TextField("Objective (optional)", text: $objective).onSubmit(create).frame(width: 200)
-                if let error { Text(error).font(Typography.meta).foregroundStyle(palette.warning) }
-                HStack { Spacer(); Button("Create", action: create).keyboardShortcut(.defaultAction) }
-            }.padding(12)
-        }
-    }
-
-    private func create() {
-        guard let repoPath = model.repoPath else { return }
-        Task {
-            do {
-                let added = try await model.addWave(name: name, objective: objective, repo: repoPath)
-                name = ""
-                objective = ""
-                error = nil
-                if added.summary.isEmpty { naming = false } else { leftovers = added }
-                model.select(.wave(id: added.id))
-            } catch let failure {
-                error = failure.localizedDescription
+            .popover(isPresented: $naming, arrowEdge: .trailing) {
+                CreateWaveSheet(
+                    repos: model.repoPath.map { [PortfolioRepo(path: $0, error: nil)] } ?? [],
+                    initialRepoPath: model.repoPath,
+                    onCreate: { repo, name, objective in
+                        let added = try await model.addWave(name: name, objective: objective, repo: repo)
+                        model.select(.wave(id: added.id))
+                        return added
+                    },
+                    onCancel: { naming = false })
+                    .environment(\.palette, palette)
             }
-        }
     }
 }
 
@@ -558,7 +531,7 @@ private struct WaveSectionDivider: View {
 
     var body: some View {
         Rectangle().fill(palette.border).frame(height: 1)
-            .frame(maxWidth: .infinity).padding(.vertical, 3)
+            .frame(maxWidth: .infinity).padding(.vertical, Spacing.xxs)
             .contentShape(Rectangle())
             .onHover { if $0 { NSCursor.resizeUpDown.push() } else { NSCursor.pop() } }
             .gesture(DragGesture(minimumDistance: 0).onChanged { value in
@@ -727,7 +700,7 @@ extension TaskOrderDrag {
 struct WorkTaskIdentity: View {
     let presentation: WorkModel.TaskPresentation
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.xs) {
             if let identifier = presentation.identifier {
                 Text(identifier).font(Typography.mono).fixedSize()
             }
@@ -742,6 +715,6 @@ struct WorkTaskIdentity: View {
 struct WorkReadStatus: View {
     let status: String
     var body: some View {
-        Text(status).font(Typography.meta).padding(10).accessibilityIdentifier("work-status")
+        Text(status).font(Typography.meta).padding(Spacing.sm).accessibilityIdentifier("work-status")
     }
 }

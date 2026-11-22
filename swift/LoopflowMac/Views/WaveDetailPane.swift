@@ -40,9 +40,6 @@ struct WaveDetailPane: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            HStack {
-                Button("Project history") { showHistory = true }
-            }.padding(.bottom, 8)
             Divider()
             HSplitView {
                 WavePlanView(
@@ -58,8 +55,6 @@ struct WaveDetailPane: View {
                 )
                 .id("\(repoPath)|\(wave.id)")
                 .frame(minWidth: 230, idealWidth: 320, maxWidth: 440, maxHeight: .infinity)
-
-
             }
         }
         .sheet(isPresented: $showHistory) {
@@ -67,15 +62,19 @@ struct WaveDetailPane: View {
         }
     }
 
-
     private var header: some View {
         HStack(spacing: Spacing.sm) {
             StatusMark(lens: wave.lens)
             Text(wave.displayName)
-                .font(Typography.lede)
-                .foregroundStyle(palette.text)
+                .serif(.display)
+                .foregroundStyle(palette.emphasisInk)
+                .lineLimit(1)
+                .accessibilityIdentifier("wave-page-title")
 
             Spacer()
+
+            Button("Project history") { showHistory = true }
+                .buttonStyle(LoopflowButtonStyle())
 
             Button {
                 onClose()
@@ -328,6 +327,10 @@ struct WaveMetricPortfolioView: View {
                     .font(Typography.text)
                     .foregroundStyle(palette.textSecondary)
 
+                if !portfolio.contractIssues.isEmpty {
+                    WaveContractIssueNotice(summaries: portfolio.contractIssues.map(\.summary))
+                }
+
                 if !portfolio.metrics.isEmpty {
                     // One row per measure: official first, then candidates
                     // still proving their instruments.
@@ -344,31 +347,6 @@ struct WaveMetricPortfolioView: View {
                     .accessibilityIdentifier(official.isEmpty ? "wave-metric-candidates" : "wave-metric-official")
                 }
 
-                if !portfolio.contractIssues.isEmpty {
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
-                        Label(
-                            countLabel(portfolio.contractIssues.count, singular: "contract issue", plural: "contract issues"),
-                            systemImage: "exclamationmark.triangle.fill"
-                        )
-                        .font(Typography.textStrong)
-                        .foregroundStyle(palette.warning)
-                        ForEach(Array(portfolio.contractIssues.enumerated()), id: \.offset) { _, issue in
-                            Text(issue.summary)
-                                .font(Typography.meta)
-                                .foregroundStyle(palette.text)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.vertical, Spacing.sm)
-                    .background(palette.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: CornerRadius.pane))
-                    .overlay(alignment: .leading) {
-                        Rectangle().fill(palette.warning).frame(width: 2)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.pane))
-                    .accessibilityIdentifier("wave-metric-contract-issues")
-                }
             }
             .accessibilityIdentifier("wave-metric-portfolio")
         }
@@ -376,6 +354,43 @@ struct WaveMetricPortfolioView: View {
 
     private func countLabel(_ count: Int, singular: String, plural: String) -> String {
         "\(count) \(count == 1 ? singular : plural)"
+    }
+}
+
+/// What is wrong with the Wave's metric contracts: the count, each issue's
+/// summary, and Copy, since the wire carries no recovery to offer.
+struct WaveContractIssueNotice: View {
+    let summaries: [String]
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Label("\(summaries.count) contract \(summaries.count == 1 ? "issue" : "issues")",
+                      systemImage: "exclamationmark.triangle")
+                    .font(Typography.textStrong)
+                    .foregroundStyle(palette.warning)
+                Spacer(minLength: Spacing.sm)
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(summaries.joined(separator: "\n"), forType: .string)
+                }
+                .buttonStyle(LoopflowButtonStyle())
+                .help("Copy the issues")
+                .accessibilityIdentifier("wave-metric-contract-issues-copy")
+            }
+            ForEach(Array(summaries.enumerated()), id: \.offset) { _, summary in
+                Text(summary)
+                    .font(Typography.text)
+                    .foregroundStyle(palette.text)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
+        .overlay(RoundedRectangle(cornerRadius: CornerRadius.row).strokeBorder(palette.border, lineWidth: 1))
+        .accessibilityIdentifier("wave-metric-contract-issues")
     }
 }
 
@@ -399,16 +414,14 @@ private struct WaveMetricTableHeader: View {
             cell("State").frame(width: MetricColumns.state, alignment: .leading)
         }
         .padding(.horizontal, Spacing.md)
-        .padding(.vertical, 7)
+        .padding(.vertical, Spacing.sm)
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border.opacity(0.8)).frame(height: 1) }
         .accessibilityHidden(true)
     }
 
     private func cell(_ text: String) -> some View {
         Text(text)
-            .textCase(.uppercase)
-            .font(Typography.textStrong)
-            .tracking(0.6)
+            .font(Typography.meta)
             .foregroundStyle(palette.textTertiary)
     }
 }
@@ -422,7 +435,7 @@ private struct WaveMetricTableRow: View {
 
     var body: some View {
         let presentation = WaveMetricRowPresentation(metric: metric, owner: "Wave", targetUnavailable: targetUnavailable)
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Text(presentation.name)
@@ -465,7 +478,7 @@ private struct WaveMetricTableRow: View {
             }
         }
         .padding(.horizontal, Spacing.md)
-        .padding(.vertical, 8)
+        .padding(.vertical, Spacing.sm)
         .overlay(alignment: .top) { Rectangle().fill(palette.border.opacity(0.45)).frame(height: 1) }
         .accessibilityIdentifier("wave-metric")
         .accessibilityElement(children: .combine)
@@ -681,11 +694,11 @@ struct WaveProjectView: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(project.name).font(Typography.lede).textSelection(.enabled)
             TrackerSyncView(sync: project.sync, repo: repo)
             ForEach(project.krs) { kr in
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Circle()
                         .fill(kr.holds ? palette.success : Color.clear)
                         .overlay(Circle().strokeBorder(kr.holds ? palette.success : palette.borderStrong, lineWidth: 1.5))
@@ -700,7 +713,6 @@ struct WaveProjectView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityValue(kr.holds ? "Holds" : "Open")
             }
-
         }.accessibilityIdentifier("wave-project")
     }
 }

@@ -55,6 +55,29 @@ struct RoadmapViewTests {
         #expect(model.selection == nil)
     }
 
+    @Test @MainActor func contractIssuesAreANoticeWithTheirCountSummariesAndCopy() throws {
+        let notice = WaveContractIssueNotice(summaries: ["wave-a/latency: no instrument", "metrics.yaml: bad unit"])
+        let view = try notice.inspect().find(viewWithAccessibilityIdentifier: "wave-metric-contract-issues")
+        #expect(try view.find(text: "2 contract issues").string() == "2 contract issues")
+        #expect(try view.find(text: "metrics.yaml: bad unit").string() == "metrics.yaml: bad unit")
+        #expect(try view.find(button: "Copy").accessibilityIdentifier() == "wave-metric-contract-issues-copy")
+        #expect(try WaveContractIssueNotice(summaries: ["one"]).inspect().find(text: "1 contract issue").string()
+            == "1 contract issue")
+    }
+
+    @Test @MainActor func aWaveOnTheRoadmapIsASectionUnderItsNameWithNoFrame() throws {
+        let snapshot = try loadRoadmapFixture()
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No read needed") })
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let wave = try #require(model.visibleRoadmaps.first)
+        let section = try RoadmapWaveSection(roadmap: wave, onOpenWave: {}, onOpenTask: { _ in },
+                                             onTaskAction: { _, _ in }, onOpenWorktree: { _ in })
+            .inspect().find(viewWithAccessibilityIdentifier: "loopflow-wave-\(wave.wave.id)")
+        #expect(try section.find(text: wave.wave.name).string() == wave.wave.name)
+        #expect(throws: (any Error).self) { try section.overlay() }
+        #expect(throws: (any Error).self) { try section.background() }
+    }
+
     private func loadRoadmapFixture(sourceFile: String = #filePath) throws -> RoadmapSnapshot {
         let fixture = URL(fileURLWithPath: sourceFile)
             .deletingLastPathComponent()

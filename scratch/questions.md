@@ -72,3 +72,13 @@ Each was decided so the work could continue; `scratch/plan.md` has the detail.
     `TelemetryDashboardView.swift:216` and `NewTaskSheet.swift:85` use one
     too. The backlog's accent capsule went; no rule or test names the rest.
     Make them plain counts in the sweep?
+23. **An unsaved dashboard has no serif name.** The prototype's note says
+    "You named it, so it gets the 26 pt step"; a query opened and not saved
+    is headed by its query alone. Give it a word such as "Unsaved Dashboard"?
+24. **New Wave's button says "Create"**, as `swift/README.md` does; it said
+    "Create wave". Its title is "New Wave" in serif at the title step, in the
+    sheet and in the sidebar's popover alike.
+25. **The Now list's count keeps its pill**, snapped from 1 pt to 2 pt of
+    vertical padding (question 22 covers whether the pills go).
+26. **Refresh on the roadmap is the one button** holding an icon, where it
+    was a borderless icon.

@@ -11,16 +11,19 @@ struct DashboardEditor: View {
     @State private var expression = "state:available"
     @State private var pinned = true
     @State private var revision: Int64?
+    @Environment(\.palette) private var palette
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard").font(Typography.textStrong)
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            Text(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard").serif(.title)
+                .foregroundStyle(palette.emphasisInk)
             TextField("Name", text: $name)
             TextField("Query", text: $expression, axis: .vertical).font(Typography.mono)
             Text("For example: (wave:product state:open), state:available or state:auto")
-                .font(Typography.meta).foregroundStyle(.secondary)
+                .font(Typography.meta).foregroundStyle(palette.textSecondary)
             Toggle("Pin in sidebar", isOn: $pinned)
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                    .buttonStyle(LoopflowButtonStyle())
                 Spacer()
                 Button("Save") {
                     Task {
@@ -28,8 +31,10 @@ struct DashboardEditor: View {
                                                      revision: revision) { dismiss() }
                     }
                 }.keyboardShortcut(.defaultAction).disabled(model.dashboardSaving || expression.isEmpty || name.isEmpty)
+                    .buttonStyle(LoopflowButtonStyle(.accent))
+                    .accessibilityIdentifier("dashboard-save")
             }
-        }.padding(24).frame(width: 540)
+        }.padding(Spacing.xxl).frame(width: 540)
         .onAppear {
             id = plan.dashboardID ?? id
             name = plan.name ?? id
@@ -78,9 +83,14 @@ struct DashboardView: View {
     @State private var editingSlots = false
     @Environment(\.palette) private var palette
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Spacing.sm) {
             if let plan = model.selectedViewPlan {
-                HStack {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+                    // An unsaved query has no name; its query heads it.
+                    if let name = workingTasks ? "Working Tasks" : plan.name {
+                        Text(name).serif(.title).foregroundStyle(palette.emphasisInk).lineLimit(1)
+                            .layoutPriority(1).accessibilityIdentifier("dashboard-name")
+                    }
                     DashboardQueryField(model: model, plan: plan)
                     if !workingTasks {
                         if plan.dashboardID != nil {
@@ -92,7 +102,7 @@ struct DashboardView: View {
                         }
                         Button(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard") { editing = true }
                     }
-                }.padding(10)
+                }.buttonStyle(LoopflowButtonStyle()).padding(Spacing.sm)
                 // One line: membership may be incomplete; every reason stays in its help.
                 if let first = plan.resolution.unavailable.first {
                     let more = plan.resolution.unavailable.count - 1
@@ -121,14 +131,14 @@ struct DashboardView: View {
                                     ?? plan.contents.first { $0.work == member.work }?.title ?? member.work.id)
                             }.disabled(model.dashboardSaving).help("Show this occurrence again")
                         }
-                    }.font(Typography.meta).padding(8)
+                    }.font(Typography.meta).buttonStyle(LoopflowButtonStyle()).padding(Spacing.sm)
                 }
             } else {
                 ContentUnavailableView("Dashboard unavailable", systemImage: "exclamationmark.triangle",
                     description: Text("This Dashboard is no longer available."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-        }.padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(palette.surfaceMuted)
+        }.padding(Spacing.sm).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(palette.surfaceMuted)
             .sheet(isPresented: $editing) {
                 if let plan = model.selectedViewPlan { DashboardEditor(model: model, plan: plan) }
             }
@@ -158,20 +168,21 @@ struct WaveTiles: View {
     let sessions: SessionsStore
     /// `.wave(id)` or `.repository`.
     let view: WorkNavigation.Board
+    @Environment(\.palette) private var palette
 
     var body: some View {
         if let plan = model.boardPlan(view) {
             let members = model.boardTiles(view)
             if members.isEmpty {
                 Text("No planned or started Tasks").font(Typography.text)
-                    .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .foregroundStyle(palette.textSecondary).frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityIdentifier("wave-tiles-empty")
             } else {
                 DashboardSlotGrid(members: members, focused: nil, layout: plan.slots,
                                   page: model.page(of: view), pagerKeys: false) { member in
                     DashboardTile(model: model, workspaces: workspaces, sessions: sessions, member: member, plan: plan,
                                   workingTasks: false, focused: false, takesFocus: false)
-                }.padding(8).accessibilityIdentifier("wave-tiles")
+                }.padding(Spacing.sm).accessibilityIdentifier("wave-tiles")
             }
         }
     }
@@ -198,32 +209,42 @@ struct DashboardTile: View {
         let task = model.task(id: member.work.id)
         // Only a saved Dashboard has an arrangement to write.
         let arrangeable = plan.dashboardID != nil
+        let status = task.map { model.programStatus(task: $0.task.id) } ?? .unknown
         return VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: Spacing.sm) {
-                if let task {
-                    let id = task.task.id
-                    TaskRow(id: id, presentation: model.taskPresentation(id: id), task: task.task,
-                            status: model.programStatus(task: id), auto: task.task.selectionStates.contains(.auto))
-                        .opening { enter() }
-                } else {
-                    Button { enter() } label: { Text(content?.title ?? member.work.id).lineLimit(1) }
-                        .buttonStyle(.plain).padding(Spacing.sm)
-                    Spacer(minLength: 0)
-                }
-                HStack(spacing: Spacing.sm) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: Spacing.sm) {
                     if let task {
-                        Menu { TaskActionItems(model: model, task: task.task, wave: task.wave?.wave,
-                                                         work: model.taskWork[task.task.id].value) }
-                            label: { Image(systemName: "ellipsis") }
-                            .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
+                        let id = task.task.id
+                        TaskRow(id: id, presentation: model.taskPresentation(id: id), task: task.task,
+                                status: status, auto: task.task.selectionStates.contains(.auto))
+                            .opening { enter() }
+                    } else {
+                        Button { enter() } label: { Text(content?.title ?? member.work.id).lineLimit(1) }
+                            .buttonStyle(.plain).padding(Spacing.sm)
+                        Spacer(minLength: 0)
                     }
-                    Button { enter() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
-                        .help("Open this Work in full")
-                    if arrangeable {
-                        Button { model.setTile(plan, member, hidden: true) } label: { Image(systemName: "eye.slash") }
-                            .help("Hide this occurrence").disabled(model.dashboardSaving)
-                    }
-                }.padding([.top, .trailing], Spacing.sm)
+                    HStack(spacing: Spacing.sm) {
+                        if let task {
+                            Menu { TaskActionItems(model: model, task: task.task, wave: task.wave?.wave,
+                                                             work: model.taskWork[task.task.id].value) }
+                                label: { Image(systemName: "ellipsis") }
+                                .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
+                        }
+                        Button { enter() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                            .help("Open this Work in full")
+                        if arrangeable {
+                            Button { model.setTile(plan, member, hidden: true) } label: { Image(systemName: "eye.slash") }
+                                .help("Hide this occurrence").disabled(model.dashboardSaving)
+                        }
+                    }.padding([.top, .trailing], Spacing.sm)
+                }
+                // The row's own line says what the Task asks; otherwise where its workflow stands.
+                if let task, TaskStanding(task: task.task, status: status).line == nil,
+                   let workflow = model.taskWork[task.task.id].value?.graph {
+                    WorkflowLine(graph: workflow, auto: model.taskExecution[task.task.id].value?.auto?.state == .on,
+                                 setup: task.task.setupPosition, sentenceOnly: true)
+                        .padding(.horizontal, Spacing.md).padding(.bottom, Spacing.sm)
+                }
             }.background(palette.surface)
                 .foregroundStyle(palette.text, palette.textSecondary)
                 .draggable(workingTasks ? TaskOrderDrag.token(member.work.id) : member.token)

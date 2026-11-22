@@ -83,10 +83,9 @@ the backlog, the dashboard, the Portfolio's Wave page and roadmap,
 - 69 uses of `Typography.mono`; each needs reading against "could a person
   paste this into a terminal".
 - `WorkSectionHeading` and `WorkDisclosureHeading` are already sentence case
-  since #2016; only their doc comments still say "caps". The live uppercase is
-  the two hand-made variants: `WaveMetricTableHeader.cell`
-  (`WaveDetailPane.swift:405`) and the kind label in
-  `WorkActivityView.swift:109`.
+  since #2016; only their doc comments still say "caps". One live uppercase is
+  left since slice 3, the kind label in `WorkActivityView.swift:109`, and 22
+  uses of a system button style.
 - `WaveStandupBoard.swift` no longer exists. The Portfolio window
   (`WavesView`) mounts `WaveDetailPane` and `RoadmapView`; those are the Wave
   page and the standup's successor.

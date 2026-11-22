@@ -37,7 +37,7 @@ public struct TaskActions: Equatable {
     public init(work: TaskOverview?, row: RoadmapTask, execution: TaskExecution?) {
         let issue = row.task.identifier
         if let graph = work?.graph {
-            run = graph.runAction(issue: issue).map { Run(label: $0.label, help: $0.help) }
+            run = graph.runAction(issue: issue)
         } else if work != nil {
             // A reading with no Graph: the first run takes one up.
             run = Run(label: "Start", help: "lf task run \(issue)")
@@ -56,14 +56,14 @@ public struct TaskActions: Equatable {
 public extension TaskGraph {
     /// What `lf task run` does from where the Task stands, named for it; `nil`
     /// while a run carries the Task or once it is at `end`.
-    func runAction(issue: String) -> (label: String, help: String)? {
+    func runAction(issue: String) -> TaskActions.Run? {
         let help = "lf task run \(issue)"
         switch position {
-        case .at(TaskGraph.start): return ("Start", help)
+        case .at(TaskGraph.start): return .init(label: "Start", help: help)
         case .at(TaskGraph.end): return nil
-        case .at(let step): return ("Run", "\(help): continue after \(step)")
+        case .at(let step): return .init(label: "Run", help: "\(help): continue after \(step)")
         case .run(_, _, _, true): return nil
-        case .run(_, let at, _, false): return ("Run", "\(help): run again at \(at)")
+        case .run(_, let at, _, false): return .init(label: "Run", help: "\(help): run again at \(at)")
         }
     }
 }

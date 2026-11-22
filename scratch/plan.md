@@ -45,11 +45,6 @@ Nothing to build. Checks nobody has run, for qa or demo:
 - The Mac's "Auto-Ship requested" Notice and its Undo in Loopflow Dev.
 - Landscape and iPad, the QR scanner, a physical phone (demo).
 
-For compress: `TaskGraph.runAction` returns a `(label, help)` tuple that
-`TaskActions.init` copies into `TaskActions.Run`; it can return `Run`
-(`swift/Loopflow/Design/TaskActions.swift`, one other caller in
-`WorkflowLineTests`).
-
 Open, a product choice (`scratch/questions.md`): the filter "Working now"
 lists rows that read "Busy", and "Ready for you" lists rows that read
 "Available".

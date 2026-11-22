@@ -76,15 +76,12 @@ struct WorkflowLineTests {
 
     @Test("The step that moves a Task is named from where its Graph stands")
     func runAction() {
-        func action(_ position: TaskGraph.Position) -> (label: String, help: String)? {
+        func action(_ position: TaskGraph.Position) -> TaskActions.Run? {
             graph(position, current: nil, sentence: "").runAction(issue: "LOO-5")
         }
-        #expect(action(.at(step: "start"))?.label == "Start")
-        #expect(action(.at(step: "start"))?.help == "lf task run LOO-5")
-        #expect(action(.at(step: "ship-review"))?.label == "Run")
-        #expect(action(.at(step: "ship-review"))?.help == "lf task run LOO-5: continue after ship-review")
-        #expect(action(run(running: false))?.label == "Run")
-        #expect(action(run(running: false))?.help == "lf task run LOO-5: run again at implement")
+        #expect(action(.at(step: "start")) == .init(label: "Start", help: "lf task run LOO-5"))
+        #expect(action(.at(step: "ship-review")) == .init(label: "Run", help: "lf task run LOO-5: continue after ship-review"))
+        #expect(action(run(running: false)) == .init(label: "Run", help: "lf task run LOO-5: run again at implement"))
         // A run carries the Task, or it is finished: nothing to press.
         #expect(action(run(running: true)) == nil)
         #expect(action(.at(step: "end")) == nil)

@@ -7,7 +7,7 @@ import SwiftUI
 public struct LoopflowButtonStyle: ButtonStyle {
     public enum Role: Sendable { case neutral, accent, destructive }
 
-    var role: Role = .neutral
+    let role: Role
     @Environment(\.palette) private var palette
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.isFocused) private var focused

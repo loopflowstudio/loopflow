@@ -253,18 +253,19 @@ impl SqliteStore {
         if !first {
             return Ok(false);
         }
+        // The write repeats only what another connection can change between
+        // the read and it: which process is current, and its own reading.
         let changed = conn.execute(
             "INSERT INTO session_activity(session_id,attachment_token,observed_at,open_tools,pending_input,yielded,agent_process_id)
              SELECT s.id,s.attachment_token,unixepoch(),0,0,1,s.agent_process_id FROM agent_sessions s
-             WHERE s.id=?1 AND s.agent_process_id=?2 AND s.interactive=1 AND EXISTS(SELECT 1
-                FROM steer_adapters a WHERE a.agent_process_id=?2 AND a.capability=?3)
+             WHERE s.id=?1 AND s.agent_process_id=?2
              ON CONFLICT(session_id) DO UPDATE SET agent_process_id=excluded.agent_process_id,
                 yielded=1,open_tools=0,pending_input=0,observed_at=excluded.observed_at,
                 program_status=CASE WHEN session_activity.agent_process_id IS excluded.agent_process_id THEN session_activity.program_status END,
                 cpu_sampled_at=NULL,cpu_quiet_since=NULL,
                 attachment_token=COALESCE(excluded.attachment_token,session_activity.attachment_token)
              WHERE session_activity.agent_process_id IS NOT excluded.agent_process_id OR session_activity.observed_at=0",
-            params![adapter.session, adapter.agent_process_id, adapter.capability],
+            params![adapter.session, adapter.agent_process_id],
         )?;
         Ok(changed > 0)
     }

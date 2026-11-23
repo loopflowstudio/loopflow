@@ -887,19 +887,26 @@ mod tests {
         assert!(found.is_empty(), "{}", found.join("\n"));
     }
 
-    #[test]
-    fn a_boundary_with_nothing_to_settle_does_not_wait_for_another_sessions_write() {
-        let (home, store, adapter, delivery) = fixture();
+    /// Another connection holding the Machine's write lock; `store` gives up
+    /// waiting for it after 50ms.
+    fn hold_write_lock(home: &tempfile::TempDir, store: &SqliteStore) -> rusqlite::Connection {
         store
             .conn
             .lock()
             .unwrap()
             .busy_timeout(std::time::Duration::from_millis(50))
             .unwrap();
-        // A process's first boundary writes; this one is not its first.
-        assert!(store.record_first_boundary(&adapter).unwrap());
         let writer = rusqlite::Connection::open(home.path().join("store.db")).unwrap();
         writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        writer
+    }
+
+    #[test]
+    fn a_boundary_with_nothing_to_settle_does_not_wait_for_another_sessions_write() {
+        let (home, store, adapter, delivery) = fixture();
+        // A process's first boundary writes; this one is not its first.
+        assert!(store.record_first_boundary(&adapter).unwrap());
+        let writer = hold_write_lock(&home, &store);
         let tool = boundary(
             BoundaryMoment::Tool,
             &adapter,
@@ -931,16 +938,9 @@ mod tests {
                 [&adapter.session],
             )
             .unwrap();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .busy_timeout(std::time::Duration::from_millis(50))
-            .unwrap();
-        let writer = rusqlite::Connection::open(home.path().join("store.db")).unwrap();
-        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
-        // A worker reports through the stream lf owns: no boundary is its first.
-        assert!(!store.record_first_boundary(&adapter).unwrap());
+        let writer = hold_write_lock(&home, &store);
+        // A worker reports through the stream lf owns: no boundary is its
+        // first, so none writes its reading.
         let tool = boundary(
             BoundaryMoment::Tool,
             &adapter,

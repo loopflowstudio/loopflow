@@ -179,7 +179,7 @@ prompt once and hears the steer once.
 
 ## Checks
 
-- `cargo nextest run -p loopflow --lib -E 'test(server::boundary::tests::) | test(server::wake::tests::) | test(lf::commands::context::tests::)'`: 25 passed (implement, after slice 4); 26 passed (implement, after slice 5).
+- `cargo nextest run -p loopflow --lib -E 'test(server::boundary::tests::) | test(server::wake::tests::) | test(lf::commands::context::tests::)'`: 25 passed (implement, after slice 4); 26 passed (implement, after slice 5); 26 passed (compress).
 - `cargo test -p loopflow-execution --lib harness::codex::tests::`: 7 passed (implement).
 - `cargo test -p loopflow --test integration documented_commands::`: passed (implement).
 - `tests/e2e/idle_wake.py --harness opencode` (OpenCode 2.0.32): passed, wake and reopen legs (implement).

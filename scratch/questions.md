@@ -220,3 +220,15 @@ Answers (Jack Heart): "1a 2a 3b 4b 5 not sure, explain"
   checkout inside a Task's checkout count as that Task's for resume, as it
   does for launches? Adoption of such a worktree was refused by the same
   change and is fixed (`a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout`).
+
+## Concept review on a49184a28b (2026-11-22)
+
+- **Ownership vs membership split (page 1a, chosen for review).** `task_holding`
+  (containment) stays the membership answer; a new exact-root
+  `task_checkout_owner` answers whose checkout a Git worktree is, for
+  `checkout_scope`, `pr_landing` and bare-resume routing. Rejected:
+  containment everywhere (`lf land` in a `.claude/worktrees/` subagent
+  checkout fails against the outer Task's PR) and root equality everywhere
+  (subagent work leaves the Task's history). This answers the QA question
+  above: bare `lf resume` in a nested non-Task worktree says "no associated
+  work conversation", as released lf does.

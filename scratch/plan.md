@@ -441,7 +441,40 @@ task status` shows no rank (QA 2026-11-22). Desktop's Working board after
 merge and install. Auto stays a Machine fact
 (2a), unchanged.
 
-## Next: gate
+## Next: implement (concept review on `a49184a28b`, 2026-11-22)
+
+`task_holding` answers two questions with one rule. **Membership** ("whose
+work is this directory"): deepest containing checkout, correct. **Ownership**
+("whose checkout is this Git worktree"): this must be root equality, as main's
+`counted_task` was. Claude Code's isolated subagents and `EnterWorktree` put
+worktrees at `.claude/worktrees/<name>` inside the current checkout, so the
+nested case is ordinary. As built, `lf land` in such a worktree
+(`pr_landing.rs:1200` → `task_for_checkout`) checks the outer Task's PR and
+fails. Bare `lf resume` there opens the outer Task's conversation (QA). The
+`8896fa9057` patch fixes adoption alone, inline. Choice made for review
+(page question 1a): two store answers.
+
+- Add `SqliteStore::task_checkout_owner(root)` in `task_work.rs`: the Task
+  whose `task_checkouts.worktree` is `root`, matched as named and as it
+  resolves, one seek on `task_checkouts_root`, lower id on a shared root.
+- Ownership callers use it, given the Git root: `checkout_scope`
+  (`human_session.rs:217`, which covers resume, adoption and bind),
+  `pr_landing.rs:1200`, and `work_route.rs` `worktree_task` (resolve the Git
+  root first). Delete the special case in `adoption.rs:114-120`.
+- Membership callers keep `task_holding`: `starting_task_in`, `counted_task`
+  (launch, `turns.rs`), `run.rs:167` select, `handoff.rs` `--design`. Split
+  `task_for_checkout` so the name says which question it answers. One
+  function per question, no third lookup.
+- Tests: in storage, a nested worktree that isn't a Task's checkout is owned
+  by nobody and held by the outer Task. In execution, keep
+  `a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout`, and add
+  that bare resume in a nested non-Task worktree gets the "no associated work
+  conversation" error. Run `ops::task::adoption::`, `ops::task::tests::`,
+  `ops::human_session::`, `work_route`, and the storage `task_work::`.
+- In questions.md, the QA question "should a nested checkout count as the
+  outer Task's for resume" is answered by 1a/2a (no). Gate can reverse it.
+
+## Then: gate
 
 QA on `86fe72ab65` (2026-11-22, `scratch/qa.html`) found one regression and
 fixed it: `lf task create --worktree` refused a worktree nested inside another

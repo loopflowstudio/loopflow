@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-937 Concept Review</title>
+<title>LOO-937 Concept Review (a49184a2)</title>
 <style>
 :root{--bg:#fbfaf7;--fg:#1d1c1a;--mute:#6b675f;--line:#e2ded5;--card:#fff;--yes:#2f7d4f;--no:#b3412e;--new:#7a5bc4;--code:#f1eee7}
-@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#171614;--fg:#ece9e2;--mute:#a19c92;--line:#34312c;--card:#1f1e1b;--yes:#6cc28f;--no:#ec8a76;--new:#b9a2f0;--code:#2a2824}}
-:root[data-theme=dark]{--bg:#171614;--fg:#ece9e2;--mute:#a19c92;--line:#34312c;--card:#1f1e1b;--yes:#6cc28f;--no:#ec8a76;--new:#b9a2f0;--code:#2a2824}
+@media (prefers-color-scheme:dark){:root{--bg:#171614;--fg:#ece9e2;--mute:#a19c92;--line:#34312c;--card:#1f1e1b;--yes:#6cc28f;--no:#ec8a76;--new:#b9a2f0;--code:#2a2824}}
 body{background:var(--bg);color:var(--fg);font:16px/1.55 ui-sans-serif,system-ui,-apple-system,sans-serif;margin:0;padding:32px 16px}
 main{max-width:920px;margin:0 auto}
 h1{font-size:1.6rem;margin:0 0 .3rem}h2{font-size:1.15rem;margin:2.2rem 0 .6rem}
 p{margin:.5rem 0}.mute{color:var(--mute)}
 code{font:.86em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:1px 4px;border-radius:4px}
+pre{font:.84em/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:10px 12px;border-radius:8px;overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:.93rem}
 td,th{text-align:left;vertical-align:top;padding:8px 6px;border-top:1px solid var(--line)}
 th{font-weight:600;color:var(--mute)}
@@ -27,57 +27,72 @@ ol li{margin:.5rem 0}
 </style>
 </head>
 <body><main>
-<h1>LOO-937, after the plan hub</h1>
-<p class="mute">Head <code>9f10bb15</code>: the branch with main through #2022 merged in, 35 commits after the last review at <code>0ef1ad038a</code>. The area reviewed is the same: which record holds each Task fact, and how a Task's Sessions and Graph runs know whose they are. The question is whether the merged commits moved any of the plan's premises.</p>
+<h1>LOO-937 as built, at <code>a49184a2</code></h1>
+<p class="mute">The area: which record holds each Task fact, and how a directory, a Session, a Graph run or a landing finds its Task. I read the whole branch against origin/main, not just the QA fix. The QA fix is where the problem shows up.</p>
 
-<h2>What moved underneath the plan</h2>
+<h2>Product concepts and code concepts</h2>
 <div class="wrap"><table>
-<tr><th>Main change</th><th>What it does to this Task</th></tr>
-<tr><td>#1983 plan hub (LOO-938)</td><td>The Git peer exchange is gone (<code>planning_peer_*</code>, <code>git_tracker_*</code> leaving). A plan without Linear travels as <code>plan_stamps</code>: one stamp per field, newest wins. <code>tasks</code> is now literally the shared record: what is stamped and carried is shared. <b>That removes the reason the plan gives for keeping <code>tasks.planning_revision</code>.</b></td></tr>
-<tr><td>#1976 auto as a Task setting</td><td><code>task_auto</code> holds the mark; <code>tasks.shipped_at</code> leaves (LOO-971). The plan still lists <code>shipped_at</code> and <code>paused</code> (now leaving, LOO-938) as lifecycle columns it keeps.</td></tr>
-<tr><td>#1972 Task conversations and runs recover</td><td><code>agent_sessions</code> gained three columns; this branch's rebuild already carries them. <code>task_graphs</code> gained <code>restarts</code>, <code>restarted_at</code>, <code>run_died_at</code> next to its existing <code>run_pid</code>/<code>run_os_started_at</code>.</td></tr>
-<tr><td>#1985, #1998 new harnesses</td><td>Nothing to change: every Session still starts through <code>starting_task_in</code>.</td></tr>
-<tr><td>#1993 Wave backlog rank</td><td>It reorders by <code>planning_rank</code>, the plan's one order. It agrees with the plan.</td></tr>
-<tr><td>#2007 Dev on the live Machine</td><td><code>--copy</code> and <code>lf-world</code> are gone. Dev talks to the installed server, which doesn't have this branch's migration, so the Working-board drag can't be shown in Dev before merge.</td></tr>
-</table></div>
-<p>No commit on main added path-based Task membership back. A search for new path matching over cwd or worktree found nothing.</p>
-
-<h2>Pairings, as they stand now</h2>
-<div class="wrap"><table>
-<tr><th>Product concept</th><th>Code concept</th><th></th><th>Where it's wrong</th></tr>
-<tr><td>A Task's title, state, rank, URL, branch, team</td><td><code>tasks</code> (desired, stamped, carried); <code>tracker_items</code> (observed, merge base)</td><td class="yes">yes</td><td>The plan hub makes the split sharper. A carried column is shared; anything else on <code>tasks</code> needs a reason.</td></tr>
-<tr><td>"When did this Task last change"</td><td><code>plan_stamps</code> per field, <code>plan_changes.seq</code>, <code>tasks.updated_at</code>, <b><code>tasks.planning_revision</code></b><span class="tag">new finding</span></td><td class="no">no</td><td><code>planning_revision</code> is incremented on every local write (<code>planning_write.rs:252</code>) and selected as column 12 of <code>TASK_COLUMNS</code> (<code>children.rs:1831</code>), but the row mapper never reads it. Nothing else in Rust, Swift or Python reads it either. It's a clock that only gets written, left behind when its exchange was deleted.</td></tr>
-<tr><td>Auto on or off</td><td><code>task_auto</code>, a Machine-local row, not in <code>plan_changes</code></td><td class="no">?</td><td>Every Mac screen shows it (#2018). A second Machine that shares the plan reads "nobody set it". Whether that's correct depends on whether auto belongs to the Task or to the Machine that runs it. Question 2.</td></tr>
-<tr><td>The run a Task stands on, and whether it's alive</td><td><code>task_graphs.lf_process_id, run_pid, run_os_started_at, run_died_at</code>; <code>graph_processes.pid, os_started_at, ended_at</code></td><td class="no">no</td><td>Both tables record <code>start.pid</code> for the same run. #1972 put liveness on <code>task_graphs</code>, so "is this run alive" now has two homes. This is a Machine fact about a run, not a shared Task fact. Question 3.</td></tr>
-<tr><td>The Task's conversations and runs</td><td><code>agent_sessions.task_id</code>, <code>graph_processes.task_id</code>, set once by <code>starting_task_in</code></td><td class="yes">yes</td><td>Unchanged. The new harnesses go through the same function.</td></tr>
-<tr><td>"Work started in a Task's checkout is that Task's"</td><td><code>counted_task</code> (execution) and <code>deepest_checkout</code> (storage)</td><td class="no">no</td><td>Mismatch A from the last review, unchanged. Its first question is still open.</td></tr>
-<tr><td>A Task takes a checkout with work already running</td><td>Sessions join, runs don't</td><td class="no">no</td><td>Mismatch B, unchanged and still open.</td></tr>
-<tr><td>The Task's primary conversation</td><td><code>primary_scope='task'</code></td><td class="yes">yes</td><td>Unchanged, including the upgrade-day cost.</td></tr>
+<tr><th>What a person knows</th><th>What the code has</th><th></th><th>Note</th></tr>
+<tr><td>A Task's title, state, rank, URL, branch</td><td><code>tasks</code> (desired), <code>tracker_items</code>/<code>pm_items</code> (observed)</td><td class="yes">yes</td><td>Two records on purpose: they're the merge base for conflicts.</td></tr>
+<tr><td>Is it done?</td><td><code>planning_state</code>; the boolean is leaving</td><td class="yes">yes</td><td>One fact now.</td></tr>
+<tr><td>Task order, the drag on the Working board</td><td><code>tasks.planning_rank</code>, <code>reorder_task</code></td><td class="yes">yes</td><td><code>task_orders</code> is leaving. One order.</td></tr>
+<tr><td>A Task's conversation</td><td><code>task_primary_sessions</code>, read through <code>primary_scope_sql</code></td><td class="yes">yes</td><td>Kept until LOO-877 so released lf agrees with it.</td></tr>
+<tr><td>A Session's or a run's Task (its history)</td><td><code>agent_sessions.task_id</code>, <code>graph_processes.task_id</code>, written once by <code>starting_task_in</code></td><td class="yes">yes</td><td>The work stays with its Task after a move or path reuse.</td></tr>
+<tr><td><b>"I'm working in this Task's directory"</b> (membership)</td><td rowspan="2"><code>SqliteStore::task_holding(dir)</code>, which picks the deepest checkout that contains <code>dir</code></td><td class="yes">yes</td><td>Containment is right here: a command started inside a checkout is that Task's work.</td></tr>
+<tr><td><b>"This checkout is this Task's"</b> (ownership: whose PR lands from it, which conversation <code>lf resume</code> opens, whether <code>lf task create --worktree</code> may take it)</td><td class="no">no</td><td><b>One name for two ideas.</b> A checkout is one Git worktree. A second Git worktree nested inside it is a separate checkout, but containment gives it to the outer Task.</td></tr>
+<tr><td>Edit revision (stale edit refused)</td><td><code>tasks.planning_revision</code></td><td class="yes">yes</td><td>Kept: it's the compare-and-set every edit checks.</td></tr>
+<tr><td>Is a run alive?</td><td><code>task_graphs.run_pid</code> (carrier) and <code>graph_processes.pid</code> (child)</td><td class="no">no</td><td>Two OS processes behind one concept. Too big for this Task (launch work). It's in questions.md.</td></tr>
+<tr><td>The Session list's Task column</td><td><code>WorkspaceResolver</code> working from Git roots</td><td class="no">no</td><td>A third lookup. Fits LOO-934.</td></tr>
 </table></div>
 
-<h2>Biggest mismatch: a Task clock nobody reads</h2>
-<div class="cols">
-<div class="card"><b>As built</b>
-<p>The plan's inventory says: <code>planning_revision</code>, keep, "the peer exchange's clock (<code>planning_peers.rs</code>)". That file no longer exists. #1983 replaced the exchange with per-field stamps, and each local save writes three records of "this changed": a stamp per field, a <code>plan_changes</code> seq, and <code>updated_at</code>. It also does <code>planning_revision+1</code>, which nobody reads.</p>
-<p>It's small, but it's exactly the kind of duplicate this Task exists to remove, and it appeared while the PR sat in review.</p></div>
-<div class="card prop"><b>Proposed</b><span class="tag">proposed</span>
-<p>Add <code>-- leaving: tasks.planning_revision LOO-877</code> to <code>task_facts_once.sql</code>. Delete the increment and the dead column from <code>TASK_COLUMNS</code>, and move the plan's inventory row to leaving. The leaving guard then fails any read that comes back.</p>
-<p>What survives: released lf keeps writing the column until the staging window ends, which is harmless. What changes: nothing a person sees. What would break it: a reader outside Rust, and the search found none.</p></div>
+<h2>The biggest mismatch: ownership is answered by containment</h2>
+<p>On main, <code>counted_task</code> compared Git worktree roots: a nested worktree was its own checkout, owned by nobody. Change 4 routed every caller through <code>task_holding</code>, which matches by containment. QA hit one caller (<code>lf task create --worktree</code> refused a nested worktree), and <code>8896fa90</code> patched only that caller, by comparing the root inline.</p>
+<p>The case is common. Claude Code's isolated subagents and <code>EnterWorktree</code> create <code>.claude/worktrees/&lt;name&gt;</code> <i>inside</i> the current checkout. Three of them sit inside <code>~/src/loopflow</code> right now. Here is one interaction:</p>
+<div class="card">
+<p>1. A Task agent in <code>loopflow.loo-X/</code> starts an isolated subagent. Its worktree is <code>loopflow.loo-X/.claude/worktrees/agent-1</code>, on its own branch.</p>
+<p>2. The subagent's commands record <code>task_id = LOO-X</code>. <span class="yes">Right</span>: it's that Task's work.</p>
+<p>3. Someone runs <code>lf land</code> in <code>agent-1</code>. <code>pr_landing.rs:1200</code> calls <code>task_for_checkout</code> → LOO-X. The landing then checks LOO-X's active PR against the armed PR from <code>agent-1</code>'s branch and fails ("Task merge request does not match…"). <span class="no">Wrong</span>. On main this landing had no Task and went through.</p>
+<p>4. Bare <code>lf resume</code> in <code>agent-1</code> opens LOO-X's conversation (seen in QA). Released lf says "This worktree has no associated work conversation". <span class="no">Wrong</span>: the conversation's checkout isn't this one.</p>
+<p>5. <code>lf task create --worktree agent-1</code> works only because of the special case. The same Session without <code>--worktree</code> still sees LOO-X as the checkout's owner.</p>
 </div>
 
-<h2>Plan text the merge made wrong</h2>
-<ul>
-<li>The <code>tasks</code> inventory keeps <code>paused</code> and <code>shipped_at</code> as lifecycle. Both are now leaving, under LOO-938 and LOO-971.</li>
-<li>"URL, branch and team keep travelling with the peer exchange": they now travel as stamped fields through plan carriers. The verdict holds; the reason has changed.</li>
-<li>The rule "<code>tasks</code> holds every Task fact a person sees on any Machine" can now be tested in code: a column is shared if and only if a <code>WorkValue</code> carries it.</li>
-</ul>
+<div class="cols">
+<div class="card"><b>Before (as built)</b>
+<pre>task_holding(dir)        // containment
+ ├ starting_task_in      membership ✓
+ ├ counted_task / launch membership ✓
+ ├ checkout_scope        ownership ✗
+ │   └ adoption + inline root compare (patch)
+ ├ pr_landing            ownership ✗
+ ├ handoff --design      membership ✓
+ └ worktree_task (resume) ownership ✗</pre></div>
+<div class="card prop"><b>After</b> <span class="tag">proposed</span>
+<pre>task_holding(dir)        // membership: deepest containing
+ ├ starting_task_in, counted_task, run select,
+ └ handoff --design
+task_checkout_owner(root) // ownership: exact Git root
+ ├ checkout_scope (resume, adoption, bind)
+ ├ pr_landing
+ └ worktree_task (bare lf resume routing)
+adoption special case: deleted</pre></div>
+</div>
+<p>The ownership answer is one index seek on <code>task_checkouts_root</code>: the Task whose checkout <i>is</i> the Git root, matched as named and as it resolves. This brings back main's behavior for ownership without its O(checkouts) Git subprocess scan, and drops the inline patch. Two Tasks on one root resolve to the lower id, the same as <code>task_holding</code>.</p>
+<p class="mute">Decided for review: ownership callers are <code>checkout_scope</code>, <code>pr_landing</code> and <code>worktree_task</code>. Rejected: making containment the single rule and deciding a nested worktree belongs to the outer Task everywhere. That would mean <code>lf land</code> in a subagent worktree can't work, and the outer Task's conversation hijacks <code>lf resume</code>.</p>
+
+<h2>What else holds</h2>
+<p>The slices line up with the product: one completion fact, one order, primary in its released home, work recorded once at start, and the leaving guard. Nothing left over from replaced designs: adoption is gone, the primary mark nothing writes is gone, and <code>'inherited'</code> is gone.</p>
 
 <h2>Questions</h2>
 <ol>
-<li><code>tasks.planning_revision</code>: (a) mark it leaving in this PR, as proposed; (b) leave it to LOO-877.</li>
-<li>Auto: (a) a Machine fact, as built, because the Machine that runs the Task is the one that merges; (b) a Task fact, carried by the plan hub like rank, which is its own Task under LOO-938.</li>
-<li>A run's OS process in both <code>task_graphs</code> and <code>graph_processes</code>: (a) a separate Task, where <code>task_graphs</code> keeps only the step and the run id and liveness reads the run; (b) build it here; (c) intended, because the carrier can claim the step before the run registers. Verify this before choosing (a).</li>
-<li>The demo for the Working-board drag now that Dev only talks to the installed server: (a) show it after merge and install, through the tour; (b) <code>lf task move</code> plus <code>lf task status</code> at gate, Desktop after merge.</li>
-<li>The last review's questions about Mismatches A and B and the primary mark's upgrade day are still unanswered and unaffected by the merge. Answer them as "A:a" and so on, using that review's letters.</li>
+<li>Ownership vs membership:
+ <br>a) two store answers, as above <span class="tag">chosen</span>
+ <br>b) containment everywhere; a nested worktree is the outer Task's checkout too
+ <br>c) Git-root equality everywhere, including membership (a subagent worktree's work leaves the Task's history)</li>
+<li>Bare <code>lf resume</code> in a nested non-Task worktree:
+ <br>a) "no associated work conversation", as released lf says <span class="tag">chosen, follows 1a</span>
+ <br>b) open the outer Task's conversation</li>
+<li>Run liveness has two process records (carrier vs child):
+ <br>a) leave it for a launch Task <span class="tag">current</span>
+ <br>b) the carrier records itself as the run in <code>graph_processes</code></li>
 </ol>
 </main></body></html>

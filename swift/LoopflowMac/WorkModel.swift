@@ -1036,15 +1036,18 @@ final class WorkModel {
 
     /// A Wave view's backlog as `lf desktop capture -p backlog` reads it.
     private func backlogText(_ view: WorkNavigation.Board) -> String? {
-        let scope = view == .repository ? "Repository" : "Wave"
-        switch viewTasks(view) {
-        case .available:
-            let heading = if case .wave(let id) = view, let roadmap = wave(id: id) { BacklogList.heading(roadmap) }
-                else { [repositoryName] }
-            return backlog(view).text(heading: heading)
-        case .unavailable(let reason): return "\(scope) planning unavailable · \(reason)"
-        case nil: return nil
+        if navigation.backlogs[view]?.filedRow == nil {
+            switch viewTasks(view) {
+            case .available: break
+            case .unavailable(let reason):
+                let scope = view == .repository ? "Repository" : "Wave"
+                return "\(scope) planning unavailable · \(reason)"
+            case nil: return nil
+            }
         }
+        let heading = if case .wave(let id) = view, let roadmap = wave(id: id) { BacklogList.heading(roadmap) }
+            else { [repositoryName] }
+        return backlog(view).text(heading: heading)
     }
 
     /// A Wave view's backlog: its open Tasks nobody is running, in rank order, filtered and selected as the view left them.
@@ -1052,9 +1055,14 @@ final class WorkModel {
         let waveNames = Dictionary(visibleRoadmaps.map { ($0.wave.id, $0.wave.displayName) }, uniquingKeysWith: { first, _ in first })
         let scope: String? = if case .wave(let id) = view { id } else { nil }
         let tasks = viewTasks(view)
-        return BacklogList(tasks: tasks?.items ?? [], truncated: tasks?.truncated ?? false,
-                           wave: scope, waveNames: waveNames,
-                           state: navigation.backlogs[view] ?? BacklogState())
+        let state = navigation.backlogs[view] ?? BacklogState()
+        var rows = tasks?.items ?? []
+        if let filed = state.filedRow {
+            rows.removeAll { $0.id == filed.id }
+            rows += pendingChanges.apply(to: [filed], readAt: roadmap.readAt, wave: scope)
+        }
+        return BacklogList(tasks: rows, truncated: tasks?.truncated ?? false,
+                           wave: scope, waveNames: waveNames, state: state)
     }
 
     /// A Wave view's Tasks: the Wave's, or every Task in the repository.
@@ -1151,7 +1159,11 @@ final class WorkModel {
     var historyWave: WaveSnapshot?
     var historyReference: String?
     @ObservationIgnored private(set) var historyLookup: Task<Void, Never>?
-    var repoPath: String?
+    var repoPath: String? {
+        willSet {
+            if newValue != repoPath { navigationByRepo[repoPath ?? ""]?.releaseFiledRow() }
+        }
+    }
     var selection: WorkReference? { navigation.selection }
     @ObservationIgnored private var navigationByRepo: [String: WorkNavigation] = [:]
 
@@ -1219,6 +1231,10 @@ final class WorkModel {
         didSet {
             reported(WorkPart.planning.rawValue, "The plan", from: oldValue, to: roadmap)
             taskIndexCache = nil
+            if let owner = navigationByRepo[repoPath ?? ""], let view = owner.waveView,
+               let filed = owner.backlogs[view]?.filedRow, roadmap.current != nil, currentTask(id: filed.id) != nil {
+                owner.releaseFiledRow()
+            }
             // Retain the latest observed Task across temporary project membership
             // gaps, including selections saved in another repository.
             for navigation in navigationByRepo.values {
@@ -1466,6 +1482,10 @@ final class WorkModel {
     /// unless this launch has already replaced it.
     func confirmMachine(_ id: String) {
         let changed = workMachine != id
+        if observingMachineId != id {
+            navigation.releaseFiledRow()
+            if observingMachineId != nil { dismissTaskLink() }
+        }
         if changed, workMachine != nil { dropMachineContent() }
         workMachine = id
         // Readings are keyed by Machine: one taken before this confirmation is
@@ -2649,6 +2669,7 @@ final class WorkModel {
         let owner = navigation
         let presentation = owner.paletteGeneration
         let destination = destinationGeneration
+        let machine = observingMachineId
         let requestID = UUID().uuidString
         let created: TaskCreated?
         do {
@@ -2658,15 +2679,39 @@ final class WorkModel {
 
         guard owner.paletteGeneration == presentation else { return }
         if owner.palette == .newTask { owner.palette = nil }
-        guard let created, navigation === owner, destinationGeneration == destination else { return }
+        guard let created, navigation === owner, destinationGeneration == destination,
+              observingMachineId == machine else { return }
 
-        let view: WorkNavigation.Board = wave.map { .wave($0.id) } ?? .repository
-        if owner.waveView != view { select(wave.map { .wave(id: $0.id) }) }
+        let filed = created.row
+        if let repoPath, repoIdentity(filed.task.repo) != repoIdentity(repoPath) { return }
+        let planned = roadmap.current != nil && !showsSavedPlanning ? currentTask(id: filed.id)?.task : nil
+        let observed = subscribedTaskRow.current.flatMap { $0.id == filed.id ? $0 : nil }
+        let row = planned ?? observed ?? filed
+        guard row.section == .backlog else { return }
+        let view = row.task.waveId.map(WorkNavigation.Board.wave) ?? .repository
+        if owner.waveView != view { select(row.task.waveId.map { .wave(id: $0) }) }
         if isHidden(.backlog, in: view) { setHidden(.backlog, false, in: view) }
         if let zoom = zoomedPart(in: view), zoom != .backlog { setZoomed(nil, in: view) }
-        let task = created.receipt.task
-        owner.backlogs[view, default: BacklogState()].showFiled(task)
-        CreationRecovery.shared.awaitingPresentation(requestID, of: .task(task.id))
+        owner.backlogs[view, default: BacklogState()].showFiled(row, inPlanning: planned != nil)
+        CreationRecovery.shared.awaitingPresentation(requestID, of: .task(row.id))
+    }
+
+    /// Only an exact lookup can settle a filed Task's absence from planning.
+    func refreshFiledRow(_ row: RoadmapTask, in view: WorkNavigation.Board) async {
+        let owner = navigation
+        guard owner.backlogs[view]?.filedRow?.id == row.id,
+              let exact = try? await query.taskDestination(issue: row.id, repo: row.task.repo),
+              !Task.isCancelled, owner.backlogs[view]?.filedRow?.id == row.id,
+              case .available(let matches, let truncated) = exact.tasks else { return }
+        if let current = matches.first(where: { $0.id == row.id }) {
+            if current.section == .backlog, current.task.waveId == row.task.waveId {
+                owner.backlogs[view]?.filedRow = current
+            } else {
+                owner.backlogs[view]?.clear()
+            }
+        } else if matches.isEmpty && !truncated {
+            owner.backlogs[view]?.clear()
+        }
     }
 
     /// Install a created Task's conversation from the answer: its row selects the

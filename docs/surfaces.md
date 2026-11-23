@@ -182,8 +182,9 @@ steps and marks each one where you take part.
 
 - **Start with `<workflow>`** (⌘↩) starts the workflow and opens the new
   Task's conversation. The Machine resolves an inherited default at Start.
-- **File to backlog** runs `lf task create` and selects the new Task in its
-  backlog. When you start the filed Task, it offers the current default and
+- **File to backlog** opens the new Task’s brief in its backlog as soon as
+  `lf task create` answers, even while the backlog is refreshing.
+  When you start the filed Task, it offers the current default and
   [the same workflow list](#start-picks-a-workflow).
 - **Cancel** (Esc) closes the sheet.
 

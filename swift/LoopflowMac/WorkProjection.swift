@@ -325,7 +325,17 @@ final class WorkNavigation {
         case repository
     }
     static let workingTasksTitle = "Working Tasks"
-    var destination: Destination = .work(nil)
+    var destination: Destination = .work(nil) {
+        willSet {
+            if newValue != destination { releaseFiledRow() }
+        }
+    }
+
+    func releaseFiledRow() {
+        if let view = waveView, backlogs[view]?.filedRow != nil {
+            backlogs[view]?.filedRow = nil
+        }
+    }
     var selection: WorkReference? {
         get {
             switch destination {

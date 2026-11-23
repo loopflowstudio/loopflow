@@ -4,11 +4,15 @@
 
 The workflow choice belongs to Start. **Use default** follows the selected scope until admission. A named choice survives scope changes, including when its name matches the default. File sends no Graph choice or run intent. A filed Task offers the current default at first Start. The Machine records the Graph when the Task takes it up.
 
-## First slice
+## Backlog handoff
 
-1. Hold back the planning subscription in the New Task File walkthrough. QA saw “Filed 8747cc” and “Nothing selected” together for about 30 seconds after a server restart. The fixture currently includes the new row before File, which misses that gap.
-2. Present the existing `TaskCreated.row` in the destination backlog as temporary evidence for the selected brief. Use the Task’s recorded scope and the current navigation guards. Reveal the backlog and clear interfering filters as today. Keep the row in this selection, scoped to the original Machine and repository. Leave authoritative inventory alone. Current planning for that ID takes precedence and a current Task read can establish a move or removal. Release the temporary row on either event or when the selection leaves it. Absence from stale or partial planning alone is inconclusive. Render the row once and let its mounted brief retire the saved submission through `CreationPresentation`.
-3. Verify the brief opens before planning catches up, the arriving row replaces it without a duplicate or lost selection, and a Task that moved or started is never revived by a delayed reply. Switching destinations before the reply leaves the committed result available to recovery.
+The File walkthrough now holds the planning subscription back until the returned brief mounts and the saved submission retires. The next frame carries an edited brief for the same ID. It takes over the selected row, and removing it on a later frame leaves the row gone. The earlier build failed to find a brief with planning held back.
+
+File uses the Task’s recorded scope. The selected backlog borrows its committed row until current planning includes it. While that brief is open, a repository-qualified Task lookup can settle a move or removal. The reply never adds a Task to the planning inventory.
+
+`scripts/test_desktop.sh --skip-build --filter 'NewTaskTests/(fileRefusalAndRetry|planningBeforeFileReply|exactLookupRemovesFiledBrief|leaveFiledBrief|leaveBeforeFileReply)'` passed all five tests after building Desktop. The mounted backlog kept the brief through a partial lookup and dropped it after a complete lookup found no Task.
+
+`cargo test -p loopflow --test integration documented_commands::` passed all four checks for the updated File instructions.
 
 ## Finish the draft lifecycle
 

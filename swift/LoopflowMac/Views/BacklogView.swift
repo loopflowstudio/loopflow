@@ -30,7 +30,13 @@ enum BacklogNotice: Equatable {
 
 /// What a person has done to one view's backlog; it outlives entering a Task.
 struct BacklogState: Equatable {
-    var selection: Set<String> = []
+    var selection: Set<String> = [] {
+        didSet {
+            if let filedRow, selection != [filedRow.id] { self.filedRow = nil }
+        }
+    }
+    /// The selected brief while its File reply is ahead of planning.
+    var filedRow: RoadmapTask?
     /// Where ⇧-click and ⇧↑↓ extend from.
     var anchor: String?
     /// The row the keyboard last moved to; arrows step from here.
@@ -51,12 +57,13 @@ struct BacklogState: Equatable {
         mark(id)
     }
 
-    mutating func showFiled(_ task: TaskCreateReceipt.CreatedTask) {
+    mutating func showFiled(_ task: RoadmapTask, inPlanning: Bool) {
         filter = .all
         query = ""
         selection = [task.id]
+        filedRow = inPlanning ? nil : task
         mark(task.id)
-        notice = .did("Filed \(task.identifier)")
+        notice = .did("Filed \(task.task.identifier)")
     }
 
     mutating func toggle(_ id: String) {
@@ -542,7 +549,7 @@ extension WorkModel {
 
     /// Go to a Task's own view, where its position, PR and run action live.
     func openBacklog(_ task: RoadmapTask) {
-        openTaskDestination(wave: self.task(id: task.id)?.wave, task: task)
+        openTaskDestination(wave: task.task.waveId.flatMap { wave(id: $0) }, task: task)
     }
 
     func moveBacklog(_ tasks: [RoadmapTask], toWave wave: String?, in view: WorkNavigation.Board) {
@@ -633,10 +640,7 @@ struct BacklogView: View {
         .accessibilityIdentifier("wave-backlog")
         .task(id: model.repoPath) { await model.loadGraphCatalog() }
         .onChange(of: [list.state.filter.rawValue, list.state.query]) {
-            // File clears both filters and selects its row before planning delivers it.
-            if list.state.filter != .all || !list.state.query.isEmpty {
-                state.wrappedValue.keep(list.ids)
-            }
+            state.wrappedValue.keep(list.ids)
         }
         .confirmationDialog(abandonTitle, isPresented: Binding(get: { abandoning != nil }, set: { if !$0 { abandoning = nil } })) {
             Button("Abandon", role: .destructive) {
@@ -810,6 +814,9 @@ struct BacklogView: View {
                             if isOpen {
                                 BacklogUnderTitle(identifier: task.task.identifier) {
                                     BacklogBrief(task: task, state: state, perform: perform)
+                                        .task(id: list.state.filedRow == nil ? nil : model.planningSequence) {
+                                            if let filed = list.state.filedRow { await model.refreshFiledRow(filed, in: view) }
+                                        }
                                 }
                             }
                         }

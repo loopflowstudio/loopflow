@@ -9,3 +9,5 @@ The sheet opens the destination backlog after File succeeds, including when **In
 File reveals a hidden destination backlog and leaves another pane's zoom so the selected brief can appear. The mounted brief retires the saved submission through the same presentation hook as the Task workspace.
 
 The built review keeps the backlog as File's destination and uses the committed row for its brief during reconnect. It keeps the sheet through admission so a refused Start can be corrected in place. If the chosen Wave disappears, the draft waits for a destination choice.
+
+If planning beats the File reply and the Task has moved, open its brief in the backlog that now holds it. If it has entered Working, leave the current destination in place and keep the saved submission available to recovery.

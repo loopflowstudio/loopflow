@@ -65,10 +65,12 @@ struct NewTaskTests {
     }
 
     private func model(catalog: OSAllocatedUnfairLock<String>,
+                       planning: String? = nil,
+                       subscribe: (@Sendable () async throws -> WorkObservation)? = nil,
                        write: @escaping @Sendable (ServedWrite) async throws -> String) async throws -> WorkModel {
-        let planning = String(decoding: try loadFixtureData("roadmap_snapshot.json"), as: UTF8.self)
-        let model = WorkModel(query: RegistryQuery(write: write) { args, _ in
-            if args.starts(with: ["plan", "list"]) { return planning }
+        let initial = String(decoding: try loadFixtureData("roadmap_snapshot.json"), as: UTF8.self)
+        let model = WorkModel(query: RegistryQuery(write: write, subscribeWork: subscribe) { args, _ in
+            if args.starts(with: ["plan", "list"]), !args.contains("--task") { return planning ?? initial }
             if args.starts(with: ["graph", "list"]) { return catalog.withLock { $0 } }
             if args.starts(with: ["wave", "graph", "show"]) {
                 return args.contains("--no-wave")
@@ -132,10 +134,9 @@ struct NewTaskTests {
         _ = try bar.inspect().find(text: "Starting code")
     }
 
-    @Test("File keeps a refused draft and selects its unstarted row even after its Start workflow disappears")
-    func fileRefusalAndRetry() async throws {
-        let snapshot = try #require(JSONSerialization.jsonObject(with: loadFixtureData("roadmap_snapshot.json")) as? [String: Any])
-        let tasks = try #require(snapshot["tasks"] as? [String: Any])
+    private func filing() throws -> (row: RoadmapTask, receipt: String, before: String, after: String) {
+        var snapshot = try #require(JSONSerialization.jsonObject(with: loadFixtureData("roadmap_snapshot.json")) as? [String: Any])
+        var tasks = try #require(snapshot["tasks"] as? [String: Any])
         let rows = try #require(tasks["items"] as? [[String: Any]])
         let filedRow = try #require(rows.first { $0["lifecycle"] as? String == "unstarted" })
         let row = try RegistryQuery.decode(RoadmapTask.self, from: json(filedRow))
@@ -143,13 +144,29 @@ struct NewTaskTests {
             "task": ["id": row.id, "identifier": row.task.identifier, "title": row.task.name],
             "graph": NSNull(), "session_id": NSNull(), "milestone": "filed", "session": NSNull(), "row": filedRow,
         ])
+        // Planning carries a later brief for the same Task.
+        let planned = try json(snapshot).replacingOccurrences(of: row.task.description, with: "Edited after filing")
+        tasks["items"] = rows.filter { ($0["task"] as? [String: Any])?["id"] as? String != row.id }
+        snapshot["tasks"] = tasks
+        let beforeFile = try json(snapshot)
+        return (row, filed, beforeFile, planned)
+    }
+
+    @Test("File opens the committed brief before planning catches up")
+    func fileRefusalAndRetry() async throws {
+        let (row, filed, beforeFile, planned) = try filing()
+        let feed = WorkFeed()
         let catalog = OSAllocatedUnfairLock(initialState: try catalogWithCode())
         let attempts = OSAllocatedUnfairLock<[ServedWrite]>(initialState: [])
-        let model = try await model(catalog: catalog) { change in
+        let model = try await model(catalog: catalog, planning: beforeFile, subscribe: { await feed.open() }) { change in
+            if case .waveSync = change { return "{}" }
             let first = attempts.withLock { $0.append(change); return $0.count == 1 }
             if first { throw ServerError(code: "unavailable", message: "Wave unavailable", data: .null) }
             return filed
         }
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        try await feed.opened(1)
         let product = try #require(model.visibleRoadmaps.first?.wave)
         let sheet = NewTaskSheet(model: model)
         try sheet.inspect().find(button: product.displayName).tap()
@@ -188,16 +205,161 @@ struct NewTaskTests {
         #expect(state.notice == .did("Filed \(row.task.identifier)"))
         let brief = try BacklogView(model: model, view: destination).inspect().find(BacklogBrief.self).actualView()
         #expect(brief.task.id == row.id)
+        #expect(!model.visibleTasks.contains { $0.id == row.id })
         let resource = CreationRecovery.Presentation.task(row.id)
         #expect(!CreationRecovery.shared.requests(for: resource).isEmpty)
         let pane = ImageRenderer(content: brief)
         defer { withExtendedLifetime(pane) {} }
         _ = try #require(pane.cgImage)
         for await retired in Observations({ CreationRecovery.shared.requests(for: resource).isEmpty }) where retired { break }
-        model.openBacklog(brief.task)
+        let scope = model.workScope
+        func deliver(_ snapshot: String, sequence: Int) async throws {
+            let line = #"{"answers":null,"unavailable":null,"body":\#(snapshot),"read_at":null}"#
+            try await feed.send(WorkFrame.decode(part: .planning, scope: scope, sequence: sequence, line: Data(line.utf8)))
+            for await received in Observations({ model.planningSequence }) where received == sequence { break }
+        }
+        try await deliver(planned, sequence: 1)
+        let caughtUp = model.backlog(destination)
+        #expect(caughtUp.ids.filter { $0 == row.id }.count == 1)
+        #expect(caughtUp.opened?.task.description == "Edited after filing")
+        try await deliver(beforeFile, sequence: 2)
+        #expect(!model.backlog(destination).ids.contains(row.id))
+        try await deliver(planned, sequence: 3)
+        model.openBacklog(try #require(model.backlog(destination).opened))
         #expect(model.selection == .task(id: row.id))
         let offer = try TaskStartOffer(model: model, task: row).inspect()
         _ = try offer.find(textWhere: { text, _ in text.contains("It will run feature") && text.contains("You take part at demo.") })
+    }
+
+    enum TaskChange: CaseIterable { case moved, started }
+
+    private func changedPlan(_ planning: String, row: RoadmapTask, change: TaskChange) throws -> String {
+        var snapshot = try #require(JSONSerialization.jsonObject(with: Data(planning.utf8)) as? [String: Any])
+        var tasks = try #require(snapshot["tasks"] as? [String: Any])
+        let rows = try #require(tasks["items"] as? [[String: Any]])
+        tasks["items"] = rows.map { entry in
+            var entry = entry
+            guard var task = entry["task"] as? [String: Any], task["id"] as? String == row.id else { return entry }
+            switch change {
+            case .moved:
+                task["wave_id"] = NSNull()
+                entry["task"] = task
+            case .started:
+                entry["section"] = "working"
+                entry["lifecycle"] = "active"
+            }
+            return entry
+        }
+        snapshot["tasks"] = tasks
+        return try json(snapshot)
+    }
+
+    @Test("A File reply follows the newer Task's backlog membership", arguments: TaskChange.allCases)
+    func planningBeforeFileReply(change: TaskChange) async throws {
+        let (row, receipt, before, after) = try filing()
+        let current = try RegistryQuery.decode(RoadmapSnapshot.self, from: changedPlan(after, row: row, change: change))
+        let sent = AsyncStream<Void>.makeStream()
+        let reply = AsyncStream<Void>.makeStream()
+        let model = try await model(catalog: .init(initialState: "[]"), planning: before) { _ in
+            sent.continuation.finish()
+            for await _ in reply.stream {}
+            return receipt
+        }
+        let wave = try #require(model.visibleRoadmaps.first?.wave)
+        let filing = Task { try await model.fileTask(request: row.task.name, wave: wave) }
+        for await _ in sent.stream {}
+        model.applyFixture(roadmap: .available(current), waves: .available([]), workActivity: .loading, repos: [])
+        reply.continuation.finish()
+        try await filing.value
+        #expect(!model.backlog(.wave(wave.id)).ids.contains(row.id))
+        let backlog = model.backlog(.repository)
+        switch change {
+        case .moved:
+            #expect(model.navigation.waveView == .repository)
+            #expect(backlog.opened?.task.description == "Edited after filing")
+        case .started:
+            #expect(!backlog.ids.contains(row.id))
+        }
+        await CreationRecovery.shared.presented(CreationRecovery.shared.requests(for: .task(row.id)))
+    }
+
+    @Test("A complete Task lookup can remove the filed brief while planning is paused")
+    func exactLookupRemovesFiledBrief() async throws {
+        let (row, receipt, before, _) = try filing()
+        let empty = #"{"generated_at":"now","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#
+        let partial = OSAllocatedUnfairLock(initialState: true)
+        let model = WorkModel(query: RegistryQuery(write: { _ in receipt }) { args, _ in
+            if args.contains("--task") {
+                return partial.withLock { $0 } ? empty.replacingOccurrences(of: "false", with: "true") : empty
+            }
+            return before
+        }, repoPath: row.task.repo)
+        await model.refreshPlanning()
+        try await model.fileTask(request: row.task.name, wave: nil)
+        let wave = WorkNavigation.Board.wave(try #require(row.task.waveId))
+        #expect(model.navigation.waveView == wave)
+        let brief = try #require(model.backlog(wave).opened)
+        await model.refreshFiledRow(brief, in: wave)
+        #expect(model.backlog(wave).opened?.id == row.id)
+        partial.withLock { $0 = false }
+        let pane = ImageRenderer(content: BacklogView(model: model, view: wave).frame(width: 900, height: 600))
+        defer { withExtendedLifetime(pane) {} }
+        _ = try #require(pane.cgImage)
+        try await eventually { !model.backlog(wave).ids.contains(row.id) }
+        await CreationRecovery.shared.presented(CreationRecovery.shared.requests(for: .task(row.id)))
+    }
+
+    enum Departure: CaseIterable { case selection, repository, machine }
+
+    @Test("Leaving the filed selection releases its receipt row", arguments: Departure.allCases)
+    func leaveFiledBrief(departure: Departure) async throws {
+        let (row, receipt, before, _) = try filing()
+        let model = try await model(catalog: .init(initialState: "[]"), planning: before) { _ in receipt }
+        model.confirmMachine("original")
+        try await model.fileTask(request: row.task.name, wave: nil)
+        let view = try #require(model.navigation.waveView)
+        #expect(model.backlog(view).opened?.id == row.id)
+        switch departure {
+        case .selection:
+            model.navigation.backlogs[view]?.select(row.id)
+            model.navigation.backlogs[view]?.select(row.id)
+        case .repository:
+            model.setRepoPath("/another")
+            model.setRepoPath(row.task.repo)
+        case .machine:
+            model.confirmMachine("another")
+        }
+        #expect(!model.backlog(view).ids.contains(row.id))
+        await CreationRecovery.shared.presented(CreationRecovery.shared.requests(for: .task(row.id)))
+    }
+
+    @Test("Leaving during File keeps the new destination and the saved submission")
+    func leaveBeforeFileReply() async throws {
+        let (row, receipt, before, _) = try filing()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sent = AsyncStream<Void>.makeStream()
+        let reply = AsyncStream<Void>.makeStream()
+        let journal = CreationSubmissions(directory: directory, machine: { "original" },
+            lookup: { _ in ReadOutput("null") }, send: { _ in
+                sent.continuation.finish()
+                for await _ in reply.stream {}
+                return receipt
+            })
+        let model = try await model(catalog: .init(initialState: "[]"), planning: before) { change in
+            guard case .taskCreate(_, let id, _, _, _, _, _, _) = change else { throw RegistryQueryError("Expected File") }
+            return try await journal.submit(change, requestID: id)
+        }
+        let filing = Task { try await model.fileTask(request: row.task.name, wave: nil) }
+        for await _ in sent.stream {}
+        model.selectDashboard("another")
+        model.navigation.palette = .newTask
+        reply.continuation.finish()
+        try await filing.value
+        #expect(model.navigation.dashboardID == "another")
+        #expect(model.navigation.palette == .newTask)
+        let saved = try await journal.pending()
+        #expect(saved.count == 1 && saved.first?.destination == "original")
     }
 }
 #endif

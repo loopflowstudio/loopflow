@@ -1,0 +1,62 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-922 QA: seeded worktree targets</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:860px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f5f5f2;padding:.7em;overflow-x:auto;font-size:13px}
+h2{margin-top:1.8em}td,th{padding:.25em .7em;border-bottom:1px solid #ddd;text-align:left}
+.bad{color:#a40}.ok{color:#270}
+</style>
+<h1>LOO-922 QA: seeded worktree targets</h1>
+<p>2026-11-22, this Machine, load average 75–121 on 16 CPUs. Real repository, real hook, real Cargo.</p>
+
+<h2>1. lf's Task checkout path, end to end</h2>
+<p>Replayed lf's exact Git sequence (<code>prepare_ready_checkout</code> then <code>take_ready_checkout</code>):
+<code>git worktree add --detach</code> a ready-style checkout, <code>git worktree move</code> it, <code>git switch -c</code>, then
+<code>cargo build -p loopflow --bin lf</code>.</p>
+<pre>worktree add: real 2.13 s (clone included)
+target/debug: .fingerprint build deps
+status: seed     from ../loopflow.ready at f4b74bc8eb
+7 Compiling (workspace crates only)
+Finished in 1m 19s; 79.4 real, 70.4 user, 4.8 sys; max RSS 2.27 GB
+lf 0.16.0+f4b74bc8e (build f4b74bc8e on v0.16.0)   # HEAD f4b74bc8eb</pre>
+<p class="ok">Works. The move carries the seed; the switch doesn't re-seed. <code>-L native=</code> paths in rustc's command named the new checkout's own target.</p>
+
+<h2>2. Bug found and fixed: seeds chained from unbuilt seeds</h2>
+<p class="bad">Before the fix, the first seed came from <code>loopflow.ready</code>, which nobody had built: it had been seeded 2 minutes earlier.
+<code>clonefile(2)</code> keeps file mtimes but gives cloned directories the clone time:</p>
+<pre>.fingerprint/thiserror-…/          source 20:26:56   ready clone 21:43:36   task clone 21:45:57
+.fingerprint/thiserror-…/build-…   source 20:26:56   ready clone 20:26:56   task clone 20:26:56
+ranking (.fingerprint mtime): qa922-task 21:45:57 > loopflow.ready 21:43:35 > f97c4b 21:41:59 > 43bf9b 21:40:43</pre>
+<p>Sources are ranked by <code>target/debug/.fingerprint</code> mtime, so every fresh seed ranked newest and the next worktree
+seeded from it, never from the sibling that had actually built most recently. With lf always holding a fresh <code>.ready</code>, that is the common case.</p>
+<p><b>Fix</b> (c67fb141a6): copy the source's <code>.fingerprint</code> mtime onto the clone. New test
+<code>test_an_unbuilt_seed_ranks_as_old_as_its_source</code> failed before, passes after; the file's 25 tests pass. Rerun on the real repo: the new seed's
+<code>.fingerprint</code> carried 21:43:35, not the clone time.</p>
+<p>Also seen: after a build, a seeded checkout's <code>.fingerprint</code> mtime stays at its source's, because workspace unit
+directory names don't depend on the checkout path. The rank therefore means "when this target last gained a unit", which tracks dependency drift, the thing that decides reuse.</p>
+
+<h2>3. Busy sibling skipped, live</h2>
+<p>While scenario 1's build held <code>qa922-task</code>'s locks, <code>git worktree add -b qa922-hand ../loopflow.qa922-hand origin/main</code>
+took 1.89 s and seeded from <code>loopflow.ready</code>. Two branch switches inside it left the seed record unchanged.</p>
+
+<h2>4. Fresh install in an isolated HOME</h2>
+<p>Two-crate workspace (one crate with a build script), pinned sccache copied in, branch <code>.venv/bin/python scripts/build_cache.py install</code>.</p>
+<pre>status before any worktree: seed     none
+git worktree add -b feature ../tree2   → target/debug: .fingerprint build deps
+status: seed     from ../ws at 1633c2c222
+cargo build -v: native Dirty (new mtimes) → Compiling; app Compiling; binary prints 1</pre>
+<p class="ok">Works. Client-side mode, so no sccache daemon was started.</p>
+
+<h2>5. Volume that can't clone</h2>
+<p>HFS+ RAM disk, worktree added there: hook silent, worktree complete, no <code>target/</code>, <code>status</code> says <code>seed     none</code>.
+A manual <code>build_cache.py seed</code> prints <code>build cache: [Errno 18] Cross-device link: '…/.fingerprint'</code> and exits 1. Nothing copied.</p>
+
+<h2>Result</h2>
+<ul>
+<li>Works: lf's ready-checkout path, a hand <code>git worktree add</code>, a fresh install, busy-sibling skip, a volume that can't clone.</li>
+<li>Fixed: an unbuilt seed outranking built siblings (c67fb141a6). Hook reinstalled on this Machine from the branch.</li>
+<li>Still wrong, small: <code>loopflow.ready</code> on this Machine still carries the clone-time mtime from the old hook (21:43:35), so it ranks high until a Task takes it. That fixes itself on the next ready checkout.</li>
+<li>Not reached: Linux <code>cp --reflink=always</code> (no Linux Machine in this run); a Task started through <code>lf task create --run</code> on a private Machine. The Git sequence was replayed by hand instead, since seeding happens only in the hook.</li>
+<li>Open: the 3.1 GB peak RSS of slice 2's seeded samples didn't reproduce here (2.27 GB); see questions.md.</li>
+</ul>

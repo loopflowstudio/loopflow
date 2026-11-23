@@ -207,7 +207,7 @@ and build scripts" becomes the seeded behaviour plus what still compiles.
    with slice 2's bytes, noted Cargo.lock drift (31 units at 140 commits) and
    linked loo-922.html from testing.md.
 
-Remaining: gate. Open: the seeded build's 3.1 GB peak RSS (questions.md).
+Remaining: gate. QA done (scratch/qa.html): fixed seeds ranking from clone-time mtimes. Open: the seeded build's 3.1 GB peak RSS (questions.md; QA saw 2.27 GB).
 
 After verify: check LOO-923 status/liveness, `lf task checkout LOO-923` if
 absent, then `lf ship LOO-923` with these measurements in its context.

@@ -1,0 +1,2267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1066 · Settings Pane Redesign — Explore</title>
+<style>
+:root {
+  color-scheme: light dark;
+  /* Page chrome (Loopflow Light) */
+  --bg: #faf8f5;
+  --surface: #fffdf9;
+  --surface-muted: #f3eee7;
+  --surface-el: #ece6dd;
+  --border: #e6dfd6;
+  --border-strong: #d6ccc0;
+  --text: #2a2624;
+  --text-2: #5f5752;
+  --text-3: #6e6762;
+  --accent: #722f37;
+  --accent-hover: #5e2630;
+  --accent-text: #faf8f5;
+  --working: #2f629f;
+  --working-fill: #e3ebf3;
+  --warning: #7f5a19;
+  --warning-fill: #efe8d8;
+  --failure: #a64038;
+  --failure-fill: #f4e2de;
+  --success: #386c48;
+  --success-fill: #dfeadf;
+
+  /* Native macOS Settings window palette (Light) */
+  --mac-window: #f5f5f7;
+  --mac-sidebar: #ebebf0;
+  --mac-sidebar-hover: rgba(0, 0, 0, 0.05);
+  --mac-sidebar-active: #0a84ff;
+  --mac-sidebar-active-text: #ffffff;
+  --mac-card: #ffffff;
+  --mac-card-border: rgba(0, 0, 0, 0.08);
+  --mac-divider: rgba(0, 0, 0, 0.08);
+  --mac-control-bg: #ffffff;
+  --mac-control-border: rgba(0, 0, 0, 0.16);
+  --mac-seg-bg: rgba(0, 0, 0, 0.06);
+  --mac-seg-thumb: #ffffff;
+  --mac-switch-off: rgba(0, 0, 0, 0.16);
+  --mac-accent: #007aff;
+  --mac-text: #1d1d1f;
+  --mac-text-2: #6e6e73;
+  --mac-shadow: 0 14px 36px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+  --mac-titlebar: #ededf1;
+
+  --font-serif: "Old Standard TT", Georgia, "Times New Roman", serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Atkinson Hyperlegible Next", system-ui, sans-serif;
+  --font-mono: "Spline Sans Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --r-control: 5px;
+  --r-row: 8px;
+  --r-pane: 10px;
+  --r-window: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-page-mode="light"]) {
+    --bg: #242629;
+    --surface: #2d3034;
+    --surface-muted: #34373b;
+    --surface-el: #3d4045;
+    --border: #46494e;
+    --border-strong: #5d6066;
+    --text: #f5f1ea;
+    --text-2: #c9c6c1;
+    --text-3: #a6a39e;
+    --accent: #a64954;
+    --accent-hover: #bc5763;
+    --accent-text: #faf8f5;
+    --working: #8ab8f2;
+    --working-fill: #28384c;
+    --warning: #e0bf7d;
+    --warning-fill: #413825;
+    --failure: #f49b8d;
+    --failure-fill: #472b28;
+    --success: #86ca9a;
+    --success-fill: #243c2c;
+
+    --mac-window: #1e1e1f;
+    --mac-sidebar: #262628;
+    --mac-sidebar-hover: rgba(255, 255, 255, 0.06);
+    --mac-sidebar-active: #0a84ff;
+    --mac-sidebar-active-text: #ffffff;
+    --mac-card: #29292b;
+    --mac-card-border: rgba(255, 255, 255, 0.08);
+    --mac-divider: rgba(255, 255, 255, 0.08);
+    --mac-control-bg: #363638;
+    --mac-control-border: rgba(255, 255, 255, 0.14);
+    --mac-seg-bg: rgba(255, 255, 255, 0.08);
+    --mac-seg-thumb: #4a4a4e;
+    --mac-switch-off: rgba(255, 255, 255, 0.22);
+    --mac-accent: #0a84ff;
+    --mac-text: #f5f5f7;
+    --mac-text-2: #98989d;
+    --mac-shadow: 0 18px 44px rgba(0, 0, 0, 0.48), 0 1px 2px rgba(0, 0, 0, 0.35);
+    --mac-titlebar: #2b2b2d;
+  }
+}
+
+:root[data-page-mode="dark"] {
+  --bg: #242629;
+  --surface: #2d3034;
+  --surface-muted: #34373b;
+  --surface-el: #3d4045;
+  --border: #46494e;
+  --border-strong: #5d6066;
+  --text: #f5f1ea;
+  --text-2: #c9c6c1;
+  --text-3: #a6a39e;
+  --accent: #a64954;
+  --accent-hover: #bc5763;
+  --accent-text: #faf8f5;
+  --working: #8ab8f2;
+  --working-fill: #28384c;
+  --warning: #e0bf7d;
+  --warning-fill: #413825;
+  --failure: #f49b8d;
+  --failure-fill: #472b28;
+  --success: #86ca9a;
+  --success-fill: #243c2c;
+
+  --mac-window: #1e1e1f;
+  --mac-sidebar: #262628;
+  --mac-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --mac-sidebar-active: #0a84ff;
+  --mac-sidebar-active-text: #ffffff;
+  --mac-card: #29292b;
+  --mac-card-border: rgba(255, 255, 255, 0.08);
+  --mac-divider: rgba(255, 255, 255, 0.08);
+  --mac-control-bg: #363638;
+  --mac-control-border: rgba(255, 255, 255, 0.14);
+  --mac-seg-bg: rgba(255, 255, 255, 0.08);
+  --mac-seg-thumb: #4a4a4e;
+  --mac-switch-off: rgba(255, 255, 255, 0.22);
+  --mac-accent: #0a84ff;
+  --mac-text: #f5f5f7;
+  --mac-text-2: #98989d;
+  --mac-shadow: 0 18px 44px rgba(0, 0, 0, 0.48), 0 1px 2px rgba(0, 0, 0, 0.35);
+  --mac-titlebar: #2b2b2d;
+}
+
+/* Optional Loopflow-palette skin inside macOS Settings mockups */
+.skin-loopflow {
+  --mac-window: var(--bg);
+  --mac-sidebar: var(--surface-muted);
+  --mac-sidebar-hover: var(--surface-el);
+  --mac-sidebar-active: var(--accent);
+  --mac-sidebar-active-text: var(--accent-text);
+  --mac-card: var(--surface);
+  --mac-card-border: var(--border);
+  --mac-divider: var(--border);
+  --mac-control-bg: var(--surface);
+  --mac-control-border: var(--border-strong);
+  --mac-seg-bg: var(--surface-el);
+  --mac-seg-thumb: var(--surface);
+  --mac-accent: var(--accent);
+  --mac-text: var(--text);
+  --mac-text-2: var(--text-2);
+  --mac-titlebar: var(--surface-muted);
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 36px 24px 88px;
+}
+
+/* Header & top controls */
+.doc-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 32px;
+}
+.doc-head h1 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 32px;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+  margin: 0 0 8px;
+  font-variant-ligatures: none;
+}
+.doc-sub {
+  color: var(--text-2);
+  font-size: 15px;
+  margin: 0;
+  max-width: 580px;
+}
+.doc-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.pill-group {
+  display: inline-flex;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 2px;
+  gap: 2px;
+}
+.pill-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.pill-btn[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* Decision callout */
+.decision-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pane);
+  padding: 18px 20px;
+  margin-bottom: 36px;
+}
+.decision-box h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+.decision-box p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+.jump-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.jump-links a {
+  font-size: 13px;
+  color: var(--text);
+  text-decoration: none;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+.jump-links a:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-el);
+}
+
+/* Sections */
+section.panel {
+  margin-bottom: 52px;
+  scroll-margin-top: 24px;
+}
+.panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 8px;
+}
+.panel-head h2 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 25px;
+  letter-spacing: -0.02em;
+  margin: 0;
+  font-variant-ligatures: none;
+}
+.tag {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  background: var(--surface-muted);
+}
+.tag.existing {
+  background: var(--warning-fill);
+  color: var(--warning);
+  border-color: transparent;
+}
+.tag.proposed {
+  background: var(--working-fill);
+  color: var(--working);
+  border-color: transparent;
+}
+.tag.radical {
+  background: var(--success-fill);
+  color: var(--success);
+  border-color: transparent;
+}
+.one-liner {
+  margin: 0 0 18px;
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+/* Cost / Demo / Appeal grid */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+.fact {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-row);
+  padding: 13px 14px;
+}
+.fact h3 {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0 0 5px;
+  color: var(--text);
+}
+.fact p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.48;
+}
+.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--surface-muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* ========================================================
+   MACOS WINDOW SHELLS
+   ======================================================== */
+.mac-window {
+  background: var(--mac-window);
+  color: var(--mac-text);
+  border: 1px solid var(--mac-card-border);
+  border-radius: var(--r-window);
+  box-shadow: var(--mac-shadow);
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Traffic lights */
+.lights {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+}
+.light {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.light.r { background: #ff5f57; border: 0.5px solid rgba(0, 0, 0, 0.14); }
+.light.y { background: #febc2e; border: 0.5px solid rgba(0, 0, 0, 0.14); }
+.light.g { background: #28c840; border: 0.5px solid rgba(0, 0, 0, 0.14); }
+
+/* Existing top-toolbar Settings window */
+.old-toolbar {
+  background: var(--mac-titlebar);
+  border-bottom: 1px solid var(--mac-divider);
+  padding: 10px 14px 8px;
+}
+.old-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.old-title-row .win-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--mac-text);
+}
+.old-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.old-tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--mac-text-2);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 7px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  min-width: 78px;
+}
+.old-tab:hover { background: var(--mac-sidebar-hover); }
+.old-tab[aria-selected="true"] {
+  background: var(--mac-sidebar-hover);
+  color: var(--mac-accent);
+}
+.old-body {
+  padding: 20px 24px;
+  min-height: 290px;
+}
+
+/* Apple Settings Sidebar Split Layout */
+.split-win {
+  display: grid;
+  grid-template-columns: 214px minmax(0, 1fr);
+  min-height: 430px;
+}
+.win-sidebar {
+  background: var(--mac-sidebar);
+  border-right: 1px solid var(--mac-divider);
+  padding: 12px 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sidebar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px 4px;
+}
+.sidebar-search {
+  width: 100%;
+  border: 1px solid var(--mac-control-border);
+  background: var(--mac-control-bg);
+  color: var(--mac-text);
+  border-radius: 6px;
+  padding: 5px 8px 5px 26px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  outline: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 8px center;
+}
+.sidebar-search:focus {
+  border-color: var(--mac-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mac-accent) 25%, transparent);
+}
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nav-group + .nav-group {
+  padding-top: 8px;
+  border-top: 1px solid var(--mac-divider);
+}
+.nav-item {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--mac-text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 450;
+  padding: 5px 8px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.nav-item:hover { background: var(--mac-sidebar-hover); }
+.nav-item[aria-selected="true"] {
+  background: var(--mac-sidebar-active);
+  color: var(--mac-sidebar-active-text);
+  font-weight: 500;
+}
+.nav-item .nav-meta {
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0.7;
+}
+.nav-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.nav-dot.ok { background: #30b550; }
+.nav-dot.override { background: var(--mac-accent); }
+.nav-item[aria-selected="true"] .nav-dot.override { background: #ffffff; }
+
+/* Apple-style rounded square icon badges */
+.ico {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #ffffff;
+}
+.ico svg { width: 12px; height: 12px; }
+.ico.gray { background: #8e8e93; }
+.ico.blue { background: #007aff; }
+.ico.indigo { background: #5856d6; }
+.ico.purple { background: #af52de; }
+.ico.teal { background: #30b0c7; }
+.ico.green { background: #34c759; }
+.ico.orange { background: #ff9500; }
+.ico.burgundy { background: #722f37; }
+.ico.mono-icon {
+  background: transparent;
+  color: var(--mac-text-2);
+}
+.nav-item[aria-selected="true"] .ico.mono-icon {
+  color: var(--mac-sidebar-active-text);
+}
+
+/* Detail column */
+.win-detail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--mac-window);
+}
+.detail-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 13px 20px 11px;
+  border-bottom: 1px solid var(--mac-divider);
+  background: var(--mac-window);
+}
+.detail-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--mac-text);
+}
+.detail-scroll {
+  padding: 16px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  max-height: 460px;
+}
+
+/* Native macOS grouped form sections */
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.form-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mac-text-2);
+  padding: 0 4px;
+}
+.form-group {
+  background: var(--mac-card);
+  border: 1px solid var(--mac-card-border);
+  border-radius: var(--r-pane);
+  overflow: hidden;
+}
+.form-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 14px;
+  min-height: 40px;
+  position: relative;
+}
+.form-row + .form-row {
+  border-top: 1px solid var(--mac-divider);
+}
+.form-row.flash {
+  animation: rowFlash 1.2s ease-out;
+}
+@keyframes rowFlash {
+  0% { background: color-mix(in srgb, var(--mac-accent) 22%, transparent); }
+  100% { background: transparent; }
+}
+.row-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.row-title {
+  font-size: 13px;
+  color: var(--mac-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.row-desc {
+  font-size: 11px;
+  color: var(--mac-text-2);
+}
+.form-caption {
+  font-size: 11px;
+  color: var(--mac-text-2);
+  padding: 0 6px;
+}
+
+/* Native controls */
+.mac-switch {
+  appearance: none;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--mac-switch-off);
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.14s ease;
+  border: 0;
+}
+.mac-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+  transition: transform 0.14s ease;
+}
+.mac-switch:checked { background: var(--mac-accent); }
+.mac-switch:checked::after { transform: translateX(14px); }
+
+.mac-select, .mac-input {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--mac-text);
+  background: var(--mac-control-bg);
+  border: 1px solid var(--mac-control-border);
+  border-radius: var(--r-control);
+  padding: 4px 8px;
+  min-height: 24px;
+  outline: none;
+}
+.mac-select:focus, .mac-input:focus {
+  border-color: var(--mac-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mac-accent) 24%, transparent);
+}
+.mac-btn {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--mac-text);
+  background: var(--mac-control-bg);
+  border: 1px solid var(--mac-control-border);
+  border-radius: var(--r-control);
+  padding: 4px 10px;
+  min-height: 24px;
+  cursor: pointer;
+}
+.mac-btn:hover { filter: brightness(0.97); }
+.mac-btn.primary {
+  background: var(--mac-accent);
+  border-color: transparent;
+  color: #ffffff;
+}
+.mac-btn.destructive {
+  color: var(--failure);
+}
+.mac-btn.subtle {
+  background: transparent;
+  border-color: transparent;
+  color: var(--mac-text-2);
+  padding: 3px 6px;
+}
+.mac-btn.subtle:hover {
+  background: var(--mac-sidebar-hover);
+  color: var(--mac-text);
+}
+
+.mac-seg {
+  display: inline-flex;
+  background: var(--mac-seg-bg);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+.mac-seg button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--mac-text);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.mac-seg button[aria-pressed="true"] {
+  background: var(--mac-seg-thumb);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14);
+  font-weight: 500;
+}
+
+/* Theme card grid */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px 14px;
+}
+.theme-card {
+  appearance: none;
+  text-align: left;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  padding: 0;
+  border: 1.5px solid var(--tc-border);
+  background: var(--tc-bg);
+  color: var(--tc-text);
+  font-family: var(--font-sans);
+}
+.theme-card[aria-pressed="true"] {
+  border-color: var(--mac-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mac-accent) 30%, transparent);
+}
+.tc-bar { height: 10px; background: var(--tc-titlebar); }
+.tc-body { padding: 8px; display: flex; flex-direction: column; gap: 5px; }
+.tc-name { font-size: 12px; font-weight: 600; color: var(--tc-heading); }
+.tc-status { display: flex; gap: 6px; font-size: 10px; }
+.tc-dots { display: flex; gap: 3px; }
+.tc-dots span { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.tc-chips { display: flex; gap: 4px; align-items: center; font-size: 10px; }
+.tc-sel { padding: 1px 5px; border-radius: 4px; background: var(--tc-sel-bg); color: var(--tc-sel-tx); }
+.tc-run { padding: 1px 6px; border-radius: 4px; background: var(--tc-acc); color: var(--tc-acc-tx); }
+
+/* Scope pill & provenance badges */
+.scope-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.source-pill {
+  appearance: none;
+  border: 1px solid var(--mac-divider);
+  background: var(--mac-window);
+  color: var(--mac-text-2);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.source-pill:hover {
+  border-color: var(--mac-control-border);
+  color: var(--mac-text);
+}
+.source-pill.overridden {
+  border-color: color-mix(in srgb, var(--mac-accent) 45%, transparent);
+  color: var(--mac-accent);
+  background: color-mix(in srgb, var(--mac-accent) 9%, transparent);
+}
+.override-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mac-accent);
+  display: inline-block;
+}
+
+/* Precedence ladder popover inside Vision C */
+.ladder-panel {
+  background: var(--mac-window);
+  border-top: 1px solid var(--mac-divider);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ladder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ladder-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ladder-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--mac-card);
+  border: 1px solid var(--mac-card-border);
+}
+.ladder-step.winner {
+  border-color: color-mix(in srgb, var(--mac-accent) 50%, transparent);
+}
+.ladder-step .layer-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--mac-text-2);
+}
+.yaml-preview {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--mac-card);
+  border: 1px solid var(--mac-card-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--mac-text);
+  white-space: pre;
+  overflow-x: auto;
+  margin: 0;
+}
+.yaml-add { color: var(--success); }
+.yaml-del { color: var(--failure); }
+
+/* Search results overlay in Vision C sidebar */
+.search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.search-hit {
+  background: var(--mac-card);
+  border: 1px solid var(--mac-card-border);
+  border-radius: 7px;
+  padding: 7px 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  color: var(--mac-text);
+  font-family: var(--font-sans);
+}
+.search-hit:hover { border-color: var(--mac-accent); }
+.search-hit .hit-path {
+  font-size: 10px;
+  color: var(--mac-text-2);
+}
+
+/* Shortcuts table */
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--mac-window);
+  border: 1px solid var(--mac-control-border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: var(--mac-text-2);
+}
+
+/* Fake QR SVG container */
+.qr-box {
+  width: 104px;
+  height: 104px;
+  background: #ffffff;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--mac-card-border);
+  flex-shrink: 0;
+}
+
+/* Toast bar inside Vision C */
+.win-toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--mac-divider);
+  background: var(--mac-card);
+  font-size: 12px;
+  color: var(--mac-text-2);
+}
+
+/* Raw YAML editor look (existing + fallback) */
+.raw-textarea {
+  width: 100%;
+  min-height: 76px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--mac-control-border);
+  background: var(--mac-control-bg);
+  color: var(--mac-text);
+  resize: vertical;
+}
+
+/* Questions section */
+.questions {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pane);
+  padding: 22px 24px;
+}
+.questions h2 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 24px;
+  letter-spacing: -0.02em;
+  margin: 0 0 6px;
+}
+.questions > p {
+  margin: 0 0 18px;
+  color: var(--text-2);
+  font-size: 14px;
+}
+.q-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.q-item h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+.q-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  color: var(--text-2);
+}
+.q-opts li strong {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  margin-right: 4px;
+}
+
+/* Responsive narrow widths */
+@media (max-width: 700px) {
+  main { padding: 24px 14px 64px; }
+  .split-win { grid-template-columns: 1fr; }
+  .win-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--mac-divider);
+  }
+  .nav-group { flex-direction: row; flex-wrap: wrap; }
+  .nav-item { width: auto; }
+  .facts { grid-template-columns: 1fr; }
+  .theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+</style>
+</head>
+<body>
+<main>
+  <header class="doc-head">
+    <div>
+      <h1>Settings Pane Redesign</h1>
+      <p class="doc-sub">LOO-1066 · Make Loopflow for Mac’s Settings window feel like a standard Apple Settings pane, closer to Rex.</p>
+    </div>
+    <div class="doc-controls">
+      <div class="pill-group" role="group" aria-label="Color mode">
+        <button class="pill-btn" data-mode="light" aria-pressed="false">Light</button>
+        <button class="pill-btn" data-mode="dark" aria-pressed="false">Dark</button>
+      </div>
+      <div class="pill-group" role="group" aria-label="Window skin">
+        <button class="pill-btn" data-skin="apple" aria-pressed="true">Native Apple</button>
+        <button class="pill-btn" data-skin="loopflow" aria-pressed="false">Loopflow Palette</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="decision-box">
+    <h2>Decision needed</h2>
+    <p>Choose how far Settings should move beyond a sidebar reskin: keep the existing 5 tabs inside native Apple chrome (<strong>Vision A</strong>), promote Loopflow’s <code>lf config catalog</code> keys into typed native controls grouped by domain like Rex (<strong>Vision B</strong>), or turn Settings into a live scope-and-override control plane with direct control search (<strong>Vision C</strong>). Toggle <strong>Light / Dark</strong> and <strong>Native Apple / Loopflow Palette</strong> above to test both surfaces.</p>
+    <div class="jump-links">
+      <a href="#today">Today (existing)</a>
+      <a href="#vision-a">Vision A · Apple Shell</a>
+      <a href="#vision-b">Vision B · Typed Preferences</a>
+      <a href="#vision-c">Vision C · Live Override Lens</a>
+      <a href="#questions">Open questions</a>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       EXISTING BASELINE
+       ======================================================== -->
+  <section class="panel" id="today">
+    <div class="panel-head">
+      <h2>Today: top toolbar tabs + YAML debugger</h2>
+      <span class="tag existing">Existing</span>
+    </div>
+    <p class="one-liner">Five uneven tabs in <code>LoopflowApp.swift</code>: a 1-checkbox Editing pane, a 700×560 Theme Chooser with Cancel/Apply, and a raw single-key YAML editor for all 47 config keys. Click tabs to compare.</p>
+
+    <div class="mac-window" id="win-today">
+      <div class="old-toolbar">
+        <div class="old-title-row">
+          <span class="lights"><span class="light r"></span><span class="light y"></span><span class="light g"></span></span>
+          <span class="win-title" id="today-title">Configuration</span>
+          <span style="width:46px"></span>
+        </div>
+        <div class="old-tabs" role="tablist">
+          <button class="old-tab" data-today="appearance" aria-selected="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="9" cy="10" r="1.2" fill="currentColor"/><circle cx="14" cy="9" r="1.2" fill="currentColor"/><circle cx="15.5" cy="13.5" r="1.2" fill="currentColor"/></svg>
+            Appearance
+          </button>
+          <button class="old-tab" data-today="editing" aria-selected="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            Editing
+          </button>
+          <button class="old-tab" data-today="configuration" aria-selected="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="9" cy="6" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="11" cy="18" r="2" fill="currentColor"/></svg>
+            Configuration
+          </button>
+          <button class="old-tab" data-today="shortcuts" aria-selected="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/></svg>
+            Shortcuts
+          </button>
+          <button class="old-tab" data-today="mobile" aria-selected="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+            Mobile
+          </button>
+        </div>
+      </div>
+      <div class="old-body" id="today-body"></div>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       VISION A
+       ======================================================== -->
+  <section class="panel" id="vision-a">
+    <div class="panel-head">
+      <h2>Vision A · Native Apple Sidebar Shell</h2>
+      <span class="tag proposed">Proposed</span>
+    </div>
+    <p class="one-liner">Rehouse what Loopflow already has inside a standard macOS <code>NavigationSplitView</code> sidebar and grouped <code>Form</code> rows, folding Editing into General and picking Projects from Portfolio instead of typing file paths.</p>
+
+    <div class="mac-window skinnable" id="win-a">
+      <div class="split-win">
+        <aside class="win-sidebar">
+          <div class="sidebar-top">
+            <span class="lights"><span class="light r"></span><span class="light y"></span><span class="light g"></span></span>
+            <span class="mono" style="font-size:11px;color:var(--mac-text-2)">Settings</span>
+          </div>
+          <input class="sidebar-search" id="a-search" type="search" placeholder="Search">
+          <nav class="nav-group" id="a-nav" role="tablist"></nav>
+        </aside>
+        <div class="win-detail">
+          <div class="detail-header">
+            <h3 id="a-heading">General</h3>
+          </div>
+          <div class="detail-scroll" id="a-body"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="facts">
+      <div class="fact">
+        <h3>Demo</h3>
+        <p>Press <code>⌘,</code>. Click General, Appearance, Mobile, Keyboard Shortcuts, and Configuration in the left sidebar. Toggle Autosave, switch themes in grouped cards, and pick a repository from Portfolio inside Configuration.</p>
+      </div>
+      <div class="fact">
+        <h3>Cost</h3>
+        <p>Smallest. SwiftUI only (4–6 files in <code>swift/LoopflowMac/</code>). Zero Rust changes, zero wire DTO changes, existing <code>config.*</code> calls untouched.</p>
+      </div>
+      <div class="fact">
+        <h3>Trade-off</h3>
+        <p>Clean Apple look fast, but everyday settings (<code>agent</code>, <code>yolo</code>, <code>wave.graph</code>, <code>land</code>) still live behind a single-key YAML editor in the Configuration pane.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       VISION B
+       ======================================================== -->
+  <section class="panel" id="vision-b">
+    <div class="panel-head">
+      <h2>Vision B · Typed Native Preferences (Rex-style)</h2>
+      <span class="tag proposed">Proposed</span>
+    </div>
+    <p class="one-liner">Promote Loopflow’s <code>lf config catalog</code> into real macOS controls grouped into Apple Settings panes (General, Appearance, Agents, Context, Git &amp; Release, Machines, Mobile, Shortcuts), with a clean Scope picker and per-row Reset.</p>
+
+    <div class="mac-window skinnable" id="win-b">
+      <div class="split-win">
+        <aside class="win-sidebar">
+          <div class="sidebar-top">
+            <span class="lights"><span class="light r"></span><span class="light y"></span><span class="light g"></span></span>
+            <span class="mono" style="font-size:11px;color:var(--mac-text-2)">Settings</span>
+          </div>
+          <input class="sidebar-search" id="b-search" type="search" placeholder="Search">
+          <div id="b-nav"></div>
+        </aside>
+        <div class="win-detail">
+          <div class="detail-header">
+            <h3 id="b-heading">Agents</h3>
+            <div class="scope-bar" id="b-scope-bar">
+              <span style="font-size:11px;color:var(--mac-text-2)">Scope</span>
+              <select class="mac-select" id="b-scope" aria-label="Configuration scope">
+                <option value="global">Global (~/.lf/config.yaml)</option>
+                <option value="repo_personal">Project · loopflow (Personal)</option>
+                <option value="repo_shared">Project · loopflow (Shared)</option>
+                <option value="wave_shared">Wave · desktop (Shared)</option>
+              </select>
+            </div>
+          </div>
+          <div class="detail-scroll" id="b-body"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="facts">
+      <div class="fact">
+        <h3>Demo</h3>
+        <p>Press <code>⌘,</code>, open <strong>Agents</strong>, flip <em>Run agents without asking</em>, change Codex tier to <code>priority</code>, then switch Scope to <em>Project · loopflow (Shared)</em> to see inherited vs overridden rows with one-click <em>Reset</em>.</p>
+      </div>
+      <div class="fact">
+        <h3>Cost</h3>
+        <p>Medium. SwiftUI sidebar + typed form rows (bool, enum, string, list, fallback YAML), plus 1 Rust read (wiring <code>config.settings</code> or adding <code>config.layer</code>) so panes load all keys in one round-trip instead of 47.</p>
+      </div>
+      <div class="fact">
+        <h3>Trade-off</h3>
+        <p>Configuration stops feeling like a developer tool. Complex map keys (<code>pools</code>, <code>ondemands</code>, <code>diff_groups</code>) still expand into inline YAML disclosures at the bottom of their domain pane.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       VISION C (RADICAL SUCCESS)
+       ======================================================== -->
+  <section class="panel" id="vision-c">
+    <div class="panel-head">
+      <h2>Vision C · Apple Settings + Live Override Lens</h2>
+      <span class="tag radical">Radical success</span>
+    </div>
+    <p class="one-liner">Everything in Vision B, plus control-level Spotlight search (try typing <code>yolo</code>, <code>dark</code>, or <code>tailscale</code>), clickable provenance pills that open an interactive precedence ladder with one-click Promote/Reset and live YAML diff, live sidebar health dots, and instant-apply Theme switching with Undo.</p>
+
+    <div class="mac-window skinnable" id="win-c">
+      <div class="split-win">
+        <aside class="win-sidebar">
+          <div class="sidebar-top">
+            <span class="lights"><span class="light r"></span><span class="light y"></span><span class="light g"></span></span>
+            <span class="mono" style="font-size:11px;color:var(--mac-text-2)">Settings</span>
+          </div>
+          <input class="sidebar-search" id="c-search" type="search" placeholder="Search settings (try “yolo”)">
+          <div id="c-nav"></div>
+        </aside>
+        <div class="win-detail">
+          <div class="detail-header">
+            <h3 id="c-heading">Agents</h3>
+            <div class="scope-bar" id="c-scope-bar">
+              <select class="mac-select" id="c-scope" aria-label="Inspect context">
+                <option value="global">Global</option>
+                <option value="repo_personal" selected>loopflow · Personal</option>
+                <option value="repo_shared">loopflow · Shared</option>
+                <option value="wave_shared">loopflow / desktop · Wave</option>
+              </select>
+            </div>
+          </div>
+          <div class="detail-scroll" id="c-body"></div>
+          <div class="win-toast" id="c-toast" hidden>
+            <span id="c-toast-msg"></span>
+            <button class="mac-btn" id="c-toast-undo">Undo</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="facts">
+      <div class="fact">
+        <h3>Demo</h3>
+        <p>Type <code>yolo</code> in the sidebar search and toggle it right from results. Click the blue <code>Personal repo</code> pill on <em>Default agent</em> to inspect the 4-layer cascade, see the exact YAML diff, and promote or reset with one click. Switch a theme card and press Undo.</p>
+      </div>
+      <div class="fact">
+        <h3>Cost</h3>
+        <p>Largest. Everything in Vision B plus a live search index across app + catalog controls, an interactive precedence popover with layer-move mutations in Rust, live status probes for Mobile/Machines, and an Undo stack for Appearance.</p>
+      </div>
+      <div class="fact">
+        <h3>Trade-off</h3>
+        <p>Turns Settings into the fastest way to understand and edit Loopflow’s layered config. Main risk is visual noise if scope/override badges shout when a person just wants to change a theme; they must stay quiet on Global and expand only on click.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       QUESTIONS
+       ======================================================== -->
+  <section class="questions" id="questions">
+    <h2>Open questions</h2>
+    <p>Reply with numbers and letters (for example, <code>1b 2a 3a</code> or <code>B, but keep C’s search</code>), or ask for another round.</p>
+    <ol class="q-list">
+      <li class="q-item">
+        <h3>1. How far should Configuration go in this redesign?</h3>
+        <ul class="q-opts">
+          <li><strong>1a</strong> Vision A: Native Apple sidebar + grouped forms around the 5 existing panes (SwiftUI only, Configuration stays a cleaner key/YAML editor).</li>
+          <li><strong>1b</strong> Vision B: Split <code>lf config catalog</code> into typed native controls across domain panes (General, Appearance, Agents, Context, Git &amp; Release, Machines, Mobile, Shortcuts) with a Scope picker.</li>
+          <li><strong>1c</strong> Vision C: Vision B plus control-level search, interactive precedence ladder with Promote/Reset, and live status dots.</li>
+        </ul>
+      </li>
+      <li class="q-item">
+        <h3>2. Visual skin inside the Settings window (try the top-right toggle)</h3>
+        <ul class="q-opts">
+          <li><strong>2a</strong> Native Apple chrome: macOS System Settings colors, vibrancy sidebar, system accent, rounded-square colored SF Symbol badges (closest to Rex and System Settings).</li>
+          <li><strong>2b</strong> Loopflow Palette: native macOS sidebar and grouped form geometry, rendered with the active Loopflow theme palette, burgundy accent, and monochrome SF Symbols.</li>
+        </ul>
+      </li>
+      <li class="q-item">
+        <h3>3. Apply model for Appearance and Configuration</h3>
+        <ul class="q-opts">
+          <li><strong>3a</strong> Instant apply on click/toggle (standard Apple Settings + Rex), with Undo / Reset to default instead of a Cancel/Apply footer.</li>
+          <li><strong>3b</strong> Keep explicit Cancel / Apply for Theme editing and raw YAML edits; instant apply for simple toggles and pickers.</li>
+        </ul>
+      </li>
+      <li class="q-item">
+        <h3>4. Sidebar structure</h3>
+        <ul class="q-opts">
+          <li><strong>4a</strong> Flat sidebar (5–7 items, no section dividers): General, Appearance, Agents, Context, Machines, Mobile, Shortcuts.</li>
+          <li><strong>4b</strong> Grouped sidebar (App · Workflow · Infrastructure dividers, as in Vision B and C).</li>
+          <li><strong>4c</strong> Keep Keyboard Shortcuts in its own Window only (remove duplicate tab from Settings) or keep both?</li>
+        </ul>
+      </li>
+    </ol>
+  </section>
+</main>
+
+<script>
+// ============================================================
+// SHARED DATA (Real Loopflow themes, shortcuts, config keys)
+// ============================================================
+const THEMES = [
+  { name: "Loopflow Light", mode: "light", bg: "#faf8f5", border: "#e6dfd6", titlebar: "#722f37", heading: "#722f37", text: "#2a2624", selBg: "#e1d9ce", selTx: "#2a2624", acc: "#722f37", accTx: "#faf8f5", working: "#2f629f", warning: "#7f5a19", failure: "#a64038", ansi: ["#a02e25","#31633e","#79520d","#24579e","#722f37","#246568"] },
+  { name: "Arcade Day", mode: "light", bg: "#f7f6fa", border: "#d4d2de", titlebar: "#4b2e96", heading: "#0057b1", text: "#25194b", selBg: "#beb9c7", selTx: "#25194b", acc: "#cc0085", accTx: "#fbfaf8", working: "#3159c0", warning: "#865500", failure: "#b02b27", ansi: ["#b02b27","#006f1b","#865500","#3159c0","#cc0085","#006b76"] },
+  { name: "Loopflow Dark", mode: "dark", bg: "#2b2d30", border: "#4b4c4d", titlebar: "#722f37", heading: "#eba8ac", text: "#f5f1ea", selBg: "#5a5c5f", selTx: "#f5f1ea", acc: "#8a3a44", accTx: "#faf8f5", working: "#95c1f7", warning: "#dab979", failure: "#f6a493", ansi: ["#e06c75","#98c379","#e5c07b","#61afef","#c678dd","#56b6c2"] },
+  { name: "Arcade", mode: "dark", bg: "#160c2b", border: "#39304c", titlebar: "#3e0649", heading: "#5ce9f0", text: "#ebe4fa", selBg: "#423860", selTx: "#ebe4fa", acc: "#ff53c6", accTx: "#160c2b", working: "#9fb2ff", warning: "#d8bf00", failure: "#ff8e80", ansi: ["#ff5555","#50fa7b","#f1fa8c","#8be9fd","#ff79c6","#bd93f9"] },
+  { name: "Contrast", mode: "dark", bg: "#000000", border: "#2e2e2e", titlebar: "#000000", heading: "#ffdc4c", text: "#ffffff", selBg: "#46393d", selTx: "#ffffff", acc: "#debb19", accTx: "#000000", working: "#7cc4ff", warning: "#ffdc4c", failure: "#ff8080", ansi: ["#ff6b6b","#69db7c","#ffd43b","#74c0fc","#f783ac","#66d9e8"] }
+];
+
+const SHORTCUTS = [
+  { group: "Navigation", items: [["Navigate", "⌘K"], ["Toggle sidebar", "⌘\\"], ["Task actions", "⌘/"], ["Open repository", "⇧⌘O"]] },
+  { group: "Task Files", items: [["Choose Task file", "⌘P"], ["Save Task file", "⌘S"]] },
+  { group: "App", items: [["Settings", "⌘,"], ["New Task", "⌘N"], ["Refresh", "⌘R"]] }
+];
+
+const ICONS = {
+  gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+  palette: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="9" cy="10" r="1.2" fill="currentColor"/><circle cx="14" cy="9" r="1.2" fill="currentColor"/><circle cx="15.5" cy="13.5" r="1.2" fill="currentColor"/></svg>',
+  sliders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="9" cy="6" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="11" cy="18" r="2" fill="currentColor"/></svg>',
+  cpu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 1v5M15 1v5M9 18v5M15 18v5M1 9h5M1 15h5M18 9h5M18 15h5"/></svg>',
+  doc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>',
+  branch: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>',
+  server: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><circle cx="7" cy="7.5" r="0.8" fill="currentColor"/><circle cx="7" cy="16.5" r="0.8" fill="currentColor"/></svg>',
+  phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>',
+  keyboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/></svg>'
+};
+
+const QR_SVG = `<svg viewBox="0 0 21 21" width="88" height="88" shape-rendering="crispEdges"><rect width="21" height="21" fill="#fff"/><path fill="#111" d="M1 1h7v7H1zM2 2v5h5V2zM3 3h3v3H3zM13 1h7v7h-7zM14 2v5h5V2zM15 3h3v3h-3zM1 13h7v7H1zM2 14v5h5v-5zM3 15h3v3H3zM9 2h2v2H9zM9 6h2v3H9zM10 10h3v2h-3zM14 10h2v2h-2zM18 10h2v3h-2zM9 13h2v2H9zM12 13h3v2h-3zM16 14h4v2h-4zM10 17h3v3h-3zM15 17h2v3h-2zM18 18h2v2h-2zM2 10h4v1H2z"/></svg>`;
+
+function renderThemeCards(selectedName, onPickAttr) {
+  return `<div class="theme-grid">${THEMES.map(t => `
+    <button class="theme-card" ${onPickAttr}="${t.name}" aria-pressed="${selectedName === t.name}"
+      style="--tc-bg:${t.bg};--tc-border:${t.border};--tc-titlebar:${t.titlebar};--tc-heading:${t.heading};--tc-text:${t.text};--tc-sel-bg:${t.selBg};--tc-sel-tx:${t.selTx};--tc-acc:${t.acc};--tc-acc-tx:${t.accTx}">
+      <div class="tc-bar"></div>
+      <div class="tc-body">
+        <div class="tc-name">${t.name}</div>
+        <div class="tc-status"><span style="color:${t.working}">Busy</span><span style="color:${t.warning}">Blocked</span><span style="color:${t.failure}">Error</span></div>
+        <div class="tc-dots">${t.ansi.map(c => `<span style="background:${c}"></span>`).join("")}</div>
+        <div class="tc-chips"><span class="tc-sel">Selected</span><span class="tc-run">Run</span></div>
+      </div>
+    </button>`).join("")}</div>`;
+}
+
+// ============================================================
+// TOP BAR: Light/Dark + Native Apple / Loopflow Palette
+// ============================================================
+let pageMode = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+let windowSkin = "apple";
+
+function applyPageChrome() {
+  document.documentElement.setAttribute("data-page-mode", pageMode);
+  document.querySelectorAll("[data-mode]").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === pageMode));
+  document.querySelectorAll("[data-skin]").forEach(b => b.setAttribute("aria-pressed", b.dataset.skin === windowSkin));
+  document.querySelectorAll(".skinnable").forEach(w => w.classList.toggle("skin-loopflow", windowSkin === "loopflow"));
+  renderA();
+  renderB();
+  renderC();
+}
+document.querySelectorAll("[data-mode]").forEach(btn => btn.addEventListener("click", () => { pageMode = btn.dataset.mode; applyPageChrome(); }));
+document.querySelectorAll("[data-skin]").forEach(btn => btn.addEventListener("click", () => { windowSkin = btn.dataset.skin; applyPageChrome(); }));
+
+// ============================================================
+// EXISTING BASELINE ("TODAY")
+// ============================================================
+let todayTab = "configuration";
+let todayAutosave = true;
+let todayTheme = "Loopflow Light";
+let todayKey = "agent";
+const todayTitles = { appearance: "Appearance", editing: "Editing", configuration: "Configuration", shortcuts: "Keyboard Shortcuts", mobile: "Mobile" };
+
+function renderToday() {
+  document.getElementById("today-title").textContent = todayTitles[todayTab];
+  document.querySelectorAll("[data-today]").forEach(b => b.setAttribute("aria-selected", b.dataset.today === todayTab));
+  const body = document.getElementById("today-body");
+
+  if (todayTab === "editing") {
+    body.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;padding:12px 0">
+        <input type="checkbox" id="today-auto" ${todayAutosave ? "checked" : ""}>
+        <label for="today-auto">Autosave Task Files</label>
+      </div>
+      <p style="color:var(--mac-text-2);font-size:12px;margin-top:80px">The entire Editing tab is this one checkbox.</p>`;
+    body.querySelector("#today-auto").onchange = e => { todayAutosave = e.target.checked; };
+  } else if (todayTab === "appearance") {
+    body.innerHTML = `
+      <div style="font-family:var(--font-serif);font-size:22px;margin-bottom:8px;letter-spacing:-0.02em">Choose Theme</div>
+      <div class="mac-seg" style="margin-bottom:10px">
+        <button aria-pressed="true">System</button><button aria-pressed="false">Light</button><button aria-pressed="false">Dark</button>
+      </div>
+      ${renderThemeCards(todayTheme, "data-today-theme")}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--mac-divider)">
+        <button class="mac-btn">Customize ${todayTheme}</button>
+        <div style="display:flex;gap:8px"><button class="mac-btn">Cancel</button><button class="mac-btn primary">Apply</button></div>
+      </div>`;
+    body.querySelectorAll("[data-today-theme]").forEach(b => b.onclick = () => { todayTheme = b.dataset.todayTheme; renderToday(); });
+  } else if (todayTab === "configuration") {
+    body.innerHTML = `
+      <div style="font-size:15px;font-weight:600;margin-bottom:10px">Configuration</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="min-width:60px;color:var(--mac-text-2)">Save in</span>
+          <select class="mac-select" style="flex:1"><option>My global preferences</option><option>My project preferences</option><option>Shared project preferences</option><option>My Wave preferences</option><option>Shared Wave preferences</option></select>
+        </div>
+        <div class="mono" style="color:var(--mac-text-2)">~/.lf/config.yaml</div>
+        <div style="display:flex;gap:6px">
+          <input class="mac-input" style="flex:1" value="${todayKey}" id="today-key-in">
+          <select class="mac-select" id="today-browse">
+            <option value="">Browse…</option>
+            <option value="agent">agent</option>
+            <option value="yolo">yolo</option>
+            <option value="wave.graph">wave.graph</option>
+            <option value="codex.service_tier">codex.service_tier</option>
+            <option value="land">land</option>
+          </select>
+        </div>
+        <div style="font-size:12px;color:var(--mac-text-2)">Harness[:model] choice; every choice precedes every fallback · launch · replace · portable</div>
+        <textarea class="raw-textarea">"claude:opus"</textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="mac-btn">Reload</button>
+          <button class="mac-btn primary">Apply</button>
+          <button class="mac-btn">Unset</button>
+          <button class="mac-btn">Explain effective value</button>
+        </div>
+      </div>`;
+    body.querySelector("#today-browse").onchange = e => { if (e.target.value) { todayKey = e.target.value; renderToday(); } };
+  } else if (todayTab === "shortcuts") {
+    body.innerHTML = `<div style="display:grid;grid-template-columns:1fr auto;gap:8px 36px;max-width:340px">
+      ${SHORTCUTS.flatMap(g => g.items).map(([name, k]) => `<span>${name}</span><span style="color:var(--mac-text-2)">${k}</span>`).join("")}
+    </div>`;
+  } else {
+    body.innerHTML = `
+      <div style="font-size:15px;font-weight:600;margin-bottom:4px">Take your work with you</div>
+      <p style="margin:0 0 12px;color:var(--mac-text-2)">Open Tasks and continue their Sessions from Loopflow on your iPhone.</p>
+      <div style="display:flex;gap:14px;align-items:center">
+        <div class="qr-box">${QR_SVG}</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="font-weight:500">Ready to connect</div>
+          <div class="mono" style="color:var(--mac-text-2)">https://macbook.tail91a2.ts.net</div>
+          <div style="display:flex;gap:6px"><button class="mac-btn">Copy address</button><button class="mac-btn">Turn off mobile access</button></div>
+        </div>
+      </div>`;
+  }
+}
+document.querySelectorAll("[data-today]").forEach(btn => btn.addEventListener("click", () => { todayTab = btn.dataset.today; renderToday(); }));
+
+// ============================================================
+// VISION A: NATIVE APPLE SIDEBAR SHELL
+// ============================================================
+const stateA = {
+  pane: "general",
+  search: "",
+  autosave: true,
+  mode: "System",
+  theme: "Loopflow Light",
+  mobileOn: true,
+  dest: "personal_repo",
+  repo: "~/src/loopflow",
+  key: "agent",
+  val: '"claude:opus"',
+  explained: false
+};
+const navItemsA = [
+  { id: "general", label: "General", icon: "gear", color: "gray", keywords: "autosave editing files" },
+  { id: "appearance", label: "Appearance", icon: "palette", color: "purple", keywords: "theme light dark mode colors" },
+  { id: "mobile", label: "Mobile", icon: "phone", color: "green", keywords: "iphone tailscale qr remote" },
+  { id: "shortcuts", label: "Keyboard Shortcuts", icon: "keyboard", color: "indigo", keywords: "keys hotkeys bindings" },
+  { id: "configuration", label: "Configuration", icon: "sliders", color: "blue", keywords: "yaml agent yolo graph config" }
+];
+
+function iconHtml(name, color) {
+  const cls = windowSkin === "loopflow" ? "ico mono-icon" : `ico ${color}`;
+  return `<span class="${cls}">${ICONS[name]}</span>`;
+}
+
+function renderA() {
+  const nav = document.getElementById("a-nav");
+  const q = stateA.search.trim().toLowerCase();
+  const visible = navItemsA.filter(item => !q || item.label.toLowerCase().includes(q) || item.keywords.includes(q));
+  if (visible.length && !visible.some(i => i.id === stateA.pane)) stateA.pane = visible[0].id;
+
+  nav.innerHTML = visible.map(item => `
+    <button class="nav-item" data-a-nav="${item.id}" aria-selected="${stateA.pane === item.id}">
+      ${iconHtml(item.icon, item.color)}
+      <span>${item.label}</span>
+    </button>`).join("") || `<div style="font-size:12px;color:var(--mac-text-2);padding:8px">No matching panes</div>`;
+  nav.querySelectorAll("[data-a-nav]").forEach(b => b.onclick = () => { stateA.pane = b.dataset.aNav; renderA(); });
+
+  const cur = navItemsA.find(i => i.id === stateA.pane);
+  document.getElementById("a-heading").textContent = cur ? cur.label : "Settings";
+  const body = document.getElementById("a-body");
+
+  if (stateA.pane === "general") {
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-section-title">Editing</div>
+        <div class="form-group">
+          <div class="form-row">
+            <div class="row-label">
+              <span class="row-title">Autosave Task files</span>
+              <span class="row-desc">Save edits to Brief and scratch notes automatically</span>
+            </div>
+            <input type="checkbox" class="mac-switch" id="a-auto" ${stateA.autosave ? "checked" : ""}>
+          </div>
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="form-section-title">Preferences file</div>
+        <div class="form-group">
+          <div class="form-row">
+            <div class="row-label">
+              <span class="row-title">Personal config</span>
+              <span class="row-desc mono">~/.lf/config.yaml</span>
+            </div>
+            <button class="mac-btn" id="a-jump-cfg">Open in Configuration</button>
+          </div>
+        </div>
+      </div>`;
+    body.querySelector("#a-auto").onchange = e => { stateA.autosave = e.target.checked; };
+    body.querySelector("#a-jump-cfg").onclick = () => { stateA.pane = "configuration"; renderA(); };
+  } else if (stateA.pane === "appearance") {
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-group">
+          <div class="form-row">
+            <div class="row-label"><span class="row-title">Appearance mode</span></div>
+            <div class="mac-seg">
+              ${["System","Light","Dark"].map(m => `<button data-a-mode="${m}" aria-pressed="${stateA.mode===m}">${m}</button>`).join("")}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="form-section-title">Theme · ${stateA.theme}</div>
+        <div class="form-group">
+          ${renderThemeCards(stateA.theme, "data-a-theme")}
+          <div class="form-row">
+            <span class="row-desc">Changes apply immediately across windows and terminal</span>
+            <div style="display:flex;gap:6px">
+              <button class="mac-btn">Import…</button>
+              <button class="mac-btn">Customize…</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    body.querySelectorAll("[data-a-mode]").forEach(b => b.onclick = () => { stateA.mode = b.dataset.aMode; renderA(); });
+    body.querySelectorAll("[data-a-theme]").forEach(b => b.onclick = () => { stateA.theme = b.dataset.aTheme; renderA(); });
+  } else if (stateA.pane === "mobile") {
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-group">
+          <div class="form-row">
+            <div class="row-label">
+              <span class="row-title">Mobile access via Tailscale</span>
+              <span class="row-desc">${stateA.mobileOn ? "Ready to connect · macbook.tail91a2.ts.net" : "Off · Tasks and Sessions keep running locally"}</span>
+            </div>
+            <input type="checkbox" class="mac-switch" id="a-mob" ${stateA.mobileOn ? "checked" : ""}>
+          </div>
+          ${stateA.mobileOn ? `
+          <div class="form-row" style="align-items:flex-start;padding:14px">
+            <div class="qr-box">${QR_SVG}</div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+              <div class="row-title">Scan from Loopflow on iPhone</div>
+              <div class="row-desc">Choose Scan QR code, then Connect Machine. Access requires your Tailscale account.</div>
+              <div style="display:flex;gap:6px;margin-top:4px">
+                <button class="mac-btn">Copy address</button>
+                <button class="mac-btn">Refresh</button>
+              </div>
+            </div>
+          </div>` : ""}
+        </div>
+      </div>`;
+    body.querySelector("#a-mob").onchange = e => { stateA.mobileOn = e.target.checked; renderA(); };
+  } else if (stateA.pane === "shortcuts") {
+    body.innerHTML = SHORTCUTS.map(g => `
+      <div class="form-section">
+        <div class="form-section-title">${g.group}</div>
+        <div class="form-group">
+          ${g.items.map(([name, k]) => `<div class="form-row"><span class="row-title">${name}</span><span class="kbd">${k}</span></div>`).join("")}
+        </div>
+      </div>`).join("");
+  } else {
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-section-title">Target file</div>
+        <div class="form-group">
+          <div class="form-row">
+            <span class="row-title">Save in</span>
+            <select class="mac-select" id="a-dest">
+              <option value="personal_global" ${stateA.dest==="personal_global"?"selected":""}>My global preferences</option>
+              <option value="personal_repo" ${stateA.dest==="personal_repo"?"selected":""}>My project preferences</option>
+              <option value="shared_repo" ${stateA.dest==="shared_repo"?"selected":""}>Shared project preferences</option>
+              <option value="shared_wave" ${stateA.dest==="shared_wave"?"selected":""}>Shared Wave preferences</option>
+            </select>
+          </div>
+          ${stateA.dest !== "personal_global" ? `
+          <div class="form-row">
+            <span class="row-title">Project</span>
+            <select class="mac-select" id="a-repo">
+              <option ${stateA.repo==="~/src/loopflow"?"selected":""}>~/src/loopflow</option>
+              <option ${stateA.repo==="~/src/website"?"selected":""}>~/src/website</option>
+            </select>
+          </div>` : ""}
+          <div class="form-row">
+            <span class="row-title">Setting key</span>
+            <select class="mac-select" id="a-key">
+              <option value="agent" ${stateA.key==="agent"?"selected":""}>agent</option>
+              <option value="yolo" ${stateA.key==="yolo"?"selected":""}>yolo</option>
+              <option value="wave.graph" ${stateA.key==="wave.graph"?"selected":""}>wave.graph</option>
+              <option value="codex.service_tier" ${stateA.key==="codex.service_tier"?"selected":""}>codex.service_tier</option>
+              <option value="land" ${stateA.key==="land"?"selected":""}>land</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="form-section-title">Value (YAML)</div>
+        <div class="form-group" style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+          <textarea class="raw-textarea" id="a-val">${stateA.val}</textarea>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <button class="mac-btn" id="a-explain">${stateA.explained ? "Hide explanation" : "Explain effective value"}</button>
+            <div style="display:flex;gap:6px">
+              <button class="mac-btn">Unset</button>
+              <button class="mac-btn primary">Apply</button>
+            </div>
+          </div>
+          ${stateA.explained ? `<pre class="yaml-preview">effective: ${stateA.val}\nwinner: personal_repo · .lf/config.local.yaml\nfallback: personal_global · ~/.lf/config.yaml = "codex:gpt-6.2"</pre>` : ""}
+        </div>
+      </div>`;
+    body.querySelector("#a-dest").onchange = e => { stateA.dest = e.target.value; renderA(); };
+    if (body.querySelector("#a-repo")) body.querySelector("#a-repo").onchange = e => { stateA.repo = e.target.value; };
+    body.querySelector("#a-key").onchange = e => { stateA.key = e.target.value; renderA(); };
+    body.querySelector("#a-explain").onclick = () => { stateA.explained = !stateA.explained; renderA(); };
+  }
+}
+document.getElementById("a-search").addEventListener("input", e => { stateA.search = e.target.value; renderA(); });
+
+// ============================================================
+// VISION B: TYPED NATIVE PREFERENCES (REX-STYLE)
+// ============================================================
+const stateB = {
+  pane: "agents",
+  scope: "global",
+  search: "",
+  theme: "Loopflow Light",
+  mode: "System",
+  autosave: true,
+  stream: "stable",
+  repoRoot: "~/src",
+  mobileOn: true,
+  // Values per scope (undefined = inherited)
+  layers: {
+    global:        { agent: "claude:opus", yolo: true,  codexTier: "default", graph: "code",    auto: false, retries: 1, ctxDiff: false, ctxPaste: false, land: "gh", mergeMethod: "squash", pr: true,  hub: "none" },
+    repo_personal: { agent: "codex:gpt-6.2" },
+    repo_shared:   { graph: "feature", pr: true, land: "gh", mergeMethod: "squash" },
+    wave_shared:   { auto: true }
+  }
+};
+
+const navGroupsB = [
+  [
+    { id: "general", label: "General", icon: "gear", color: "gray", scoped: false, kw: "autosave repo_root stream user display name logs" },
+    { id: "appearance", label: "Appearance", icon: "palette", color: "purple", scoped: false, kw: "theme light dark mode" },
+    { id: "shortcuts", label: "Shortcuts", icon: "keyboard", color: "indigo", scoped: false, kw: "keyboard bindings hotkeys" },
+    { id: "mobile", label: "Mobile", icon: "phone", color: "green", scoped: false, kw: "iphone tailscale qr" }
+  ],
+  [
+    { id: "agents", label: "Agents", icon: "cpu", color: "blue", scoped: true, kw: "agent default_agent yolo claude codex service_tier graph auto retries" },
+    { id: "context", label: "Context", icon: "doc", color: "teal", scoped: true, kw: "context diff paste docs exclude budgets" },
+    { id: "release", label: "Git & Release", icon: "branch", color: "orange", scoped: true, kw: "land merge_method pr diff_hidden release" }
+  ],
+  [
+    { id: "machines", label: "Machines", icon: "server", color: "burgundy", scoped: true, kw: "hub machine pools ondemands forward env files" }
+  ]
+];
+
+function resolveB(key) {
+  const order = stateB.scope === "global" ? ["global"]
+    : stateB.scope === "repo_shared" ? ["global", "repo_shared"]
+    : stateB.scope === "repo_personal" ? ["global", "repo_shared", "repo_personal"]
+    : ["global", "repo_shared", "wave_shared", "repo_personal"];
+  let val = stateB.layers.global[key];
+  let src = "global";
+  for (const layer of order) {
+    if (stateB.layers[layer] && stateB.layers[layer][key] !== undefined) {
+      val = stateB.layers[layer][key];
+      src = layer;
+    }
+  }
+  const isLocal = stateB.scope !== "global" && stateB.layers[stateB.scope] && stateB.layers[stateB.scope][key] !== undefined;
+  return { val, src, isLocal };
+}
+
+const scopeLabels = { global: "Global", repo_personal: "Personal repo", repo_shared: "Shared repo", wave_shared: "Wave" };
+
+function provenanceHtmlB(key) {
+  if (stateB.scope === "global") return "";
+  const r = resolveB(key);
+  if (r.isLocal) {
+    return `<span class="source-pill overridden" data-b-reset="${key}" title="Click to unset in this scope"><span class="override-dot"></span>Set here · Reset</span>`;
+  }
+  return `<span class="source-pill">Inherited · ${scopeLabels[r.src]}</span>`;
+}
+
+function renderB() {
+  const nav = document.getElementById("b-nav");
+  const q = stateB.search.trim().toLowerCase();
+  const allItems = navGroupsB.flat();
+  const matches = item => !q || item.label.toLowerCase().includes(q) || item.kw.includes(q);
+  if (!allItems.filter(matches).some(i => i.id === stateB.pane)) {
+    const first = allItems.find(matches);
+    if (first) stateB.pane = first.id;
+  }
+
+  nav.innerHTML = navGroupsB.map(group => {
+    const filtered = group.filter(matches);
+    if (!filtered.length) return "";
+    return `<div class="nav-group">${filtered.map(item => `
+      <button class="nav-item" data-b-nav="${item.id}" aria-selected="${stateB.pane === item.id}">
+        ${iconHtml(item.icon, item.color)}
+        <span>${item.label}</span>
+      </button>`).join("")}</div>`;
+  }).join("") || `<div style="font-size:12px;color:var(--mac-text-2);padding:8px">No matching sections</div>`;
+  nav.querySelectorAll("[data-b-nav]").forEach(b => b.onclick = () => { stateB.pane = b.dataset.bNav; renderB(); });
+
+  const cur = allItems.find(i => i.id === stateB.pane);
+  document.getElementById("b-heading").textContent = cur ? cur.label : "Settings";
+  document.getElementById("b-scope-bar").style.display = cur && cur.scoped ? "flex" : "none";
+  document.getElementById("b-scope").value = stateB.scope;
+
+  const body = document.getElementById("b-body");
+  if (stateB.pane === "agents") {
+    const ag = resolveB("agent"), yo = resolveB("yolo"), ct = resolveB("codexTier"), gr = resolveB("graph"), au = resolveB("auto");
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-section-title">Default harness</div>
+        <div class="form-group">
+          <div class="form-row">
+            <div class="row-label">
+              <span class="row-title">Primary agent ${provenanceHtmlB("agent")}</span>
+              <span class="row-desc">Preferred harness and model for new launches</span>
+            </div>
+            <select class="mac-select" data-b-set="agent">
+              ${["claude:opus","claude:sonnet","codex:gpt-6.2","agy:gemini-4"].map(v => `<option value="${v}" ${ag.val===v?"selected":""}>${v}</option>`).join("")}
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="row-label">
+              <span class="row-title">Codex service tier ${provenanceHtmlB("codexTier")}</span>
+              <span class="row-desc">Standard or priority launch speed</span>
+            </div>
+            <div class="mac-seg">
+              ${["default","priority"].map(v => `<button data-b-seg="codexTier:${v}" aria-pressed="${ct.val===v}">${v === "default" ? "Standard" : "Priority"}</button>`).join("")}
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="row-label">
+              <span class="row-title">Run agents without asking ${provenanceHtmlB("yolo")}</span>
+              <span class="row-desc">Off keeps provider permission prompts in interactive sessions</span>
+            </div>
+            <input type="checkbox" class="mac-switch" data-b-chk="yolo" ${yo.val ? "checked" : ""}>
+          </div>
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="form-section-title">Workflow defaults</div>
+        <div class="form-group">
+          <div class="form-row">
+            <div class="row-label">
+              <span class="row-title">Default Graph ${provenanceHtmlB("graph")}</span>
+              <span class="row-desc">Graph new Tasks take up on first run</span>
+            </div>
+            <select class="mac-select" data-b-set="graph">
+              ${["code","feature","research","redesign"].map(v => `<option value="${v}" ${gr.val===v?"selected":""}>${v}</option>`).join("")}
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="row-label">
+              <span class="row-title">Auto-ship new Tasks ${provenanceHtmlB("auto")}</span>
+              <span class="row-desc">Turn auto on automatically when a Task starts its Graph</span>
+            </div>
+            <input type="checkbox" class="mac-switch" data-b-chk="auto" ${au.val ? "checked" : ""}>
+          </div>
+        </div>
+        <div class="form-caption">Changes save immediately to the selected scope and take effect on the next launch.</div>
+      </div>`;
+  } else if (stateB.pane === "context") {
+    const df = resolveB("ctxDiff"), ps = resolveB("ctxPaste");
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-section-title">Automatic context</div>
+        <div class="form-group">
+          <div class="form-row">
+            <div class="row-label"><span class="row-title">Include branch diff ${provenanceHtmlB("ctxDiff")}</span><span class="row-desc">Attach git diff against base to every launch</span></div>
+            <input type="checkbox" class="mac-switch" data-b-chk="ctxDiff" ${df.val ? "checked" : ""}>
+          </div>
+          <div class="form-row">
+            <div class="row-label"><span class="row-title">Include clipboard ${provenanceHtmlB("ctxPaste")}</span><span class="row-desc">Pass current host clipboard into prompt context</span></div>
+            <input type="checkbox" class="mac-switch" data-b-chk="ctxPaste" ${ps.val ? "checked" : ""}>
+          </div>
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="form-section-title">Advanced</div>
+        <div class="form-group">
+          <div class="form-row">
+            <div class="row-label"><span class="row-title">Extra docs &amp; exclude globs</span><span class="row-desc mono">context.docs · context.exclude · context.budgets</span></div>
+            <button class="mac-btn">Edit YAML…</button>
+          </div>
+        </div>
+      </div>`;
+  } else if (stateB.pane === "release") {
+    const ln = resolveB("land"), mm = resolveB("mergeMethod"), pr = resolveB("pr");
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-section-title">Pull requests &amp; landing</div>
+        <div class="form-group">
+          <div class="form-row">
+            <div class="row-label"><span class="row-title">Landing strategy ${provenanceHtmlB("land")}</span></div>
+            <div class="mac-seg">
+              ${["gh","local"].map(v => `<button data-b-seg="land:${v}" aria-pressed="${ln.val===v}">${v === "gh" ? "GitHub PR" : "Local merge"}</button>`).join("")}
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="row-label"><span class="row-title">Merge method ${provenanceHtmlB("mergeMethod")}</span></div>
+            <select class="mac-select" data-b-set="mergeMethod">
+              ${["squash","rebase","merge"].map(v => `<option value="${v}" ${mm.val===v?"selected":""}>${v}</option>`).join("")}
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="row-label"><span class="row-title">Open PR after pushing ${provenanceHtmlB("pr")}</span></div>
+            <input type="checkbox" class="mac-switch" data-b-chk="pr" ${pr.val ? "checked" : ""}>
+          </div>
+        </div>
+      </div>`;
+  } else if (stateB.pane === "machines") {
+    const hub = resolveB("hub");
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-section-title">Planning &amp; remote execution</div>
+        <div class="form-group">
+          <div class="form-row">
+            <div class="row-label"><span class="row-title">Plan hub ${provenanceHtmlB("hub")}</span><span class="row-desc">Machine holding plans for repositories without Linear or Asana</span></div>
+            <select class="mac-select" data-b-set="hub">
+              <option value="none" ${hub.val==="none"?"selected":""}>This Machine</option>
+              <option value="studio-m4" ${hub.val==="studio-m4"?"selected":""}>studio-m4</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="row-label"><span class="row-title">Pools &amp; on-demand rentals</span><span class="row-desc mono">pools · ondemands · forward.env</span></div>
+            <button class="mac-btn">Edit YAML…</button>
+          </div>
+        </div>
+      </div>`;
+  } else if (stateB.pane === "general") {
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-section-title">Workspace</div>
+        <div class="form-group">
+          <div class="form-row">
+            <div class="row-label"><span class="row-title">Autosave Task files</span><span class="row-desc">Save Brief and scratch edits automatically</span></div>
+            <input type="checkbox" class="mac-switch" id="b-auto" ${stateB.autosave ? "checked" : ""}>
+          </div>
+          <div class="form-row">
+            <div class="row-label"><span class="row-title">Repositories folder</span><span class="row-desc">Used for local repository discovery</span></div>
+            <input class="mac-input mono" value="${stateB.repoRoot}" style="width:140px">
+          </div>
+          <div class="form-row">
+            <div class="row-label"><span class="row-title">Release channel</span></div>
+            <div class="mac-seg">
+              ${["stable","beta"].map(v => `<button data-b-stream="${v}" aria-pressed="${stateB.stream===v}">${v[0].toUpperCase()+v.slice(1)}</button>`).join("")}
+            </div>
+          </div>
+        </div>
+      </div>`;
+    body.querySelector("#b-auto").onchange = e => { stateB.autosave = e.target.checked; };
+    body.querySelectorAll("[data-b-stream]").forEach(b => b.onclick = () => { stateB.stream = b.dataset.bStream; renderB(); });
+  } else if (stateB.pane === "appearance") {
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-group">
+          <div class="form-row">
+            <span class="row-title">Mode</span>
+            <div class="mac-seg">${["System","Light","Dark"].map(m => `<button data-b-mode="${m}" aria-pressed="${stateB.mode===m}">${m}</button>`).join("")}</div>
+          </div>
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="form-section-title">Theme · ${stateB.theme}</div>
+        <div class="form-group">${renderThemeCards(stateB.theme, "data-b-theme")}</div>
+      </div>`;
+    body.querySelectorAll("[data-b-mode]").forEach(b => b.onclick = () => { stateB.mode = b.dataset.bMode; renderB(); });
+    body.querySelectorAll("[data-b-theme]").forEach(b => b.onclick = () => { stateB.theme = b.dataset.bTheme; renderB(); });
+  } else if (stateB.pane === "mobile") {
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-group">
+          <div class="form-row">
+            <div class="row-label"><span class="row-title">Mobile access</span><span class="row-desc">${stateB.mobileOn ? "Ready · macbook.tail91a2.ts.net" : "Disabled"}</span></div>
+            <input type="checkbox" class="mac-switch" id="b-mob" ${stateB.mobileOn ? "checked" : ""}>
+          </div>
+          ${stateB.mobileOn ? `<div class="form-row" style="padding:14px"><div class="qr-box">${QR_SVG}</div><div style="flex:1;display:flex;flex-direction:column;gap:6px"><span class="row-title">Pair Loopflow for iPhone</span><span class="row-desc">Scan with your iPhone signed into the same Tailscale account.</span><div style="display:flex;gap:6px;margin-top:4px"><button class="mac-btn">Copy address</button><button class="mac-btn">Share…</button></div></div></div>` : ""}
+        </div>
+      </div>`;
+    body.querySelector("#b-mob").onchange = e => { stateB.mobileOn = e.target.checked; renderB(); };
+  } else {
+    body.innerHTML = SHORTCUTS.map(g => `
+      <div class="form-section">
+        <div class="form-section-title">${g.group}</div>
+        <div class="form-group">${g.items.map(([n,k]) => `<div class="form-row"><span class="row-title">${n}</span><span class="kbd">${k}</span></div>`).join("")}</div>
+      </div>`).join("");
+  }
+
+  // Bind Vision B scoped inputs
+  body.querySelectorAll("[data-b-set]").forEach(el => el.onchange = e => {
+    stateB.layers[stateB.scope][el.dataset.bSet] = e.target.value;
+    renderB();
+  });
+  body.querySelectorAll("[data-b-chk]").forEach(el => el.onchange = e => {
+    stateB.layers[stateB.scope][el.dataset.bChk] = e.target.checked;
+    renderB();
+  });
+  body.querySelectorAll("[data-b-seg]").forEach(el => el.onclick = () => {
+    const [k, v] = el.dataset.bSeg.split(":");
+    stateB.layers[stateB.scope][k] = v;
+    renderB();
+  });
+  body.querySelectorAll("[data-b-reset]").forEach(el => el.onclick = () => {
+    delete stateB.layers[stateB.scope][el.dataset.bReset];
+    renderB();
+  });
+}
+document.getElementById("b-scope").addEventListener("change", e => { stateB.scope = e.target.value; renderB(); });
+document.getElementById("b-search").addEventListener("input", e => { stateB.search = e.target.value; renderB(); });
+
+// ============================================================
+// VISION C: RADICAL SUCCESS — LIVE OVERRIDE LENS + DIRECT SEARCH
+// ============================================================
+const stateC = {
+  pane: "agents",
+  scope: "repo_personal",
+  search: "",
+  openLadder: "agent",
+  flashKey: null,
+  theme: "Loopflow Light",
+  prevTheme: null,
+  autosave: true,
+  mobileOn: true,
+  toast: null,
+  layers: {
+    default:       { agent: "claude:sonnet", yolo: true,  codexTier: "default", graph: "code",    auto: false, ctxDiff: false, land: "gh" },
+    global:        { agent: "claude:opus",   yolo: true,  codexTier: "priority" },
+    repo_shared:   { graph: "feature", land: "gh" },
+    wave_shared:   { auto: true },
+    repo_personal: { agent: "codex:gpt-6.2" }
+  }
+};
+
+const layerMetaC = {
+  default:       { label: "Built-in default", file: "loopflow default" },
+  global:        { label: "Global",           file: "~/.lf/config.yaml" },
+  repo_shared:   { label: "Shared repo",      file: ".lf/config.yaml" },
+  wave_shared:   { label: "Wave · desktop",   file: ".lf/wave/desktop/config.yaml" },
+  repo_personal: { label: "Personal repo",    file: ".lf/config.local.yaml" }
+};
+
+const controlsIndexC = [
+  { id: "agent",     pane: "agents",     title: "Primary agent",             key: "agent",              type: "select", options: ["claude:opus","claude:sonnet","codex:gpt-6.2","agy:gemini-4"], desc: "Harness[:model] tried first" },
+  { id: "yolo",      pane: "agents",     title: "Run agents without asking", key: "yolo",               type: "bool",   desc: "Skip vendor permission prompts" },
+  { id: "codexTier", pane: "agents",     title: "Codex service tier",        key: "codex.service_tier", type: "seg",    options: ["default","priority"], desc: "Standard or priority launch" },
+  { id: "graph",     pane: "agents",     title: "Default Graph",             key: "wave.graph",         type: "select", options: ["code","feature","research"], desc: "Graph new Tasks take up" },
+  { id: "auto",      pane: "agents",     title: "Auto-ship new Tasks",       key: "auto",               type: "bool",   desc: "Start Tasks with auto on" },
+  { id: "ctxDiff",   pane: "context",    title: "Include branch diff",       key: "context.diff",       type: "bool",   desc: "Attach branch diff to prompts" },
+  { id: "land",      pane: "release",    title: "Landing strategy",          key: "land",               type: "seg",    options: ["gh","local"], desc: "GitHub PR or local merge" },
+  { id: "autosave",  pane: "general",    title: "Autosave Task files",       key: "taskFilesAutosave",  type: "appBool",desc: "Save Brief and scratch edits" },
+  { id: "theme",     pane: "appearance", title: "Theme & Dark Mode",         key: "theme",              type: "theme",  desc: "Switch Loopflow light/dark theme" },
+  { id: "mobile",    pane: "mobile",     title: "Mobile access (Tailscale)", key: "mobile",             type: "mobBool",desc: "Connect Loopflow on iPhone" }
+];
+
+function resolveChainC(id) {
+  const order = stateC.scope === "global" ? ["default", "global"]
+    : stateC.scope === "repo_shared" ? ["default", "global", "repo_shared"]
+    : stateC.scope === "wave_shared" ? ["default", "global", "repo_shared", "wave_shared"]
+    : ["default", "global", "repo_shared", "repo_personal"];
+  const steps = order.map(layer => ({
+    layer,
+    defined: stateC.layers[layer] && stateC.layers[layer][id] !== undefined,
+    value: stateC.layers[layer] ? stateC.layers[layer][id] : undefined
+  }));
+  let winner = steps[0];
+  for (const s of steps) if (s.defined) winner = s;
+  return { steps, winner, isLocal: stateC.layers[stateC.scope] && stateC.layers[stateC.scope][id] !== undefined };
+}
+
+function showToastC(msg, undoFn) {
+  stateC.toast = { msg, undoFn };
+  const el = document.getElementById("c-toast");
+  el.hidden = false;
+  document.getElementById("c-toast-msg").textContent = msg;
+  const btn = document.getElementById("c-toast-undo");
+  btn.hidden = !undoFn;
+  btn.onclick = () => { if (undoFn) undoFn(); el.hidden = true; stateC.toast = null; renderC(); };
+}
+
+function renderLadderC(ctrl) {
+  if (stateC.openLadder !== ctrl.id) return "";
+  const { steps, winner, isLocal } = resolveChainC(ctrl.id);
+  const canPromote = stateC.scope === "repo_personal" && isLocal;
+  const yamlLine = `${ctrl.key}: ${JSON.stringify(winner.value)}`;
+  return `
+    <div class="ladder-panel">
+      <div class="ladder-head">
+        <span style="font-size:12px;font-weight:600">Precedence for <code>${ctrl.key}</code></span>
+        <div style="display:flex;gap:6px">
+          ${canPromote ? `<button class="mac-btn" data-c-promote="${ctrl.id}">Promote to Shared repo</button>` : ""}
+          ${isLocal ? `<button class="mac-btn destructive" data-c-reset="${ctrl.id}">Reset layer</button>` : ""}
+          <button class="mac-btn subtle" data-c-close-ladder>Done</button>
+        </div>
+      </div>
+      <div class="ladder-steps">
+        ${steps.slice().reverse().map(s => `
+          <div class="ladder-step ${s.layer === winner.layer ? "winner" : ""}">
+            <div>
+              <strong>${layerMetaC[s.layer].label}</strong>
+              <span class="layer-path"> · ${layerMetaC[s.layer].file}</span>
+            </div>
+            <span class="mono" style="color:${s.defined ? "var(--mac-text)" : "var(--mac-text-2)"}">
+              ${s.defined ? JSON.stringify(s.value) : "unset"}${s.layer === winner.layer ? "  ← active" : ""}
+            </span>
+          </div>`).join("")}
+      </div>
+      <pre class="yaml-preview"># ${layerMetaC[winner.layer].file}
+<span class="yaml-add">+ ${yamlLine}</span></pre>
+    </div>`;
+}
+
+function renderControlRowC(ctrl) {
+  const { winner, isLocal } = resolveChainC(ctrl.id);
+  const pill = `<button class="source-pill ${isLocal ? "overridden" : ""}" data-c-ladder="${ctrl.id}" title="Inspect precedence cascade">
+    ${isLocal ? '<span class="override-dot"></span>' : ""}${layerMetaC[winner.layer].label}
+  </button>`;
+  let input = "";
+  if (ctrl.type === "bool") {
+    input = `<input type="checkbox" class="mac-switch" data-c-chk="${ctrl.id}" ${winner.value ? "checked" : ""}>`;
+  } else if (ctrl.type === "select") {
+    input = `<select class="mac-select" data-c-sel="${ctrl.id}">${ctrl.options.map(o => `<option value="${o}" ${winner.value===o?"selected":""}>${o}</option>`).join("")}</select>`;
+  } else if (ctrl.type === "seg") {
+    input = `<div class="mac-seg">${ctrl.options.map(o => `<button data-c-seg="${ctrl.id}:${o}" aria-pressed="${winner.value===o}">${o}</button>`).join("")}</div>`;
+  }
+  return `
+    <div class="form-row ${stateC.flashKey === ctrl.id ? "flash" : ""}">
+      <div class="row-label">
+        <span class="row-title">${ctrl.title} ${pill}</span>
+        <span class="row-desc">${ctrl.desc}</span>
+      </div>
+      ${input}
+    </div>
+    ${renderLadderC(ctrl)}`;
+}
+
+function renderC() {
+  const nav = document.getElementById("c-nav");
+  const q = stateC.search.trim().toLowerCase();
+
+  if (q) {
+    const hits = controlsIndexC.filter(c =>
+      c.title.toLowerCase().includes(q) || c.key.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q) || c.pane.includes(q)
+    );
+    nav.innerHTML = `<div class="search-results">${hits.map(h => {
+      let quick = "";
+      if (h.type === "bool") {
+        const val = resolveChainC(h.id).winner.value;
+        quick = `<input type="checkbox" class="mac-switch" data-c-quick-bool="${h.id}" ${val ? "checked" : ""}>`;
+      } else if (h.type === "appBool") {
+        quick = `<input type="checkbox" class="mac-switch" data-c-quick-app="autosave" ${stateC.autosave ? "checked" : ""}>`;
+      } else if (h.type === "mobBool") {
+        quick = `<input type="checkbox" class="mac-switch" data-c-quick-app="mobileOn" ${stateC.mobileOn ? "checked" : ""}>`;
+      }
+      return `<div class="search-hit" data-c-jump="${h.pane}:${h.id}">
+        <div style="min-width:0">
+          <div style="font-size:12px;font-weight:500">${h.title}</div>
+          <div class="hit-path">${h.pane} · <span class="mono" style="font-size:10px">${h.key}</span></div>
+        </div>
+        ${quick}
+      </div>`;
+    }).join("") || `<div style="font-size:12px;color:var(--mac-text-2);padding:6px">No matching settings</div>`}</div>`;
+
+    nav.querySelectorAll("[data-c-quick-bool]").forEach(el => {
+      el.onclick = e => e.stopPropagation();
+      el.onchange = e => {
+        const id = el.dataset.cQuickBool;
+        const prev = stateC.layers[stateC.scope][id];
+        stateC.layers[stateC.scope][id] = e.target.checked;
+        showToastC(`Saved ${id} to ${layerMetaC[stateC.scope].file}`, () => {
+          if (prev === undefined) delete stateC.layers[stateC.scope][id]; else stateC.layers[stateC.scope][id] = prev;
+        });
+        renderC();
+      };
+    });
+    nav.querySelectorAll("[data-c-quick-app]").forEach(el => {
+      el.onclick = e => e.stopPropagation();
+      el.onchange = e => { stateC[el.dataset.cQuickApp] = e.target.checked; renderC(); };
+    });
+    nav.querySelectorAll("[data-c-jump]").forEach(el => el.onclick = () => {
+      const [pane, id] = el.dataset.cJump.split(":");
+      stateC.pane = pane;
+      stateC.flashKey = id;
+      renderC();
+      setTimeout(() => { stateC.flashKey = null; }, 1200);
+    });
+  } else {
+    const hasAgentOverride = ["agent","yolo","codexTier","graph","auto"].some(k => stateC.layers[stateC.scope] && stateC.layers[stateC.scope][k] !== undefined);
+    nav.innerHTML = navGroupsB.map(group => `
+      <div class="nav-group">${group.map(item => {
+        let dot = "";
+        if (item.id === "mobile" && stateC.mobileOn) dot = '<span class="nav-dot ok" title="Tailscale connected"></span>';
+        else if (item.id === "agents" && hasAgentOverride && stateC.scope !== "global") dot = '<span class="nav-dot override" title="Overrides in this scope"></span>';
+        return `<button class="nav-item" data-c-nav="${item.id}" aria-selected="${stateC.pane === item.id}">
+          ${iconHtml(item.icon, item.color)}
+          <span>${item.label}</span>
+          ${dot}
+        </button>`;
+      }).join("")}</div>`).join("");
+    nav.querySelectorAll("[data-c-nav]").forEach(b => b.onclick = () => { stateC.pane = b.dataset.cNav; renderC(); });
+  }
+
+  const allItems = navGroupsB.flat();
+  const cur = allItems.find(i => i.id === stateC.pane);
+  document.getElementById("c-heading").textContent = cur ? cur.label : "Settings";
+  document.getElementById("c-scope-bar").style.display = cur && cur.scoped ? "flex" : "none";
+  document.getElementById("c-scope").value = stateC.scope;
+
+  const body = document.getElementById("c-body");
+  if (stateC.pane === "agents") {
+    const agentCtrls = controlsIndexC.filter(c => c.pane === "agents");
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-section-title">Harness &amp; workflow (click any source pill to inspect cascade)</div>
+        <div class="form-group">
+          ${agentCtrls.map(renderControlRowC).join("")}
+        </div>
+      </div>`;
+  } else if (stateC.pane === "context") {
+    body.innerHTML = `<div class="form-section"><div class="form-section-title">Prompt context</div><div class="form-group">${controlsIndexC.filter(c => c.pane === "context").map(renderControlRowC).join("")}</div></div>`;
+  } else if (stateC.pane === "release") {
+    body.innerHTML = `<div class="form-section"><div class="form-section-title">Landing</div><div class="form-group">${controlsIndexC.filter(c => c.pane === "release").map(renderControlRowC).join("")}</div></div>`;
+  } else if (stateC.pane === "appearance") {
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-section-title">Instant-apply theme · ${stateC.theme}</div>
+        <div class="form-group">
+          ${renderThemeCards(stateC.theme, "data-c-theme")}
+          <div class="form-row">
+            <span class="row-desc">Applies live to Mac &amp; synced iPhone · ⌘Z undoes</span>
+            <button class="mac-btn">Customize…</button>
+          </div>
+        </div>
+      </div>`;
+    body.querySelectorAll("[data-c-theme]").forEach(b => b.onclick = () => {
+      const prev = stateC.theme;
+      stateC.theme = b.dataset.cTheme;
+      showToastC(`Switched theme to ${stateC.theme}`, () => { stateC.theme = prev; });
+      renderC();
+    });
+  } else if (stateC.pane === "mobile") {
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-group">
+          <div class="form-row">
+            <div class="row-label">
+              <span class="row-title"><span class="nav-dot ${stateC.mobileOn ? "ok" : ""}" style="margin:0;background:${stateC.mobileOn ? "#30b550" : "#8e8e93"}"></span> ${stateC.mobileOn ? "Connected via Tailscale" : "Disconnected"}</span>
+              <span class="row-desc mono">${stateC.mobileOn ? "macbook.tail91a2.ts.net · iPhone paired" : "Turn on to pair your iPhone"}</span>
+            </div>
+            <input type="checkbox" class="mac-switch" id="c-mob" ${stateC.mobileOn ? "checked" : ""}>
+          </div>
+          ${stateC.mobileOn ? `<div class="form-row" style="padding:14px"><div class="qr-box">${QR_SVG}</div><div style="flex:1;display:flex;flex-direction:column;gap:6px"><span class="row-title">Pair another device</span><span class="row-desc">Scan from Loopflow on iPhone.</span><div><button class="mac-btn">Copy address</button></div></div></div>` : ""}
+        </div>
+      </div>`;
+    body.querySelector("#c-mob").onchange = e => { stateC.mobileOn = e.target.checked; renderC(); };
+  } else if (stateC.pane === "general") {
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-section-title">Workspace</div>
+        <div class="form-group">
+          <div class="form-row ${stateC.flashKey === "autosave" ? "flash" : ""}">
+            <div class="row-label"><span class="row-title">Autosave Task files</span><span class="row-desc">Save Brief and scratch notes automatically</span></div>
+            <input type="checkbox" class="mac-switch" id="c-auto" ${stateC.autosave ? "checked" : ""}>
+          </div>
+        </div>
+      </div>`;
+    body.querySelector("#c-auto").onchange = e => { stateC.autosave = e.target.checked; };
+  } else if (stateC.pane === "machines") {
+    body.innerHTML = `
+      <div class="form-section">
+        <div class="form-section-title">Reachable Machines</div>
+        <div class="form-group">
+          <div class="form-row">
+            <div class="row-label"><span class="row-title"><span class="nav-dot ok" style="margin:0"></span> This MacBook</span><span class="row-desc">Local server running · default plan hub</span></div>
+            <span class="source-pill">Active</span>
+          </div>
+          <div class="form-row">
+            <div class="row-label"><span class="row-title"><span class="nav-dot ok" style="margin:0"></span> studio-m4</span><span class="row-desc mono">ssh://studio-m4.tail91a2.ts.net</span></div>
+            <button class="mac-btn">Set as hub</button>
+          </div>
+        </div>
+      </div>`;
+  } else {
+    body.innerHTML = SHORTCUTS.map(g => `
+      <div class="form-section">
+        <div class="form-section-title">${g.group}</div>
+        <div class="form-group">${g.items.map(([n,k]) => `<div class="form-row"><span class="row-title">${n}</span><span class="kbd">${k}</span></div>`).join("")}</div>
+      </div>`).join("");
+  }
+
+  // Bind Vision C interactive controls
+  body.querySelectorAll("[data-c-ladder]").forEach(el => el.onclick = () => {
+    stateC.openLadder = stateC.openLadder === el.dataset.cLadder ? null : el.dataset.cLadder;
+    renderC();
+  });
+  body.querySelectorAll("[data-c-close-ladder]").forEach(el => el.onclick = () => { stateC.openLadder = null; renderC(); });
+  body.querySelectorAll("[data-c-reset]").forEach(el => el.onclick = () => {
+    const id = el.dataset.cReset;
+    const prev = stateC.layers[stateC.scope][id];
+    delete stateC.layers[stateC.scope][id];
+    showToastC(`Removed ${id} from ${layerMetaC[stateC.scope].file}`, () => { stateC.layers[stateC.scope][id] = prev; });
+    renderC();
+  });
+  body.querySelectorAll("[data-c-promote]").forEach(el => el.onclick = () => {
+    const id = el.dataset.cPromote;
+    const val = stateC.layers.repo_personal[id];
+    const prevShared = stateC.layers.repo_shared[id];
+    stateC.layers.repo_shared[id] = val;
+    delete stateC.layers.repo_personal[id];
+    showToastC(`Moved ${id} to .lf/config.yaml (Shared repo)`, () => {
+      stateC.layers.repo_personal[id] = val;
+      if (prevShared === undefined) delete stateC.layers.repo_shared[id]; else stateC.layers.repo_shared[id] = prevShared;
+    });
+    renderC();
+  });
+  body.querySelectorAll("[data-c-sel]").forEach(el => el.onchange = e => {
+    const id = el.dataset.cSel, prev = stateC.layers[stateC.scope][id];
+    stateC.layers[stateC.scope][id] = e.target.value;
+    showToastC(`Saved ${id} to ${layerMetaC[stateC.scope].file}`, () => {
+      if (prev === undefined) delete stateC.layers[stateC.scope][id]; else stateC.layers[stateC.scope][id] = prev;
+    });
+    renderC();
+  });
+  body.querySelectorAll("[data-c-chk]").forEach(el => el.onchange = e => {
+    const id = el.dataset.cChk, prev = stateC.layers[stateC.scope][id];
+    stateC.layers[stateC.scope][id] = e.target.checked;
+    showToastC(`Saved ${id} to ${layerMetaC[stateC.scope].file}`, () => {
+      if (prev === undefined) delete stateC.layers[stateC.scope][id]; else stateC.layers[stateC.scope][id] = prev;
+    });
+    renderC();
+  });
+  body.querySelectorAll("[data-c-seg]").forEach(el => el.onclick = () => {
+    const [id, v] = el.dataset.cSeg.split(":");
+    const prev = stateC.layers[stateC.scope][id];
+    stateC.layers[stateC.scope][id] = v;
+    showToastC(`Saved ${id} to ${layerMetaC[stateC.scope].file}`, () => {
+      if (prev === undefined) delete stateC.layers[stateC.scope][id]; else stateC.layers[stateC.scope][id] = prev;
+    });
+    renderC();
+  });
+}
+document.getElementById("c-scope").addEventListener("change", e => { stateC.scope = e.target.value; renderC(); });
+document.getElementById("c-search").addEventListener("input", e => { stateC.search = e.target.value; renderC(); });
+
+// Initial paint
+renderToday();
+applyPageChrome();
+</script>
+</body>
+</html>

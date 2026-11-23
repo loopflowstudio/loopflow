@@ -50,9 +50,13 @@ prefixed_uuid_id!(
 
 impl ProjectId {
     /// A Wave's one Project shares the Wave's UUID, so every Machine that
-    /// makes it makes the same record.
+    /// makes it makes the same record. A historical Wave ID that is no UUID
+    /// names one through UUIDv5.
     pub fn for_wave(wave: &WaveId) -> Self {
-        Self(format!("proj_{}", wave.as_str().replace('-', "")))
+        let uuid = uuid::Uuid::parse_str(wave.as_str()).unwrap_or_else(|_| {
+            uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, wave.as_str().as_bytes())
+        });
+        Self(format!("proj_{}", uuid.simple()))
     }
 }
 

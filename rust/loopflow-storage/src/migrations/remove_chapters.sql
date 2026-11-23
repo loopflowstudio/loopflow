@@ -59,11 +59,14 @@ DELETE FROM plan_stamps WHERE owner_id IN (SELECT id FROM one_project_dropped);
 DELETE FROM projects WHERE id IN (SELECT id FROM one_project_dropped);
 DROP TABLE one_project_dropped;
 DROP TABLE one_project_kept;
--- A live Wave with none gets one named for it. Its id comes from the Wave's,
--- so every Machine that runs this, or later makes a missing one, makes the
--- same record.
+-- A live Wave with none gets one named for it. Its id is the Wave's UUID, so
+-- every Machine that runs this, or later makes a missing one, makes the same
+-- record; a historical Wave ID that is no hyphenated UUID gets a fresh one.
 INSERT INTO projects(id,wave_id,created_at,updated_at,description,project_name,project_slug,status)
-SELECT 'proj_'||replace(w.id,'-',''),w.id,w.created_at,w.created_at,'',w.name,w.name,'started'
+SELECT 'proj_'||CASE WHEN length(w.id)=36 AND replace(w.id,'-','') NOT GLOB '*[^0-9a-f]*'
+        AND length(replace(w.id,'-',''))=32
+    THEN replace(w.id,'-','') ELSE lower(hex(randomblob(16))) END,
+    w.id,w.created_at,w.created_at,'',w.name,w.name,'started'
 FROM waves w
 WHERE w.retired_at IS NULL AND NOT EXISTS(SELECT 1 FROM projects p WHERE p.wave_id=w.id);
 DROP INDEX idx_projects_wave;

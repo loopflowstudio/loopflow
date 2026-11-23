@@ -23,8 +23,9 @@ fn project_name_receipt_does_not_reconstruct_unrelated_order_evidence() {
     let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
     let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
     crate::test_fixture::wave(&store, &wave);
+    let linear = wave.id().to_string();
     let observed = serde_json::from_value(serde_json::json!({
-        "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
+        "id":linear, "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
         "workflow":"", "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
     })).unwrap();
     crate::sqlite::linear_events::accept_linear_project_in(
@@ -42,8 +43,8 @@ fn project_name_receipt_does_not_reconstruct_unrelated_order_evidence() {
         .lock()
         .unwrap()
         .execute(
-            "UPDATE tracker_projects SET task_order_json='{}' WHERE id='linear-project'",
-            [],
+            "UPDATE tracker_projects SET task_order_json='{}' WHERE id=?1",
+            [&linear],
         )
         .unwrap();
     store
@@ -64,8 +65,8 @@ fn project_name_receipt_does_not_reconstruct_unrelated_order_evidence() {
         .lock()
         .unwrap()
         .query_row(
-            "SELECT task_order_json,observed_at FROM tracker_projects WHERE id='linear-project'",
-            [],
+            "SELECT task_order_json,observed_at FROM tracker_projects WHERE id=?1",
+            [&linear],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
@@ -78,8 +79,9 @@ fn project_prose_unobserved_baseline_stays_unknown_at_the_same_revision() {
     let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
     let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
     crate::test_fixture::wave(&store, &wave);
+    let linear = wave.id().to_string();
     let mut observed: crate::planning::TrackerProject = serde_json::from_value(serde_json::json!({
-        "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
+        "id":linear, "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
         "workflow":"", "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
     })).unwrap();
     crate::sqlite::linear_events::accept_linear_project_in(
@@ -140,8 +142,9 @@ fn project_prose_partial_observation_retains_its_original_baseline_and_age() {
     let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
     let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
     crate::test_fixture::wave(&store, &wave);
+    let linear = wave.id().to_string();
     let mut observed: crate::planning::TrackerProject = serde_json::from_value(serde_json::json!({
-        "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"", "description":"Baseline",
+        "id":linear, "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"", "description":"Baseline",
         "workflow":"", "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
     })).unwrap();
     crate::sqlite::linear_events::accept_linear_project_in(
@@ -185,8 +188,8 @@ fn project_prose_partial_observation_retains_its_original_baseline_and_age() {
         .lock()
         .unwrap()
         .query_row(
-            "SELECT json_object('value',description,'revision',description_revision,'observed_at',description_observed_at) FROM tracker_projects WHERE id='linear-project'",
-            [],
+            "SELECT json_object('value',description,'revision',description_revision,'observed_at',description_observed_at) FROM tracker_projects WHERE id=?1",
+            [&linear],
             |r| r.get(0),
         )
         .unwrap();
@@ -222,7 +225,7 @@ fn project_edit_failure_rolls_back_fields_and_receipts() {
     crate::test_fixture::wave(&store, &wave);
     let project = loopflow_model::durable::ProjectId::new();
     let conn = store.conn.lock().unwrap();
-    conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,description)
+    conn.execute("INSERT OR REPLACE INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,description)
         VALUES(?1,?2,1,1,'product','Original','')",rusqlite::params![project.as_str(),wave.id()]).unwrap();
     conn.execute_batch(
         "CREATE TRIGGER fail_project_save BEFORE UPDATE ON projects
@@ -261,7 +264,7 @@ fn unchanged_project_content_saves_nothing_with_and_without_linear_mapping() {
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO projects(id,wave_id,external_project_id,created_at,updated_at,
+                "INSERT OR REPLACE INTO projects(id,wave_id,external_project_id,created_at,updated_at,
              project_slug,project_name,description) VALUES(?1,?2,?3,1,1,?4,?4,'')",
                 rusqlite::params![project.as_str(), wave.id(), mapping, name],
             )

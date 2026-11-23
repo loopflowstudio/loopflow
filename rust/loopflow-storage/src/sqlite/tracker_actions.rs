@@ -1418,17 +1418,22 @@ mod tests {
         );
         crate::test_fixture::wave(&store, &wave);
         let here = store.seed_project(wave.id()).unwrap().id;
-        // The released lf made Projects before fields were stamped.
+        // The released lf made Projects before fields were stamped, and
+        // another Machine's Project arrives with its own stamps.
+        let (older, theirs) = (
+            loopflow_model::id::WaveId::new(),
+            loopflow_model::id::WaveId::new(),
+        );
         let unstamped = loopflow_model::durable::ProjectId::new();
         store
             .conn
             .lock()
             .unwrap()
-            .execute(
-                "INSERT INTO projects(id,wave_id,created_at,updated_at,description,project_name,project_slug)
-                 VALUES(?1,?2,1,1,'','Earlier','earlier')",
-                rusqlite::params![unstamped.as_str(), wave.id()],
-            )
+            .execute_batch(&format!(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES('{older}','older','/repo',1),('{theirs}','theirs','/repo',1);
+                 INSERT INTO projects(id,wave_id,created_at,updated_at,description,project_name,project_slug)
+                 VALUES('{unstamped}','{older}',1,1,'','Earlier','earlier')"
+            ))
             .unwrap();
         let elsewhere = loopflow_model::durable::ProjectId::new();
         crate::test_fixture::arrive(
@@ -1437,7 +1442,7 @@ mod tests {
             &crate::work::edit::WorkEdit::for_target(
                 elsewhere.as_str(),
                 &[
-                    WorkValue::ProjectWave(wave.id().to_string()),
+                    WorkValue::ProjectWave(theirs.to_string()),
                     WorkValue::ProjectName(Some("Theirs".into())),
                 ],
             ),

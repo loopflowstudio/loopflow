@@ -337,8 +337,8 @@ fn scopes_graph_downward_and_each_session_reads_for_itself() {
         .unwrap();
         conn.execute_batch(
             "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000040008000000000000001','/repo',1);
-            INSERT INTO tasks(repository_id,id,project_id,wave_id,issue_identifier,created_at)
-            SELECT 'repo_00000000000040008000000000000001',t.id,'project',p.wave_id,t.identifier,1
+            INSERT INTO tasks(repository_id,id,project_id,issue_identifier,created_at)
+            SELECT 'repo_00000000000040008000000000000001',t.id,'project',t.identifier,1
             FROM projects p, (SELECT 'task' AS id,'T-1' AS identifier UNION ALL SELECT 'sibling-task','T-2') t
             WHERE p.id='project';
             INSERT INTO task_checkouts(task_id,worktree) VALUES('task','/task'),('sibling-task','/sibling');

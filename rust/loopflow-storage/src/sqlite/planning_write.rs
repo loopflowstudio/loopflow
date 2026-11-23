@@ -536,7 +536,7 @@ mod tests {
     fn plan(store: &SqliteStore) -> TaskId {
         let wave = Wave::new(WaveId::new(), "planning".into(), "/repo".into());
         crate::test_fixture::wave(store, &wave);
-        let project = ProjectId::new();
+        let project = ProjectId::for_wave(wave.id());
         {
             let mut conn = store.conn.lock().unwrap();
             let tx = conn.transaction().unwrap();

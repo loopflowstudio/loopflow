@@ -365,7 +365,7 @@ ship the release whose peer protocol accepts a `Disposition` without
 
 ## Next: implement (concept review after the plan hub, 2026-11-22)
 
-Main through #2026 is merged (`def5dfdded`). The review is
+Main is merged through #1988 (`8892ba5671`, origin/main's head). The review is
 `scratch/concept-review.html`; the answers, word for word, are in
 `scratch/questions.md`. Status of its six changes:
 

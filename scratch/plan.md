@@ -46,6 +46,11 @@ real records with a name, summary and status that start and end.
   Project it is in, and a Linear Project linked to no Wave is not imported.
   The "held until moved back" rule for a Project moved between Initiatives
   goes. Asana: the same with an Asana project.
+- Every Wave, top-level included, is one Linear Project; no Wave links an
+  Initiative now. Jack Heart, 2026-11-22, asked whether a long-running Wave
+  keeps its Initiative link: "One Project only". Initiative links (Wave
+  config `linear: initiative:`, `pm_wave_sync.initiative`, the connect
+  flow's Initiative create) go until subwaves bring them back.
 - A Wave created in a connected repository makes its Linear Project with it.
   A child Wave is its own Linear Project.
 - Every Wave Task is an issue in its Wave's Linear Project, so it crosses

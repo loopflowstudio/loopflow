@@ -7,8 +7,17 @@ private final class NewTaskDraft {
     var request = ""
     var waveID: String?
     var graph: String?
-    var pending: NewTaskAction?
-    var refusal: (action: NewTaskAction, reason: String)?
+    enum Submission: Equatable {
+        case editing
+        case sending(NewTaskAction)
+        case refused(NewTaskAction, String)
+    }
+    var submission = Submission.editing
+
+    var isSending: Bool {
+        if case .sending = submission { return true }
+        return false
+    }
 
     init(waveID: String?) { self.waveID = waveID }
 }
@@ -30,7 +39,7 @@ struct NewTaskSheet: View {
         guard draft.waveID != nil else { return .repository }
         return wave.map { .wave($0.id) }
     }
-    private var canSubmit: Bool { !trimmed.isEmpty && destination != nil && draft.pending == nil }
+    private var canSubmit: Bool { !trimmed.isEmpty && destination != nil && !draft.isSending }
     private var trimmed: String { draft.request.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var scopeDefault: WaveGraph.Default? {
         destination == nil ? nil : model.defaultWorkflow(in: wave)
@@ -66,13 +75,13 @@ struct NewTaskSheet: View {
                 .task(id: destination) {
                     if destination != nil { await model.loadGraphDefault(wave: wave) }
                 }
-            if let refusal = draft.refusal {
-                FailureLine(refusal.action == .file ? "Not filed." : "Not started.", machine: refusal.reason)
+            if case .refused(let action, let reason) = draft.submission {
+                FailureLine(action == .file ? "Not filed." : "Not started.", machine: reason)
                     .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier(refusal.action == .file ? "new-task-file-error" : "new-task-error")
+                    .accessibilityIdentifier(action == .file ? "new-task-file-error" : "new-task-error")
             }
             HStack(spacing: Spacing.sm) {
-                Button(draft.pending == .file ? "Filing…" : "File to backlog") { submit(.file) }
+                Button(draft.submission == .sending(.file) ? "Filing…" : "File to backlog") { submit(.file) }
                     .buttonStyle(LoopflowButtonStyle())
                     .disabled(!canSubmit)
                     .accessibilityIdentifier("new-task-file")
@@ -93,8 +102,8 @@ struct NewTaskSheet: View {
         }
         .font(Typography.text)
         .foregroundStyle(palette.text)
-        .disabled(draft.pending != nil)
-        .interactiveDismissDisabled(draft.pending != nil)
+        .disabled(draft.isSending)
+        .interactiveDismissDisabled(draft.isSending)
         .padding(Spacing.xxl)
         .frame(width: 540)
         .background(palette.surface)
@@ -103,7 +112,7 @@ struct NewTaskSheet: View {
     }
 
     private var startLabel: String {
-        if case .start = draft.pending { return "Starting…" }
+        if case .sending(.start) = draft.submission { return "Starting…" }
         return startWorkflow.map { "Start with \($0) ⌘↩" } ?? "Start ⌘↩"
     }
 
@@ -146,31 +155,28 @@ struct NewTaskSheet: View {
 
     private func submit(_ action: NewTaskAction) {
         guard canSubmit else { return }
-        let request = trimmed
-        let wave = self.wave
+        draft.submission = .sending(action)
         let requestID = UUID().uuidString
-        let owner = model.navigation.performanceOwner
-        draft.pending = action
-        draft.refusal = nil
-        func send() {
-            // Capture the submitting sheet and repository before navigation can change.
-            Task.immediate {
-                do {
-                    try await model.submitTask(action, request: request, wave: wave, requestID: requestID)
-                } catch {
-                    draft.refusal = (action, error.localizedDescription)
-                    draft.pending = nil
-                    if case .start = action { Perf.finish(.startTask, id: requestID, owner: owner, outcome: .failed) }
-                }
-            }
-        }
         switch action {
-        case .file: send()
+        case .file:
+            send(action, requestID: requestID)
         case .start:
+            let owner = model.navigation.performanceOwner
             Perf.userAction(.startTask, scenario: "new_task_to_typing", id: requestID, repository: model.repoPath,
                             machine: model.machineKind, liveSessions: model.liveSessionCount, owner: owner) {
                 Perf.acknowledged(.startTask, id: requestID, owner: owner)
-                send()
+                send(action, requestID: requestID)
+            }
+        }
+    }
+
+    private func send(_ action: NewTaskAction, requestID: String) {
+        // Begin in this sheet's repository before navigation can change.
+        Task.immediate {
+            do {
+                try await model.submitTask(action, request: trimmed, wave: wave, requestID: requestID)
+            } catch {
+                draft.submission = .refused(action, error.localizedDescription)
             }
         }
     }

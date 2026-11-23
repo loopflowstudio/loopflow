@@ -1,19 +1,21 @@
-at: 7e1f85ab0ced8e0ec6c76097a1b6302338efb63d
+at: a6d432cc3452ff88699c7950bc4cacbedfcab223
 first:
   - path: docs/surfaces.md
-    why: Where File and Start take you
+    why: Where File and Start take the draft
   - path: swift/LoopflowMac/Views/NewTaskSheet.swift
-    why: How the draft handles scope and refusal
+    why: Editing, sending and correcting a refused draft
   - path: swift/Loopflow/Services/CreationJournal.swift
-    why: When a fresh submission is safe
+    why: Which failures allow a fresh request
   - path: swift/LoopflowMac/WorkModel.swift
-    why: Open the brief or the admitted conversation
+    why: Which reply can open which destination
+  - path: swift/LoopflowMac/WorkProjection.swift
+    why: Leaving the backlog releases its borrowed row
   - path: swift/LoopflowMac/Views/BacklogView.swift
-    why: Show the filed brief while planning catches up
+    why: Selected rows supply the brief and its actions
   - path: swift/LoopflowTests/NewTaskTests.swift
-    why: Correct the draft and recover a lost reply
-  - path: swift/LoopflowTests/WorkDestinationTests.swift
-    why: Install the primary Session and respect later navigation
+    why: File and Start through refusal and reconnect
   - path: swift/LoopflowTests/CreationSubmissionTests.swift
-    why: Recover saved submissions across windows and restarts
+    why: Retirement and recovery on the original Machine
+  - path: swift/LoopflowTests/WorkDestinationTests.swift
+    why: Session installation and replies after navigation
 hide: []

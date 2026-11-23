@@ -31,3 +31,5 @@ On an unlocked display, use the Workflow menu, correct a refused Start with **Us
 - That Desktop filter reported 37 tests in six suites, including two skipped display diagnostics. It covered named and inherited Start, refused File, revealing a hidden backlog and retirement after the brief mounts.
 - `task_create_tests::task_create_answers_and_its_conversation_starts_the_graph_across_a_server_restart` passed with a lost Start reply against a disposable Machine. The documented command suite passed all four checks.
 - [QA](qa.html) drove File in the repository and Wave, inherited Start, a removed Wave and server restart in an isolated Dev bundle. The named-workflow menu, live confirmed refusal after send and live lost reply were untested.
+
+`scripts/test_desktop.sh --filter 'NewTaskTests|BacklogViewTests|CreationSubmissionTests|WorkDestinationTests/(newTask|lateCreationReply)'` built Desktop and passed 39 tests in five suites after compression. The unlocked-display demo remains for QA.

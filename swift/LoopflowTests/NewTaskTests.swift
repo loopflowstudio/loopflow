@@ -64,7 +64,7 @@ struct NewTaskTests {
         return try json(fixtureArray("graph_catalog.json") + [code])
     }
 
-    private func model(catalog: OSAllocatedUnfairLock<String>,
+    private func model(catalog: OSAllocatedUnfairLock<String> = .init(initialState: "[]"),
                        planning: String? = nil,
                        subscribe: (@Sendable () async throws -> WorkObservation)? = nil,
                        write: @escaping @Sendable (ServedWrite) async throws -> String) async throws -> WorkModel {
@@ -221,22 +221,13 @@ struct NewTaskTests {
     func lostStartReply() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let sent = OSAllocatedUnfairLock<[Data]>(initialState: [])
-        let receipts = OSAllocatedUnfairLock<[String: String]>(initialState: [:])
-        let complete = try json(fixtureArray("creation_lookup.json")[0])
+        let server = CreationTestMachine()
         let journal = CreationSubmissions(directory: directory, machine: { "original" },
-            lookup: { id in ReadOutput(receipts.withLock { $0[id] } ?? "null") },
-            send: { data in
-                sent.withLock { $0.append(data) }
-                let payload = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-                let id = try #require(payload["request_id"] as? String)
-                var receipt = try #require(JSONSerialization.jsonObject(with: Data(complete.utf8)) as? [String: Any])
-                receipt["request_id"] = id
-                let answer = String(decoding: try JSONSerialization.data(withJSONObject: receipt), as: UTF8.self)
-                receipts.withLock { $0[id] = answer }
+            lookup: { await server.lookup($0) }, send: { payload in
+                _ = try await server.send(payload)
                 throw RegistryQueryError("Connection lost after admission")
             })
-        let model = try await model(catalog: .init(initialState: "[]")) { change in
+        let model = try await model { change in
             guard case .taskCreate(_, let id, _, _, _, _, _, _) = change else { throw RegistryQueryError("Expected Start") }
             return try await journal.submit(change, requestID: id)
         }
@@ -249,28 +240,43 @@ struct NewTaskTests {
         #expect(saved.count == 1 && record.destination == "original")
         let recovered = try #require(try await journal.reconcile(record))
         #expect(recovered.requestId == record.id && recovered.taskId == "original")
-        #expect(sent.withLock { $0 } == [record.payload])
+        #expect(await server.submissions == [record.payload])
         let payload = try #require(JSONSerialization.jsonObject(with: record.payload) as? [String: Any])
         #expect(payload["request_id"] as? String == record.id)
         #expect(payload["request"] as? String == "start once")
     }
 
-    private func filing() throws -> (row: RoadmapTask, receipt: String, before: String, after: String) {
+    enum TaskChange: CaseIterable { case moved, started }
+
+    private func filing(change: TaskChange? = nil) throws -> (row: RoadmapTask, receipt: String, before: String, after: String) {
         var snapshot = try #require(JSONSerialization.jsonObject(with: loadFixtureData("roadmap_snapshot.json")) as? [String: Any])
         var tasks = try #require(snapshot["tasks"] as? [String: Any])
-        let rows = try #require(tasks["items"] as? [[String: Any]])
-        let filedRow = try #require(rows.first { $0["lifecycle"] as? String == "unstarted" })
-        let row = try RegistryQuery.decode(RoadmapTask.self, from: json(filedRow))
-        let filed = try json([
+        var rows = try #require(tasks["items"] as? [[String: Any]])
+        let index = try #require(rows.firstIndex { $0["lifecycle"] as? String == "unstarted" })
+        var filed = rows.remove(at: index)
+        let row = try RegistryQuery.decode(RoadmapTask.self, from: json(filed))
+        let receipt = try json([
             "task": ["id": row.id, "identifier": row.task.identifier, "title": row.task.name],
-            "graph": NSNull(), "session_id": NSNull(), "milestone": "filed", "session": NSNull(), "row": filedRow,
+            "graph": NSNull(), "session_id": NSNull(), "milestone": "filed", "session": NSNull(), "row": filed,
         ])
-        // Planning carries a later brief for the same Task.
-        let planned = try json(snapshot).replacingOccurrences(of: row.task.description, with: "Edited after filing")
-        tasks["items"] = rows.filter { ($0["task"] as? [String: Any])?["id"] as? String != row.id }
+        tasks["items"] = rows
         snapshot["tasks"] = tasks
-        let beforeFile = try json(snapshot)
-        return (row, filed, beforeFile, planned)
+        let before = try json(snapshot)
+
+        var task = try #require(filed["task"] as? [String: Any])
+        task["description"] = "Edited after filing"
+        switch change {
+        case .moved: task["wave_id"] = NSNull()
+        case .started:
+            filed["section"] = "working"
+            filed["lifecycle"] = "active"
+        case nil: break
+        }
+        filed["task"] = task
+        rows.insert(filed, at: index)
+        tasks["items"] = rows
+        snapshot["tasks"] = tasks
+        return (row, receipt, before, try json(snapshot))
     }
 
     @Test("File opens the committed brief before planning catches up")
@@ -359,36 +365,13 @@ struct NewTaskTests {
         _ = try offer.find(textWhere: { text, _ in text.contains("It will run feature") && text.contains("You take part at demo.") })
     }
 
-    enum TaskChange: CaseIterable { case moved, started }
-
-    private func changedPlan(_ planning: String, row: RoadmapTask, change: TaskChange) throws -> String {
-        var snapshot = try #require(JSONSerialization.jsonObject(with: Data(planning.utf8)) as? [String: Any])
-        var tasks = try #require(snapshot["tasks"] as? [String: Any])
-        let rows = try #require(tasks["items"] as? [[String: Any]])
-        tasks["items"] = rows.map { entry in
-            var entry = entry
-            guard var task = entry["task"] as? [String: Any], task["id"] as? String == row.id else { return entry }
-            switch change {
-            case .moved:
-                task["wave_id"] = NSNull()
-                entry["task"] = task
-            case .started:
-                entry["section"] = "working"
-                entry["lifecycle"] = "active"
-            }
-            return entry
-        }
-        snapshot["tasks"] = tasks
-        return try json(snapshot)
-    }
-
     @Test("A File reply follows the newer Task's backlog membership", arguments: TaskChange.allCases)
     func planningBeforeFileReply(change: TaskChange) async throws {
-        let (row, receipt, before, after) = try filing()
-        let current = try RegistryQuery.decode(RoadmapSnapshot.self, from: changedPlan(after, row: row, change: change))
+        let (row, receipt, before, after) = try filing(change: change)
+        let current = try RegistryQuery.decode(RoadmapSnapshot.self, from: after)
         let sent = AsyncStream<Void>.makeStream()
         let reply = AsyncStream<Void>.makeStream()
-        let model = try await model(catalog: .init(initialState: "[]"), planning: before) { _ in
+        let model = try await model(planning: before) { _ in
             sent.continuation.finish()
             for await _ in reply.stream {}
             return receipt
@@ -426,8 +409,8 @@ struct NewTaskTests {
         try await model.submitTask(.file, request: row.task.name, wave: nil)
         let wave = WorkNavigation.Board.wave(try #require(row.task.waveId))
         #expect(model.navigation.waveView == wave)
-        let brief = try #require(model.backlog(wave).opened)
-        await model.refreshFiledRow(brief, in: wave)
+        #expect(model.backlog(wave).opened?.id == row.id)
+        await model.refreshFiledRow(in: wave)
         #expect(model.backlog(wave).opened?.id == row.id)
         partial.withLock { $0 = false }
         let pane = ImageRenderer(content: BacklogView(model: model, view: wave).frame(width: 900, height: 600))
@@ -442,7 +425,7 @@ struct NewTaskTests {
     @Test("Leaving the filed selection releases its receipt row", arguments: Departure.allCases)
     func leaveFiledBrief(departure: Departure) async throws {
         let (row, receipt, before, _) = try filing()
-        let model = try await model(catalog: .init(initialState: "[]"), planning: before) { _ in receipt }
+        let model = try await model(planning: before) { _ in receipt }
         model.confirmMachine("original")
         try await model.submitTask(.file, request: row.task.name, wave: nil)
         let view = try #require(model.navigation.waveView)
@@ -474,7 +457,7 @@ struct NewTaskTests {
                 for await _ in reply.stream {}
                 return receipt
             })
-        let model = try await model(catalog: .init(initialState: "[]"), planning: before) { change in
+        let model = try await model(planning: before) { change in
             guard case .taskCreate(_, let id, _, _, _, _, _, _) = change else { throw RegistryQueryError("Expected File") }
             return try await journal.submit(change, requestID: id)
         }

@@ -207,10 +207,9 @@ them. Nothing here needs WindowServer focus.
   answer appears in `<name>.cmd.out`.
 - Give `snap` and `frame` an absolute prefix: a relative one is resolved
   against the app's cwd (`/`), and the `.out` lists a file that was never written.
-- Skew without relaunching: start the private server through a symlink
-  `bin/lf` and swap the binary it serves (`kill` the server PID, relink,
-  start again on the same `LF_HOME`); the running app reconnects to the new
-  one, which is how "update the older one" is checked.
+- To check “update the older one,” launch the private server through a
+  `bin/lf` symlink and keep its PID (`$!` when backgrounded). Stop that PID,
+  relink the binary and start it with the same `LF_HOME`. The app reconnects.
 - `snap <prefix>` writes every window with `cacheDisplay` (no title bar) and
   lists index, title and size. Indices change as windows open: read the list
   before each click.
@@ -257,8 +256,7 @@ them. Nothing here needs WindowServer focus.
 - Navigate with `lf desktop goto <n>`, `working-tasks`, `back` and `forward`;
   `lf --task <id> desktop do details page=brief` switches the Task pane. A tile
   shows its workflow sentence only after its Task was visited in that window.
-  `lf desktop do new-task` opens the New Task sheet, and `snap` lists a sheet
-  as its own untitled window. Card clicks in the chooser preview reliably;
+  Card clicks in the chooser preview reliably;
   Apply and Cancel answered one hook click in round 7 (Apply wrote
   `config.yaml`) after missing in earlier runs. If they miss, set the theme with
   `lf set --global theme`. Send Customize once: Done Editing takes its place,
@@ -324,23 +322,14 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
   `config.theme`).
 - With a sheet open, `osascript … quit` fails with "User canceled"; stop that
   one PID. `open -n` beside a live instance leaves two; check `pgrep` first.
-- New Task with the QA hook alone (no capture loop): `insert <words>` types
-  into the open sheet's field, `key return` sends ⌘↩ (Start), `key escape`
-  closes it. `press new-task-file` answers "not found"; click the point
-  instead: in the 540 pt sheet File to backlog sits at (74, 308), 33 pt lower
-  once a "Not filed." line shows. `lf desktop do new-task` prints the scope it
-  opened in (`repository` or `wave:<id>`), which is how to tell a sidebar
-  click on a Wave landed. A Wave's own default: `graph: <name>` in
-  `.lf/wave/<name>/config.yaml`, committed. Removing that Wave with the sheet
-  open should show **Wave unavailable**. Select the repository to enable File
-  and Start again.
-- The private server's argv is plain `lf server run` (the `env -i` wrapper
-  execs it from `PATH`); find its PID with `ps -E -p <pid> -o command=` and its
-  `LF_HOME=`. In zsh `kill $PIDS` with a newline-separated list kills nothing;
-  pipe the PIDs to `xargs kill`.
-- New Task: `lf desktop do new-task` opens the sheet. Type with
-  `(sheet.firstResponder as? NSTextView)?.insertText(…)`; ⌘↩ and Esc work as
-  `sheet.performKeyEquivalent(with:)` on a synthesized key event.
+- `lf desktop do new-task` opens the sheet and prints its scope. The QA hook's
+  `snap` lists the sheet as an untitled window. Use `insert <words>` for its
+  focused field, `key return` for ⌘↩ and `key escape` for Esc. To file, click
+  **File to backlog** at the position in the snapshot. In the 540 pt sheet it
+  was at (74, 308), 33 pt lower after a refusal.
+- Set `graph: <name>` in the Wave's committed `.lf/wave/<name>/config.yaml` to
+  exercise its default. Remove the chosen Wave with the sheet open to see
+  **Wave unavailable**. Choosing the repository enables File and Start again.
 - A synthesized click presses SwiftUI buttons, sidebar rows and backlog rows.
   Post the mouse-up with `NSApp.postEvent` before sending the mouse-down
   through `window.sendEvent`: a text field or other control that tracks the

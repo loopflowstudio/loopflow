@@ -2633,20 +2633,21 @@ final class WorkModel {
         let machine = observingMachineId
         let created: TaskCreated?
         do {
-            created = try await query.createTask(request: request, wave: wave?.name, graph: action.graph,
-                                                 run: action != .file, cwd: repoPath, requestID: requestID)
-        } catch is SubmittedCreationError {
-            created = nil
-        }
-
-        if case .start = action {
-            if let created {
-                Perf.retarget(.startTask, from: requestID, to: created.receipt.sessionId ?? created.receipt.task.id,
-                              owner: owner.performanceOwner)
-                CreationRecovery.shared.awaitingPresentation(requestID, of: .task(created.receipt.task.id))
-            } else {
-                Perf.finish(.startTask, id: requestID, owner: owner.performanceOwner, outcome: .unmeasured)
+            let answer = try await query.createTask(request: request, wave: wave?.name, graph: action.graph,
+                                                    run: action != .file, cwd: repoPath, requestID: requestID)
+            created = answer
+            if case .start = action {
+                let receipt = answer.receipt
+                Perf.retarget(.startTask, from: requestID, to: receipt.sessionId ?? receipt.task.id, owner: owner.performanceOwner)
+                CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
             }
+        } catch {
+            let uncertain = error is SubmittedCreationError
+            if case .start = action {
+                Perf.finish(.startTask, id: requestID, owner: owner.performanceOwner, outcome: uncertain ? .unmeasured : .failed)
+            }
+            guard uncertain else { throw error }
+            created = nil
         }
         guard owner.paletteGeneration == presentation else { return }
         if owner.palette == .newTask { owner.palette = nil }
@@ -2673,9 +2674,9 @@ final class WorkModel {
     }
 
     /// Only an exact lookup can settle a filed Task's absence from planning.
-    func refreshFiledRow(_ row: RoadmapTask, in view: WorkNavigation.Board) async {
+    func refreshFiledRow(in view: WorkNavigation.Board) async {
         let owner = navigation
-        guard owner.backlogs[view]?.filedRow?.id == row.id,
+        guard let row = owner.backlogs[view]?.filedRow,
               let exact = try? await query.taskDestination(issue: row.id, repo: row.task.repo),
               !Task.isCancelled, owner.backlogs[view]?.filedRow?.id == row.id,
               case .available(let matches, let truncated) = exact.tasks else { return }

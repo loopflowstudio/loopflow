@@ -13,3 +13,5 @@ The built review keeps the backlog as File's destination and uses the committed 
 If planning beats the File reply and the Task has moved, open its brief in the backlog that now holds it. If it has entered Working, leave the current destination in place and keep the saved submission available to recovery.
 
 While a selected Wave is unavailable, the workflow menu stays editable. Only File and Start wait for a destination.
+
+A filter can hide a row during a drag. I kept the existing drop behavior for that case. The backlog accepts its own row and leaves the ranks alone.

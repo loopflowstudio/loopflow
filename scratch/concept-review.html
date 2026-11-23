@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Settings concept review (pass 2) · LOO-1066</title>
+<title>Settings concept review (pass 3) · LOO-1066</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -54,10 +54,9 @@
   .lede { font-size: 1.08rem; max-width: 76ch; margin-top: .8rem; }
   .note { color: var(--muted); font-size: .92rem; }
   .tag { display: inline-block; font-size: .76rem; font-weight: 700; padding: .1rem .45rem; border-radius: .35rem; vertical-align: middle; }
-  .tag-existing { background: var(--red-bg); color: var(--red); }
-  .tag-proposed { background: var(--green-bg); color: var(--green); }
+  .tag-prior { background: var(--red-bg); color: var(--red); }
+  .tag-existing { background: var(--green-bg); color: var(--green); }
   .tag-choice { background: var(--amber-bg); color: var(--amber); }
-  .tag-ok { background: var(--accent); color: var(--blue); }
   button {
     font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
     border-radius: .45rem; padding: .24rem .6rem; max-width: 100%;
@@ -67,7 +66,7 @@
   button.small { font-size: .84rem; padding: .16rem .5rem; }
   :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
   .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
-  .cases { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .9rem; }
+  .cases { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; }
   .card { padding: 1rem 1.1rem; border: 1px solid var(--line); background: var(--panel); border-radius: .85rem; min-width: 0; }
   .card > * + * { margin-top: .65rem; }
   .form-card { border: 1px solid var(--line); border-radius: .65rem; background: var(--well); overflow: hidden; }
@@ -76,24 +75,18 @@
   .form-row:first-child { border-top: 0; }
   .val { color: var(--muted); font-size: .92rem; }
   .val-strong { color: var(--ink); font-size: .92rem; }
-  .val-bad { color: var(--red); font-weight: 600; font-size: .92rem; }
-  .val-good { color: var(--green); font-weight: 600; font-size: .92rem; }
-  .val-warn { color: var(--amber); font-weight: 600; font-size: .92rem; }
   .banner { border: 1px solid var(--line); border-radius: .55rem; padding: .55rem .75rem; font-size: .9rem; display: flex; justify-content: space-between; align-items: center; gap: .6rem; flex-wrap: wrap; }
   .banner-bad { border-color: var(--red); background: var(--red-bg); color: var(--red); }
   .banner-warn { border-color: var(--amber); background: var(--amber-bg); color: var(--amber); }
-  .banner-good { border-color: var(--green); background: var(--green-bg); color: var(--green); }
   .callout { border: 1px solid var(--line); border-radius: .65rem; padding: .75rem .9rem; background: var(--well); }
   .callout-bad { border-color: var(--red); background: var(--red-bg); }
   .callout-good { border-color: var(--green); background: var(--green-bg); }
   .disabled-form { opacity: .52; }
-  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .87em; }
-  pre { border: 1px solid var(--line); border-radius: .45rem; padding: .55rem .7rem; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--panel); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .87em; }
   table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: .75rem; overflow: hidden; }
   th, td { text-align: left; vertical-align: top; padding: .65rem .8rem; border-top: 1px solid var(--line); }
   thead th { border-top: 0; background: var(--well); font-size: .86rem; color: var(--muted); }
   .yes { color: var(--green); font-weight: 700; white-space: nowrap; }
-  .no { color: var(--red); font-weight: 700; white-space: nowrap; }
   .choices { padding-left: 1.35rem; }
   .choices > li { margin-bottom: 1rem; }
   .choices ul { list-style: none; padding: 0; margin-top: .3rem; }
@@ -112,30 +105,31 @@
 <body>
 <main>
   <header>
-    <p class="overline">LOO-1066 · Concept review pass 2 · macOS Settings &amp; Configuration Scope</p>
+    <p class="overline">LOO-1066 · Concept review pass 3 · macOS Settings &amp; Configuration Scope</p>
     <h1>Do the product’s concepts and the code’s concepts line up?</h1>
     <p class="lede">
-      <strong>Almost completely — all four pass-1 row mismatches are resolved, leaving one live-observation lifecycle mismatch.</strong>
-      Reviewed across the entire macOS Settings &amp; Configuration Scope area against base <code>2656258a</code> through <code>3dd087e8</code>.
-      Agent Policy fallbacks, gated <em>In effect</em> provenance, instant checked Reset with human-titled Undo, <em>Skill or Graph step</em> targeting via one <code>SettingsWork.scope(for:)</code> predicate, and checkout-clean config locks under <code>$LF_HOME/locks/config/</code> all line up cleanly.
-      One mismatch remains: every other live surface in Desktop reconnects automatically when the local server restarts, while <code>ScopedSettingsModel.observe()</code> is one-shot and dies permanently.
+      <strong>Yes — all ten product-to-code pairings line up across the full Settings &amp; Configuration Scope area.</strong>
+      Reviewed from checkout base <code>2aa9964894</code> through <code>bfd4664da3</code> across the macOS Settings window, scoped configuration models, search, theme/mobile/machine surfaces, and the Rust config scope, writer, and move engine.
+      Pass 2’s live-observation lifecycle mismatch is resolved in <code>a74b556a22</code> and verified in both unit tests and live QA round 5 (<a href="qa.html">qa.html</a>).
+      <code>e753cd0c45</code> tightened edit, undo, error, and move addressing around one <code>SettingDeclaration</code> snapshot so every mutation speaks in the exact slot the user saw.
+      No plan changes remain; visual inspection of the compact Settings window on an unlocked display stays with the human demo.
     </p>
   </header>
 
-  <section aria-labelledby="biggest-heading">
-    <h2 id="biggest-heading">Biggest remaining mismatch: Existing (<code>3dd087e8</code>) vs Proposed</h2>
-    <p class="note">Step through a routine server restart (<code>lf update</code>, <code>lf server restart</code>, or wake from sleep) while Settings is open. Left is what the branch build does today (<a href="qa.html">qa.html</a>); right is the self-healing observation written into <a href="plan.md">scratch/plan.md</a>.</p>
+  <section aria-labelledby="resolved-heading">
+    <h2 id="resolved-heading">Resolved mismatch: Prior (<code>3dd087e8</code>) vs Built (<code>bfd4664da3</code>)</h2>
+    <p class="note">Walk a routine local server restart and a post-reconnect edit while Settings is open. Left is the one-shot stream from pass 2; right is the self-healing observation and declaration-bound edit flow now built and verified on this branch.</p>
 
     <div style="display:flex; gap:.45rem; flex-wrap:wrap; margin:.85rem 0;">
       <button type="button" class="small active" data-step="running">1 · Server running</button>
-      <button type="button" class="small" data-step="restarting">2 · Server restarts (350 ms gap)</button>
-      <button type="button" class="small" data-step="back">3 · Server is back up (+1 s)</button>
-      <button type="button" class="small" data-step="switch">4 · User switches to Project &amp; Wave Config</button>
+      <button type="button" class="small" data-step="restarting">2 · Server restarts</button>
+      <button type="button" class="small" data-step="back">3 · Server is back up</button>
+      <button type="button" class="small" data-step="switch">4 · Switch to Project &amp; edit</button>
     </div>
 
     <div class="compare">
       <article class="card">
-        <p class="overline"><span class="tag tag-existing">Existing · 3dd087e8</span> · One-shot <code>ScopedSettingsModel.observe()</code></p>
+        <p class="overline"><span class="tag tag-prior">Before · 3dd087e8</span> · One-shot <code>observe()</code> &amp; re-read slots</p>
         <h3 id="old-title">Live subscription connected</h3>
         <div id="old-banner" class="banner banner-bad" hidden>
           <span>Loopflow server unavailable or owned by another account</span>
@@ -144,8 +138,8 @@
         <div id="old-form">
           <p class="form-title" id="old-pane">Agents · ~/.lf/config.yaml</p>
           <div class="form-card">
-            <div class="form-row"><span>Primary agent</span><span class="val">Use starting preference (Default)</span></div>
-            <div class="form-row"><span>Starting preference</span><span class="val-strong">claude</span></div>
+            <div class="form-row"><span>Primary agent</span><span class="val" id="old-agent">Use starting preference (Default)</span></div>
+            <div class="form-row"><span>Starting preference</span><span class="val-strong" id="old-default">claude</span></div>
             <div class="form-row"><span>Run without asking</span><span class="val-strong">On</span></div>
           </div>
         </div>
@@ -155,7 +149,7 @@
       </article>
 
       <article class="card">
-        <p class="overline"><span class="tag tag-proposed">Proposed</span> · Self-healing observation loop (matching <code>WorkModel</code>)</p>
+        <p class="overline"><span class="tag tag-existing">Built · bfd4664da3</span> · Self-healing <code>observe()</code> &amp; <code>SettingDeclaration</code></p>
         <h3 id="new-title">Live subscription connected</h3>
         <div id="new-banner" class="banner banner-warn" hidden>
           <span id="new-banner-text"></span>
@@ -164,89 +158,89 @@
         <div id="new-form">
           <p class="form-title" id="new-pane">Agents · ~/.lf/config.yaml</p>
           <div class="form-card">
-            <div class="form-row"><span>Primary agent</span><span class="val">Use starting preference (Default)</span></div>
-            <div class="form-row"><span>Starting preference</span><span class="val-strong">claude</span></div>
+            <div class="form-row"><span>Primary agent</span><span class="val" id="new-agent">Use starting preference (Default)</span></div>
+            <div class="form-row"><span>Starting preference</span><span class="val-strong" id="new-default">claude</span></div>
             <div class="form-row"><span>Run without asking</span><span class="val-strong">On</span></div>
           </div>
         </div>
         <div class="callout callout-good" id="new-why">
-          <strong>Normal state:</strong> Zero polling while healthy; push updates arrive over the live <code>config.scope</code> stream.
+          <strong>Normal state:</strong> Zero polling while healthy; push updates arrive over live <code>config.scope</code> streams for both scopes.
         </div>
       </article>
     </div>
   </section>
 
   <section aria-labelledby="map-heading">
-    <h2 id="map-heading">Product concepts vs code concepts (<code>2656258a</code> → <code>3dd087e8</code>)</h2>
+    <h2 id="map-heading">Product concepts vs code concepts (<code>2aa9964894</code> → <code>bfd4664da3</code>)</h2>
     <table>
       <thead>
         <tr>
-          <th style="width:19%;">Product concept</th>
-          <th style="width:31%;">Code concept</th>
+          <th style="width:20%;">Product concept</th>
+          <th style="width:32%;">Code concept</th>
           <th style="width:8%;">Match?</th>
           <th>Assessment</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td><strong>Live Settings window across server restarts</strong></td>
-          <td><code>ScopedSettingsModel.observe()</code> runs one <code>config.catalog</code> fetch + one <code>ServerClient.subscribe</code> stream and exits permanently on error (beyond <code>ServerSubscription</code>’s single 100 ms retry).</td>
-          <td class="no">No</td>
-          <td><strong>One lifecycle modeled two ways across Desktop:</strong> <code>WorkModel</code> (backoff loop), <code>AppearanceStore</code> (1 s retry on failure), <code>MobileSetup</code>, and <code>MachineConnections</code> all self-heal when the server restarts. <code>ScopedSettingsModel</code> freezes both <code>personal</code> and <code>project</code> with <code>editsDisabled = true</code> until the user clicks Refresh in each scope or reopens Settings. Wrap <code>observe()</code> in a bounded backoff loop (1 s → 30 s, reset on healthy frame), releasing pending <code>confirmations</code> before sleeping.</td>
+          <td><strong>Live Settings across server restarts &amp; broken files</strong></td>
+          <td><code>ScopedSettingsModel.observe()</code> runs a <code>1 s → 30 s</code> exponential backoff loop, refreshes <code>config.catalog</code> after failures, stays on the live stream for file-level <code>unavailable</code> frames, cancels streams and releases <code>confirmations</code> before sleeping, and resets delay on a healthy frame.</td>
+          <td class="yes">Yes</td>
+          <td>Resolved in <code>a74b556a22</code> and verified in <code>SettingsWorkflowTests</code> plus QA round 5 (both scopes reconnected in 11–16 s, preserved last readings, dropped edits while down, and saved edits afterwards). Matches <code>WorkModel</code>, <code>AppearanceStore</code>, <code>MobileSetup</code>, and <code>MachineConnections</code>.</td>
         </tr>
         <tr>
           <td><strong>Personal preferences vs Project &amp; Wave Config</strong> (Policy B)</td>
-          <td><code>SettingsWindow</code> with separate <code>personal</code> and <code>project</code> <code>ScopedSettingsModel</code>s; 7-pane monochrome sidebar, 2 unselectable dividers, capsule search, removed sidebar-toggle toolbar.</td>
+          <td><code>SettingsWindow</code> owns independent <code>personal</code> and <code>project</code> <code>ScopedSettingsModel</code>s; 7-pane monochrome sidebar (6 personal + 1 project), 2 unselectable dividers, capsule search, removed sidebar-toggle toolbar.</td>
           <td class="yes">Yes</td>
-          <td>Clean 1:1 split. Switching panes preserves checkout/Wave/destination independently; identical search read errors collapse to one refresh action.</td>
+          <td>Clean 1:1 split matching Jack Heart’s demo direction (<code>1b 2a</code>). Switching panes preserves checkout, Wave, target, and destination independently; duplicate search read errors collapse to one refresh action.</td>
+        </tr>
+        <tr>
+          <td><strong>Declaration-bound edits, Undo &amp; conflict recovery</strong></td>
+          <td><code>SettingDeclaration</code> carries <code>destination</code>, <code>catalogKey</code>, <code>owner</code>, and the slot snapshot at edit time; <code>ScopedSettingsModel</code> keys edits, Undo, moves, and <code>errors[SettingDeclaration.ID]</code> on it; <code>confirmReading()</code> synchronizes rapid clicks; Rust <code>config::files::edit</code> preserves comments and isolates locks under <code>$LF_HOME/locks/config/</code>.</td>
+          <td class="yes">Yes</td>
+          <td>Tightened in <code>e753cd0c45</code>. Stale drafts cannot pass as current slots, Undo targets the original file even after switching destinations, and checkouts keep a clean <code>git status</code>.</td>
         </tr>
         <tr>
           <td><strong>Three Agent Policy keys + combined order</strong></td>
-          <td><code>catalog.rs</code> supplies <code>unset</code> for <code>agent</code> and <code>default_agent</code>; <code>ScopedSettingRow.unsetText</code> filters <code>effective.candidates.last(where: { $0.key == key })</code> uniformly for all three <code>.policy</code> keys; <code>Effective agent order</code> sits at the foot of Project’s Agent Policy section.</td>
+          <td><code>catalog.rs</code> provides <code>unset</code> fallbacks for <code>agent</code> and <code>default_agent</code>; <code>ScopedSettingRow.unsetText</code> filters <code>effective.candidates.last(where: { $0.key == key })</code> uniformly for all three <code>.policy</code> keys; <code>Effective agent order</code> sits at the foot of Project’s Agent Policy section.</td>
           <td class="yes">Yes</td>
-          <td>Pass-1 mismatch resolved and verified in QA round 4. Each row reflects its own key and fallback without leaking <code>default_agent</code> onto unset <code>Primary agent</code>.</td>
+          <td>Each row reflects its own key and origin without leaking <code>default_agent</code> onto unset <code>Primary agent</code>.</td>
         </tr>
         <tr>
           <td><strong>Default values vs active overrides</strong></td>
           <td><code>ScopedSettingRow</code> gates <code>SettingProvenance("In effect", …)</code> on <code>declared != .absent || candidates.contains { $0.source != "builtin" }</code>; <code>ScopedSettings</code> renders <code>file.path</code> once above <strong>Open file…</strong>.</td>
           <td class="yes">Yes</td>
-          <td>Pass-1 mismatch resolved. Clean checkouts stay calm; provenance appears as soon as any file participates.</td>
+          <td>Clean checkouts stay calm; provenance appears as soon as this file or another non-builtin layer participates.</td>
         </tr>
         <tr>
           <td><strong>Nullable choices, enum labels, instant Reset &amp; Undo</strong></td>
-          <td><code>ConfigurationDefinition.displayText</code> maps enum tokens; Picker renders <code>Explicit null</code> only when <code>declared == .present(.null)</code>; simple controls reset immediately via checked <code>config.edit</code> with human-titled Undo; emptied integer drafts reset; <code>.yaml</code> disclosures keep previewed <code>Reset…</code>.</td>
+          <td><code>ConfigurationDefinition.displayText</code> maps enum tokens; Picker includes <code>Explicit null</code> only when <code>declared == .present(.null)</code>; simple controls reset immediately via checked <code>config.edit</code> with human-titled Undo; emptied text/number fields reset; <code>.yaml</code> disclosures keep previewed <code>Reset…</code>.</td>
           <td class="yes">Yes</td>
-          <td>Pass-1 mismatch resolved and verified across toggles, pickers, text/number fields, and YAML editors.</td>
+          <td>One consistent immediate-edit + Undo model for simple controls, and explicit Apply/Cancel/previewed Reset for multi-line YAML editors.</td>
         </tr>
         <tr>
           <td><strong>Skill &amp; Graph-step targeting</strong></td>
-          <td><code>SettingsTargetPicker</code> labeled <strong>Skill or Graph step</strong>; one shared <code>SettingsWork.scope(for:)</code> predicate drives both form filtering and Search jump scope adjustment; <code>Appearance</code> shows <strong>Configuration file</strong> directly.</td>
+          <td><code>SettingsTargetPicker</code> labeled <strong>Skill or Graph step</strong>; one shared <code>SettingsWork.scope(for:)</code> predicate drives both form filtering and Search jump scope adjustment; read-only steps without an <code>id:</code> explain why.</td>
           <td class="yes">Yes</td>
-          <td>Pass-1 mismatch resolved and further simplified in <code>f58683f6</code> so search and form cannot drift.</td>
-        </tr>
-        <tr>
-          <td><strong>Bulk scope read, checked YAML writes &amp; lock isolation</strong></td>
-          <td><code>engine::config::scope</code>, <code>config::files::edit</code>, locks under <code>$LF_HOME/locks/config/&lt;sha256&gt;.lock</code>, <code>observe::invalidate_path</code> + <code>read_stream::wake_file_readers()</code>, <code>confirmReading()</code>, per-row <code>errors[RowAddress]</code>.</td>
-          <td class="yes">Yes</td>
-          <td>Single round-trip reads, comment-preserving checked writes, rapid-click synchronization, and clean checkout <code>git status</code> after Settings edits.</td>
+          <td>Search and form filtering cannot drift; changing only the Skill or Graph step keeps the selected file.</td>
         </tr>
         <tr>
           <td><strong>Move (Promote) &amp; interrupted move recovery</strong></td>
-          <td><code>engine::config::promotion</code> (ordered locks, projected <code>In effect after move</code> preview, audience notice, crash journal, <code>Action::Resume</code>, idempotent <code>Action::Dismiss</code>, inverse-move Undo).</td>
+          <td><code>engine::config::promotion</code> uses ordered locks, requires an empty receiving slot, reads source entries once for both Reset and Undo restore, shows projected <code>In effect after move</code> + audience notice, journals under <code>$LF_HOME/settings-moves/</code>, and offers <code>Action::Resume</code> and idempotent <code>Action::Dismiss</code>.</td>
           <td class="yes">Yes</td>
-          <td>Honest 2-file move with safe conflict refusal and non-destructive Dismiss.</td>
+          <td>Honest 2-file move with safe conflict refusal, inverse-move Undo, and non-destructive Dismiss.</td>
         </tr>
         <tr>
           <td><strong>Appearance, Shortcuts, Mobile &amp; Machines</strong></td>
-          <td><code>AppearanceStore</code> + <code>ThemeChooser</code> + <code>ThemeEditor</code>; shared <code>KeyboardShortcutsView</code>; lifted <code>MobileSetup</code>; <code>MachineConnections</code> + <code>machine.status</code>.</td>
+          <td><code>AppearanceStore</code> (instant apply + Undo via checked <code>config.edit</code> + staged <code>ThemeEditor</code> + direct configuration path), shared <code>KeyboardShortcutsView</code>, lifted <code>MobileSetup</code>, and <code>MachineConnections</code> with 4-way concurrent <code>machine.status</code> probes.</td>
           <td class="yes">Yes</td>
-          <td>All four match their product concepts and already self-heal across server or connectivity interruptions.</td>
+          <td>Each surface matches its domain owner and self-heals across server or connectivity interruptions.</td>
         </tr>
         <tr>
           <td><strong>Cross-pane Search</strong></td>
           <td><code>SettingsMatch</code> + <code>SettingsNavigation.matches</code> + <code>SettingsSearchRow</code> + <code>settingsForm(highlighted:)</code>.</td>
           <td class="yes">Yes</td>
-          <td>Exact match leads, agent personal default appears before project override, inline toggles show destination, file-only global keys highlight <strong>Open ~/.lf/config.yaml</strong>.</td>
+          <td>Exact matches lead, agent personal defaults precede project overrides, inline switches show their exact destination (including Wave and Skill/step key) and write through <code>SettingDeclaration</code>, and file-only global keys highlight <strong>Open ~/.lf/config.yaml</strong>.</td>
         </tr>
       </tbody>
     </table>
@@ -256,33 +250,52 @@
     <h2 id="survival-heading">Failure, recovery &amp; counterexamples checked</h2>
     <div class="cases">
       <article class="card">
-        <h3>Invalid YAML on disk (counterexample)</h3>
-        <p><strong>No reconnect churn.</strong> A YAML syntax error does not end the stream: the server sends <code>SubscriptionFrame(body: nil, unavailable: "Read …")</code> and keeps watching the file. The backoff loop runs only when the stream itself ends or throws.</p>
+        <h3>Invalid YAML on disk</h3>
+        <p><strong>No reconnect churn.</strong> The server keeps the <code>config.scope</code> stream open and emits <code>SubscriptionFrame(body: nil, unavailable: …)</code>. Edits pause while last readings stay visible; fixing the YAML pushes a healthy frame immediately without backoff.</p>
       </article>
       <article class="card">
         <h3>Manual Refresh or scope change during backoff</h3>
-        <p><strong>Instant, never waits on sleep.</strong> Clicking <strong>Refresh</strong> or changing checkout/Wave/target assigns a new <code>observation = UUID()</code>, canceling the sleeping <code>.task(id:)</code> and connecting immediately with fresh 1 s backoff.</p>
+        <p><strong>Immediate recovery.</strong> Clicking <strong>Refresh</strong> or switching checkout, Wave, or target rotates <code>observation = UUID()</code>, canceling the sleeping <code>.task(id:)</code> and opening a fresh stream right away with a 1 s backoff.</p>
       </article>
       <article class="card">
-        <h3>Disconnect mid-edit / window closed</h3>
-        <p><strong>No hang, no leak.</strong> Every loop exit clears <code>self.stream = nil</code>, calls <code>finishConfirmations(through: .max)</code>, and awaits <code>stream.cancel()</code> before sleeping. Closing Settings cancels the task and exits the loop cleanly.</p>
+        <h3>Disconnect mid-edit or rapid double-click</h3>
+        <p><strong>No hang, no stale conflict.</strong> <code>apply()</code> waits on <code>confirmReading()</code> when the stream lags a frame behind <code>receipt.after</code>. If the connection drops while waiting, <code>observe()</code> releases all pending confirmations before sleeping so the UI never deadlocks.</p>
+      </article>
+      <article class="card">
+        <h3>External file edit while typing</h3>
+        <p><strong>Draft preserved, conflict surfaced.</strong> <code>Draft</code> holds the <code>SettingDeclaration</code> captured when typing started. Checked writes refuse stale entries and show <strong>Refresh</strong>, which calls <code>model.refresh(declaration)</code> to re-bind the draft to the new slot.</p>
       </article>
     </div>
   </section>
 
   <section aria-labelledby="outside-heading">
-    <h2 id="outside-heading">Noted as minor polish outside conceptual alignment</h2>
-    <p class="note">From <a href="qa.html">qa.html</a> round 4 (not blocking concept alignment): serde wording on rejected block fields (<code>automation: invalid type: string "abc", expected u32</code>), empty <code>{}</code> left when resetting a file’s last key (shared with <code>lf unset</code>), and bare <code>Empty list (Default)</code> on <code>agents</code>. Live pixel verification on an unlocked display remains for the human review step.</p>
+    <h2 id="outside-heading">Noted outside conceptual alignment</h2>
+    <p class="note">
+      <strong>Human visual check remaining (<a href="plan.md">plan.md</a>):</strong> verify sidebar chrome and scoped forms visually in a compact (760 pt) Settings window on an unlocked display (geometry checked headless in <a href="qa.html">qa.html</a>; pixels require an unlocked screen).<br>
+      <strong>Minor polish / shared outside Settings:</strong> shared disconnect wording in <code>ServerClient.swift:305</code> (“Loopflow server unavailable or owned by another account”), serde wording on rejected block fields, empty <code>{}</code> left when resetting a file’s last key (shared with <code>lf unset</code>), and <code>Empty list (Default)</code> wording on <code>agents</code>.
+    </p>
   </section>
 
   <section aria-labelledby="choices-heading">
-    <h2 id="choices-heading">Choice written into the plan for review</h2>
-    <p class="note">Reversible choice recorded in <a href="plan.md">scratch/plan.md</a> and <a href="questions.md">scratch/questions.md</a> for the next implement pass. Reply with e.g. <code>1b</code> to steer.</p>
+    <h2 id="choices-heading">Choices made for review</h2>
+    <p class="note">All reversible choices are built and recorded in <a href="questions.md">scratch/questions.md</a>. Reply with a number and letter (e.g. <code>2b</code>) to steer any of them during demo.</p>
     <ol class="choices">
-      <li><strong>How open Settings panes recover when the local <code>lf</code> server restarts or starts late</strong>
+      <li><strong>How open Settings panes recover after a local server restart</strong>
         <ul>
-          <li><span class="tag tag-choice">1a · Chosen</span> Reconnect automatically inside <code>ScopedSettingsModel.observe()</code> with bounded exponential backoff (1 s → 30 s, resetting on a healthy reading) and refresh the catalog on reconnect, while keeping manual <strong>Refresh</strong> immediate. Matches <code>WorkModel</code>, <code>AppearanceStore</code>, <code>MobileSetup</code>, and <code>MachineConnections</code>.</li>
-          <li><strong>1b.</strong> Keep Settings subscriptions one-shot and require manual <strong>Refresh</strong> (or reopening Settings) after a server restart.</li>
+          <li><span class="tag tag-choice">1a · Built</span> Reconnect automatically inside <code>ScopedSettingsModel.observe()</code> with 1–30 s backoff (reset on healthy reading) while keeping manual <strong>Refresh</strong> immediate.</li>
+          <li><strong>1b.</strong> Keep Settings streams one-shot and require manual <strong>Refresh</strong> or reopening Settings.</li>
+        </ul>
+      </li>
+      <li><strong>How simple controls vs YAML editors apply and reset changes</strong>
+        <ul>
+          <li><span class="tag tag-choice">2a · Built</span> Switches, pickers, text/number fields, and simple-control <strong>Reset</strong> apply immediately with checked writes and Undo; <code>ThemeEditor</code> and raw <code>.yaml</code> disclosures keep Apply/Cancel and previewed <code>Reset…</code>.</li>
+          <li><strong>2b.</strong> Require confirmation or YAML preview before resetting simple controls too.</li>
+        </ul>
+      </li>
+      <li><strong>Disconnect banner wording during a plain server restart</strong>
+        <ul>
+          <li><span class="tag tag-choice">3a · Built</span> Keep the shared <code>ServerClient</code> message (“Loopflow server unavailable or owned by another account”) so Settings does not fork transport errors.</li>
+          <li><strong>3b.</strong> Split socket-connect refusal from peer-UID mismatch in <code>ServerClient</code> so a routine restart says the server is unavailable and reconnecting.</li>
         </ul>
       </li>
     </ol>
@@ -294,38 +307,50 @@
   const oldBanner = document.getElementById('old-banner');
   const oldForm = document.getElementById('old-form');
   const oldPane = document.getElementById('old-pane');
+  const oldAgent = document.getElementById('old-agent');
+  const oldDefault = document.getElementById('old-default');
   const oldWhy = document.getElementById('old-why');
   const newTitle = document.getElementById('new-title');
   const newBanner = document.getElementById('new-banner');
   const newBannerText = document.getElementById('new-banner-text');
   const newForm = document.getElementById('new-form');
   const newPane = document.getElementById('new-pane');
+  const newAgent = document.getElementById('new-agent');
+  const newDefault = document.getElementById('new-default');
   const newWhy = document.getElementById('new-why');
 
   const steps = {
     running: {
       old: { title: 'Live subscription connected', banner: false, disabled: false, pane: 'Agents · ~/.lf/config.yaml',
+             agent: 'Use starting preference (Default)', def: 'claude',
              why: '<strong>Normal state:</strong> Both <code>personal</code> and <code>project</code> subscriptions are active.' },
       next: { title: 'Live subscription connected', banner: null, disabled: false, pane: 'Agents · ~/.lf/config.yaml',
-              why: '<strong>Normal state:</strong> Zero polling while healthy; push updates arrive over the live <code>config.scope</code> stream.' }
+              agent: 'Use starting preference (Default)', def: 'claude',
+              why: '<strong>Normal state:</strong> Zero polling while healthy; push updates arrive over live <code>config.scope</code> streams for both scopes.' }
     },
     restarting: {
       old: { title: 'Subscription throws and observe() exits forever', banner: true, disabled: true, pane: 'Agents · ~/.lf/config.yaml',
-             why: '<strong>What breaks:</strong> <code>ServerSubscription</code> retries once after 100 ms, fails, and finishes the stream. <code>observe()</code> sets <code>reading.failed(...)</code> and returns permanently.' },
-      next: { title: 'Edits pause briefly while backoff retries (1 s)', banner: 'Reconnecting after server disconnect: Loopflow server unavailable…', disabled: true, pane: 'Agents · ~/.lf/config.yaml',
-              why: '<strong>Safe pause:</strong> Last good values stay visible, <code>editsDisabled</code> stays true so nothing is silently lost, pending confirmations release, and <code>observe()</code> schedules a 1 s retry.' }
+             agent: 'Use starting preference (Default)', def: 'claude',
+             why: '<strong>What broke:</strong> <code>observe()</code> set <code>reading.failed(...)</code> and returned permanently, freezing both scopes.' },
+      next: { title: 'Edits pause while backoff retries (1 s → 30 s)', banner: 'Loopflow server unavailable or owned by another account', disabled: true, pane: 'Agents · ~/.lf/config.yaml',
+              agent: 'Use starting preference (Default)', def: 'claude',
+              why: '<strong>Safe pause:</strong> Last good values stay visible, edits pause (typed input while down is dropped cleanly), pending confirmations release, and backoff retries automatically.' }
     },
     back: {
       old: { title: 'Still frozen even though server is healthy', banner: true, disabled: true, pane: 'Agents · ~/.lf/config.yaml',
-             why: '<strong>Stuck dead:</strong> Server is back up and <code>Appearance</code>/main windows already recovered, but <code>personal</code> and <code>project</code> stay disabled until manual Refresh or reopening Settings.' },
+             agent: 'Use starting preference (Default)', def: 'claude',
+             why: '<strong>Stuck dead:</strong> Server is back up, but <code>personal</code> and <code>project</code> stay disabled until manual Refresh or reopening Settings.' },
       next: { title: 'Automatically reconnected & editable again', banner: null, disabled: false, pane: 'Agents · ~/.lf/config.yaml',
-              why: '<strong>Self-healed:</strong> Next backoff tick opens a fresh <code>config.scope</code> stream (and refreshes catalog), clears the banner, re-enables controls, and resumes live updates.' }
+              agent: 'Use starting preference (Default)', def: 'claude',
+              why: '<strong>Self-healed (verified in QA round 5):</strong> Next backoff tick refreshes <code>config.catalog</code> and opens a fresh <code>config.scope</code> stream, clearing the banner and resetting delay to 1 s.' }
     },
     switch: {
-      old: { title: 'Project & Wave Config is ALSO permanently dead', banner: true, disabled: true, pane: 'Project & Wave Config · loopflow',
-             why: '<strong>Two independent dead scopes:</strong> Even if the user clicked Refresh in <em>Agents</em>, <code>project.observe()</code> exited during the restart and stays dead until refreshed separately.' },
-      next: { title: 'Project & Wave Config already reconnected in parallel', banner: null, disabled: false, pane: 'Project & Wave Config · loopflow',
-              why: '<strong>Both scopes live:</strong> Both <code>personal.observe()</code> and <code>project.observe()</code> ran their own backoff loop, so switching panes lands on a fresh, editable scope.' }
+      old: { title: 'Project & Wave Config is also permanently dead', banner: true, disabled: true, pane: 'Project & Wave Config · loopflow',
+             agent: 'Use starting preference (Default)', def: 'codex (from Shared repository settings)',
+             why: '<strong>Two dead scopes:</strong> Switching panes reveals a second frozen form that also needs a separate manual Refresh.' },
+      next: { title: 'Project scope live; edit saves via SettingDeclaration', banner: null, disabled: false, pane: 'Project & Wave Config · loopflow',
+              agent: 'claude (from My repository settings)', def: 'codex (from Shared repository settings)',
+              why: '<strong>Live & synchronized:</strong> <code>project</code> reconnected in parallel; editing <code>Primary agent</code> writes <code>agent: claude</code> against its captured <code>SettingDeclaration</code>, keeps <code>git status</code> clean, and awaits <code>confirmReading()</code> before the next click.' }
     }
   };
 
@@ -336,6 +361,8 @@
     oldBanner.hidden = !s.old.banner;
     oldForm.classList.toggle('disabled-form', s.old.disabled);
     oldPane.textContent = s.old.pane;
+    oldAgent.textContent = s.old.agent;
+    oldDefault.textContent = s.old.def;
     oldWhy.innerHTML = s.old.why;
 
     newTitle.textContent = s.next.title;
@@ -343,6 +370,8 @@
     if (s.next.banner) newBannerText.textContent = s.next.banner;
     newForm.classList.toggle('disabled-form', s.next.disabled);
     newPane.textContent = s.next.pane;
+    newAgent.textContent = s.next.agent;
+    newDefault.textContent = s.next.def;
     newWhy.innerHTML = s.next.why;
   }
 

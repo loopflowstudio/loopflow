@@ -1,0 +1,13 @@
+at: 865509b31f94cc022b7b0f20d51c7f1592e720fb
+first:
+  - path: docs/surfaces.md
+    why: Follow the second sidebar row through a conversation turn.
+  - path: rust/loopflow-storage/src/sqlite/selections.rs
+    why: Saved position, rank and ID determine order.
+  - path: rust/loopflow/src/lf/commands/waves.rs
+    why: Compare roadmap, Wave, repository and phone readings.
+  - path: swift/LoopflowTests/TaskConceptTests.swift
+    why: Replay the turn with the second Task selected.
+hide:
+  - path: tests/fixtures/dto/task_concepts.json
+    why: Rust observations exercised by the Desktop tests.

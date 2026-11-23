@@ -162,27 +162,44 @@ impl OsProcess {
         std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
     }
 
-    /// Only this owned OS session, without reading unrelated processes' argv.
+    pub(crate) fn session_id(pid: u32) -> io::Result<Option<u32>> {
+        // SAFETY: getsid only reads kernel metadata.
+        let session = unsafe { libc::getsid(pid as i32) };
+        if session == -1 {
+            let error = io::Error::last_os_error();
+            return if error.raw_os_error() == Some(libc::ESRCH) {
+                Ok(None)
+            } else {
+                Err(error)
+            };
+        }
+        Ok(Some(session as u32))
+    }
+
+    /// Live members of an owned OS session, without reading arguments.
+    #[cfg(target_os = "macos")]
     pub fn session(session: u32) -> io::Result<Vec<Self>> {
-        #[cfg(target_os = "macos")]
-        let pids = macos::pids()?;
-        #[cfg(not(target_os = "macos"))]
-        let pids = std::fs::read_dir("/proc")?
-            .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse::<u32>().ok())
-            .collect::<Vec<_>>();
         let mut processes = Vec::new();
-        for pid in pids {
+        for pid in macos::pids()? {
             // SAFETY: getsid reads the kernel's session membership for this PID.
-            if unsafe { libc::getsid(pid as i32) } != session as i32 {
-                continue;
-            }
-            if let Some(process) = Self::read(pid)? {
-                if !process.has_exited() {
+            if unsafe { libc::getsid(pid as i32) } == session as i32 {
+                if let Some(process) = macos::read_name(pid)?.filter(|p| !p.has_exited()) {
                     processes.push(process);
                 }
             }
         }
         Ok(processes)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn session(session: u32) -> io::Result<Vec<Self>> {
+        let mut members = query_column(
+            &["-s", &session.to_string()],
+            "comm",
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )?;
+        members.retain(|member| !member.has_exited());
+        Ok(members)
     }
 
     /// The executable file `pid` runs, resolved by the kernel rather than the

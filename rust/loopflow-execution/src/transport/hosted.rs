@@ -40,11 +40,10 @@ fn end_jobs(source: &Source, terminal: &TerminalId) -> Result<()> {
         return Ok(());
     }
     // The holder made the shell its session's leader.
-    let jobs = crate::os_process::TerminalJobs::new(source.pid());
+    let session = source.pid();
     let terminal = terminal.clone();
     std::thread::spawn(move || {
-        let settled = jobs
-            .terminate()
+        let settled = crate::os_process::terminate_shell_jobs(session)
             .map_err(anyhow::Error::from)
             .and_then(|()| Ok(crate::journal::process_ledger()?.settle_shell_jobs(&terminal)?));
         if let Err(error) = settled {

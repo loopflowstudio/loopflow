@@ -55,8 +55,12 @@ pub fn spawn(
             .into_owned();
         Ok(store.with_session_attachment(session, attachment, || {
             store.record_agent_process_launch(session, attachment, command.as_std(), false)?;
-            let spawned =
-                crate::os_process::spawn_agent_process(command, lifeline, record_identity(owner));
+            let spawned = crate::os_process::spawn_agent_process(
+                command,
+                kind,
+                lifeline,
+                record_identity(owner),
+            );
             if spawned.is_err() {
                 store.record_agent_process_exit(session, attachment, false)?;
             }
@@ -468,10 +472,14 @@ fn close_agent_process(pid: u32, started: i64) -> Result<()> {
             "recorded process does not lead its own process group"
         ));
     }
-    // The leader may exit before its helpers. Use the same group-wide death
-    // judgment as scheduled settlement rather than ending on leader death.
-    terminate_process_group(pid)
-        .map_err(|error| anyhow!("AgentProcess group {pid} death is unresolved: {error}"))
+    // A worker owns its OS session, including jobs that outlived their
+    // immediate parent. Other providers own only their recorded group.
+    match OsProcess::session_id(pid)? {
+        Some(session) if session == pid => crate::os_process::terminate_worker_jobs(pid, started),
+        Some(_) => terminate_process_group(pid)
+            .map_err(|error| anyhow!("AgentProcess group {pid} death is unresolved: {error}")),
+        None => confirmed_group_death(pid),
+    }
 }
 
 // Leader death alone neither proves group death nor authorizes signaling helpers.
@@ -639,35 +647,40 @@ fn is_agent_process(process: &OsProcess, started_at: i64, provider: Option<&str>
         .is_some_and(|kind| kind.harness().recognizes_driver(&process.command))
 }
 
-/// Stop the AgentProcess's group, then any group one of its descendants leads.
-/// Identity is proven again here, immediately before the first signal.
+/// Reap a verified provider and its jobs. Providers without a private OS
+/// session can still have attached helpers leading their own groups.
 fn terminate_agent_process(pid: u32, started_at: i64, provider: Option<&str>) -> Result<()> {
     let refused = |reason: &str| anyhow::anyhow!("AgentProcess {pid} {reason}");
-    let processes = OsProcess::sample(time::OffsetDateTime::now_utc().unix_timestamp())?;
-    let descendants = descendant_group_leaders(pid, &processes);
+    let descendants = if OsProcess::session_id(pid)? == Some(pid) {
+        Vec::new()
+    } else {
+        descendant_group_leaders(pid, &OsProcess::sample_names()?)
+    };
     if !OsProcess::read(pid)?
         .as_ref()
         .is_some_and(|process| is_agent_process(process, started_at, provider))
     {
         return Err(refused("is no longer the recorded process"));
     }
-    terminate_process_group(pid).map_err(|error| refused(&format!("did not exit: {error}")))?;
-    for (leader, leader_started_at) in descendants {
-        // Most exit with the AgentProcess. One that survives is still the process
-        // sampled above only if its start time is unchanged.
-        if OsProcess::read(leader)?.is_some_and(|process| {
-            process.pgid == leader && process.matches_start(leader, leader_started_at)
-        }) {
-            if let Err(error) = terminate_process_group(leader) {
-                tracing::warn!(
-                    pid,
-                    leader,
-                    %error,
-                    "AgentProcess descendant group outlived its AgentProcess"
-                );
+    close_agent_process(pid, started_at)?;
+    let mut failures = Vec::new();
+    for (leader, birth) in descendants {
+        let result = match OsProcess::read(leader) {
+            Ok(Some(process)) if process.pgid == leader && process.matches_start(leader, birth) => {
+                terminate_process_group(leader)
             }
+            Ok(_) => continue,
+            Err(error) => Err(error.into()),
+        };
+        if let Err(error) = result {
+            failures.push(format!("group {leader}: {error}"));
         }
     }
+    anyhow::ensure!(
+        failures.is_empty(),
+        "AgentProcess {pid} has unresolved descendants: {}",
+        failures.join(", ")
+    );
     Ok(())
 }
 

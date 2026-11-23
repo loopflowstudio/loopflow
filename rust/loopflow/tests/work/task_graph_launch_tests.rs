@@ -2209,6 +2209,74 @@ fn a_question_with_nobody_there_ends_the_step() {
     }
 }
 
+/// The tool's shell exits after starting a background build in its own group.
+/// Only the worker's OS session still ties that build to the Task.
+#[test]
+fn interrupt_stops_a_reparented_build_in_the_workers_session() {
+    use loopflow_execution::process::OsProcess;
+    use loopflow_execution::store::ProcessIdentityEvidence;
+
+    let task = GraphTask::with_tools(&[("claude", &holding_claude())]);
+    define_worker_graph(&task);
+    let home = task.home.path();
+    let pipe = home.join("build-input");
+    assert!(Command::new("mkfifo")
+        .arg(&pipe)
+        .status()
+        .unwrap()
+        .success());
+    // Closing the test's writer releases the job even if an assertion fails.
+    let _writer = fs::File::options()
+        .read(true)
+        .write(true)
+        .open(&pipe)
+        .unwrap();
+    fs::write(home.join("release"), "").unwrap();
+    fs::write(home.join("hold-turn"), "").unwrap();
+    fs::write(
+        home.join("tool_turn.py"),
+        r#"import os, signal, subprocess
+from pathlib import Path
+home = Path(os.environ['LF_HOME'])
+# Both processes ignore TERM and stay alive until the test closes its writer.
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+with (home / 'build-input').open('rb') as pipe:
+    def start(**group):
+        return subprocess.Popen(['/bin/cat'], stdin=pipe, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, **group).pid
+    (home / 'build').write_text(str(start(preexec_fn=os.setpgrp)))
+    (home / 'daemon').write_text(str(start(start_new_session=True)))
+"#,
+    )
+    .unwrap();
+
+    let started = task.run(&["task", "run", "INF-123", "worker", "-a", "claude"]);
+    assert!(started.status.success(), "{started:?}");
+    // The provider reports "holding" after the tool's shell has exited.
+    wait_for("the worker's turn", || home.join("holding").exists());
+    let job = |name| {
+        let pid = fs::read_to_string(home.join(name))
+            .unwrap()
+            .parse()
+            .unwrap();
+        OsProcess::read(pid).unwrap().unwrap()
+    };
+    let build = job("build");
+    let daemon = job("daemon");
+    assert_eq!(build.pgid, build.pid);
+
+    task.ok(&["task", "interrupt", "INF-123"]);
+    let stopped = task.ran(started);
+    assert_eq!(stopped.code, Some(130), "{}", stopped.text);
+    let live = |job: &OsProcess| {
+        OsProcess::read(job.pid)
+            .unwrap()
+            .is_some_and(|p| p.evidence(job.started_at) == ProcessIdentityEvidence::Live)
+    };
+    assert!(!live(&build), "build survived the worker");
+    assert!(live(&daemon), "interrupt stopped a detached service");
+}
+
 /// `lf task interrupt` ends a worker's turn while it runs: the turn is recorded
 /// interrupted, nothing starts the run again, and the next `lf task run` takes
 /// the step up and moves the Graph on.

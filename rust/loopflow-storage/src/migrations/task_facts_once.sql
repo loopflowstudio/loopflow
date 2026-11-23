@@ -44,7 +44,7 @@ SELECT g.lf_process_id AS run, coalesce(
      WHERE up.path!='' OR substr(g.cwd,1,1)='/' OR g.cwd=''
      ORDER BY length(up.path) DESC, c.task_id LIMIT 1),
     (SELECT s.task_id FROM agent_sessions s
-     WHERE s.id=g.caller_session_id AND coalesce(s.primary_scope,'task')='task')) AS task_id
+     WHERE s.id=g.caller_session_id AND s.primary_scope IS NULL)) AS task_id
 FROM graph_processes g WHERE g.task_id IS NULL;
 UPDATE graph_processes SET task_id=found.task_id
 FROM graph_run_tasks found
@@ -83,15 +83,10 @@ BEGIN UPDATE tasks SET planning_completed=(NEW.planning_state IS 'completed') WH
 -- leaving: tracker_projects.task_order_json LOO-877
 -- leaving: pm_projects.task_order_json LOO-877
 
--- A Task's primary conversation will be marked on its own row, as a
--- repository's and a Wave's are: `primary_scope='task'`, with the row's
--- `task_id` naming the Task. Released lf reads and writes
--- `task_primary_sessions`, so it stays the primary's home until LOO-877 moves
--- writers to the mark; the CHECK accepts it now. SQLite cannot alter a CHECK,
--- so the table is rebuilt with its column order, indexes and triggers.
--- The same rebuild drops `work_source='inherited'`, unwritten since
--- 2026-10-07: those rows declared their Task through the Session that started
--- them, which is `declared`.
+-- `work_source='inherited'` goes, unwritten since 2026-10-07: those rows
+-- declared their Task through the Session that started them, which is
+-- `declared`. SQLite cannot alter a CHECK, so the table is rebuilt with its
+-- column order, indexes and triggers.
 PRAGMA legacy_alter_table = ON;
 CREATE TABLE agent_sessions_task_primary (
     id TEXT PRIMARY KEY NOT NULL,
@@ -113,13 +108,12 @@ CREATE TABLE agent_sessions_task_primary (
     skill TEXT,
     provider TEXT,
     model TEXT,
-    primary_scope TEXT CHECK (primary_scope IN ('repository', 'wave', 'task')), agent_process_id TEXT, transport_lf_process_id TEXT, fence_locator TEXT, moved_to_machine_id TEXT, held_terminal_id TEXT REFERENCES held_terminals(id), skill_version TEXT, opened_at INTEGER, transition TEXT, departed_attachment TEXT, departure TEXT, agent_started_at INTEGER, agent_pid INTEGER, agent_os_started_at INTEGER, agent_ended_at INTEGER, agent_exit_code INTEGER, agent_launcher_lf_process_id TEXT, agent_spawn_state TEXT
+    primary_scope TEXT CHECK (primary_scope IN ('repository', 'wave')), agent_process_id TEXT, transport_lf_process_id TEXT, fence_locator TEXT, moved_to_machine_id TEXT, held_terminal_id TEXT REFERENCES held_terminals(id), skill_version TEXT, opened_at INTEGER, transition TEXT, departed_attachment TEXT, departure TEXT, agent_started_at INTEGER, agent_pid INTEGER, agent_os_started_at INTEGER, agent_ended_at INTEGER, agent_exit_code INTEGER, agent_launcher_lf_process_id TEXT, agent_spawn_state TEXT
     CHECK(agent_spawn_state IN ('reserved','spawn_requested','spawn_failed','exited')), agent_command TEXT, agent_interactive INTEGER CHECK(agent_interactive IN (0,1)), agent_endpoint TEXT, agent_inbox TEXT, attachment_token TEXT, attached_lf_process_id TEXT, attached_pid INTEGER, attached_os_started_at INTEGER, attached_terminal_id TEXT,
     starts_since_turn INTEGER NOT NULL DEFAULT 0,
     last_started_at INTEGER,
     start_failure TEXT,
-    agent_socket TEXT,
-    CHECK (primary_scope IS NOT 'task' OR task_id IS NOT NULL)
+    agent_socket TEXT
 );
 INSERT INTO agent_sessions_task_primary(id,current_capture,title,title_source,completed_at,created_at,request,interactive,repo,provider_thread,task_id,wave_id,work_source,bound_at,input_published,cwd,skill,provider,model,primary_scope,agent_process_id,transport_lf_process_id,fence_locator,moved_to_machine_id,held_terminal_id,skill_version,opened_at,transition,departed_attachment,departure,agent_started_at,agent_pid,agent_os_started_at,agent_ended_at,agent_exit_code,agent_launcher_lf_process_id,agent_spawn_state,agent_command,agent_interactive,agent_endpoint,agent_inbox,attachment_token,attached_lf_process_id,attached_pid,attached_os_started_at,attached_terminal_id,starts_since_turn,last_started_at,start_failure,agent_socket)
 SELECT s.id,s.current_capture,s.title,s.title_source,s.completed_at,s.created_at,s.request,s.interactive,s.repo,s.provider_thread,s.task_id,s.wave_id,CASE s.work_source WHEN 'inherited' THEN 'declared' ELSE s.work_source END,s.bound_at,s.input_published,s.cwd,s.skill,s.provider,s.model,s.primary_scope,s.agent_process_id,s.transport_lf_process_id,s.fence_locator,s.moved_to_machine_id,s.held_terminal_id,s.skill_version,s.opened_at,s.transition,s.departed_attachment,s.departure,s.agent_started_at,s.agent_pid,s.agent_os_started_at,s.agent_ended_at,s.agent_exit_code,s.agent_launcher_lf_process_id,s.agent_spawn_state,s.agent_command,s.agent_interactive,s.agent_endpoint,s.agent_inbox,s.attachment_token,s.attached_lf_process_id,s.attached_pid,s.attached_os_started_at,s.attached_terminal_id,s.starts_since_turn,s.last_started_at,s.start_failure,s.agent_socket
@@ -139,10 +133,6 @@ CREATE UNIQUE INDEX agent_sessions_primary_repository ON agent_sessions(repo)
     WHERE primary_scope = 'repository' AND completed_at IS NULL;
 CREATE UNIQUE INDEX agent_sessions_primary_wave ON agent_sessions(wave_id)
     WHERE primary_scope = 'wave' AND completed_at IS NULL;
--- A Task has one primary, finished or not. The index becomes unique in
--- LOO-877, with the drop of `task_primary_sessions`.
-CREATE INDEX agent_sessions_primary_task ON agent_sessions(task_id)
-    WHERE primary_scope = 'task';
 CREATE INDEX agent_sessions_provider_thread ON agent_sessions(provider_thread)
     WHERE provider_thread IS NOT NULL;
 CREATE INDEX agent_sessions_transport ON agent_sessions(transport_lf_process_id)

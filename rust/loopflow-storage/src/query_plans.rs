@@ -13,7 +13,7 @@ use rusqlite::OptionalExtension;
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
-const GROWING: [&str; 14] = [
+const GROWING: [&str; 15] = [
     "agent_sessions",
     "processes",
     "session_activity",
@@ -24,6 +24,7 @@ const GROWING: [&str; 14] = [
     "task_events",
     "task_moves",
     "task_ownership",
+    "task_primary_sessions",
     "task_retirements",
     "task_auto",
     "task_update_readings",
@@ -38,7 +39,7 @@ const GROWING: [&str; 14] = [
 /// `task_checkouts` retains the November 12 measurement of 838 checkouts;
 /// `tasks_abandoned` counts that store's 259 abandoned Tasks, and
 /// `task_checkouts_parent_pr` its 11 parent PRs;
-/// `agent_sessions_primary_task` takes the 319 primaries `tasks_primary_session` counted.
+/// `task_primary_sessions` takes the 319 primaries `tasks_primary_session` counted.
 /// `task_auto` counts the 186 marks that store's 174 shipping and 12 stopped
 /// Tasks backfill to.
 /// `task_ownership` counts November 13's 895 entries over 880 Tasks.
@@ -55,7 +56,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_delivered',
          'steer_adapters','projects','waves',
          'repository_plans','steers',
-         'task_retirements','task_checkouts','task_auto',
+         'task_retirements','task_checkouts','task_primary_sessions','task_auto',
          'task_ownership','task_update_readings','session_activity');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
          ('agent_sessions','agent_sessions_agent_process','17171 1'),
@@ -137,8 +138,9 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('task_checkouts','task_checkouts_parent_pr','11 2'),
          ('task_ownership','idx_task_ownership_task','895 1'),
          ('task_ownership','sqlite_autoindex_task_ownership_1','895 1'),
-         ('agent_sessions','agent_sessions_primary_task','319 1'),
+         ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_1','319 1'),
          ('task_auto','sqlite_autoindex_task_auto_1','186 1'),
+         ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_2','319 1'),
          ('tasks','idx_tasks_issue_identifier','1219 1'),
          ('tasks','idx_tasks_project','1219 20 1'),
          ('tasks','idx_tasks_repository','1219 134 22 2'),

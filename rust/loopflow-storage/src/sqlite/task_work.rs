@@ -34,9 +34,9 @@ fn tasks(selector: &str) -> String {
 }
 
 /// Whether a Session counts toward its `task_id`: Repository and Wave
-/// primaries keep their own scope; a Task's primary is one of its own.
+/// primaries keep their own scope.
 pub(super) fn counts_for_task(session: &str) -> String {
-    format!("coalesce({session}.primary_scope,'task')='task'")
+    format!("{session}.primary_scope IS NULL")
 }
 
 /// A Session belongs to the Task it recorded when it was created.

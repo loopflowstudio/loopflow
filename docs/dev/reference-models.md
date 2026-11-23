@@ -199,9 +199,10 @@ provider generation in caller provenance, turn origin and Program Status.
 | Owner | Authoritative fields and operations |
 | --- | --- |
 | `processes` | Leaving (LOO-965). Written only by a released lf during the upgrade window; triggers copy its rows onto the owning Session, Graph run or step, and agent rows are copied back for a released holder's fence. No reader in this lf except the released-lf skew inventory. |
-| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, the scope it is primary for (`primary_scope`: repository, Wave or Task), native identity, the current AgentProcess and its attachment; reserve, attach, resume, bind and rename; historical feedback/completion retained |
+| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, the scope it is primary for (`primary_scope`: repository or Wave), native identity, the current AgentProcess and its attachment; reserve, attach, resume, bind and rename; historical feedback/completion retained |
 | `tasks` | Shared planning row: identity, repository, project, title, description, state, rank and tracker revision; no Machine-local column |
 | `task_checkouts` | This Machine's checkout of a Task (worktree path, branch, base commit, parent PR); absent on every other Machine |
+| `task_primary_sessions` | The conversation this Machine opens for a Task, with or without a checkout; absent on every other Machine |
 | `task_ownership` | Append-only `claim`/`unclaim` entries (`own_…`; `lf task unassign` writes `unclaim`, shown as unassign) with person, the Machine they name, the Machine that wrote them and time; a move is a claim naming another Machine, and earlier `handoff` entries read as one |
 | `projects` | A Wave's plan: stable local identity, optional provider binding, status, prose, KRs and targets; the default graph belongs to the Wave |
 | `waves` | Stable identity and repository address; objective, memory and instruments are read from checkout files |

@@ -95,3 +95,12 @@ pub struct SessionSteerPage {
     pub next_after: Option<i64>,
     pub pending: i64,
 }
+
+/// A steer the server read that names `session`, an interactive Session
+/// that has not read it; `identity` is its unfinished AgentProcess, if any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SteerWake {
+    pub steer: String,
+    pub session: String,
+    pub identity: Option<(u32, i64)>,
+}

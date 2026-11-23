@@ -2213,7 +2213,7 @@ pub fn task_create(
         super::planning_sync::sync_after_save(
             &store,
             &main.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+            Some(&ActionOwner::Task(task.id.clone())),
         )
         .await;
         store
@@ -2273,7 +2273,7 @@ pub(crate) fn sync_admitted(main: &Path, task: &loopflow_model::durable::TaskId)
         super::planning_sync::sync_after_save(
             &store,
             &repo,
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.clone()),
+            Some(&ActionOwner::Task(task.clone())),
         )
         .await;
         super::task_ownership::assert_assignee(&store.sqlite, main, task).await;
@@ -2917,7 +2917,7 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
         super::planning_sync::sync_after_save(
             &store,
             &repo.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+            Some(&ActionOwner::Task(task.id.clone())),
         )
         .await;
         Ok(task)
@@ -2978,11 +2978,8 @@ pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsRes
                 .map_err(|error| task_error(format!("{error:#}")))?;
             return carriers_synced(&store, &repo, &task);
         };
-        let project = task
-            .project_id
-            .clone()
-            .map(loopflow_storage::sqlite::tracker_actions::ActionOwner::Project);
-        let owner = loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone());
+        let project = task.project_id.clone().map(ActionOwner::Project);
+        let owner = ActionOwner::Task(task.id.clone());
         for owner in project.iter().chain([&owner]) {
             super::tracker::drain::drain_repository(
                 &store,
@@ -3153,7 +3150,7 @@ async fn sync_completion(store: &SharedStore, task: &Task) -> OpsResult<()> {
     super::planning_sync::sync_after_save(
         store,
         &repo.to_string_lossy(),
-        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+        Some(&ActionOwner::Task(task.id.clone())),
     )
     .await;
     Ok(())
@@ -3372,7 +3369,7 @@ pub fn task_edit(
         super::planning_sync::sync_after_save(
             &store,
             &repository_for_task(&store, &task)?.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+            Some(&ActionOwner::Task(task.id.clone())),
         )
         .await;
         Ok(TaskEdit {
@@ -3421,7 +3418,7 @@ pub fn task_move_membership(repo: &Path, issue: &str, wave: Option<&str>) -> Ops
         super::planning_sync::sync_after_save(
             &store,
             &repository_for_task(&store, &task)?.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+            Some(&ActionOwner::Task(task.id.clone())),
         )
         .await;
         Ok(TaskEdit {
@@ -3725,7 +3722,7 @@ pub(crate) async fn append_task_comment_async(
     super::planning_sync::sync_after_save(
         store,
         &repository_for_task(store, task)?.to_string_lossy(),
-        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+        Some(&ActionOwner::Task(task.id.clone())),
     )
     .await;
     Ok(id)

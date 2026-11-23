@@ -14,6 +14,7 @@ use loopflow_model::id::WaveId;
 use loopflow_storage::planning_sync::{ActionOwnerKind, LostAnswer, TrackerActionStatus};
 use loopflow_storage::sqlite::tracker_actions::{ActionOwner, ActionPhase};
 
+use super::tracker::drain::Scope;
 use super::{OpsError, OpsResult};
 
 fn message(error: impl std::fmt::Display) -> OpsError {
@@ -47,10 +48,10 @@ pub(crate) async fn find_task(
 /// runs after its reply; queued actions are durable rows, so a server that
 /// stops before it runs loses nothing. Failure leaves its successful local
 /// mutation and durable pending state intact.
-pub(crate) async fn sync_after_save(store: &Store, repo: &str, saved: &ActionOwner) {
-    let (deferred, owner) = (repo.to_owned(), saved.clone());
+pub(crate) async fn sync_after_save(store: &Store, repo: &str, saved: Option<&ActionOwner>) {
+    let (deferred, owner) = (repo.to_owned(), saved.cloned());
     if crate::journal::request::after_reply(move || {
-        after_reply(|store| async move { sync_saved(&store, &deferred, &owner).await })
+        after_reply(|store| async move { sync_saved(&store, &deferred, owner.as_ref()).await })
     })
     .is_none()
     {
@@ -82,7 +83,7 @@ where
     }
 }
 
-async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
+async fn sync_saved(store: &Store, repo: &str, saved: Option<&ActionOwner>) {
     let attempt = async {
         if !super::tracker::connected(repo) {
             return super::plan_carriers::send(store, repo)
@@ -92,7 +93,7 @@ async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
         super::tracker::drain::drain_repository(
             store,
             repo,
-            super::tracker::drain::Scope::First(saved),
+            saved.map_or(Scope::All, Scope::First),
             super::tracker::drain::Bound::PASS,
         )
         .await?;
@@ -148,9 +149,7 @@ pub fn answer_lost(repo: &Path, id: &str, answer: LostAnswer) -> OpsResult<Track
                 ))),
                 _ => WaveId::parse(&line.owner_id).ok().map(ActionOwner::Wave),
             };
-            if let Some(owner) = owner {
-                sync_after_save(&store, &repo, &owner).await;
-            }
+            sync_after_save(&store, &repo, owner.as_ref()).await;
             Ok(line)
         })
 }

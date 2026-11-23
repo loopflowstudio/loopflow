@@ -9,6 +9,7 @@ use serde_json::json;
 
 use super::test_fixture::{now, Fixture, PlanningEnvironment};
 use super::LINEAR_TEST_CONTEXT;
+use crate::ops::wave_lifecycle;
 use crate::ops::NullProgress;
 use loopflow_model::durable::WorkStatus;
 use loopflow_storage::sqlite::tracker_actions::ActionPhase;
@@ -17,6 +18,84 @@ use loopflow_storage::work::task::{
 };
 
 use crate::test_support::planning_tasks::*;
+
+#[test]
+fn connect_links_a_new_wave_without_creating_a_linear_project() {
+    with_planning_task(|runtime, _, repo, _, state| {
+        super::test_fixture::commit_planning_repo(repo);
+        let existing = json!({
+            "id": "refunds-project", "name": "Refunds", "description": "", "content": "",
+            "status": {"type": "started"}, "teams": {"nodes": [{"id": "team-1"}]}
+        });
+        {
+            let mut provider = runtime.block_on(state.lock());
+            provider.export_mode = true;
+            provider.extra_projects.push(existing.clone());
+        }
+        let result = super::connect(
+            repo,
+            &super::LinearInitOptions {
+                wave: Some("ops".into()),
+                project: Some("Refunds".into()),
+                ..Default::default()
+            },
+            &NullProgress,
+        )
+        .unwrap();
+
+        assert_eq!(result.project_id.as_deref(), existing["id"].as_str());
+        assert!(!result.created);
+        let provider = runtime.block_on(state.lock());
+        assert!(!provider.operations.contains_key("DeliverProjectCreation"));
+        assert_eq!(provider.extra_projects, [existing]);
+    });
+}
+
+#[test]
+fn adding_and_renaming_waves_send_their_projects_ahead_of_older_work() {
+    with_planning_task(|runtime, fixture, repo, _, state| {
+        super::test_fixture::commit_planning_repo(repo);
+        runtime.block_on(async {
+            let repo_key = repo.to_str().unwrap();
+            for n in 0..(2 * crate::ops::tracker::drain::Bound::PASS.requests) {
+                fixture
+                    .store
+                    .create_wave(&crate::work::wave::Wave::new(
+                        loopflow_model::id::WaveId::new(),
+                        format!("older-{n}"),
+                        repo_key.into(),
+                    ))
+                    .await
+                    .unwrap();
+            }
+            fixture
+                .store
+                .sqlite
+                .enqueue_tracker_creations(
+                    repo_key,
+                    loopflow_storage::planning_sync::TrackerKind::Linear,
+                )
+                .unwrap();
+            state.lock().await.export_mode = true;
+
+            wave_lifecycle::add(repo, "billing", None).await.unwrap();
+            assert!(state
+                .lock()
+                .await
+                .extra_projects
+                .iter()
+                .any(|p| p["name"] == "billing"));
+
+            wave_lifecycle::rename(repo, "product", Some("payments"), None)
+                .await
+                .unwrap();
+            let provider = state.lock().await;
+            let renamed = provider.project_fields.as_ref().unwrap();
+            assert_eq!(renamed["id"], "project-1");
+            assert_eq!(renamed["name"], "payments");
+        });
+    });
+}
 
 #[test]
 fn native_runner_is_quiet_until_its_turn_ends_codex_task_headless() {

@@ -408,7 +408,8 @@ lf wave plan connect billing 'Refunds'             # or link the Linear Project 
 lf wave plan connect billing https://linear.app/acme/project/refunds-1a2b3c4d5e6f
 ```
 
-A Linear Project no Wave links stays out of Loopflow.
+You can connect a new Wave directly to an existing Linear Project. A Linear
+Project no Wave links stays out of Loopflow.
 
 ### Offline queue and conflict resolution
 
@@ -457,7 +458,7 @@ A Task in no Wave goes to Linear right away, as a team issue.
 ## Waves
 
 A Wave groups related Tasks under a lasting objective (`GOAL.md`), curated team
-memory (`MEMORY.md`), its Projects, and shared defaults. Every Task in the Wave
+memory (`MEMORY.md`), its Project, and shared defaults. Every Task in the Wave
 starts with that context.
 
 ### Goal and memory
@@ -516,7 +517,7 @@ See [Configuration](config.md) for the complete precedence rules.
 ```bash
 lf --wave billing wave-operate "invoices first"   # one finite pass over its Tasks
 lf resume --wave billing                          # open the Wave's ongoing conversation
-lf wave status billing                            # Projects, Tasks and runtime state
+lf wave status billing                            # the Wave's Project, Tasks and runtime state
 ```
 
 `wave-operate` reviews every started Task you own (leaving running Graphs alone
@@ -551,11 +552,10 @@ The Project has a name, a summary and a status, and `lf wave status` and
 rename it or mark it completed in Linear, and `lf wave sync` shows the same
 here. An ended Project is still the Wave's, and new Tasks still join it.
 
-A tracker holds an issue in a Project. A Task in a Wave is its Project's issue
-there, and another Machine reading the tracker lists it under that Wave. A
-Task with no Wave goes to the tracker as an issue in no Project, which other
-Machines do not read back. An issue made in the tracker joins the Wave whose
-Project it is in.
+In Linear, an issue in a linked Project appears under that Project's Wave on
+other Machines. A Task with no Wave goes to Linear as a Team issue with no
+Project. Other Machines syncing the Team import it as a Task with no Wave.
+Issues in unlinked Linear Projects stay out of Loopflow.
 
 `lf task move` puts a Task in the new Wave's Project. A started Task keeps its
 worktree and PR wherever it is.

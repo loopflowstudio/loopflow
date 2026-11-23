@@ -139,6 +139,18 @@ pub fn now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
+#[cfg(test)]
+pub(super) fn commit_planning_repo(repo: &std::path::Path) {
+    for args in [
+        &["config", "user.email", "fixture@example.com"][..],
+        &["config", "user.name", "Fixture Person"],
+        &["add", ".lf"],
+        &["commit", "-qm", "seed"],
+    ] {
+        crate::git::git_stdout(repo, args).unwrap();
+    }
+}
+
 pub fn token(access: &str, refresh: &str, expires_at: i64) -> ProviderToken {
     ProviderToken {
         provider: "linear".into(),

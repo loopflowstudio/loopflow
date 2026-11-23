@@ -24,6 +24,7 @@ use crate::store::{
 };
 use crate::work::wave::Wave;
 use loopflow_storage::planning::TrackerProject;
+use loopflow_storage::sqlite::tracker_actions::ActionOwner;
 use loopflow_storage::work::task::Task;
 use loopflow_storage::work::wave::normalize_wave_name;
 use serde::{Deserialize, Serialize};
@@ -599,10 +600,8 @@ pub fn connect(
 }
 
 /// Link a Wave's Project to a Linear Project in the repository Team: the one
-/// `options.project` names, else one Loopflow makes for it. Connecting never
-/// creates a Wave itself: a name the store does not know is added first, so
-/// its files and commit land on the main checkout like any other add; the
-/// repository's tracker setting is committed there too.
+/// `options.project` names, else one Loopflow makes for it. Register a new
+/// Wave locally so its Project can take the named link before any export.
 async fn connect_async(
     repo: &Path,
     options: &LinearInitOptions,
@@ -625,9 +624,9 @@ async fn connect_async(
         Some(registered) => registered,
         None => {
             progress.status(&format!("adding Wave {wave}"));
-            super::wave_lifecycle::add(repo, &wave, None).await?;
+            let added = super::wave_lifecycle::add_local(&store, repo, &wave, None).await?;
             store
-                .get_wave_at(&locator)
+                .get_wave(&added.id)
                 .await
                 .map_err(|error| OpsError::Message(error.to_string()))?
                 .ok_or_else(|| OpsError::Message(format!("Wave {wave} was not added")))?
@@ -716,7 +715,7 @@ async fn connect_async(
                 super::planning_sync::sync_after_save(
                     &store,
                     &repo.to_string_lossy(),
-                    &loopflow_storage::sqlite::tracker_actions::ActionOwner::Project(own.clone()),
+                    Some(&ActionOwner::Project(own.clone())),
                 )
                 .await;
             }
@@ -1964,10 +1963,7 @@ mod tests {
                     );
                     String::from_utf8(output.stdout).unwrap()
                 };
-                git(&["config", "user.email", "fixture@example.com"], &main);
-                git(&["config", "user.name", "Fixture Person"], &main);
-                git(&["add", "-A"], &main);
-                git(&["commit", "-q", "-m", "seed"], &main);
+                test_fixture::commit_planning_repo(&main);
                 let worktree = main.parent().unwrap().join("task");
                 git(
                     &[

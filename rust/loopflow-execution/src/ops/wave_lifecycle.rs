@@ -16,6 +16,7 @@ use crate::ops::{OpsError, OpsResult};
 use crate::store::Store;
 use crate::work::wave::Wave;
 use loopflow_model::id::WaveId;
+use loopflow_storage::sqlite::tracker_actions::ActionOwner;
 
 fn lifecycle_error(message: impl ToString) -> OpsError {
     OpsError::Message(message.to_string())
@@ -46,13 +47,24 @@ pub struct WaveAdded {
 /// Register a Wave, seed its authored files on the main checkout and commit
 /// them. Re-adding a live Wave changes nothing.
 pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<WaveAdded> {
+    let store = super::planning_sync::planning_store().await?;
+    let added = add_local(&store, repo, name, objective).await?;
+    sync_wave_project(&store, &added.main_checkout.to_string_lossy(), &added.id).await?;
+    Ok(added)
+}
+
+pub(crate) async fn add_local(
+    store: &Store,
+    repo: &Path,
+    name: &str,
+    objective: Option<&str>,
+) -> OpsResult<WaveAdded> {
     let main = crate::repository::discover(repo)
         .map_err(lifecycle_error)?
         .as_path()
         .to_path_buf();
     let _lifecycle = recovery::lock(&main)?;
     let locator = crate::work::wave::discover(&main, name).map_err(lifecycle_error)?;
-    let store = super::planning_sync::planning_store().await?;
     // A clone's authored Waves join the store with the first explicit write here.
     crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, &main.to_string_lossy())
         .map_err(lifecycle_error)?;
@@ -66,10 +78,10 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
     // Another Machine may have made a Wave of this name: read the plan first,
     // so this command joins that Wave and does not make a second.
     let created = !held().await? && {
-        super::plan_carriers::look_first(&store, &main).await;
+        super::plan_carriers::look_first(store, &main).await;
         !held().await?
     };
-    let wave = crate::work::wave::ensure_wave_row(&store, &main, locator.slug())
+    let wave = crate::work::wave::ensure_wave_row(store, &main, locator.slug())
         .await
         .map_err(lifecycle_error)?;
     if created {
@@ -82,12 +94,6 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
         &[authored_path(wave.slug())],
         &format!("lf wave add: {}", wave.slug()),
     );
-    super::planning_sync::sync_after_save(
-        &store,
-        &main.to_string_lossy(),
-        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(wave.id().clone()),
-    )
-    .await;
     let mut added = WaveAdded {
         id: wave.id().clone(),
         name: wave.slug().to_string(),
@@ -98,6 +104,12 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
     };
     added.summary = uncommitted_summary(&added.name, &added.files);
     Ok(added)
+}
+
+async fn sync_wave_project(store: &Store, repo: &str, wave: &WaveId) -> OpsResult<()> {
+    let project = store.sqlite.wave_project(wave).map_err(lifecycle_error)?;
+    super::planning_sync::sync_after_save(store, repo, Some(&ActionOwner::Project(project))).await;
+    Ok(())
 }
 
 /// Report authored files the main checkout could not commit.
@@ -465,9 +477,7 @@ pub fn remove(
             .retire_waves(&ids, "removed")
             .map_err(lifecycle_error)?;
         runtime.block_on(super::planning_sync::sync_after_save(
-            &store,
-            &repo_key,
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(ids[0].clone()),
+            &store, &repo_key, None,
         ));
     }
 
@@ -785,9 +795,8 @@ pub struct WaveRenamed {
     pub summary: Vec<String>,
 }
 
-/// Give a Wave a new address (and optionally another repository). Identity,
-/// Projects, Tasks and Sessions are untouched; `.lf/wave/<name>` moves on main
-/// with path references in other Waves' documents.
+/// Give a Wave a new address and rename its Project. The authored directory
+/// moves on main with path references in other Waves' documents.
 pub async fn rename(
     repo: &Path,
     wave: &str,
@@ -937,14 +946,7 @@ pub async fn rename(
         }
         operation.planning_done = true;
         recovery::save(&operation, &store)?;
-        super::planning_sync::sync_after_save(
-            &store,
-            &operation.target_repo,
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(
-                operation.waves[0].id.clone(),
-            ),
-        )
-        .await;
+        sync_wave_project(&store, &operation.target_repo, current.id()).await?;
     }
     let files = recovery::finish_files(&mut operation, &store, &main);
     let mut renamed = WaveRenamed {

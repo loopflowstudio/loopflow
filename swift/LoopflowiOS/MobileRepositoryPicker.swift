@@ -3,7 +3,7 @@ import SwiftUI
 
 struct MobileRepositoryPicker: View {
     let model: MobileTaskCreation
-    let theme: ThemeDefinition
+    @Environment(\.theme) private var theme
     @State private var search = ""
     @State private var refresh: Task<Void, Never>?
     @Environment(\.dismiss) private var dismiss

@@ -4,9 +4,18 @@ Read when the change reaches the iOS app's screens and a Simulator on the Machin
 
 Needs `lf server mobile --status` to say `"ready":true` and
 `~/.lf/mobile-same-device` to exist; both are the person's settings, so read
-them and stop if they are off. The carrier is the host's one Tailscale
-endpoint, so a private `LF_HOME` cannot stand in: the phone talks to the
+them and stop if they are off. Paired that way, the phone talks to the
 installed server and the real store.
+
+To put a branch server behind the phone, give a private Machine its own
+listener: start the branch `lf server run` with that `LF_HOME` (and `HOME`),
+`touch $LF_HOME/mobile-same-device`, then run the same binary's `lf server
+mobile`. Its server already answers with the same executable, so no launchd
+job is registered; the listener takes another port on the same tailnet name,
+and `lf server mobile --status` in that home prints the endpoint to type.
+Machine settings for the phone to read (`theme:`) go in `$LF_HOME/config.yaml`;
+New Task's portfolio is `$HOME/src`. "Forget Machine" in the Machine menu
+unpairs; the pairing survives `simctl uninstall`.
 
 ```sh
 brew install cameroncooke/axe/axe          # taps, typing, swipes and the accessibility tree, headless

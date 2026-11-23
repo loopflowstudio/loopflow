@@ -22,16 +22,20 @@ func machineConnectionMessage(_ error: any Error) -> String {
     return "Couldn’t connect. Check that both devices use the same Tailscale account and mobile access is enabled on the Machine."
 }
 
+/// The app's root: the paired Machine's Tasks in that Machine's theme, or pairing in Loopflow's.
 struct MachineConnectionView: View {
     @State private var savedMachine: SavedMachine?
     @State private var changingAddress = false
     @State private var error: String?
+    @State private var machineTheme = MachineTheme()
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        let theme = machineTheme.theme(dark: colorScheme == .dark)
         Group {
             if let savedMachine {
-                TaskListView(client: RemoteMobileClient(savedMachine: savedMachine, endpoint: .machine(savedMachine.endpoint)), onForget: forget,
-                    onChangeAddress: { changingAddress = true })
+                TaskListView(client: RemoteMobileClient(savedMachine: savedMachine, endpoint: .machine(savedMachine.endpoint)),
+                    machineTheme: machineTheme, onForget: forget, onChangeAddress: { changingAddress = true })
                     .id(savedMachine.endpoint)
             } else {
                 MachineAddressView(replacing: nil) { savedMachine = $0 }
@@ -49,12 +53,16 @@ struct MachineConnectionView: View {
             do { savedMachine = try MachineKeychain.load() }
             catch { self.error = error.localizedDescription }
         }
+        .onChange(of: savedMachine?.machineID, initial: true) { _, id in machineTheme.show(machineID: id) }
         .alert("Machine connection", isPresented: Binding(
             get: { error != nil },
             set: { if !$0 { error = nil } }
         )) {
             Button("OK") { error = nil }
         } message: { Text(error ?? "") }
+        .environment(\.theme, theme)
+        .environment(\.palette, theme.palette)
+        .environment(\.colorScheme, theme.colorScheme)
     }
 
     private func forget() {
@@ -77,8 +85,7 @@ struct MachineAddressView: View {
     @State private var error: String?
     @State private var operation: Task<Void, Never>?
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
-    private var theme: ThemeDefinition { colorScheme == .dark ? .dark : .light }
+    @Environment(\.theme) private var theme
 
     var body: some View {
         NavigationStack {

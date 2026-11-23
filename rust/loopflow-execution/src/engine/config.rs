@@ -89,11 +89,11 @@ pub fn explain(destination: &Destination, key: &str) -> Result<Explanation> {
     })
 }
 
-/// `config.theme`: the theme file Appearance owns at `path`, set to `value`
-/// when one is given, read otherwise.
-pub fn theme(path: &Path, value: Option<&str>) -> Result<Declaration> {
+/// `config.theme`: the Machine's `theme:` in `~/.lf/config.yaml`, set to
+/// `value` when one is given, read otherwise.
+pub fn theme(value: Option<&str>) -> Result<Declaration> {
     file_value(
-        path,
+        &crate::config::global_config_path(),
         &["theme"],
         "theme",
         value,

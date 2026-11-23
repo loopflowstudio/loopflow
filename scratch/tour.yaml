@@ -1,4 +1,4 @@
-at: 0754c253f36742ffd2ecac73d455dcff76a5fbe5
+at: 570dee919484cb7de33d8096c53c717dc617d597
 first:
   - path: swift/README.md
     why: Files walkthrough, rail, shortcuts and presentation
@@ -36,12 +36,14 @@ first:
     why: Checkout declarations and enclosing names
   - path: rust/loopflow/src/lf/commands/desktop.rs
     why: Address a path and lines from a terminal
+  - path: swift/LoopflowMac/FileJumps.swift
+    why: Clicked occurrences, lookup results and return history
   - path: swift/LoopflowMac/DesktopActions.swift
-    why: Present files beside the caller and retain focus
+    why: Route reading keys and present files beside the caller
   - path: swift/LoopflowMac/Views/TaskFilesView.swift
     why: Breadcrumb, responsive rail, update bar and HTML settling
   - path: swift/LoopflowMac/Views/TaskCodeReader.swift
-    why: Read gutter, selected lines and keyboard navigation
+    why: Hit-test and underline the clicked occurrence
   - path: swift/LoopflowMac/Views/ReviewStreamView.swift
     why: Visible Diff sides and the shared comment editor
   - path: swift/LoopflowMac/Views/TaskHTMLView.swift
@@ -52,8 +54,6 @@ first:
     why: Preview checkout files, grep matches and Task changes
   - path: swift/LoopflowMac/FileOutline.swift
     why: Live declarations from the reader’s syntax tree
-  - path: swift/LoopflowMac/FileJumps.swift
-    why: Reference and definition picks share return history
   - path: swift/LoopflowTests/TaskFilesTests.swift
     why: Mixed review batch, Find routing and peer reads
   - path: swift/LoopflowTests/DesktopPaneControlTests.swift

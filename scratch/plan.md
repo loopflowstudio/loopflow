@@ -130,10 +130,6 @@ Checks, each run once on this tree:
 - `tests/e2e/idle_wake.py` on OpenCode 2.2.1 and Pi 1.3.0 (Pi from nvm
   v24.22.2; not on this shell's PATH): passed.
 
-Then QA: reopen an OpenCode work session after changing `agent:`; the first
-turn answers on the new model, and a `/models` pick after it holds. Not run
-on a real model yet.
-
 Filed separately as LOO-1068, to run on the `autonomous` Graph once this merges: one owner for "a new provider
 process is idle" at its first boundary on every provider (3b), carrying 2a
 with it: a reopened work session with steers waiting starts a turn on every
@@ -154,7 +150,10 @@ before changing it. Chats keep the start-hook claim: nothing wakes a chat.
   "Reconnect OpenCode Console to continue", the fixture's `opencode` provider
   config never reaching the scripted model. `command -v opencode` is 2.0.32 on
   this Machine; 2.2.1 is `/opt/homebrew/bin/opencode`.
-- PR #1985 merged on 2026-11-19 at 18:46 UTC, before the idle-wake commits.
-  It was a squash, and the branch has no open PR: gate publishes the
-  idle-wake diff (`git diff 2a3b6d11d8 HEAD`) as a new one.
+- PR #1985 merged on 2026-11-19 (squash) before the idle-wake commits; this
+  diff is PR #1988, open. Gate updates it.
+- QA on a real model: reopen an OpenCode work session after changing
+  `agent:`; the first turn answers on the new model, a `/models` pick after
+  it holds, and an idle wake as the first turn of a reopen (`questions.md` 7)
+  also lands on the new model.
 - Complete LOO-1002 when this merges.

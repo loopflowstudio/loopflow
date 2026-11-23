@@ -2809,25 +2809,29 @@ final class WorkModel {
         }
     }
 
-    /// Open descendants of `task` in the loaded roadmap, breadth-first and cycle-safe.
+    func hasOpenChildren(_ task: RoadmapTask) -> Bool {
+        taskIndex.openChildren[task.task.id] != nil
+    }
+
     func openDescendants(of task: RoadmapTask) -> [RoadmapTask] {
-        var queue = [task.task.id]
-        var seen: Set<String> = [task.task.id]
+        let children = taskIndex.openChildren
         var descendants: [RoadmapTask] = []
-        let open = taskIndex.tasks.filter { !$0.isCompleted }
-        while !queue.isEmpty {
-            let parentId = queue.removeFirst()
-            for child in open where child.task.parentId == parentId && seen.insert(child.task.id).inserted {
+        var seen: Set<String> = [task.task.id]
+        var parents = [task.task.id]
+        var index = 0
+        while index < parents.count {
+            for child in children[parents[index]] ?? [] where seen.insert(child.task.id).inserted {
                 descendants.append(child)
-                queue.append(child.task.id)
+                parents.append(child.task.id)
             }
+            index += 1
         }
         return descendants
     }
 
     /// Complete immediately when no open children exist; confirm first when children will settle.
     func beginComplete(_ task: RoadmapTask) {
-        if openDescendants(of: task).isEmpty {
+        if !hasOpenChildren(task) {
             completeTaskFromInput(task)
         } else {
             navigation.completing = task.id
@@ -3121,6 +3125,7 @@ final class WorkModel {
         let key: (revision: Int, repoPath: String?)
         let tasks: [RoadmapTask]
         let positions: [String: Int]
+        let openChildren: [String: [RoadmapTask]]
         let waves: [String: WaveRoadmap]
     }
     @ObservationIgnored private var taskIndexCache: TaskIndex?
@@ -3135,13 +3140,17 @@ final class WorkModel {
         } ?? tasks
         // The first Task matching any of its keys wins, as a scan in order would.
         var positions: [String: Int] = [:]
+        var openChildren: [String: [RoadmapTask]] = [:]
         for (index, task) in visible.enumerated() {
+            if let parent = task.task.parentId, !task.isCompleted {
+                openChildren[parent, default: []].append(task)
+            }
             for name in [task.id, task.task.identifier] where positions[name] == nil {
                 positions[name] = index
             }
         }
         let waves = Dictionary(visibleRoadmaps.map { ($0.wave.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let index = TaskIndex(key: key, tasks: visible, positions: positions, waves: waves)
+        let index = TaskIndex(key: key, tasks: visible, positions: positions, openChildren: openChildren, waves: waves)
         taskIndexCache = index
         return index
     }

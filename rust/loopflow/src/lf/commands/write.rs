@@ -110,9 +110,7 @@ writes! {
             title: title.clone(),
             request: request.clone(),
             wave: wave.clone(),
-            parent: loopflow_execution::ops::task::TaskParentChoice {
-                named: parent.clone(),
-            },
+            parent: parent.clone(),
             graph: graph.clone(),
             session: session.clone(),
             worktree: None,

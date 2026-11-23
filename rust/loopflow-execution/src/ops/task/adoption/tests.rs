@@ -121,9 +121,7 @@ impl Table {
                 title: Some(title.into()),
                 request: None,
                 wave: wave.map(str::to_owned),
-                parent: crate::ops::task::TaskParentChoice {
-                    named: parent.map(str::to_owned),
-                },
+                parent: parent.map(str::to_owned),
                 graph: None,
                 session: None,
                 worktree: None,

@@ -950,7 +950,7 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     assert_eq!(
         lf(&["task", "complete", &second]),
         format!(
-            "{second} done\n  {merged} done: #1991 merged\n    {idle} abandoned: never started\n"
+            "{second} done\n  {merged} done: #1991 merged\n    {idle} abandoned: no merged PR\n"
         )
     );
 }

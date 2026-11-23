@@ -254,7 +254,7 @@ struct TaskActionItems: View {
             Button("Reopen Task") { model.reopenTask(task) }.disabled(unavailable)
                 .accessibilityIdentifier("task-reopen")
         } else {
-            let hasOpenChildren = !model.openDescendants(of: task).isEmpty
+            let hasOpenChildren = model.hasOpenChildren(task)
             Button(hasOpenChildren ? "Complete Task & Settle Children…" : "Complete Task") {
                 model.beginComplete(task)
             }

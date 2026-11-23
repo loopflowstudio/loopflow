@@ -742,11 +742,8 @@ fn project_accepted_planning(
     observe_parents(tx, repo, tracker, &item_ids)
 }
 
-/// Each observed item's parent becomes its Task's, once every Task in the
-/// batch exists. A tracker with no parent clears only a link it could have
-/// held: a parent with no item there (another repository's, an unsent one)
-/// stays. The writer keeps the Task's parent when the new one is its
-/// descendant.
+/// Apply observed parent links after both Tasks have arrived, in either order.
+/// A tracker can clear a link only after the parent has a tracker item.
 fn observe_parents(
     tx: &Transaction<'_>,
     repo: &str,
@@ -754,26 +751,45 @@ fn observe_parents(
     item_ids: &str,
 ) -> StoreResult<()> {
     let mut query = tx.prepare(
-        "SELECT t.id,parent.id FROM tracker_items i
+        "WITH arriving AS (SELECT value FROM json_each(?3))
+         SELECT t.id, parent.id, i.revision FROM tracker_items i
          JOIN tasks t ON t.external_issue_id=i.id
          LEFT JOIN tasks parent ON parent.external_issue_id=i.parent_id
          LEFT JOIN tasks held ON held.id=t.parent_task_id
          WHERE i.repo=?1 AND i.tracker=?2 AND i.needs_refresh=0 AND i.parent_id_observed=1
-         AND i.id IN (SELECT value FROM json_each(?3))
+         AND i.id IN (
+             SELECT value FROM arriving UNION
+             SELECT id FROM tracker_items WHERE repo=?1 AND tracker=?2 AND parent_id IN arriving
+         )
+         AND t.repository_id=(SELECT id FROM repository_plans WHERE repo=?1 AND selected=1)
          AND t.parent_task_id IS NOT parent.id
          AND (parent.id IS NOT NULL
               OR (i.parent_id IS NULL AND held.external_issue_id IS NOT NULL))",
     )?;
     let moved = query
         .query_map(params![repo, tracker, item_ids], |row| {
-            Ok(crate::work::edit::WorkEdit {
-                target: row.get(0)?,
-                change: Edit::TaskParent(row.get(1)?),
-            })
+            Ok((
+                loopflow_model::durable::TaskId::from_raw(row.get::<_, String>(0)?),
+                Edit::TaskParent(row.get(1)?),
+                row.get::<_, Option<String>>(2)?,
+            ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     drop(query);
-    planning_write::tracker(tx, &moved)?;
+    for (id, parent, revision) in moved {
+        let mut edits = [parent];
+        let resolved = tracker_actions::reconcile_in(
+            tx,
+            &tracker_actions::ActionOwner::Task(id.clone()),
+            revision.as_deref(),
+            &mut edits,
+        )?;
+        record_adoptions(tx, &id, &resolved)?;
+        planning_write::tracker(
+            tx,
+            &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
+        )?;
+    }
     Ok(())
 }
 
@@ -997,8 +1013,9 @@ mod tests {
             task.parent_task_id
                 .map(|parent| store.task(&parent).unwrap().unwrap().title)
         };
-        observe(1, "a", None);
-        observe(2, "b", Some("a"));
+        observe(1, "b", Some("a"));
+        assert_eq!(parent_of("b"), None);
+        observe(2, "a", None);
         observe(3, "c", Some("b"));
         assert_eq!(parent_of("b").as_deref(), Some("a"));
         assert_eq!(parent_of("c").as_deref(), Some("b"));

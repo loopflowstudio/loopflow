@@ -293,6 +293,8 @@ fn cleanup_ends_a_done_tasks_held_conversation() {
 fn a_closed_tasks_conversations_reopen_in_the_main_checkout() {
     use crate::ops::human_session::{admit_workspace, select_connection, SessionTarget};
     let _ledger = crate::journal::TestLedgerGuard::new();
+    let executable = std::env::current_exe().unwrap();
+    let _bin = crate::config::environment::EnvVarGuard::set("LF_BIN", executable.to_str().unwrap());
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let fixture = Workspace::new().await;
         fixture.due();

@@ -536,14 +536,34 @@ fn local_planning_creation_retry_keeps_identity_after_edit_and_restart() {
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let retried = store.create_task(&input).unwrap();
     assert_eq!(retried, edited);
-    let second = store
-        .create_task(&NewTask {
-            repository_id: local_repository(&store),
-            due_date: None,
-            id: TaskId::new(),
-            ..input.clone()
-        })
+    let child_request = NewTask {
+        id: TaskId::new(),
+        parent_task_id: Some(task.id.clone()),
+        ..input.clone()
+    };
+    let other_repo = loopflow_storage::test_fixture::repository(&store, "/other");
+    let cross_repo = NewTask {
+        repository_id: other_repo,
+        project_id: None,
+        ..child_request.clone()
+    };
+    assert!(store
+        .create_task(&cross_repo)
+        .unwrap_err()
+        .to_string()
+        .contains("another repository"));
+    let second = store.create_task(&child_request).unwrap();
+    let detached = store
+        .edit_task(
+            &second.id,
+            second.revision,
+            &TaskUpdate {
+                parent: Some(None),
+                ..Default::default()
+            },
+        )
         .unwrap();
+    assert_eq!(store.create_task(&child_request).unwrap(), detached);
     assert_ne!(second.id, task.id);
     assert_eq!(store.list_tasks(None).unwrap().len(), 2);
     assert_eq!(
@@ -832,10 +852,10 @@ fn local_planning_migration_preserves_released_links() {
             "/repo",
             "LOO-318",
         );
-    assert_eq!(
-        serde_json::to_value(observation.item).unwrap(),
-        payload["items"][0]
-    );
+    let mut expected = payload["items"][0].clone();
+    expected["parent_id"] = serde_json::Value::Null;
+    expected["parent_observed"] = serde_json::json!(false);
+    assert_eq!(serde_json::to_value(observation.item).unwrap(), expected);
     assert_eq!(
         serde_json::to_value(observation.project.unwrap()).unwrap(),
         payload["projects"][0]

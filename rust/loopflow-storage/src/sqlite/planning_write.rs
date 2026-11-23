@@ -289,27 +289,28 @@ fn write_record(
     Ok(changed)
 }
 
-/// Why `task` cannot be filed under `parent`: the parent is unknown here, or
-/// is `task` itself or one of its descendants.
+/// Task parents belong to the same repository and cannot form a cycle.
 pub(super) fn parent_refusal(
     conn: &Connection,
     task: &str,
     parent: &str,
 ) -> StoreResult<Option<&'static str>> {
-    let found: Option<bool> = conn
+    let found: Option<(bool, bool)> = conn
         .prepare_cached(
             "WITH RECURSIVE up(id) AS (
                  SELECT id FROM tasks WHERE id=?2
                  UNION SELECT t.parent_task_id FROM tasks t JOIN up ON up.id=t.id
                  WHERE t.parent_task_id IS NOT NULL
-             ) SELECT EXISTS(SELECT 1 FROM up WHERE id=?1) FROM up LIMIT 1",
+             ) SELECT child.repository_id=parent.repository_id, EXISTS(SELECT 1 FROM up WHERE id=?1)
+               FROM tasks child JOIN tasks parent ON parent.id=?2 WHERE child.id=?1",
         )?
-        .query_row(params![task, parent], |row| row.get(0))
+        .query_row(params![task, parent], |row| Ok((row.get(0)?, row.get(1)?)))
         .optional()?;
     Ok(match found {
         None => Some("parent Task is not known to this Machine"),
-        Some(true) => Some("a Task cannot be its own ancestor"),
-        Some(false) => None,
+        Some((false, _)) => Some("parent Task belongs to another repository"),
+        Some((true, true)) => Some("a Task cannot be its own ancestor"),
+        Some((true, false)) => None,
     })
 }
 

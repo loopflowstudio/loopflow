@@ -2145,7 +2145,7 @@ pub fn task_create(
     title: Option<String>,
     report: Option<String>,
     adoption: TaskAdoptionOptions,
-    parent: TaskParentChoice,
+    parent: Option<String>,
     receipt: Option<loopflow_storage::sqlite::creation::CreationIdentity>,
 ) -> OpsResult<Task> {
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
@@ -2183,7 +2183,7 @@ pub fn admit_task(
     title: Option<String>,
     request: Option<String>,
     adoption: TaskAdoptionOptions,
-    parent: TaskParentChoice,
+    parent: Option<String>,
     graph: Option<&str>,
     receipt: loopflow_storage::sqlite::creation::CreationIdentity,
 ) -> OpsResult<Task> {
@@ -2345,12 +2345,23 @@ async fn file_task_in(
     title: Option<String>,
     report: Option<String>,
     adoption: TaskAdoptionOptions,
-    parent: TaskParentChoice,
+    parent: Option<String>,
     receipt: Option<Receipt<'_>>,
 ) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let source = adoption::resolve_source(store, repo, &adoption).await?;
+    let parent_named = parent.is_some();
+    let parent = match parent.as_deref() {
+        None | Some("none") => None,
+        Some(named) => Some(resolve_parent_task(store, named).await?),
+    };
     if let Some(task) = source.task.as_ref() {
+        if parent_named && task.parent_task_id.as_ref() != parent.as_ref().map(|p| &p.id) {
+            return Err(task_error(format!(
+                "{} already exists; use `lf task update {} --parent <parent|none>` to change its parent",
+                task.identifier, task.identifier
+            )));
+        }
         if let Some(selected) = select_task_creation_wave(store, main, wave).await? {
             if task.wave_id.as_ref() != Some(selected.id()) {
                 return Err(task_error(format!(
@@ -2393,7 +2404,6 @@ async fn file_task_in(
     let repository_id =
         crate::repository::location::ensure_repository(&store.sqlite, &main.to_string_lossy())
             .map_err(task_error)?;
-    let parent = parent.resolve(store).await?;
     let selected = select_task_creation_wave(store, main, wave).await?;
     // With no Wave named, a follow-up is filed in its parent's Wave and Project.
     let inherited = parent
@@ -2456,22 +2466,6 @@ async fn file_task_in(
         .await
         .map_err(task_error)?
         .ok_or_else(|| task_error("Created Task is missing"))
-}
-
-/// Which Task a new one is filed under (`--parent`).
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TaskParentChoice {
-    /// `--parent`: a Task ID or identifier. Omitted or `none` files top-level work.
-    pub named: Option<String>,
-}
-
-impl TaskParentChoice {
-    async fn resolve(&self, store: &SharedStore) -> OpsResult<Option<Task>> {
-        match self.named.as_deref() {
-            None | Some("none") => Ok(None),
-            Some(named) => resolve_parent_task(store, named).await.map(Some),
-        }
-    }
 }
 
 pub(crate) async fn resolve_parent_task(store: &SharedStore, named: &str) -> OpsResult<Task> {

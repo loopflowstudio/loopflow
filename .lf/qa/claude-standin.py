@@ -7,8 +7,7 @@ args = sys.argv[1:]
 if args[:1] == ["--version"]:
     print("2.1.328 (Claude Code)"); sys.exit(0)
 log = open(LOG, "a")
-log.write(json.dumps({"argv": args, "cwd": os.getcwd(), "tty": [sys.stdin.isatty(), sys.stdout.isatty()],
-                      "env": {k: v for k, v in os.environ.items() if k.startswith("LF_")}}) + "\n"); log.flush()
+log.write(json.dumps({"cwd": os.getcwd(), "tty": [sys.stdin.isatty(), sys.stdout.isatty()]}) + "\n"); log.flush()
 def opt(*names):
     for n in names:
         if n in args: return args[args.index(n) + 1]

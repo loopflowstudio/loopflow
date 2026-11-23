@@ -89,9 +89,7 @@ pub fn create(
             title: title.clone(),
             request: report,
             wave: if *no_wave { None } else { wave.clone() },
-            parent: loopflow_execution::ops::task::TaskParentChoice {
-                named: parent.clone(),
-            },
+            parent: parent.clone(),
             graph: graph.clone(),
             session: session.clone(),
             worktree: worktree.clone(),

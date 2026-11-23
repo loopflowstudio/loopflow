@@ -185,7 +185,7 @@ Passing `--parent <ID>` on `lf task create` (or `lf task update <ID> --parent
 always files top-level work, even inside an existing Task's conversation or
 worktree. Each child is an ordinary Task with its own worktree, branch and pull
 request; on creation it joins its parent's Wave unless you pass `--wave`.
-Nesting is unrestricted and cycles are refused. A parent says who conducts the
+Tasks can nest at any depth within a repository. Loopflow refuses cycles. A parent says who conducts the
 work, a stack says which branch it starts from, and neither sets the other: add
 `--stack-on LOO-12` when a child needs LOO-12's unmerged code.
 
@@ -229,8 +229,8 @@ with no PR whose graph reached `end` stands the same way and reads
 $ lf task complete LOO-12
 LOO-12 done
   LOO-14 done: #1980 merged
-    LOO-17 abandoned: never started
-  LOO-16 abandoned: never started
+    LOO-17 abandoned: no merged PR
+  LOO-16 abandoned: no merged PR
   LOO-15 abandoned: #1981 open, at ship-review
 ```
 
@@ -238,13 +238,6 @@ Completing a parent Task settles every open descendant: children whose PR
 merged are marked `done`, and all other open children (unstarted or unmerged)
 are `abandoned` (closing their PRs and deleting their branches). Abandoned
 Tasks cannot be reopened.
-
-Completing a parent finishes each child whose PR merged and abandons each
-child that never started. A child with anything unmerged (an open PR, a
-running Graph, a checkout with commits) stays open and is named;
-finish it or `lf task abandon` it yourself. A child closed this way settles
-its own children by the same rule, printed under it. The command never stops
-to ask.
 
 A done Task's conversation is still yours. `lf resume LOO-12` reopens it
 after the checkout is gone, in the repository's main checkout, and it goes on

@@ -21,7 +21,9 @@ pub struct TaskCreation {
     pub title: Option<String>,
     pub request: Option<String>,
     pub wave: Option<String>,
-    pub parent: crate::ops::task::TaskParentChoice,
+    // Top-level retries keep the fingerprint recorded before Tasks could have parents.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
     pub graph: Option<String>,
     pub session: Option<String>,
     pub worktree: Option<PathBuf>,

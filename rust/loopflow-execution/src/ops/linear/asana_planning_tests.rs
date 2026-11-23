@@ -328,9 +328,7 @@ fn asana_follow_up_is_created_as_a_subtask_of_its_parent() {
                 Some(title.into()),
                 Some("Brief".into()),
                 crate::ops::task::TaskAdoptionOptions::default(),
-                crate::ops::task::TaskParentChoice {
-                    named: parent.map(|parent| parent.identifier.clone()),
-                },
+                parent.map(|parent| parent.identifier.clone()),
                 None,
             )
             .unwrap()

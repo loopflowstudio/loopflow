@@ -589,9 +589,7 @@ fn a_follow_up_is_created_in_linear_under_its_parents_issue() {
                 Some(title.into()),
                 Some("Retain this work".into()),
                 crate::ops::task::TaskAdoptionOptions::default(),
-                crate::ops::task::TaskParentChoice {
-                    named: parent.map(|parent| parent.identifier.clone()),
-                },
+                parent.map(|parent| parent.identifier.clone()),
                 None,
             )
             .unwrap()

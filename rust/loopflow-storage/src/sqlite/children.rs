@@ -99,11 +99,11 @@ fn write_task_checkout_in(conn: &Connection, task: &Task) -> StoreResult<()> {
 
 fn task_creation_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<NewTask>> {
     conn.query_row(
-        "SELECT project_id,title,description,due_date,repository_id FROM task_creation_intents WHERE task_id=?1",
+        "SELECT project_id,title,description,due_date,repository_id,parent_task_id FROM task_creation_intents WHERE task_id=?1",
         [task.as_str()],
         |row| {
             Ok(NewTask {
-                parent_task_id: None,
+                parent_task_id: row.get::<_, Option<String>>(5)?.map(TaskId::from_raw),
                 due_date: row.get(3)?,
                 id: task.clone(),
                 project_id: row.get::<_, Option<String>>(0)?.map(ProjectId::from_raw),
@@ -177,15 +177,16 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
     validate_task(&task)?;
     insert_task_row(conn, &task)?;
     conn.execute(
-        "INSERT INTO task_creation_intents(task_id, project_id, title, description, due_date, repository_id)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO task_creation_intents(task_id, project_id, title, description, due_date, repository_id, parent_task_id)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             input.id.as_str(),
             input.project_id.as_ref().map(ProjectId::as_str),
             input.title,
             input.description,
             input.due_date,
-            input.repository_id.as_str()
+            input.repository_id.as_str(),
+            input.parent_task_id.as_ref().map(TaskId::as_str)
         ],
     )?;
     task_on(conn, &input.id)?.ok_or(StoreError::NotFound)

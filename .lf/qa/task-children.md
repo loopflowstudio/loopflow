@@ -14,7 +14,7 @@ pushed. Isolate `HOME` (with a `.gitconfig` identity), `LF_HOME`,
 `lf holder run`. Drive it with
 `.lf/qa/pty-drive.py '<steps>' lf session resume <session>`: a line starting
 with `!` runs as the agent's Bash tool call, with the conversation's
-`LF_AGENT_CALLER`, so `!lf task create "…"` files a child the way an agent
+`LF_AGENT_CALLER`, so `!lf task create --parent <parent> "…"` files a child the way an agent
 does. The stand-in runs lf's hooks from `--settings`, so each prompt prints the
 `<lf:steers>` block it would inject: that is where a notice shows as
 delivered.
@@ -68,9 +68,7 @@ delivered.
 - A completed Task with no PR is never retired: `lf task retire <task>` exits
   1 with "Retained PR-less checkout", and its conversation reopens in that
   checkout. Use a parent with a merged PR to see the main-checkout resume.
-- For a hook's cost, set `CLAUDE_QA_LOG`: the stand-in logs each launch's
-  `LF_*` environment, enough to run `lf __context-block --moment tool` by hand
-  with Claude's callback JSON on stdin and time it.
+- For a hook's cost, set `CLAUDE_QA_LOG`: the stand-in records launch and hook results.
 - Never `pgrep -fl` for `lf …`: other agents' argv holds whole prompts that
   match. List `ps -axo pid,command` and match the binary path in column two:
   that finds the holder (`$LF_BIN holder run`), whose children are the
@@ -92,7 +90,7 @@ keeps turns cheap. A repository Claude has not seen stops the first launch at
 "Adding a new directory … Yes, add it": the conversation lists as `detached`
 with no turn until a viewer answers it (Down, Enter through `pty-drive.py`,
 which needs its 40x120 window or Claude draws nothing). Then
-`lf steer <parent> 'run exactly: lf task create "…"'` wakes it to file the
+`lf steer <parent> 'run exactly: lf task create --parent <parent> "…"'` wakes it to file the
 child, and `lf task run <child>` wakes it again about two seconds after the
 child stops. Read both in
 `~/.claude/projects/<checkout with / and . as ->/<thread>.jsonl`: a `user`

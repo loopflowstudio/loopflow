@@ -433,7 +433,7 @@ fn child_completion_line(child: &loopflow_storage::sqlite::children::ChildComple
             let step = child.step.as_ref().map(|step| format!("at {step}"));
             let reasons: Vec<String> = pr.into_iter().chain(step).collect();
             if reasons.is_empty() {
-                format!("{id} abandoned: never started")
+                format!("{id} abandoned: no merged PR")
             } else {
                 format!("{id} abandoned: {}", reasons.join(", "))
             }

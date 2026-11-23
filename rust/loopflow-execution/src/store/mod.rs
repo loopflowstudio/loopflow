@@ -1123,7 +1123,7 @@ mod tests {
                     .unwrap();
             }
             let record = store.sqlite.task(&task.id).unwrap().unwrap();
-            assert_eq!(record.state.as_deref(), Some("unstarted"));
+            assert_eq!(record.state.as_deref(), Some("started"));
             assert_eq!(record.completed_at, None);
             assert_eq!(record.assignee, None);
             assert_eq!(record.rank, 0);

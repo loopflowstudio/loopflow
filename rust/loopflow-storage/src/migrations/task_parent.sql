@@ -2,6 +2,8 @@
 -- name a parent; nothing stores a child list.
 ALTER TABLE tasks ADD COLUMN parent_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL;
 CREATE INDEX tasks_parent ON tasks(parent_task_id);
+-- A retry compares the original filing, even after a Task moves.
+ALTER TABLE task_creation_intents ADD COLUMN parent_task_id TEXT;
 
 DROP TRIGGER store_revision_tasks_update;
 CREATE TRIGGER store_revision_tasks_update AFTER UPDATE ON tasks
@@ -74,6 +76,7 @@ END;
 -- A tracker's own parent of an item: a Linear sub-issue's, an Asana subtask's.
 -- Rows read before this column existed have not observed it.
 ALTER TABLE tracker_items ADD COLUMN parent_id TEXT;
+CREATE INDEX tracker_items_parent ON tracker_items(repo,tracker,parent_id);
 ALTER TABLE tracker_items ADD COLUMN parent_id_observed INTEGER NOT NULL DEFAULT 0;
 
 DROP TRIGGER store_revision_tracker_items_update;

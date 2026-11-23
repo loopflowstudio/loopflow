@@ -37,7 +37,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `task_changes`: seq, id, task_id, field, value_json, base_json, conflict_json, attempted, error, acknowledged_revision, acknowledged
 - `task_checkouts`: task_id, worktree, branch, base_commit, parent_pr_id
 - `task_comment_deliveries`: comment_id, comment_json, acknowledged, error, conflicting_comment_json
-- `task_creation_intents`: task_id, repository_id, project_id, title, description, export_json, export_attempted, export_error, due_date, export_observed_at
+- `task_creation_intents`: task_id, repository_id, project_id, title, description, export_json, export_attempted, export_error, due_date, export_observed_at, parent_task_id
 - `task_events`: id, task_id, kind_json, created_at
 - `task_linear_ingested_comments`: task_id, comment_id, ingested_at
 - `task_linear_observations`: task_id, last_revision, last_title, last_description, last_success_at, degraded_reason, updated_at

@@ -1037,6 +1037,8 @@ fn task_create_without_recovery_keeps_the_existing_receipt_and_exit_status() {
 /// Task's row again, so only the receipt repeats exactly.
 fn receipt(mut answer: serde_json::Value) -> serde_json::Value {
     let fields = answer.as_object_mut().unwrap();
-    assert!(fields.remove("session").is_some() && fields.remove("row").is_some());
+    for field in ["session", "row", "parent"] {
+        assert!(fields.remove(field).is_some(), "missing {field}");
+    }
     answer
 }

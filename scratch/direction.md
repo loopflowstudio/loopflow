@@ -15,3 +15,10 @@ item arrived cut off as written):
 > (b) is performant and avoids lots of unnecessary work or scattered processes on the macine
 > (c) has the most consistency across
 > (d) gives us functionality ourside our core use cases we might want to add later
+
+Jack Heart on November 22, answering the concept-review questions (1:
+OpenCode model through config; 2: reopen with steers waiting; 3: the "new
+process is idle" rule; 4: a reopened OpenCode session after `agent:`
+changed; 5: `agent_inbox` holding two shapes):
+
+> 1 2a is preferable, but i feel like there may have been a reason we didnt do it 3b (but an auto mode task) 4b unless there is some important cost to that 5 b

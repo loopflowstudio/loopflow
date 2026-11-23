@@ -96,11 +96,39 @@ idle steer and a steer saved while quit both woke it after the compress; a
 changed `agent:` on reopen stayed on carbon. `idle_wake.py` passed on
 OpenCode 2.2.1 and Pi 1.3.0.
 
-## Remaining
+## Next slice: from the concept review's answers
 
-- Claude reopened with a steer waiting marks it delivered through its start
-  hook and starts no turn; OpenCode and Pi now start one. Larger than this
-  Task; on the concept-review page.
+`direction.md` has the answers word for word. Two changes here; the
+reopen rule goes to its own Task.
+
+1. **Split `agent_inbox` (5b).** Claude's key file stays in `agent_inbox`;
+   the OpenCode or Pi socket goes in a new `agent_socket` column
+   (`src/migrations/loo974_agent_socket.sql`, created empty, additive). The
+   boundary request names which it carries, so `IdleReach` reads its arm from
+   the column and the `provider IN ('opencode','pi')` switch in
+   `idle_conversation_candidates` goes. Mark nothing leaving: the column
+   keeps its Claude meaning. Regenerate the DTO fixture if the wire changes.
+2. **A launch's model reaches a reopened OpenCode session (4b).** The plugin
+   sets the model from `agent:` on the first turn of each launch only, then
+   leaves it. That is what `claude --resume --model` does, and it keeps a
+   `/models` choice made inside the TUI, which a set-every-turn plugin would
+   undo each turn (the cost of 4b as asked). Probe first which plugin hook
+   can change a turn's model on 2.2.1 (`chat.message`, `chat.params`); if
+   none can, stop and record it in `questions.md` 7 rather than restarting
+   the conversation (4c).
+
+Then QA: reopen an OpenCode work session after changing `agent:`; the first
+turn answers on the new model, and a `/models` pick after it holds.
+
+Filed separately as LOO-1068, to run on the `autonomous` Graph once this merges: one owner for "a new provider
+process is idle" at its first boundary on every provider (3b), carrying 2a
+with it: a reopened work session with steers waiting starts a turn on every
+provider. Claude and Codex today claim the steers in their start hook
+(server README, "Every launch reads its own steers") and start no turn. The
+reason that start hook claims them is not recorded; the new Task finds out
+before changing it. Chats keep the start-hook claim: nothing wakes a chat.
+
+## Remaining
 - A provider killed with SIGKILL leaves its empty `/tmp/lf-wake-*` directory.
   Accepted: empty, and cleared on reboot.
 

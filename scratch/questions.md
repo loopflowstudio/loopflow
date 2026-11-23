@@ -26,13 +26,8 @@
    boundary carry a token the server sends back?
 
 6. A newly reachable provider is recorded as idle whatever the earlier one on
-   that Session was doing, so a conversation interrupted, quit and reopened
-   takes its waiting steers at once. Launched with an opening prompt, the wake
-   and the prompt both run, each once. Assumed right; question 4's case (Esc,
-   then no quit) is unchanged.
+   that Session was doing. Moves to LOO-1068 with the reopen rule.
 
-7. A reopened OpenCode session keeps the model of its last turn, whatever
-   `OPENCODE_CONFIG_CONTENT` says (`probes.md`). Changing `agent:` for a
-   Task's OpenCode work session therefore takes effect only on a new
-   conversation. Ways in, untried: the plugin choosing the model for each
-   turn, or lf starting a new session when the model changed. Left as is.
+7. A reopened OpenCode session keeps the model of its last turn. Answered 4b;
+   built as the plugin setting the model on a launch's first turn only
+   (`plan.md`, next slice).

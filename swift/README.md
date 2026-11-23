@@ -823,9 +823,12 @@ custom postprocessing are outside the opaque-text contrast guarantee.
 In a focused Session or Shell, programs that distinguish **Shift-Return** and
 **Control-Return** receive those chords even after you reopen the pane.
 Desktop shortcuts, app menus and terminal bindings such as **⌘↑** to jump to
-the previous prompt still work. A chord that only a Shift menu shortcut
-uses, such as **⌘↩** beside Zoom Pane's **⇧⌘↩**, goes to the program. While you compose text with an input method or
-dead key, Desktop shortcuts wait. Canceling the composition sends no text.
+the previous prompt still work. **⌃/** sends the shell's undo character in
+legacy keyboard mode. **⌘.** reaches programs that request modified keys
+when no menu claims it. A menu shortcut that requires Shift leaves the
+unshifted chord available, as with Zoom Pane's **⇧⌘↩** and the program's **⌘↩**.
+While you compose text with an input method or dead key, Desktop shortcuts
+wait. Canceling the composition sends no text.
 
 Option follows Ghostty’s default for your active keyboard layout. To use
 Left Option as Alt and Right Option for text and accents, add this to

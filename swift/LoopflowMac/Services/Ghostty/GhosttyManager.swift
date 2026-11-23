@@ -112,18 +112,6 @@ final class GhosttyManager: ObservableObject {
     // Current preview plus applied candidate; cancel reuses validated config.
     private nonisolated(unsafe) var themeConfigs: [String: (TerminalPalette, ghostty_config_t)] = [:]
     private(set) var theme = ThemeDefinition.light
-    // These bindings operate Ghostty's standalone window, tabs, splits and app chrome.
-    // Ghostty binds tab numbers 1–8 by both character and physical key for non-US layouts.
-    private static let standaloneShortcuts = [
-        "super+n", "super+w", "super+alt+w", "super+alt+shift+w",
-        "super+t", "super+shift+t", "super+z", "super+shift+z",
-        "ctrl+tab", "ctrl+shift+tab", "super+shift+[", "super+shift+]",
-        "super+d", "super+shift+d", "super+[", "super+]",
-        "super+alt+arrow_up", "super+alt+arrow_down", "super+alt+arrow_left", "super+alt+arrow_right",
-        "super+ctrl+arrow_up", "super+ctrl+arrow_down", "super+ctrl+arrow_left", "super+ctrl+arrow_right",
-        "super+ctrl+=", "super+enter", "super+ctrl+f", "super+shift+enter",
-        "super+shift+p", "super+alt+i", "super+shift+,", "super+9",
-    ] + (1...8).flatMap { ["super+\($0)", "super+digit_\($0)"] }
 
     /// Loaded before the person's files so their bindings and values win.
     static let loopflowConfig = """
@@ -133,7 +121,37 @@ final class GhosttyManager: ObservableObject {
     font-feature = -liga
     font-thicken = true
     minimum-contrast = 3
-    \(standaloneShortcuts.map { "keybind = \($0)=unbind" }.joined(separator: "\n"))
+    keybind = clear
+    keybind = alt+arrow_left=esc:b
+    keybind = alt+arrow_right=esc:f
+    keybind = super+arrow_left=text:\\x01
+    keybind = super+arrow_right=text:\\x05
+    keybind = super+backspace=text:\\x15
+    keybind = super+shift+arrow_up=jump_to_prompt:-1
+    keybind = super+shift+arrow_down=jump_to_prompt:1
+    keybind = super+a=select_all
+    keybind = performable:shift+arrow_left=adjust_selection:left
+    keybind = performable:shift+arrow_right=adjust_selection:right
+    keybind = performable:shift+arrow_up=adjust_selection:up
+    keybind = performable:shift+arrow_down=adjust_selection:down
+    keybind = performable:shift+page_up=adjust_selection:page_up
+    keybind = performable:shift+page_down=adjust_selection:page_down
+    keybind = performable:shift+home=adjust_selection:home
+    keybind = performable:shift+end=adjust_selection:end
+    keybind = super+home=scroll_to_top
+    keybind = super+end=scroll_to_bottom
+    keybind = super+page_up=scroll_page_up
+    keybind = super+page_down=scroll_page_down
+    keybind = performable:super+j=scroll_to_selection
+    keybind = super+==increase_font_size:1
+    keybind = super++=increase_font_size:1
+    keybind = super+-=decrease_font_size:1
+    keybind = super+0=reset_font_size
+    keybind = performable:super+e=search_selection
+    keybind = performable:super+g=navigate_search:next
+    keybind = performable:super+shift+g=navigate_search:previous
+    keybind = performable:super+shift+f=end_search
+    keybind = performable:escape=end_search
 
     """
 

@@ -62,34 +62,53 @@ struct GhosttyModifierInputTests {
         }
     }
 
-    @Test("Standalone split and tab defaults leave their chords available to the terminal")
+    @Test("Standalone window, tab, export and paste bindings leave their chords available to the terminal")
     func standaloneShortcuts() async throws {
-        try await expectInput("\u{1b}[100;9u\u{1b}[13;9u\u{1b}[9;5u\u{1b}[49;9u", after: "\u{1b}[>11u") { view in
+        let expected = "\u{1b}[100;9u\u{1b}[13;9u\u{1b}[9;5u\u{1b}[49;9u\u{1b}[106;10u\u{1b}[118;10u"
+        try await expectInput(expected, after: "\u{1b}[>11u") { view in
             view.keyDown(with: try terminalKeyEvent("d", 2, .command))
             view.keyDown(with: try terminalKeyEvent("\r", 36, .command))
             view.keyDown(with: try terminalKeyEvent("\t", 48, .control))
             view.keyDown(with: try terminalKeyEvent("1", 18, .command))
+            view.keyDown(with: try terminalKeyEvent("J", 38, [.command, .shift]))
+            view.keyDown(with: try terminalKeyEvent("V", 9, [.command, .shift]))
         }
     }
 
     @Test("Menu items that require Shift leave the unshifted chord to the terminal")
     func shiftedMenuItems() {
         let menu = NSMenu()
-        for (key, mask): (String, NSEvent.ModifierFlags) in [("\r", [.command, .shift]), ("e", [.command, .shift]),
-                                                             ("O", .command), ("k", .command), ("k", [.command, .shift])] {
-            let item = NSMenuItem(title: key, action: nil, keyEquivalent: key)
-            item.keyEquivalentModifierMask = mask
-            menu.addItem(item)
+        @discardableResult
+        func add(_ key: String, _ modifiers: NSEvent.ModifierFlags) -> NSMenuItem {
+            let item = menu.addItem(withTitle: key, action: nil, keyEquivalent: key)
+            item.keyEquivalentModifierMask = modifiers
+            return item
         }
         func shadowed(_ key: String, _ flags: NSEvent.ModifierFlags) -> Bool {
             GhosttyTerminalShortcut.shadowedByShiftedMenuItem(characters: key, modifiers: flags, in: menu)
         }
+        add("\r", [.command, .shift])
+        add("e", [.command, .shift])
+        add("O", .command)
+        let exact = add("k", .command)
+        let shifted = add("k", [.command, .shift])
         #expect(shadowed("\r", .command))
         #expect(shadowed("e", .command))
         #expect(shadowed("o", .command))
         #expect(!shadowed("\r", [.command, .shift]))
         #expect(!shadowed("k", .command))
         #expect(!shadowed("d", .command))
+
+        exact.isHidden = true
+        #expect(shadowed("k", .command))
+        shifted.isEnabled = false
+        #expect(!shadowed("k", .command))
+        exact.isHidden = false
+        exact.isEnabled = false
+        shifted.isEnabled = true
+        #expect(shadowed("k", .command))
+        shifted.isHidden = true
+        #expect(!shadowed("k", .command))
     }
 
     @Test("Committing marked text writes it once and canceling writes nothing")
@@ -108,7 +127,7 @@ struct GhosttyModifierInputTests {
         }
     }
 
-    @Test("A focused terminal leaves app menus available and runs each binding once", .requiresDisplay)
+    @Test("A focused terminal leaves app menus available and runs each binding once")
     func focusedKeyEquivalents() async throws {
         let bindings = """
         keybind = super+q=text:quit
@@ -116,12 +135,7 @@ struct GhosttyModifierInputTests {
         keybind = super+shift+w=text:close
         keybind = unconsumed:super+d=text:split
         """
-        try await expectInput("\u{1b}[13;5usplit\u{1b}[100;9u", after: "\u{1b}[>11uhello", userConfig: bindings) { view in
-            let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
-            window.contentView = view
-            defer { window.contentView = nil }
-            try #require(window.makeFirstResponder(view))
-
+        try await expectInput("\u{1b}[13;5usplit\u{1b}[100;9u", after: "\u{1b}[>11uhello", userConfig: bindings, focused: true) { view in
             for (key, code): (String, UInt16) in [("q", 12), (",", 43), ("h", 4), ("m", 46), ("/", 44), ("n", 45)] {
                 #expect(try !view.performKeyEquivalent(with: terminalKeyEvent(key, code, .command)))
             }
@@ -131,6 +145,77 @@ struct GhosttyModifierInputTests {
             #expect(try view.performKeyEquivalent(with: terminalKeyEvent("a", 0, .command)))
             let surface = try #require(view.surface)
             #expect(ghostty_surface_has_selection(surface))
+        }
+    }
+
+    @Test("Control-/ reaches the program in its keyboard protocol", arguments: [
+        ("", "\u{1f}"), ("\u{1b}[>1u", "\u{1b}[47;5u"),
+    ])
+    func controlSlash(mode: String, bytes: String) async throws {
+        try await expectInput(bytes, after: mode, focused: true) { view in
+            let event = try terminalKeyEvent("/", 44, .control)
+            #expect(view.performKeyEquivalent(with: event))
+        }
+    }
+
+    @Test("Command-period redirected to cancelOperation reaches the terminal once")
+    func commandPeriod() async throws {
+        try await expectInput("\u{1b}[46;9u", after: "\u{1b}[>1u", focused: true) { view in
+            let event = try terminalKeyEvent(".", 47, .command)
+            // Posting an AppKit event stops the current run loop. Dispatch it from
+            // a nested loop so Swift Testing's main loop keeps running.
+            let mode = RunLoop.Mode("postTerminalKey")
+            let post: @MainActor @Sendable () -> Void = { NSApp.postEvent(event, atStart: true) }
+            let timer = Timer(timeInterval: 0, repeats: false) { _ in
+                MainActor.assumeIsolated(post)
+            }
+            RunLoop.current.add(timer, forMode: mode)
+            RunLoop.current.run(mode: mode, before: .distantFuture)
+            let current = try #require(NSApp.nextEvent(matching: .keyDown, until: .distantPast, inMode: .default, dequeue: true))
+            try #require(current.keyCode == event.keyCode && current.modifierFlags.contains(.command))
+            #expect(!view.performKeyEquivalent(with: current))
+
+            // A deferred window has no WindowServer number to route the re-sent event by.
+            let route = try #require(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { key in
+                guard key.timestamp == current.timestamp else { return key }
+                #expect(view.performKeyEquivalent(with: key))
+                return nil
+            })
+            defer { NSEvent.removeMonitor(route) }
+            view.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+            view.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        }
+    }
+
+    @Test("Ghostty applies personal modifier remaps when encoding terminal keys")
+    func remappedModifiers() async throws {
+        let remaps = """
+        key-remap = shift=ctrl
+        key-remap = ctrl=super
+        key-remap = super=alt
+        key-remap = alt=shift
+        """
+        try await expectInput("\u{1b}[13;5u\u{1b}[13;9u\u{1b}[13;3u\u{1b}[13;2u", after: "\u{1b}[>11u", userConfig: remaps) { view in
+            for flags: NSEvent.ModifierFlags in [.shift, .control, .command, .option] {
+                view.keyDown(with: try terminalKeyEvent("\r", 36, flags))
+            }
+        }
+    }
+
+    @Test("Terminal editing and font shortcuts work with personal overrides")
+    func surfaceBindings() async throws {
+        let bindings = "keybind = alt+arrow_right=text:forward"
+        try await expectInput("\u{1}\u{5}\u{15}forward", after: "", userConfig: bindings, focused: true) { view in
+            for (key, code): (String, UInt16) in [("\u{f702}", 123), ("\u{f703}", 124), ("\u{7f}", 51)] {
+                #expect(try view.performKeyEquivalent(with: terminalKeyEvent(key, code, .command)))
+            }
+            #expect(try view.performKeyEquivalent(with: terminalKeyEvent("\u{f703}", 124, .option)))
+            let surface = try #require(view.surface)
+            let size = ghostty_surface_size(surface).cell_height_px
+            #expect(try view.performKeyEquivalent(with: terminalKeyEvent("=", 24, .command)))
+            #expect(ghostty_surface_size(surface).cell_height_px > size)
+            #expect(try view.performKeyEquivalent(with: terminalKeyEvent("0", 29, .command)))
+            #expect(ghostty_surface_size(surface).cell_height_px == size)
         }
     }
 
@@ -183,7 +268,7 @@ struct GhosttyModifierInputTests {
     }
 
     private func expectInput(_ expected: String, after terminalOutput: String, userConfig: String = "",
-                             send: (GhosttyMetalView) throws -> Void) async throws {
+                             focused: Bool = false, send: (GhosttyMetalView) throws -> Void) async throws {
         _ = NSApplication.shared
         try #require(GhosttyManager.libraryReady)
         let config = try #require(ghostty_config_new())
@@ -204,6 +289,13 @@ struct GhosttyModifierInputTests {
 
         let view = GhosttyMetalView(terminal: .shell("modifiers", machineId: fixtureMachineId),
                                    frame: CGRect(x: 0, y: 0, width: 400, height: 200))
+        // Mount before attaching the surface so a responder test needs no display link.
+        let window = focused ? NSWindow(contentRect: view.frame, styleMask: .borderless, backing: .buffered, defer: true) : nil
+        if let window {
+            window.contentView = view
+            try #require(window.makeFirstResponder(view))
+        }
+        defer { window?.contentView = nil }
         let output = Output()
         var options = ghostty_surface_config_new()
         options.platform_tag = GHOSTTY_PLATFORM_MACOS

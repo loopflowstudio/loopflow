@@ -18,7 +18,7 @@ One keyboard ownership hierarchy governs every Desktop terminal pane (Session an
 - **Single AppKit-to-Ghostty key path (`GhosttyTerminalView.swift`).** Follow the pinned Ghostty AppKit responder contract:
   - Delete split direct-bypass and paste-on-insert paths (done).
   - Translate modifiers with left/right side masks (`NX_DEVICEL*`/`NX_DEVICER*` -> `GHOSTTY_MODS_*_RIGHT` / base flags), carry press vs. `event.isARepeat` -> `GHOSTTY_ACTION_REPEAT` vs. release, and compute `unshifted_codepoint` from `event.characters(byApplyingModifiers: [])` (done).
-  - Query `ghostty_surface_key_translation_mods(surface, mods)` on `keyDown` and update all four modifier flags (`[.shift, .control, .option, .command]`) from the result, rather than short-circuiting on `.option` alone, so Ghostty `key-remap` configs work alongside `macos-option-as-alt`. Construct a translated `NSEvent` only when the translated flags differ from `event.modifierFlags`; reuse the original `NSEvent` unchanged when equal (required by input methods such as Korean). Record `consumed_mods` from the translation modifiers (excluding Control and Super).
+  - Query `ghostty_surface_key_translation_mods(surface, mods)` on `keyDown` and update all four modifier flags (`[.shift, .control, .option, .command]`) from the result, rather than short-circuiting on `.option` alone, so AppKit interprets the layout modifiers Ghostty requests. The pinned translation API applies Option-as-Alt. Ghostty applies `key-remap` during binding lookup and key encoding. Construct a translated `NSEvent` only when the translated flags differ from `event.modifierFlags`; reuse the original `NSEvent` unchanged when equal (required by input methods such as Korean). Record `consumed_mods` from the translation modifiers (excluding Control and Super).
   - Run `interpretKeyEvents([translationEvent])` with `keyText` open; deliver collected text on the single `ghostty_surface_key` call. Clear `_markedRange` and preedit when `setMarkedText` receives an empty string; commit preedit text without triggering modifiers; emit nothing on cancel (done).
   - Fix `flagsChanged` to skip while `hasMarkedText()` is true and determine press vs. release from each keycode's side-specific `NX_DEVICE*` bit (done).
   - In `performKeyEquivalent`, keep first-responder, `surface`, `connectionAcceptsInput`, window-cycling (`⌘\``, `⌘⇧~`), and exact `GhosttyTerminalShortcut` (`⌘C`/`⌘V`/`⌘F`) handling. Route into `keyDown` and return `true` for:
@@ -31,8 +31,8 @@ One keyboard ownership hierarchy governs every Desktop terminal pane (Session an
 - **Ghostty config & keyboard-layout sync (`GhosttyManager.swift`).**
   - Observe `NSTextInputContext.keyboardSelectionDidChangeNotification` and call `ghostty_app_keyboard_changed(app)` so Ghostty's layout-dependent `macos-option-as-alt` default and physical-key mapping stay accurate when input sources change (done).
   - Replace the negative 49-entry `standaloneShortcuts` blacklist in `loopflowConfig` with `keybind = clear` followed by the explicit set of surface-owned macOS terminal bindings Loopflow Desktop supports (loaded before `~/.config/ghostty/config` so personal overrides win):
-    - Natural macOS text editing: `super+arrow_left=text:\x01`, `super+arrow_right=text:\x05`, `super+backspace=text:\x15`
-    - Prompt navigation: `super+arrow_up=jump_to_prompt:-1`, `super+arrow_down=jump_to_prompt:1`, `super+shift+arrow_up=jump_to_prompt:-1`, `super+shift+arrow_down=jump_to_prompt:1`
+    - Natural macOS text editing: `alt+arrow_left=esc:b`, `alt+arrow_right=esc:f`, `super+arrow_left=text:\x01`, `super+arrow_right=text:\x05`, `super+backspace=text:\x15`
+    - Additional prompt navigation: `super+shift+arrow_up=jump_to_prompt:-1`, `super+shift+arrow_down=jump_to_prompt:1`
     - Selection: `super+a=select_all`, `shift+arrow_left/right/up/down/page_up/page_down/home/end=performable:adjust_selection:...`
     - Viewport scrolling: `super+home=scroll_to_top`, `super+end=scroll_to_bottom`, `super+page_up=scroll_page_up`, `super+page_down=scroll_page_down`, `super+j=performable:scroll_to_selection`
     - Font size: `super+equal=increase_font_size:1`, `super+plus=increase_font_size:1`, `super+minus=decrease_font_size:1`, `super+0=reset_font_size` (verify exact Ghostty key names parse with `ghostty_config_diagnostics_count == 0`)
@@ -58,19 +58,11 @@ App-wide Shift-menu matching outside focused terminals (Sidebar, Brief, Files), 
 2. **Built modifier, composition and shortcut ownership.** Each modifier release follows its physical key. Both Desktop shortcut monitors and the terminal's modifier handler defer during marked text. Input-source changes refresh Ghostty's keymap, and Edit → Select All selects terminal output.
 3. **Verified held Session reattachment.** `SessionModifierInputTests` opens a prepared Session on a private Machine. Its provider sets the PTY to raw mode and requests Kitty disambiguation once, printing each batch as hex before and after releasing and reopening the surface.
 4. **QA found and patched Shift-menu shadowing (`5c9193e1dd`).** Added `GhosttyTerminalShortcut.shadowedByShiftedMenuItem` so `⌘↩` and `⌘E` are not stolen by `⇧⌘↩` (Zoom Pane) and `⇧⌘E` (Toggle Browser).
+5. **Built embedded terminal defaults and AppKit command dispatch.** Ghostty starts with cleared bindings and loads the supported editing, selection, scrolling, prompt, font and search actions. Option-Left and Option-Right keep their word movements. The responder routes Control-/ directly and gives menus first refusal on Command-period. Only visible, enabled menu items participate in Shift matching.
 
-**Remaining (post-build concept-review pass):**
+**Checked this slice.** `scripts/test_desktop.sh --filter 'GhosttyModifierInputTests|SessionModifierInputTests|embeddedConfigBindsPromptJumps'` passed 15 tests, including zero config diagnostics, `⌃/` in both protocols, one `⌘.` via AppKit command dispatch and held Session reattachment. One display-only composition check was skipped.
 
-1. **`GhosttyManager.swift`:** Replace `standaloneShortcuts` with `keybind = clear` plus the explicit surface-owned macOS terminal bindings in `loopflowConfig` (verifying `ghostty_config_diagnostics_count == 0`).
-2. **`GhosttyTerminalView.swift`:**
-   - Update `translationEvent` to check all four modifiers (`[.shift, .control, .option, .command]`) from `ghostty_surface_key_translation_mods`, reusing `event` unchanged when equal.
-   - Route `⌃/` (Control only) from `performKeyEquivalent` to `keyDown`.
-   - Implement Ghostty's `lastPerformKeyEvent` timestamp round-trip between `performKeyEquivalent`, `keyDown`, and `doCommand(by:)` so chords like `⌘.` reach `keyDown` once AppKit menus decline them.
-   - Update `GhosttyTerminalShortcut.shadowedByShiftedMenuItem` to ignore hidden and disabled menu items (`!item.isHidden`, `item.isEnabled`).
-3. **Tests (`swift/LoopflowTests/GhosttyModifierInputTests.swift`):**
-   - Verify `ghostty_config_diagnostics_count == 0` with the `keybind = clear` + surface-owned config, that previously missed unimplemented defaults (`⇧⌘J`, `⇧⌘V`) reach the terminal instead of being swallowed, and that surface defaults (`⌘←`, `⌘→`, `⌘⌫`, `⌘A`, `⌘↑`/`⌘↓`, font size) and user overrides still work.
-   - Verify `⌃/` emits `0x1f` (legacy) / `CSI 47;5u` (Kitty) through `performKeyEquivalent`, `key-remap` works via 4-modifier `translationEvent`, `doCommand(by:)` re-dispatches a `lastPerformKeyEvent`-matched chord (`⌘.`) to `keyDown`, and `shadowedByShiftedMenuItem` ignores disabled/hidden menu items.
-   - Run `scripts/test_desktop.sh --filter 'GhosttyModifierInputTests|SessionModifierInputTests'` and `swift/LoopflowTests/GhosttyTerminalInputTests.swift` (`embeddedConfigBindsPromptJumps`).
+**Remaining.** Gate and unlocked-Mac QA for physical key delivery, live menus, palette focus, input-source switching and IME composition.
 
 ### Previous checks
 

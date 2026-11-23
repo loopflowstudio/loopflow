@@ -49,7 +49,7 @@ enum GhosttyTerminalShortcut: String {
         guard !held.contains(.shift), let key = characters?.lowercased(), !key.isEmpty, let menu else { return false }
         var shifted = false
         func visit(_ menu: NSMenu) -> Bool {
-            for item in menu.items {
+            for item in menu.items where item.isEnabled && !item.isHidden {
                 var required = item.keyEquivalentModifierMask.intersection(keys)
                 // An uppercase equivalent implies Shift.
                 if item.keyEquivalent != item.keyEquivalent.lowercased() { required.insert(.shift) }
@@ -614,6 +614,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private nonisolated(unsafe) var themeObserver: NSObjectProtocol?
     private var _markedRange = NSRange(location: NSNotFound, length: 0)
     private var _selectedRange = NSRange(location: 0, length: 0)
+    private var lastPerformKeyEvent: TimeInterval?
     // AppKit can call insertText several times while interpreting one key.
     private var keyText: String?
     private var dropHighlight: NSView?
@@ -1277,13 +1278,31 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             key.text = $0
             return ghostty_surface_key_is_binding(surface, key, nil)
         }
-        guard controlReturn || bound || GhosttyTerminalShortcut.shadowedByShiftedMenuItem(
-            characters: event.charactersIgnoringModifiers, modifiers: mods, in: NSApp.mainMenu) else { return false }
-        keyDown(with: event)
-        return true
+        let controlSlash = mods.intersection([.command, .control, .shift, .option]) == .control
+            && event.charactersIgnoringModifiers == "/"
+        if bound || controlReturn || controlSlash || GhosttyTerminalShortcut.shadowedByShiftedMenuItem(
+            characters: event.charactersIgnoringModifiers, modifiers: mods, in: NSApp.mainMenu) {
+            keyDown(with: event)
+            return true
+        }
+
+        // AppKit can turn ⌘. into cancelOperation: after menus decline it.
+        // doCommand re-sends that event. Synthetic events have no timestamp.
+        guard event.timestamp != 0 else { return false }
+        guard !mods.isDisjoint(with: [.command, .control]) else {
+            lastPerformKeyEvent = nil
+            return false
+        }
+        if lastPerformKeyEvent == event.timestamp {
+            keyDown(with: event)
+            return true
+        }
+        lastPerformKeyEvent = event.timestamp
+        return false
     }
 
     override func keyDown(with event: NSEvent) {
+        lastPerformKeyEvent = nil
         // Ghostty uses a key to dismiss an exited child. An ended relay no
         // longer accepts input, but must still let that local close happen.
         let exited = surface.map { ghostty_surface_process_exited($0) } ?? false
@@ -1381,7 +1400,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func doCommand(by selector: Selector) {
-        _ = selector
+        if let lastPerformKeyEvent, let event = NSApp.currentEvent,
+           event.timestamp == lastPerformKeyEvent {
+            NSApp.sendEvent(event)
+        }
     }
 
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
@@ -1779,12 +1801,20 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private func translationEvent(_ event: NSEvent, surface: ghostty_surface_t) -> NSEvent {
         let flags = event.modifierFlags
-        guard flags.contains(.option) else { return event }
         let translated = ghostty_surface_key_translation_mods(surface, translateMods(flags))
-        // Ghostty strips Option when this side acts as Alt. Input methods need
-        // the original event (including its device flags) in every other case.
-        guard translated.rawValue & GHOSTTY_MODS_ALT.rawValue == 0 else { return event }
-        let textFlags = flags.subtracting(.option)
+        var textFlags = flags
+        for (flag, mod): (NSEvent.ModifierFlags, ghostty_input_mods_e) in [
+            (.shift, GHOSTTY_MODS_SHIFT), (.control, GHOSTTY_MODS_CTRL),
+            (.option, GHOSTTY_MODS_ALT), (.command, GHOSTTY_MODS_SUPER),
+        ] {
+            if translated.rawValue & mod.rawValue != 0 {
+                textFlags.insert(flag)
+            } else {
+                textFlags.remove(flag)
+            }
+        }
+        // Input methods rely on the original event and its device-specific flags.
+        guard textFlags != flags else { return event }
         return NSEvent.keyEvent(with: event.type, location: event.locationInWindow, modifierFlags: textFlags,
             timestamp: event.timestamp, windowNumber: event.windowNumber, context: nil,
             characters: event.characters(byApplyingModifiers: textFlags) ?? "",

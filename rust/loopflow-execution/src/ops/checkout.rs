@@ -7,12 +7,14 @@ use std::process::Command;
 
 use fs2::FileExt;
 
+use crate::git::worktrees::stacked_base;
 use crate::git::{
     absolute_git_dir, current_branch, find_worktree_for_branch, get_default_branch,
     intervention_state, is_ancestor, rev_parse,
 };
 use crate::ops::git_operation::begin_sync_operation;
-use crate::ops::task::StackedSync;
+use crate::ops::pr::gh_available;
+use crate::ops::task::{task_stack, StackedSync};
 use crate::ops::{OpsError, OpsResult, Progress};
 
 fn git(repo: &Path, args: &[&str]) -> OpsResult<String> {
@@ -109,7 +111,7 @@ fn preserve_untracked_collisions(repo: &Path, stash: &str) -> OpsResult<()> {
 #[derive(Debug)]
 pub enum CheckoutBase {
     /// This checkout's Task is stacked on another Task.
-    Stacked(StackedSync),
+    Stacked(Box<StackedSync>),
     /// The branch `lf wt create --stack` recorded until its PR merges, else
     /// the default branch.
     Branch(String),
@@ -118,7 +120,7 @@ pub enum CheckoutBase {
 impl CheckoutBase {
     pub fn stack(&self) -> Option<&StackedSync> {
         match self {
-            Self::Stacked(stack) => Some(stack),
+            Self::Stacked(stack) => Some(stack.as_ref()),
             Self::Branch(_) => None,
         }
     }
@@ -155,15 +157,28 @@ impl CheckoutBase {
 
 /// The one reader for a checkout's base; sync and publication both call it.
 pub fn checkout_base(repo: &Path, default_branch: &str) -> OpsResult<CheckoutBase> {
-    if let Some(stack) = crate::ops::task::task_stack(repo)? {
-        return Ok(CheckoutBase::Stacked(stack));
+    if let Some(stack) = task_stack(repo)? {
+        return Ok(CheckoutBase::Stacked(Box::new(stack)));
     }
-    Ok(CheckoutBase::Branch(
-        match crate::git::worktrees::stacked_base(repo)? {
-            Some(base) if !crate::ops::pr::branch_pr_merged(repo, &base)? => base,
-            _ => default_branch.to_string(),
-        },
-    ))
+    Ok(CheckoutBase::Branch(match stacked_base(repo)? {
+        Some(base) if !branch_pr_merged(repo, &base)? => base,
+        _ => default_branch.to_string(),
+    }))
+}
+
+/// Whether `branch`'s PR has merged; without `gh` nothing says so.
+fn branch_pr_merged(repo: &Path, branch: &str) -> OpsResult<bool> {
+    if !gh_available() {
+        return Ok(false);
+    }
+    let output = Command::new("gh")
+        .args(["pr", "view", branch, "--json", "state", "-q", ".state"])
+        .current_dir(repo)
+        .output()?;
+    Ok(output.status.success()
+        && String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .eq_ignore_ascii_case("MERGED"))
 }
 
 const STASH_MESSAGE: &str = "lf checkout update: caller edits in ";

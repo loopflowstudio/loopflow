@@ -12,6 +12,7 @@ use crate::git::worktrees::main_repo_root;
 use crate::git::{current_branch, get_default_branch, rev_parse};
 use crate::graph::load_skill;
 
+use crate::ops::checkout::{checkout_base, CheckoutBase};
 use crate::ops::commit::{commit_workflow, message_launch, CommitOptions, MessageAgent};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -2031,21 +2032,20 @@ fn update_pr(repo: &Path, number: u64, title: &str, body: &str) -> OpsResult<()>
 // ---------------------------------------------------------------------------
 
 /// The Task's stack and the base its PR should target, from
-/// [`checkout_base`](crate::ops::checkout::checkout_base). A base branch
+/// [`checkout_base`]. A base branch
 /// origin lacks is pushed first, since a PR can only target a branch GitHub has.
 fn publication_base(repo: &Path, default_branch: &str) -> OpsResult<(Option<StackedSync>, String)> {
-    let base = crate::ops::checkout::checkout_base(repo, default_branch)?;
+    let base = checkout_base(repo, default_branch)?;
     let branch = base.branch(default_branch)?.to_string();
-    let stack = match base {
-        crate::ops::checkout::CheckoutBase::Stacked(stack) => Some(stack),
-        crate::ops::checkout::CheckoutBase::Branch(_) => {
+    match base {
+        CheckoutBase::Stacked(stack) => Ok((Some(*stack), branch)),
+        CheckoutBase::Branch(_) => {
             if branch != default_branch {
                 push_unpushed_base(repo, &branch)?;
             }
-            None
+            Ok((None, branch))
         }
-    };
-    Ok((stack, branch))
+    }
 }
 
 /// What publication knows about where an existing PR should point.
@@ -2236,39 +2236,17 @@ fn resolve_main_repo(repo: &Path) -> PathBuf {
 /// Push a base branch origin lacks, as stacking a Task on an unpushed parent
 /// does. Without a branch on origin it has no PR, so no merge request moves.
 fn push_unpushed_base(repo: &Path, base_branch: &str) -> OpsResult<()> {
-    let fetched = Command::new("git")
-        .args(["fetch", "--quiet", "origin", base_branch])
-        .current_dir(repo)
-        .output()?;
-    if fetched.status.success() {
+    if git_stdout(repo, &["fetch", "--quiet", "origin", base_branch]).is_ok() {
         return Ok(());
     }
-    let pushed = Command::new("git")
-        .args(["push", "--quiet", "--set-upstream", "origin", base_branch])
-        .current_dir(repo)
-        .output()?;
-    if !pushed.status.success() {
-        return Err(OpsError::Message(format!(
-            "this branch builds on {base_branch}, which origin doesn't have, and pushing it failed: {}",
-            stderr_from_output(&pushed)
-        )));
-    }
+    git_stdout(repo, &["push", "--quiet", "--set-upstream", "origin", base_branch]).map_err(
+        |error| {
+            OpsError::Message(format!(
+                "this branch builds on {base_branch}, which origin doesn't have, and pushing it failed: {error}"
+            ))
+        },
+    )?;
     Ok(())
-}
-
-/// Whether `branch`'s PR has merged; without `gh` nothing says so.
-pub(crate) fn branch_pr_merged(repo: &Path, branch: &str) -> OpsResult<bool> {
-    if !gh_available() {
-        return Ok(false);
-    }
-    let output = Command::new("gh")
-        .args(["pr", "view", branch, "--json", "state", "-q", ".state"])
-        .current_dir(repo)
-        .output()?;
-    Ok(output.status.success()
-        && String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .eq_ignore_ascii_case("MERGED"))
 }
 
 fn parse_generated_pr_copy(raw: &str) -> Option<PrCopy> {

@@ -1,4 +1,4 @@
-at: cd28c4baadc24703ee886370a1d2626fb858a5e0
+at: fcf99fc9bb4e610ae7c14055d720247eda8c0ece
 first:
   - path: swift/README.md
     why: Files walkthrough, rail, shortcuts and presentation
@@ -6,6 +6,10 @@ first:
     why: Present a file or line range beside a terminal
   - path: docs/workspaces.md
     why: Search a checkout from the command line
+  - path: swift/LoopflowMac/ReviewDiff.swift
+    why: Line references keep their source through edits
+  - path: swift/LoopflowMac/FileFind.swift
+    why: Match coordinates, stepping and promotion to Grep
   - path: swift/LoopflowMac/TaskFilesStore.swift
     why: Working tree, scratch inventory and file observation
   - path: swift/LoopflowMac/FilesBrowserState.swift
@@ -34,6 +38,14 @@ first:
     why: Present files beside the caller and retain focus
   - path: swift/LoopflowMac/Views/TaskFilesView.swift
     why: Breadcrumb, responsive rail, update bar and HTML settling
+  - path: swift/LoopflowMac/Views/TaskCodeReader.swift
+    why: Read gutter, selected lines and keyboard navigation
+  - path: swift/LoopflowMac/Views/ReviewStreamView.swift
+    why: Visible Diff sides and the shared comment editor
+  - path: swift/LoopflowMac/Views/TaskHTMLView.swift
+    why: Offline page search, highlighting and settled reloads
+  - path: swift/LoopflowMac/Views/WorkspacePanesView.swift
+    why: Responder ownership between Files and terminal panes
   - path: swift/LoopflowMac/Views/TaskFilePicker.swift
     why: Preview checkout files, grep matches and Task changes
   - path: swift/LoopflowMac/FileOutline.swift
@@ -41,13 +53,13 @@ first:
   - path: swift/LoopflowMac/FileJumps.swift
     why: Definition choices and return locations
   - path: swift/LoopflowTests/TaskFilesTests.swift
-    why: File choices, peer reads and draft lifetime
+    why: Mixed review batch, Find routing and peer reads
   - path: swift/LoopflowTests/DesktopPaneControlTests.swift
     why: Route a presentation during editing or review
   - path: rust/loopflow/tests/machine_commands.rs
     why: Watch and search a peer-only checkout
   - path: scratch/plan.md
-    why: Remaining Find, line comments and display checks
+    why: Remaining language coverage, journey and display checks
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Generated from the Rust protocol types

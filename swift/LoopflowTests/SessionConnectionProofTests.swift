@@ -39,25 +39,25 @@ struct SessionConnectionProofTests {
             view.createSurface(manager: manager)
             let surface = try #require(view.surface)
             try #require(window.makeFirstResponder(view))
-            try await waitForSession(view) { view.connectionAcceptsInput && terminalViewport(view).contains("session-proof-ready") }
+            try await waitForTerminal(view) { view.connectionAcceptsInput && terminalViewport(view).contains("session-proof-ready") }
             let frame = view.frame
             try type("before\r", into: view, window: window)
-            try await waitForSession(view) { terminalViewport(view).contains("received:before") }
+            try await waitForTerminal(view) { terminalViewport(view).contains("received:before") }
             await server.stop()
-            try await waitForSession(view) { !view.connectionAcceptsInput }
+            try await waitForTerminal(view) { !view.connectionAcceptsInput }
             #expect(terminalViewport(view).contains("received:before"))
             #expect(view.frame == frame)
             try type("discarded\r", into: view, window: window)
             _ = try await server.status()
-            try await waitForSession(view) { view.connectionAcceptsInput }
+            try await waitForTerminal(view) { view.connectionAcceptsInput }
             #expect(view.surface == surface)
             #expect(view.frame == frame)
             try type("after\r", into: view, window: window)
-            try await waitForSession(view) { terminalViewport(view).contains("received:after") }
+            try await waitForTerminal(view) { terminalViewport(view).contains("received:after") }
             #expect(try String(contentsOf: lf.cwd.appendingPathComponent("answers"), encoding: .utf8) == "before\nafter\n")
             #expect(try String(contentsOf: lf.cwd.appendingPathComponent("launches"), encoding: .utf8).split(separator: "\n").count == 1)
             try type("quit\r", into: view, window: window)
-            try await waitForSession(view) { view.childExited || ghostty_surface_process_exited(surface) }
+            try await waitForTerminal(view) { view.childExited || ghostty_surface_process_exited(surface) }
         }
     }
 

@@ -1,30 +1,32 @@
-at: d9dfa86938d963421a0c5ef761f5e950e5f8f83b
+at: c8e7b6e4e89247f41254b06bffddf996013b8046
 first:
   - path: swift/README.md
     why: Keyboard behavior in a focused Session or Shell
   - path: scratch/qa.html
     why: Live Antigravity draft before and after reattachment
-  - path: rust/loopflow-execution/src/transport/registry.rs
-    why: Color capabilities passed to each new held terminal
   - path: swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift
-    why: Terminal bindings and precedence for personal settings
+    why: Terminal defaults and personal binding precedence
+  - path: swift/LoopflowMac/Services/Ghostty/GhosttyKeyEvent.swift
+    why: Physical modifiers and AppKit text translation
   - path: swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift
-    why: Menu dispatch, AppKit composition and terminal input encoding
+    why: Shortcut dispatch and composition in the responder
   - path: swift/LoopflowMac/DesktopActions.swift
-    why: Desktop shortcuts defer while the terminal composes text
+    why: Desktop shortcuts yield during composition
   - path: swift/LoopflowMac/Views/WorkPalette.swift
+  - path: rust/loopflow-execution/src/transport/registry.rs
+    why: Color capabilities for held terminals
   - path: swift/LoopflowTests/GhosttyModifierInputTests.swift
-    why: Terminal bytes, menu ownership and command dispatch
+    why: Encoded bytes, bindings and menu dispatch
   - path: swift/LoopflowTests/SessionModifierInputTests.swift
-    why: Shifted text under the keyboard modes Antigravity requests
-  - path: rust/loopflow-execution/src/transport/registry_tests.rs
-    why: PTY reads missing, empty and caller-provided color settings
+    why: Shifted text survives Session reattachment
   - path: swift/LoopflowTests/DesktopTerminalFixtures.swift
-    why: Keyboard events and the private Session fixture
-  - path: swift/LoopflowTests/SessionConnectionProofTests.swift
-    why: Mounted Session recovery and input gating
+    why: A prepared Session and its visible viewport
   - path: swift/LoopflowTests/GhosttyTerminalInputTests.swift
-    why: Prompt jumps, restored scrollback and paste
+    why: Restored scrollback and paste focus
+  - path: swift/LoopflowTests/SessionConnectionProofTests.swift
+    why: Input during Session recovery
+  - path: rust/loopflow-execution/src/transport/registry_tests.rs
+    why: Caller-provided and default colors at the PTY
   - path: scratch/plan.md
-    why: Test results and remaining physical keyboard checks
+    why: Remaining physical keyboard checks
 hide: []

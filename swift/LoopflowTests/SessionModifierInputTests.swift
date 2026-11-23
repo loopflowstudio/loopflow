@@ -47,7 +47,7 @@ struct SessionModifierInputTests {
                 defer { view.destroySurface() }
                 let surface = try #require(view.surface)
 
-                try await waitForLine(ready, in: view)
+                try await waitForTerminalLine(ready, in: view)
                 for flags: NSEvent.ModifierFlags in [[], .shift, .control] {
                     view.keyDown(with: try terminalKeyEvent("\r", 36, flags))
                 }
@@ -56,24 +56,18 @@ struct SessionModifierInputTests {
                 // An ordinary x delimits the entire batch, including any duplicate final chord.
                 view.keyDown(with: try terminalKeyEvent("x", 7))
                 ready = "bytes-\(round)=0d1b5b31333b32751b5b31333b35753f41"
-                try await waitForLine(ready, in: view)
+                try await waitForTerminalLine(ready, in: view)
                 if round == 1 {
                     await pool.release(terminal)?.value
                     let prepared = try await lf.run(["session", "resume", record.id, "--prepare", "--json"])
                     record = try JSONDecoder().decode(SessionRecord.self, from: Data(prepared.utf8))
                 } else {
                     view.keyDown(with: try terminalKeyEvent("x", 7))
-                    try await waitForSession(view) {
+                    try await waitForTerminal(view) {
                         view.childExited || ghostty_surface_process_exited(surface)
                     }
                 }
             }
-        }
-    }
-
-    private func waitForLine(_ line: String, in view: GhosttyMetalView) async throws {
-        try await waitForSession(view) {
-            view.connectionAcceptsInput && terminalViewport(view).split(separator: "\n").contains(Substring(line))
         }
     }
 }

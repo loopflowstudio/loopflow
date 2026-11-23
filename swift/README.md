@@ -828,8 +828,10 @@ colors. Faint text may not reach the requested ratio. Graphics, images,
 transparent backdrops and custom postprocessing are outside the opaque-text
 contrast guarantee.
 
-In a focused Session or Shell, programs that distinguish **Shift-Return** and
-**Control-Return** receive those chords even after you reopen the pane.
+In a focused Session or Shell, **Shift-/** types `?` on a US keyboard.
+Programs that distinguish **Shift-Return** and **Control-Return** receive
+those chords even after you reopen the pane. Sessions launched from Desktop
+advertise true color when the launch environment leaves it unset.
 Desktop shortcuts, app menus and terminal bindings such as **⌘↑** to jump to
 the previous prompt still work. **⌃/** sends the shell's undo character in
 legacy keyboard mode. **⌘.** reaches programs that request modified keys

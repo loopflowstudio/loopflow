@@ -11,3 +11,4 @@
 - The held-Session fixture types an ordinary `x` after the three chords to delimit each batch, so a duplicated final Control-Return is visible in the byte comparison.
 - Read the held provider’s hex report from each pane. An extra ordinary `x` acknowledges the second report so the provider can exit after Desktop reads it.
 - Keep Option-Left and Option-Right as word movements. The pinned macOS defaults bind them to Escape-b and Escape-f, and the existing Kitty test expects Escape-b.
+- Keep AppKit-to-Ghostty event conversion together in `GhosttyKeyEvent.swift`. The responder owns shortcut dispatch and composition. Session and Shell fixtures share the visible viewport and keep their existing deadlines.

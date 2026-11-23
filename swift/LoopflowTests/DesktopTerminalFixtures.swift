@@ -13,6 +13,11 @@ func terminalKeyEvent(_ text: String, _ code: UInt16, _ flags: NSEvent.ModifierF
         isARepeat: repeating, keyCode: code))
 }
 
+// The Session relay keeps its status connection open while echoing terminal input.
+let echoingSessionRelay = buildGhosttyShellCommand(argv: ["/bin/sh", "-c", #"""
+    { printf '%s\n' '{"generation":1,"state":"connected","native_ready":true,"message":null}'; /bin/cat >/dev/tty; } | /usr/bin/nc -U "$LF_SERVER_STATUS"
+    """#], env: [:])
+
 @MainActor
 func terminalViewport(_ view: GhosttyMetalView) -> String {
     if case .available(let text, _) = try? view.readText(region: .screen, maxBytes: 65536) { return text }
@@ -20,15 +25,24 @@ func terminalViewport(_ view: GhosttyMetalView) -> String {
 }
 
 @MainActor
-func waitForSession(_ view: GhosttyMetalView, at location: SourceLocation = #_sourceLocation,
-                    until condition: () -> Bool) async throws {
-    let deadline = ContinuousClock.now + .seconds(20)
+func waitForTerminal(_ view: GhosttyMetalView, timeout: Duration = .seconds(20),
+                     at location: SourceLocation = #_sourceLocation,
+                     until condition: () -> Bool) async throws {
+    let deadline = ContinuousClock.now + timeout
     while !condition() {
         try #require(ContinuousClock.now < deadline,
                      "Connection \(String(describing: view.connectionReading)), screen \(terminalViewport(view))",
                      sourceLocation: location)
         GhosttyManager.shared.tick()
         try await Task.sleep(for: .milliseconds(20))
+    }
+}
+
+@MainActor
+func waitForTerminalLine(_ line: String, in view: GhosttyMetalView, timeout: Duration = .seconds(20),
+                         at location: SourceLocation = #_sourceLocation) async throws {
+    try await waitForTerminal(view, timeout: timeout, at: location) {
+        view.connectionAcceptsInput && terminalViewport(view).split(separator: "\n").contains(Substring(line))
     }
 }
 

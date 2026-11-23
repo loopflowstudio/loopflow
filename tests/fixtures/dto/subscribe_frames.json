@@ -197,9 +197,7 @@
               "unavailable": [
                 "No primary Session is recorded",
                 "Recorded execution location is unavailable"
-              ],
-              "face": null,
-              "pane_revision": null
+              ]
             }
           ],
           "name": null,
@@ -260,22 +258,6 @@
     }
   },
   {
-    "read": "lf monitor ps --json --subscribe",
-    "part": "activity",
-    "frame": {
-      "answers": 7,
-      "unavailable": null,
-      "body": {
-        "nodes": []
-      },
-      "work": null,
-      "read_at": {
-        "planning": 12,
-        "sessions": 41
-      }
-    }
-  },
-  {
     "read": "lf desktop task LOO-1 --json --subscribe",
     "part": "task",
     "frame": {
@@ -285,10 +267,8 @@
         "sync": null,
         "task": null,
         "project": null,
-        "observed_at": null,
         "plan_error": null,
         "plan_stale": false,
-        "plan_state": "available",
         "execution": null,
         "ownership": null,
         "overview": {
@@ -304,7 +284,11 @@
           "refresh_error": null,
           "conflicts": {}
         },
-        "row": null
+        "row": null,
+        "tracker_state": {
+          "state": "available",
+          "synced_at": null
+        }
       },
       "work": null,
       "read_at": {
@@ -315,13 +299,36 @@
   },
   {
     "read": "lf planning status --json --subscribe",
-    "part": "peer_planning",
+    "part": "plan_home",
     "frame": {
       "answers": 7,
       "unavailable": null,
       "body": {
-        "transport": "git",
-        "destinations": []
+        "tracker": null,
+        "plan": {
+          "git": {
+            "remote": "origin",
+            "unsent": 0,
+            "records": [],
+            "error": null,
+            "failing_since": null,
+            "not_taken": {
+              "count": 3,
+              "reason": "wave design from mini has the name of a Wave here; `lf wave rename design <new name>` on either Machine lets both arrive"
+            }
+          },
+          "hub": {
+            "machine": "mini",
+            "unsent": 1,
+            "records": [
+              "3e1c9a07"
+            ],
+            "error": "ssh: mini: Operation timed out",
+            "failing_since": 1763474520,
+            "not_taken": null
+          }
+        },
+        "actions": []
       },
       "work": null,
       "read_at": {

@@ -20,13 +20,13 @@ pub async fn wave_metric_portfolio(
 ) -> Result<MetricPortfolioDto> {
     match super::project::current_project(store, wave) {
         Ok(project) => {
-            chapter_metric_portfolio(store, wave, &project.metric_targets, evaluation_time).await
+            project_metric_portfolio(store, wave, &project.metric_targets, evaluation_time).await
         }
         Err(error) => {
             let mut discovery = discover_wave_contracts(wave)?;
             discovery
                 .contract_issues
-                .push(MetricContractIssueDto::ChapterUnavailable {
+                .push(MetricContractIssueDto::ProjectUnavailable {
                     wave_id: wave.id().to_string(),
                     reason: error.to_string(),
                 });
@@ -35,7 +35,7 @@ pub async fn wave_metric_portfolio(
     }
 }
 
-pub(crate) async fn chapter_metric_portfolio(
+pub(crate) async fn project_metric_portfolio(
     store: &Store,
     wave: &Wave,
     targets: &[crate::work::wave::metrics::MetricTarget],
@@ -59,7 +59,7 @@ pub(crate) async fn chapter_metric_portfolio(
     compose_persisted_portfolio(store, discovery, Some(targets), evaluation_time).await
 }
 
-pub(crate) fn validate_chapter_targets(
+pub(crate) fn validate_project_targets(
     wave: &Wave,
     targets: &[crate::work::wave::metrics::MetricTarget],
 ) -> Result<()> {
@@ -71,7 +71,7 @@ pub(crate) fn validate_chapter_targets(
             .any(|source| source.contract.identity.metric_id == target.metric_id)
         {
             bail!(
-                "chapter target references unavailable Wave metric {}",
+                "project target references unavailable Wave metric {}",
                 target.metric_id
             );
         }
@@ -377,10 +377,10 @@ mod tests {
     use loopflow_storage::work::project::ProjectKR;
 
     use super::*;
-    use crate::linear::LinearProject;
+    use loopflow_storage::planning::TrackerProject;
 
-    fn project(id: &str, slug: &str) -> LinearProject {
-        LinearProject {
+    fn project(id: &str, slug: &str) -> TrackerProject {
+        TrackerProject {
             description: None,
             revision: None,
             id: id.to_string(),
@@ -524,7 +524,7 @@ mod tests {
         assert_eq!(portfolio.metrics.len(), 2);
         assert!(matches!(
             portfolio.contract_issues.as_slice(),
-            [MetricContractIssueDto::ChapterUnavailable { .. }]
+            [MetricContractIssueDto::ProjectUnavailable { .. }]
         ));
         assert!(portfolio.metrics.iter().any(|metric| {
             matches!(
@@ -544,7 +544,6 @@ mod tests {
 
         let mut snapshot = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".into(),
             initiative: "initiative-1".into(),
             synced_at: 1,
             snapshot: crate::test_linear_input::Inventory {

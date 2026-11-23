@@ -71,99 +71,49 @@
       ],
       "type": "object"
     },
-    "ActivityNode": {
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "kind": {
-          "$ref": "#/$defs/ActivityNodeKind"
-        },
-        "label": {
-          "type": "string"
-        },
-        "parent_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "pid": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "repo": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "started_at": {
-          "type": "string"
-        },
-        "state": {
-          "$ref": "#/$defs/ActivityState"
-        },
-        "wave": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "worktree": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "id",
-        "parent_id",
-        "kind",
-        "label",
-        "repo",
-        "worktree",
-        "wave",
-        "pid",
-        "started_at",
-        "state"
-      ],
-      "type": "object"
-    },
-    "ActivityNodeKind": {
+    "ActionKind": {
       "enum": [
-        "process",
-        "agent_process"
+        "create",
+        "field",
+        "order",
+        "state",
+        "comment",
+        "delete",
+        "link"
       ],
       "type": "string"
     },
-    "ActivitySnapshot": {
-      "properties": {
-        "nodes": {
-          "items": {
-            "$ref": "#/$defs/ActivityNode"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "nodes"
-      ],
-      "type": "object"
-    },
-    "ActivityState": {
+    "ActionOwnerKind": {
+      "description": "What a tracker action addresses.",
       "enum": [
-        "working",
-        "waiting",
-        "stalled",
-        "unknown"
+        "task",
+        "project",
+        "wave"
       ],
       "type": "string"
+    },
+    "ActionPhase": {
+      "description": "Where an action stands. A person sees `queued`, `sent` and `conflicted`;\n`confirmed` and `retired` actions have left the queue.",
+      "oneOf": [
+        {
+          "enum": [
+            "queued",
+            "confirmed",
+            "retired"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "sent",
+          "description": "Sent with no answer yet; looked for before anything else on its owner.",
+          "type": "string"
+        },
+        {
+          "const": "conflicted",
+          "description": "The tracker's value won; `conflict` holds it and `value` the local loser.",
+          "type": "string"
+        }
+      ]
     },
     "AgeBucket": {
       "description": "Time since a Session's transcript was last written, or its last activity.",
@@ -174,117 +124,6 @@
         "older"
       ],
       "type": "string"
-    },
-    "AgentProcess": {
-      "description": "One recorded provider OS process, launched under the lf process that\nreserved it. It never has a receipt or an agent caller of its own.",
-      "properties": {
-        "agent_session_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LfSessionId"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "command": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "completed_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "cwd": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "exit_code": {
-          "format": "int32",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "id": {
-          "$ref": "#/$defs/AgentProcessId"
-        },
-        "os_started_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "parent_lf_process_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LfProcessId"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "pid": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "repo": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "signal": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "started_at": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "trace_id": {
-          "$ref": "#/$defs/TraceId"
-        }
-      },
-      "required": [
-        "id",
-        "pid",
-        "os_started_at",
-        "agent_session_id",
-        "trace_id",
-        "parent_lf_process_id",
-        "command",
-        "repo",
-        "cwd",
-        "started_at",
-        "completed_at",
-        "exit_code",
-        "signal",
-        "error"
-      ],
-      "type": "object"
     },
     "AgentProcessId": {
       "type": "string"
@@ -473,6 +312,60 @@
         }
       ]
     },
+    "Auto": {
+      "description": "The Task's auto mark: its state, when it was set and who set it.",
+      "properties": {
+        "at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "by": {
+          "$ref": "#/$defs/Starter"
+        },
+        "state": {
+          "$ref": "#/$defs/AutoState"
+        }
+      },
+      "required": [
+        "state",
+        "at",
+        "by"
+      ],
+      "type": "object"
+    },
+    "AutoOff": {
+      "additionalProperties": false,
+      "description": "What `task.auto.off` turned off.",
+      "properties": {
+        "issue": {
+          "type": "string"
+        },
+        "was_on": {
+          "description": "Auto was on before this.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "issue",
+        "was_on"
+      ],
+      "type": "object"
+    },
+    "AutoState": {
+      "description": "Auto, a setting on the Task: whether its interactive steps run headless,\nstanding in for the person, and whether its landing may merge.",
+      "oneOf": [
+        {
+          "const": "on",
+          "description": "`lf task auto on` or an `auto: on` configuration turned it on.",
+          "type": "string"
+        },
+        {
+          "const": "off",
+          "description": "`lf task auto off` turned it off; `-b` leaves it off.",
+          "type": "string"
+        }
+      ]
+    },
     "BoardPr": {
       "properties": {
         "url": {
@@ -522,120 +415,6 @@
         }
       ]
     },
-    "BrowserTab": {
-      "description": "A browser tab: the Task's Files view (with its own document tabs), its Graph\nprocess log, or a web page.",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "files",
-              "type": "string"
-            },
-            "selected": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "tabs": {
-              "items": {
-                "$ref": "#/$defs/FileTab"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "kind",
-            "id",
-            "tabs",
-            "selected"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Task brief and workflow, independent of associated Graph processes.",
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "task",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "id"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The exact comparison, independent of its host's renderer.",
-          "properties": {
-            "comparison": {
-              "$ref": "#/$defs/ChangeComparison"
-            },
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "changes",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "id",
-            "comparison"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "graph_log",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "id"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "url",
-              "type": "string"
-            },
-            "url": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "id",
-            "url"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "BuildProvenance": {
       "enum": [
         "development",
@@ -674,75 +453,6 @@
         "Loopflow"
       ],
       "type": "string"
-    },
-    "ChangeComparison": {
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "base": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "working_tree",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "base"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "base": {
-              "type": "string"
-            },
-            "head": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "branch",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "base",
-            "head"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "base": {
-              "type": "string"
-            },
-            "head": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "pull_request",
-              "type": "string"
-            },
-            "number": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "kind",
-            "number",
-            "base",
-            "head"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "Check": {
       "properties": {
@@ -1304,7 +1014,7 @@
     },
     "ClientIdentity": {
       "additionalProperties": false,
-      "description": "Who connected, for diagnostics; it grants nothing.",
+      "description": "Who connected; it grants nothing. A `kind` of [`MACHINE_CLIENT`] is\nanother Machine: every operation it sends runs here and is never sent on.",
       "properties": {
         "kind": {
           "type": "string"
@@ -1418,6 +1128,17 @@
                 "null"
               ]
             },
+            "sender": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Sender"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What the Machine that sent the request runs with; null from a\nclient on this Machine."
+            },
             "type": {
               "const": "request",
               "type": "string"
@@ -1428,6 +1149,7 @@
             "id",
             "operation",
             "select",
+            "sender",
             "request_id"
           ],
           "type": "object"
@@ -1458,6 +1180,17 @@
                 "null"
               ]
             },
+            "sender": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Sender"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "As for a request."
+            },
             "type": {
               "const": "subscribe",
               "type": "string"
@@ -1468,7 +1201,8 @@
             "id",
             "operation",
             "select",
-            "resume"
+            "resume",
+            "sender"
           ],
           "type": "object"
         },
@@ -1517,7 +1251,7 @@
       ]
     },
     "Close": {
-      "description": "The last frame before an orderly terminal disconnect. No stream offset or\ncontrol claim transfers to a replacement terminal.",
+      "description": "The last frame before an orderly terminal disconnect. No stream offset\ntransfers to a replacement terminal.",
       "properties": {
         "reason": {
           "$ref": "#/$defs/CloseReason"
@@ -1742,6 +1476,26 @@
         "steps"
       ],
       "type": "object"
+    },
+    "ConfigLayer": {
+      "description": "The configuration a default came from, as `lf task status` names it.",
+      "oneOf": [
+        {
+          "const": "wave",
+          "description": "The Task's Wave's `config.yaml`, or a personal setting for that Wave.",
+          "type": "string"
+        },
+        {
+          "const": "repository",
+          "description": "The repository's `.lf/config.yaml`.",
+          "type": "string"
+        },
+        {
+          "const": "personal",
+          "description": "Personal configuration.",
+          "type": "string"
+        }
+      ]
     },
     "ConfigSource": {
       "description": "Authority is independent of the declaration's scope and target.",
@@ -2147,25 +1901,6 @@
       ],
       "type": "object"
     },
-    "DesktopLayoutRecord": {
-      "anyOf": [
-        {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/WorkPaneLayout"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        {
-          "$ref": "#/$defs/Dashboard",
-          "description": "Its `slots`; null is the default layout."
-        }
-      ],
-      "description": "`layout` reads and writes a Work's pane intent or a Dashboard's slot layout."
-    },
     "DesktopTaskPane": {
       "description": "The full Task reading used by Desktop and terminal Task views, plus the\nDesktop row that keeps the pane current after the Task leaves the plan.",
       "properties": {
@@ -2190,18 +1925,11 @@
           ]
         },
         "graph_processes": {
-          "description": "`lf graph show --processes` for each of `overview`'s Graphs, in order.",
+          "description": "`lf graph show` for each of `overview`'s Graphs, in order.",
           "items": {
             "$ref": "#/$defs/GraphProcessDetail"
           },
           "type": "array"
-        },
-        "observed_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
         },
         "overview": {
           "anyOf": [
@@ -2233,9 +1961,6 @@
         "plan_stale": {
           "type": "boolean"
         },
-        "plan_state": {
-          "$ref": "#/$defs/PlanningState"
-        },
         "project": {
           "anyOf": [
             {
@@ -2259,7 +1984,7 @@
         "sync": {
           "anyOf": [
             {
-              "$ref": "#/$defs/PlanningSyncStatus"
+              "$ref": "#/$defs/TrackerSync"
             },
             {
               "type": "null"
@@ -2275,16 +2000,18 @@
               "type": "null"
             }
           ]
+        },
+        "tracker_state": {
+          "$ref": "#/$defs/TrackerState"
         }
       },
       "required": [
         "sync",
         "task",
         "project",
-        "observed_at",
+        "tracker_state",
         "plan_error",
         "plan_stale",
-        "plan_state",
         "execution",
         "ownership",
         "overview",
@@ -2412,18 +2139,12 @@
           },
           "type": "array"
         },
-        "rows": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
         "store": {
           "$ref": "#/$defs/StoreReport"
         }
       },
       "required": [
         "store",
-        "rows",
         "checks"
       ],
       "type": "object"
@@ -2806,49 +2527,60 @@
       ],
       "type": "object"
     },
-    "FileDraft": {
-      "additionalProperties": false,
-      "description": "Recovery data, not permission to overwrite a file. The host compares the base on reopen.",
+    "GitCarrier": {
+      "description": "Git's line: `Plan: Git origin, failing since Nov 18 14:02, 3 unsent.`",
       "properties": {
-        "base_content": {
+        "error": {
+          "description": "Why the last exchange failed, while it still fails.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failing_since": {
+          "description": "When the carrier stopped working (Unix seconds), while it still does not.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "not_taken": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NotTaken"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the carrier's last read brought that this Machine could not\nwrite, and reads again at each exchange. `null` when it took\neverything."
+        },
+        "records": {
+          "description": "The first of them in change order: a Task's identifier, `wave <name>`,\n`project <name>` or `comment <id>`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "remote": {
+          "description": "The remote's name.",
           "type": "string"
         },
-        "base_revision": {
-          "type": "string"
-        },
-        "location": {
-          "$ref": "#/$defs/ViewLocation"
-        },
-        "path": {
-          "type": "string"
-        },
-        "text": {
-          "type": "string"
+        "unsent": {
+          "description": "How many records changed here the carrier has not taken.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "required": [
-        "location",
-        "path",
-        "base_revision",
-        "base_content",
-        "text"
-      ],
-      "type": "object"
-    },
-    "FileTab": {
-      "additionalProperties": false,
-      "description": "References the Task's document owner; drafts are stored once on WorkPaneLayout.",
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "path": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "path"
+        "remote",
+        "unsent",
+        "records",
+        "error",
+        "failing_since",
+        "not_taken"
       ],
       "type": "object"
     },
@@ -3059,8 +2791,26 @@
             }
           ]
         },
+        "description": {
+          "description": "Its `description:` line; `None` when the file has none or does not load.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "included_by": {
+          "description": "The Graphs that include this one with `graph:`, by name. Empty for a\nGraph people start with; a piece of other Graphs names them here.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "name": {
           "type": "string"
+        },
+        "runs": {
+          "$ref": "#/$defs/GraphSubject",
+          "description": "What it runs for: a Task, or a Wave's own operation."
         },
         "source": {
           "description": "The repository file that defines it; `None` for a builtin.",
@@ -3075,14 +2825,29 @@
             "string",
             "null"
           ]
+        },
+        "workflow": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowOutline"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Graph as a Task's workflow line draws it; null exactly when\n`compiled` is."
         }
       },
       "required": [
         "name",
+        "description",
         "source",
         "compiled",
         "composition",
-        "unavailable"
+        "workflow",
+        "unavailable",
+        "included_by",
+        "runs"
       ],
       "type": "object"
     },
@@ -3449,6 +3214,13 @@
             "null"
           ]
         },
+        "error": {
+          "description": "Why the step failed, as the step recorded it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "exit_code": {
           "format": "int32",
           "type": [
@@ -3497,9 +3269,18 @@
         "started_at",
         "completed_at",
         "outcome",
-        "exit_code"
+        "exit_code",
+        "error"
       ],
       "type": "object"
+    },
+    "GraphSubject": {
+      "description": "What a Graph is started on.",
+      "enum": [
+        "task",
+        "wave"
+      ],
+      "type": "string"
     },
     "HarnessRetention": {
       "properties": {
@@ -3583,24 +3364,6 @@
       ],
       "type": "object"
     },
-    "Hold": {
-      "additionalProperties": false,
-      "description": "What `task.hold` withdrew.",
-      "properties": {
-        "issue": {
-          "type": "string"
-        },
-        "stopped": {
-          "description": "A run was shipping the Task; otherwise only the stop was saved.",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "issue",
-        "stopped"
-      ],
-      "type": "object"
-    },
     "HomeRetention": {
       "properties": {
         "harness": {
@@ -3624,6 +3387,63 @@
         "home",
         "policy",
         "transcripts"
+      ],
+      "type": "object"
+    },
+    "HubCarrier": {
+      "description": "The hub's line: `Hub mini, failing since Nov 18 14:02, 2 unsent.`",
+      "properties": {
+        "error": {
+          "description": "Why the last exchange failed, while it still fails.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failing_since": {
+          "description": "When the carrier stopped working (Unix seconds), while it still does not.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "machine": {
+          "description": "The hub's name.",
+          "type": "string"
+        },
+        "not_taken": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NotTaken"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the carrier's last read brought that this Machine could not\nwrite, and reads again at each exchange. `null` when it took\neverything."
+        },
+        "records": {
+          "description": "The first of them in change order: a Task's identifier, `wave <name>`,\n`project <name>` or `comment <id>`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unsent": {
+          "description": "How many records changed here the carrier has not taken.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "machine",
+        "unsent",
+        "records",
+        "error",
+        "failing_since",
+        "not_taken"
       ],
       "type": "object"
     },
@@ -3765,7 +3585,7 @@
     },
     "Launched": {
       "additionalProperties": false,
-      "description": "What a detached operation set going: the `lf` Process that carries it.\n`process.get` reads how it is going; `log` is its output.",
+      "description": "What a detached operation set going: the `lf` that carries it, and `log`,\nits output.",
       "properties": {
         "lf_process_id": {
           "$ref": "#/$defs/LfProcessId"
@@ -3775,7 +3595,7 @@
           "type": "string"
         },
         "operation": {
-          "description": "The operation the Process carries: `checkout.sync`, `pr.land`,\n`repo.release`, `graph.run`, `skill.run`.",
+          "description": "The operation that `lf` carries: `checkout.sync`, `pr.land`,\n`repo.release`, `graph.run`, `skill.run`.",
           "type": "string"
         },
         "run": {
@@ -3788,142 +3608,6 @@
         "lf_process_id",
         "run",
         "log"
-      ],
-      "type": "object"
-    },
-    "LfProcess": {
-      "description": "One recorded lf process. Unknown historical caller and exit evidence stays absent.",
-      "properties": {
-        "caller_agent_process_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/AgentProcessId"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "caller_session_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LfSessionId"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "command": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "completed_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "cwd": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "exit_code": {
-          "format": "int32",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "id": {
-          "$ref": "#/$defs/LfProcessId"
-        },
-        "os_started_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "outcome": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "parent_lf_process_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LfProcessId"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "pid": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "repo": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "signal": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "started_at": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "trace_id": {
-          "$ref": "#/$defs/TraceId"
-        },
-        "via_agent": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "id",
-        "pid",
-        "os_started_at",
-        "trace_id",
-        "parent_lf_process_id",
-        "via_agent",
-        "caller_session_id",
-        "caller_agent_process_id",
-        "command",
-        "repo",
-        "cwd",
-        "started_at",
-        "completed_at",
-        "outcome",
-        "exit_code",
-        "signal",
-        "error"
       ],
       "type": "object"
     },
@@ -4240,6 +3924,21 @@
       ],
       "type": "string"
     },
+    "LostAnswer": {
+      "description": "How a person answers a value the tracker won: `lf task sync --keep-theirs`\nor `--use-mine`, and Desktop's two buttons on the line.",
+      "oneOf": [
+        {
+          "const": "keep_theirs",
+          "description": "The tracker's value stands; the line closes.",
+          "type": "string"
+        },
+        {
+          "const": "use_mine",
+          "description": "Save the losing value again, which sends it.",
+          "type": "string"
+        }
+      ]
+    },
     "Machine": {
       "properties": {
         "created_at": {
@@ -4307,6 +4006,10 @@
           },
           "type": "array"
         },
+        "hub": {
+          "description": "This Machine exchanges its plan with it (`lf machine hub`).",
+          "type": "boolean"
+        },
         "id": {
           "type": "string"
         },
@@ -4337,6 +4040,7 @@
         "created_at",
         "observed_at",
         "defaults",
+        "hub",
         "tasks"
       ],
       "type": "object"
@@ -4485,7 +4189,7 @@
         {
           "properties": {
             "kind": {
-              "const": "chapter_unavailable",
+              "const": "project_unavailable",
               "type": "string"
             },
             "reason": {
@@ -5130,6 +4834,25 @@
       ],
       "type": "string"
     },
+    "NotTaken": {
+      "properties": {
+        "count": {
+          "description": "How many records.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "description": "Why the first was not, and what to do about it when something can be\ndone: `wave design from mini has the name of a Wave here; …`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "count",
+        "reason"
+      ],
+      "type": "object"
+    },
     "Observation": {
       "description": "Freshness of the GitHub observation behind the Task's returned PR state.\nThe durable attempt metadata lives on `TaskPr`; this derived view tells one\ncaller whether it read GitHub, reused a recent reading, or opened a degraded\ncircuit while preserving the cached PR fields.",
       "oneOf": [
@@ -5532,257 +5255,6 @@
         }
       ]
     },
-    "PaneIntent": {
-      "description": "A Task workspace holds exactly one of each designated pane; Wave and repository\nworkspaces hold only the session pane. Arrangement is free; membership is not.",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "description": "One conversation at a time; none shows the start state.",
-          "properties": {
-            "kind": {
-              "const": "session",
-              "type": "string"
-            },
-            "location": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/ViewLocation"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "session_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "kind",
-            "session_id",
-            "location"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "kind": {
-              "const": "shell",
-              "type": "string"
-            },
-            "selected": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "tabs": {
-              "items": {
-                "$ref": "#/$defs/ShellTab"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "kind",
-            "tabs",
-            "selected"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "kind": {
-              "const": "browser",
-              "type": "string"
-            },
-            "location": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/ViewLocation"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "selected": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "tabs": {
-              "items": {
-                "$ref": "#/$defs/BrowserTab"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "kind",
-            "location",
-            "tabs",
-            "selected"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "PaneTree": {
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "content": {
-              "$ref": "#/$defs/PaneIntent"
-            },
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "pane",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "id",
-            "content"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "axis": {
-              "$ref": "#/$defs/SplitAxis"
-            },
-            "first": {
-              "$ref": "#/$defs/PaneTree"
-            },
-            "kind": {
-              "const": "split",
-              "type": "string"
-            },
-            "ratio": {
-              "format": "double",
-              "type": "number"
-            },
-            "second": {
-              "$ref": "#/$defs/PaneTree"
-            }
-          },
-          "required": [
-            "kind",
-            "axis",
-            "ratio",
-            "first",
-            "second"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "PeerPlanningStatus": {
-      "description": "Local routing and import evidence. Endpoints are deliberately not displayed:\nGit URLs can contain credentials. A checkpoint is not publication evidence.",
-      "properties": {
-        "acquisition_error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "active": {
-          "type": "boolean"
-        },
-        "conflicts": {
-          "items": {
-            "$ref": "#/$defs/PeerProjectionConflict"
-          },
-          "type": "array"
-        },
-        "fetched_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "id": {
-          "type": "string"
-        },
-        "imported_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "pending_local": {
-          "type": "boolean"
-        },
-        "publication_error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "publication_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "publication_state": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reference": {
-          "type": "string"
-        },
-        "selected_records": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "id",
-        "reference",
-        "active",
-        "selected_records",
-        "imported_revision",
-        "fetched_revision",
-        "acquisition_error",
-        "publication_revision",
-        "publication_state",
-        "publication_error",
-        "pending_local",
-        "conflicts"
-      ],
-      "type": "object"
-    },
-    "PeerProjectionConflict": {
-      "properties": {
-        "reason": {
-          "type": "string"
-        },
-        "target": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "target",
-        "reason"
-      ],
-      "type": "object"
-    },
     "PlacementStrategy": {
       "enum": [
         "create",
@@ -5790,6 +5262,22 @@
         "use_existing_worktree"
       ],
       "type": "string"
+    },
+    "PlanApplied": {
+      "additionalProperties": false,
+      "description": "What `plan.apply` answers.",
+      "properties": {
+        "not_taken": {
+          "description": "How many of the records could not be written here (a Wave whose name\na Wave here holds, and what hangs from it). The sender keeps them\nunsent and sends them again.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "not_taken"
+      ],
+      "type": "object"
     },
     "PlanBoard": {
       "properties": {
@@ -5855,23 +5343,62 @@
       ],
       "type": "object"
     },
-    "PlanStatus": {
-      "description": "What `repo.plan` answers: the transport, and for Git the\ndestinations with their import and publication evidence.",
+    "PlanCarriers": {
+      "description": "The ways a plan without a tracker reaches other Machines. Every Machine\nholds the whole plan; with none of these it stays on this one.",
       "properties": {
-        "destinations": {
-          "items": {
-            "$ref": "#/$defs/PeerPlanningStatus"
-          },
-          "type": "array"
+        "git": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GitCarrier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The repository's remote; `null` without one."
         },
-        "transport": {
-          "description": "`git`, or the tracker's lowercased name.",
-          "type": "string"
+        "hub": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HubCarrier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Machine `lf machine hub` names; `null` without one."
         }
       },
       "required": [
-        "transport",
-        "destinations"
+        "git",
+        "hub"
+      ],
+      "type": "object"
+    },
+    "PlanChanges": {
+      "additionalProperties": false,
+      "description": "What `plan.changes` answers.",
+      "properties": {
+        "more": {
+          "description": "More changes follow `seq`; read again from it.",
+          "type": "boolean"
+        },
+        "records": {
+          "items": {
+            "$ref": "#/$defs/Untyped"
+          },
+          "type": "array"
+        },
+        "seq": {
+          "description": "The watermark to read from next.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "records",
+        "seq",
+        "more"
       ],
       "type": "object"
     },
@@ -5885,63 +5412,6 @@
         "unavailable"
       ],
       "type": "string"
-    },
-    "PlanningSyncChange": {
-      "properties": {
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "field": {
-          "type": "string"
-        },
-        "id": {
-          "type": "string"
-        },
-        "linear_value": true,
-        "local_value": true,
-        "state": {
-          "$ref": "#/$defs/PlanningSyncState"
-        }
-      },
-      "required": [
-        "id",
-        "field",
-        "state",
-        "local_value",
-        "linear_value",
-        "error"
-      ],
-      "type": "object"
-    },
-    "PlanningSyncState": {
-      "enum": [
-        "pending",
-        "uncertain",
-        "adopted_linear"
-      ],
-      "type": "string"
-    },
-    "PlanningSyncStatus": {
-      "description": "Read-only delivery evidence. These rows never confer execution authority.",
-      "properties": {
-        "changes": {
-          "items": {
-            "$ref": "#/$defs/PlanningSyncChange"
-          },
-          "type": "array"
-        },
-        "connected": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "connected",
-        "changes"
-      ],
-      "type": "object"
     },
     "Portability": {
       "enum": [
@@ -6543,37 +6013,6 @@
       ],
       "type": "object"
     },
-    "ProcessEntry": {
-      "description": "One row of the process inventory: both kinds share one history and paging order.",
-      "oneOf": [
-        {
-          "$ref": "#/$defs/LfProcess",
-          "properties": {
-            "kind": {
-              "const": "lf",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind"
-          ],
-          "type": "object"
-        },
-        {
-          "$ref": "#/$defs/AgentProcess",
-          "properties": {
-            "kind": {
-              "const": "agent",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "Project": {
       "properties": {
         "created_at": {
@@ -6591,13 +6030,6 @@
           },
           "type": "array"
         },
-        "linear_id": {
-          "description": "Optional Linear binding, not a second owner of this record.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "metric_targets": {
           "items": {
             "$ref": "#/$defs/MetricTarget"
@@ -6607,14 +6039,6 @@
         "name": {
           "type": "string"
         },
-        "pm_snapshot_synced_at": {
-          "description": "Acquisition time of the retained Linear observation, never a write clock.",
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "slug": {
           "type": "string"
         },
@@ -6623,6 +6047,21 @@
         },
         "summary": {
           "type": "string"
+        },
+        "tracker_id": {
+          "description": "The record’s ID in the repository's tracker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tracker_synced_at": {
+          "description": "Time of the last successful tracker refresh.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "updated_at": {
           "type": "string"
@@ -6641,8 +6080,8 @@
         "krs",
         "metric_targets",
         "status",
-        "linear_id",
-        "pm_snapshot_synced_at",
+        "tracker_id",
+        "tracker_synced_at",
         "wave_id",
         "created_at",
         "updated_at"
@@ -6777,12 +6216,6 @@
           },
           "type": "array"
         },
-        "linear_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "metric_targets": {
           "items": {
             "$ref": "#/$defs/MetricTarget"
@@ -6799,14 +6232,20 @@
           "$ref": "#/$defs/ProjectStatus"
         },
         "sync": {
-          "$ref": "#/$defs/PlanningSyncStatus"
+          "$ref": "#/$defs/TrackerSync"
+        },
+        "tracker_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "sync",
         "current",
         "id",
-        "linear_id",
+        "tracker_id",
         "slug",
         "name",
         "status",
@@ -6823,7 +6262,6 @@
         "opencodezen",
         "linear",
         "asana",
-        "notion",
         "doppler"
       ],
       "type": "string"
@@ -7048,13 +6486,13 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "The CLI's retained process or Session history, as display text.",
+          "description": "`lf session history show <id>`: one Session's history, as display text.",
           "properties": {
             "id": {
               "type": "string"
             },
             "kind": {
-              "const": "process.history",
+              "const": "session.history.get",
               "type": "string"
             }
           },
@@ -7093,23 +6531,6 @@
                 "type": "null"
               }
             ]
-          }
-        },
-        {
-          "additionalProperties": false,
-          "description": "`lf process list`: live Loopflow call trees.",
-          "properties": {
-            "kind": {
-              "const": "process.list",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind"
-          ],
-          "type": "object",
-          "x-result": {
-            "$ref": "#/$defs/ActivitySnapshot"
           }
         },
         {
@@ -7344,6 +6765,31 @@
         },
         {
           "additionalProperties": false,
+          "description": "`lf --cwd <directory> task status <issue> --json`: one Task's status\nand its planning.",
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "issue"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/Untyped"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "`lf task changes <issue> --base <base> [--head <head>]`: a Task's changed files.",
           "properties": {
             "base": {
@@ -7422,8 +6868,14 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task file <issue> <path>`: one file of a Task's checkout.",
+          "description": "`lf task file <issue> <path> [--at <rev>]`: one file of a Task's\ncheckout, or its version at a commit.",
           "properties": {
+            "at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "issue": {
               "type": "string"
             },
@@ -7438,11 +6890,48 @@
           "required": [
             "kind",
             "issue",
-            "path"
+            "path",
+            "at"
           ],
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/TaskFileSnapshot"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf task files <issue> <path> [--cursor <cursor>] [--show-ignored]`:\none page of a Task checkout directory's immediate entries.",
+          "properties": {
+            "cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.files",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "show_ignored": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "path",
+            "cursor",
+            "show_ignored"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskDirectory"
           }
         },
         {
@@ -7623,7 +7112,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> desktop layout <work>`: a Work's saved panes.",
+          "description": "`lf --cwd <directory> desktop layout query:<id>`: a Dashboard's slots.",
           "properties": {
             "directory": {
               "type": "string"
@@ -7643,7 +7132,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/DesktopLayoutRecord"
+            "$ref": "#/$defs/Dashboard"
           }
         },
         {
@@ -7763,13 +7252,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf process show <id>`: one Graph that ran, with its steps.",
+          "description": "`lf graph show <id>`: one Graph that ran, with its steps.",
           "properties": {
             "id": {
               "type": "string"
             },
             "kind": {
-              "const": "process.get",
+              "const": "graph.run.get",
               "type": "string"
             }
           },
@@ -8027,13 +7516,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> repo plan`: where the repository's\nplanning is exchanged. Its subscription exchanges it while it runs.",
+          "description": "`lf --cwd <directory> repo tracker`: where the repository's\nplanning is exchanged. Its subscription exchanges it while it runs.",
           "properties": {
             "directory": {
               "type": "string"
             },
             "kind": {
-              "const": "repo.plan",
+              "const": "repo.tracker",
               "type": "string"
             }
           },
@@ -8043,7 +7532,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/PlanStatus"
+            "$ref": "#/$defs/TrackerStatus"
           }
         },
         {
@@ -9011,6 +8500,10 @@
         "next_move": {
           "$ref": "#/$defs/NextMove"
         },
+        "owned_by_you": {
+          "description": "Whether its owner is you; `false` when nobody owns it.",
+          "type": "boolean"
+        },
         "pr": {
           "anyOf": [
             {
@@ -9048,19 +8541,6 @@
           "type": "array",
           "uniqueItems": true
         },
-        "ship_control": {
-          "$ref": "#/$defs/TaskRunControl"
-        },
-        "shipping": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ShippingSnapshot"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "task": {
           "$ref": "#/$defs/TaskSummary"
         }
@@ -9079,10 +8559,30 @@
         "latest_graph_process",
         "execution",
         "run_control",
-        "ship_control",
-        "shipping",
         "pr",
-        "section"
+        "section",
+        "owned_by_you"
+      ],
+      "type": "object"
+    },
+    "RunDied": {
+      "description": "A Task run's carrier died while the run was at a step.",
+      "properties": {
+        "at": {
+          "description": "RFC 3339; `null` when nobody recorded the death.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "at_step": {
+          "description": "The step the run reached, where it starts again.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "at_step",
+        "at"
       ],
       "type": "object"
     },
@@ -9091,6 +8591,13 @@
         "object",
         "boolean"
       ]
+    },
+    "Secrets": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Values by environment variable name; never logged.",
+      "type": "object"
     },
     "Selection": {
       "properties": {
@@ -9104,6 +8611,56 @@
       "required": [
         "id",
         "expression"
+      ],
+      "type": "object"
+    },
+    "Selection2": {
+      "additionalProperties": false,
+      "description": "Who asks, and how: what a launch the request starts runs with.",
+      "properties": {
+        "agent": {
+          "description": "`--agent` as the sender selected it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "participant": {
+          "description": "The name its person's Task claims carry.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profile": {
+          "$ref": "#/$defs/Untyped",
+          "description": "The sender's personal settings and definitions."
+        },
+        "settings": {
+          "description": "Command-line settings (`LF_SETTINGS`), as YAML.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Untyped"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A shipped Task's branch and Linear mapping, which resolve here."
+        }
+      },
+      "required": [
+        "profile",
+        "participant",
+        "agent",
+        "settings",
+        "source"
       ],
       "type": "object"
     },
@@ -9336,9 +8893,7 @@
             "idle",
             "active",
             "moving",
-            "shipping",
             "working",
-            "autonomous",
             "done"
           ],
           "type": "string"
@@ -9362,8 +8917,34 @@
           "const": "backlog",
           "description": "Board axis: the Task's `TaskSection`.",
           "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "Setting axis: the open Task's auto setting is on.",
+          "type": "string"
         }
       ]
+    },
+    "Sender": {
+      "additionalProperties": false,
+      "description": "What the Machine that sent a request runs with. An operation names the\nsender's own directory; it runs in this Machine's checkout of `repository`.",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "secrets": {
+          "$ref": "#/$defs/Secrets"
+        },
+        "selection": {
+          "$ref": "#/$defs/Selection2"
+        }
+      },
+      "required": [
+        "repository",
+        "selection",
+        "secrets"
+      ],
+      "type": "object"
     },
     "ServerMessage": {
       "description": "One message from the server.",
@@ -10141,42 +9722,81 @@
             "update": null,
             "waiting": false
           }
+        },
+        {
+          "additionalProperties": false,
+          "description": "The hub's side of a plan exchange: take in another Machine's stamped\nrecords of `repository`'s plan, in one transaction. Each field is\nwritten only when its stamp is newer than the one held here, so\nrepeating it changes nothing.",
+          "properties": {
+            "kind": {
+              "const": "plan.apply",
+              "type": "string"
+            },
+            "records": {
+              "items": {
+                "$ref": "#/$defs/Untyped"
+              },
+              "type": "array"
+            },
+            "repository": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "repository",
+            "records"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/PlanApplied"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Each Wave, Project, Task and comment of `repository`'s plan here that\nchanged after the watermark `since`, whole, every field with its stamp;\nnull reads the whole plan.",
+          "properties": {
+            "kind": {
+              "const": "plan.changes",
+              "type": "string"
+            },
+            "repository": {
+              "type": "string"
+            },
+            "since": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "repository",
+            "since"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/PlanChanges"
+          }
         }
       ]
     },
     "SessionAction": {
+      "description": "What opening a Session does here, as a person reads it. Every opening is\n`lf resume`: it adds a view, resumes saved history, or takes the\nconversation over from a client lf can't share.",
       "properties": {
         "help": {
           "type": "string"
         },
-        "kind": {
-          "$ref": "#/$defs/SessionActionKind"
-        },
         "label": {
           "type": "string"
-        },
-        "unavailable_reason": {
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
-        "kind",
         "label",
-        "help",
-        "unavailable_reason"
+        "help"
       ],
       "type": "object"
-    },
-    "SessionActionKind": {
-      "enum": [
-        "reveal",
-        "open",
-        "move_here"
-      ],
-      "type": "string"
     },
     "SessionAttached": {
       "additionalProperties": false,
@@ -10283,6 +9903,28 @@
         "liveness",
         "control_holder",
         "last_line"
+      ],
+      "type": "object"
+    },
+    "SessionEnd": {
+      "description": "A conversation's last agent end.",
+      "properties": {
+        "at": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "exit_code": {
+          "description": "The provider's exit; `null` when nobody saw it (the holder died, or\nthe Machine restarted).",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "at",
+        "exit_code"
       ],
       "type": "object"
     },
@@ -10578,14 +10220,70 @@
       ],
       "type": "string"
     },
-    "SessionOpenIntent": {
-      "description": "Whether opening may take control, start a thread, or only reveal history.",
-      "enum": [
-        "resume",
-        "start",
-        "reveal"
+    "SessionOutlook": {
+      "description": "Whether a conversation that is not running comes up, and what brings it.\nThe server works this out; no client does it again from `ended` and\n`start`.",
+      "properties": {
+        "at": {
+          "description": "RFC 3339: when the server starts it next; a time already past is a\nstart under way. `null` when the server will not start it, and for\none that is starting.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "description": "The command that opens it; `null` while the server brings it up.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/SessionOutlookKind"
+        },
+        "reason": {
+          "description": "Ready to print. Why it could not start; for one coming back, that its\nlast start failed and why; for one waiting, why the server leaves it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "at",
+        "reason",
+        "command"
       ],
-      "type": "string"
+      "type": "object"
+    },
+    "SessionOutlookKind": {
+      "oneOf": [
+        {
+          "const": "starting",
+          "description": "No agent runs yet and one is on its way: a Task's conversation the\nserver here is starting, or a start whose agent has no pid recorded.",
+          "type": "string"
+        },
+        {
+          "const": "coming_back",
+          "description": "It died and the server here starts it again, at `at`.",
+          "type": "string"
+        },
+        {
+          "const": "waiting_for_you",
+          "description": "It is down and only its command brings it up: it is not a Task's\nconversation, or the server here does not or no longer starts it.",
+          "type": "string"
+        },
+        {
+          "const": "quit",
+          "description": "The person quit it. It stays quit.",
+          "type": "string"
+        },
+        {
+          "const": "could_not_start",
+          "description": "No agent has run yet: its start failed, for `reason`. The server\ntries again at `at`, or left it to `command`.",
+          "type": "string"
+        }
+      ]
     },
     "SessionPage": {
       "properties": {
@@ -10646,11 +10344,16 @@
             "null"
           ]
         },
-        "actions": {
-          "items": {
-            "$ref": "#/$defs/SessionAction"
-          },
-          "type": "array"
+        "action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionAction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How opening it here reads; absent for a Run, which opens nowhere."
         },
         "agent_process_id": {
           "anyOf": [
@@ -10680,6 +10383,17 @@
         "detail": {
           "type": "string"
         },
+        "ended": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionEnd"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How its last agent ended, while none runs; `null` for a headless\nSession, before a first start, or when nobody recorded the end."
+        },
         "graph_membership": {
           "$ref": "#/$defs/SessionGraphMembership"
         },
@@ -10701,6 +10415,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "outlook": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionOutlook"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What happens next to a conversation that is not running, as this\nMachine reads it; `null` while it runs, and when nothing says why it\nis down."
         },
         "preview": {
           "anyOf": [
@@ -10739,14 +10464,26 @@
           "description": "A conversation open here that Loopflow never launched; `id` is the\nprovider's conversation ID and no Session records it.",
           "type": "boolean"
         },
-        "ready_summary": {
+        "start": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionStarts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The server's starts of a Task's conversation since it last finished a\nturn; `null` when it made none, and once the person quit."
+        },
+        "state": {
+          "$ref": "#/$defs/SessionState"
+        },
+        "status_line": {
+          "description": "Whether it runs, how it ended and its outlook, as one sentence in this\nMachine's local time: \"died 12:01 (exit 137) · starting again\". Every\nclient prints it as given; `null` for a headless Session.",
           "type": [
             "string",
             "null"
           ]
-        },
-        "state": {
-          "$ref": "#/$defs/SessionState"
         },
         "task_ids": {
           "items": {
@@ -10843,7 +10580,7 @@
         "work",
         "wave_id",
         "work_path",
-        "actions",
+        "action",
         "title",
         "title_source",
         "graph_membership",
@@ -10853,11 +10590,14 @@
         "model",
         "cwd",
         "state",
-        "ready_summary",
         "open_argv",
         "terminal_ids",
         "turn",
-        "raw"
+        "raw",
+        "ended",
+        "start",
+        "outlook",
+        "status_line"
       ],
       "type": "object"
     },
@@ -10871,6 +10611,29 @@
       },
       "required": [
         "terminal_id"
+      ],
+      "type": "object"
+    },
+    "SessionStarts": {
+      "description": "What the server's recovery pass did for a Task conversation.",
+      "properties": {
+        "attempts": {
+          "description": "Starts since it last finished a turn.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "last_started_at": {
+          "description": "RFC 3339: the pass's last start.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "attempts",
+        "last_started_at"
       ],
       "type": "object"
     },
@@ -11221,87 +10984,6 @@
       ],
       "type": "object"
     },
-    "ShellTab": {
-      "additionalProperties": false,
-      "description": "A retained shell identity, independent of its tool pane and current selection.",
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "lf_process_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "location": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ViewLocation"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "id",
-        "location",
-        "lf_process_id"
-      ],
-      "type": "object"
-    },
-    "ShipMark": {
-      "description": "When someone approved or stopped Auto-Ship, and who.",
-      "properties": {
-        "at": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "by": {
-          "$ref": "#/$defs/Starter"
-        }
-      },
-      "required": [
-        "at",
-        "by"
-      ],
-      "type": "object"
-    },
-    "ShippingSnapshot": {
-      "description": "What a shipping Task is doing, derived from its ship process, its state\nand its landing. Nothing here waits on a person.",
-      "properties": {
-        "reason": {
-          "description": "One line saying what is happening.",
-          "type": "string"
-        },
-        "shipped_at": {
-          "description": "When the Task was handed off.",
-          "format": "int64",
-          "type": "integer"
-        },
-        "state": {
-          "$ref": "#/$defs/ShippingState"
-        }
-      },
-      "required": [
-        "shipped_at",
-        "state",
-        "reason"
-      ],
-      "type": "object"
-    },
-    "ShippingState": {
-      "enum": [
-        "building",
-        "landing",
-        "repairing",
-        "restarting",
-        "unassigned"
-      ],
-      "type": "string"
-    },
     "Skipped": {
       "properties": {
         "id": {
@@ -11522,6 +11204,23 @@
             "requester"
           ],
           "type": "object"
+        },
+        {
+          "description": "A configured default set it: `auto: on`. Only an auto mark names one.",
+          "properties": {
+            "kind": {
+              "const": "config",
+              "type": "string"
+            },
+            "layer": {
+              "$ref": "#/$defs/ConfigLayer"
+            }
+          },
+          "required": [
+            "kind",
+            "layer"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -11624,7 +11323,7 @@
     },
     "SteerAdapter": {
       "additionalProperties": false,
-      "description": "Survives attachment-only handoff; replacement creates another capability.",
+      "description": "Belongs to one agent; replacement creates another capability.",
       "properties": {
         "agent_process_id": {
           "$ref": "#/$defs/AgentProcessId"
@@ -12151,29 +11850,11 @@
         "identifier": {
           "type": "string"
         },
-        "linear_id": {
-          "description": "Optional Linear binding, not a second owner of this record.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "parent_pr_id": {
           "type": [
             "string",
             "null"
           ]
-        },
-        "pm_snapshot_synced_at": {
-          "description": "Acquisition time of the retained Linear observation, never a write clock.",
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "pm_writeback": {
-          "$ref": "#/$defs/LinearWritebackState"
         },
         "project_id": {
           "type": [
@@ -12206,6 +11887,24 @@
         },
         "title": {
           "type": "string"
+        },
+        "tracker_id": {
+          "description": "The record’s ID in the repository's tracker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tracker_synced_at": {
+          "description": "Time of the last successful tracker refresh.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tracker_writeback": {
+          "$ref": "#/$defs/LinearWritebackState"
         },
         "updated_at": {
           "type": "string"
@@ -12242,9 +11941,9 @@
         "due_date",
         "state",
         "completed_at",
-        "linear_id",
-        "pm_snapshot_synced_at",
-        "pm_writeback",
+        "tracker_id",
+        "tracker_synced_at",
+        "tracker_writeback",
         "wave_id",
         "repo_id",
         "project_id",
@@ -12255,26 +11954,6 @@
         "parent_pr_id",
         "created_at",
         "updated_at"
-      ],
-      "type": "object"
-    },
-    "TaskAcquisition": {
-      "description": "Acquisition evidence is independent of saved Work and outbound delivery.",
-      "properties": {
-        "observed_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "state": {
-          "$ref": "#/$defs/PlanningState"
-        }
-      },
-      "required": [
-        "state",
-        "observed_at"
       ],
       "type": "object"
     },
@@ -12310,6 +11989,12 @@
     },
     "TaskChangedFile": {
       "properties": {
+        "changes": {
+          "description": "Runs of changed lines in the file's patch, each the Diff's stop: a run\nends at an unchanged line, a hunk's end, or a removal after additions.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "committed": {
           "type": "boolean"
         },
@@ -12338,7 +12023,8 @@
         "committed",
         "staged",
         "unstaged",
-        "untracked"
+        "untracked",
+        "changes"
       ],
       "type": "object"
     },
@@ -12346,6 +12032,13 @@
       "properties": {
         "base_commit": {
           "type": "string"
+        },
+        "commits": {
+          "description": "The commits on head's first-parent line since base, oldest first,\nwithout merges.",
+          "items": {
+            "$ref": "#/$defs/TaskCommit"
+          },
+          "type": "array"
         },
         "files": {
           "items": {
@@ -12384,6 +12077,7 @@
         "task_id",
         "base_commit",
         "head_commit",
+        "commits",
         "files",
         "scratch",
         "scratch_truncated"
@@ -12444,7 +12138,7 @@
       "type": "object"
     },
     "TaskCommentAuthor": {
-      "description": "Who wrote a comment. Person attribution survives local saves and provider acquisition;\nintegrations are distinct from participant direction. An agent's direction\nis the Session's, written for its requester.",
+      "description": "Who wrote a comment. Person attribution survives local saves and tracker fetches;\nintegrations are distinct from participant direction. An agent's direction\nis the Session's, written for its requester.",
       "oneOf": [
         {
           "properties": {
@@ -12543,6 +12237,27 @@
       ],
       "type": "object"
     },
+    "TaskCommit": {
+      "description": "One commit in a Task's comparison. A Graph step's commits share the subject\nprefix `lf <step>:`.",
+      "properties": {
+        "parent": {
+          "description": "The commit's first parent: a step starting here compares against it.",
+          "type": "string"
+        },
+        "sha": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "parent",
+        "subject"
+      ],
+      "type": "object"
+    },
     "TaskConditionSnapshot": {
       "description": "A Task's shared condition and the evidence that proves it.",
       "properties": {
@@ -12615,7 +12330,8 @@
       ],
       "type": "object"
     },
-    "TaskCreateReceipt": {
+    "TaskCreated": {
+      "description": "`task.create`'s answer: its receipt, the primary conversation's record and\nthe Task's row in the Work projection's shape, read when answering, so a\nclient selects the Task and opens the conversation before its planning\nsubscription lists it. The stored receipt holds neither.",
       "properties": {
         "graph": {
           "type": [
@@ -12625,6 +12341,19 @@
         },
         "milestone": {
           "type": "string"
+        },
+        "row": {
+          "$ref": "#/$defs/RoadmapTask"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "session_id": {
           "anyOf": [
@@ -12644,7 +12373,9 @@
         "task",
         "graph",
         "session_id",
-        "milestone"
+        "milestone",
+        "session",
+        "row"
       ],
       "type": "object"
     },
@@ -12763,13 +12494,38 @@
       ],
       "type": "object"
     },
+    "TaskDirectory": {
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/TaskFileEntry"
+          },
+          "type": "array"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "entries",
+        "next_cursor"
+      ],
+      "type": "object"
+    },
     "TaskEdit": {
       "properties": {
         "id": {
           "type": "string"
         },
         "sync": {
-          "$ref": "#/$defs/PlanningSyncStatus"
+          "$ref": "#/$defs/TrackerSync"
         }
       },
       "required": [
@@ -13334,6 +13090,28 @@
             "null"
           ]
         },
+        "died": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunDied"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where the run's carrier (`lf task run`) died before the run stopped;\n`null` for a run that runs, stopped on its own, or never started."
+        },
+        "outlook": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionOutlook"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What happens next to a run that died, as this Machine reads it: the\nserver here starts it again at `at`, or leaves it to `command` for\n`reason`. `null` unless `died` says it did."
+        },
         "reason": {
           "type": "string"
         },
@@ -13352,7 +13130,9 @@
         "state",
         "reason",
         "step",
-        "captured"
+        "captured",
+        "died",
+        "outlook"
       ],
       "type": "object"
     },
@@ -13371,10 +13151,33 @@
         },
         {
           "const": "waiting",
-          "description": "Its step is waiting out a usage limit until an account frees up.",
+          "description": "Its step is waiting out a usage limit until an account frees up, or\nits run waits to be carried again after its carrier died.",
           "type": "string"
         }
       ]
+    },
+    "TaskFileEntry": {
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/TaskFileKind"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "TaskFileKind": {
+      "enum": [
+        "file",
+        "directory",
+        "symlink"
+      ],
+      "type": "string"
     },
     "TaskFileRecovery": {
       "properties": {
@@ -13422,6 +13225,13 @@
             "null"
           ]
         },
+        "data": {
+          "description": "A `binary` file's bytes, base64, up to `MAX_BINARY_DATA_BYTES`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "issue_identifier": {
           "type": "string"
         },
@@ -13464,6 +13274,7 @@
         "task_id",
         "path",
         "content",
+        "data",
         "state",
         "revision",
         "read_only_reason",
@@ -13505,6 +13316,15 @@
     "TaskGraph": {
       "description": "One Task's Graph as `lf task status --json` carries it.",
       "properties": {
+        "current_step": {
+          "description": "The index in `steps` of the step the Task stands in; null at `start`\nand at `end`.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "interactive_steps": {
           "items": {
             "$ref": "#/$defs/InteractiveStep"
@@ -13516,12 +13336,26 @@
         },
         "position": {
           "$ref": "#/$defs/TaskGraphPosition"
+        },
+        "sentence": {
+          "description": "Where the Task stands, in one sentence: \"build is running implement.\nYou are next needed at ship-review.\"",
+          "type": "string"
+        },
+        "steps": {
+          "description": "The Graph's top-level steps in order, as the workflow line shows them.",
+          "items": {
+            "$ref": "#/$defs/WorkflowStep"
+          },
+          "type": "array"
         }
       },
       "required": [
         "name",
         "interactive_steps",
-        "position"
+        "position",
+        "steps",
+        "current_step",
+        "sentence"
       ],
       "type": "object"
     },
@@ -13576,7 +13410,7 @@
       ]
     },
     "TaskOverview": {
-      "description": "Workspace facts needed before opening diagnostic Process history.",
+      "description": "Workspace facts without the Task's full history.",
       "properties": {
         "graph": {
           "anyOf": [
@@ -13704,6 +13538,14 @@
             "null"
           ]
         },
+        "order": {
+          "description": "Where the entry sorts in the Task's log on every Machine, from its\nwriter's plan clock. Absent with Linear or Asana, whose comment order\ndecides, and from entries written before claims were first-wins.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "person": {
           "type": [
             "string",
@@ -13711,7 +13553,7 @@
           ]
         },
         "person_id": {
-          "description": "The person's `people` id, their planning provider's identity for them.\nAbsent from entries released lf wrote and where the writer knew none.",
+          "description": "The person's `people` id, their tracker's identity for them.\nAbsent from entries released lf wrote and where the writer knew none.",
           "type": [
             "string",
             "null"
@@ -13724,11 +13566,18 @@
             "null"
           ]
         },
+        "seen": {
+          "description": "The entry in effect when this one was written, or this entry itself\nwhen there was none. Present exactly when `order` is. A claim whose\nwriter had not seen the claim holding the Task loses to it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "task_id": {
           "type": "string"
         },
         "writer_machine_id": {
-          "description": "Absent from entries released lf wrote, which name no writer (Task 538340\ndrops `written_here`, after which every entry names one).",
+          "description": "Absent from entries lf before `task_machine_local` wrote, which name no writer.",
           "type": [
             "string",
             "null"
@@ -13745,7 +13594,9 @@
         "machine_id",
         "machine_label",
         "writer_machine_id",
-        "at"
+        "at",
+        "order",
+        "seen"
       ],
       "type": "object"
     },
@@ -14082,13 +13933,13 @@
                 "null"
               ]
             },
+            "merges": {
+              "description": "The run may merge the PR: auto is on, or no interactive step is\nleft ahead, and nobody turned auto off.",
+              "type": "boolean"
+            },
             "run": {
               "description": "The graph and where the run set out: `code from implement`.",
               "type": "string"
-            },
-            "ships": {
-              "description": "No interactive step is left ahead: Auto-Ship is approved and the\nrun may merge the PR.",
-              "type": "boolean"
             },
             "state": {
               "const": "running",
@@ -14099,7 +13950,7 @@
             "state",
             "issue",
             "run",
-            "ships",
+            "merges",
             "graph_process",
             "log"
           ],
@@ -14231,11 +14082,6 @@
           "const": "working",
           "description": "Someone's idle, active or moving Task.",
           "type": "string"
-        },
-        {
-          "const": "autonomous",
-          "description": "Someone's shipping Task, running to merge with nothing left for a person.",
-          "type": "string"
         }
       ]
     },
@@ -14275,85 +14121,21 @@
       ],
       "type": "object"
     },
-    "TaskShip": {
-      "description": "What `task.ship` set going.",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "description": "Auto-Ship is approved and `process` ships the Task to `end`.",
-          "properties": {
-            "issue": {
-              "type": "string"
-            },
-            "lf_process_id": {
-              "$ref": "#/$defs/LfProcessId"
-            },
-            "log": {
-              "description": "The ship's output once its launcher lets go; null under `-b`.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "state": {
-              "const": "shipping",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state",
-            "issue",
-            "lf_process_id",
-            "log"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Another live process already ships it.",
-          "properties": {
-            "issue": {
-              "type": "string"
-            },
-            "lf_process_id": {
-              "$ref": "#/$defs/LfProcessId"
-            },
-            "state": {
-              "const": "already_shipping",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state",
-            "issue",
-            "lf_process_id"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The Task already stands at `end`.",
-          "properties": {
-            "issue": {
-              "type": "string"
-            },
-            "state": {
-              "const": "at_end",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state",
-            "issue"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "TaskSnapshot": {
       "properties": {
         "actions": {
           "$ref": "#/$defs/TaskActionModel"
+        },
+        "auto": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Auto"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Task's auto setting: on, off, and who set it when;\n`null` when nobody has."
         },
         "base_commit": {
           "type": [
@@ -14415,16 +14197,6 @@
           "$ref": "#/$defs/Observation",
           "description": "Freshness of the PR state against GitHub as of this read. `Degraded`\nmeans a bounded remote read failed and the PR fields are cached, not\nfreshly confirmed."
         },
-        "pm_snapshot_synced_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "pm_writeback": {
-          "$ref": "#/$defs/LinearWritebackState"
-        },
         "pr": {
           "anyOf": [
             {
@@ -14456,27 +14228,16 @@
         "repo_id": {
           "type": "string"
         },
-        "ship_approval": {
+        "stack_parent": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ShipMark"
+              "$ref": "#/$defs/TaskStackParent"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Who approved Auto-Ship and when, while the Task is approved."
-        },
-        "ship_stop": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ShipMark"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "The stop that keeps a run from approving Auto-Ship, until `lf ship`."
+          "description": "The Task this one is stacked on."
         },
         "started_by": {
           "anyOf": [
@@ -14495,6 +14256,16 @@
         },
         "task_id": {
           "type": "string"
+        },
+        "tracker_synced_at": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tracker_writeback": {
+          "$ref": "#/$defs/LinearWritebackState"
         },
         "updated_at": {
           "type": "string"
@@ -14525,8 +14296,8 @@
         "task_id",
         "external_project_id",
         "project",
-        "pm_snapshot_synced_at",
-        "pm_writeback",
+        "tracker_synced_at",
+        "tracker_writeback",
         "wave",
         "project_id",
         "repo_id",
@@ -14546,13 +14317,39 @@
         "observation",
         "actions",
         "started_by",
-        "ship_approval",
-        "ship_stop"
+        "auto",
+        "stack_parent"
+      ],
+      "type": "object"
+    },
+    "TaskStackParent": {
+      "description": "The Task a stacked Task builds on, as people name it.",
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "pr_number": {
+          "description": "`None` until the parent opens its PR.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "identifier",
+        "branch",
+        "pr_number"
       ],
       "type": "object"
     },
     "TaskState": {
-      "description": "A Task's state, derived from its checkout, Graph position, whether a\nGraph runs for it and the Auto-Ship approval. Completion and abandonment\nare durable; the open states follow what the Task is doing now. Whether\nanyone owns it is ownership, not state.",
+      "description": "A Task's state, derived from its checkout, Graph position, whether a\nGraph runs for it. Completion and abandonment\nare durable; the open states follow what the Task is doing now. Whether\nanyone owns it is ownership, not state.",
       "oneOf": [
         {
           "enum": [
@@ -14567,7 +14364,7 @@
         },
         {
           "const": "idle",
-          "description": "A checkout, no Graph running and not at an interactive step: before its first run,\nafter a stopped one, or shipping whose ship process exited.",
+          "description": "A checkout, no Graph running and not at an interactive step: before its first run,\nor after a stopped one.",
           "type": "string"
         },
         {
@@ -14577,12 +14374,7 @@
         },
         {
           "const": "moving",
-          "description": "A Graph runs for it with an interactive step still ahead that will stop for a person.",
-          "type": "string"
-        },
-        {
-          "const": "shipping",
-          "description": "A Graph runs for it and no interactive step ahead will stop it: none remain, or\nAuto-Ship approved stand-ins at the rest. It finishes on its own to merge.",
+          "description": "A Graph runs for it. Its auto setting says whether the run stands in\nat interactive steps or stops there for a person.",
           "type": "string"
         },
         {
@@ -14594,9 +14386,6 @@
     },
     "TaskSummary": {
       "properties": {
-        "acquisition": {
-          "$ref": "#/$defs/TaskAcquisition"
-        },
         "assignee": {
           "type": [
             "string",
@@ -14623,12 +14412,6 @@
         },
         "identifier": {
           "type": "string"
-        },
-        "linear_id": {
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "name": {
           "type": "string"
@@ -14657,7 +14440,16 @@
           ]
         },
         "sync": {
-          "$ref": "#/$defs/PlanningSyncStatus"
+          "$ref": "#/$defs/TrackerSync"
+        },
+        "tracker_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tracker_state": {
+          "$ref": "#/$defs/TrackerState"
         },
         "wave_id": {
           "type": [
@@ -14671,10 +14463,10 @@
         "repo",
         "project_id",
         "wave_id",
-        "acquisition",
+        "tracker_state",
         "sync",
         "id",
-        "linear_id",
+        "tracker_id",
         "identifier",
         "name",
         "description",
@@ -14721,12 +14513,6 @@
           },
           "type": "array"
         },
-        "processes": {
-          "items": {
-            "$ref": "#/$defs/ProcessEntry"
-          },
-          "type": "array"
-        },
         "sessions": {
           "items": {
             "$ref": "#/$defs/TaskSession"
@@ -14737,7 +14523,6 @@
       "required": [
         "sessions",
         "graph_processes",
-        "processes",
         "graph"
       ],
       "type": "object"
@@ -14834,6 +14619,156 @@
     "TraceId": {
       "type": "string"
     },
+    "TrackerActionStatus": {
+      "description": "One tracker action as a person reads it.",
+      "properties": {
+        "change": {
+          "description": "What changes, as a person names it: `title`, `complete`, `comment`.",
+          "type": "string"
+        },
+        "error": {
+          "description": "Why the last request did not confirm it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ActionKind"
+        },
+        "local_value": {
+          "description": "The value saved here; when conflicted, the one that lost."
+        },
+        "owner_id": {
+          "type": "string"
+        },
+        "owner_kind": {
+          "$ref": "#/$defs/ActionOwnerKind"
+        },
+        "phase": {
+          "$ref": "#/$defs/ActionPhase",
+          "description": "`queued`, `sent` (reply unknown) or `conflicted` (the tracker's value won)."
+        },
+        "seq": {
+          "description": "Send order across the repository; none for Git, which keeps no queue.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "subject": {
+          "description": "The field or comment the change addresses.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tracker": {
+          "$ref": "#/$defs/TrackerKind"
+        },
+        "tracker_value": {
+          "description": "The tracker's winning value, when conflicted."
+        }
+      },
+      "required": [
+        "id",
+        "seq",
+        "owner_kind",
+        "owner_id",
+        "kind",
+        "change",
+        "subject",
+        "phase",
+        "tracker",
+        "error",
+        "local_value",
+        "tracker_value"
+      ],
+      "type": "object"
+    },
+    "TrackerKind": {
+      "description": "The tracker a queued planning change goes to.",
+      "enum": [
+        "linear",
+        "asana"
+      ],
+      "type": "string"
+    },
+    "TrackerState": {
+      "description": "The tracker's last known state for a Task and when it was synced.",
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/PlanningState"
+        },
+        "synced_at": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "synced_at"
+      ],
+      "type": "object"
+    },
+    "TrackerStatus": {
+      "description": "What `repo.tracker` answers: the tracker, or for a repository without\none how its plan travels, and every open and lost tracker action.",
+      "properties": {
+        "actions": {
+          "description": "What the tracker has yet to confirm (open: `queued`, `sent`), in send\norder, and each value it kept over a local one (lost: `conflicted`)\nuntil it is answered.",
+          "items": {
+            "$ref": "#/$defs/TrackerActionStatus"
+          },
+          "type": "array"
+        },
+        "plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanCarriers"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How a plan without a tracker travels; `null` with a tracker."
+        },
+        "tracker": {
+          "description": "`linear` or `asana`; `null` when the plan is in Loopflow's store.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "tracker",
+        "plan",
+        "actions"
+      ],
+      "type": "object"
+    },
+    "TrackerSync": {
+      "description": "A Task's or Project's slice of `lf repo tracker`'s actions: what its tracker\nhas yet to confirm (open), and each value the tracker won (lost) until it\nis answered.\nRead-only; these rows never confer execution authority.",
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/TrackerActionStatus"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "actions"
+      ],
+      "type": "object"
+    },
     "TransitionKind": {
       "enum": [
         "retained",
@@ -14928,16 +14863,6 @@
             "null"
           ]
         },
-        "face": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PaneIntent"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "identifier": {
           "description": "A Task's short name, as people say it: `LOO-809`.",
           "type": [
@@ -14953,13 +14878,6 @@
             {
               "type": "null"
             }
-          ]
-        },
-        "pane_revision": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
           ]
         },
         "primary_session": {
@@ -14989,8 +14907,6 @@
         }
       },
       "required": [
-        "pane_revision",
-        "face",
         "work",
         "title",
         "states",
@@ -15246,11 +15162,6 @@
         "already_removed": {
           "type": "boolean"
         },
-        "chapters": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
         "completed_tasks": {
           "format": "uint",
           "minimum": 0,
@@ -15304,6 +15215,11 @@
         "preview": {
           "type": "boolean"
         },
+        "projects": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
         "sessions": {
           "format": "uint",
           "minimum": 0,
@@ -15340,7 +15256,7 @@
         "moved",
         "deleted",
         "completed_tasks",
-        "chapters",
+        "projects",
         "sessions",
         "initiatives",
         "has_files",
@@ -15440,6 +15356,10 @@
         "agent": {
           "$ref": "#/$defs/SetupValue"
         },
+        "auto": {
+          "$ref": "#/$defs/SetupValue",
+          "description": "`on` when the Wave's Tasks turn auto on as they take up their Graph."
+        },
         "graph": {
           "$ref": "#/$defs/SetupValue"
         },
@@ -15461,6 +15381,7 @@
       },
       "required": [
         "graph",
+        "auto",
         "agent",
         "skill_agents",
         "tasks_machine",
@@ -15853,9 +15774,6 @@
     },
     "WorkLinkTarget": {
       "properties": {
-        "diff": {
-          "type": "boolean"
-        },
         "execution_machine": {
           "description": "The execution owner when it is another Machine.",
           "type": [
@@ -15910,58 +15828,7 @@
         "task_id",
         "wave",
         "session",
-        "diff",
         "execution_machine"
-      ],
-      "type": "object"
-    },
-    "WorkPaneLayout": {
-      "additionalProperties": false,
-      "properties": {
-        "drafts": {
-          "items": {
-            "$ref": "#/$defs/FileDraft"
-          },
-          "type": "array"
-        },
-        "focused": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "hidden": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array",
-          "uniqueItems": true
-        },
-        "revision": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "tree": {
-          "$ref": "#/$defs/PaneTree"
-        },
-        "work": {
-          "$ref": "#/$defs/WorkWorkspaceKey"
-        },
-        "zoomed": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "work",
-        "revision",
-        "tree",
-        "focused",
-        "zoomed",
-        "hidden",
-        "drafts"
       ],
       "type": "object"
     },
@@ -16063,6 +15930,52 @@
       ],
       "type": "string"
     },
+    "WorkflowOutline": {
+      "description": "A Graph as the workflow line shows it before any Task stands on it.",
+      "properties": {
+        "interactive_steps": {
+          "description": "Every step where a person takes part, as `TaskGraph` carries them.",
+          "items": {
+            "$ref": "#/$defs/InteractiveStep"
+          },
+          "type": "array"
+        },
+        "sentence": {
+          "description": "\"You take part at explore, ship-review and verify.\" or \"Runs on its own.\"",
+          "type": "string"
+        },
+        "steps": {
+          "description": "The Graph's top-level steps in order, as `TaskGraph.steps` carries them.",
+          "items": {
+            "$ref": "#/$defs/WorkflowStep"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "steps",
+        "interactive_steps",
+        "sentence"
+      ],
+      "type": "object"
+    },
+    "WorkflowStep": {
+      "description": "One top-level step of a Task's Graph.",
+      "properties": {
+        "interactive": {
+          "description": "A person takes part somewhere inside it, XOR paths included.",
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "interactive"
+      ],
+      "type": "object"
+    },
     "Write": {
       "description": "A typed mutation with the same defaults and effects as its CLI spelling.\nOn the wire each write is a resource-named `kind` (`task.complete`);\n`desktop.*` writes are Desktop's own arrangement state.",
       "oneOf": [
@@ -16151,7 +16064,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/TaskCreateReceipt"
+            "$ref": "#/$defs/TaskCreated"
           }
         },
         {
@@ -16206,7 +16119,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task edit <issue> --notes=<notes>`.",
+          "description": "`lf task edit <issue> [--notes=<notes>] [--rank=<rank>]`: a new brief,\na new position in its Project, or both.",
           "properties": {
             "directory": {
               "type": "string"
@@ -16219,14 +16132,26 @@
               "type": "string"
             },
             "notes": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rank": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             }
           },
           "required": [
             "kind",
             "directory",
             "issue",
-            "notes"
+            "notes",
+            "rank"
           ],
           "type": "object",
           "x-result": {
@@ -16310,7 +16235,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started\ndetached: the Graph process it started, or where the Task now waits.\n`approve` is `-b`: every step headless to `end`, approving Auto-Ship.",
+          "description": "`lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started\ndetached: the Graph process it started, or where the Task now waits.\n`approve` is `-b`: every step headless to `end`; it writes no auto.",
           "examples": [
             {
               "agent": "claude",
@@ -16372,19 +16297,19 @@
             "graph_process": "85c31c1e-850c-4821-878d-55527b6dba46",
             "issue": "LOO-1",
             "log": "/Users/maya/.lf/logs/graph-85c31c1e-850c-4821-878d-55527b6dba46.log",
+            "merges": false,
             "run": "code from implement",
-            "ships": false,
             "state": "running"
           }
         },
         {
           "additionalProperties": false,
-          "description": "`lf --task <issue> ship --json`, started detached: approves Auto-Ship.",
+          "description": "`lf task auto on <issue> --json`, started detached: turns auto on and returns the run, as\n`task.run` does. Nothing else turns auto on.",
           "examples": [
             {
               "directory": "/repo",
               "issue": "LOO-1",
-              "kind": "task.ship"
+              "kind": "task.auto.on"
             }
           ],
           "properties": {
@@ -16395,7 +16320,7 @@
               "type": "string"
             },
             "kind": {
-              "const": "task.ship",
+              "const": "task.auto.on",
               "type": "string"
             }
           },
@@ -16406,23 +16331,32 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/TaskShip"
+            "$ref": "#/$defs/TaskRun"
           },
           "x-result-example": {
+            "graph_process": "85c31c1e-850c-4821-878d-55527b6dba46",
             "issue": "LOO-1",
-            "lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
-            "log": "/Users/maya/.lf/logs/ship-LOO-1.log",
-            "state": "shipping"
+            "log": "/Users/maya/.lf/logs/graph-85c31c1e-850c-4821-878d-55527b6dba46.log",
+            "merges": true,
+            "run": "code from ship-review",
+            "state": "running"
           }
         },
         {
           "additionalProperties": false,
-          "description": "`lf task hold <issue> --json`: withdraws the Task's Auto-Ship approval.",
+          "description": "`lf task auto off <issue> --json`: turns the Task's auto setting off.",
           "examples": [
             {
               "directory": "/repo",
               "issue": "LOO-1",
-              "kind": "task.hold"
+              "kind": "task.auto.off",
+              "reason": null
+            },
+            {
+              "directory": "/laptop/repo",
+              "issue": "LOO-1",
+              "kind": "task.auto.off",
+              "reason": null
             }
           ],
           "properties": {
@@ -16433,22 +16367,95 @@
               "type": "string"
             },
             "kind": {
-              "const": "task.hold",
+              "const": "task.auto.off",
+              "type": "string"
+            },
+            "reason": {
+              "description": "Why, saved as a comment on the Task.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "issue",
+            "reason"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/AutoOff"
+          },
+          "x-result-example": {
+            "issue": "LOO-1",
+            "was_on": true
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf task sync <issue> [--keep-theirs | --use-mine]`: exchange the\nTask with its tracker now, first answering every value it lost.\nAnswers what the command prints.",
+          "properties": {
+            "answer": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LostAnswer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "directory": {
+              "type": "string"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.sync",
               "type": "string"
             }
           },
           "required": [
             "kind",
             "directory",
-            "issue"
+            "issue",
+            "answer"
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/Hold"
+            "type": "string"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf repo tracker answer <action> --keep-theirs | --use-mine`: answer one\nlost line of the directory's repository, whoever owns it. Answers the\nline as it stood.",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "answer": {
+              "$ref": "#/$defs/LostAnswer"
+            },
+            "directory": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "repo.tracker.answer",
+              "type": "string"
+            }
           },
-          "x-result-example": {
-            "issue": "LOO-1",
-            "stopped": true
+          "required": [
+            "kind",
+            "directory",
+            "action",
+            "answer"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TrackerActionStatus"
           }
         },
         {
@@ -16730,18 +16737,15 @@
           },
           "x-result-example": {
             "account": "work",
-            "actions": [
-              {
-                "help": "Open this Session in a terminal",
-                "kind": "open",
-                "label": "Open here",
-                "unavailable_reason": null
-              }
-            ],
+            "action": {
+              "help": "Open this Session in a terminal",
+              "label": "Open here"
+            },
             "agent_process_id": "44444444-4444-4444-8444-444444444444",
             "availability": "available",
             "cwd": "/src/loopflow.task",
             "detail": "review-design",
+            "ended": null,
             "graph_membership": {
               "graph": "task-design",
               "graph_lf_process_id": "00000000-0000-0000-0000-00000000f10w",
@@ -16762,13 +16766,15 @@
               "resume",
               "task_00000000000000000000000000000001:task-design:review_kickoff:0"
             ],
+            "outlook": null,
             "preview": null,
             "primary_scope": null,
             "program_status": null,
             "provider": "codex",
             "raw": false,
-            "ready_summary": "The design now reflects Jack's requested changes.",
+            "start": null,
             "state": "unknown",
+            "status_line": "running",
             "task_ids": [
               "task_00000000000000000000000000000001"
             ],
@@ -16925,9 +16931,6 @@
                 "null"
               ]
             },
-            "intent": {
-              "$ref": "#/$defs/SessionOpenIntent"
-            },
             "kind": {
               "const": "session.resume",
               "type": "string"
@@ -16951,8 +16954,7 @@
             "id",
             "task",
             "wave",
-            "agent",
-            "intent"
+            "agent"
           ],
           "type": "object",
           "x-result": {
@@ -17177,7 +17179,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf wave plan bind <wave> <project> --json`: the tracker Project\nbound as the Wave's current plan.",
+          "description": "`lf wave plan bind <wave> <project> --json`: the tracker Project\nbound as the Wave's current Project.",
           "examples": [
             {
               "directory": "/repo",
@@ -18544,35 +18546,6 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf desktop layout <work> --save`, with `layout` (JSON) on stdin.",
-          "properties": {
-            "directory": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "desktop.layout.save",
-              "type": "string"
-            },
-            "layout": {
-              "type": "string"
-            },
-            "work": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "directory",
-            "work",
-            "layout"
-          ],
-          "type": "object",
-          "x-result": {
-            "$ref": "#/$defs/WorkPaneLayout"
-          }
-        },
-        {
-          "additionalProperties": false,
           "description": "`lf config set <key> <value> <destination flags> --json`: declare a\nsetting in the destination's file; `value` is YAML.",
           "examples": [
             {
@@ -18637,13 +18610,10 @@
         },
         {
           "additionalProperties": false,
-          "description": "Appearance's theme file at `path`: set to `value`, or read when null.\nDesktop owns its Apply/Cancel transaction; no CLI spells it.",
+          "description": "The Machine's `theme:` choice: set to `value`, or read when null.\nDesktop owns its Apply/Cancel transaction and the phone reads it; no\nCLI spells it.",
           "properties": {
             "kind": {
               "const": "config.theme",
-              "type": "string"
-            },
-            "path": {
               "type": "string"
             },
             "value": {
@@ -18655,7 +18625,6 @@
           },
           "required": [
             "kind",
-            "path",
             "value"
           ],
           "type": "object",
@@ -18676,8 +18645,8 @@
     }
   ],
   "title": "Loopflow server protocol",
-  "x-min-revision": 7,
-  "x-revision": 7,
+  "x-min-revision": 8,
+  "x-revision": 9,
   "x-terminal-close": {
     "payload": {
       "$ref": "#/$defs/Close"

@@ -141,7 +141,7 @@ fn removing_an_empty_wave_retires_it_and_removes_its_files_on_main() {
     assert!(lab.live_waves().is_empty());
     assert_eq!(
         removed["summary"][1],
-        "1 chapter stays readable in history."
+        "1 Project stays readable in history."
     );
     let history = lab.lf(&["wave", "show", "research", "--json"]);
     assert_eq!(
@@ -181,14 +181,14 @@ fn removing_a_wave_with_work_moves_open_tasks_and_keeps_history() {
     let preview = lab.lf(&["wave", "remove", "desktop", "--preview", "--json"]);
     assert_eq!(preview["moved"].as_array().unwrap().len(), 2);
     assert_eq!(preview["completed_tasks"], 1);
-    assert_eq!(preview["chapters"], 1);
+    assert_eq!(preview["projects"], 1);
     let summary = preview["summary"].to_string();
     assert!(
         summary.contains("2 open Tasks move to the repository (1 started keeps its worktree"),
         "{summary}"
     );
     assert!(
-        summary.contains("1 completed Task and 1 chapter stay readable"),
+        summary.contains("1 completed Task and 1 Project stay readable"),
         "{summary}"
     );
 
@@ -223,7 +223,7 @@ fn removing_a_child_wave_moves_tasks_to_its_parent_and_folds_memory() {
     std::fs::write(
         child.join("config.yaml"),
         format!(
-            "{}graph: auto\n",
+            "{}graph: feature\n",
             std::fs::read_to_string(child.join("config.yaml")).unwrap()
         ),
     )
@@ -245,7 +245,7 @@ fn removing_a_child_wave_moves_tasks_to_its_parent_and_folds_memory() {
     );
     assert!(memory.contains("Keep sidebars narrow."), "{memory}");
     let config = std::fs::read_to_string(lab.path().join(".lf/wave/product/config.yaml")).unwrap();
-    assert!(config.contains("graph: auto"), "{config}");
+    assert!(config.contains("graph: feature"), "{config}");
     assert!(!child.exists());
     assert_eq!(lab.live_waves(), ["product", "product/cli"]);
     assert_eq!(

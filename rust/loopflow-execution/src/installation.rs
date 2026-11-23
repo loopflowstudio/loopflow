@@ -794,7 +794,8 @@ pub fn installed_app() -> Option<PathBuf> {
     public.ancestors().nth(3).map(Path::to_path_buf)
 }
 
-/// `<App>.app/Contents/MacOS/lf`.
+/// `<App>.app/Contents/MacOS/lf`, excluding retired bundles parked under
+/// `.<App>.noindex/<slot>/<App>`.
 pub fn is_app_helper(path: &Path) -> bool {
     let tail: Vec<_> = path
         .iter()
@@ -803,6 +804,23 @@ pub fn is_app_helper(path: &Path) -> bool {
         .map(|name| name.to_str())
         .collect();
     matches!(tail[..], [Some("lf"), Some("MacOS"), Some("Contents"), Some(bundle)] if bundle.ends_with(".app"))
+        && !is_retired_app_helper(path)
+}
+
+fn is_retired_app_helper(path: &Path) -> bool {
+    let Some(bundle) = path.ancestors().nth(3) else {
+        return false;
+    };
+    let Some(bundle_name) = bundle.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let scratch_name = format!(".{bundle_name}.noindex");
+    bundle
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        == Some(scratch_name.as_str())
 }
 
 /// A build runs its own code on whichever home it selects. A private home
@@ -1523,11 +1541,16 @@ mod tests {
 
     #[test]
     fn only_the_lf_inside_an_app_bundle_is_a_desktop_helper() {
-        assert!(is_app_helper(Path::new(
-            "/Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf"
-        )));
+        for path in [
+            "/Applications/Loopflow.app/Contents/MacOS/lf",
+            "/Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf",
+            "/Users/jack/src/loopflow/local-bin/app.noindex/Loopflow.app/Contents/MacOS/lf",
+        ] {
+            assert!(is_app_helper(Path::new(path)), "{path}");
+        }
         for path in [
             "/Applications/Loopflow.app/Contents/MacOS/Loopflow",
+            "/Applications/.Loopflow.app.noindex/superseded.switch-123/Loopflow.app/Contents/MacOS/lf",
             "/Users/jack/.lf/bin/lf",
             "/repo/target/debug/lf",
             "/tmp/Contents/MacOS/lf",
@@ -2005,7 +2028,7 @@ mod tests {
         let root = directory.path().join("authority");
         let published = selection(directory.path(), "published", InstallSource::Published);
         let development = selection(directory.path(), "development", InstallSource::Development);
-        fs::write(&development.store, b"retained chapter and Task history").unwrap();
+        fs::write(&development.store, b"retained project and Task history").unwrap();
         let mut receipt = switch(
             published.clone(),
             development.clone(),

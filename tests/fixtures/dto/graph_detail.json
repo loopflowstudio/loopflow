@@ -115,7 +115,8 @@
       "started_at": 10,
       "completed_at": 20,
       "outcome": "succeeded",
-      "exit_code": 0
+      "exit_code": 0,
+      "error": null
     },
     {
       "lf_process_id": "00000002-0000-4000-8000-000000000000",
@@ -129,7 +130,8 @@
       "started_at": 20,
       "completed_at": 30,
       "outcome": "succeeded",
-      "exit_code": 0
+      "exit_code": 0,
+      "error": null
     },
     {
       "lf_process_id": "00000003-0000-4000-8000-000000000000",
@@ -143,7 +145,8 @@
       "started_at": 30,
       "completed_at": 40,
       "outcome": "succeeded",
-      "exit_code": 0
+      "exit_code": 0,
+      "error": null
     },
     {
       "lf_process_id": "00000004-0000-4000-8000-000000000000",
@@ -157,7 +160,8 @@
       "started_at": 40,
       "completed_at": 50,
       "outcome": "succeeded",
-      "exit_code": 0
+      "exit_code": 0,
+      "error": null
     },
     {
       "lf_process_id": "00000005-0000-4000-8000-000000000000",
@@ -171,7 +175,8 @@
       "started_at": 50,
       "completed_at": 60,
       "outcome": "succeeded",
-      "exit_code": 0
+      "exit_code": 0,
+      "error": null
     },
     {
       "lf_process_id": "00000006-0000-4000-8000-000000000000",
@@ -185,7 +190,8 @@
       "started_at": 60,
       "completed_at": null,
       "outcome": null,
-      "exit_code": null
+      "exit_code": null,
+      "error": null
     }
   ]
 }

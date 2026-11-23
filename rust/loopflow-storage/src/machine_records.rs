@@ -4,21 +4,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordKind {
-    Process,
     Session,
     SessionEvent,
-    GraphProcess,
-    GraphProcessStep,
 }
 
 impl RecordKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Process => "process",
             Self::Session => "session",
             Self::SessionEvent => "session_event",
-            Self::GraphProcess => "graph_process",
-            Self::GraphProcessStep => "graph_process_step",
         }
     }
 }
@@ -52,16 +46,11 @@ pub enum ExportLine {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct CopyCounts {
     pub sessions: usize,
-    pub processes: usize,
 }
 
 impl std::fmt::Display for CopyCounts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} Session(s), {} Process(es)",
-            self.sessions, self.processes
-        )
+        write!(f, "{} Session(s)", self.sessions)
     }
 }
 

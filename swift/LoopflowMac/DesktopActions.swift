@@ -307,32 +307,9 @@ struct DesktopAction {
             model.turnPage(wave, to: page - 1)
             return nil
         },
-        DesktopAction("section", "Show Wave Board Section", arguments: [.init(name: "section", kind: .string, required: true)],
-                      available: { $0.model.navigation.waveView != nil }) { context in
-            guard let view = context.model.navigation.waveView else {
-                throw DesktopTargetError("This window shows no Wave board. Nothing changed.")
-            }
-            let value = try context.string("section")
-            guard let section = WaveBoardSection(rawValue: value) else {
-                throw DesktopArgumentError("section=\(value) is not backlog, working, autonomous or done; nothing changed.")
-            }
-            context.model.navigation.boardSections[view] = section
-            return nil
-        },
-        DesktopAction("filter", "Set Wave Board Done Days", arguments: [.init(name: "days", kind: .integer, required: true)],
-                      available: { $0.model.navigation.waveView != nil }) { context in
-            guard context.model.navigation.waveView != nil else {
-                throw DesktopTargetError("This window shows no Wave board. Nothing changed.")
-            }
-            var filter = TaskHistoryFilter()
-            filter.editDays(try context.string("days"))
-            if let message = filter.validationMessage { throw DesktopArgumentError(message) }
-            UserDefaults.standard.set(filter.days, forKey: WaveStandupDefaults.doneDaysKey)
-            return nil
-        },
     ]
 
-    /// `lf desktop hide|show -p board|tiles` names a Wave view part in place of a pane.
+    /// `lf desktop hide|show -p backlog|tiles` names a Wave view part in place of a pane.
     private static let part = DesktopActionArgument(name: "part", kind: .string, required: false)
 
     /// The Wave view part `part=` names; nil when the action addresses a pane.
@@ -342,7 +319,7 @@ struct DesktopAction {
             throw DesktopTargetError("This window shows no Wave view. Nothing changed.")
         }
         guard let part = WaveViewPart(rawValue: name) else {
-            throw DesktopArgumentError("part=\(name) is not board, session or tiles; nothing changed.")
+            throw DesktopArgumentError("part=\(name) is not backlog, session or tiles; nothing changed.")
         }
         return (view, part)
     }
@@ -352,12 +329,12 @@ struct DesktopAction {
                                        part: WaveViewPart, ratio: Double) throws {
         let value = try context.string("toward")
         guard let toward = WaveViewPart(rawValue: value), toward != part else {
-            throw DesktopArgumentError("toward=\(value) must name another of board, session or tiles; nothing changed.")
+            throw DesktopArgumentError("toward=\(value) must name another of backlog, session or tiles; nothing changed.")
         }
         var ratios = context.model.navigation.waveRatios[view] ?? WaveViewRatios()
         switch (part, toward) {
-        case (.session, .board): ratios.session = ratio
-        case (.board, .session): ratios.session = 1 - ratio
+        case (.session, .backlog): ratios.session = ratio
+        case (.backlog, .session): ratios.session = 1 - ratio
         case (.tiles, _): ratios.band = 1 - ratio
         case (_, .tiles): ratios.band = ratio
         default: return
@@ -539,6 +516,22 @@ struct DesktopAction {
             }
             return outcome
         },
+        DesktopAction("details", "Show Task Details", scope: .pane,
+            arguments: [.init(name: "page", kind: .string, required: true)],
+            keys: [(Character("1"), "brief"), (Character("2"), "diff"), (Character("3"), "files")].map {
+                DesktopKeyBinding(.character($0.0), [.command, .option], args: ["page": $0.1])
+            }, available: taskTool) { context in
+            let value = try context.string("page")
+            guard let page = TaskFilesStore.Page.allCases.first(where: { $0.rawValue.lowercased() == value }) else {
+                throw DesktopArgumentError("page=\(value) is not brief, diff or files; nothing changed.")
+            }
+            let outcome = try show(.files, context)
+            let workspace = try context.task
+            if let browser = workspace.multiplexer.browserPane {
+                try workspace.files(for: browser.content, task: nil, query: RegistryQueryLocal.shared).page = page
+            }
+            return outcome
+        },
         DesktopAction("graph-log", "Show Graph Processes", scope: .pane, available: taskTool) { context in
             try show(.graphLog, context)
         },
@@ -581,14 +574,6 @@ struct DesktopAction {
                     Perf.reconnected(id: id, owner: workspace.performanceOwner)
                 }
             }
-            return DesktopActionOutcome(pane: pane.id, tab: nil)
-        },
-        DesktopAction("take-back-session", "Take Back Session", scope: .pane) { context in
-            let (workspace, pane) = try context.addressed
-            guard let id = pane.sessionId else {
-                throw DesktopTargetError("Address a Session pane to take back its input; nothing changed.")
-            }
-            Task { @MainActor in await context.workspaces.takeBackSession(id, in: workspace) }
             return DesktopActionOutcome(pane: pane.id, tab: nil)
         },
         DesktopAction("switch", "Switch Conversation", scope: .pane,

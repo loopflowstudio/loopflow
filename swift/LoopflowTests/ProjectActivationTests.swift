@@ -78,7 +78,8 @@ struct ProjectActivationTests {
                 plan: WavePlan(objective: "Retained objective")),
             repoPath: wave.repo, streamed: nil,
             isProjectActivationPending: model.isProjectActivationPending(id: wave.id),
-            transportError: model.projectCommandErrors[wave.id], onActivateProject: {}, onClose: {}, onOpenTask: { _ in }) }
+            transportError: model.projectCommandErrors[wave.id], onActivateProject: {}, onClose: {}, onOpenTask: { _ in },
+            onTaskAction: { _, _ in }, onOpenWorktree: { _ in }) }
         let portfolioPending = try? portfolio.inspect().find(text: "Preparing Project…").string()
         let retainedObjective = try? portfolio.inspect().find(text: "Retained objective").string()
         await response.finish()
@@ -105,6 +106,22 @@ struct ProjectActivationTests {
         #expect(try view.inspect().find(text: "Project activation has no recorded outcome yet.").string()
             == "Project activation has no recorded outcome yet.")
         #expect((try? view.inspect().find(text: "Preparing Project…")) == nil)
+    }
+
+    @Test("a failed preparation says what failed, shows the Machine's message and keeps Retry")
+    func failedPreparation() throws {
+        var retried = false
+        let failed = ProjectReadinessView(readiness: nil, isPending: false, transportError: "offline", retry: { retried = true })
+        #expect(try failed.inspect().find(text: "Project not prepared.").string() == "Project not prepared.")
+        #expect(try failed.inspect().find(text: "offline").string() == "offline")
+        try failed.inspect().find(button: "Retry Project preparation").tap()
+        #expect(retried)
+
+        // Where the Project stands is a sentence of its own; nothing failed.
+        let readiness = try JSONDecoder().decode(ProjectReadiness.self, from: Data(#"{"state":"unconfigured","activation":null}"#.utf8))
+        let standing = ProjectReadinessView(readiness: readiness, isPending: false, transportError: nil, retry: {})
+        #expect(try standing.inspect().find(text: "No Project selected yet.").string() == "No Project selected yet.")
+        #expect((try? standing.inspect().find(text: "Project not prepared.")) == nil)
     }
 
 }

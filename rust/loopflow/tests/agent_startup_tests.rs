@@ -134,7 +134,11 @@ fn launch(home: &Path, repo: &Path, bin: &Path, measurements: &Path, args: &[&st
     assert!(endings > 0, "missing completed performance receipt");
     // Each store open still reads the whole schema_migrations ledger, so every
     // release batch adds rows here; the schema itself is read once per process.
-    assert!(rows < 19_000, "launch read {rows} SQLite rows");
+    // Each connection also loads the schema of the history.db it attaches,
+    // about 1,100 rows across this launch. The tracker_tables expand step keeps
+    // each released tracker table beside its renamed one, with mirror triggers,
+    // until its contract drops them.
+    assert!(rows < 23_000, "launch read {rows} SQLite rows");
     assert!(
         statements < 2_000,
         "launch executed {statements} statements"
@@ -224,6 +228,9 @@ while [ ! -f "$LF_HOME/release" ]; do sleep 0.02; done
         .skip_while(|arg| *arg != "--session-id")
         .nth(1)
         .unwrap();
+    let project = home.join("claude/projects/fixture");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join(format!("{native}.jsonl")), "{}\n").unwrap();
     let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     let session: String = db
         .query_row("SELECT id FROM agent_sessions", [], |row| row.get(0))
@@ -247,13 +254,18 @@ while [ ! -f "$LF_HOME/release" ]; do sleep 0.02; done
         )
         .unwrap();
     // Irrelevant history must not become a scan in the launch path.
-    db.execute(
-        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-         WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<30000)
-         SELECT ?1,'observed','startup-noise:'||x,1,'{}',?2 FROM n",
-        rusqlite::params![session, captured],
-    )
+    let history = rusqlite::Connection::open(loopflow_storage::history::history_path(
+        &home.join("loopflow.db"),
+    ))
     .unwrap();
+    history
+        .execute(
+            "INSERT INTO session_history(session_id,receipt_key,observed_at,payload,captured_event)
+         WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<30000)
+         SELECT ?1,'startup-noise:'||x,1,'{}',?2 FROM n",
+            rusqlite::params![session, captured],
+        )
+        .unwrap();
     launch(
         &home,
         &repo,
@@ -273,12 +285,13 @@ while [ ! -f "$LF_HOME/release" ]; do sleep 0.02; done
         1
     );
     assert_eq!(
-        db.query_row(
-            "SELECT count(*) FROM session_events WHERE receipt_key LIKE 'startup-noise:%'",
-            [],
-            |row| row.get::<_, i64>(0)
-        )
-        .unwrap(),
+        history
+            .query_row(
+                "SELECT count(*) FROM session_history WHERE receipt_key LIKE 'startup-noise:%'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
         30000
     );
 }

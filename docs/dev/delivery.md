@@ -52,7 +52,7 @@ The exact landing fence is modeled in
 
 `lf checkout` resolves a saved Task inside one Wave's planning and
 creates or reuses its managed worktree without creating a PR. Saved planning
-works without Linear; an unknown provider alias needs initial acquisition.
+works without Linear; an unknown tracker alias is fetched first.
 It starts no execution. `lf task run ISSUE` uses the same substrate and additionally
 runs a fresh Graph there. The repository identity—not the caller's
 current directory spelling—selects the Git directory and sibling worktree
@@ -128,7 +128,7 @@ and push the exact head. Branch commits and merge resolutions retain their ident
 GitHub applies the repository’s allowed merge method or merge queue policy. `arm` and `land` request
 GitHub auto-merge, record the landing, and return. Success means handoff;
 `lf pr reconcile` checks recorded repository landings once and repairs nothing;
-the waiting landing (`--wait-and-fix`, `lf ship`) does. `submit` performs the
+the waiting landing (`--wait-and-fix`, `lf task auto on`) does. `submit` performs the
 same preparation but leaves the exact-head merge to a person. These delivery
 commands inspect Task delivery state when present; they do not require a running
 Task Graph or certify that a particular Graph ran.
@@ -246,8 +246,8 @@ read required checks on H1 once
 ```
 
 `lf pr reconcile` repeats this from fresh evidence, records a failure and
-returns. Only a waiting landing (`lf land --wait-and-fix`, the ship process of a
-shipping Task) and a release's own landing start a repair through this check.
+returns. Only a waiting landing (`lf land --wait-and-fix`, as a Graph's landing
+step runs it) and a release's own landing start a repair through this check.
 The landing lock, landing generation and incident reservation are the claim, so
 none of them repeats a fix. A returned bare landing is repaired by nothing.
 
@@ -259,11 +259,10 @@ attempt; the next attempt starts after a backoff, with the earlier summaries.
 
 ### Recovery
 
-There is no schedule. Any lf read of this Machine's Tasks or processes
-(`lf task status`, `lf task list`, `lf process list`, `lf wave status`, Desktop's planning
-reads) first settles AgentProcesses whose lf died and starts the ship process of
-each shipping Task checked out here again when it has exited. A Machine nothing
-reads recovers on its next read.
+The Machine server's recovery pass (`server/recovery.rs`) settles
+AgentProcesses whose lf died and carries again, as `lf task run`, each Task run
+checked out here whose carrier died. It runs when the store changes and
+at least every minute, so a Machine nobody reads recovers too.
 
 A check never transfers green checks from one head to another. A failure is
 confirmed by a second observation before repair. One incident (head, failed check set and provider check URLs) owns one repair
@@ -340,13 +339,13 @@ Independently accepted later work is an ordinary Task plus a linking comment.
 Keep a saved Task when its comment fails; retry only the comment. Synchronization
 uses the same Task and comment writers as other Work. Historical filing events
 stay intact: private recovery converts reserved children and notes, retaining
-unknown provider creations and relations with their original IDs and inputs.
+unknown tracker creations and relations with their original IDs and inputs.
 These receipts carry no completion or process authority.
 
 `lf task complete` settles status without moving the Task's graph. Reaching
 `end` persists a completion request in the same transaction as arrival, then
 tries completion. Failure retains both arrival and the reason; operators retry
-completion alone. Accepted provider status changes clear superseded requests
+completion alone. Accepted tracker status changes clear superseded requests
 without touching graph position or Process history. Reads never execute the trigger. A Task with a PR needs merge
 evidence; its follow-up Tasks need not be complete.
 A PR-less Task may finish with retained files and commits, without a landing

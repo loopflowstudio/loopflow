@@ -132,8 +132,8 @@ func renameFixtureRecord(
     return try JSONDecoder().decode(SessionRecord.self, from: Data("""
     {"id":"\(id)","run_id":"run_\(id)", "interactive": true,"work":\(workJSON),"title":"\(title)",
      "detail":"codex","cwd":"/src/loopflow","state":"active","wave_id":null,"work_path":null,
-     "actions":\(sessionActionFixtureJSON(state: "active")),
-     "ready_summary":null,"blocked": false, "title_source":"\(source)","task_primary":false, "graph_membership":{"kind":"independent"},
+     "action":\(sessionActionFixtureJSON(state: "active")),
+     "blocked": false, "title_source":"\(source)","ended": null, "start": null, "outlook": null, "status_line": null, "task_primary":false, "graph_membership":{"kind":"independent"},
      "task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["lf","session","resume","\(id)"]}
     """.utf8))
 }

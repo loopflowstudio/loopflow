@@ -26,6 +26,18 @@ struct DashboardWorkspaceTests {
         #expect(FocusSizing.shares([0.7, 0.3], focused: 1) == [1 - FocusSizing.golden, FocusSizing.golden])
     }
 
+    @Test("A tile's workflow sentence yields only to what a program asks")
+    func tileKeepsItsWorkflowSentenceUnlessAProgramAsks() throws {
+        let graph = TaskGraph(name: "code", interactiveSteps: [], position: .at(step: "demo"),
+                              steps: [.init(name: "build", interactive: false), .init(name: "demo", interactive: true)],
+                              currentStep: 1, sentence: "You are next needed at demo.")
+        // No program reporting, whatever the row's own line says: the sentence shows.
+        #expect(DashboardTile.workflow(graph, status: .unknown, auto: false, setup: nil)?.sentence == "You are next needed at demo.")
+        let asking = try programStatus(reporting: .blocked, msg: "Approve the plan?")
+        #expect(asking.ask == "Approve the plan?")
+        #expect(DashboardTile.workflow(graph, status: asking, auto: false, setup: nil) == nil)
+    }
+
     /// Rust's `SlotLayout::golden`, as every built-in plan reports it.
     static let golden = DashboardSlotLayout(root: .split(.horizontal, [0.618, 0.382], [
         .split(.vertical, [0.618, 0.382], [.slot(0), .split(.vertical, [1, 1], [.slot(1), .slot(2)])]),
@@ -108,7 +120,7 @@ struct DashboardWorkspaceTests {
         resolution["members"] = members
         json["resolution"] = resolution
         json["projection"] = ["visible": members, "suppressed": []]
-        json["contents"] = members.map { ["work": $0["work"]!, "title": "t", "states": [], "identifier": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "face": NSNull(), "pane_revision": NSNull()] }
+        json["contents"] = members.map { ["work": $0["work"]!, "title": "t", "states": [], "identifier": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": []] }
         let plan = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: json))
         let model = WorkModel(query: RegistryQuery { args, _ in throw RegistryQueryError("Unexpected command \(args)") }, repoPath: "/repo")
         let registry = SessionsWorkspaceRegistry(localMachineId: "local")
@@ -294,7 +306,6 @@ struct DashboardWorkspaceTests {
         let plan = try JSONDecoder().decode(WorkViewPlan.self, from: bytes)
         let query = RegistryQuery { args, _ in
             if args == ["desktop", "view", "show", expression, "--json"] { return String(decoding: bytes, as: UTF8.self) }
-            if args.starts(with: ["desktop", "layout"]) { return "null" }
             throw RegistryQueryError("Unexpected execution")
         }
         let model = WorkModel(query: query, repoPath: "/repo")
@@ -327,7 +338,8 @@ struct DashboardWorkspaceTests {
         #expect(model.selectedViewPlan == plan)
     }
 
-    @Test func delayedRestoreRetainsNewTabsAndDraftsAndStaleSaveDoesNotReplaceThem() async throws {
+    @Test func restoreMergesSavedTabsAndDraftsIntoWorkAlreadyOpen() async throws {
+        let layouts = temporaryLayouts()
         let source = fixtureWork(fixtureWorkspace("/task"))
         let location = try #require(source.location)
         source.multiplexer.load(sessionId: "primary", location: location)
@@ -338,18 +350,14 @@ struct DashboardWorkspaceTests {
         let originalFiles = source.files(issue: source.key.id, cwd: "/task")
         originalFiles.selection = "old.txt"
         originalFiles.selection = "second.txt"
-        let saved = source.portableLayout()
-        let server = IntentReading(saved)
-        let query = RegistryQuery(runWithInput: { _, _, input in try await server.write(input) }) { args, _ in
-            if args.starts(with: ["desktop", "layout"]) { return await server.read() }
+        try layouts.save(source.portableLayout(), machineId: fixtureMachineId, work: source.key)
+        let query = RegistryQuery { args, _ in
             if args.contains("file") {
                 return #"{"recoveries":[],"issue_identifier":"TASK","task_id":"task","path":"new.txt","content":"base","state":"text","revision":"base","read_only_reason":null,"size_bytes":4}"#
             }
             throw RegistryQueryError("No execution allowed")
         }
         let workspace = fixtureWork(location)
-        workspace.startPersistence(query: query, repoPath: "/repo")
-        await server.waitForRead()
         workspace.multiplexer.newShell(command: ["new-shell"], location: location)
         let fresh = try #require(workspace.multiplexer.focusedPane.content.selectedShell)
         workspace.toggleBrowser()
@@ -359,8 +367,7 @@ struct DashboardWorkspaceTests {
         let draft = WorkFileDraft(location: .init(machineID: location.machineId, cwd: location.worktree),
             path: "new.txt", baseRevision: "base", baseContent: "base", text: "new draft")
         document.restore(draft, task: workspace.key.id)
-        try await server.release(advance: true)
-        let durable = await server.saved
+        workspace.startPersistence(layouts: layouts, query: query)
         try await eventually { workspace.multiplexer.shell(oldShell.id) != nil && !workspace.isRestoringIntent }
         #expect(workspace.multiplexer.shell(fresh.id) == fresh)
         #expect(workspace.multiplexer.shell(oldShell.id)?.command == nil)
@@ -368,75 +375,65 @@ struct DashboardWorkspaceTests {
         #expect(Set(files.tabs.map(\.path)) == ["new.txt", "old.txt", "second.txt"])
         #expect(files.document("new.txt") === document)
         #expect(document.text == "new draft")
-        let before = workspace.portableLayout()
-        await workspace.savePaneIntent()
-        try await eventually { workspace.persistenceError != nil }
-        #expect(workspace.persistenceError == "Revision conflict")
-        #expect(workspace.portableLayout() == before)
-        #expect(await server.saved == durable)
+        #expect(layouts.load(machineId: fixtureMachineId, work: workspace.key) == workspace.portableLayout())
+        #expect(workspace.persistenceError == nil)
     }
 
     @Test func coldRestorationSavesLaterEditsWithoutLaunchingShells() async throws {
+        let layouts = temporaryLayouts()
         let source = fixtureWork(fixtureWorkspace("/task"))
         source.multiplexer.newShell(command: ["must-not-replay"], location: source.location)
         let original = try #require(source.multiplexer.focusedPane.content.selectedShell)
-        let server = IntentReading(source.portableLayout().revised(1))
-        let query = RegistryQuery(runWithInput: { _, _, input in try await server.write(input) }) { args, _ in
-            if args.starts(with: ["desktop", "layout"]) { return await server.read() }
-            throw RegistryQueryError("Unexpected execution")
-        }
+        try layouts.save(source.portableLayout(), machineId: fixtureMachineId, work: source.key)
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Unexpected execution") }
         let workspace = fixtureWork(try #require(source.location))
-        workspace.startPersistence(query: query, repoPath: "/repo")
-        await server.waitForRead()
-        try await server.release()
-        try await eventually { !workspace.isRestoringIntent }
+        workspace.startPersistence(layouts: layouts, query: query)
+        try await eventually { workspace.multiplexer.shell(original.id) != nil && !workspace.isRestoringIntent }
         #expect(workspace.multiplexer.shell(original.id)?.command == nil)
-        let reload = Task { await workspace.loadPaneIntent() }
-        await server.waitForRead()
-        try await server.release()
-        await reload.value
-        #expect(await server.saved.revision == 1)
         workspace.multiplexer.newShell(command: ["new-tab"], location: source.location)
         let added = try #require(workspace.multiplexer.focusedPane.content.selectedShell)
-        try await eventually { workspace.portableLayout().revision == 2 }
-        let durable = await server.saved
-        #expect(durable.revision == 2)
-        #expect(durable == workspace.portableLayout())
+        try await eventually { layouts.load(machineId: fixtureMachineId, work: workspace.key) == workspace.portableLayout() }
         #expect(workspace.multiplexer.shell(added.id) == added)
         #expect(workspace.persistenceError == nil)
+    }
+
+    @Test
+    func savedLayoutRoundTripsThroughItsFileAndKeepsEverySession() async throws {
+        let layouts = temporaryLayouts()
+        let source = fixtureWork(fixtureWorkspace("/task"))
+        let location = try #require(source.location)
+        source.multiplexer.load(sessionId: "primary", location: location)
+        source.multiplexer.newShell(command: ["never-launch"], location: location)
+        let shell = try #require(source.multiplexer.focusedPane.content.selectedShell)
+        source.multiplexer.setZoom(try #require(source.multiplexer.shellPane).id, enabled: true)
+        let saved = source.portableLayout()
+        try layouts.save(saved, machineId: fixtureMachineId, work: source.key)
+        let file = layouts.url(machineId: fixtureMachineId, work: source.key)
+        // The Work id holds a `/`; it stays one file directly under the Machine and kind.
+        #expect(Array(file.deletingLastPathComponent().pathComponents.suffix(2)) == [fixtureMachineId, "task"])
+        #expect(file.pathComponents.count == layouts.directory.pathComponents.count + 3)
+        #expect(FileManager.default.fileExists(atPath: file.path))
+        #expect(layouts.load(machineId: fixtureMachineId, work: source.key) == saved)
+        #expect(layouts.load(machineId: "another-machine", work: source.key) == nil)
+
+        let workspace = fixtureWork(location)
+        // "primary" is in no Sessions reading; a saved pane keeps it anyway.
+        workspace.startPersistence(layouts: layouts, query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected execution") })
+        try await eventually { workspace.multiplexer.shell(shell.id) != nil && !workspace.isRestoringIntent }
+        #expect(workspace.multiplexer.sessionPane?.sessionId == "primary")
+        #expect(workspace.multiplexer.zoomedPaneId == source.multiplexer.zoomedPaneId)
+        #expect(workspace.multiplexer.layout.allPanes.map(\.id) == source.multiplexer.layout.allPanes.map(\.id))
+    }
+
+    private func temporaryLayouts() -> PaneLayoutStore {
+        PaneLayoutStore(directory: FileManager.default.temporaryDirectory
+            .appendingPathComponent("pane-layouts-\(UUID().uuidString)", isDirectory: true))
     }
 
     private func eventually(_ condition: () -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(5)
         while !condition(), ContinuousClock.now < deadline { await Task.yield() }
         try #require(condition())
-    }
-}
-
-private actor IntentReading {
-    var saved: WorkPaneLayout
-    var continuation: CheckedContinuation<String, Never>?
-    init(_ saved: WorkPaneLayout) { self.saved = saved }
-    func read() async -> String { await withCheckedContinuation { continuation = $0 } }
-    func waitForRead() async {
-        while continuation == nil { await Task.yield() }
-    }
-    func write(_ input: String) throws -> String {
-        let proposed = try JSONDecoder().decode(WorkPaneLayout.self, from: Data(input.utf8))
-        guard proposed.revision == saved.revision else { throw RegistryQueryError("Revision conflict") }
-        saved = proposed.revised(saved.revision + 1)
-        return String(decoding: try JSONEncoder().encode(saved), as: UTF8.self)
-    }
-    func release(advance: Bool = false) throws {
-        let data = try JSONEncoder().encode(saved)
-        if advance { saved = saved.revised(saved.revision + 1) }
-        continuation?.resume(returning: String(decoding: data, as: UTF8.self))
-        continuation = nil
-    }
-}
-private extension WorkPaneLayout {
-    func revised(_ revision: Int64) -> WorkPaneLayout {
-        WorkPaneLayout(work: work, revision: revision, tree: tree, focused: focused, zoomed: zoomed, hidden: hidden, drafts: drafts)
     }
 }
 

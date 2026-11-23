@@ -1731,7 +1731,7 @@ mod tests {
         let warnings = scratch_plan_warnings(
             "Jack selected local kickoff in this conversation.\n\
              No worker launch is part of this\nstep.\n\
-             Its current chapter is unavailable in the selected Machine.\n\
+             Its current project is unavailable in the selected Machine.\n\
              > $kickoff\n",
         );
         assert_eq!(

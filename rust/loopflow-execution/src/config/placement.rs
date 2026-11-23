@@ -80,7 +80,12 @@ pub fn read_at(
 ) -> Result<Value> {
     let (path, prefix) = location_at(home, scope)?;
     let mut value = super::files::read(&path)?;
-    super::remote::apply_document(&path, &mut value)?;
+    super::remote::apply_document(
+        super::remote::incoming_text().as_deref(),
+        home,
+        &path,
+        &mut value,
+    )?;
     for part in prefix {
         value = value.get(part).cloned().unwrap_or(Value::Null);
     }
@@ -96,17 +101,33 @@ pub(crate) fn write_global(home: &Path, key: &[&str], value: Option<Value>) -> R
     )
 }
 
+/// What your `config.yaml` under `home` declares alone, for the Machine facts
+/// no checkout overrides. Served readings share one value until it changes.
 pub(crate) fn global_settings_at(home: &Path) -> Result<super::Config> {
-    let path = home.join("config.yaml");
+    // A store's home is the one read, whatever `LF_HOME` says.
+    let mut outside = super::settings::outside()?;
+    outside.home = home.to_owned();
+    let key = crate::observe::Derived::GlobalSettings {
+        outside: outside.clone(),
+    };
+    outside
+        .shared(key, || {
+            resolve_global_settings(&outside).map_err(|error| error.to_string())
+        })
+        .map_err(anyhow::Error::msg)
+}
+
+fn resolve_global_settings(outside: &super::settings::Outside) -> Result<super::Config> {
+    let path = outside.home.join("config.yaml");
     let mut value = super::files::read(&path)?;
-    super::remote::apply_document(&path, &mut value)?;
+    super::remote::apply_document(outside.remote.as_deref(), &outside.home, &path, &mut value)?;
     let declarations = [super::ConfigDeclarations {
         source: super::ConfigSource::Personal,
         scope: super::settings::SettingScope::Global,
         path,
         value,
     }];
-    Ok(super::settings::resolve_layers(&declarations, None)?.config)
+    Ok(super::settings::resolve_with(&declarations, None, outside)?.config)
 }
 
 pub(crate) fn historical_account_labels(home: &Path) -> Result<Value> {
@@ -169,4 +190,41 @@ impl Default for OnDemandDeclaration {
 pub struct AuthBrowsers {
     pub default: Vec<String>,
     pub accounts: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::global_settings_at;
+    use crate::observe::{Cache, Derived};
+
+    #[test]
+    fn readings_share_global_settings_until_the_file_changes() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let file = home.path().join("config.yaml");
+        std::fs::write(&file, "default_agent: claude\n").unwrap();
+        let cache = Arc::new(Cache::default());
+        let read = || {
+            global_settings_at(home.path())
+                .unwrap()
+                .agent()
+                .unwrap()
+                .to_owned()
+        };
+        let global = |computed: &Derived| matches!(computed, Derived::GlobalSettings { .. });
+        let (first, dependencies) = cache.capture(read);
+        assert_eq!(first, "claude");
+        assert_eq!(cache.capture(read).0, "claude");
+        assert_eq!(cache.computations(global), 1);
+
+        std::fs::write(&file, "default_agent: codex\n").unwrap();
+        cache.refresh_all();
+        assert!(dependencies.changed());
+        assert_eq!(cache.capture(read).0, "codex");
+        assert_eq!(cache.computations(global), 2);
+    }
 }

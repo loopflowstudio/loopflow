@@ -101,7 +101,7 @@ saved between turns delivered at the next prompt, two retained completed turns,
 provider cleanup, and preserved user settings.
 Add `--context-repo /path/to/loopflow-checkout` to run the built-in `demo` with
 copied agent instructions, scratch and Infrastructure Wave context. Wave context
-is supplied as scratch in the isolated store, without a planning provider binding.
+is supplied as scratch in the isolated store, without a tracker binding.
 Add `--cmux-wrapper /path/to/cmux-codex-wrapper` to exercise the cmux entry
 script with an isolated home, a nonexistent socket and computer-use attachment
 disabled. It cannot report into existing panes.

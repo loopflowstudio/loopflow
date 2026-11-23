@@ -21,7 +21,6 @@ PROOFS = {
     "task_graph_read_keeps_captured_topology_and_counts_both_returns": "graph_tests",
     "installation_uses_candidate_authority_from_any_checkout": "global_commands",
     "installation_reaches_candidate_verdict_with_an_unreadable_task_registry": "global_commands",
-    "install_preflight_records_no_process": "process_ownership_tests",
     # Structured-ID upgrade on a case-sensitive filesystem with live owners.
     "canonical_ids_live_receipt_defers_then_normal_settlement_allows_upgrade": CANONICAL_IDS,
     "canonical_ids_changed_claim_waits_for_canonical_live_caller": CANONICAL_IDS,
@@ -139,35 +138,20 @@ def _migration_order(repo: Path) -> str:
     return "".join(f"{slug}\n" for slug in order)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--image", default="docker.io/library/rust:trixie")
-    parser.add_argument("--test", nargs="+", choices=PROOFS, help="run selected named proofs")
-    parser.add_argument(
-        "--cache-dir",
-        type=Path,
-        help="persist Cargo target and registry on a native Linux filesystem",
-    )
-    parser.add_argument(
-        "--repository-upgrade",
-        action="store_true",
-        help="prove populated released repository upgrade",
-    )
-    args = parser.parse_args()
-    repo = Path(__file__).resolve().parents[1]
+def _start_container(image: str, cache_dir: Path | None) -> str:
     _wait_for_docker()
-    _prepare_image(args.image)
+    _prepare_image(image)
     mounts = [
         "type=volume,source=loopflow-task-proof-target,target=/source/target",
         "type=volume,source=loopflow-task-proof-registry,target=/usr/local/cargo/registry",
     ]
-    if args.cache_dir:
+    if cache_dir:
         mounts = []
         for name, destination in (
             ("target", "/source/target"),
             ("registry", "/usr/local/cargo/registry"),
         ):
-            source = args.cache_dir.resolve() / name
+            source = cache_dir.resolve() / name
             source.mkdir(parents=True, exist_ok=True)
             mounts.append(f"type=bind,source={source},target={destination}")
     container = subprocess.check_output(
@@ -178,7 +162,7 @@ def main() -> None:
             mounts[0],
             "--mount",
             mounts[1],
-            args.image,
+            image,
             "sleep",
             "infinity",
         ],
@@ -187,6 +171,43 @@ def main() -> None:
     ).strip()
     try:
         subprocess.run(["docker", "start", container], check=True)
+    except BaseException:
+        _remove_container(container)
+        raise
+    return container
+
+
+def _remove_container(container: str) -> None:
+    try:
+        subprocess.run(["docker", "rm", "--force", container], check=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"Docker cleanup timed out; proof container {container} still needs removal."
+        ) from None
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--image", default="docker.io/library/rust:trixie")
+    parser.add_argument("--test", nargs="+", choices=PROOFS, help="run selected named proofs")
+    container_source = parser.add_mutually_exclusive_group()
+    container_source.add_argument(
+        "--cache-dir",
+        type=Path,
+        help="persist Cargo target and registry on a native Linux filesystem",
+    )
+    container_source.add_argument(
+        "--container", help="use a running proof container managed by the caller"
+    )
+    parser.add_argument(
+        "--repository-upgrade",
+        action="store_true",
+        help="prove populated released repository upgrade",
+    )
+    args = parser.parse_args()
+    repo = Path(__file__).resolve().parents[1]
+    container = args.container or _start_container(args.image, args.cache_dir)
+    try:
         paths = subprocess.check_output(
             ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
             cwd=repo,
@@ -290,12 +311,8 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof GIT_ALLOW_PROTOCOL=file
             ["docker", "exec", container, "sh", "-ec", isolated], check=True, timeout=1800
         )
     finally:
-        try:
-            subprocess.run(["docker", "rm", "--force", container], check=True, timeout=30)
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(
-                f"Docker cleanup timed out; proof container {container} still needs removal."
-            ) from None
+        if args.container is None:
+            _remove_container(container)
 
 
 if __name__ == "__main__":

@@ -9,9 +9,9 @@ use std::path::Path;
 use anyhow::Result;
 
 use super::{SessionAvailability, SessionGraphMembership, SessionRecord, SessionState};
-use crate::harness::HarnessKind;
 use crate::session_record::SessionTitleSource;
-use crate::transcript::live::SessionTurn;
+use loopflow_harness::transcript::live::SessionTurn;
+use loopflow_harness::HarnessKind;
 use loopflow_model::durable::TaskId;
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -193,7 +193,7 @@ fn record(
         work: None,
         wave_id: None,
         work_path: None,
-        actions: Vec::new(),
+        action: None,
         title,
         title_source,
         graph_membership: SessionGraphMembership::Independent,
@@ -203,11 +203,14 @@ fn record(
         model: turn.as_ref().and_then(|turn| turn.model.clone()),
         cwd: cwd.display().to_string(),
         state: SessionState::Active,
-        ready_summary: None,
         open_argv: Vec::new(),
         terminal_ids: Vec::new(),
         turn,
         raw: true,
+        ended: None,
+        start: None,
+        outlook: None,
+        status_line: None,
     }
 }
 
@@ -222,7 +225,7 @@ fn home_relative(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcript::live::TurnState;
+    use loopflow_harness::transcript::live::TurnState;
 
     fn turn(state: TurnState) -> Option<SessionTurn> {
         Some(SessionTurn {
@@ -274,11 +277,18 @@ mod tests {
     fn a_recorded_end_closes_only_the_open_turn_with_its_id() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let session =
+            store.test_session("conversation", &crate::session_record::new_artifact_key());
         let thread = loopflow_model::id::AgentSessionId::from("thread");
         let detail = serde_json::json!({"status":"interrupted"});
         store
-            .record_turn_completion("conversation", &thread, "u1", 1_794_328_071, &detail)
+            .record_answered_turn_end(
+                session.captured.unwrap(),
+                &thread,
+                "u1",
+                1_794_328_071,
+                &detail,
+            )
             .unwrap();
         let open = |id: &str| {
             let mut turn = turn(TurnState::Running).unwrap();

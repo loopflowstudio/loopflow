@@ -10,12 +10,13 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Result};
 
 use super::{append_input, local_capture_dir, lock_session_process, publish_prepared_input};
-use crate::harness::HarnessKind;
 use crate::provider_auth::Provider;
 use crate::session::{LfSession, TitleSource};
 use crate::store::{ProviderAccountId, SharedStore};
+use crate::transcript::conversation_home;
 use crate::transcript::native_home;
-use crate::transcript::{conversation_home, recorded_cwd, transcript};
+use loopflow_harness::transcript::{recorded_cwd, transcript};
+use loopflow_harness::HarnessKind;
 
 pub(super) async fn human_input_times<'a>(
     store: &SharedStore,
@@ -27,7 +28,7 @@ pub(super) async fn human_input_times<'a>(
         let Some(kind) = session.provider.as_deref().and_then(HarnessKind::parse) else {
             continue;
         };
-        let Some(provider) = kind.provider() else {
+        let Some(provider) = crate::harness::launcher(kind).provider() else {
             continue;
         };
         let Some(key) = session.artifact_key.as_deref() else {
@@ -133,7 +134,6 @@ pub async fn admit(store: &SharedStore, id: &str, directory: &Path) -> Result<Op
             title: format!("{} {}", conversation.provider, &id[..8]),
             title_source: TitleSource::Generated,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: loopflow_storage::rows::now_unix(),
         })
@@ -182,9 +182,9 @@ pub async fn select(
             .await?
             .and_then(|account| account.home)
             .ok_or_else(|| anyhow!("{provider} account {account} has no home"))?;
-        let harness = HarnessKind::parse(provider.as_str())
+        let harness = crate::harness::from_provider(provider)
             .expect("conversations are found only for agent providers");
-        crate::transcript::copy_between(harness, id, &home, &native_home(provider))?;
+        loopflow_harness::transcript::copy_between(harness, id, &home, &native_home(provider))?;
         store
             .sqlite
             .record_native_conversation_home(provider, &id.into())?;
@@ -198,7 +198,7 @@ async fn find(store: &SharedStore, id: &str) -> Result<Vec<NativeConversation>> 
     let accounts = store.list_provider_accounts(None).await?;
     let mut found: Vec<NativeConversation> = Vec::new();
     for harness in HarnessKind::ALL {
-        let Some(provider) = harness.provider() else {
+        let Some(provider) = crate::harness::launcher(harness).provider() else {
             continue;
         };
         let stored = accounts
@@ -317,12 +317,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            crate::harness::HarnessKind::Codex
+            loopflow_harness::HarnessKind::Codex
                 .harness()
                 .human_input_times(home.path(), &std::collections::BTreeSet::from(["a", "b"])),
             std::collections::BTreeMap::from([("a".into(), 20_000), ("b".into(), 30_000)])
         );
-        assert!(crate::harness::HarnessKind::Codex
+        assert!(loopflow_harness::HarnessKind::Codex
             .harness()
             .human_input_times(
                 &home.path().join("missing"),
@@ -385,7 +385,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            crate::harness::HarnessKind::Claude
+            loopflow_harness::HarnessKind::Claude
                 .harness()
                 .human_input_times(home.path(), &std::collections::BTreeSet::from([ID]))
                 .get(ID)
@@ -397,7 +397,7 @@ mod tests {
             serde_json::json!([{"type":"image","source":{"type":"base64","data":"fixture"}}]);
         fs::write(&path, image.to_string()).unwrap();
         assert_eq!(
-            crate::harness::HarnessKind::Claude
+            loopflow_harness::HarnessKind::Claude
                 .harness()
                 .human_input_times(home.path(), &std::collections::BTreeSet::from([ID]))
                 .get(ID)

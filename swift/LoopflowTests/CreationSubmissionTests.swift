@@ -10,7 +10,7 @@ struct CreationSubmissionTests {
         private var receipts: [String: String] = [:]
         private(set) var creations = 0
         private(set) var submissions = 0
-        func lookup(_ id: String) -> String { receipts[id] ?? "null" }
+        func lookup(_ id: String) -> ReadOutput { ReadOutput(receipts[id] ?? "null") }
         func send(_ payload: Data) throws -> String {
             let fields = try #require(JSONSerialization.jsonObject(with: payload) as? [String: Any])
             let id = try #require(fields["request_id"] as? String)
@@ -141,7 +141,7 @@ struct CreationSubmissionTests {
         actor Sends { var count = 0; func add() { count += 1 } }
         let sent = Sends()
         let client = CreationSubmissions(directory: root, machine: { "machine" },
-            lookup: { _ in other }, send: { _ in await sent.add(); return "{}" })
+            lookup: { _ in ReadOutput(other) }, send: { _ in await sent.add(); return "{}" })
         let record = try await client.record(.taskCreate(directory: "/repo", requestID: "not-the-fixture", title: nil,
             request: "work", wave: nil, graph: nil, session: nil, run: true), requestID: "not-the-fixture")
         await #expect(throws: (any Error).self) { try await client.reconcile(record) }
@@ -244,8 +244,8 @@ struct ProviderTransitionTests {
         let transition = try JSONDecoder().decode(ProviderTransition.self, from: Data(contentsOf: path))
         let row = ProviderTransitionRow(transition: transition)
         #expect(try row.inspect().find(text: "Forked from earlier; original was running at fork").string() == transition.explanation)
-        let reading = ServerConnectionReading(generation: 2, state: .connected, input: false, nativeReady: true, message: nil, transition: transition)
-        #expect(reading.title?.contains("Read-only") == true)
-        #expect(!reading.acceptsInput)
+        let reading = ServerConnectionReading(generation: 2, state: .connected, nativeReady: true, message: nil, transition: transition)
+        #expect(reading.title == transition.explanation)
+        #expect(reading.acceptsInput)
     }
 }

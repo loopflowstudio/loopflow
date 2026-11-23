@@ -222,7 +222,6 @@ fn hand_back_rejects_a_changed_repository_with_the_same_held_set() {
             max_machines: 1,
             max_usd_per_hour: Usd::parse("1.00").unwrap(),
             hours: 1.0,
-            created_at: time::OffsetDateTime::UNIX_EPOCH,
         },
     )
     .unwrap();
@@ -346,7 +345,8 @@ fn held_scope_batches_ten_thousand_tasks_and_keys_repository_joins() {
              INSERT INTO task_ownership(id,task_id,kind,machine_id,at,ordered_at,writer_machine_id,written_here)
              SELECT printf('own_%032x',i),printf('task_%032x',i),'claim',?1,1,1,?1,1 FROM n",
             [local.as_str()],
-        ).unwrap();
+        )
+        .unwrap();
         tx.commit().unwrap();
     }
     let after = loopflow_storage::query_plans::statements(&store, || {
@@ -401,13 +401,14 @@ fn promotion_refuses_a_replaced_caller_for_either_title_source() {
             .unwrap();
         let process = store.test_lf_process();
         let first = store
-            .attach_session(&id, None, &process, true, None, &absent)
+            .attach_session(&id, None, &process, None, &absent)
             .unwrap();
         let caller = SessionCaller {
             agent: Some(AgentCaller {
                 session_id: id.clone().into(),
                 agent_process_id: Some(first.agent_process_id.clone()),
                 origin_lf_process_id: process,
+                trace_id: None,
             }),
             capture_key: session.artifact_key.clone(),
         };
@@ -418,14 +419,7 @@ fn promotion_refuses_a_replaced_caller_for_either_title_source() {
         )
         .unwrap();
         let replacement = store
-            .attach_session(
-                &id,
-                Some(&first),
-                &store.test_lf_process(),
-                true,
-                None,
-                &absent,
-            )
+            .attach_session(&id, Some(&first), &store.test_lf_process(), None, &absent)
             .unwrap();
         let before = store.session(&id).unwrap().unwrap();
         assert_eq!(before.title_source, source);

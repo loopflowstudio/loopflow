@@ -1,5 +1,4 @@
 //! Saved selection and layout intent share one transaction and one Work snapshot.
-mod panes;
 use super::sessions::{SessionProjection, SessionProjectionInputs};
 use super::SqliteStore;
 use crate::execution::{TaskSection, TaskState};
@@ -105,11 +104,10 @@ fn work_in(
     // State, publication and ownership for every Task in a fixed number of
     // statements: a query per Task costs thousands on a large repository.
     let ids: Vec<_> = tasks.iter().map(|task| task.id.clone()).collect();
-    let task_states = super::task_details::states_in(
-        conn,
-        &super::children::ids_json(ids.iter().map(|id| id.as_str())),
-    )?;
-    let published = super::project_adoption::published_in(conn, &ids)?;
+    let ids_json = super::children::ids_json(ids.iter().map(|id| id.as_str()));
+    let task_states = super::task_details::states_in(conn, &ids_json)?;
+    let auto_on = super::task_details::auto_on_in(conn, &ids_json)?;
+    let published = super::task_started::published_in(conn, &ids)?;
     let owners = super::task_ownership::owners_in(conn, &ids)?;
     let mut task_work = Vec::with_capacity(tasks.len());
     for task in tasks {
@@ -121,6 +119,7 @@ fn work_in(
             state,
             owned,
             published.contains(&task.id),
+            auto_on.contains(&task.id),
             task.state.as_deref(),
             reading.activity.get(&task.id),
         );
@@ -185,11 +184,13 @@ impl TaskOrder {
     }
 }
 
-/// The same lifecycle, section and activity set for roadmap rows and selections.
+/// The same lifecycle, section, auto setting and activity set for roadmap rows
+/// and selections.
 pub fn task_selection_states(
     runtime: TaskState,
     owned: bool,
     published: bool,
+    auto: bool,
     plan_state: Option<&str>,
     activity: Option<&TaskActivity>,
 ) -> BTreeSet<SelectionState> {
@@ -198,18 +199,19 @@ pub fn task_selection_states(
     if (owned || published) && !state.is_terminal() {
         states.insert(SelectionState::Open);
     }
+    if auto && !state.is_terminal() {
+        states.insert(SelectionState::Auto);
+    }
     states.insert(match state {
         TaskState::Unstarted => SelectionState::Unstarted,
         TaskState::Idle => SelectionState::Idle,
         TaskState::Active => SelectionState::Active,
         TaskState::Moving => SelectionState::Moving,
-        TaskState::Shipping => SelectionState::Shipping,
         TaskState::Done | TaskState::Abandoned => SelectionState::Done,
     });
     states.insert(match TaskSection::of(runtime, owned, plan_state) {
         TaskSection::Backlog => SelectionState::Backlog,
         TaskSection::Working => SelectionState::Working,
-        TaskSection::Autonomous => SelectionState::Autonomous,
         TaskSection::Done | TaskSection::Abandoned => SelectionState::Done,
     });
     states
@@ -337,7 +339,7 @@ fn plan_in(
     queries: &BTreeMap<DashboardId, Selection>,
     work: &[SelectionWork],
 ) -> StoreResult<crate::work::selection::ViewPlan> {
-    use crate::work::selection::{PaneIntent, ViewContent, ViewLocation, ViewPlan};
+    use crate::work::selection::{ViewContent, ViewLocation, ViewPlan};
     let resolution = selection
         .resolve(repository.as_str(), work, queries)
         .map_err(StoreError::from)?;
@@ -354,17 +356,7 @@ fn plan_in(
     let mut contents = Vec::new();
     for key in selected {
         let facts = work.iter().find(|item| item.key == key);
-        let pane_layout = panes::layout_in(conn, &key)?;
-        let face = pane_layout.as_ref().and_then(|layout| {
-            layout
-                .zoomed
-                .as_ref()
-                .and_then(|id| layout.tree.pane(id))
-                .cloned()
-        });
         let mut content = ViewContent {
-            pane_revision: pane_layout.as_ref().map(|layout| layout.revision),
-            face,
             work: key.clone(),
             title: facts.map_or_else(|| key.id.clone(), |item| item.name.clone()),
             states: facts.map_or_else(BTreeSet::new, |item| item.states.clone()),
@@ -403,12 +395,6 @@ fn plan_in(
                 content
                     .unavailable
                     .push("Recorded execution location is unavailable".into());
-            }
-            if content.face.is_none() {
-                content.face = primary.map(|primary| PaneIntent::Session {
-                    session_id: Some(primary.id.into()),
-                    location: content.location.clone(),
-                });
             }
         }
         contents.push(content);

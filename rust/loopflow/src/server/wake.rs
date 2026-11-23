@@ -310,15 +310,14 @@ mod tests {
             &loopflow_execution::session_record::new_artifact_key(),
         );
         let process = store.test_lf_process();
-        let claim =
-            attachment::claim_session_attachment(&store, session, None, &process, false).unwrap();
+        let claim = attachment::claim_session_attachment(&store, session, None, &process).unwrap();
         let pid = std::process::id();
         store
             .record_agent_process_identity(
                 session,
                 &claim,
                 pid,
-                loopflow_execution::journal::process_started_at(pid)
+                loopflow_execution::process::os_process::process_started_at(pid)
                     .unwrap()
                     .unwrap(),
             )
@@ -354,7 +353,7 @@ mod tests {
             )
             .unwrap();
             conn.execute(
-                "UPDATE processes SET agent_interactive=1 WHERE id=?1",
+                "UPDATE agent_sessions SET agent_interactive=1 WHERE agent_process_id=?1",
                 [&adapter.agent_process_id],
             )
             .unwrap();
@@ -668,7 +667,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE processes SET completed_at=unixepoch() WHERE id=?1",
+                "UPDATE agent_sessions SET agent_ended_at=unixepoch(), agent_pid=NULL, agent_os_started_at=NULL WHERE agent_process_id=?1",
                 [&fixture.adapter.agent_process_id],
             )
             .unwrap();

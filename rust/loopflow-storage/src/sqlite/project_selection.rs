@@ -4,8 +4,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use super::planning_write;
 use super::SqliteStore;
+use crate::graph_process::{Execution, ExecutionResult};
 use crate::work::project::Project;
-use crate::{PlanningLocks, StoreError, StoreResult};
+use crate::{StoreError, StoreResult};
 use loopflow_model::durable::ProjectId;
 use loopflow_model::id::WaveId;
 
@@ -95,7 +96,7 @@ pub fn write_project_binding(
     wave: &WaveId,
     expected: Option<&str>,
     project: &str,
-    _guard: &PlanningLocks,
+    _guard: &crate::PlanningLocks,
 ) -> StoreResult<()> {
     let mut conn = store.conn.lock().expect("store mutex poisoned");
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -110,7 +111,7 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let project = bind_in(&tx, wave, project)?;
         let candidate = super::children::project_in(&tx, &project)?;
-        match readiness_in(&tx,wave)?.state {
+        match readiness_in(&tx, wave, Execution::result)?.state {
             ProjectReadinessState::Unavailable | ProjectReadinessState::Terminal => return Err(StoreError::InvalidAuthority(
                 "Project is terminal or has unresolved provider evidence; selection is unchanged".into())),
             _ => {}
@@ -143,7 +144,9 @@ impl SqliteStore {
         }
         let now = crate::rows::now_unix();
         let id = if selected.is_some() {
-            if readiness_in(&tx, wave)?.state == ProjectReadinessState::Unavailable {
+            if readiness_in(&tx, wave, Execution::result)?.state
+                == ProjectReadinessState::Unavailable
+            {
                 return Err(StoreError::InvalidAuthority(
                     "selected Project has unresolved provider evidence".into(),
                 ));
@@ -182,6 +185,7 @@ impl SqliteStore {
                             Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
                         ],
                     ),
+                    crate::sqlite::planning_write::WriteOrigin::Local,
                 )?;
                 if pending.is_none() {
                     tx.execute("INSERT INTO project_transitions(wave_id,successor_id,created_at,local_plan_json)
@@ -202,11 +206,6 @@ impl SqliteStore {
                 "terminal or paused Project history cannot be activated".into(),
             ));
         }
-        super::planning_changes::PlanningChanges::Project(&id).record(
-            &tx,
-            &Edit::ProjectStatus(project.status),
-            &Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
-        )?;
         planning_write::local(
             &tx,
             &crate::work::edit::WorkEdit::for_target(
@@ -217,7 +216,7 @@ impl SqliteStore {
             ),
         )?;
         write_in(&tx, wave, selected.as_deref(), id.as_str())?;
-        if readiness_in(&tx, wave)?.state == ProjectReadinessState::Unavailable {
+        if readiness_in(&tx, wave, Execution::result)?.state == ProjectReadinessState::Unavailable {
             return Err(StoreError::InvalidAuthority(
                 "Project has unresolved provider evidence; activation is unchanged".into(),
             ));
@@ -229,53 +228,29 @@ impl SqliteStore {
         Ok(id)
     }
 
+    /// The lf activating `wave`'s Project, as it starts: a new activation
+    /// replaces the last one's end.
     pub fn record_project_activation(
         &self,
         wave: &WaveId,
-        process: Option<&loopflow_model::id::LfProcessId>,
+        process: &loopflow_model::id::LfProcessId,
+        start: &crate::graph_process::ExecutionStart,
     ) -> StoreResult<()> {
-        let Some(process) = process else {
-            return Ok(());
-        };
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE waves SET project_activation_lf_process_id=?2 WHERE id=?1",
-            params![wave, process],
+            "UPDATE waves SET project_activation_lf_process_id=?2,project_activation_started_at=?3,
+                project_activation_pid=?4,project_activation_os_started_at=?5,
+                project_activation_ended_at=NULL,project_activation_exit_code=NULL,
+                project_activation_error=NULL
+             WHERE id=?1",
+            params![
+                wave,
+                process,
+                start.started_at,
+                start.pid,
+                start.os_started_at
+            ],
         )?;
-        Ok(())
-    }
-
-    pub fn project_binding_imported(&self, wave: &WaveId) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM project_binding_imports WHERE wave_id=?1)",
-            [wave],
-            |row| row.get(0),
-        )?)
-    }
-
-    /// Preserve original bytes and select their exact accepted identity atomically.
-    pub fn import_project_binding(
-        &self,
-        wave: &WaveId,
-        original: Option<&str>,
-        project: Option<&str>,
-        _guard: &PlanningLocks,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let imported: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM project_binding_imports WHERE wave_id=?1)",
-            [wave],
-            |row| row.get(0),
-        )?;
-        if !imported {
-            if let Some(project) = project {
-                bind_in(&tx, wave, project)?;
-            }
-            tx.execute("INSERT INTO project_binding_imports(wave_id,original_yaml,imported_at) VALUES(?1,?2,unixepoch())", params![wave, original])?;
-        }
-        tx.commit()?;
         Ok(())
     }
 }
@@ -309,11 +284,25 @@ pub struct ProjectActivation {
     pub error: Option<String>,
 }
 
+impl ProjectActivation {
+    fn of(run: Execution, result: ExecutionResult) -> Self {
+        Self {
+            lf_process_id: run.id.as_str().to_owned(),
+            completed_at: run.ended_at,
+            outcome: result.outcome().map(str::to_owned),
+            error: run.error,
+        }
+    }
+}
+
+/// How a reader sees a recorded run's result; liveness lives above the store.
+pub type ObserveResult = fn(&Execution) -> ExecutionResult;
+
 impl SqliteStore {
     pub fn selected_project(&self, wave: &WaveId) -> StoreResult<Option<Project>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
-        let readiness = readiness_in(&tx, wave)?;
+        let readiness = readiness_in(&tx, wave, Execution::result)?;
         match readiness.state {
             ProjectReadinessState::Unconfigured => return Ok(None),
             ProjectReadinessState::Unavailable => {
@@ -333,16 +322,25 @@ impl SqliteStore {
         Ok(Some(project))
     }
 
-    pub fn project_readiness(&self, wave: &WaveId) -> StoreResult<ProjectReadiness> {
+    /// `wave`'s Project readiness, its activation's result read by `observe`.
+    pub fn project_readiness(
+        &self,
+        wave: &WaveId,
+        observe: ObserveResult,
+    ) -> StoreResult<ProjectReadiness> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        readiness_in(&conn, wave)
+        readiness_in(&conn, wave, observe)
     }
 }
 
 // Saved planning supplies values and age; retained provider evidence can invalidate
 // selection, but absent inventory does not erase an owned Project. A peer can
 // supply an accepted entity without claiming a complete provider membership list.
-fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadiness> {
+fn readiness_in(
+    conn: &Connection,
+    wave: &WaveId,
+    observe: ObserveResult,
+) -> StoreResult<ProjectReadiness> {
     Ok(conn.query_row(
             "SELECT p.id, p.pm_snapshot_synced_at,
              CASE WHEN w.current_project_id IS NULL THEN 'unconfigured'
@@ -354,14 +352,17 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
                   WHEN p.status IN ('completed','canceled') THEN 'terminal'
                   WHEN p.status='started' THEN 'ready' ELSE 'inactive' END,
              (SELECT successor_id FROM project_transitions WHERE wave_id=w.id AND settled_at IS NULL),
-             e.id,e.completed_at,e.outcome,e.error
+             w.project_activation_lf_process_id,w.project_activation_started_at,
+             w.project_activation_ended_at,w.project_activation_pid,
+             w.project_activation_os_started_at,w.project_activation_exit_code,
+             w.project_activation_error
              FROM waves w LEFT JOIN projects p ON p.id=w.current_project_id
-             LEFT JOIN pm_wave_sync s ON s.wave_id=w.id
-             LEFT JOIN pm_projects f ON f.repo=w.repo AND f.provider=COALESCE(s.provider,'linear') AND f.id=p.external_project_id
-             LEFT JOIN processes e ON e.id=w.project_activation_lf_process_id WHERE w.id=?1",
+             LEFT JOIN tracker_wave_sync s ON s.wave_id=w.id
+             LEFT JOIN tracker_projects f ON f.repo=w.repo AND f.tracker=COALESCE(s.tracker,'linear') AND f.id=p.external_project_id
+             WHERE w.id=?1",
             [wave], |row| {
                 let state: String = row.get(2)?;
-                let process: Option<String> = row.get(4)?;
+                let process: Option<loopflow_model::id::LfProcessId> = row.get(4)?;
                 Ok(ProjectReadiness {
                     project_id: row.get(0)?, observed_at: row.get(1)?,
                     state: match state.as_str() {
@@ -372,9 +373,20 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
                         _ => ProjectReadinessState::Inactive,
                     },
                     pending_successor: row.get(3)?,
-                    activation: process.map(|lf_process_id| Ok::<_,rusqlite::Error>(ProjectActivation {
-                        lf_process_id, completed_at: row.get(5)?, outcome: row.get(6)?, error: row.get(7)?,
-                    })).transpose()?,
+                    activation: process.map(|id| {
+                        Ok::<_, rusqlite::Error>(Execution {
+                            id,
+                            started_at: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+                            ended_at: row.get(6)?,
+                            pid: row.get(7)?,
+                            os_started_at: row.get(8)?,
+                            exit_code: row.get(9)?,
+                            error: row.get(10)?,
+                        })
+                    }).transpose()?.map(|run| {
+                        let result = observe(&run);
+                        ProjectActivation::of(run, result)
+                    }),
                 })
             },
         )?)
@@ -430,11 +442,11 @@ mod tests {
         assert_eq!(store.project(&id).unwrap().unwrap().name, "Later edit");
         let receipt: (String,bool) = store.conn.lock().unwrap().query_row("SELECT successor_id,settled_at IS NOT NULL FROM project_transitions WHERE wave_id=?1",[wave.id()],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
         assert_eq!(receipt, (reserved.into(), true));
-        assert!(store.project(&id).unwrap().unwrap().linear_id.is_none());
+        assert!(store.project(&id).unwrap().unwrap().tracker_id.is_none());
     }
 
     #[test]
-    fn selection_import_is_once_and_only_committed_selection_wakes_readers() {
+    fn only_a_committed_selection_wakes_readers() {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&dir.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "a".into(), "/repo".into());
@@ -451,31 +463,19 @@ mod tests {
         }
         let first = "11111111-1111-4111-8111-111111111111";
         let second = "22222222-2222-4222-8222-222222222222";
-        let original = format!("# preserve me\npm:\n  linear_project: {first}\n");
         let before = store.revisions().unwrap();
         assert_eq!(
-            store.project_readiness(wave.id()).unwrap().state,
+            store
+                .project_readiness(wave.id(), crate::graph_process::Execution::result)
+                .unwrap()
+                .state,
             ProjectReadinessState::Unconfigured
         );
         assert_eq!(store.revisions().unwrap(), before);
-        assert!(store
-            .import_project_binding(wave.id(), Some(&original), Some("missing"), &guard)
-            .is_err());
-        assert!(!store.project_binding_imported(wave.id()).unwrap());
-        assert_eq!(store.revisions().unwrap(), before);
         write_project_binding(&store, wave.id(), None, first, &guard).unwrap();
         assert!(store.revisions().unwrap().planning > before.planning);
-        let selected = store.revisions().unwrap();
-        // Local and provider IDs select the same stored Project during import too.
-        store
-            .import_project_binding(wave.id(), Some(&original), Some("one"), &guard)
-            .unwrap();
-        assert_eq!(store.revisions().unwrap(), selected);
         write_project_binding(&store, wave.id(), Some(first), second, &guard).unwrap();
         let selected = store.revisions().unwrap();
-        store
-            .import_project_binding(wave.id(), Some(&original), Some(first), &guard)
-            .unwrap();
         assert!(write_project_binding(&store, wave.id(), Some(first), first, &guard).is_err());
         assert_eq!(
             read_project_binding(&store, wave.id()).unwrap().as_deref(),
@@ -484,20 +484,12 @@ mod tests {
         assert_eq!(store.revisions().unwrap(), selected);
         // No accepted provider facts: a selected ID alone cannot prove readiness.
         assert_eq!(
-            store.project_readiness(wave.id()).unwrap().state,
+            store
+                .project_readiness(wave.id(), crate::graph_process::Execution::result)
+                .unwrap()
+                .state,
             ProjectReadinessState::Unavailable
         );
-        let saved: String = store
-            .conn
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT original_yaml FROM project_binding_imports WHERE wave_id=?1",
-                [wave.id()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(saved, original);
     }
 }
 
@@ -508,12 +500,14 @@ mod activation_tests {
     use loopflow_model::id::{LfProcessId, TraceId, WaveId};
 
     #[test]
-    fn readiness_retains_exact_unknown_and_failed_activation_outcomes() {
+    fn an_activation_reads_pending_until_its_lf_writes_its_end() {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&dir.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "a".into(), "/repo".into());
         crate::test_fixture::wave(&store, &wave);
         let process = LfProcessId::new();
+        // The journal's row for the activating lf, which `waves` still
+        // references until its rebuild drops the foreign key.
         store
             .conn
             .lock()
@@ -524,19 +518,31 @@ mod activation_tests {
             )
             .unwrap();
         store
-            .record_project_activation(wave.id(), Some(&process))
+            .record_project_activation(
+                wave.id(),
+                &process,
+                &crate::graph_process::ExecutionStart::reserved(1),
+            )
             .unwrap();
         let pending = store
-            .project_readiness(wave.id())
+            .project_readiness(wave.id(), crate::graph_process::Execution::result)
             .unwrap()
             .activation
             .unwrap();
         assert_eq!(pending.lf_process_id, process.as_str());
         assert!(pending.completed_at.is_none());
         assert!(pending.outcome.is_none());
-        store.conn.lock().unwrap().execute("UPDATE processes SET completed_at=2,outcome='failed',error='provider unavailable' WHERE id=?1", [&process]).unwrap();
+        store
+            .finish_run(
+                crate::graph_process::RunOwner::ProjectActivation,
+                &process,
+                2,
+                Some(1),
+                Some("provider unavailable"),
+            )
+            .unwrap();
         let failed = store
-            .project_readiness(wave.id())
+            .project_readiness(wave.id(), crate::graph_process::Execution::result)
             .unwrap()
             .activation
             .unwrap();

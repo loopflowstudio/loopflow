@@ -28,7 +28,6 @@ fn dead_agent_never_waits_for_approval_quiet_or_blocked_report() {
                 "session",
                 None,
                 &store.test_lf_process(),
-                true,
             )
             .unwrap();
             let mut child = Child(
@@ -43,7 +42,7 @@ fn dead_agent_never_waits_for_approval_quiet_or_blocked_report() {
                     "session",
                     &attachment,
                     child.0.id(),
-                    crate::journal::process_started_at(child.0.id())
+                    crate::process::os_process::process_started_at(child.0.id())
                         .unwrap()
                         .unwrap(),
                 )
@@ -135,7 +134,7 @@ fn dead_agent_never_waits_for_approval_quiet_or_blocked_report() {
 }
 
 #[test]
-fn program_status_overrides_inference_before_paging_and_survives_attachment_handoff() {
+fn program_status_overrides_inference_before_paging_and_ends_with_its_agent() {
     let home = tempfile::tempdir().unwrap();
     let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
     store.test_session("session", "run_00000000000000000000000000000001");
@@ -149,14 +148,14 @@ fn program_status_overrides_inference_before_paging_and_survives_attachment_hand
             [&lf_process_id],
         )
         .unwrap();
-    let first = attachment::claim_session_attachment(&store, "session", None, &lf_process_id, true)
-        .unwrap();
+    let first =
+        attachment::claim_session_attachment(&store, "session", None, &lf_process_id).unwrap();
     store
         .record_agent_process_identity(
             "session",
             &first,
             std::process::id(),
-            crate::journal::process_started_at(std::process::id())
+            crate::process::os_process::process_started_at(std::process::id())
                 .unwrap()
                 .unwrap(),
         )
@@ -231,22 +230,8 @@ fn program_status_overrides_inference_before_paging_and_survives_attachment_hand
             &records
         )
         .unwrap());
-    let second = attachment::claim_session_attachment(
-        &store,
-        "session",
-        Some(&first),
-        &lf_process_id,
-        false,
-    )
-    .unwrap();
-    assert_eq!(
-        crate::store::session_projection::session_summaries(&store, &filter, 500).unwrap()[0]
-            .program_status
-            .as_ref(),
-        Some(&records)
-    );
     assert!(store
-        .begin_program_status("session", Some(&second.agent_process_id), "surface-b")
+        .begin_program_status("session", Some(&first.agent_process_id), "surface-b")
         .unwrap());
     assert!(!store
         .record_program_status(
@@ -261,7 +246,7 @@ fn program_status_overrides_inference_before_paging_and_survives_attachment_hand
     assert!(store
         .record_program_status(
             "session",
-            Some(&second.agent_process_id),
+            Some(&first.agent_process_id),
             "surface-b",
             1,
             &records
@@ -270,7 +255,7 @@ fn program_status_overrides_inference_before_paging_and_survives_attachment_hand
     assert!(!store
         .record_program_status(
             "session",
-            Some(&second.agent_process_id),
+            Some(&first.agent_process_id),
             "surface-b",
             1,
             &records
@@ -281,18 +266,17 @@ fn program_status_overrides_inference_before_paging_and_survives_attachment_hand
             .unwrap()
             .is_empty()
     );
-    let third = attachment::claim_session_attachment(
-        &store,
-        "session",
-        Some(&second),
-        &lf_process_id,
-        true,
-    )
-    .unwrap();
+    // A Session runs one agent: the replaced one has exited.
+    store
+        .record_agent_process_exit("session", &first, true)
+        .unwrap();
+    let third =
+        attachment::claim_session_attachment(&store, "session", Some(&first), &lf_process_id)
+            .unwrap();
     assert!(!store
         .record_program_status(
             "session",
-            Some(&second.agent_process_id),
+            Some(&first.agent_process_id),
             "surface-b",
             2,
             &records
@@ -334,7 +318,7 @@ fn program_status_overrides_inference_before_paging_and_survives_attachment_hand
             "session",
             &third,
             std::process::id(),
-            crate::journal::process_started_at(std::process::id())
+            crate::process::os_process::process_started_at(std::process::id())
                 .unwrap()
                 .unwrap(),
         )

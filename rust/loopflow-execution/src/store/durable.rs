@@ -1,8 +1,6 @@
 use crate::durable::AbandonReceipt;
 use crate::steer::Steer;
-use loopflow_model::durable::{
-    Machine, MachineId, TaskId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
-};
+use loopflow_model::durable::{Machine, MachineId, TaskId, WorkRef, WorkStatus};
 use loopflow_storage::child::ChildRef;
 
 use super::{run_sqlite, Store, StoreResult};
@@ -130,31 +128,6 @@ impl Store {
         let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
             store.save_steer(&work, &author, &text)
-        })
-        .await
-    }
-
-    pub async fn write_tool_response(
-        &self,
-        work: &WorkRef,
-        write: ToolResponseWrite,
-    ) -> StoreResult<(ToolResponseReceipt, bool)> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.write_tool_response(&work, &write)
-        })
-        .await
-    }
-
-    pub async fn tool_response(
-        &self,
-        work: &WorkRef,
-        request_id: &str,
-    ) -> StoreResult<Option<ToolResponseReceipt>> {
-        let work = work.clone();
-        let request_id = request_id.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.tool_response(&work, &request_id)
         })
         .await
     }

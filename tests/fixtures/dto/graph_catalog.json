@@ -1,6 +1,7 @@
 [
   {
     "name": "feature",
+    "description": "Explore, build, deliver and verify. You choose what to build, try the change and check it on main.",
     "source": null,
     "compiled": {
       "name": "feature",
@@ -132,6 +133,8 @@
       ]
     },
     "unavailable": null,
+    "included_by": [],
+    "runs": "task",
     "composition": {
       "revision": "fixture-feature-composition",
       "items": [
@@ -192,13 +195,45 @@
           "paths": {}
         }
       ]
+    },
+    "workflow": {
+      "steps": [
+        {
+          "name": "design",
+          "interactive": false
+        },
+        {
+          "name": "pursue",
+          "interactive": true
+        },
+        {
+          "name": "xor-route",
+          "interactive": false
+        },
+        {
+          "name": "queue",
+          "interactive": false
+        }
+      ],
+      "interactive_steps": [
+        {
+          "name": "demo",
+          "skill": "demo",
+          "description": "Put the change in someone's hands so they can feel it."
+        }
+      ],
+      "sentence": "You take part at demo."
     }
   },
   {
     "name": "broken",
+    "description": null,
     "source": ".lf/graphs/broken.yaml",
-    "graph": null,
+    "compiled": null,
+    "composition": null,
+    "workflow": null,
     "unavailable": "failed to load skill \"missing\": not found",
-    "composition": null
+    "included_by": [],
+    "runs": "task"
   }
 ]

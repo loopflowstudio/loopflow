@@ -1,10 +1,11 @@
 //! The direct caller's terminal host and serialized placement.
 
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use crate::journal::OsProcess;
+use crate::process::OsProcess;
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 
@@ -25,6 +26,7 @@ const TMUX_PANE: &str = "TMUX_PANE";
 /// Terminal-host context a direct caller carries. The link receiver removes
 /// it: an OS receiver's environment belongs to its first launch, not the click.
 pub(crate) const HOST_CONTEXT: &[&str] = &[
+    "REX_BIN_DIR",
     "REX_SERVER",
     "REX_SESSION",
     "REX_BLOCK",
@@ -127,8 +129,25 @@ impl TmuxLocation {
     }
 }
 
-pub fn rex_endpoint(server: Option<&str>) -> Result<String> {
-    let mut command = Command::new("rex");
+fn rex_bin_dir() -> Option<PathBuf> {
+    std::env::var_os("REX_BIN_DIR")
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+}
+
+pub fn rex_command(viewer_bin_dir: Option<&Path>) -> Command {
+    let ambient = rex_bin_dir();
+    let program = viewer_bin_dir
+        .into_iter()
+        .chain(ambient.as_deref())
+        .map(|dir| dir.join("rex"))
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| "rex".into());
+    Command::new(program)
+}
+
+pub fn rex_endpoint(server: Option<&str>, viewer_bin_dir: Option<&Path>) -> Result<String> {
+    let mut command = rex_command(viewer_bin_dir);
     for name in ["REX_SERVER", "REX_SESSION", "REX_BLOCK"] {
         command.env_remove(name);
     }
@@ -149,6 +168,9 @@ pub fn rex_endpoint(server: Option<&str>) -> Result<String> {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RexLocation {
+    /// Rex supplies this to the viewer. A detached agent may have a different PATH.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bin_dir: Option<PathBuf>,
     pub server: String,
     pub session: String,
     pub block: String,
@@ -163,6 +185,7 @@ impl RexLocation {
             )?,
         };
         Self {
+            bin_dir: rex_bin_dir(),
             server,
             session: std::env::var("REX_SESSION").context("Rex caller session is missing")?,
             block: std::env::var("REX_BLOCK").context("Rex caller block is missing")?,
@@ -171,7 +194,7 @@ impl RexLocation {
     }
 
     pub fn resolve(mut self) -> Result<Self> {
-        self.server = rex_endpoint(Some(&self.server))?;
+        self.server = rex_endpoint(Some(&self.server), self.bin_dir.as_deref())?;
         Ok(self)
     }
 }

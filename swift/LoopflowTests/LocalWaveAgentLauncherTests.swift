@@ -19,13 +19,13 @@ struct LocalWaveAgentLauncherTests {
             "LF_HOME": "/tmp/loopflow-development-home",
             "LF_WAVE_ID": "launching-wave",
             "LF_GRAPH_ID": "launching-step",
-            "LF_RUN_ID": "launching-run",
+            "LF_EXECUTION_ID": "launching-run",
         ])
 
         #expect(environment["LF_HOME"] == "/tmp/loopflow-development-home")
         #expect(environment["LF_WAVE_ID"] == nil)
         #expect(environment["LF_GRAPH_ID"] == nil)
-        #expect(environment["LF_RUN_ID"] == nil)
+        #expect(environment["LF_EXECUTION_ID"] == nil)
     }
 
     @Test("the launcher's terminal and agent output policy are dropped; account authority stays")
@@ -94,33 +94,44 @@ struct LocalWaveAgentLauncherTests {
         try Data("#!/bin/sh\nexit 0\n".utf8).write(to: helper)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
         let environment = ["LF_HOME": directory.path, "LF_BIN": helper.path]
-        #expect(try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh"), environment: environment) == helper.path)
+        #expect(LocalWaveAgentLauncher.machineLf(bundled: URL(fileURLWithPath: "/bin/sh"), environment: environment) == .privateHome(helper.path))
+        #expect(LocalWaveAgentLauncher.machineLf(environment: environment).startsServer)
+        let child = GUIProcessEnvironment.enriched(environment)
+        #expect(child["LF_BIN"] == helper.path)
+        #expect(child["PATH"]?.components(separatedBy: ":").first == bin.path)
         try FileManager.default.removeItem(at: helper)
+        #expect(GUIProcessEnvironment.enriched(environment)["LF_BIN"] == helper.path)
         #expect(throws: LocalLfError.self) {
-            try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh"), environment: environment)
+            try LocalWaveAgentLauncher.machineLf(bundled: URL(fileURLWithPath: "/bin/sh"), environment: environment).path
         }
     }
 
-    @Test("a missing bundled helper never falls through to PATH")
-    func missingBundledHelperFails() {
+    @Test("Dev uses the public entry and names it if the installation is missing")
+    func devUsesInstalledLf() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let entry = directory.appending(path: "lf")
+        let environment = ["LF_INSTALL_DIR": directory.path, "LF_BIN": "/bin/ls"]
         #expect {
-            try LocalWaveAgentLauncher.controlLfPath(bundled: nil, environment: [:])
+            try LocalWaveAgentLauncher.machineLf(bundled: nil, environment: environment).path
         } throws: { error in
-            guard error is LocalLfError else { return false }
-            return error.localizedDescription.contains("missing its executable bundled lf helper")
-                && error.localizedDescription.contains("PATH fallback is disabled")
+            error.localizedDescription.contains("no lf at \(entry.path)")
         }
-    }
 
-    @Test("the app selects its bundled helper")
-    func appUsesBundledHelper() throws {
-        #expect(try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh"), environment: [:]) == "/bin/sh")
+        try FileManager.default.createSymbolicLink(atPath: entry.path, withDestinationPath: "/bin/sh")
+        #expect(LocalWaveAgentLauncher.machineLf(bundled: nil, environment: environment) == .installed(entry.path))
+        #expect(!LocalWaveAgentLauncher.machineLf(bundled: nil, environment: environment).startsServer)
+        let privateHome = ["LF_INSTALL_DIR": directory.path, "LF_HOME": directory.path]
+        #expect(LocalWaveAgentLauncher.machineLf(bundled: nil, environment: privateHome) == .privateHome(entry.path))
+        let bundled = URL(filePath: "/bin/ls")
+        #expect(LocalWaveAgentLauncher.machineLf(bundled: bundled, environment: environment) == .bundled(bundled.path))
     }
 
     #if !SWIFT_PACKAGE
     @Test("the hosted app executes its bundled lf and decodes the reply")
     func hostedBundleExecutes() async throws {
-        let helper = try LocalWaveAgentLauncher.controlLfPath()
+        let helper = try LocalWaveAgentLauncher.machineLf().path
         #expect(FileManager.default.isExecutableFile(atPath: helper))
         let query = RegistryQuery { args, cwd in
             try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd)

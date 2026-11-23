@@ -43,7 +43,7 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
             let mut stdout = String::new();
             let mut stderr = String::new();
             let mut exit_code = None;
-            let mut limited = false;
+            let mut failure = None;
             let mut input_tick = tokio::time::interval(Duration::from_millis(250));
             input_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             let mut activity_tick = tokio::time::interval(crate::session_record::activity::SAMPLE_INTERVAL);
@@ -77,8 +77,7 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
                                 }
                             }
                             ConversationEvent::Error { code, message, .. } => {
-                                stderr.push_str(&format!("{code}: {message}\n"));
-                                limited |= code == "provider_rate_limited";
+                                report(&launch, &code, &message, &mut stderr, &mut failure);
                                 if launch.harness.terminal_error(&code)
                                 {
                                     exit_code = Some(1);
@@ -99,7 +98,7 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
             while let Ok(event) = event_rx.try_recv() {
                 if let Some(runtime) = runtime { runtime.record_conversation(event.clone()); }
                 if let ConversationEvent::Error { code, message, .. } = event {
-                    stderr.push_str(&format!("{code}: {message}\n"));
+                    report(&launch, &code, &message, &mut stderr, &mut failure);
                 }
             }
             if process.stream && !stdout.ends_with('\n') {
@@ -111,9 +110,9 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
                 stdout,
                 stderr,
                 agent_session: harness.agent_session(),
-                // A turn the provider finished was served, whatever a rate
-                // limit event said along the way.
-                failure: (limited && exit_code != 0).then_some(AgentFailure::UsageLimit),
+                // A turn the provider finished was served, whatever an error
+                // said along the way.
+                failure: failure.filter(|_| exit_code != 0),
             })
         };
         let result = match process.timeout {
@@ -130,4 +129,20 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         result
     })
+}
+
+/// Keep an error the provider reported: its text is what a person reads as
+/// the reason, and the gravest failure of the turn decides what happens next.
+fn report(
+    launch: &Launch<'_>,
+    code: &str,
+    message: &str,
+    stderr: &mut String,
+    failure: &mut Option<AgentFailure>,
+) {
+    stderr.push_str(&format!("{code}: {message}\n"));
+    *failure = [*failure, launch.harness.classify_failure(code, message)]
+        .into_iter()
+        .flatten()
+        .reduce(AgentFailure::graver);
 }

@@ -64,3 +64,7 @@
   in a held terminal, where `session_run` keeps its parent's choice). A later
   `lf resume` from a terminal reopens it as a chat, which is what the Session
   was. Left as is; recheck after LOO-924 lands.
+
+- Sync onto main: use main’s launch kinds and Session-owned agent identity for
+  steer delivery. Crash recovery and named steers share the existing held
+  terminal start. The old stacked harness implementation is superseded.

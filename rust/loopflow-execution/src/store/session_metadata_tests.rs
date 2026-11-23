@@ -210,12 +210,6 @@ fn captured_reservation_survives_interruption_and_fences_replacement() {
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let old_key = "run_00000000000000000000000000000001";
     let first = store.test_session("conversation", old_key);
-    let history = store.session_history("conversation", 0, 100).unwrap();
-    assert_eq!(
-        history.first().unwrap().kind,
-        loopflow_storage::session::SessionEventKind::Captured
-    );
-    assert_eq!(history.first().unwrap().seq, first.captured.unwrap());
     let mut next = first.clone();
     next.artifact_key = Some(loopflow_storage::session_record::new_artifact_key());
     next.input_published = false;
@@ -246,10 +240,7 @@ fn captured_reservation_survives_interruption_and_fences_replacement() {
     assert!(store
         .publish_capture(&retained.id, retained.captured)
         .is_err());
-    assert_eq!(
-        store.session_history("conversation", 0, 100).unwrap().len(),
-        2
-    );
+    assert_eq!(store.session_inputs("conversation").unwrap().len(), 2);
     assert!(
         store
             .session("conversation")
@@ -287,9 +278,9 @@ fn session_metadata_reads_its_graph_from_the_process_that_captured_its_input() {
             [conn.last_insert_rowid()],
         )
         .unwrap();
-        conn.execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-            VALUES('session','observed',?1,1,'not JSON',(SELECT current_capture FROM agent_sessions WHERE id='session'))",
+        store.execute_history(
+"INSERT INTO session_history(session_id,receipt_key,observed_at,payload,captured_event)
+            VALUES('session',?1,1,'not JSON',(SELECT current_capture FROM agent_sessions WHERE id='session'))",
             [format!("{input}:events.jsonl:0")],
         )
         .unwrap();
@@ -322,21 +313,50 @@ fn session_metadata_reads_its_graph_from_the_process_that_captured_its_input() {
         store.input_events(&input).is_err(),
         "Exact history still reports corrupt payload"
     );
+    let pid = std::process::id();
+    let started = crate::process::os_process::process_started_at(pid)
+        .unwrap()
+        .unwrap();
+    let graph_state = || {
+        crate::store::session_projection::session_summary(&store, "session", 0)
+            .unwrap()
+            .unwrap()
+            .graph
+            .unwrap()
+            .state
+    };
     store
         .conn
         .lock()
         .unwrap()
         .execute(
-            "UPDATE processes SET outcome='succeeded',completed_at=2 WHERE id=?1",
+            "UPDATE graph_processes SET pid=?2,os_started_at=?3 WHERE lf_process_id=?1",
+            params![graph_process, pid, started + 60],
+        )
+        .unwrap();
+    // A Graph run whose OS process is gone without writing its end stopped.
+    assert_eq!(graph_state(), GraphProcessSummaryState::Stopped);
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE graph_processes SET os_started_at=?2 WHERE lf_process_id=?1",
+            params![graph_process, started],
+        )
+        .unwrap();
+    assert_eq!(graph_state(), GraphProcessSummaryState::Current);
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE graph_processes SET ended_at=2,exit_code=0,pid=NULL,os_started_at=NULL
+             WHERE lf_process_id=?1",
             params![graph_process],
         )
         .unwrap();
-    let graph = crate::store::session_projection::session_summary(&store, "session", 0)
-        .unwrap()
-        .unwrap()
-        .graph
-        .unwrap();
-    assert_eq!(graph.state, GraphProcessSummaryState::Completed);
+    assert_eq!(graph_state(), GraphProcessSummaryState::Completed);
 }
 
 #[test]
@@ -372,11 +392,16 @@ fn session_metadata_receipts_remain_idempotent_and_conflicts_do_not_relabel() {
             .unwrap()
             .independent
     );
-    assert_eq!(store.session_history("imported", 0, 0).unwrap().len(), 2);
+    assert_eq!(store.session_history("imported", 0, 0).unwrap().len(), 1);
+    // A conflicting receipt is a recording gap: the first one stays.
     observation.payload["evidence"]["flow"] = serde_json::Value::Null;
-    assert!(store
+    store
         .retain_session_observation(&session, &observation)
-        .is_err());
+        .unwrap();
+    assert_eq!(
+        store.session_history("imported", 0, 0).unwrap()[0].payload["evidence"]["flow"]["kind"],
+        "independent"
+    );
     assert!(
         crate::store::session_projection::session_summary(&store, "imported", 0)
             .unwrap()
@@ -392,7 +417,7 @@ fn session_metadata_filters_and_preserves_explicit_membership() {
     {
         let conn = store.conn.lock().unwrap();
         for (id, title, interactive, repo, membership) in [
-            ("a", "Alpha%", true, "/repo", Some("independent")),
+            ("a", "Alpha%", true, "/repo", Some(())),
             ("b", "Beta", true, "/repo", None),
             ("headless", "Headless", false, "/repo", None),
             ("closed", "Closed", true, "/repo", None),
@@ -409,12 +434,13 @@ fn session_metadata_filters_and_preserves_explicit_membership() {
             )
             .unwrap();
             loopflow_storage::sqlite::sessions::test_capture(&conn, id, &input);
-            if let Some(kind) = membership {
-                let payload = json!({"input_id":input.as_str(),"source":"manifest.json", "evidence":{
-                    "artifact_key":input.as_str(),"schema_version":1,"flow":{"kind":kind}}});
-                conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-                    VALUES(?1,'observed',?2,1,?3,(SELECT current_capture FROM agent_sessions WHERE id=?1))",
-                    params![id,format!("{input}:manifest.json"),payload.to_string()]).unwrap();
+            if membership.is_some() {
+                conn.execute(
+                    "UPDATE session_events SET independent=1
+                     WHERE seq=(SELECT current_capture FROM agent_sessions WHERE id=?1)",
+                    [id],
+                )
+                .unwrap();
             }
         }
     }

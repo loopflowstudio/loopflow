@@ -5,10 +5,10 @@ use loopflow_model::durable::{
     MachineId, MachineRef, MachineSetting, RepositoryId, TaskId, TaskOwner, TaskOwnershipEntry,
 };
 use loopflow_storage::sqlite::scope_defaults::TaskScope;
-use loopflow_storage::sqlite::task_ownership::{label_owner, OwnershipFacts, Person};
+use loopflow_storage::sqlite::task_ownership::{label_owner, OwnershipFacts, Person, You};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::task::{NewTask, Task, TaskPr};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
@@ -59,6 +59,18 @@ pub fn viewer(
     }))
 }
 
+/// You in `repo`, whose Git `user.email` is your person key. Reading it
+/// spawns `git` and loads Machine configuration: read once per repository.
+pub fn you(store: &SqliteStore, repository: &RepositoryId, repo: &Path) -> StoreResult<You> {
+    let scope = store.placement_scope(None, Some(repository))?;
+    let mut machines: HashSet<MachineId> = machine_names(store)?.into_keys().collect();
+    machines.insert(scope.local_machine);
+    Ok(You {
+        person: claimant(repo, scope.person_id)?,
+        machines,
+    })
+}
+
 fn prepare(
     store: &SqliteStore,
     scope: TaskScope,
@@ -75,7 +87,7 @@ fn prepare(
     Ok((
         OwnershipFacts {
             person: claimant(Path::new(repo), scope.placement.person_id.clone())?,
-            planning_connected: crate::ops::planning_client::connected(repo),
+            planning_connected: crate::ops::tracker::connected(repo),
             declared_machines: machine_names(store)?,
             local_label: local_label(),
             owning_machine: machine,
@@ -190,7 +202,7 @@ pub(crate) fn promote_task(
     placement: Option<&(PathBuf, TaskPr)>,
     session: Option<&crate::session::LfSession>,
     destination: Option<&Path>,
-    receipt: Option<&loopflow_storage::sqlite::creation::CreationIdentity>,
+    receipt: Option<&loopflow_storage::sqlite::creation::TaskCreationRecord>,
 ) -> StoreResult<Task> {
     let caller = if session.is_some() {
         super::sessions::session_caller()?
@@ -256,7 +268,7 @@ pub(crate) fn held_planning(
         .map(|(task, (_, repo))| {
             let value = *connected
                 .entry(repo)
-                .or_insert_with(|| crate::ops::planning_client::connected(repo));
+                .or_insert_with(|| crate::ops::tracker::connected(repo));
             (task.clone(), value)
         })
         .collect();
@@ -321,25 +333,19 @@ pub fn task_detail_facts(
     Ok(facts)
 }
 
-pub(crate) fn apply_linear_observation(
+pub(crate) fn apply_tracker_event(
     store: &SqliteStore,
     task_id: &TaskId,
-    observation: &loopflow_storage::linear_records::LinearIssueObservation,
+    event: &loopflow_storage::planning::TrackerEvent,
     observed_at: time::OffsetDateTime,
     planning_connected: bool,
-) -> StoreResult<loopflow_storage::work::task::LinearObservationOutcome> {
+) -> StoreResult<loopflow_storage::work::task::TrackerEventOutcome> {
     let mut names = machine_names(store)?;
     names.insert(
         crate::store::machines::local_machine(store)?.id,
         local_label(),
     );
-    store.apply_linear_observation_prepared(
-        task_id,
-        observation,
-        observed_at,
-        planning_connected,
-        &names,
-    )
+    store.apply_tracker_event_prepared(task_id, event, observed_at, planning_connected, &names)
 }
 
 #[cfg(test)]

@@ -38,6 +38,18 @@ fn comment(id: &str, created: Option<&str>, body: Option<&str>, user: Value) -> 
     node
 }
 
+/// One pass over the repository's queue, as a connected command makes.
+async fn deliver(store: &crate::store::Store, repo: &std::path::Path) -> crate::ops::OpsResult<()> {
+    crate::ops::tracker::drain::drain_repository(
+        store,
+        &repo.to_string_lossy(),
+        crate::ops::tracker::drain::Scope::All,
+        crate::ops::tracker::drain::Bound::PASS,
+    )
+    .await
+    .map(|_| ())
+}
+
 fn page(nodes: Vec<Value>, next: Option<&str>, has_next: bool) -> Value {
     json!({"nodes": nodes, "pageInfo": {"hasNextPage": has_next, "endCursor": next}})
 }
@@ -62,7 +74,7 @@ async fn graphql(
         json!({"issue": {"id":"issue-uuid","identifier":"FIX-7","url":null,"title":"Comments",
             "description":"","completedAt": null, "dueDate": null, "prioritySortOrder":0.0,"sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z","assignee":null,
             "state":{"type":"unstarted"},"team":{"id":"team-1"},
-            "project":{"id":"project-1","name":"Chapter","description":"","content":"workflow: feature",
+            "project":{"id":"project-1","name":"Project","description":"","content":"workflow: feature",
                 "status":{"type":"started"},
                 "initiatives":{"nodes":[{"id":"initiative-1"}]},"teams":{"nodes":[{"id":"team-1"}]}}}})
     } else if query.contains("mutation SyncComment") {
@@ -97,7 +109,7 @@ async fn graphql(
         json!({"comment":comment})
     } else if query.contains("query IssueTrash") {
         json!({"issue": {"id": vars["id"], "updatedAt": "2026-09-24T12:00:00Z", "trashed": false}})
-    } else if query.contains("query IssueObservation") {
+    } else if query.contains("query IssueEvent") {
         assert_eq!(
             vars["id"], "issue-uuid",
             "read uses the resolved provider UUID"
@@ -292,8 +304,11 @@ async fn task_comments_read_and_publish_without_starting_work() {
 
             let task = store.get_task_by_issue("FIX-7").await.unwrap().unwrap();
             rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap()
-                .execute("INSERT INTO task_state_deliveries(id,task_id,target,error,base_state,base_revision,attempted)
-                    VALUES('pending-completion',?1,'completed','unrelated completion remains pending','unstarted','2026-09-29T12:00:00.123Z',1)",
+                .execute("INSERT INTO tracker_actions(id,task_id,kind,value_json,base_json,phase,tracker,error,sent_at,looked_at)
+                    VALUES('00000000-0000-4000-8000-00000000c0de',?1,'state',
+                        '{\"field\":\"disposition\",\"value\":{\"planning_state\":\"completed\",\"planning_completed\":true,\"planning_completed_at\":null}}',
+                        '{\"revision\":\"2026-09-29T12:00:00.123Z\",\"value\":{\"field\":\"disposition\",\"value\":{\"planning_state\":\"unstarted\",\"planning_completed\":false,\"planning_completed_at\":null}}}',
+                        'sent','linear','unrelated completion remains pending',unixepoch(),unixepoch())",
                     [task.id.as_str()]).unwrap();
             provider.lock().await.thread = Thread::Failing;
             let saved = task_comment_async(&repo, None, "FIX-7", Some("Keep the public name"), true)
@@ -303,30 +318,34 @@ async fn task_comments_read_and_publish_without_starting_work() {
             let id = saved.pending_sync[0].clone();
             assert!(provider.lock().await.posted.is_empty());
             assert!(!store.task_owned(&task.id).await.unwrap());
-            crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
+            deliver(&store, &repo).await.unwrap();
             assert_eq!(store.sqlite.pending_task_comments(&task.id).unwrap().len(), 1);
             let saved_steers = store.task_steers(&task.id).await.unwrap();
 
             provider.lock().await.thread = Thread::Empty;
+            // A failed comment resends once its window has passed.
+            rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap()
+                .execute("UPDATE tracker_actions SET sent_at=sent_at-600 WHERE kind='comment'", [])
+                .unwrap();
             // The provider commits but loses its first reply. Concurrent catch-up
             // keeps the same UUID and confirms the exact issue and body.
             let (one, two) = tokio::join!(
-                crate::ops::linear_observe::sync_task_comments(&store, &task),
-                crate::ops::linear_observe::sync_task_comments(&store, &task),
+                deliver(&store, &repo),
+                deliver(&store, &repo),
             );
             one.unwrap(); two.unwrap();
             assert_eq!(provider.lock().await.posted.len(), 1);
             assert_eq!(provider.lock().await.posted[0]["id"], id);
             assert!(store.sqlite.pending_task_comments(&task.id).unwrap().is_empty());
-            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
-            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_events::refresh_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_events::refresh_task_comments(&store, &task).await.unwrap();
             assert_eq!(store.task_steers(&task.id).await.unwrap(), saved_steers);
             assert_eq!(store.task_comments(&task.id).unwrap().comments.len(), 5);
 
             provider.lock().await.posted.push(comment("incoming-after-reconnect",
                 Some("2026-09-27T00:00:01Z"), Some("Keep inbound independent"),
                 json!({"id":"person-1","displayName":"Maya","name":null})));
-            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_events::refresh_task_comments(&store, &task).await.unwrap();
             // Keep this create pending deliberately; connected saves may deliver immediately.
             provider.lock().await.thread = Thread::Failing;
             let saved = task_comment_async(&repo, None, "FIX-7", Some("Local value survives"), true)
@@ -336,16 +355,15 @@ async fn task_comments_read_and_publish_without_starting_work() {
             provider.lock().await.posted.push(comment(&collision,
                 Some("2026-09-27T00:00:03Z"), Some("Provider value survives"),
                 json!({"id":"person-1","displayName":"Maya","name":null})));
-            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
-            crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_events::refresh_task_comments(&store, &task).await.unwrap();
+            deliver(&store, &repo).await.unwrap();
             let conflict = store.task_comments(&task.id).unwrap();
             assert!(conflict.conflicts[&collision].starts_with("Local value survives"));
             assert!(conflict.comments.iter().find(|c| c.id == collision).unwrap().body == "Provider value survives");
             assert!(!conflict.pending_sync.contains(&collision));
             // A late acknowledgement records delivery, not authority to discard
             // the newer remote value acquired while the create was in flight.
-            store.sqlite.record_comment_delivery(&collision, None).unwrap();
-            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_events::refresh_task_comments(&store, &task).await.unwrap();
             assert_eq!(store.task_comments(&task.id).unwrap().conflicts, conflict.conflicts);
 
             // An acknowledged create with a retained collision must not hide
@@ -356,14 +374,14 @@ async fn task_comments_read_and_publish_without_starting_work() {
                 amended["body"] = json!("Provider correction survives");
                 amended["updatedAt"] = json!("2026-09-25T09:00:01Z");
             }
-            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            crate::ops::tracker_events::refresh_task_comments(&store, &task).await.unwrap();
             assert_eq!(store.task_comments(&task.id).unwrap().comments.iter().find(|c| c.id == collision).unwrap().body, "Provider correction survives");
             assert!(store.task_steers(&task.id).await.unwrap().iter().any(|steer| steer.text.contains("Provider correction survives")));
 
             let before_retry = store.task_steers(&task.id).await.unwrap();
             let posted_before = provider.lock().await.posted.len();
-            crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
-            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            deliver(&store, &repo).await.unwrap();
+            crate::ops::tracker_events::refresh_task_comments(&store, &task).await.unwrap();
             assert!(store.sqlite.pending_task_comments(&task.id).unwrap().is_empty());
             assert_eq!(provider.lock().await.posted.len(), posted_before);
             assert_eq!(store.task_steers(&task.id).await.unwrap(), before_retry);
@@ -371,7 +389,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
 
             let delivered = store.task_steers(&task.id).await.unwrap();
             assert_eq!(delivered.iter().filter(|steer| steer.text.contains("incoming-after-reconnect")).count(), 1);
-            assert!(matches!(store.get_task(&task.id).await.unwrap().unwrap().pm_writeback,
+            assert!(matches!(store.get_task(&task.id).await.unwrap().unwrap().tracker_writeback,
                 loopflow_storage::work::task::LinearWritebackState::Pending {
                     operation: loopflow_storage::work::task::LinearWritebackOperation::CompleteTask, ..
                 }));

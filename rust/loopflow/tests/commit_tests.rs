@@ -200,6 +200,46 @@ fn commit_generates_message_when_none() {
 }
 
 #[test]
+fn a_commit_message_comes_from_the_next_agent_when_codex_is_out_of_quota() {
+    let home = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(home.path().join(".lf")).unwrap();
+    std::fs::write(
+        home.path().join(".lf/config.yaml"),
+        "agents: [codex, claude]\n",
+    )
+    .unwrap();
+    let _env = EnvGuard::with_home(
+        &[
+            ("codex", support::refused_codex_script().as_str()),
+            (
+                "claude",
+                support::answering_claude_script(
+                    r#"{"title":"Say hello","body":""}"#,
+                    &home.path().join("received"),
+                )
+                .as_str(),
+            ),
+        ],
+        Some(home.path()),
+    );
+    let repo = TestRepo::new();
+    repo.create_file("needs-message.txt", "hello");
+    let options = CommitOptions {
+        add: true,
+        ..CommitOptions::for_task("implement")
+    };
+
+    let committed = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
+
+    assert!(committed);
+    assert!(
+        last_commit_message(&repo).contains("Say hello"),
+        "{}",
+        last_commit_message(&repo)
+    );
+}
+
+#[test]
 fn step_commit_without_an_agent_checkpoints_once_and_keeps_the_default_branch_unpushed() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();

@@ -11,13 +11,11 @@ pub mod graph_process;
 pub mod human_session;
 pub mod land;
 pub mod linear;
-pub mod linear_observe;
 pub mod metrics;
 pub mod people;
-pub mod planning_client;
-pub(crate) mod planning_delivery;
-pub(crate) mod planning_export;
-mod planning_order;
+pub mod plan_carriers;
+pub mod plan_git;
+pub mod plan_hub;
 pub mod planning_sync;
 mod pr;
 pub mod pr_landing;
@@ -44,6 +42,8 @@ pub mod task_ownership;
 pub mod task_run;
 pub mod telemetry;
 pub mod trace;
+pub mod tracker;
+pub mod tracker_events;
 pub mod util;
 pub mod wave_lifecycle;
 pub mod wt;
@@ -72,7 +72,6 @@ pub use run::{
     resolve_execution_binding, resolve_work_binding, resolve_work_selection, WorkBinding,
     WorkSelection,
 };
-pub use sync::{abort_sync_after_authorization, continue_sync_after_authorization};
 pub use sync::{
     abort_sync_for_resolution, continue_sync_for_resolution, plan_sync, recover_sync,
     sync_class_name, sync_strategy_name, sync_with_plan, sync_with_recovery, SyncClass,

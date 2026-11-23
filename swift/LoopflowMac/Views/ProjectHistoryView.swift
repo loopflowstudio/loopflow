@@ -3,7 +3,6 @@ import Loopflow
 import SwiftUI
 
 struct ProjectHistoryView: View {
-    @Environment(\.palette) private var palette
     let wave: String
     let repo: String
     var sourceReference: String? = nil
@@ -14,15 +13,15 @@ struct ProjectHistoryView: View {
     @State private var loaded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
             HStack {
-                Text("\(wave) · Projects").font(.headline)
+                Text("\(wave) · Projects").font(Typography.textStrong)
                 Spacer()
-                Button("Done") { dismiss() }
+                Button("Done") { dismiss() }.buttonStyle(LoopflowButtonStyle())
             }
-            if let error { Text(error).foregroundStyle(palette.warning) }
+            if let error { FailureLine("Projects did not load.", machine: error) }
             if !loaded { ProgressView("Reading Projects…") }
-            if loaded && projects.isEmpty && error == nil { Text("No Projects in this Wave.") }
+            if loaded && projects.isEmpty && error == nil { Text("No Projects in this Wave.").emptyLine() }
             Picker("Project", selection: $selected) {
                 ForEach(projects) { project in
                     Text("\(project.name) · \(project.status.rawValue)").tag(Optional(project.id))
@@ -30,8 +29,8 @@ struct ProjectHistoryView: View {
             }
             ScrollView {
                 if let project = projects.first(where: { $0.id == selected }) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        PlanningSyncView(sync: project.sync)
+                    VStack(alignment: .leading, spacing: Spacing.md) {
+                        TrackerSyncView(sync: project.sync, repo: repo)
                         ForEach(project.krs) { kr in
                             Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "circle")
                         }
@@ -39,13 +38,13 @@ struct ProjectHistoryView: View {
                 }
             }
         }
-        .padding(24).frame(minWidth: 500, minHeight: 420)
+        .padding(Spacing.xxl).frame(minWidth: 500, minHeight: 420)
         .task {
             do {
                 let status = try await RegistryQueryLocal.shared.status(wave: wave, cwd: repo)
                 projects = status.projects.items
                 error = status.projects.unavailableReason
-                selected = projects.first(where: { $0.id == sourceReference || $0.slug == sourceReference || (sourceReference != nil && $0.linearId == sourceReference) })?.id
+                selected = projects.first(where: { $0.id == sourceReference || $0.slug == sourceReference || (sourceReference != nil && $0.trackerId == sourceReference) })?.id
                     ?? status.currentProject?.id ?? projects.first?.id
             } catch { self.error = error.localizedDescription }
             loaded = true

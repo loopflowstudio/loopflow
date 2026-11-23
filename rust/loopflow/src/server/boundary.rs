@@ -1,4 +1,4 @@
-//! `session.boundary`: what a held launch's hook reports at a turn or tool
+//! `session.boundary`: what a managed launch's hook reports at a turn or tool
 //! boundary, for the server to record. The hook opens no store for this; it
 //! reads the Session's steers and Task update from the store itself afterwards
 //! ([`loopflow_execution::steer::claim`]).
@@ -168,7 +168,7 @@ pub(super) fn after_stop(after: AfterStop) {
             let repo = after.repo.to_string_lossy();
             if tokio::time::timeout(
                 PLANNING_REFRESH,
-                loopflow_execution::ops::linear_observe::sync_repository(&store, &repo),
+                loopflow_execution::ops::tracker_events::sync_repository(&store, &repo),
             )
             .await
             .is_err()
@@ -258,7 +258,7 @@ mod tests {
         );
         let process = store.test_lf_process();
         let claim =
-            attachment::claim_session_attachment(&store, "session", None, &process, false).unwrap();
+            attachment::claim_session_attachment(&store, "session", None, &process).unwrap();
         store
             .record_agent_process_identity("session", &claim, std::process::id(), 1)
             .unwrap();
@@ -268,7 +268,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE processes SET agent_interactive=1 WHERE id=?1",
+                "UPDATE agent_sessions SET agent_interactive=1 WHERE agent_process_id=?1",
                 [&adapter.agent_process_id],
             )
             .unwrap();
@@ -477,7 +477,7 @@ mod tests {
         assert!(yielded);
         let gaps: i64 = conn
             .query_row(
-                "SELECT count(*) FROM session_events WHERE session_id='session'
+                "SELECT count(*) FROM history.session_history WHERE session_id='session'
                  AND json_extract(payload,'$.source')='store-gap'
                  AND json_extract(payload,'$.first_miss')=1794358000",
                 [],
@@ -574,16 +574,16 @@ mod tests {
         answer(&store, &stop).unwrap();
         answer(&store, &stop).unwrap();
         let usage = store
-            .session_history("session", 0, 0)
+            .session_turns("session")
             .unwrap()
             .into_iter()
-            .filter(|event| event.kind == loopflow_execution::session::SessionEventKind::Usage)
+            .filter_map(|turn| Some((turn.turn, turn.usage?.usage)))
             .collect::<Vec<_>>();
         assert_eq!(usage.len(), 1);
-        assert_eq!(usage[0].provider_turn.as_deref(), Some("u1"));
-        assert_eq!(usage[0].payload["usage"]["total_input_tokens"], 100);
-        assert_eq!(usage[0].payload["usage"]["output_tokens"], 5);
-        assert_eq!(usage[0].payload["usage"]["cost_usd"], 0.25);
+        assert_eq!(usage[0].0, "u1");
+        assert_eq!(usage[0].1.total_input_tokens, Some(100));
+        assert_eq!(usage[0].1.output_tokens, Some(5));
+        assert_eq!(usage[0].1.cost_usd, Some(0.25));
     }
 
     /// OpenCode reports a managed turn end with no callback body.
@@ -658,7 +658,7 @@ mod tests {
                 let at = |moment, callback: serde_json::Value| {
                     boundary(moment, &adapter, &delivery, callback)
                 };
-                // What a held launch's hooks do at each boundary: report it,
+                // What a managed launch's hooks do at each boundary: report it,
                 // then claim the Session's steers themselves.
                 answer(
                 &store,

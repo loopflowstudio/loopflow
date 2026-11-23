@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
-use super::super::wire::{frame, parse_position, Decoder, Incoming, Own, Request, Tag};
+use super::super::wire::{frame, parse_position, Decoder, Incoming, Request, Tag};
 use super::{connect, Registry, Start};
 use crate::journal::TestLedgerGuard;
 use crate::terminal_holder::{serve, Place};
@@ -60,17 +60,18 @@ impl View {
     }
 
     fn attach_from(terminal: &TerminalId, from: Option<u64>) -> Self {
+        Self::attach_sized(terminal, from, 80)
+    }
+
+    fn attach_sized(terminal: &TerminalId, from: Option<u64>, cols: u16) -> Self {
         let mut socket = connect(terminal).unwrap();
         let attach = Incoming {
             id: 1,
             request: Request::Attach {
-                control: true,
-                replace: true,
-                own: Some(Own::Take),
+                focused: None,
                 rows: 24,
-                cols: 80,
+                cols,
                 name: None,
-                moved: None,
                 from,
             },
         };
@@ -146,46 +147,63 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
 
 #[test]
 fn an_interrupted_paste_ends_before_the_next_view_types() {
-    for interruption in ["disconnect", "replace", "restart"] {
-        let _ledger = TestLedgerGuard::new();
-        let place = holder();
-        let mut registry = Registry::open(BUILD).unwrap();
-        let terminal = registry
-            .start(shell(
-                None,
-                "interrupted-paste",
-                "stty raw -echo; printf '\\r\\nready\\r\\n'; dd bs=1 count=9 2>/dev/null | od -An -tx1; printf '\\r\\nprefix\\r\\n'; dd bs=1 count=6 2>/dev/null | od -An -tx1; printf '\\r\\nclosed\\r\\n'; read line; printf '\\r\\nreply:%s\\r\\n' \"$line\"",
-            ))
-            .unwrap();
-        let mut first = View::attach(&terminal);
-        first.wait_for("ready");
-        first.type_in(b"\x1b[200~abc");
-        first.wait_for("prefix");
-        let mut next = if interruption == "replace" {
-            View::attach(&terminal)
+    let ledger = TestLedgerGuard::new();
+    let place = holder();
+    let mut registry = Registry::open(BUILD).unwrap();
+    for interruption in ["disconnect", "another view", "restart"] {
+        let end = ledger.home().join(interruption.replace(' ', "-"));
+        let script = r#"stty raw -echo
+printf 'ready\r\n'
+dd bs=1 count=9 of=/dev/null 2>/dev/null
+printf 'prefix\r\n'
+dd bs=1 count=6 of="$PASTE_END" 2>/dev/null
+read line
+printf 'reply:%s\r\n' "$line""#;
+        let mut start = shell(None, &interruption.replace(' ', "-"), script);
+        start
+            .env
+            .push(("PASTE_END".into(), end.display().to_string()));
+        let terminal = registry.start(start).unwrap();
+        let mut first = Some(View::attach(&terminal));
+        let pasting = first.as_mut().unwrap();
+        pasting.wait_for("ready");
+        pasting.type_in(b"\x1b[200~abc");
+        pasting.wait_for("prefix");
+        let wait_for_end = || {
+            wait_until("child to receive the paste end", || {
+                end.metadata().is_ok_and(|metadata| metadata.len() == 6)
+            });
+            assert_eq!(std::fs::read(&end).unwrap(), b"\x1b[201~", "{interruption}");
+        };
+        let mut next = if interruption == "another view" {
+            // The first view stays; the second one's keys end its paste.
+            let mut next = View::attach(&terminal);
+            next.wait_for("prefix");
+            next.type_in(b"next\n");
+            wait_for_end();
+            next
         } else {
             if interruption == "restart" {
                 registry.close();
+            }
+            first = None;
+            wait_for_end();
+            if interruption == "restart" {
                 registry = Registry::open(BUILD).unwrap();
             }
-            drop(first);
-            View::attach(&terminal)
+            let mut next = View::attach(&terminal);
+            next.type_in(b"next\n");
+            next
         };
-        next.wait_for("closed");
-        assert!(String::from_utf8_lossy(&next.seen)
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .contains("1b 5b 32 30 31 7e"));
-        next.type_in(b"next\n");
         next.wait_for("reply:next");
+        drop(first);
         wait_until("paste child exit receipt", || {
             crate::terminal_holder::recorded_exit(&place, terminal.as_str())
                 .unwrap()
                 .is_some()
         });
-        registry.close();
     }
+    registry.close();
 }
 
 #[test]
@@ -350,7 +368,7 @@ fn kept_exit_record(place: &Place, terminal: &TerminalId) -> crate::process::Ses
     let session = store.test_session("held", &crate::session_record::new_artifact_key());
     let launcher = store.test_lf_process();
     let attachment =
-        attachment::claim_session_attachment(&store, &session.id, None, &launcher, true).unwrap();
+        attachment::claim_session_attachment(&store, &session.id, None, &launcher).unwrap();
     let record = crate::harness::native_exit::NativeExit {
         session: session.id.to_string(),
         attachment: attachment.clone(),
@@ -517,6 +535,31 @@ fn a_view_continues_from_its_position_after_the_server_restarts() {
     kill(&place, &terminal);
 }
 
+/// A server taking up a terminal narrows it by a column and widens it back to
+/// ask for a repaint. A view that takes the size meanwhile keeps it.
+#[test]
+fn a_view_sizing_the_terminal_during_the_repaint_nudge_keeps_its_size() {
+    let _ledger = TestLedgerGuard::new();
+    let place = holder();
+    let first = Registry::open(BUILD).unwrap();
+    let script = "trap 'echo size:$(stty size)' WINCH; echo up; \
+                  while :; do read -r line && echo now:$(stty size); done";
+    let terminal = first.start(shell(None, "request-1", script)).unwrap();
+    let mut view = View::attach(&terminal);
+    view.wait_for("up");
+    first.close();
+    drop(view);
+
+    let second = Registry::open(BUILD).unwrap();
+    let mut wide = View::attach_sized(&terminal, None, 120);
+    wide.wait_for("size:24 120");
+    std::thread::sleep(super::NUDGE * 3);
+    wide.type_in(b"\n");
+    wide.wait_for("now:24 120");
+    second.close();
+    kill(&place, &terminal);
+}
+
 #[test]
 fn a_view_the_ring_no_longer_reaches_is_painted_afresh() {
     let _ledger = TestLedgerGuard::new();
@@ -622,8 +665,7 @@ fn a_held_terminal_with_no_view_reports_that_it_waits() {
     let session = store.test_session("asking", &crate::session_record::new_artifact_key());
     let launcher = store.test_lf_process();
     let attachment =
-        attachment::claim_session_attachment(&store, session.id.as_str(), None, &launcher, true)
-            .unwrap();
+        attachment::claim_session_attachment(&store, session.id.as_str(), None, &launcher).unwrap();
     let ask = ledger.home().join("ask");
     let script = format!(
         r"printf '\033]7501;state=working:app=claude-code\033\\'
@@ -646,7 +688,9 @@ read answer",
         .find(|held| held.terminal == terminal.as_str())
         .unwrap()
         .pid;
-    let started = crate::journal::process_started_at(pid).unwrap().unwrap();
+    let started = crate::process::os_process::process_started_at(pid)
+        .unwrap()
+        .unwrap();
     store
         .record_agent_process_identity(session.id.as_str(), &attachment, pid, started)
         .unwrap();

@@ -333,8 +333,9 @@ start/assignment evidence; uncertainty never becomes an invented token split.
 
 Conversation, Graph and command summaries filter and page in SQL before opening
 payloads. Exact detail can load the selected captured input, transcript or final
-answer. Without correlated native output from a completed turn, the final answer
-is absent; retained transcript prose never substitutes for it.
+answer. The final answer is the last message of the input's completed turn in
+its provider's transcript; when that transcript is gone, the read fails and
+names where it looked.
 
 Session inventory reads the selected rows, Work labels and indexed Graph metadata;
 it does not decode captures or Session history. Readiness text remains the exact

@@ -1,11 +1,11 @@
-//! Asana delivery and observation. Work owns local content; this adapter owns provider facts.
+//! Asana requests, actions and events.
 //!
 //! Every task Loopflow exports carries its Loopflow UUID as the OAuth app's
 //! `external.gid`, and every request addresses it as `external:<uuid>`. The
 //! Task's planning identity stays the one Loopflow assigned, exactly as Linear
 //! accepts a caller-supplied issue ID, so a lost creation reply is resolved by
 //! lookup rather than a second create. Asana returns the shared planning
-//! observations, so acceptance, receipts and steering stay one path.
+//! events, so both trackers share the same action queue and steering code.
 //! Descriptions and comments travel as Asana rich text (see [`rich_text`]).
 //!
 //! The repository's planning scope is an Asana team, like a Linear Team. Every
@@ -14,6 +14,7 @@
 //! project in the team, and a Task in it belongs to both projects. Asana
 //! projects accept no caller ID, so their notes end with a `Loopflow ID:` line.
 
+mod actions;
 mod rich_text;
 
 use std::sync::Arc;
@@ -23,10 +24,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::OnceCell;
 
-use crate::linear::{
-    local_identifier, LinearComment, LinearError, LinearIssue, LinearIssueObservation,
-    LinearResult, OrderedIssue, PlanningResponse,
-};
+use crate::linear::local_identifier;
+use crate::ops::tracker::{TrackerError, TrackerResult};
+use loopflow_storage::planning::{TrackerComment, TrackerEvent, TrackerItem};
 
 const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
 const TASK_FIELDS: &str = "gid,external,name,html_notes,completed,completed_at,modified_at,permalink_url,due_on,assignee.gid,memberships.project.gid";
@@ -145,7 +145,7 @@ impl AsanaClient {
     }
 
     /// The team project named after the repository, created when the team has none.
-    async fn project(&self) -> LinearResult<&str> {
+    async fn project(&self) -> TrackerResult<&str> {
         self.project
             .get_or_try_init(|| async {
                 let path = format!("/teams/{}/projects?archived=false", self.team);
@@ -177,13 +177,13 @@ impl AsanaClient {
             .map(String::as_str)
     }
 
-    async fn team_projects(&self) -> LinearResult<Vec<Project>> {
+    async fn team_projects(&self) -> TrackerResult<Vec<Project>> {
         self.pages(&format!("/teams/{}/projects?archived=false", self.team))
             .await
     }
 
     /// The team project mirroring Loopflow Project `id`.
-    async fn wave_project(&self, id: &str) -> LinearResult<Option<Project>> {
+    async fn wave_project(&self, id: &str) -> TrackerResult<Option<Project>> {
         Ok(self
             .team_projects()
             .await?
@@ -191,54 +191,17 @@ impl AsanaClient {
             .find(|project| project.identity().as_deref() == Some(id)))
     }
 
-    /// Create a Wave Project's Asana project in the team from its export input
-    /// (`id`, `name`, `description`), answering its revision.
-    pub async fn create_project(&self, input: &Value) -> LinearResult<Option<String>> {
-        let id = input["id"]
-            .as_str()
-            .ok_or_else(|| message("Asana Project export has no Loopflow identity"))?;
-        let summary = input["description"].as_str().unwrap_or_default().trim();
-        let footer = format!("{IDENTITY_LABEL} {id}");
-        let notes = if summary.is_empty() {
-            footer
-        } else {
-            format!("{summary}\n\n{footer}")
-        };
-        let project: Project = self
-            .send(
-                Method::POST,
-                &format!("/teams/{}/projects", self.team),
-                Some(json!({"name": input["name"], "html_notes": rich_text::to_html(&notes)})),
-            )
-            .await?;
-        Ok(project.modified_at)
-    }
-
     /// The revision of the Asana project mirroring Loopflow Project `id`, if any.
-    pub(crate) async fn project_revision(&self, id: &str) -> LinearResult<Option<Option<String>>> {
+    pub(crate) async fn project_revision(&self, id: &str) -> TrackerResult<Option<Option<String>>> {
         Ok(self
             .wave_project(id)
             .await?
             .map(|project| project.modified_at))
     }
 
-    /// The Asana project gid for a Task's `projectId`, the Loopflow Project's identity.
-    async fn project_gid(&self, project: &Value) -> LinearResult<Option<String>> {
-        let Some(id) = project.as_str() else {
-            return Ok(None);
-        };
-        match self.wave_project(id).await? {
-            Some(project) => Ok(Some(project.gid)),
-            None => Err(message(format!(
-                "Asana team {} has no project for Loopflow Project {id}",
-                self.team
-            ))),
-        }
-    }
-
     /// Move the task into the Wave Project `target`, leaving any other mirrored
     /// Wave Project. The repository project and people's own projects stay.
-    async fn set_project(&self, task: &Task, target: Option<String>) -> LinearResult<()> {
+    async fn set_project(&self, task: &Task, target: Option<String>) -> TrackerResult<()> {
         let mirrored: Vec<String> = self
             .team_projects()
             .await?
@@ -269,55 +232,19 @@ impl AsanaClient {
         Ok(())
     }
 
-    /// Create the exported task in the repository project, and in its Wave
-    /// Project's when it has one. `input` is the saved export receipt: `id`,
-    /// `title`, `description`, `assigneeId`, `dueDate`, `stateId`, `projectId`.
-    pub async fn create_task(&self, input: &Value) -> LinearResult<PlanningResponse> {
-        let id = input["id"]
-            .as_str()
-            .ok_or_else(|| message("Asana export has no Loopflow identity"))?;
-        let mut data = task_fields(input)?;
-        let mut projects = vec![self.project().await?.to_string()];
-        projects.extend(self.project_gid(&input["projectId"]).await?);
-        data["projects"] = json!(projects);
-        data["external"] = json!({"gid": id});
-        let task: Task = self.send(Method::POST, "/tasks", Some(data)).await?;
-        self.response(id, task).await
-    }
-
-    pub async fn task(&self, id: &str) -> LinearResult<Option<LinearIssue>> {
+    pub async fn task(&self, id: &str) -> TrackerResult<Option<TrackerItem>> {
         match self
             .send::<Task>(Method::GET, &format!("/tasks/external:{id}"), None)
             .await
         {
             Ok(task) => Ok(Some(self.issue(id, task).await?)),
             Err(AsanaFailure::NotFound) => Ok(None),
-            Err(AsanaFailure::Provider(error)) => Err(error),
+            Err(AsanaFailure::Tracker(error)) => Err(error),
         }
-    }
-
-    /// Field edits share the export input's names.
-    pub(crate) async fn update_task(
-        &self,
-        id: &str,
-        input: &Value,
-    ) -> LinearResult<PlanningResponse> {
-        let data = task_fields(input)?;
-        let mut task: Task = self
-            .send(Method::PUT, &format!("/tasks/external:{id}"), Some(data))
-            .await?;
-        if let Some(project) = input.get("projectId") {
-            let target = self.project_gid(project).await?;
-            self.set_project(&task, target).await?;
-            task = self
-                .send(Method::GET, &format!("/tasks/external:{id}"), None)
-                .await?;
-        }
-        self.response(id, task).await
     }
 
     /// Asana has open and completed tasks; a canceled Task is closed there too.
-    pub(crate) async fn set_state(&self, id: &str, target: &str) -> LinearResult<LinearIssue> {
+    pub(crate) async fn set_state(&self, id: &str, target: &str) -> TrackerResult<TrackerItem> {
         let task: Task = self
             .send(
                 Method::PUT,
@@ -328,7 +255,7 @@ impl AsanaClient {
         self.issue(id, task).await
     }
 
-    pub async fn delete_task(&self, id: &str) -> LinearResult<()> {
+    pub async fn delete_task(&self, id: &str) -> TrackerResult<()> {
         let _: Value = self
             .send(Method::DELETE, &format!("/tasks/external:{id}"), None)
             .await?;
@@ -337,7 +264,7 @@ impl AsanaClient {
 
     /// Post `text` once. Asana stories carry no caller identity, so a Loopflow
     /// comment is its visible text on the task: an existing match is the delivery.
-    pub(crate) async fn sync_comment(&self, issue: &str, text: &str) -> LinearResult<()> {
+    pub(crate) async fn sync_comment(&self, issue: &str, text: &str) -> TrackerResult<()> {
         let task: Task = self
             .send(Method::GET, &format!("/tasks/external:{issue}"), None)
             .await?;
@@ -359,21 +286,21 @@ impl AsanaClient {
         Ok(())
     }
 
-    pub async fn observe(&self, id: &str) -> LinearResult<LinearIssueObservation> {
+    pub async fn fetch_issue(&self, id: &str) -> TrackerResult<TrackerEvent> {
         let task: Task = self
             .send(Method::GET, &format!("/tasks/external:{id}"), None)
             .await?;
-        self.observation(task).await
+        self.issue_event(task).await
     }
 
-    async fn observation(&self, task: Task) -> LinearResult<LinearIssueObservation> {
+    async fn issue_event(&self, task: Task) -> TrackerResult<TrackerEvent> {
         let mut comments = self.comments(&task.gid).await?;
         comments.sort_by(|left, right| {
             left.revision
                 .cmp(&right.revision)
                 .then(left.id.cmp(&right.id))
         });
-        Ok(LinearIssueObservation {
+        Ok(TrackerEvent {
             revision: task.modified_at,
             title: task.name,
             description: rich_text::to_markdown(&task.html_notes),
@@ -382,7 +309,7 @@ impl AsanaClient {
     }
 
     /// Tasks in the repository project modified in `since..`, with their
-    /// observations. A task someone created in Asana has no Loopflow identity
+    /// events. A task someone created in Asana has no Loopflow identity
     /// yet; it takes one derived from its gid, so every machine claims the same
     /// one. Completed tasks Loopflow never tracked, and `finished` ones, are skipped.
     pub async fn changes(
@@ -390,7 +317,7 @@ impl AsanaClient {
         since: Option<&str>,
         live: &[String],
         finished: &[String],
-    ) -> LinearResult<Vec<(LinearIssue, LinearIssueObservation)>> {
+    ) -> TrackerResult<Vec<(TrackerItem, TrackerEvent)>> {
         let mut path = format!("/projects/{}/tasks", self.project().await?);
         if let Some(since) = since {
             path.push_str(&format!("?modified_since={since}"));
@@ -414,19 +341,19 @@ impl AsanaClient {
                     )
                     .await?;
             }
-            let observation = self.observation(task.clone()).await?;
-            changes.push((self.issue(&id, task).await?, observation));
+            let event = self.issue_event(task.clone()).await?;
+            changes.push((self.issue(&id, task).await?, event));
         }
         Ok(changes)
     }
 
     /// Story listing accepts only Asana's own task gid, not `external:`.
-    async fn comments(&self, gid: &str) -> LinearResult<Vec<LinearComment>> {
+    async fn comments(&self, gid: &str) -> TrackerResult<Vec<TrackerComment>> {
         let stories: Vec<Story> = self.pages(&format!("/tasks/{gid}/stories")).await?;
         Ok(stories
             .into_iter()
             .filter(|story| story.resource_subtype.as_deref() == Some("comment_added"))
-            .map(|story| LinearComment {
+            .map(|story| TrackerComment {
                 id: story.gid,
                 revision: story.created_at.clone(),
                 created_at: story.created_at,
@@ -437,19 +364,7 @@ impl AsanaClient {
             .collect())
     }
 
-    async fn response(&self, id: &str, task: Task) -> LinearResult<PlanningResponse> {
-        let item = self.issue_unchecked(id, task).await?;
-        Ok(PlanningResponse::Task {
-            issue: Box::new(OrderedIssue {
-                item,
-                priority_sort_order: 0.0,
-                sort_order: 0.0,
-            }),
-            project: None,
-        })
-    }
-
-    async fn issue(&self, id: &str, task: Task) -> LinearResult<LinearIssue> {
+    async fn issue(&self, id: &str, task: Task) -> TrackerResult<TrackerItem> {
         if task.external.as_ref().and_then(|e| e.gid.as_deref()) != Some(id) {
             return Err(message(
                 "Asana returned a task with a different Loopflow identity",
@@ -460,7 +375,7 @@ impl AsanaClient {
 
     /// A task in the repository's team project belongs to the team's plan; one
     /// in a mirrored Wave Project too belongs to that Project.
-    async fn issue_unchecked(&self, id: &str, task: Task) -> LinearResult<LinearIssue> {
+    async fn issue_unchecked(&self, id: &str, task: Task) -> TrackerResult<TrackerItem> {
         let repository = self.project().await?;
         let members: Vec<&str> = task
             .memberships
@@ -477,7 +392,7 @@ impl AsanaClient {
         } else {
             None
         };
-        Ok(LinearIssue {
+        Ok(TrackerItem {
             revision: Some(task.modified_at),
             id: id.to_string(),
             identifier: local_identifier(id),
@@ -504,7 +419,7 @@ impl AsanaClient {
     }
 
     /// Every page of a list read, at Asana's largest page size.
-    async fn pages<T: serde::de::DeserializeOwned>(&self, path: &str) -> LinearResult<Vec<T>> {
+    async fn pages<T: serde::de::DeserializeOwned>(&self, path: &str) -> TrackerResult<Vec<T>> {
         let separator = if path.contains('?') { '&' } else { '?' };
         let mut items = Vec::new();
         let mut offset = None;
@@ -580,7 +495,8 @@ impl AsanaClient {
         }
         if status == StatusCode::TOO_MANY_REQUESTS {
             let now = time::OffsetDateTime::now_utc().unix_timestamp() * 1000;
-            return Err(LinearError::RateLimited {
+            return Err(TrackerError::RateLimited {
+                tracker: "Asana",
                 reset_at_ms: now + retry_after.unwrap_or(60) * 1000,
             }
             .into());
@@ -600,20 +516,20 @@ impl AsanaClient {
 #[derive(Debug)]
 enum AsanaFailure {
     NotFound,
-    Provider(LinearError),
+    Tracker(TrackerError),
 }
 
-impl From<LinearError> for AsanaFailure {
-    fn from(error: LinearError) -> Self {
-        Self::Provider(error)
+impl From<TrackerError> for AsanaFailure {
+    fn from(error: TrackerError) -> Self {
+        Self::Tracker(error)
     }
 }
 
-impl From<AsanaFailure> for LinearError {
+impl From<AsanaFailure> for TrackerError {
     fn from(failure: AsanaFailure) -> Self {
         match failure {
             AsanaFailure::NotFound => message("Asana task is unavailable"),
-            AsanaFailure::Provider(error) => error,
+            AsanaFailure::Tracker(error) => error,
         }
     }
 }
@@ -641,8 +557,8 @@ fn acquired_identity(gid: &str) -> String {
     .to_string()
 }
 
-fn message(text: impl Into<String>) -> LinearError {
-    LinearError::Message(text.into())
+fn message(text: impl Into<String>) -> TrackerError {
+    TrackerError::Message(text.into())
 }
 
 /// A Loopflow comment's visible text as Asana returns it: the markdown its rich
@@ -651,7 +567,7 @@ pub(crate) fn comment_markdown(text: &str) -> String {
     rich_text::to_markdown(&rich_text::to_html(text))
 }
 
-fn completed(target: &str) -> LinearResult<bool> {
+fn completed(target: &str) -> TrackerResult<bool> {
     match target {
         "completed" | "canceled" => Ok(true),
         // Asana tasks are open or complete; work in progress is open.
@@ -660,62 +576,9 @@ fn completed(target: &str) -> LinearResult<bool> {
     }
 }
 
-/// Translate the shared planning input names into Asana task fields.
-fn task_fields(input: &Value) -> LinearResult<Value> {
-    let mut data = serde_json::Map::new();
-    let input = input
-        .as_object()
-        .ok_or_else(|| message("Asana input must be an object"))?;
-    for (key, value) in input {
-        match key.as_str() {
-            "title" => {
-                data.insert("name".into(), value.clone());
-            }
-            "description" => {
-                let markdown = value.as_str().unwrap_or_default();
-                data.insert("html_notes".into(), json!(rich_text::to_html(markdown)));
-            }
-            "assigneeId" => {
-                data.insert("assignee".into(), value.clone());
-            }
-            "dueDate" => {
-                data.insert("due_on".into(), value.clone());
-            }
-            "stateId" => {
-                let target = value
-                    .as_str()
-                    .ok_or_else(|| message("Asana state must be named"))?;
-                data.insert("completed".into(), json!(completed(target)?));
-            }
-            // Loopflow identity, scope and Project membership are not task fields.
-            "id" | "teamId" | "projectId" => {}
-            other => {
-                return Err(message(format!(
-                    "Asana does not mirror the planning field `{other}` yet"
-                )))
-            }
-        }
-    }
-    Ok(Value::Object(data))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn task_fields_translate_shared_planning_names() {
-        let fields = task_fields(&json!({
-            "id": "4b0e7d0c-5e8f-4f5c-9a8e-1d2c3b4a5f6e", "teamId": "1", "projectId": null,
-            "title": "Ship", "description": "Notes", "dueDate": null, "stateId": "canceled"
-        }))
-        .unwrap();
-        assert_eq!(
-            fields,
-            json!({"name": "Ship", "html_notes": "<body>Notes</body>", "due_on": null, "completed": true})
-        );
-        assert!(task_fields(&json!({"parentId": "task"})).is_err());
-    }
 
     #[test]
     fn team_gids_read_from_urls_and_bare_ids() {

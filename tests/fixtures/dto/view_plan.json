@@ -147,9 +147,7 @@
       "unavailable": [
         "No primary Session is recorded",
         "Recorded execution location is unavailable"
-      ],
-      "face": null,
-      "pane_revision": null
+      ]
     }
   ],
   "name": null,

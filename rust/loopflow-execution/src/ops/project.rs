@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use crate::ops::{OpsError, OpsResult};
-use crate::store::{PlanningLocks, Store};
+use crate::store::Store;
 use crate::work::wave::Wave;
-use loopflow_storage::planning_sync::PlanningSyncStatus;
+use loopflow_storage::planning_sync::TrackerSync;
 use loopflow_storage::work::project::Project;
 use loopflow_storage::work::project::ProjectStatus;
 
@@ -29,7 +29,7 @@ pub fn current_project(store: &Store, wave: &Wave) -> OpsResult<Project> {
     Ok(project)
 }
 
-/// Select an existing non-terminal Project as the Wave's shared current plan.
+/// Select an existing non-terminal Project as the Wave's current Project.
 pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResult<Project> {
     let store = super::planning_sync::planning_store().await?;
     let wave = crate::work::wave::context::resolve_managed_wave(
@@ -40,20 +40,19 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
     )
     .await
     .map_err(project_error)?;
-    let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
-    import_binding(&store, &wave, &acquisition)?;
+    let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
     store
         .sqlite
         .bind_project(wave.id(), project_id)
         .map_err(project_error)
 }
 
-pub async fn update_plan(
+pub async fn update_project(
     repo: &Path,
     wave: Option<&str>,
     krs: &[loopflow_storage::work::project::ProjectKR],
     metric_targets: &[crate::work::wave::metrics::MetricTarget],
-) -> OpsResult<(Project, PlanningSyncStatus)> {
+) -> OpsResult<(Project, TrackerSync)> {
     let store = super::planning_sync::planning_store().await?;
     let ambient = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok();
     let wave = crate::work::wave::context::resolve_managed_wave(
@@ -66,62 +65,19 @@ pub async fn update_plan(
     .map_err(project_error)?;
     let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
     let project = current_project(&store, &wave)?;
-    super::metrics::validate_chapter_targets(&wave, metric_targets).map_err(project_error)?;
+    super::metrics::validate_project_targets(&wave, metric_targets).map_err(project_error)?;
     store
         .sqlite
         .update_project_content(&project.id, krs, metric_targets)
         .map_err(project_error)?;
     drop(_acquisition);
-    super::planning_sync::sync_after_save(&store, wave.repo()).await;
+    super::planning_sync::sync_after_save(
+        &store,
+        wave.repo(),
+        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Project(project.id.clone()),
+    )
+    .await;
     read_saved(&store, &project.id)
-}
-
-/// One-time supported import at an explicit mutation boundary. A failed read is
-/// never permission to create; the original bytes remain durable evidence.
-pub(crate) fn import_binding(store: &Store, wave: &Wave, guard: &PlanningLocks) -> OpsResult<()> {
-    if store
-        .sqlite
-        .project_binding_imported(wave.id())
-        .map_err(project_error)?
-    {
-        return Ok(());
-    }
-    let path = store
-        .sqlite
-        .home_dir()
-        .map_err(project_error)?
-        .join("waves")
-        .join(wave.id().as_str())
-        .join("config.yaml");
-    let original = match std::fs::read_to_string(&path) {
-        Ok(content) => Some(content),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => {
-            return Err(project_error(format!(
-                "Project binding import at {}: {error}",
-                path.display()
-            )))
-        }
-    };
-    #[derive(serde::Deserialize)]
-    struct Config {
-        pm: Option<Binding>,
-    }
-    #[derive(serde::Deserialize)]
-    struct Binding {
-        linear_project: Option<String>,
-    }
-    let selected = original
-        .as_deref()
-        .map(serde_yaml_ng::from_str::<Config>)
-        .transpose()
-        .map_err(project_error)?
-        .and_then(|config| config.pm)
-        .and_then(|pm| pm.linear_project);
-    store
-        .sqlite
-        .import_project_binding(wave.id(), original.as_deref(), selected.as_deref(), guard)
-        .map_err(project_error)
 }
 
 /// Address a retained Project by durable ID, provider ID, or unique slug/name.
@@ -159,7 +115,7 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
         .collect();
     if let Some(project) = projects.iter().find(|project| {
         project
-            .linear_id
+            .tracker_id
             .as_ref()
             .is_some_and(|id| id.as_str() == loopflow_model::id::canonical_uuid(selector))
     }) {
@@ -177,18 +133,22 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
     Ok(project)
 }
 
-/// Current chapter selection and exact historical lookup are distinct addresses.
+/// Current Project selection and exact historical lookup are distinct addresses.
 #[derive(Debug, Clone, Copy)]
-pub enum PlanTarget<'a> {
+pub enum ProjectTarget<'a> {
     Wave(Option<&'a str>),
     Project(&'a str),
 }
 
 /// Resolve on the operation's store; never ensure a Project or start work.
-async fn resolve_plan(store: &Store, repo: &Path, target: PlanTarget<'_>) -> OpsResult<Project> {
+async fn resolve_project_target(
+    store: &Store,
+    repo: &Path,
+    target: ProjectTarget<'_>,
+) -> OpsResult<Project> {
     let selector = match target {
-        PlanTarget::Project(project) => return resolve_project(store, repo, project).await,
-        PlanTarget::Wave(wave) => wave,
+        ProjectTarget::Project(project) => return resolve_project(store, repo, project).await,
+        ProjectTarget::Wave(wave) => wave,
     };
     let wave = crate::work::wave::context::resolve_managed_wave(
         Some(store),
@@ -231,18 +191,18 @@ async fn graph_wave(store: &Store, repo: &Path, wave: Option<&str>) -> OpsResult
 
 pub async fn edit(
     repo: &Path,
-    target: PlanTarget<'_>,
+    target: ProjectTarget<'_>,
     name: Option<&str>,
     summary: Option<&str>,
     description: Option<&str>,
-) -> OpsResult<(Project, PlanningSyncStatus)> {
+) -> OpsResult<(Project, TrackerSync)> {
     if name.is_none() && summary.is_none() && description.is_none() {
         return Err(project_error(
-            "wave edit-plan requires --name, --summary or --description",
+            "wave edit-project requires --name, --summary or --description",
         ));
     }
     let store = super::planning_sync::planning_store().await?;
-    let project = resolve_plan(&store, repo, target).await?;
+    let project = resolve_project_target(&store, repo, target).await?;
     let wave = store
         .get_wave(&project.wave_id)
         .await
@@ -254,7 +214,12 @@ pub async fn edit(
         .edit_project(&project.id, name, summary, description)
         .map_err(project_error)?;
     drop(_acquisition);
-    super::planning_sync::sync_after_save(&store, wave.repo()).await;
+    super::planning_sync::sync_after_save(
+        &store,
+        wave.repo(),
+        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Project(project.id.clone()),
+    )
+    .await;
     read_saved(&store, &project.id)
 }
 
@@ -302,12 +267,87 @@ pub async fn wave_graph(
 fn read_saved(
     store: &Store,
     id: &loopflow_model::durable::ProjectId,
-) -> OpsResult<(Project, PlanningSyncStatus)> {
+) -> OpsResult<(Project, TrackerSync)> {
     let project = store
         .sqlite
         .project(id)
         .map_err(project_error)?
         .ok_or_else(|| project_error("Project is unavailable"))?;
-    let sync = store.project_planning_sync(id).map_err(project_error)?;
+    let sync = store.project_tracker_sync(id).map_err(project_error)?;
     Ok((project, sync))
+}
+
+/// `wave`'s Project readiness. An activation whose lf died without writing
+/// its end reads `unknown`, not pending.
+pub fn readiness(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    wave: &loopflow_model::id::WaveId,
+) -> crate::store::StoreResult<loopflow_storage::sqlite::ProjectReadiness> {
+    store.project_readiness(wave, crate::process::os_process::observed_result)
+}
+
+#[cfg(test)]
+mod readiness_tests {
+    use crate::work::wave::Wave;
+    use loopflow_model::id::{LfProcessId, TraceId, WaveId};
+    use loopflow_storage::graph_process::ExecutionStart;
+
+    #[test]
+    fn an_activation_whose_lf_died_unended_reads_unknown() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = loopflow_storage::test_fixture::open(&dir.path().join("loopflow.db")).unwrap();
+        let wave = Wave::new(WaveId::new(), "a".into(), "/repo".into());
+        loopflow_storage::test_fixture::wave(&store, &wave);
+        // The journal's row for the activating lf, which `waves` still
+        // references until its rebuild drops the foreign key.
+        let process = LfProcessId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
+                rusqlite::params![process, TraceId::new()],
+            )
+            .unwrap();
+        let activate = |pid: u32| {
+            let start = ExecutionStart {
+                started_at: 1,
+                pid: Some(pid),
+                os_started_at: crate::process::os_process::process_started_at(pid).unwrap(),
+                caller_session: None,
+            };
+            store
+                .record_project_activation(wave.id(), &process, &start)
+                .unwrap();
+            super::readiness(&store, wave.id())
+                .unwrap()
+                .activation
+                .unwrap()
+        };
+        assert_eq!(activate(std::process::id()).outcome, None);
+
+        let mut child = std::process::Command::new("sleep")
+            .arg("5")
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let start = ExecutionStart {
+            started_at: 1,
+            pid: Some(pid),
+            os_started_at: crate::process::os_process::process_started_at(pid).unwrap(),
+            caller_session: None,
+        };
+        child.kill().unwrap();
+        child.wait().unwrap();
+        store
+            .record_project_activation(wave.id(), &process, &start)
+            .unwrap();
+        let unknown = super::readiness(&store, wave.id())
+            .unwrap()
+            .activation
+            .unwrap();
+        assert_eq!(unknown.completed_at, None);
+        assert_eq!(unknown.outcome.as_deref(), Some("unknown"));
+    }
 }

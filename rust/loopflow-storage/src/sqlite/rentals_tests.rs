@@ -36,7 +36,8 @@ fn hand_back_writes_nothing_when_a_claim_lacks_planning_facts() {
                 task.as_str(),
                 machine.as_str(),
             ],
-        ).unwrap();
+        )
+        .unwrap();
     };
     claim(&first);
     let scope = super::super::task_ownership::held_planning_scope_in(&conn, &machine).unwrap();
@@ -210,7 +211,7 @@ fn removing_a_pool_keeps_the_machines_cost_and_expiry() {
     store
         .set_machine_ownership_prepared(&machine, &ownership)
         .unwrap();
-    store.remove_pool_record("lab").unwrap();
+    store.clear_pool_machines("lab").unwrap();
     assert_eq!(
         super::ownership_in(&store.conn.lock().unwrap(), &machine).unwrap(),
         Ownership {

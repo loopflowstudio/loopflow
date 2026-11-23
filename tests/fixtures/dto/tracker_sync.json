@@ -1,0 +1,86 @@
+{
+  "actions": [
+    {
+      "id": "create-task",
+      "seq": 1,
+      "owner_kind": "task",
+      "owner_id": "task_00000000000000000000000000000001",
+      "kind": "create",
+      "change": "create",
+      "subject": null,
+      "phase": "queued",
+      "tracker": "linear",
+      "error": null,
+      "local_value": {
+        "title": "Saved offline"
+      },
+      "tracker_value": null
+    },
+    {
+      "id": "order-project",
+      "seq": 2,
+      "owner_kind": "project",
+      "owner_id": "proj_00000000000000000000000000000002",
+      "kind": "order",
+      "change": "order",
+      "subject": null,
+      "phase": "sent",
+      "tracker": "linear",
+      "error": "Reply lost; awaiting readback",
+      "local_value": [
+        "task-b",
+        "task-a"
+      ],
+      "tracker_value": null
+    },
+    {
+      "id": "title-task",
+      "seq": 3,
+      "owner_kind": "task",
+      "owner_id": "task_00000000000000000000000000000001",
+      "kind": "field",
+      "change": "title",
+      "subject": "task_title",
+      "phase": "conflicted",
+      "tracker": "linear",
+      "error": null,
+      "local_value": "Local title",
+      "tracker_value": "Linear title"
+    },
+    {
+      "id": "assignee-task",
+      "seq": 4,
+      "owner_kind": "task",
+      "owner_id": "task_00000000000000000000000000000001",
+      "kind": "field",
+      "change": "assignee",
+      "subject": "task_assignee",
+      "phase": "conflicted",
+      "tracker": "linear",
+      "error": null,
+      "local_value": "person-id",
+      "tracker_value": null
+    },
+    {
+      "id": "comment-task",
+      "seq": 5,
+      "owner_kind": "task",
+      "owner_id": "task_00000000000000000000000000000001",
+      "kind": "comment",
+      "change": "comment",
+      "subject": null,
+      "phase": "queued",
+      "tracker": "linear",
+      "error": "Offline",
+      "local_value": {
+        "body": "Saved comment",
+        "author": {
+          "kind": "person",
+          "name": "Maya"
+        },
+        "created_at": "2026-10-08T12:00:00Z"
+      },
+      "tracker_value": null
+    }
+  ]
+}

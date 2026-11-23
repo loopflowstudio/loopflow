@@ -4,11 +4,18 @@ use std::io::IsTerminal;
 use std::process::{Command, Stdio};
 
 pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
-// Non-interactive SSH skips shell profiles, including the npm prefix.
-pub const REMOTE_PATH: &str = "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; if command -v npm >/dev/null 2>&1; then PATH=\"$PATH:$(npm config get prefix 2>/dev/null)/bin\"; fi";
+/// Shell that finds `lf` and npm-installed providers before lf can repair its
+/// own `PATH`: non-interactive SSH skips shell profiles.
+pub fn remote_path() -> String {
+    let dirs = crate::os_process::tool_dirs(std::path::Path::new("$HOME"));
+    format!(
+        "export PATH=\"$PATH:{}\"; if command -v npm >/dev/null 2>&1; then PATH=\"$PATH:$(npm config get prefix 2>/dev/null)/bin\"; fi",
+        dirs.join(":")
+    )
+}
 
 pub fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
-    let mut lines = vec![REMOTE_PATH.to_string()];
+    let mut lines = vec![remote_path()];
     for (name, value) in extra_env {
         lines.push(format!("export {name}={}", sh_quote(value)));
     }
@@ -78,12 +85,142 @@ pub async fn request(
     let output = tokio::time::timeout(bound, exchange)
         .await
         .context("Machine command unavailable: peer timed out")??;
+    let said = String::from_utf8_lossy(&output.stderr);
     anyhow::ensure!(
         output.status.success(),
         "Machine command unavailable: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
+        match said.trim() {
+            "" => format!("ssh {}", output.status),
+            said => said.to_owned(),
+        }
     );
     Ok(output.stdout)
+}
+
+/// `ssh … lf server connect` on a Machine: a pipe to its server's socket.
+/// The destination checks it is the Machine named here and starts its server
+/// when none is running; every message after that is the protocol's.
+#[derive(Debug)]
+pub struct Pipe {
+    machine: loopflow_model::durable::Machine,
+    child: std::process::Child,
+    /// What the destination printed, collected until it exits.
+    said: Option<std::thread::JoinHandle<Vec<u8>>>,
+}
+
+impl Pipe {
+    /// The pipe and its two ends: what the destination's server sends, and
+    /// where this side writes.
+    pub fn open(
+        machine: &loopflow_model::durable::Machine,
+    ) -> anyhow::Result<(Self, std::process::ChildStdout, std::process::ChildStdin)> {
+        let command = ["lf", "server", "connect"].map(str::to_owned);
+        let preamble = build_preamble(&command, &[(EXPECTED_MACHINE_ID_ENV, machine.id.as_str())]);
+        let mut child = Command::new("ssh")
+            .args(crate::machine_route::bounded_ssh_args(
+                &machine.route,
+                false,
+            )?)
+            .arg(preamble)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("could not start ssh")?;
+        let (output, input) = (
+            child.stdout.take().expect("piped SSH stdout"),
+            child.stdin.take().expect("piped SSH stdin"),
+        );
+        let mut stderr = child.stderr.take().expect("piped SSH stderr");
+        let said = std::thread::spawn(move || {
+            let mut said = Vec::new();
+            let _ = std::io::Read::read_to_end(&mut stderr, &mut said);
+            said
+        });
+        Ok((
+            Self {
+                machine: machine.clone(),
+                child,
+                said: Some(said),
+            },
+            output,
+            input,
+        ))
+    }
+
+    /// Why the destination closed the pipe before answering: an `lf` too old
+    /// for the entry, one that failed, or SSH's own failure, with what it
+    /// said. `code` is what the failure means for the request.
+    pub fn ended(&mut self, code: crate::engine::ErrorCode) -> anyhow::Error {
+        use crate::engine::{Error, ErrorCode};
+        let status = self.child.wait();
+        let said = self
+            .said
+            .take()
+            .and_then(|said| said.join().ok())
+            .unwrap_or_default();
+        let said = String::from_utf8_lossy(&said);
+        let said = said.trim();
+        let name = self.machine.name();
+        let destination = |reason: String| match said {
+            "" => reason,
+            said => format!("{reason}; the destination said: {said}"),
+        };
+        let message = match status.map(|status| status.code()) {
+            // Clap's usage error: this `lf` has no `server connect`.
+            Ok(Some(2)) => {
+                return Error::new(ErrorCode::Incompatible, outdated(&self.machine)).into()
+            }
+            // SSH's own failure: no `lf` ran, and what SSH said names the check.
+            Ok(Some(255) | None) => {
+                super::connection::transport_failure(&self.machine.route, said).to_string()
+            }
+            Ok(Some(0)) => destination(format!("{name} closed the connection before answering")),
+            // The destination's `lf` ran and failed, most often starting its server.
+            Ok(Some(code)) => format!(
+                "{}; check `ssh {} lf server status`",
+                destination(format!(
+                    "lf on {name} exited with status {code} before answering"
+                )),
+                self.machine.route
+            ),
+            Err(error) => destination(format!("ssh to {name} did not exit: {error}")),
+        };
+        match code {
+            ErrorCode::OutcomeUnknown => Error::outcome_unknown(&anyhow::anyhow!(message)),
+            code => Error::new(code, message),
+        }
+        .into()
+    }
+}
+
+impl Drop for Pipe {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// `mini runs lf 0.15.2, which cannot take this operation; update it with …`.
+pub(crate) fn outdated(machine: &loopflow_model::durable::Machine) -> String {
+    let name = machine.label.as_deref().unwrap_or(machine.route.as_str());
+    let update = super::connection::update_command(&machine.route);
+    let version = tokio::runtime::Runtime::new()
+        .ok()
+        .and_then(|runtime| {
+            runtime
+                .block_on(super::connection::probe(&machine.route, false))
+                .ok()
+        })
+        .map(|probe| probe.version);
+    match version {
+        Some(version) => format!(
+            "{name} runs lf {version}, which cannot take this operation; update it with `{update}`"
+        ),
+        None => {
+            format!("{name} runs an lf that cannot take this operation; update it with `{update}`")
+        }
+    }
 }
 
 pub fn run_ssh_io(

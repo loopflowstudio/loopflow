@@ -2,6 +2,7 @@
 import Darwin
 import Foundation
 import Loopflow
+import Synchronization
 
 /// Shared Work operations use the server over one connection per location;
 /// service errors remain visible.
@@ -10,12 +11,12 @@ enum ServerClient {
     /// can give up; writes wait, because their outcome would become unknown.
     static let readDeadline = Duration.seconds(60)
 
-    /// What `lf <read>` prints: bare text for a string value, JSON otherwise.
+    /// Read from the link selected for this location.
     static func read(_ query: ServedRead, location: ServerLocation = .shared,
-                     deadline: Duration = readDeadline) async throws -> String {
+                     deadline: Duration = readDeadline) async throws -> ReadOutput {
         try Task.checkCancellation()
         let link = try await links.link(for: location)
-        return try await link.request(.read(query), deadline: deadline).printed
+        return try await link.read(query, deadline: deadline)
     }
 
     /// What the write returned, as JSON: what `lf <write> --json` prints.
@@ -48,11 +49,18 @@ enum ServerClient {
     /// A subscription on the location's connection; `send` carries checkpoints,
     /// `cancel` ends it. After a reading, connection loss resumes the same stream.
     static func subscribe(_ query: ServedRead, location: ServerLocation = .shared) -> LineSubscription {
-        let watch = ServerLink.subscribe(query, connect: { try await links.link(for: location) }) { update -> Data? in
+        // The newest link's sentence for a reading this build can't decode; nil before one connects.
+        let unreadable = Mutex<String?>(nil)
+        let watch = ServerLink.subscribe(query, connect: {
+            let link = try await links.link(for: location)
+            unreadable.withLock { $0 = link.unreadable }
+            return link
+        }) { update -> Data? in
             guard case .reading(let frame) = update else { return nil }
             return Data(frame.bytes)
         }
-        return LineSubscription(lines: watch.updates, send: checkpoints(watch), cancel: watch.cancel)
+        return LineSubscription(lines: watch.updates, send: checkpoints(watch), cancel: watch.cancel,
+                                unreadable: { unreadable.withLock { $0 } })
     }
 
     /// Readings and occurrences share one stream so the consumer applies its
@@ -98,11 +106,20 @@ struct ServerEventSubscription: Sendable {
 /// One live connection per server location, reopened on demand with bounded
 /// backoff after consecutive failures to open.
 private actor ServerLinks {
+    private struct Owner { weak var location: ServerLocation? }
+    private var owners: [ObjectIdentifier: Owner] = [:]
     private var links: [ObjectIdentifier: Task<ServerLink, any Error>] = [:]
     private var failures: [ObjectIdentifier: Int] = [:]
 
     func link(for location: ServerLocation) async throws -> ServerLink {
         let key = ObjectIdentifier(location)
+        // A freed location's identifier can name a new one at the same
+        // address; that one starts without the old one's connection.
+        if owners[key]?.location !== location {
+            links[key] = nil
+            failures[key] = nil
+            owners[key] = Owner(location: location)
+        }
         while let opening = links[key] {
             // A failed open answers everyone it kept waiting; only a link that
             // opened and later closed is worth another attempt.
@@ -130,22 +147,27 @@ private actor ServerLinks {
 }
 
 actor ServerLocation {
-    static let shared = ServerLocation()
+    static let shared = ServerLocation(startsServer: LocalWaveAgentLauncher.machineLf().startsServer)
     private let query: @Sendable ([String]) async throws -> String
     private var endpoint: Task<String, any Error>?
+    private let startsServer: Bool
     private var setupError: String?
 
-    init(query: @escaping @Sendable ([String]) async throws -> String = {
-        try await LocalWaveAgentLauncher.queryLf($0, cwd: "/")
-    }) {
+    init(
+        startsServer: Bool,
+        query: @escaping @Sendable ([String]) async throws -> String = {
+            try await LocalWaveAgentLauncher.queryLf($0, cwd: "/")
+        }
+    ) {
+        self.startsServer = startsServer
         self.query = query
     }
 
     func path() async throws -> String {
         if let endpoint { return try await endpoint.value }
-        // The shared task retains a successful endpoint. A failed initial lookup
-        // retains its diagnosis instead; later lookups only observe status.
-        let prepare = setupError == nil
+        // Keep a successful endpoint. After a failed install, keep its diagnosis
+        // and check status on subsequent attempts.
+        let prepare = startsServer && setupError == nil
         let previousSetupError = setupError
         let task = Task {
             do {
@@ -156,7 +178,13 @@ actor ServerLocation {
                     let error: String?
                 }
                 let status = try JSONDecoder().decode(Status.self, from: Data(result.utf8))
-                guard status.ready else { throw RegistryQueryError(status.error ?? "Loopflow server unavailable") }
+                guard status.ready else {
+                    if !startsServer {
+                        let guidance = "Loopflow's server isn't running. Open Loopflow, or run `lf install server`."
+                        throw RegistryQueryError([guidance, status.error].compactMap { $0 }.joined(separator: " "))
+                    }
+                    throw RegistryQueryError(status.error ?? "Loopflow server unavailable")
+                }
                 return status.socket
             } catch {
                 // Every concurrent waiter gets the same actionable diagnosis.
@@ -183,7 +211,9 @@ extension ServerEndpoint {
     /// The Machine's server on its private Unix socket.
     static func unix(path: String) -> ServerEndpoint {
         ServerEndpoint(
-            client: ServerClientIdentity(kind: "desktop", platform: "macos", name: "Loopflow", version: LaunchJournal.appVersion),
+            client: ServerClientIdentity(kind: "desktop", platform: "macos",
+                                          name: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Loopflow",
+                                          version: "\(LaunchJournal.appVersion)+\(DesktopLog.sourceRevision)"),
             control: { try UnixSocketCarrier(path: path, limit: ServerProtocol.maxMessage) },
             ticketed: { try UnixSocketCarrier(path: path, limit: ServerProtocol.maxBulk) })
     }

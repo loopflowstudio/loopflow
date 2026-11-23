@@ -5,11 +5,11 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::sync::mpsc;
 
-use super::fact::{Decoded, ProviderTurn};
 use super::pi::Driver as PiDriver;
-use super::pi_decode::Turn;
-use super::{Driver, SendCurrentOutcome};
+use super::Driver;
 use crate::agent::AgentConfig;
+use loopflow_harness::fact::{Decoded, ProviderFact, ProviderTurn};
+use loopflow_harness::pi_decode::Turn;
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 
 async fn completed(rx: &mut mpsc::UnboundedReceiver<ConversationEvent>) -> Vec<ConversationEvent> {
@@ -33,10 +33,10 @@ fn fixture(
 ) -> (
     crate::journal::TestLedgerGuard,
     crate::test_ambient::EnvGuard,
-    crate::harness::Admitted,
+    crate::harness::Recording,
 ) {
     let ledger = crate::journal::TestLedgerGuard::new();
-    let admitted = super::admit_for_test(ledger.home());
+    let recording = super::admit_for_test(ledger.home());
     let env = crate::test_ambient::EnvGuard::clear(&["PATH", "LF_BIN"]);
     let script = ledger.home().join("pi");
     std::fs::write(
@@ -52,17 +52,17 @@ fn fixture(
     std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
     config.cwd = Some(ledger.home().to_owned());
     config.agent = crate::config::Agent::parse("pi:fixture/model").unwrap();
-    (ledger, env, admitted)
+    (ledger, env, recording)
 }
 
 #[tokio::test]
 async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     let mut config = crate::agent::AgentConfig::default();
-    let (_ledger, _env, admitted) = fixture(&mut config);
+    let (_ledger, _env, recording) = fixture(&mut config);
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &admitted),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -90,13 +90,13 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     pi.stop().await.unwrap();
     assert!(other_store.agent_processes().unwrap().is_empty());
     drop(selection);
-    let crate::harness::Admitted {
+    let crate::harness::Recording {
         store,
         session,
         attachment,
-    } = admitted.clone();
+    } = recording.clone();
     let next = attachment::prepare_session_agent_process(&store, &session, &attachment).unwrap();
-    let admitted = crate::harness::Admitted {
+    let recording = crate::harness::Recording {
         store,
         session,
         attachment: next,
@@ -105,7 +105,7 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &admitted),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -121,7 +121,7 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
 #[tokio::test]
 async fn pi_headless_resumes_a_conversation_recorded_by_its_id() {
     let mut config = crate::agent::AgentConfig::default();
-    let (ledger, _env, admitted) = fixture(&mut config);
+    let (ledger, _env, recording) = fixture(&mut config);
     let _dir = crate::test_ambient::EnvGuard::clear(&["PI_CODING_AGENT_DIR"]);
     std::env::set_var("PI_CODING_AGENT_DIR", ledger.home());
     let id: loopflow_model::id::AgentSessionId = "cac985ee-d62a-4ce9-abba-f3e66d053410".into();
@@ -133,7 +133,7 @@ async fn pi_headless_resumes_a_conversation_recorded_by_its_id() {
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &admitted),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -147,11 +147,11 @@ async fn pi_headless_resumes_a_conversation_recorded_by_its_id() {
 #[tokio::test]
 async fn pi_interrupt_keeps_the_conversation_alive_and_auth_failure_is_not_success() {
     let mut config = crate::agent::AgentConfig::default();
-    let (_ledger, _env, admitted) = fixture(&mut config);
+    let (_ledger, _env, recording) = fixture(&mut config);
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &admitted),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -193,11 +193,11 @@ async fn pi_interrupt_keeps_the_conversation_alive_and_auth_failure_is_not_succe
 #[tokio::test]
 async fn pi_crash_closes_open_tools_and_fails_the_turn() {
     let mut config = crate::agent::AgentConfig::default();
-    let (_ledger, _env, admitted) = fixture(&mut config);
+    let (_ledger, _env, recording) = fixture(&mut config);
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &admitted),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -282,11 +282,11 @@ fn pi_missing_conversation_is_not_recreated() {
 #[tokio::test]
 async fn pi_rejected_prompt_and_malformed_stream_remain_failures() {
     let mut config = crate::agent::AgentConfig::default();
-    let (_ledger, _env, admitted) = fixture(&mut config);
+    let (_ledger, _env, recording) = fixture(&mut config);
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &admitted),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -317,16 +317,28 @@ async fn pi_rejected_prompt_and_malformed_stream_remain_failures() {
 
 #[tokio::test]
 async fn pi_headless_dialogs_and_extension_failures_do_not_hang_or_succeed() {
-    for (input, reason) in [
-        ("dialog", "interactive input"),
-        ("extension error", "context delivery failed"),
+    for (input, failed, reason) in [
+        (
+            "dialog",
+            "unanswered_question",
+            "Pi asked a question with nobody there to answer it: Use the fixture?",
+        ),
+        (
+            "extension error",
+            "pi_disconnected",
+            "context delivery failed",
+        ),
     ] {
         let mut config = crate::agent::AgentConfig::default();
-        let (_ledger, _env, admitted) = fixture(&mut config);
+        let (_ledger, _env, recording) = fixture(&mut config);
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         let mut pi = PiDriver::new(
-            &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &admitted),
+            &crate::harness::launch_for_test(
+                loopflow_harness::HarnessKind::Pi,
+                &config,
+                &recording,
+            ),
             tx,
         );
         pi.start().await.unwrap();
@@ -339,7 +351,7 @@ async fn pi_headless_dialogs_and_extension_failures_do_not_hang_or_succeed() {
             })
         ));
         assert!(
-            matches!(rx.recv().await.unwrap(), ConversationEvent::Error { message, .. } if message.contains(reason))
+            matches!(rx.recv().await.unwrap(), ConversationEvent::Error { code, message, .. } if code == failed && message.contains(reason))
         );
         pi.stop().await.unwrap();
     }
@@ -348,20 +360,20 @@ async fn pi_headless_dialogs_and_extension_failures_do_not_hang_or_succeed() {
 #[tokio::test]
 async fn pi_missing_binary_records_a_failed_launch_without_a_live_process() {
     let mut config = crate::agent::AgentConfig::default();
-    let (ledger, _env, admitted) = fixture(&mut config);
+    let (ledger, _env, recording) = fixture(&mut config);
     std::fs::remove_file(ledger.home().join("pi")).unwrap();
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &admitted),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     let error = pi.start().await.unwrap_err().to_string();
     assert!(error.contains("Install Pi"), "{error}");
     assert_eq!(pi.pid(), None);
-    let crate::harness::Admitted {
+    let crate::harness::Recording {
         store, attachment, ..
-    } = admitted.clone();
+    } = recording.clone();
     assert!(store
         .agent_process(&attachment.agent_process_id)
         .unwrap()
@@ -372,6 +384,10 @@ async fn pi_missing_binary_records_a_failed_launch_without_a_live_process() {
 
 #[test]
 fn pi_model_selection_native_resume_and_credentials_keep_their_owners() {
+    let _lock = crate::journal::test_env_lock();
+    let _env = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
+    // Pi's context extension calls back into this checkout's lf.
+    std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("pi.jsonl");
     std::fs::write(&path, "{\"type\":\"session\",\"id\":\"native\"}\n").unwrap();
@@ -381,13 +397,12 @@ fn pi_model_selection_native_resume_and_credentials_keep_their_owners() {
         cwd: Some(directory.path().into()),
         ..crate::agent::AgentConfig::default()
     };
-    let cmd = crate::harness::HarnessKind::Pi
-        .harness()
+    let cmd = crate::harness::launcher(loopflow_harness::HarnessKind::Pi)
         .open(&crate::harness::Launch {
-            harness: crate::harness::HarnessKind::Pi.harness(),
+            harness: crate::harness::launcher(loopflow_harness::HarnessKind::Pi),
             config: &config,
-            admitted: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-            run: crate::harness::Run::Bare(crate::harness::Mode::Headless),
+            recording: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+            kind: crate::harness::LaunchKind::Batch,
             start: crate::harness::Start::Resume { thread: &token },
             context_file: Some(&directory.path().join("context.md")),
         })
@@ -413,62 +428,15 @@ fn pi_model_selection_native_resume_and_credentials_keep_their_owners() {
         "GEMINI_API_KEY",
         "MOONSHOT_API_KEY",
     ] {
-        assert!(crate::provider_auth::api_key_env_allowed_for_program(
-            "pi", name
+        assert!(crate::provider_auth::api_key_env_allowed(
+            loopflow_harness::HarnessKind::Pi,
+            name
         ));
-        assert!(!crate::provider_auth::provider_env_allowed_for_program(
-            "pi", name
+        assert!(!crate::provider_auth::provider_env_allowed(
+            loopflow_harness::HarnessKind::Pi,
+            name
         ));
     }
-}
-
-#[tokio::test]
-async fn pi_stale_attachment_cannot_send_or_stop_the_provider() {
-    let mut config = crate::agent::AgentConfig::default();
-    let (_ledger, _env, admitted) = fixture(&mut config);
-    let (tx, _rx) = mpsc::unbounded_channel();
-
-    let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &admitted),
-        tx,
-    );
-    pi.start().await.unwrap();
-    let crate::harness::Admitted {
-        store,
-        session,
-        attachment: previous,
-    } = admitted.clone();
-    let current = attachment::claim_session_attachment(
-        &store,
-        &session,
-        Some(&previous),
-        previous.lf_process_id.as_ref().unwrap(),
-        false,
-    )
-    .unwrap();
-    assert!(pi.send_input("stale direction").await.is_err());
-    assert!(pi.stop().await.is_err());
-    let pid = pi.pid().unwrap();
-    let process = store
-        .agent_process(&current.agent_process_id)
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        crate::journal::process_identity_evidence(pid, process.os_started_at.unwrap()),
-        crate::journal::ProcessIdentityEvidence::Live
-    );
-    super::agent_process::stop(&crate::harness::Admitted {
-        store: store.clone(),
-        session: session.clone(),
-        attachment: current,
-    })
-    .unwrap();
-    assert!(store
-        .session(&session)
-        .unwrap()
-        .unwrap()
-        .completed_at
-        .is_none());
 }
 
 #[test]
@@ -515,108 +483,53 @@ fn pi_empty_final_answers_fail_but_tool_steps_and_internal_retries_can_recover()
     ));
 }
 
-#[tokio::test]
-async fn pi_steering_receipts_preserve_one_turn_and_distinguish_uncertainty() {
-    let mut config = crate::agent::AgentConfig::default();
-    let (_ledger, _env, admitted) = fixture(&mut config);
-    let (tx, mut rx) = mpsc::unbounded_channel();
-
-    let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &admitted),
-        tx,
-    );
-    pi.start().await.unwrap();
-    assert_eq!(
-        pi.send_current("idle").await,
-        SendCurrentOutcome::NotSteerable
-    );
-    pi.send_input("wait").await.unwrap();
-    let ConversationEvent::TurnStarted { turn_id } = rx.recv().await.unwrap() else {
-        panic!("turn starts");
-    };
-    let crate::harness::Admitted {
-        store,
-        session,
-        attachment: _,
-    } = admitted.clone();
-    let thread = pi.agent_session().unwrap();
-    let origin = store.session_history(&session, 0, 0).unwrap();
-    assert!(matches!(
-        pi.send_current("reject").await,
-        SendCurrentOutcome::Failed { .. }
-    ));
-    assert!(matches!(
-        pi.send_current("handled").await,
-        SendCurrentOutcome::Unknown { .. }
-    ));
-    assert!(matches!(
-        pi.send_current("malformed").await,
-        SendCurrentOutcome::Unknown { .. }
-    ));
-    assert_eq!(
-        pi.send_current("direction 雪").await,
-        SendCurrentOutcome::Sent {
-            provider_turn_id: turn_id.clone()
-        }
-    );
-    assert_eq!(
-        pi.send_current("finish").await,
-        SendCurrentOutcome::Sent {
-            provider_turn_id: turn_id.clone()
-        }
-    );
-    let events = completed(&mut rx).await;
-    assert!(!events
-        .iter()
-        .any(|e| matches!(e, ConversationEvent::TurnStarted { .. })));
-    assert!(
-        matches!(events.last(), Some(ConversationEvent::TurnCompleted {turn_id: id, status: Lifecycle::Completed}) if id == &turn_id)
-    );
-    assert_eq!(pi.agent_session().unwrap(), thread);
-    let start = origin
-        .iter()
-        .find(|e| e.kind == crate::session::SessionEventKind::Started)
-        .unwrap();
-    let done = store
-        .session_history(&session, 0, 0)
-        .unwrap()
+/// What a failed turn's completion records as its error.
+fn completed_error(decoded: Vec<Decoded>) -> serde_json::Value {
+    decoded
         .into_iter()
-        .find(|e| e.kind == crate::session::SessionEventKind::Completed)
-        .unwrap();
-    assert_eq!(done.lf_process_id, start.lf_process_id);
-    assert_eq!(done.agent_process_id, start.agent_process_id);
-    assert_eq!(done.task_id, start.task_id);
-    assert_eq!(done.provider_turn, start.provider_turn);
-    let history = store.session_history(&session, 0, 0).unwrap();
+        .find_map(|decoded| match decoded {
+            Decoded::Fact(ProviderFact::TurnCompleted { detail, .. }) => {
+                Some(detail["error"].clone())
+            }
+            _ => None,
+        })
+        .expect("turn completion")
+}
+
+#[test]
+fn a_failed_pi_turn_keeps_why_on_its_completion() {
+    let provider_turn = || ProviderTurn {
+        thread: "/tmp/pi-session.jsonl".into(),
+        turn: "turn".into(),
+    };
+    let mut turn = Turn::new(provider_turn());
+    turn.event(&json!({"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"429 quota exceeded"}}));
+    let settled = turn.event(&json!({"type":"agent_settled","aborted":false}));
     assert_eq!(
-        history
-            .iter()
-            .filter(|e| e.kind == crate::session::SessionEventKind::Started)
-            .count(),
-        origin
-            .iter()
-            .filter(|e| e.kind == crate::session::SessionEventKind::Started)
-            .count()
+        completed_error(settled),
+        json!({"code":"pi_model_error","message":"429 quota exceeded"})
     );
-    pi.send_input("wait").await.unwrap();
-    assert!(matches!(
-        pi.send_current("late").await,
-        SendCurrentOutcome::Unknown { .. }
-    ));
-    completed(&mut rx).await;
-    pi.send_input("wait").await.unwrap();
-    assert!(matches!(
-        pi.send_current("disconnect").await,
-        SendCurrentOutcome::Unknown { .. }
-    ));
-    completed(&mut rx).await;
-    pi.stop().await.unwrap();
+
+    let mut turn = Turn::new(provider_turn());
+    let settled = turn.event(&json!({"type":"agent_settled","aborted":false}));
+    assert_eq!(completed_error(settled)["code"], "pi_empty_turn");
+
+    // A model error Pi reported stays the cause when its stream then closes.
+    let mut turn = Turn::new(provider_turn());
+    turn.event(&json!({"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"overloaded"}}));
+    let died = turn.finish(
+        Lifecycle::Failed,
+        Some(json!({"code":"pi_disconnected","message":"Pi RPC stream closed"})),
+    );
+    assert_eq!(completed_error(died)["code"], "pi_model_error");
 }
 
 #[test]
 fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
     let _lock = crate::journal::test_env_lock();
-    let _env = crate::test_ambient::EnvGuard::clear(&["PI_CODING_AGENT_DIR"]);
+    let _env = crate::test_ambient::EnvGuard::clear(&["PI_CODING_AGENT_DIR", "LF_BIN"]);
+    // Pi's context extension calls back into this checkout's lf.
+    std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
     let agent_dir = tempfile::tempdir().unwrap();
     std::env::set_var("PI_CODING_AGENT_DIR", agent_dir.path());
     let config = AgentConfig {
@@ -625,15 +538,14 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
         ..crate::agent::AgentConfig::default()
     };
     // A bare Pi's thread is the one its admission assigned.
-    let admitted = crate::harness::admit_for_test(tempfile::tempdir().unwrap().path());
-    let id = admitted.assigned_thread().unwrap();
-    let start = crate::harness::HarnessKind::Pi
-        .harness()
+    let recording = crate::harness::admit_for_test(tempfile::tempdir().unwrap().path());
+    let id = recording.assigned_thread().unwrap();
+    let start = crate::harness::launcher(loopflow_harness::HarnessKind::Pi)
         .open(&crate::harness::Launch {
-            harness: crate::harness::HarnessKind::Pi.harness(),
+            harness: crate::harness::launcher(loopflow_harness::HarnessKind::Pi),
             config: &config,
-            admitted: &admitted,
-            run: crate::harness::Run::Bare(crate::harness::Mode::Headless),
+            recording: &recording,
+            kind: crate::harness::LaunchKind::Batch,
             start: crate::harness::Start::New,
             context_file: None,
         })
@@ -648,13 +560,12 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
 
     // Before Pi wrote the conversation (no reply yet), a resume starts it
     // fresh under the same id.
-    let fresh = crate::harness::HarnessKind::Pi
-        .harness()
+    let fresh = crate::harness::launcher(loopflow_harness::HarnessKind::Pi)
         .open(&crate::harness::Launch {
-            harness: crate::harness::HarnessKind::Pi.harness(),
+            harness: crate::harness::launcher(loopflow_harness::HarnessKind::Pi),
             config: &config,
-            admitted: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-            run: crate::harness::Run::Bare(crate::harness::Mode::Headless),
+            recording: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+            kind: crate::harness::LaunchKind::Batch,
             start: crate::harness::Start::Resume { thread: &id },
             context_file: None,
         })
@@ -670,13 +581,12 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
     std::fs::create_dir_all(&project).unwrap();
     let file = project.join(format!("2026-11-11T11-22-55-913Z_{id}.jsonl"));
     std::fs::write(&file, format!("{{\"type\":\"session\",\"id\":\"{id}\"}}\n")).unwrap();
-    let resume = crate::harness::HarnessKind::Pi
-        .harness()
+    let resume = crate::harness::launcher(loopflow_harness::HarnessKind::Pi)
         .open(&crate::harness::Launch {
-            harness: crate::harness::HarnessKind::Pi.harness(),
+            harness: crate::harness::launcher(loopflow_harness::HarnessKind::Pi),
             config: &config,
-            admitted: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-            run: crate::harness::Run::Bare(crate::harness::Mode::Headless),
+            recording: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+            kind: crate::harness::LaunchKind::Batch,
             start: crate::harness::Start::Resume { thread: &id },
             context_file: None,
         })

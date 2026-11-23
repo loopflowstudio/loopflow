@@ -1,12 +1,10 @@
 //! Coordinate provider lifetime above saved process state and SQL transactions.
 
-use crate::process::{AgentProcessState, Departure, LfProcessStart, SessionAttachment};
+use crate::process::{AgentProcessState, AttachingLf, Departure, SessionAttachment};
 use crate::session::LfSession;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::id::{AgentSessionId, LfProcessId};
-use loopflow_storage::sqlite::{
-    PreviousAgentDisposition, SessionTransfer, SqliteStore, UnrecordedAncestry,
-};
+use loopflow_storage::sqlite::{PreviousAgentDisposition, SessionTransfer, SqliteStore};
 
 pub fn session_connection(
     store: &SqliteStore,
@@ -15,16 +13,16 @@ pub fn session_connection(
     let Some(saved) = store.saved_session_connection(session)? else {
         return Ok(None);
     };
-    match crate::journal::agent_process_evidence(
-        saved.completed_at,
-        saved.pid,
-        saved.os_started_at,
-        None,
-        crate::journal::process_identity_evidence,
-    ) {
-        crate::journal::ProcessIdentityEvidence::Live => Ok(Some((saved.endpoint, saved.thread))),
-        crate::journal::ProcessIdentityEvidence::Dead => Ok(None),
-        crate::journal::ProcessIdentityEvidence::Unknown => Err(StoreError::InvalidAuthority(
+    let agent = crate::process::RecordedProcess {
+        ended: saved.completed_at.is_some(),
+        pid: saved.pid,
+        os_started_at: saved.os_started_at,
+        started_at: None,
+    };
+    match agent.evidence() {
+        crate::store::ProcessIdentityEvidence::Live => Ok(Some((saved.endpoint, saved.thread))),
+        crate::store::ProcessIdentityEvidence::Dead => Ok(None),
+        crate::store::ProcessIdentityEvidence::Unknown => Err(StoreError::InvalidAuthority(
             "AgentProcess OS identity is unavailable; cannot reconnect or replace it".into(),
         )),
     }
@@ -33,21 +31,19 @@ pub fn session_connection(
 pub(crate) fn resume_session_attachment(
     store: &SqliteStore,
     session: &str,
-    expected: Option<&SessionAttachment>,
     process: &LfProcessId,
     close: impl FnOnce() -> StoreResult<bool>,
 ) -> StoreResult<SessionAttachment> {
     let caller = crate::store::sessions::session_caller()?;
     let canonical = loopflow_model::id::canonical_session(session);
     let session = canonical.as_str();
-    let resume = store.begin_session_transfer(session, expected)?;
-    let beside = store.runs_in_its_terminal(session)?;
-    let previous = prepare_resume(store, &resume, beside, close)?;
+    let resume = store.begin_session_resume(session)?;
+    let previous = prepare_resume(store, &resume, close)?;
     let start = current_start(process);
     resume.claim_attachment(process, previous, start.as_ref(), &caller)
 }
 
-/// Input replacement and attachment admission commit together. Acquisition
+/// Input replacement and attachment admission commit together. The caller
 /// retains both checkout admission and attachment fences without holding SQL.
 pub(crate) fn claim_session_input(
     store: &SqliteStore,
@@ -59,7 +55,7 @@ pub(crate) fn claim_session_input(
     let caller = crate::store::sessions::session_caller()?;
     let _admission = crate::store::admission::lock_session_checkouts(store, &next)?;
     let resume = store.begin_session_transfer(&next.id, expected)?;
-    let previous = prepare_resume(store, &resume, false, close)?;
+    let previous = prepare_resume(store, &resume, close)?;
     let start = current_start(process);
     resume.claim_input(next, process, previous, start.as_ref(), &caller)
 }
@@ -69,18 +65,10 @@ pub fn claim_session_attachment(
     session: &str,
     expected: Option<&SessionAttachment>,
     process: &LfProcessId,
-    replace_provider: bool,
 ) -> StoreResult<SessionAttachment> {
     let caller = crate::store::sessions::session_caller()?;
     let start = current_start(process);
-    store.attach_session(
-        session,
-        expected,
-        process,
-        replace_provider,
-        start.as_ref(),
-        &caller,
-    )
+    store.attach_session(session, expected, process, start.as_ref(), &caller)
 }
 
 pub(crate) fn prepare_session_agent_process(
@@ -112,15 +100,6 @@ pub(crate) fn replace_session_agent_process(
     transfer.replace_agent(resume_thread, reserved, start.as_ref(), &caller)
 }
 
-pub(crate) fn release_unrecorded_ancestry(
-    store: &SqliteStore,
-    agent: &UnrecordedAncestry,
-    repairer: Option<&LfProcessId>,
-) -> StoreResult<bool> {
-    let start = repairer.and_then(current_start);
-    store.release_agent_ancestry(agent, repairer, start.as_ref())
-}
-
 /// Close and settle the exact attachment under the transfer fence, with no
 /// SQLite lock held during provider I/O.
 pub fn finish_session_attachment(
@@ -134,15 +113,6 @@ pub fn finish_session_attachment(
     let transfer = store.begin_session_transfer(session, Some(expected))?;
     let closed = close_provider()?;
     transfer.finish(outcome, departure, closed)
-}
-
-pub(crate) fn process_receipt_path(
-    store: &SqliteStore,
-    id: &LfProcessId,
-) -> StoreResult<Option<std::path::PathBuf>> {
-    Ok(store
-        .process_receipt_locator(id)?
-        .map(|(home, locator)| crate::journal::process_receipt_path(&home, &locator)))
 }
 
 /// A stale process cannot authorize termination. Retain the Session fence
@@ -160,47 +130,45 @@ pub(crate) fn settle_agent_process(
     Ok(true)
 }
 
-/// Observe and close while the saved attachment remains fenced. Unknown owner
-/// identity cannot authorize takeover; a bare foreground launch may run beside it.
+/// Observe and close while the saved attachment remains fenced. A live or
+/// unknown holder cannot be taken over, and a previous agent with no observed
+/// exit is never left running beside the new one.
 fn prepare_resume(
     store: &SqliteStore,
     resume: &SessionTransfer<'_>,
-    beside: bool,
     close: impl FnOnce() -> StoreResult<bool>,
 ) -> StoreResult<PreviousAgentDisposition> {
-    if let Some(attached) = resume
-        .attachment()
-        .filter(|_| !beside)
-        .and_then(|attachment| attachment.lf_process_id.as_ref())
-    {
-        if crate::journal::lf_evidence(store, attached)
-            != crate::journal::ProcessIdentityEvidence::Dead
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Conversation already has an attached LfProcess; connect to it".into(),
-            ));
+    if let Some(attachment) = resume.attachment() {
+        let holder = store
+            .agent_state(&attachment.agent_process_id)?
+            .and_then(|agent| agent.holder);
+        if let Some(holder) = holder {
+            if crate::process::RecordedProcess::from(&holder).evidence()
+                != crate::store::ProcessIdentityEvidence::Dead
+            {
+                return Err(StoreError::InvalidAuthority(
+                    "Conversation already has an attached LfProcess; connect to it".into(),
+                ));
+            }
         }
     }
     let (ended, reserved) = resume.previous_progress()?;
     if ended || reserved {
         return Ok(PreviousAgentDisposition::Inactive);
     }
-    let closed = close()?;
-    if !closed && !beside {
+    if !close()? {
         return Err(StoreError::InvalidAuthority(
             "Previous AgentProcess has no observed exit".into(),
         ));
     }
-    Ok(if closed {
-        PreviousAgentDisposition::Closed
-    } else {
-        PreviousAgentDisposition::Running
-    })
+    Ok(PreviousAgentDisposition::Closed)
 }
 
-fn current_start(process: &LfProcessId) -> Option<LfProcessStart> {
-    crate::journal::current_start_record(process).map(|record| LfProcessStart {
-        process: record,
+/// This lf, when `process` is this lf: the holder its attachment records.
+fn current_start(process: &LfProcessId) -> Option<AttachingLf> {
+    crate::journal::current_holder(process).map(|holder| AttachingLf {
+        lf_process_id: process.clone(),
+        holder,
         terminal: crate::transport::current().cloned(),
     })
 }

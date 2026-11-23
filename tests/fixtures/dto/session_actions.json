@@ -1,76 +1,30 @@
 [
   {
     "state": "unknown",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ]
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    }
   },
   {
     "state": "active",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": "This Session is active in another terminal; use Take back to transfer it"
-      },
-      {
-        "kind": "move_here",
-        "label": "Take back",
-        "help": "Transfer control here; unsent text in the previous terminal is not transferred",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": "This conversation is controlled elsewhere; use Take back to continue here"
-      }
-    ]
+    "action": {
+      "label": "Take over",
+      "help": "Continue here; the client that has it ends, unsent text there is lost"
+    }
   },
   {
     "state": "detached",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Reconnect",
-        "help": "Show the running Session in this terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ]
+    "action": {
+      "label": "Reconnect",
+      "help": "View the running conversation here: lf resume metadata"
+    }
   },
   {
     "state": "closed",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ]
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    }
   }
 ]

@@ -67,7 +67,9 @@ lf task complete <ID>           # the outcome is delivered
 Read a Task's status before starting more work on it. Leave a live Graph
 running. A stopped Graph is history: fix the cause and run the steps it didn't
 reach. Publishing, merging and completing are three separate facts. A failed
-read is unknown, not an empty plan.
+read is unknown, not an empty plan. To build on another open Task, `lf sync
+<its ID>`; `lf sync main` undoes it. Never `git merge` a Task's branch or
+`gh pr edit --base`.
 
 A child agent takes one piece of your work: `lf -b <skill> '<brief>'` runs
 one headless in this checkout on any model (`-a codex`), and your harness's
@@ -89,4 +91,5 @@ Name the Session for its work in two or three words: take its ID from the lf
 context block and run `lf session rename <id> '<name>' --suggest`. Answer in
 this conversation; never `lf resume` your own Session.
 
-`lf help <command-or-skill>` is the current reference.
+`lf help <command-or-skill>` is the command reference; `lf docs [topic]` reads
+embedded user docs.

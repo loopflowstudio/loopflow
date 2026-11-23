@@ -6,7 +6,7 @@ Clear your old work state, keep your started Tasks moving, and report what is ha
 A Task is yours when its person is `lf config user` or it names no person.
 Another person's Task is listed as theirs and left alone; unowned backlog is
 listed for someone to pick up. This pass works existing Tasks only. Plans,
-targets, chapters and new Tasks are out of scope: report gaps, don't file them.
+targets, projects and new Tasks are out of scope: report gaps, don't file them.
 
 ## Clear old work
 
@@ -47,12 +47,13 @@ Operate each Wave that has started work by following `lf help wave-operate`,
 here or with `lf --wave <wave> wave-operate "<direction>"`, and operate your
 started Tasks outside any Wave with `lf task-operate <issue>`. Sending someone
 to another conversation is not operating. Follow each intervention to its
-result. Never start a competing Graph process.
+result. Never start a competing Graph run.
 
-`lf task run <issue>` continues a Task to its next interactive step. `lf -b
-task run`, `lf ship`, and any run with no interactive step left ahead approve
-Auto-Ship and may merge the PR: only when asked to ship or land, and never to
-re-ship a Task someone stopped. When a Task of yours is heading the wrong way,
+`lf task run <issue>` continues a Task to its next interactive step. `lf task
+auto on` turns auto on, so the run stands in at interactive steps and may
+merge the PR; `lf -b task run` stands in for its own run, and a run with no
+interactive step left ahead may merge it too. Use them only when asked to ship or land, and never turn auto back on
+for a Task someone turned it off for. When a Task of yours is heading the wrong way,
 `lf task interrupt <issue>` stops it; discuss the new direction in its
 conversation.
 
@@ -70,9 +71,11 @@ Task and PR. Routine progress goes in this conversation, not Task comments.
   earlier turn. A failed read is not an empty list. To open one, run
   `lf resume <session-id> --prepare --json` and execute its `open_argv`
   unchanged.
-- **Processes.** When work looks stuck, run `lf top` before guessing. Time
-  alone never means dead. `lf process prune --dry-run` shows cleanup
-  candidates. Never kill a PID you can't account for.
+- **Execution.** When work looks stuck, run `lf session list --json` and
+  `lf graph list --runs --state current --json`: what runs, confirmed
+  against the OS. Time alone
+  never means dead. `lf machine doctor` reports strays and kills nothing.
+  Never kill a PID you can't account for.
 - **Machines.** A Task belongs to a person on a Machine. Each person picks
   where new Tasks run with `lf --wave <wave> set machine <machine>` or
   `lf --repo <repo> set machine <machine>`, never committed. This pass changes

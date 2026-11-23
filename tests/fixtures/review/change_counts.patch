@@ -1,0 +1,58 @@
+diff --git a/binary.bin b/binary.bin
+new file mode 100644
+index 0000000..8352675
+Binary files /dev/null and b/binary.bin differ
+diff --git a/edited.txt b/edited.txt
+index f00c965..842eccf 100644
+--- a/edited.txt
++++ b/edited.txt
+@@ -1,4 +1,4 @@
+-1
++one
+ 2
+ 3
+ 4
+@@ -7,4 +7,5 @@
+ 7
+ 8
+ 9
+-10
++ten
++eleven
+diff --git a/removed.txt b/removed.txt
+deleted file mode 100644
+index 422c2b7..0000000
+--- a/removed.txt
++++ /dev/null
+@@ -1,2 +0,0 @@
+-a
+-b
+diff --git a/old name.txt b/renamed.txt
+similarity index 100%
+rename from old name.txt
+rename to renamed.txt
+diff --git a/with space.txt b/with space.txt
+index f00c965..33011fd 100644
+--- a/with space.txt	
++++ b/with space.txt	
+@@ -2,7 +2,7 @@
+ 2
+ 3
+ 4
+-5
++five
+ 6
+ 7
+ 8
+diff --git a/empty.txt b/empty.txt
+new file mode 100644
+index 0000000..e69de29
+diff --git a/new.txt b/new.txt
+new file mode 100644
+index 0000000..de98044
+--- /dev/null
++++ b/new.txt
+@@ -0,0 +1,3 @@
++a
++b
++c

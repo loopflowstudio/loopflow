@@ -253,7 +253,7 @@ fn copy_up(sqlite: &SqliteStore, rental: &Rental, machine: &Machine) -> anyhow::
         .format(&time::format_description::well_known::Rfc3339)?;
     let script = format!(
         "{}; lf history export --since {}",
-        crate::machine::ssh::REMOTE_PATH,
+        crate::machine::ssh::remote_path(),
         crate::machine::ssh::sh_quote(&since)
     );
     let output = Command::new("ssh")
@@ -302,7 +302,7 @@ pub fn settle(machine: &MachineId) {
     }
 }
 
-/// Lazy recovery's give-back pass. A rental whose provider this process
+/// The server recovery pass's give-back. A rental whose provider this process
 /// cannot reach is reported only once its soft deadline passes; its provider
 /// deletes it at the hard deadline either way.
 ///
@@ -420,7 +420,6 @@ mod tests {
                 max_machines: 1,
                 max_usd_per_hour: Usd::parse("0.40").unwrap(),
                 hours: 4.0,
-                created_at: time::OffsetDateTime::now_utc(),
             },
         )
         .unwrap();
@@ -468,13 +467,10 @@ mod tests {
                 !deleted(&log),
                 "the sandbox was deleted before its records were copied"
             );
-            Ok(CopyCounts {
-                sessions: 3,
-                processes: 14,
-            })
+            Ok(CopyCounts { sessions: 3 })
         })
         .unwrap();
-        assert!(matches!(ended, Ended::Copied(counts) if counts.processes == 14));
+        assert!(matches!(ended, Ended::Copied(counts) if counts.sessions == 3));
         assert!(deleted(&log));
         assert_eq!(store.rental(&rental.id).unwrap().state, RentalState::Ended);
     }

@@ -20,7 +20,7 @@ actor LocalServerFixture {
     deinit { if let process, process.isRunning { process.terminate() } }
 
     nonisolated func location() -> ServerLocation {
-        ServerLocation { _ in try await self.status() }
+        ServerLocation(startsServer: true) { _ in try await self.status() }
     }
 
     func status() async throws -> String {

@@ -13,11 +13,10 @@ use rusqlite::OptionalExtension;
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
-const GROWING: [&str; 16] = [
+const GROWING: [&str; 15] = [
     "agent_sessions",
-    "planning_peer_changes",
-    "planning_peer_routes",
     "processes",
+    "session_activity",
     "session_events",
     "steer_delivered",
     "steers",
@@ -27,31 +26,43 @@ const GROWING: [&str; 16] = [
     "task_ownership",
     "task_primary_sessions",
     "task_retirements",
+    "task_auto",
     "task_update_readings",
-    "task_ship_events",
     "tasks",
 ];
 
 /// `sqlite_stat1` as `ANALYZE` measured it on a Machine with 17,536
-/// Sessions, 170,688 Processes, 283,304 Session events, 37,512 planning
-/// changes and 3,362 steers (November 13). Indexes newer than that store's
+/// Sessions, 170,688 Processes, 283,304 Session events and 3,362 steers
+/// (November 13). Indexes newer than that store's
 /// schema were built and analyzed on a copy of it; `steer_delivered` is counted
 /// from the rows its migration copies there.
 /// `task_checkouts` retains the November 12 measurement of 838 checkouts;
 /// `tasks_abandoned` counts that store's 259 abandoned Tasks, and
 /// `task_checkouts_parent_pr` its 11 parent PRs;
 /// `task_primary_sessions` takes the 319 primaries `tasks_primary_session` counted.
-/// `task_ship_events` counts the 396 rows that store's 174 shipping and 12
-/// stopped Tasks backfill to, 216 of them naming a Process.
+/// `task_auto` counts the 186 marks that store's 174 shipping and 12 stopped
+/// Tasks backfill to.
 /// `task_ownership` counts November 13's 895 entries over 880 Tasks.
+/// `agent_sessions_attached` and `agent_sessions_unended_agent` count
+/// November 17's 117 attached Sessions and 17 unended agents of 22,221;
+/// `agent_sessions_agent_ended` takes the rest of that store's 17,171 agents.
+/// `session_capture_provider_thread` counts the 21,078 inputs with a resume
+/// reference on November 16's store. `session_capture_turn` is estimated from
+/// that store's 28,791 `completed` rows over 21,601 inputs: about 19,000
+/// inputs with an ended turn, rarely two per Session thread.
+/// `session_activity` counts November 18's 20,732 readings, one per Session
+/// of 22,643, on a store where 37 agents had not ended.
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_delivered',
          'steer_adapters','projects','waves',
-         'planning_peer_changes','planning_peer_routes','repository_plans','steers',
-         'task_retirements','task_checkouts','task_primary_sessions','task_ship_events',
-         'task_ownership','task_update_readings');
+         'repository_plans','steers',
+         'task_retirements','task_checkouts','task_primary_sessions','task_auto',
+         'task_ownership','task_update_readings','session_activity');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
          ('agent_sessions','agent_sessions_agent_process','17171 1'),
+         ('agent_sessions','agent_sessions_attached','117 1'),
+         ('agent_sessions','agent_sessions_unended_agent','17 1'),
+         ('agent_sessions','agent_sessions_agent_ended','17150 1'),
          ('agent_sessions','agent_sessions_held_terminal','85 2'),
          ('agent_sessions','agent_sessions_primary_repository','9 1'),
          ('agent_sessions','agent_sessions_primary_wave','15 1'),
@@ -64,11 +75,6 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('agent_sessions','session_repo_inventory','17206 101 58 1 1 1'),
          ('agent_sessions','sqlite_autoindex_agent_sessions_1','17206 1'),
          ('agent_sessions','sqlite_autoindex_agent_sessions_2','17206 1'),
-         ('planning_peer_changes','planning_peer_changes_clock','37312 1'),
-         ('planning_peer_changes','planning_peer_changes_object','37312 3 2'),
-         ('planning_peer_changes','sqlite_autoindex_planning_peer_changes_1','37312 1'),
-         ('planning_peer_routes','planning_peer_routes_mutation','4220 1'),
-         ('planning_peer_routes','sqlite_autoindex_planning_peer_routes_1','4220 401 267 1'),
          ('processes','agent_process_attachment','17979 4'),
          ('processes','agent_process_unfinished','77 1'),
          ('processes','processes_agent_session','18327 1'),
@@ -89,8 +95,11 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('projects','sqlite_autoindex_projects_2','63 2'),
          ('repository_plans','repository_selected_plan','53 1'),
          ('repository_plans','sqlite_autoindex_repository_plans_1','53 1'),
+         ('session_activity','sqlite_autoindex_session_activity_1','20732 1'),
          ('session_events','session_capture_caller','17360 15'),
          ('session_events','session_capture_key','17360 1'),
+         ('session_events','session_capture_provider_thread','21078 1'),
+         ('session_events','session_capture_turn','19000 2 1 1'),
          ('session_events','session_capture_window','17723 1'),
          ('session_events','session_event_input','20942 15 14'),
          ('session_events','session_event_receipt','278035 51 37 20 7 1'),
@@ -130,8 +139,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('task_ownership','idx_task_ownership_task','895 1'),
          ('task_ownership','sqlite_autoindex_task_ownership_1','895 1'),
          ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_1','319 1'),
-         ('task_ship_events','task_ship_events_task','396 3 1'),
-         ('task_ship_events','task_ship_events_process','216 1'),
+         ('task_auto','sqlite_autoindex_task_auto_1','186 1'),
          ('task_primary_sessions','sqlite_autoindex_task_primary_sessions_2','319 1'),
          ('tasks','idx_tasks_issue_identifier','1219 1'),
          ('tasks','idx_tasks_project','1219 20 1'),
@@ -260,7 +268,7 @@ pub fn growing_scans(store: &SqliteStore, statements: &[String]) -> Vec<String> 
         steps
     };
     let mut steps = plan("unanalyzed");
-    conn.execute_batch("ANALYZE").unwrap();
+    conn.execute_batch("ANALYZE main").unwrap();
     conn.execute_batch(MEASURED).unwrap();
     steps.extend(plan("analyzed"));
     // An index's size is a property of the data, so both passes judge a walk
@@ -475,7 +483,6 @@ mod tests {
                     store.resolve_history_input("missing-capture"),
                     Err(crate::StoreError::NotFound)
                 ));
-                store.unrecorded_agent_ancestry().unwrap();
                 store.idle_conversation_candidates(None).unwrap();
                 store.idle_conversation_candidates(Some("viewed")).unwrap();
                 // The first read files the steer's receipt; the second has nothing to file.
@@ -488,8 +495,28 @@ mod tests {
         assert!(scans.is_empty(), "{}", scans.join("\n"));
     }
 
+    // Every save runs a pass: its creation check and queue read plan by index,
+    // and a check that finds nothing takes no write lock.
     #[test]
-    fn auto_ship_log_reads_and_writes_plan_by_index() {
+    fn a_tracker_pass_reads_its_queue_by_index() {
+        let (_home, store, _task, _viewer) = fixture();
+        let traced = assert_no_empty_writes(&store, || {
+            statements(&store, || {
+                store
+                    .enqueue_tracker_creations(
+                        "/elsewhere",
+                        crate::planning_sync::TrackerKind::Linear,
+                    )
+                    .unwrap();
+                store.unconfirmed_tracker_actions("/elsewhere").unwrap();
+            })
+        });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
+    fn auto_reads_and_writes_plan_by_index() {
         let (_home, store, _task, _viewer) = fixture();
         let task = TaskId::new();
         store
@@ -502,16 +529,15 @@ mod tests {
                 due_date: None,
             })
             .unwrap();
+        let mark = crate::sqlite::Auto {
+            state: crate::sqlite::AutoState::On,
+            at: 1,
+            by: crate::process::Starter::Person { name: None },
+        };
         let traced = statements(&store, || {
-            store
-                .ship_task(&task, &loopflow_model::id::LfProcessId::new(), "ship")
-                .unwrap();
-            store.count_ship_restart(&task).unwrap();
-            store
-                .ship_task(&task, &loopflow_model::id::LfProcessId::new(), "ship")
-                .unwrap();
-            store.task_shipping(&task).unwrap();
-            store.reset_ship_restarts(&task).unwrap();
+            store.set_task_auto(&task, &mark, true).unwrap();
+            store.task_auto(&task).unwrap();
+            store.task_state(&task).unwrap();
         });
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));
@@ -578,22 +604,55 @@ mod tests {
         });
         let scans: Vec<_> = growing_scans(&store, &traced)
             .into_iter()
-            .filter(|scan| scan.contains("planning_peer_changes") || scan.contains("SCAN tasks"))
+            .filter(|scan| scan.contains("SCAN tasks"))
             .collect();
         assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
+    fn stamps_and_unsent_records_are_read_by_index() {
+        let (_home, store, _task) = crate::test_fixture::store_with_task();
+        let conn = store.conn.lock().unwrap();
+        for (sql, index) in [
+            ("SELECT COALESCE(MAX(at),0) FROM plan_stamps", "plan_stamps_at"),
+            (
+                "SELECT field,at,machine_id FROM plan_stamps WHERE owner_id='t'",
+                "PRIMARY KEY",
+            ),
+            (
+                "SELECT COUNT(*) FROM plan_changes WHERE repo='r' AND seq>0",
+                "plan_changes_repo",
+            ),
+            (
+                "SELECT seq,owner_table,owner_id FROM plan_changes WHERE repo='r' AND seq>0 ORDER BY seq",
+                "plan_changes_repo",
+            ),
+        ] {
+            let plan: Vec<String> = conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .unwrap()
+                .query_map([], |row| row.get(3))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert!(
+                plan.iter().all(|step| step.contains(index)) && !plan.is_empty(),
+                "{sql}: {plan:?}"
+            );
+        }
     }
 
     #[test]
     fn a_walk_of_a_large_partial_index_is_a_scan() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("loopflow.db")).unwrap();
-        let history = "SELECT session_id FROM session_events WHERE kind='observed'
-             AND json_extract(payload,'$.evidence.provider_session_id')='thread'";
-        let scans = growing_scans(&store, &[history.to_owned()]);
+        let inputs = "SELECT session_id FROM session_events WHERE kind='captured'
+             AND json_extract(payload,'$.cwd')='/fixture'";
+        let scans = growing_scans(&store, &[inputs.to_owned()]);
         assert!(
             scans
                 .iter()
-                .any(|scan| scan.contains("session_observation_receipt (")
+                .any(|scan| scan.contains("session_capture_window (")
                     && scan.contains(" rows measured)")),
             "{}",
             scans.join("\n")
@@ -608,7 +667,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("loopflow.db")).unwrap();
         let conn = store.conn.lock().unwrap();
-        conn.execute_batch("ANALYZE; DELETE FROM sqlite_stat1;")
+        conn.execute_batch("ANALYZE main; DELETE FROM sqlite_stat1;")
             .unwrap();
         conn.execute_batch(MEASURED).unwrap();
         let unmeasured: Vec<String> = conn
@@ -638,7 +697,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("loopflow.db")).unwrap();
         let conn = store.conn.lock().unwrap();
-        conn.execute_batch("ANALYZE; DELETE FROM sqlite_stat1;")
+        conn.execute_batch("ANALYZE main; DELETE FROM sqlite_stat1;")
             .unwrap();
         conn.execute_batch(MEASURED).unwrap();
         let stale: Vec<String> = conn

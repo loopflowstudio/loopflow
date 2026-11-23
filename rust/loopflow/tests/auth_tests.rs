@@ -49,13 +49,6 @@ fn service_auth_survives_subscription_removal() {
         .collect();
     assert_eq!(
         providers,
-        [
-            "github",
-            "opencodezen",
-            "linear",
-            "asana",
-            "notion",
-            "doppler"
-        ]
+        ["github", "opencodezen", "linear", "asana", "doppler"]
     );
 }

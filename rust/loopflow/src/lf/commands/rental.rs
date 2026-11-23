@@ -185,7 +185,6 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                 max_machines: *max,
                 max_usd_per_hour: *max_usd_per_hour,
                 hours: hours.min(rental::MAX_HOURS),
-                created_at: now(),
             };
             let price = ondemand.usd_per_hour().map_err(|reason| anyhow!(reason))?;
             loopflow_execution::store::rentals::add_ondemand(sqlite, &ondemand)?;
@@ -296,7 +295,7 @@ fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing
             loopflow_execution::store::machines::machine_by_id(sqlite, id)?
                 .and_then(|machine| machine.label),
             held_ids(sqlite, id)?,
-            Some(sqlite.copy_counts(id)?).filter(|counts| counts.sessions + counts.processes > 0),
+            Some(sqlite.copy_counts(id)?).filter(|counts| counts.sessions > 0),
         ),
         None => (None, Vec::new(), None),
     };
@@ -583,7 +582,7 @@ pub fn place(
     let sqlite = &store.sqlite;
     if let Some(pool) = placement.pool {
         let record = loopflow_execution::store::rentals::pool(sqlite, pool)?
-            .ok_or_else(|| anyhow!("no pool {pool}; `lf pool add {pool}` creates it"))?;
+            .ok_or_else(|| anyhow!("no pool {pool}; `lf machine pool add {pool}` creates it"))?;
         let machines = loopflow_execution::store::machines::pool_machines(sqlite, pool)?;
         match rental::free_machine(&record, &machines, now()) {
             Ok(free) if placement.quote => {
@@ -740,7 +739,7 @@ fn prepare(
         .planning_transport();
     if matches!(
         planning,
-        loopflow_execution::config::PlanningConfig::Linear { .. }
+        Some(loopflow_execution::config::TrackerConfig::Linear { .. })
     ) {
         runtime.block_on(loopflow_execution::machine::credentials::connect(
             &machine,
@@ -796,7 +795,7 @@ fn checkout_script(
         .collect();
     let script = format!(
         "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf config repo --bind {repository}",
-        loopflow_execution::machine::ssh::REMOTE_PATH,
+        loopflow_execution::machine::ssh::remote_path(),
         dir = q(directory),
     );
     Ok((origin, script))

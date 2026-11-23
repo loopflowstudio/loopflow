@@ -53,51 +53,47 @@ struct TaskCommentsView: View {
     @ViewBuilder
     private var statusText: some View {
         Text(reading.isLoading ? "Reading comments…" : "")
-            .font(Typography.body(12.5))
+            .font(Typography.text)
             .foregroundStyle(palette.textSecondary)
             .textSelection(.enabled)
-            .padding(.leading, 17)
+            .padding(.leading, Spacing.lg)
             .accessibilityIdentifier("task-comments-status")
     }
 
     private func threadView(_ thread: TaskComments) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if let reason = thread.refreshError {
-                Text("Latest read failed: \(reason)")
-                    .font(Typography.body(12))
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
+                FailureLine("Latest read failed.", machine: reason)
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("task-comments-status")
             }
             if thread.comments.isEmpty {
-                Text("No comments.")
-                    .font(Typography.body(12))
-                    .foregroundStyle(palette.textSecondary)
+                Text("No comments.").emptyLine()
                     .accessibilityIdentifier("task-comments-empty")
             }
             ForEach(Array(thread.comments.enumerated()), id: \.element.id) { index, comment in
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                         Text(Self.author(comment.author))
-                            .font(Typography.strong(12.5))
+                            .font(Typography.textStrong)
                             .foregroundStyle(palette.text)
                         if thread.pendingSync.contains(comment.id) {
                             Text("Pending sync")
-                                .font(Typography.caption(12))
+                                .font(Typography.text)
                                 .foregroundStyle(palette.textSecondary)
                         }
                         Text(Self.date(comment.createdAt))
-                            .font(Typography.caption(12))
+                            .font(Typography.text)
                             .foregroundStyle(palette.textTertiary)
                     }
                     if let conflict = thread.conflicts[comment.id] {
-                        Text("Saved local comment; the planning provider’s edit is current")
-                            .font(Typography.strong(12.5))
+                        Text("Saved your comment locally. The tracker’s edit is current.")
+                            .font(Typography.textStrong)
                         MarkdownBlocks(source: Self.readableBody(conflict)).equatable()
                     }
                     let body = Self.readableBody(comment.body)
                     if body.isEmpty {
-                        Text("Empty comment").font(Typography.body(13)).foregroundStyle(palette.textSecondary)
+                        Text("Empty comment.").emptyLine()
                     } else {
                         MarkdownBlocks(source: body).equatable()
                     }
@@ -110,7 +106,7 @@ struct TaskCommentsView: View {
                 .accessibilityIdentifier("task-comment-\(comment.id)")
             }
         }
-        .padding(.leading, 17)
+        .padding(.leading, Spacing.lg)
         .frame(maxWidth: 680, alignment: .leading)
         .accessibilityIdentifier("task-comments-thread")
     }

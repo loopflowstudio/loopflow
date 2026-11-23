@@ -1,23 +1,22 @@
 //! Captured Linear input for preservation and delayed-observation fixtures.
 #![allow(dead_code)]
 use loopflow::id::WaveId;
-use loopflow::linear::LinearIssue;
-use loopflow::linear::LinearProject;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{PlanningLocks, Store, StoreResult};
+use loopflow_storage::planning::TrackerItem;
+use loopflow_storage::planning::TrackerProject;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Inventory {
-    pub projects: Vec<LinearProject>,
-    pub items: Vec<LinearIssue>,
+    pub projects: Vec<TrackerProject>,
+    pub items: Vec<TrackerItem>,
 }
 
 /// One acquired Linear inventory. Input to ingestion, never a local Work reading.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InventoryFixture {
     pub wave_id: WaveId,
-    pub provider: String,
     pub initiative: String,
     pub synced_at: i64,
     pub snapshot: Inventory,
@@ -26,8 +25,8 @@ pub struct InventoryFixture {
 /// A planning observation; neither Project ownership nor execution is required.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IssueFixture {
-    pub item: loopflow::linear::LinearIssue,
-    pub project: Option<loopflow::linear::LinearProject>,
+    pub item: loopflow_storage::planning::TrackerItem,
+    pub project: Option<loopflow_storage::planning::TrackerProject>,
     pub observed_at: i64,
 }
 
@@ -41,7 +40,7 @@ pub trait SeedLinear {
     async fn seed_issue(
         &self,
         repo: &str,
-        provider: &str,
+        tracker: &str,
         input: IssueFixture,
         confirmed: Option<(WaveId, String)>,
         locks: Option<Arc<PlanningLocks>>,
@@ -53,8 +52,7 @@ impl SeedLinear for Store {
         input: InventoryFixture,
         locks: Option<Arc<PlanningLocks>>,
     ) -> StoreResult<()> {
-        assert_eq!(input.provider, "linear");
-        loopflow::linear::acceptance::accept_linear_inventory(
+        loopflow::linear::events::accept_linear_inventory(
             self,
             input.wave_id,
             input.initiative,
@@ -68,13 +66,13 @@ impl SeedLinear for Store {
     async fn seed_issue(
         &self,
         repo: &str,
-        provider: &str,
+        tracker: &str,
         input: IssueFixture,
         confirmed: Option<(WaveId, String)>,
         locks: Option<Arc<PlanningLocks>>,
     ) -> StoreResult<()> {
-        assert_eq!(provider, "linear");
-        loopflow::linear::acceptance::accept_linear_issue(
+        assert_eq!(tracker, "linear");
+        loopflow::linear::events::accept_linear_issue(
             self,
             repo,
             input.item,
@@ -91,15 +89,14 @@ pub trait SeedLinearSqlite {
     fn seed_issue(
         &self,
         repo: &str,
-        provider: &str,
+        tracker: &str,
         input: &IssueFixture,
         confirmed: Option<(&WaveId, &str)>,
     ) -> StoreResult<()>;
 }
 impl SeedLinearSqlite for SqliteStore {
     fn seed_inventory(&self, input: &InventoryFixture) -> StoreResult<()> {
-        assert_eq!(input.provider, "linear");
-        loopflow::store::sqlite::linear_acceptance::accept_linear_inventory_in(
+        loopflow::store::sqlite::linear_events::accept_linear_inventory_in(
             self,
             &input.wave_id,
             &input.initiative,
@@ -111,18 +108,19 @@ impl SeedLinearSqlite for SqliteStore {
     fn seed_issue(
         &self,
         repo: &str,
-        provider: &str,
+        tracker: &str,
         input: &IssueFixture,
         confirmed: Option<(&WaveId, &str)>,
     ) -> StoreResult<()> {
-        assert_eq!(provider, "linear");
-        loopflow::store::sqlite::linear_acceptance::accept_linear_issue_in(
+        assert_eq!(tracker, "linear");
+        loopflow::store::sqlite::linear_events::accept_linear_issue_in(
             self,
             repo,
             &input.item,
             input.project.as_ref(),
             input.observed_at,
             confirmed,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
     }
 }

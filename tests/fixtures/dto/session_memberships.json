@@ -12,7 +12,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "active",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
@@ -27,26 +26,10 @@
     "turn": null,
     "raw": false,
     "work_path": "product / LOO-291",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": "This Session is active in another terminal; use Take back to transfer it"
-      },
-      {
-        "kind": "move_here",
-        "label": "Take back",
-        "help": "Transfer control here; unsent text in the previous terminal is not transferred",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": "This conversation is controlled elsewhere; use Take back to continue here"
-      }
-    ],
+    "action": {
+      "label": "Take over",
+      "help": "Continue here; the client that has it ends, unsent text there is lost"
+    },
     "graph_membership": {
       "kind": "step",
       "graph": "task-design",
@@ -71,7 +54,11 @@
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
     "preview": null,
-    "transition": null
+    "transition": null,
+    "ended": null,
+    "start": null,
+    "outlook": null,
+    "status_line": "running"
   },
   {
     "id": "run_00000000000000000000000000000002",
@@ -86,7 +73,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "closed",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
@@ -101,20 +87,10 @@
     "turn": null,
     "raw": false,
     "work_path": "product / LOO-291",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "graph_membership": {
       "kind": "step",
       "graph": "feature",
@@ -145,7 +121,19 @@
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
     "preview": null,
-    "transition": null
+    "transition": null,
+    "ended": {
+      "at": "2026-11-17T12:01:00Z",
+      "exit_code": 0
+    },
+    "start": null,
+    "outlook": {
+      "kind": "quit",
+      "at": null,
+      "reason": null,
+      "command": "lf resume run_00000000000000000000000000000002"
+    },
+    "status_line": "quit 12:01; `lf resume run_00000000000000000000000000000002` opens it"
   },
   {
     "id": "run_00000000000000000000000000000003",
@@ -160,7 +148,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "active",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
@@ -175,26 +162,10 @@
     "turn": null,
     "raw": false,
     "work_path": "product / LOO-291",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": "This Session is active in another terminal; use Take back to transfer it"
-      },
-      {
-        "kind": "move_here",
-        "label": "Take back",
-        "help": "Transfer control here; unsent text in the previous terminal is not transferred",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": "This conversation is controlled elsewhere; use Take back to continue here"
-      }
-    ],
+    "action": {
+      "label": "Take over",
+      "help": "Continue here; the client that has it ends, unsent text there is lost"
+    },
     "graph_membership": {
       "kind": "independent"
     },
@@ -211,7 +182,11 @@
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
     "preview": null,
-    "transition": null
+    "transition": null,
+    "ended": null,
+    "start": null,
+    "outlook": null,
+    "status_line": "running"
   },
   {
     "id": "run_00000000000000000000000000000004",
@@ -226,7 +201,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "closed",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
@@ -241,20 +215,10 @@
     "turn": null,
     "raw": false,
     "work_path": "product / LOO-291",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "graph_membership": {
       "kind": "unknown",
       "reason": "Run run_00000000000000000000000000000004 predates recorded Graph membership"
@@ -272,7 +236,22 @@
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
     "preview": null,
-    "transition": null
+    "transition": null,
+    "ended": {
+      "at": "2026-11-17T12:01:00Z",
+      "exit_code": 137
+    },
+    "start": {
+      "attempts": 1,
+      "last_started_at": "2026-11-17T12:01:02Z"
+    },
+    "outlook": {
+      "kind": "coming_back",
+      "at": "2026-11-17T12:02:02Z",
+      "reason": "last start failed: claude is not installed on this Machine's PATH",
+      "command": null
+    },
+    "status_line": "died 12:01 (exit 137) · starts again 12:02 · last start failed: claude is not installed on this Machine's PATH"
   },
   {
     "id": "run_00000000000000000000000000000006",
@@ -287,7 +266,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "closed",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
@@ -302,20 +280,10 @@
     "turn": null,
     "raw": false,
     "work_path": "product / LOO-291",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "graph_membership": {
       "kind": "step",
       "graph": "feature",
@@ -343,7 +311,22 @@
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
     "preview": null,
-    "transition": null
+    "transition": null,
+    "ended": {
+      "at": "2026-11-17T12:01:00Z",
+      "exit_code": null
+    },
+    "start": {
+      "attempts": 5,
+      "last_started_at": "2026-11-17T12:31:00Z"
+    },
+    "outlook": {
+      "kind": "waiting_for_you",
+      "at": null,
+      "reason": "started 5 times",
+      "command": "lf resume --task LOO-1"
+    },
+    "status_line": "died 12:01 (no exit recorded) · started 5 times; `lf resume --task LOO-1` opens it"
   },
   {
     "id": "run_00000000000000000000000000000007",
@@ -358,7 +341,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "closed",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
@@ -373,20 +355,10 @@
     "turn": null,
     "raw": false,
     "work_path": "product / LOO-291",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "graph_membership": {
       "kind": "step",
       "graph": "feature",
@@ -409,7 +381,19 @@
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
     "preview": null,
-    "transition": null
+    "transition": null,
+    "ended": null,
+    "start": {
+      "attempts": 1,
+      "last_started_at": "2026-11-17T12:01:02Z"
+    },
+    "outlook": {
+      "kind": "could_not_start",
+      "at": "2026-11-17T12:02:02Z",
+      "reason": "no PTY left: 511 in use (kern.tty.ptmx_max)",
+      "command": null
+    },
+    "status_line": "could not start: no PTY left: 511 in use (kern.tty.ptmx_max) · tries again 12:02"
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
@@ -424,7 +408,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "unknown",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "ssh",
@@ -441,20 +424,10 @@
     "turn": null,
     "raw": false,
     "work_path": "product / LOO-291",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "graph_membership": {
       "kind": "step",
       "graph": "feature",
@@ -482,6 +455,15 @@
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
     "preview": null,
-    "transition": null
+    "transition": null,
+    "ended": null,
+    "start": null,
+    "outlook": {
+      "kind": "starting",
+      "at": null,
+      "reason": null,
+      "command": null
+    },
+    "status_line": "starting"
   }
 ]

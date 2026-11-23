@@ -37,7 +37,7 @@ fn snapshot_preview_fixture() {
     bytes.extend(saved.encode().unwrap());
     std::fs::write(screens.join(format!("{SESSION}.ghostsnp")), bytes).unwrap();
 
-    if matches!(case.as_str(), "resume" | "reveal" | "provider_failure") {
+    if matches!(case.as_str(), "resume" | "provider_failure") {
         resume_fixture(&case);
         return;
     }
@@ -114,7 +114,6 @@ fn snapshot_preview_fixture() {
             reply: Reply::Attached {
                 viewer: "viewer".into(),
                 nonce: "nonce".into(),
-                token: Some("claim".into()),
                 terminal: true,
                 owner: Some("viewer".into()),
             },
@@ -222,7 +221,7 @@ fn snapshot_preview_fixture() {
             ));
         }
     });
-    attach_with_terminal(&terminal, None, None, preview, true).unwrap();
+    attach_with_terminal(&terminal, None, preview, &mut super::RelayInput::new(true)).unwrap();
     peer.join().unwrap();
     std::fs::write(
         viewer_cwd,
@@ -288,6 +287,16 @@ printf '%s\n' "$*" >> "$HOME/launches"
     if !succeeds {
         std::fs::remove_file(&provider).unwrap();
     } else {
+        let initial_args = std::fs::read_to_string(home.join("launches")).unwrap();
+        let thread = initial_args
+            .split_whitespace()
+            .skip_while(|arg| *arg != "--session-id")
+            .nth(1)
+            .unwrap();
+        let project =
+            loopflow_harness::transcript::live::claude_project(&home.join(".claude"), repo.path());
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join(format!("{thread}.jsonl")), "{}\n").unwrap();
         std::fs::write(
             &provider,
             r#"#!/bin/sh
@@ -304,9 +313,6 @@ read -r answer < /dev/tty
     let _server = loopflow_test_support::MachineServer::start(&binary, &home);
     let mut resume = command();
     resume.args(["resume", &session]);
-    if case == "reveal" {
-        resume.arg("--reveal-existing");
-    }
     let result = resume.status().unwrap();
     assert_eq!(result.success(), succeeds);
     let launches = std::fs::read_to_string(home.join("launches")).unwrap();
@@ -340,7 +346,7 @@ impl Drop for ViewerProcess {
 }
 
 fn preview_case(case: &str) -> (tempfile::TempDir, Vec<u8>) {
-    let resumes = matches!(case, "resume" | "reveal");
+    let resumes = case == "resume";
     // Prepare the source CLI before the isolated fixture, outside any Cargo run.
     let binary = if resumes || case == "provider_failure" {
         loopflow_test_support::lf_binary()
@@ -545,11 +551,6 @@ fn snapshot_preview_resume_uses_live_primary_output() {
 #[test]
 fn snapshot_preview_resume_provider_failure_restores_terminal() {
     preview_case("provider_failure");
-}
-
-#[test]
-fn snapshot_preview_reveal_resumes_history_without_replaying_input() {
-    preview_case("reveal");
 }
 
 const CLEAR_DIRECTORY: &[u8] = b"\x1b]7;\x1b\\";

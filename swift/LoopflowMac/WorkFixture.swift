@@ -8,12 +8,8 @@ enum WorkFixture {
         do {
             switch mode {
             case .emptyWorkspaces:
-                let snapshot = try JSONDecoder().decode(
-                    RoadmapSnapshot.self,
-                    from: Data(#"{"generated_at":"2026-07-20T00:00:00Z","waves":[]}"#.utf8)
-                )
                 model.applyFixture(
-                    roadmap: .available(snapshot),
+                    roadmap: .available(try emptyRoadmap()),
                     waves: .available([]),
                     workActivity: .available(try emptyWorkActivity()),
                     repos: [],
@@ -81,7 +77,12 @@ enum WorkFixture {
         return (roadmap, waves, repos)
     }
 
-    private static func emptyWorkActivity() throws -> WorkActivitySnapshot {
+    static func emptyRoadmap() throws -> RoadmapSnapshot {
+        let json = #"{"generated_at":"2026-07-20T00:00:00Z","waves":[],"tasks":{"state":"ok","truncated":false,"items":[]}}"#
+        return try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(json.utf8))
+    }
+
+    static func emptyWorkActivity() throws -> WorkActivitySnapshot {
         let json = #"{"generated_at":1784606400,"since":1784001600,"limit":50,"truncated":false,"items":[]}"#
         return try JSONDecoder().decode(WorkActivitySnapshot.self, from: Data(json.utf8))
     }

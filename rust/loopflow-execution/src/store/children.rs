@@ -5,8 +5,8 @@ use std::sync::Arc;
 use loopflow_model::id::WaveId;
 use loopflow_storage::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use loopflow_storage::work::task::{
-    LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId, TaskLinearObservation,
-    TaskPr, TaskPrId,
+    Task, TaskEvent, TaskEventKind, TaskId, TaskPr, TaskPrId, TaskTrackerCursor,
+    TrackerEventOutcome,
 };
 use time::OffsetDateTime;
 
@@ -22,7 +22,7 @@ impl Store {
         session: Option<crate::session::LfSession>,
         destination: Option<std::path::PathBuf>,
         acquisition: Option<Arc<super::PlanningLocks>>,
-        receipt: Option<super::sqlite::creation::CreationIdentity>,
+        receipt: Option<super::sqlite::creation::TaskCreationRecord>,
     ) -> StoreResult<Task> {
         let task_id = task_id.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
@@ -151,13 +151,14 @@ impl Store {
         &self,
         task_id: &TaskId,
         new_base: &str,
-        clear_parent: bool,
+        parent_pr_id: Option<&TaskPrId>,
         updated_at: OffsetDateTime,
     ) -> StoreResult<()> {
         let task_id = task_id.clone();
         let new_base = new_base.to_string();
+        let parent_pr_id = parent_pr_id.cloned();
         run_sqlite(&self.sqlite, move |store| {
-            store.sync_task_placement(&task_id, &new_base, clear_parent, updated_at)
+            store.sync_task_placement(&task_id, &new_base, parent_pr_id.as_ref(), updated_at)
         })
         .await
     }
@@ -170,19 +171,6 @@ impl Store {
     pub async fn update_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
         let pr = pr.clone();
         run_sqlite(&self.sqlite, move |store| store.update_task_pr(&pr)).await
-    }
-
-    pub(crate) async fn record_task_pr_repair_incident(
-        &self,
-        pr_id: &TaskPrId,
-        kind: loopflow_storage::work::task::TaskPrRepairKind,
-        occurred_at: OffsetDateTime,
-    ) -> StoreResult<bool> {
-        let pr_id = pr_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.record_task_pr_repair_incident(&pr_id, kind, occurred_at)
-        })
-        .await
     }
 
     pub async fn task_prs(&self, task_id: &TaskId) -> StoreResult<Vec<TaskPr>> {
@@ -278,30 +266,30 @@ impl Store {
         .await
     }
 
-    pub async fn task_linear_observation(
+    pub async fn task_tracker_cursor(
         &self,
         task_id: &TaskId,
-    ) -> StoreResult<Option<TaskLinearObservation>> {
+    ) -> StoreResult<Option<TaskTrackerCursor>> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.task_linear_observation(&task_id)
+            store.task_tracker_cursor(&task_id)
         })
         .await
     }
 
-    pub(crate) async fn apply_linear_observation(
+    pub(crate) async fn apply_tracker_event(
         &self,
         task_id: &TaskId,
-        observation: loopflow_storage::linear_records::LinearIssueObservation,
+        event: loopflow_storage::planning::TrackerEvent,
         observed_at: OffsetDateTime,
         planning_connected: bool,
-    ) -> StoreResult<LinearObservationOutcome> {
+    ) -> StoreResult<TrackerEventOutcome> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            crate::store::ownership::apply_linear_observation(
+            crate::store::ownership::apply_tracker_event(
                 &store,
                 &task_id,
-                &observation,
+                &event,
                 observed_at,
                 planning_connected,
             )

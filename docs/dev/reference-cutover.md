@@ -48,16 +48,15 @@ schemas and old format readers. The cutover retains current Work and links,
 native history and resumable conversations. Configured acceptance is separate.
 
 Current CLI examples use supported spellings. `lf resume` selects a Session ID,
-Task or Wave. Retained native terminals attach without replacing their provider.
-A worker's or batch's id, running or finished, is refused with a pointer to its
-Task's Session; only a Graph continues its own step's worker (structured-output
-correction).
+Task or Wave. A held terminal gains a view; a native client lf can't share is taken over.
+A worker or batch ID is refused with a pointer to an interactive Session.
+A Graph continues its own worker with `lf -b steer` to correct a structured answer.
 A Graph whose process died leaves its
 Processes as history; nothing resumes it. `session list` supports
 `--headless`, `--task` and `--search`; `--all` means all
 repositories. Finished conversations belong in `lf history`. `--page --json` uses stable ID pages; Desktop retains earlier
-observations until enumeration succeeds. `lf graph list --processes` and `lf process show` reads
-Graphs from their Graph process and step processes. `lf session history show` and `lf session history replay` are the command spellings.
+observations until enumeration succeeds. `lf graph list --runs` and `lf graph show` read
+Graphs from their Graph run and step rows. `lf session history show` and `lf session history replay` are the command spellings.
 History exposes Session event and provider evidence; `RunSnapshot` and Session
 `run_id` are removed across Rust, Swift and fixtures. Retaining these names in a command or
 wire reference does not make Run a target owner. Coordinate migration with
@@ -69,13 +68,13 @@ external consumers before changing those references.
 | --- | --- |
 | One Process per actual lf process | Every lf process is listed while it runs; at exit its row stays only when an agent issued it, a running parent may read it, or another record references it. Help, rejected arguments and installation entry use an existing compatible ledger without initialization; unavailable storage remains an explicit gap. Public discovery and Rust/Swift wire fixtures cover the current shape; installed startup acceptance remains open. |
 | Stable LfSession with separate attachment and AgentProcess | Admission/publication and Session readers use LfSession directly; ordinary automatic retry retains both outcomes with zero Run rows in the native fixture. Public Codex connect/client replacement preserves the active turn and sibling in the synthetic-Responses proof. Complete configured native Machine, stale-client exclusion and shared-AgentProcess preservation across every provider path. |
-| Graph reads each step's result from its Process | A step's result is its process exit; a deciding or routing step answers through the Session turn its Process captured. Structured native results close the earlier Codex decision-retry transport failure in the real-Codex/synthetic-Responses fixture; configured-provider acceptance remains unproven. OpenCode batch and native terminal launches share an authenticated private server and API-confirmed identity. Ordered native messages attribute assistant steps to admitted initiating inputs across steers; an idle marker plus a successful nonempty answer settles that input. Interrupted execution is never automatically continued. The separate Task provider launcher and retired Run owners are deleted; configured recovery across providers remains open. |
+| Graph reads each step's result from its Process | A step's result is its process exit; a deciding or routing step answers through the Session turn its Process captured. Structured native results close the earlier Codex decision-retry transport failure in the real-Codex/synthetic-Responses fixture; configured-provider acceptance remains unproven. An OpenCode headless turn is one `opencode run` process and a terminal launch is `opencode --standalone`; both continue the conversation lf named with `--session`. A run that exits cleanly with a nonempty answer settles its input. Interrupted execution is never automatically continued. The separate Task provider launcher and retired Run owners are deleted; configured recovery across providers remains open. |
 | One started Graph is one lf process and its step processes | Jack Heart's 2026-10-05 decision: a Graph adds nothing on top of running `lf graph ...` in a Task worktree, and its record is the lf binary's ordinary logging. Jack's later 2026-10-05 statements put that logging in the Graph process: an append-only GraphProcess row with the Graph's name and compiled graph, and one row per step it starts. The Graph process holds one cursor and its return counters in memory; steps are plain commands that know nothing of their Graph. Configured acceptance remains open. |
 | Complete recovery | Six standalone native fixtures use real Codex with synthetic Responses/private Machines, including attachment/AgentProcess loss and automatic retry. Managed dispatch has synthetic successor-history proof; configured native-provider continuity remains unproven. |
 | Current-state cutover | Three direct migration groups retain current database state. Release conversion must also recover resumable native identities from a frozen filesystem snapshot. Finished history and intermediate branch schemas are discarded. |
 | Indexed discovery and usage | Runs/usage/telemetry/activity and landing conclusions select LfSession input history before payload decoding, preserving per-input attribution and windows. Native receipts without a captured input/start remain discoverable with unknown ownership and partial usage coverage. Debug measurements at `6d76f74926` used 20,000 Sessions, 5,000 Graphs and 100,000 Processes: bounded warm CLI reads were 291–313 ms against a 300 ms empty-store baseline. The broad Process search miss was 362 ms, with a separate 64 ms SQL control. These are uncontrolled-cache local measurements, not release or Desktop latency. History uses captured event sequences and exact native references. |
 | Desktop and wire agreement | Off-plan ancestry and pane/draft retention pass unit and mounted native-terminal fixtures. Graph and membership wire use captured numeric IDs in Rust/Swift. History and usage use the coordinated Session wire types. Configured Desktop continuity remains unproven. |
-| Status-owned Chapters (retired) | Chapter rotation left the model with `ops::chapter`; a plan is replaced in place. Legacy Linear Project adoption, which `lf wave sync` still runs, keeps its fixtures. No Chapter table or packet belongs in the model. |
+| Status-owned Projects (retired) | Project rotation left the model; a Wave's Project is replaced in place. Legacy Linear Project adoption, which `lf wave sync` still runs, keeps its fixtures. No rotation table or packet belongs in the model. |
 | Integrated acceptance | Affected checks, configured provider/Desktop, backed-up current-state conversion and final consistency remain required. Branch fixture passes do not establish installed acceptance or promotion readiness. |
 
 Admission preserves saved executable/Machine/database handoff and failed-command

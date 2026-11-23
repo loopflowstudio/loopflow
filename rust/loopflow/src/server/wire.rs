@@ -26,6 +26,15 @@ impl Operation {
             Self::Write(_) | Self::Measured(MeasuredOperation::Write { .. })
         )
     }
+
+    /// The directory a command names, whose repository it reads or changes.
+    pub(super) fn directory(&mut self) -> Option<std::path::PathBuf> {
+        match self {
+            Self::Read(read) => read.directory_mut().cloned(),
+            Self::Write(write) => write.directory_mut().cloned(),
+            Self::Server(_) | Self::Measured(_) => None,
+        }
+    }
 }
 
 /// The ordinary operation and its per-request work receipt in one response.
@@ -49,6 +58,27 @@ pub struct MeasuredResult {
 #[cfg(test)]
 mod tests {
     use super::ClientMessage;
+
+    #[test]
+    fn a_request_another_machine_sent_carries_its_secrets_and_never_prints_them() {
+        let raw = include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/machine_request.json"
+        );
+        let message: ClientMessage = serde_json::from_str(raw).unwrap();
+        let loopflow_execution::machine::wire::ClientMessage::Request {
+            sender: Some(sender),
+            ..
+        } = &message
+        else {
+            panic!("no sender: {message:?}");
+        };
+        assert_eq!(sender.secrets.0[0].0, "CLAUDE_CODE_OAUTH_TOKEN");
+        assert!(!format!("{message:?}").contains("sk-fixture"));
+        assert_eq!(
+            serde_json::to_value(&message).unwrap(),
+            serde_json::from_str::<serde_json::Value>(raw).unwrap()
+        );
+    }
 
     #[test]
     fn shared_client_fixtures_decode_and_round_trip_without_defaults() {
@@ -95,8 +125,10 @@ mod tests {
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/upload.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/ticket.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_run.json"),
-            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_ship.json"),
-            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_hold.json"),
+            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on.json"),
+            include_str!(
+                "../../../loopflow-execution/tests/fixtures/dto/server/task_auto_off.json"
+            ),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_steer.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_report.json"),
             include_str!(

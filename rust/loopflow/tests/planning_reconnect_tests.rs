@@ -55,8 +55,8 @@ fn planning_reconnect_fixture(mode: &str) {
         .unwrap();
     let fixture = serde_json::json!({
         "lf": env!("CARGO_BIN_EXE_lf"), "repo": repo.path(), "home": home.path(),
-        "issue": registered.task.linear_id.as_ref().unwrap().as_str(), "task": registered.task.id.as_str(),
-        "project": project.linear_id.as_ref().unwrap().as_str(), "wave": registered.task.wave_id.as_ref().unwrap().as_str(),
+        "issue": registered.task.tracker_id.as_ref().unwrap().as_str(), "task": registered.task.id.as_str(),
+        "project": project.tracker_id.as_ref().unwrap().as_str(), "wave": registered.task.wave_id.as_ref().unwrap().as_str(),
     });
     let input = home.path().join("fixture.json");
     std::fs::write(&input, serde_json::to_vec(&fixture).unwrap()).unwrap();

@@ -22,7 +22,9 @@ pub fn accepts(cli: &Cli) -> bool {
                 | TaskCommand::Abandon { .. }
                 | TaskCommand::Update { .. }
                 | TaskCommand::Move { .. }
-                | TaskCommand::Hold { .. }
+                | TaskCommand::Auto {
+                    cmd: crate::lf::AutoCommand::Off { .. }
+                }
         ),
         Some(Commands::Wave { cmd }) => matches!(
             cmd,
@@ -53,17 +55,16 @@ fn execute(cli: &Cli, args: &[String], directory: &Path, io: &mut CommandIo<'_>)
     if let Some(forward) = super::work_route::forward(cli, args, directory)? {
         return forward.run(cli, directory, io);
     }
-    // Session, shipping, holding and arrangement select their own Work. Other
+    // Session, auto and arrangement select their own Work. Other
     // commands retain the CLI's explicit Task placement without changing
     // process cwd.
     let binding = if !matches!(
         cli.command,
         Some(
             Commands::Session { .. }
-                | Commands::Ship { .. }
                 | Commands::Desktop { .. }
                 | Commands::Task {
-                    cmd: TaskCommand::Hold { .. }
+                    cmd: TaskCommand::Auto { .. }
                 }
         )
     ) {
@@ -109,21 +110,33 @@ fn local(
     match cli.command.as_ref().context("missing mutation")? {
         Commands::Task {
             cmd:
-                TaskCommand::Hold {
-                    issue,
-                    reason,
-                    json,
+                TaskCommand::Auto {
+                    cmd:
+                        crate::lf::AutoCommand::Off {
+                            issue,
+                            reason,
+                            json,
+                        },
                 },
         } => {
             let issue = issue
                 .as_deref()
                 .or(cli.task.as_deref())
                 .context("No Task selected")?;
-            let held = loopflow_execution::engine::task::hold(directory, issue, reason.as_deref())?;
+            // A Task another Machine runs is set there.
+            let super::write::WriteResult::TaskAutoOff(off) = super::write::Write::TaskAutoOff {
+                directory: directory.to_path_buf(),
+                issue: issue.to_owned(),
+                reason: reason.clone(),
+            }
+            .run()?
+            else {
+                unreachable!("task.auto.off answers with what it turned off")
+            };
             if *json {
-                writeln!(io.output, "{}", serde_json::to_string(&held)?)?;
+                writeln!(io.output, "{}", serde_json::to_string(&off)?)?;
             } else {
-                writeln!(io.output, "{}", held.render())?;
+                writeln!(io.output, "{}", off.render())?;
             }
             Ok(())
         }
@@ -178,12 +191,19 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
     match command {
         TaskCommand::Create { .. } => super::task_create::create(repo, command, io, false, None),
         TaskCommand::Claim { issue, json } | TaskCommand::Unassign { issue, json } => {
-            use loopflow_execution::ops::task_ownership::{render, OwnershipChange};
-            let requested = match command {
-                TaskCommand::Claim { .. } => OwnershipChange::Claim,
-                _ => OwnershipChange::Unassign,
+            use super::write::{Write, WriteResult};
+            use loopflow_execution::ops::task_ownership::render;
+            let (directory, issue) = (repo.to_path_buf(), issue.clone());
+            let write = match command {
+                TaskCommand::Claim { .. } => Write::TaskClaim { directory, issue },
+                _ => Write::TaskUnassign { directory, issue },
             };
-            let ownership = loopflow_execution::engine::task::ownership(repo, issue, requested)?;
+            // A Task whose ownership another Machine writes is changed there.
+            let (WriteResult::TaskClaim(ownership) | WriteResult::TaskUnassign(ownership)) =
+                write.run()?
+            else {
+                unreachable!("an ownership write answers with ownership")
+            };
             if *json {
                 writeln!(io.output, "{}", serde_json::to_string(&ownership)?)?;
             } else {
@@ -269,7 +289,12 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             json,
             ..
         } => {
-            let ownership = loopflow_execution::ops::session_move::move_task(issue, machine, None)?;
+            let ownership = loopflow_execution::ops::session_move::move_task(
+                issue,
+                machine,
+                None,
+                super::write::run_task,
+            )?;
             if *json {
                 writeln!(io.output, "{}", serde_json::to_string(&ownership)?)?;
             }

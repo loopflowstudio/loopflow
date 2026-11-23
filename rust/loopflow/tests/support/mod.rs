@@ -5,9 +5,18 @@ pub use loopflow_execution::test_support::*;
 fn initialize_application_build() {
     loopflow_execution::test_support::isolate_from_the_developers_machine();
     loopflow::build_info::initialize();
+    // An integration binary runs the `lf` Cargo built beside it. Building it
+    // again from inside the test would link another feature set over that
+    // path while this binary's Machine server still spawns from it.
+    if let (Some(built), None) = (
+        option_env!("CARGO_BIN_EXE_lf"),
+        std::env::var_os("LOOPFLOW_TEST_LF"),
+    ) {
+        std::env::set_var("LOOPFLOW_TEST_LF", built);
+    }
 }
 
-#[allow(dead_code)] // Session fixtures serve the integration binary only.
+#[allow(dead_code)]
 pub const CALLER: &str = "run_00000000000000000000000000000002";
 
 /// A prepared conversation, before a provider has started.
@@ -44,7 +53,6 @@ pub fn prepare_conversation(
             title: title.into(),
             title_source: loopflow_execution::session::TitleSource::Generated,
             request: Some(title.into()),
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         },
@@ -72,7 +80,6 @@ pub fn prepare_conversation(
     (session.id.to_string(), input, dir)
 }
 
-/// The provider thread `native` that `input` ran on, as its hooks record it.
 #[allow(dead_code)]
 pub fn record_native(home: &std::path::Path, id: &str, input: &str, native: &str) {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
@@ -81,7 +88,11 @@ pub fn record_native(home: &std::path::Path, id: &str, input: &str, native: &str
         [id, native],
     )
     .unwrap();
-    db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-        SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id',?3,'account_id',NULL)),current_capture
-        FROM agent_sessions WHERE id=?1", [id,input,native]).unwrap();
+    // The input resumes the native conversation its captured row names.
+    db.execute(
+        "UPDATE session_events SET provider_thread=?3,provider_account=NULL
+         WHERE session_id=?1 AND kind='captured' AND receipt_key=?2",
+        [id, input, native],
+    )
+    .unwrap();
 }

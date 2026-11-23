@@ -101,7 +101,7 @@ fn read() -> Result<(Vec<Step>, Vec<SessionBind>)> {
     if !database.exists() {
         return Ok((Vec::new(), Vec::new()));
     }
-    let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+    let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
         &database,
         loopflow_execution::store::token_key::encryption_key,
     )?;

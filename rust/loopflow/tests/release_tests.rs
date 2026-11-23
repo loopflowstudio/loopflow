@@ -2548,8 +2548,8 @@ fn release_run_waits_out_a_repair_disarm_but_stops_on_a_persons() {
         let gh_script = write_gh_merge_wait_script(&log_path.to_string_lossy(), wait);
         let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
         if repairing {
-            // A repair reservation whose Process has no recorded death is live;
-            // the disarm falls inside its lifetime.
+            // A repair reserved this boot with no recorded end is live; the
+            // disarm falls inside its lifetime.
             let config = storage_config_from_env().unwrap();
             tokio::runtime::Runtime::new()
                 .unwrap()
@@ -2559,14 +2559,9 @@ fn release_run_waits_out_a_repair_disarm_but_stops_on_a_persons() {
             let conn = rusqlite::Connection::open(path).unwrap();
             let started = now.unix_timestamp() - 60;
             conn.execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',?2)",
-                rusqlite::params![REPAIR, started],
-            )
-            .unwrap();
-            conn.execute(
                 "INSERT INTO ci_incidents(identity,repo,pr_number,failed_head_sha,failure_set_json,
-                 poll_observed_at,created_at,updated_at,repair_lf_process_id)
-                 VALUES('incident',?1,1176,'old-head','[]',?2,?2,?2,?3)",
+                 poll_observed_at,created_at,updated_at,repair_lf_process_id,repair_started_at)
+                 VALUES('incident',?1,1176,'old-head','[]',?2,?2,?2,?3,?2)",
                 rusqlite::params![
                     RepoId::discover(repo.path()).unwrap().as_str(),
                     started,
@@ -2857,19 +2852,21 @@ read -r initialize
 echo '{{"jsonrpc":"2.0","id":1,"result":{{}}}}'
 read -r initialized
 read -r thread_start
-echo '{{"jsonrpc":"2.0","id":2,"result":{{"thread":{{"id":"thread-test"}}}}}}'
+echo '{{"jsonrpc":"2.0","id":2,"result":{{"thread":{{"id":"019a0000-0000-7000-8000-000000000001"}}}}}}'
 read -r turn_start
 printf '%s\n' "$turn_start" > '{prompt}'
 touch '{repaired}'
-echo '{{"jsonrpc":"2.0","id":3,"result":{{"turn":{{"id":"turn-test"}}}}}}'
-echo '{{"jsonrpc":"2.0","method":"turn/started","params":{{"threadId":"thread-test","turn":{{"id":"turn-test","status":"inProgress"}}}}}}'
-printf '%s\n' '{{"jsonrpc":"2.0","method":"item/completed","params":{{"threadId":"thread-test","turnId":"turn-test","item":{{"type":"agentMessage","id":"message-test","text":"{{\"status\":\"published\",\"summary\":\"Merge group rerun green; re-armed.\"}}","phase":"final_answer"}}}}}}'
-echo '{{"jsonrpc":"2.0","method":"turn/completed","params":{{"threadId":"thread-test","turn":{{"id":"turn-test","status":"completed"}}}}}}'
+echo '{{"jsonrpc":"2.0","id":3,"result":{{"turn":{{"id":"019a0000-0000-7000-8000-000000000002"}}}}}}'
+echo '{{"jsonrpc":"2.0","method":"turn/started","params":{{"threadId":"019a0000-0000-7000-8000-000000000001","turn":{{"id":"019a0000-0000-7000-8000-000000000002","status":"inProgress"}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"item/completed","params":{{"threadId":"019a0000-0000-7000-8000-000000000001","turnId":"019a0000-0000-7000-8000-000000000002","item":{{"type":"agentMessage","id":"message-test","text":"{{\"status\":\"published\",\"summary\":\"Merge group rerun green; re-armed.\"}}","phase":"final_answer"}}}}}}'
+python3 '{rollout}' 019a0000-0000-7000-8000-000000000001 019a0000-0000-7000-8000-000000000002 '"{{\"status\":\"published\",\"summary\":\"Merge group rerun green; re-armed.\"}}"' || exit 1
+echo '{{"jsonrpc":"2.0","method":"turn/completed","params":{{"threadId":"019a0000-0000-7000-8000-000000000001","turn":{{"id":"019a0000-0000-7000-8000-000000000002","status":"completed"}}}}}}'
 if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
 while read -r line; do :; done
 "#,
         prompt = prompt.display(),
         repaired = repaired.display(),
+        rollout = support::codex_rollout_script(),
     ));
     let lf = format!("#!/bin/sh\nexec '{}' \"$@\"\n", env!("CARGO_BIN_EXE_lf"));
     let _env = EnvGuard::new(&[("gh", &gh), ("codex", &codex), ("lf", &lf)]);

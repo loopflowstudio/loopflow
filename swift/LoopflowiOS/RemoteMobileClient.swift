@@ -38,7 +38,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         let directory = URL.applicationSupportDirectory.appending(path: "submissions-\(savedMachine.machineID)")
         let machineID = savedMachine.machineID
         return CreationSubmissions(directory: directory, machine: { machineID }, lookup: { [self] id in
-            try await connection().request(.read(.creationGet(requestID: id)), deadline: Self.requestDeadline).printed
+            try await connection().read(.creationGet(requestID: id), deadline: Self.requestDeadline)
         }, send: { [self] payload in
             let creation = try JSONDecoder().decode(JSONValue.self, from: payload)
             return String(decoding: try await connection().request(.submittedCreation(creation), deadline: Self.requestDeadline).bytes,
@@ -58,14 +58,28 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         }
     }
 
+    /// One Task as `lf task show` reads it, kept current: each update is a whole reading as sent.
+    func observeTask(issue: String) -> ServerWatch<RawJSON> {
+        // The Machine finds a Task by its ID from any directory, as Desktop asks.
+        ServerLink.subscribe(.taskGet(directory: "/", issue: issue), connect: { [self] in try await connection() }, map: { update in
+            guard case .reading(let frame) = update else { return nil }
+            return frame
+        })
+    }
+
     /// The Machine's Waves that are still in use.
     func waves() async throws -> [Wave] {
         try await query.allWaves().filter { $0.status != .abandoned }
     }
 
+    /// The Machine's `theme:` text; nil when it names none.
+    func themeChoice() async throws -> String? {
+        try await request(.config(.configTheme(value: nil))).decode(ConfigurationFileValue.self).text
+    }
+
     private struct Ticket: Decodable { let ticket: String }
 
-    /// Attaching takes the keyboard and fits the terminal to `size`.
+    /// Attaching fits the terminal to `size`.
     func attach(sessionID: String, size: TerminalGeometry) async throws -> RemoteAttachment {
         let ticket: String
         do { ticket = try decode(Ticket.self, await request(.sessionAttach(session: sessionID))).ticket }
@@ -94,13 +108,22 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         return MobileCreationContext(machineID: machineID, name: savedMachine.endpoint.host ?? "Machine", repositories: portfolio.repos)
     }
 
-    /// Saved before it is sent; a repeat asks the Machine first and resends the
-    /// same payload only when the Machine says to continue.
-    func createTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome {
+    /// Saved before it is sent, then sent once; the answer names the Task and
+    /// its conversation, so opening it reads nothing more.
+    func startTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskStart {
         try verifySubmission(submission)
         let id = submission.id.uuidString.lowercased()
-        let record = try await journal.record(.taskCreate(directory: submission.directory, requestID: id, title: nil,
-            request: submission.request, wave: nil, graph: nil, session: nil, run: true), requestID: id)
+        let answer = try await journal.submit(taskCreate(submission, requestID: id), requestID: id)
+        do { return MobileTaskStart(try RegistryQuery.decode(TaskCreated.self, from: answer)) }
+        catch { throw SubmittedCreationError(requestID: id, cause: error) }
+    }
+
+    /// A saved request asks the Machine first and resends the same payload
+    /// only when the Machine says to continue.
+    func recoverTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome {
+        try verifySubmission(submission)
+        let id = submission.id.uuidString.lowercased()
+        let record = try await journal.record(taskCreate(submission, requestID: id), requestID: id)
         guard let lookup = try await journal.reconcile(record) else {
             throw RegistryQueryError("This request is already being sent")
         }
@@ -116,18 +139,29 @@ final class RemoteMobileClient: MobileTaskCreationClient {
             receipt: receipt, message: lookup.disposition == .inspect ? lookup.explanation : nil)
     }
 
+    private func taskCreate(_ submission: MobileTaskSubmission, requestID: String) -> ServedWrite {
+        .taskCreate(directory: submission.directory, requestID: requestID, title: nil,
+                    request: submission.request, wave: nil, graph: nil, session: nil, run: true)
+    }
+
     /// The created Task is on screen: its saved creation is done.
     func taskPresented(_ submission: MobileTaskSubmission) async throws {
         try await journal.presented(submission.id.uuidString.lowercased())
     }
 
-    func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content {
+    func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> MobileTask {
         try verifySubmission(submission)
-        let plan = try await query.viewPlan(expression: "task:\(taskID)", repoPath: submission.directory)
-        guard let task = try mobileTasks(plan).first(where: { $0.work.id == taskID }) else {
+        guard let task = try await task(id: taskID, directory: submission.directory) else {
             throw RegistryQueryError("The Task was created, but its workspace is not available yet. Try Open Task again.")
         }
         return task
+    }
+
+    /// One Task's row as a reading of its repository lists it, with the
+    /// conversation it has now; nil when that reading does not list it.
+    func task(id: String, directory: String) async throws -> MobileTask? {
+        let plan = try await query.viewPlan(expression: "task:\(id)", repoPath: directory)
+        return try mobileTasks(plan).first { $0.work.id == id }.map(MobileTask.init)
     }
 
     private func verifySubmission(_ submission: MobileTaskSubmission) throws {
@@ -203,7 +237,7 @@ final class RemoteAttachment {
     private var pendingBytes = 0
     private var nextRequest: UInt64 = 1
     private var closed = false
-    private var controlDeadline: Task<Void, Never>?
+    private var attachDeadline: Task<Void, Never>?
 
     private init(sessionID: String, socket: MachineSocket) {
         self.sessionID = sessionID
@@ -227,22 +261,22 @@ final class RemoteAttachment {
         return link
     }
 
-    /// Take the keyboard and size back after another device took them.
-    func takeControl(size: TerminalGeometry) throws {
+    /// Take the size back after another device took it.
+    func takeSize(_ size: TerminalGeometry) throws {
         guard !closed, decoder.ready else { throw RegistryQueryError("The Session is not ready") }
         nextRequest += 1
         decoder.expectAttachment(nextRequest)
-        controlDeadline = connection.deadline(seconds: 5)
+        attachDeadline = connection.deadline(seconds: 5)
         try enqueue(attachRequest(id: nextRequest, size: size))
     }
 
     func send(_ bytes: Data) throws {
-        guard !closed, decoder.ready, decoder.inputControl else { throw RegistryQueryError("Keyboard control was released") }
+        guard !closed, decoder.ready else { throw RegistryQueryError("The Session is not ready") }
         try enqueue(OwnerStream.input(bytes))
     }
 
     func resize(columns: Int, rows: Int) throws {
-        guard !closed, decoder.geometryControl else { return }
+        guard !closed, decoder.sizing else { return }
         nextRequest += 1
         try enqueue(OwnerStream.resizeRequest(id: nextRequest, columns: columns, rows: rows))
     }
@@ -253,7 +287,7 @@ final class RemoteAttachment {
         connection.close()
         writer?.cancel()
         heartbeat?.cancel()
-        controlDeadline?.cancel()
+        attachDeadline?.cancel()
         pendingEvents = []
         outgoing.finish()
     }
@@ -264,7 +298,7 @@ final class RemoteAttachment {
         while !closed && !Task.isCancelled {
             if let event = pendingEvents.popFirst() {
                 if pendingEvents.isEmpty { pendingEvents = [] }
-                if case .control = event, decoder.awaitingAttachment { continue }
+                if case .sizing = event, decoder.awaitingAttachment { continue }
                 return event
             }
             if decoder.ended { close(); return nil }
@@ -272,7 +306,7 @@ final class RemoteAttachment {
                 let bytes = try await connection.receiveBytes()
                 guard !closed, !Task.isCancelled else { break }
                 pendingEvents = ArraySlice(try decoder.receive(bytes))
-                if decoder.ready && !decoder.awaitingAttachment { controlDeadline?.cancel() }
+                if decoder.ready && !decoder.awaitingAttachment { attachDeadline?.cancel() }
                 await Task.yield()
             } catch { fail("Session connection closed. Reconnect for a fresh screen; input was not retried.") }
         }

@@ -146,7 +146,11 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
         }
         let run = RunObservation {
             name: graph.entry.summary.name,
-            outcome: store.lf_process(&id)?.and_then(|process| process.outcome),
+            outcome: store.graph_process(id.as_str())?.and_then(|(graph, _)| {
+                crate::process::os_process::observed_result(&graph.run)
+                    .outcome()
+                    .map(str::to_owned)
+            }),
             completed: graph.entry.ended_at.is_some(),
             step: graph.steps.last().cloned(),
         };
@@ -276,12 +280,12 @@ mod tests {
         );
         assert!(quiet(&store), "between-step commits are silent");
         store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE processes SET started_at=1,completed_at=20,outcome='failed' WHERE id=?1",
-                [graph.as_str()],
+            .finish_run(
+                loopflow_storage::graph_process::RunOwner::GraphRun,
+                &graph,
+                20,
+                Some(1),
+                Some("it failed"),
             )
             .unwrap();
         let text = deliver(&store);
@@ -306,7 +310,7 @@ mod tests {
         let (_home, store, _task) = task_session();
         let run = store.test_graph("feature", "/task-updates", &[("implement", None)], None);
         assert!(quiet(&store));
-        finish_step(&store, &run);
+        finish_step(&store, &run, 0, None);
         assert!(quiet(&store));
         // Repeated labels are distinct occurrences, identified by Process id.
         let step = next_step(&store, &run, 0);
@@ -410,17 +414,35 @@ mod tests {
     }
 
     fn finish_run(store: &SqliteStore, run: &LfProcessId, outcome: &str) {
-        store.conn.lock().unwrap().execute(
-            "UPDATE processes SET completed_at=20,outcome=?2 WHERE id=?1 OR parent_lf_process_id=?1",
-            rusqlite::params![run, outcome],
-        ).unwrap();
+        let (exit, error) = match outcome {
+            "succeeded" => (0, None),
+            _ => (1, Some("it failed")),
+        };
+        finish_step(store, run, exit, error);
+        store
+            .finish_run(
+                loopflow_storage::graph_process::RunOwner::GraphRun,
+                run,
+                20,
+                Some(exit),
+                error,
+            )
+            .unwrap();
     }
 
-    fn finish_step(store: &SqliteStore, run: &LfProcessId) {
-        store.conn.lock().unwrap().execute(
-            "UPDATE processes SET completed_at=20,outcome='succeeded' WHERE parent_lf_process_id=?1",
-            [run],
-        ).unwrap();
+    fn finish_step(store: &SqliteStore, run: &LfProcessId, exit: i32, error: Option<&str>) {
+        let graph = store.graph_process(run.as_str()).unwrap().unwrap().0;
+        for step in graph.steps {
+            store
+                .finish_run(
+                    loopflow_storage::graph_process::RunOwner::GraphStep,
+                    &step.run.id,
+                    20,
+                    Some(exit),
+                    error,
+                )
+                .unwrap();
+        }
     }
 
     fn next_step(store: &SqliteStore, run: &LfProcessId, key: u32) -> LfProcessId {
@@ -437,7 +459,10 @@ mod tests {
                 rusqlite::params![step, run, serde_json::json!(["lf", label]).to_string()],
             )
             .unwrap();
-        store.record_graph_step(run, &step, key, &[vec![]]).unwrap();
+        let start = loopflow_storage::graph_process::ExecutionStart::reserved(21);
+        store
+            .record_graph_step(run, &step, key, &[vec![]], &start)
+            .unwrap();
         step
     }
 

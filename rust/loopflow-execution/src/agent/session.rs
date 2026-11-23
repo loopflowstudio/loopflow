@@ -7,7 +7,6 @@ pub fn resolve_session_config(
     session: &crate::session::LfSession,
     settings: serde_yaml_ng::Value,
     output_schema: Option<&serde_json::Value>,
-    batch: bool,
 ) -> Result<AgentConfig> {
     let _selection = crate::config::settings::select_invocation(settings);
     let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
@@ -89,7 +88,7 @@ pub fn resolve_session_config(
             .is_none_or(|harness| harness == provider);
     let mut config = AgentConfig {
         cwd: Some(session.cwd.clone()),
-        skip_permissions: current.yolo,
+        yolo: current.yolo,
         chrome: current.chrome,
         codex_service_tier: current.codex.service_tier,
         output_schema: output_schema.cloned(),
@@ -98,38 +97,16 @@ pub fn resolve_session_config(
     if importing || selected.is_some_and(|agent| agent == "claude") {
         config.agent = config.agent.with_configured_model(current);
     }
-    let mut needs_execution_boundary = false;
     if let Some(request) = request {
         if !importing
-            && crate::harness::HarnessKind::parse(provider)
-                .is_some_and(|kind| kind.harness().capabilities().initial_prompt_on_resume)
+            && crate::harness::launcher(config.agent.harness)
+                .capabilities()
+                .initial_prompt_on_resume
         {
             config.task_prompt = request.codex_initial_input();
         }
         config.system_prompt = request.system_prompt;
         config.conversation_context = request.conversation_context;
-        config.write_scope = request.write_scope;
-        needs_execution_boundary = request.execution_boundary.is_some();
-    }
-    if batch {
-        if let Some(task) = session
-            .task_id
-            .as_ref()
-            .map(|id| store.task_by_issue(id.as_str()))
-            .transpose()?
-            .flatten()
-        {
-            if task.worktree()?.canonicalize()? == session.cwd.canonicalize()? {
-                config.write_scope = super::AgentWriteScope::Worktree;
-                needs_execution_boundary = true;
-            }
-        }
-    }
-    if needs_execution_boundary {
-        config.execution_boundary = Some(super::checkout_execution_boundary(
-            &session.cwd,
-            &config.agent,
-        )?);
     }
     if resumes_native {
         if let Some(native) = session

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use loopflow_test_support::TestRepo;
+use rusqlite::OptionalExtension;
 
 fn native_codex_command(repo: &std::path::Path, home: &std::path::Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
@@ -106,161 +107,152 @@ fn settled_live_agents(database: &rusqlite::Connection) -> i64 {
 }
 
 #[test]
-fn codex_service_tier_reaches_native_and_headless_launch_and_resume() {
-    for mode in ["-i", "-b"] {
-        for (setting, expected) in [
-            (None, None),
-            (Some("standard"), Some("default")),
-            (Some("fast"), Some("priority")),
-        ] {
-            let repo = TestRepo::new();
-            let files = [
-                (
-                    ".lf/config.yaml",
-                    "diff: false\ndiff_files: false\npaste: false\n",
-                ),
-                (".lf/skills/tier-probe.md", "Tier probe"),
-                (".lf/graphs/tier-check.yaml", "- tier-probe\n"),
-            ];
-            for (path, content) in files {
-                repo.create_file(path, content);
-            }
-            let home = tempfile::tempdir().unwrap();
-            support::install_native_codex(&home.path().join("bin"));
-            // An interactive Codex conversation hosts its app-server as Work, in
-            // its Task's checkout. A bare Graph runs its headless step here.
-            let (_server, worktree, task) = codex_task(&repo, home.path(), &files);
-            let cwd = if mode == "-i" {
-                worktree.as_path()
-            } else {
-                repo.path()
-            };
-            let run = |args: &[&str]| {
-                let output = native_codex_command(cwd, home.path(), args)
-                    .output()
-                    .unwrap();
-                assert!(
-                    output.status.success(),
-                    "{mode}/{setting:?} {args:?}: {}\n{}\n{}\n{}",
-                    output.status,
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr),
-                    native_logs(home.path())
-                );
-            };
-            if let Some(setting) = setting {
-                run(&["set", "--global", "codex.service_tier", setting]);
-            }
-            let native = home.path().join(".codex");
-            fs::create_dir_all(&native).unwrap();
-            let provider_config = "service_tier = \"priority\"\n";
-            fs::write(native.join("config.toml"), provider_config).unwrap();
-            let read = |name: &str| -> serde_json::Value {
-                serde_json::from_slice(&fs::read(home.path().join(name)).unwrap()).unwrap()
-            };
-            let session = (mode == "-i").then(|| {
-                support::prepare_native_conversation(
-                    &home.path().join("loopflow.db"),
-                    &worktree,
-                    "codex",
-                    None,
-                    "Tier probe",
-                )
-            });
-            let args = if mode == "-b" {
-                vec![mode, "-a", "codex", "graph", "tier-check"]
-            } else {
-                vec![
-                    mode,
-                    "--task",
-                    &task,
-                    "-a",
-                    "codex",
-                    "resume",
-                    session.as_ref().unwrap(),
-                ]
-            };
-            run(&args);
-            let params = read("native-config.json");
-            assert_eq!(
-                params
-                    .get("serviceTier")
-                    .and_then(serde_json::Value::as_str),
-                expected
-            );
-            if mode == "-i" {
-                let server = read("native-server-config.json");
-                assert_eq!(
-                    server
-                        .get("service_tier")
-                        .and_then(serde_json::Value::as_str),
-                    expected
-                );
-            }
-            assert_eq!(read("native-tier.json"), expected.unwrap_or("priority"));
-            let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-            assert_eq!(settled_live_agents(&database), 0);
-            if mode == "-b" {
-                // Graph Runs are finite; headless resume continues an interactive Session.
-                run(&["-i", "-a", "codex", ":", "Resume seed"]);
-                assert_eq!(settled_live_agents(&database), 0);
-            }
-            let session: String = database
-                .query_row(
-                    "SELECT id FROM agent_sessions WHERE interactive=1 LIMIT 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap();
+fn codex_service_tier_native_inherits_provider_default() {
+    assert_codex_service_tier("-i", None, None);
+}
 
-            if mode == "-i" {
-                fs::write(home.path().join("check-child-tiers"), "").unwrap();
-            }
-            let resume_tier = setting.map(|_| "default");
-            let mut args = vec![mode];
-            if resume_tier.is_some() {
-                args.extend(["--setting", "codex.service_tier=default"]);
-            }
-            if mode == "-b" {
-                args.extend(["steer", &session, "Resume tier probe"]);
-            } else {
-                args.extend(["resume", &session]);
-            }
-            run(&args);
-            assert_eq!(
-                read("native-config.json")["serviceTier"].as_str(),
-                resume_tier
-            );
-            if mode == "-i" {
-                let probe = read("native-child-tiers.json");
-                assert_eq!(probe["new"], resume_tier.unwrap_or("priority"));
-                assert_eq!(probe["fork"], resume_tier.unwrap_or("priority"));
-            }
-            if mode == "-i" {
-                // The probe's new thread is a conversation started beside this
-                // one, so its app-server outlives the exit. Stop the stand-in.
-                let pids: Vec<i64> = database
-                    .prepare(
-                        "SELECT pid FROM processes WHERE kind='agent' AND completed_at IS NULL",
-                    )
-                    .unwrap()
-                    .query_map([], |row| row.get(0))
-                    .unwrap()
-                    .map(Result::unwrap)
-                    .collect();
-                assert_eq!(pids.len(), 1, "{setting:?}: {pids:?}");
-                // SAFETY: the pid is this fixture's own stand-in app-server.
-                unsafe { libc::kill(pids[0] as i32, libc::SIGKILL) };
-            } else {
-                assert_eq!(settled_live_agents(&database), 0);
-            }
-            assert_eq!(
-                fs::read_to_string(native.join("config.toml")).unwrap(),
-                provider_config
-            );
-            run(&["unset", "--global", "codex.service_tier"]);
-        }
+#[test]
+fn codex_service_tier_native_uses_standard() {
+    assert_codex_service_tier("-i", Some("standard"), Some("default"));
+}
+
+#[test]
+fn codex_service_tier_native_uses_fast() {
+    assert_codex_service_tier("-i", Some("fast"), Some("priority"));
+}
+
+#[test]
+fn codex_service_tier_headless_inherits_provider_default() {
+    assert_codex_service_tier("-b", None, None);
+}
+
+#[test]
+fn codex_service_tier_headless_uses_standard() {
+    assert_codex_service_tier("-b", Some("standard"), Some("default"));
+}
+
+#[test]
+fn codex_service_tier_headless_uses_fast() {
+    assert_codex_service_tier("-b", Some("fast"), Some("priority"));
+}
+
+fn assert_codex_service_tier(mode: &str, setting: Option<&str>, expected: Option<&str>) {
+    let repo = TestRepo::new();
+    let files = [
+        (
+            ".lf/config.yaml",
+            "diff: false\ndiff_files: false\npaste: false\n",
+        ),
+        (".lf/skills/tier-probe.md", "Tier probe"),
+        (".lf/graphs/tier-check.yaml", "- tier-probe\n"),
+    ];
+    for (path, content) in files {
+        repo.create_file(path, content);
     }
+    let home = tempfile::tempdir().unwrap();
+    support::install_native_codex(&home.path().join("bin"));
+    // Only the native Work conversation needs a Task and Machine server.
+    let native_task = (mode == "-i").then(|| codex_task(&repo, home.path(), &files));
+    let cwd = native_task
+        .as_ref()
+        .map_or(repo.path(), |(_, worktree, _)| worktree.as_path());
+    let run = |args: &[&str]| {
+        let output = native_codex_command(cwd, home.path(), args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{mode}/{setting:?} {args:?}: {}\n{}\n{}\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+            native_logs(home.path())
+        );
+    };
+    if let Some(setting) = setting {
+        run(&["set", "--global", "codex.service_tier", setting]);
+    }
+    let native = home.path().join(".codex");
+    fs::create_dir_all(&native).unwrap();
+    let provider_config = "service_tier = \"priority\"\n";
+    fs::write(native.join("config.toml"), provider_config).unwrap();
+    let read = |name: &str| -> serde_json::Value {
+        serde_json::from_slice(&fs::read(home.path().join(name)).unwrap()).unwrap()
+    };
+    if let Some((_, worktree, task)) = &native_task {
+        let session = support::prepare_native_conversation(
+            &home.path().join("loopflow.db"),
+            worktree,
+            "codex",
+            None,
+            "Tier probe",
+        );
+        run(&[mode, "--task", task, "-a", "codex", "resume", &session]);
+    } else {
+        run(&[mode, "-a", "codex", "graph", "tier-check"]);
+    }
+    let params = read("native-config.json");
+    assert_eq!(
+        params
+            .get("serviceTier")
+            .and_then(serde_json::Value::as_str),
+        expected
+    );
+    if mode == "-i" {
+        let server = read("native-server-config.json");
+        assert_eq!(
+            server
+                .get("service_tier")
+                .and_then(serde_json::Value::as_str),
+            expected
+        );
+    }
+    assert_eq!(read("native-tier.json"), expected.unwrap_or("priority"));
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    assert_eq!(settled_live_agents(&database), 0);
+    if mode == "-b" {
+        // Graph Runs are finite; headless resume continues an interactive Session.
+        run(&["-i", "-a", "codex", ":", "Resume seed"]);
+        assert_eq!(settled_live_agents(&database), 0);
+    }
+    let session: String = database
+        .query_row(
+            "SELECT id FROM agent_sessions WHERE interactive=1 LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    if mode == "-i" {
+        fs::write(home.path().join("check-child-tiers"), "").unwrap();
+    }
+    let resume_tier = setting.map(|_| "default");
+    let mut args = vec![mode];
+    if resume_tier.is_some() {
+        args.extend(["--setting", "codex.service_tier=default"]);
+    }
+    if mode == "-b" {
+        args.extend(["steer", &session, "Resume tier probe"]);
+    } else {
+        args.extend(["resume", &session]);
+    }
+    run(&args);
+    assert_eq!(
+        read("native-config.json")["serviceTier"].as_str(),
+        resume_tier
+    );
+    if mode == "-i" {
+        let probe = read("native-child-tiers.json");
+        assert_eq!(probe["new"], resume_tier.unwrap_or("priority"));
+        assert_eq!(probe["fork"], resume_tier.unwrap_or("priority"));
+        // Give the fixture's private provider an exit signal if it is still live.
+        fs::write(home.path().join("release-child-tier-server"), "").unwrap();
+    }
+    assert_eq!(settled_live_agents(&database), 0);
+    assert_eq!(
+        fs::read_to_string(native.join("config.toml")).unwrap(),
+        provider_config
+    );
 }
 
 #[test]
@@ -289,19 +281,18 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
         fs::write(native.join("config.toml"), config).unwrap();
         fs::write(native.join("history.jsonl"), unrelated).unwrap();
         fs::write(home.path().join(failure), "").unwrap();
+        let session = support::prepare_native_conversation(
+            &home.path().join("loopflow.db"),
+            &worktree,
+            "codex",
+            None,
+            "Preserve this request",
+        );
         let start = std::time::Instant::now();
         let output = native_codex_command(
             &worktree,
             home.path(),
-            &[
-                "-i",
-                "--task",
-                &task,
-                "-a",
-                "codex",
-                ":",
-                "Preserve this request",
-            ],
+            &["-i", "--task", &task, "resume", &session],
         )
         .output()
         .unwrap();
@@ -351,18 +342,13 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
             unrelated
         );
         let adopted: i64 = database.query_row(
-            "SELECT count(*) FROM session_events WHERE json_extract(payload,'$.evidence.provider_session_id')='unrelated-native-session'",
+            "SELECT count(*) FROM session_events WHERE kind='captured' AND provider_thread='unrelated-native-session'",
             [], |row| row.get(0),
         ).unwrap();
         assert_eq!(
             adopted, 0,
             "failed startup must not adopt unrelated history"
         );
-        let session: String = database
-            .query_row("SELECT id FROM agent_sessions LIMIT 1", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
         fs::remove_file(home.path().join(failure)).unwrap();
         let output = native_codex_command(&worktree, home.path(), &["session", "resume", &session])
             .output()
@@ -412,23 +398,22 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
         &[
             (
                 ".lf/config.yaml",
-                "diff: false\ndiff_files: false\npaste: false\n",
+                "yolo: false\ndiff: false\ndiff_files: false\npaste: false\n",
             ),
             (".lf/skills/probe.md", &body),
         ],
     );
     let command = |args: &[&str]| native_codex_command(&worktree, home.path(), args);
-    let output = command(&[
-        "-i",
-        "--task",
-        &task,
-        "-a",
+    let session = support::prepare_native_conversation(
+        &home.path().join("loopflow.db"),
+        &worktree,
         "codex",
-        "probe",
+        Some("probe"),
         "Find the bug.",
-    ])
-    .output()
-    .unwrap();
+    );
+    let output = command(&["-i", "--task", &task, "resume", &session])
+        .output()
+        .unwrap();
     assert!(
         output.status.success(),
         "{}",
@@ -484,29 +469,23 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
     assert!(!state.contains_key("/<session-flags>/config.toml:session_start:0:0"));
     assert!(hooks["SessionStart"].as_array().unwrap().len() > 1);
     let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    // The Task's own conversation may start beside this one.
-    let session: String = database
-        .query_row(
-            "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
-            [key],
-            |row| row.get(0),
-        )
-        .unwrap();
     // Closing before subscription must not report the already-recorded first
     // request as unsent. A genuine terminal failure must still fail.
     for marker in ["close-terminal", "fail-terminal"] {
+        assert_eq!(settled_live_agents(&database), 0);
         fs::write(home.path().join(marker), "").unwrap();
         let output = command(&["session", "resume", &session]).output().unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(
             output.status.success(),
             marker == "close-terminal",
-            "{stderr}"
+            "{marker}: {stderr}"
         );
         assert!(!stderr.contains("before submitting"), "{stderr}");
         assert_eq!(read("native-turns.json").as_array().unwrap().len(), 1);
         fs::remove_file(home.path().join(marker)).unwrap();
     }
+    assert_eq!(settled_live_agents(&database), 0);
     let output = command(&["session", "resume", &session]).output().unwrap();
     assert!(
         output.status.success(),
@@ -568,7 +547,7 @@ for arg in "$@"; do
     printf '%s\000' "$arg" >> "$HOME/argv"
 done
 printf '%s' "$LF_CONTEXT_DELIVERY" > "$HOME/delivery-path"
-printf '%s' "$LF_PROVIDER_CONTEXT" > "$HOME/provider-context"
+printf '%s' "$LF_BARE_STEER" > "$HOME/bare-steer"
 cat > "$HOME/input"
 printf 'provider fixture refused this request\n' >&2
 exit 23
@@ -632,9 +611,10 @@ exit 23
             .map(|group| group["hooks"][0]["command"].as_str().unwrap().to_owned())
             .collect()
     };
-    let provider_context = fs::read_to_string(home.path().join("provider-context")).unwrap();
+    // A chat reports to no server; its hooks read steers from the store.
+    let bare_steer = fs::read_to_string(home.path().join("bare-steer")).unwrap();
     let adapter: loopflow_execution::steer::SteerAdapter =
-        serde_json::from_str(&provider_context).unwrap();
+        serde_json::from_str(&bare_steer).unwrap();
     let identity = format!("This Session: {}\n", adapter.session);
     assert!(!instructions.contains(&adapter.session));
     let invoke = |moment: &str| {
@@ -647,7 +627,7 @@ exit 23
             .env("PATH", "/usr/bin:/bin")
             .env("HOME", home.path())
             .env("LF_HOME", home.path().join("machine"))
-            .env("LF_PROVIDER_CONTEXT", &provider_context)
+            .env("LF_BARE_STEER", &bare_steer)
             .env(
                 "LF_CONTEXT_DELIVERY",
                 fs::read_to_string(home.path().join("delivery-path")).unwrap(),
@@ -941,11 +921,20 @@ fn claude_opens_lf_created_worktree_already_trusted() {
 
 /// A stand-in Claude that keeps what it saw under `$HOME`, for one launch environment.
 fn claude_launch(home: &Path, script: &str) -> Command {
+    install_claude_fixture(home, script);
+    claude_command(home)
+}
+
+fn install_claude_fixture(home: &Path, script: &str) {
     let bin = home.join("bin");
     fs::create_dir_all(&bin).unwrap();
     let provider = bin.join("claude");
     fs::write(&provider, format!("#!/bin/sh\n{script}\n")).unwrap();
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+fn claude_command(home: &Path) -> Command {
+    let bin = home.join("bin");
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     command
         .env_clear()
@@ -1008,6 +997,15 @@ fn saved_claude_model_is_used_by_new_sessions_but_not_changed_on_resume() {
             )
             .unwrap();
         assert_eq!(model.as_deref(), expected);
+        let args = fs::read_to_string(home.path().join("args")).unwrap();
+        let thread = args
+            .lines()
+            .skip_while(|arg| *arg != "--session-id")
+            .nth(1)
+            .unwrap();
+        let project = home.path().join(".claude/projects/fixture");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join(format!("{thread}.jsonl")), "{}\n").unwrap();
         run(&["set", "--global", "claude.model", "sonnet"]);
         run(&["-i", "resume", &session]);
         assert_eq!(launched_model().as_deref(), expected);
@@ -1117,9 +1115,11 @@ fn assert_background_conversation(run_graph: bool) {
     repo.commit("Add a graph that waits for review");
     repo.push();
     let home = tempfile::tempdir().unwrap();
-    let _server = loopflow_test_support::MachineServer::start(
+    // The server's recovery pass starts the conversation, with the stand-in.
+    let _server = loopflow_test_support::MachineServer::start_with_path(
         env!("CARGO_BIN_EXE_lf"),
         &home.path().join("machine"),
+        &format!("{}:/usr/bin:/bin", home.path().join("bin").display()),
     );
     let stop = home.path().join("stop");
     let _release = Release(stop.clone());
@@ -1128,23 +1128,24 @@ fn assert_background_conversation(run_graph: bool) {
         "while [ -d \"$HOME\" ] && [ ! -e '{}' ]; do sleep 0.1; done",
         stop.display()
     );
-    succeed(
-        claude_launch(home.path(), &script)
-            .current_dir(repo.path())
-            .args(["set", "--global", "default_agent", "claude"]),
-    );
-    let created: serde_json::Value = serde_json::from_str(&succeed(
-        claude_launch(home.path(), &script)
-            .current_dir(repo.path())
-            .args([
-                "task",
-                "create",
-                "--title",
-                "Background conversation",
-                "--json",
-            ]),
-    ))
-    .unwrap();
+    // Polling must leave the script intact while the background launch opens it.
+    install_claude_fixture(home.path(), &script);
+    let command = || claude_command(home.path());
+    succeed(command().current_dir(repo.path()).args([
+        "set",
+        "--global",
+        "default_agent",
+        "claude",
+    ]));
+    let created: serde_json::Value =
+        serde_json::from_str(&succeed(command().current_dir(repo.path()).args([
+            "task",
+            "create",
+            "--title",
+            "Background conversation",
+            "--json",
+        ])))
+        .unwrap();
     let id = created["task"]["id"].as_str().unwrap();
     let db = home.path().join("machine/loopflow.db");
     // Older open Tasks must not prevent this newly checked-out conversation
@@ -1172,7 +1173,7 @@ fn assert_background_conversation(run_graph: bool) {
 
     let worktree = if run_graph {
         succeed(
-            claude_launch(home.path(), &script)
+            command()
                 .current_dir(repo.path())
                 .args(["task", "run", id, "pause"]),
         );
@@ -1187,7 +1188,7 @@ fn assert_background_conversation(run_graph: bool) {
         PathBuf::from(path)
     } else {
         let placed: serde_json::Value = serde_json::from_str(&succeed(
-            claude_launch(home.path(), &script)
+            command()
                 .current_dir(repo.path())
                 .args(["checkout", id, "--json"]),
         ))
@@ -1199,7 +1200,7 @@ fn assert_background_conversation(run_graph: bool) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let listed: serde_json::Value = serde_json::from_str(&succeed(
-            claude_launch(home.path(), &script)
+            command()
                 .current_dir(&worktree)
                 .args(["session", "list", "--json"]),
         ))
@@ -1227,16 +1228,14 @@ fn assert_background_conversation(run_graph: bool) {
 
     // Checking the Task out again keeps the one conversation.
     succeed(
-        claude_launch(home.path(), &script)
+        command()
             .current_dir(repo.path())
             .args(["checkout", id, "--json"]),
     );
     assert_eq!(open_task_conversations(&db, id), 1);
-    let timing = fs::read_to_string(home.path().join("machine/logs/launch-timing.jsonl")).unwrap();
-    assert_eq!(timing.matches("background_start").count(), 1, "{timing}");
 
     succeed(
-        claude_launch(home.path(), &script)
+        command()
             .current_dir(repo.path())
             .args(["task", "abandon", id]),
     );
@@ -1251,10 +1250,249 @@ fn assert_background_conversation(run_graph: bool) {
     }
 }
 
+/// The Task's conversation: its current agent, that agent's pid, and the
+/// recovery pass's count of starts.
+fn task_conversation_agent(db: &Path, task: &str) -> Option<(String, Option<i64>, u32)> {
+    rusqlite::Connection::open(db)
+        .unwrap()
+        .query_row(
+            "SELECT s.agent_process_id,s.agent_pid,s.starts_since_turn FROM task_primary_sessions tp
+             JOIN agent_sessions s ON s.id=tp.session_id
+             WHERE tp.task_id=?1 AND s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL",
+            [task],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .unwrap()
+}
+
+/// Wait for the Task's conversation to run an agent other than `previous`.
+fn next_task_conversation_agent(
+    db: &Path,
+    home: &Path,
+    task: &str,
+    previous: Option<&str>,
+) -> (String, i64, u32) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        if let Some((agent, Some(pid), attempts)) = task_conversation_agent(db, task) {
+            if Some(agent.as_str()) != previous {
+                return (agent, pid, attempts);
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the conversation did not start after {previous:?}\n{}",
+            fs::read_to_string(home.join("machine/logs/lf.log")).unwrap_or_default()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
+/// The `lf holder run` that `pid`, a provider in a held terminal, runs under.
+fn holder_of(mut pid: i64) -> i64 {
+    loop {
+        let line =
+            succeed(Command::new("/bin/ps").args(["-o", "ppid=,command=", "-p", &pid.to_string()]));
+        let (parent, command) = line.trim().split_once(' ').unwrap();
+        if command.contains("holder run") {
+            return pid;
+        }
+        pid = parent.parse().unwrap();
+    }
+}
+
 #[test]
-fn a_task_checkout_without_the_agent_installed_skips_its_conversation() {
+fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
+    let machine = home.path().join("machine");
+    let path = format!("{}:/usr/bin:/bin", home.path().join("bin").display());
+    let server = || {
+        loopflow_test_support::MachineServer::start_with_path(
+            env!("CARGO_BIN_EXE_lf"),
+            &machine,
+            &path,
+        )
+    };
+    let mut running = Some(server());
+    let stop = home.path().join("stop");
+    let _release = Release(stop.clone());
+    // Each launch logs the thread it starts or resumes.
+    let threads = home.path().join("threads.log");
+    let script = format!(
+        "prev=; for a in \"$@\"; do case \"$prev\" in --resume|--session-id) echo \"$prev $a\" >> '{}';; esac; prev=\"$a\"; done\n\
+         while [ -d \"$HOME\" ] && [ ! -e '{}' ]; do sleep 0.1; done",
+        threads.display(),
+        stop.display()
+    );
+    // The first `count` launches, once the provider has logged them.
+    let launches = |count: usize| -> Vec<String> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let logged: Vec<String> = fs::read_to_string(&threads)
+                .unwrap_or_default()
+                .lines()
+                .map(str::to_owned)
+                .collect();
+            if logged.len() >= count {
+                return logged;
+            }
+            assert!(std::time::Instant::now() < deadline, "{logged:?}");
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    };
+    succeed(
+        claude_launch(home.path(), &script)
+            .current_dir(repo.path())
+            .args(["set", "--global", "default_agent", "claude"]),
+    );
+    let created: serde_json::Value = serde_json::from_str(&succeed(
+        claude_launch(home.path(), &script)
+            .current_dir(repo.path())
+            .args(["task", "create", "--title", "Comes back", "--json"]),
+    ))
+    .unwrap();
+    let id = created["task"]["id"].as_str().unwrap();
+    succeed(
+        claude_launch(home.path(), &script)
+            .current_dir(repo.path())
+            .args(["checkout", id, "--json"]),
+    );
+    let db = machine.join("loopflow.db");
+    let (first, pid, attempts) = next_task_conversation_agent(&db, home.path(), id, None);
+    assert_eq!(attempts, 0, "a first start is not a death");
+    let thread = launches(1)[0]
+        .strip_prefix("--session-id ")
+        .expect("a first start opens a thread")
+        .to_owned();
+    // Claude wrote its transcript, in the home the server's starts use.
+    let transcript = machine.join(format!(".claude/projects/-repo/{thread}.jsonl"));
+    fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+    fs::write(&transcript, "{}\n").unwrap();
+
+    // Killed: it comes back on its thread, counted once. Coming back is what
+    // says the death was not read as a quit.
+    succeed(Command::new("/bin/kill").args(["-9", &pid.to_string()]));
+    let (second, provider, attempts) =
+        next_task_conversation_agent(&db, home.path(), id, Some(&first));
+    assert_eq!(attempts, 1);
+    assert_eq!(launches(2)[1..], [format!("--resume {thread}")]);
+    let status = || -> serde_json::Value {
+        let detail: serde_json::Value = serde_json::from_str(&succeed(
+            claude_launch(home.path(), &script)
+                .current_dir(repo.path())
+                .args(["task", "status", id, "--json"]),
+        ))
+        .unwrap();
+        let conversation = detail["conversation"].as_str().unwrap().to_string();
+        detail["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|session| session["id"] == conversation.as_str())
+            .unwrap()
+            .clone()
+    };
+    let conversation = status();
+    assert!(
+        ["active", "detached"].contains(&conversation["state"].as_str().unwrap()),
+        "{conversation}"
+    );
+    assert_eq!(conversation["start"]["attempts"], 1, "{conversation}");
+    assert_eq!(
+        conversation["outlook"],
+        serde_json::Value::Null,
+        "{conversation}"
+    );
+
+    // A finished turn resets the count; then the server stops, the holder
+    // dies with it, and the next server starts the conversation once. The
+    // crash took the transcript too: it goes on in a fresh thread.
+    fs::remove_file(&transcript).unwrap();
+    rusqlite::Connection::open(&db)
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET starts_since_turn=0,last_started_at=NULL",
+            [],
+        )
+        .unwrap();
+    drop(running.take());
+    let holder = holder_of(provider);
+    succeed(Command::new("/bin/kill").args(["-9", &holder.to_string()]));
+    running = Some(server());
+    let (third, _, attempts) = next_task_conversation_agent(&db, home.path(), id, Some(&second));
+    assert_eq!(attempts, 1);
+    std::thread::sleep(std::time::Duration::from_secs(4));
+    assert_eq!(
+        task_conversation_agent(&db, id).map(|(agent, _, attempts)| (agent, attempts)),
+        Some((third.clone(), 1)),
+        "started once"
+    );
+    let fresh = &launches(3)[2..];
+    assert!(
+        fresh.len() == 1 && fresh[0].starts_with("--session-id ") && !fresh[0].ends_with(&thread),
+        "{fresh:?}"
+    );
+
+    // Quit: the provider exits 0 and stays down.
+    fs::write(&stop, b"").unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while task_conversation_agent(&db, id).is_some() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the provider did not exit"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    std::thread::sleep(std::time::Duration::from_secs(4));
+    let current: (String, u32) = rusqlite::Connection::open(&db)
+        .unwrap()
+        .query_row(
+            "SELECT s.agent_process_id,s.starts_since_turn FROM task_primary_sessions tp
+             JOIN agent_sessions s ON s.id=tp.session_id WHERE tp.task_id=?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(current, (third, 1), "a quit conversation stays quit");
+    let conversation = status();
+    assert_eq!(conversation["state"], "closed", "{conversation}");
+    assert_eq!(conversation["ended"]["exit_code"], 0, "{conversation}");
+    assert_eq!(
+        conversation["start"],
+        serde_json::Value::Null,
+        "{conversation}"
+    );
+    assert_eq!(conversation["outlook"]["kind"], "quit", "{conversation}");
+    assert!(
+        conversation["status_line"]
+            .as_str()
+            .is_some_and(|line| line.starts_with("quit ") && line.ends_with(" opens it")),
+        "{conversation}"
+    );
+    assert_eq!(
+        conversation["outlook"]["at"],
+        serde_json::Value::Null,
+        "{conversation}"
+    );
+    drop(running);
+}
+
+#[test]
+fn a_task_conversation_whose_agent_is_not_installed_says_why_it_did_not_start() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    // The server finds no provider on its PATH.
+    let _server = loopflow_test_support::MachineServer::start(
+        env!("CARGO_BIN_EXE_lf"),
+        &home.path().join("machine"),
+    );
+    succeed(
+        claude_launch(home.path(), "exit 0")
+            .current_dir(repo.path())
+            .args(["set", "--global", "default_agent", "claude"]),
+    );
     let created: serde_json::Value = serde_json::from_str(&succeed(
         claude_launch(home.path(), "exit 0")
             .current_dir(repo.path())
@@ -1262,23 +1500,50 @@ fn a_task_checkout_without_the_agent_installed_skips_its_conversation() {
     ))
     .unwrap();
     let id = created["task"]["id"].as_str().unwrap();
-    // A Machine with no provider installed has nothing to start. A real
-    // Machine always has its logs directory, where the skip is recorded.
-    fs::create_dir_all(home.path().join("machine/logs")).unwrap();
-    let mut checkout = claude_launch(home.path(), "exit 0");
-    fs::remove_file(home.path().join("bin/claude")).unwrap();
     let placed: serde_json::Value = serde_json::from_str(&succeed(
-        checkout
+        claude_launch(home.path(), "exit 0")
             .current_dir(repo.path())
             .args(["checkout", id, "--json"]),
     ))
     .unwrap();
     assert!(Path::new(placed["worktree"].as_str().unwrap()).is_dir());
-    let timing = fs::read_to_string(home.path().join("machine/logs/launch-timing.jsonl")).unwrap();
-    assert!(timing.contains("background_skip"), "{timing}");
-    assert_eq!(
-        open_task_conversations(&home.path().join("machine/loopflow.db"), id),
-        0
+    let db = home.path().join("machine/loopflow.db");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let failure = loop {
+        let failure: Option<String> = rusqlite::Connection::open(&db)
+            .unwrap()
+            .query_row(
+                "SELECT s.start_failure FROM task_primary_sessions tp
+                 JOIN agent_sessions s ON s.id=tp.session_id WHERE tp.task_id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap()
+            .flatten();
+        if let Some(failure) = failure {
+            break failure;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the server recorded no reason\n{}",
+            fs::read_to_string(home.path().join("machine/logs/lf.log")).unwrap_or_default()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+    assert_eq!(failure, "claude is not installed on this Machine's PATH");
+    assert_eq!(open_task_conversations(&db, id), 0);
+    // It never ran, so it reads as that, never as a death.
+    let status = succeed(
+        claude_launch(home.path(), "exit 0")
+            .current_dir(repo.path())
+            .args(["task", "status", id]),
+    );
+    assert!(
+        status.contains(
+            "Conversation: could not start: claude is not installed on this Machine's PATH"
+        ),
+        "{status}"
     );
 }
 

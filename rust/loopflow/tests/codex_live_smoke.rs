@@ -56,7 +56,6 @@ async fn codex_live_one_turn_smoke() {
             title: "Codex live smoke".into(),
             title_source: TitleSource::Generated,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         },
@@ -71,17 +70,17 @@ async fn codex_live_one_turn_smoke() {
             [&parent],
         )
         .expect("record attaching lf Process");
-    let attachment = attachment::claim_session_attachment(&store, "smoke", None, &parent, true)
-        .expect("attachment");
+    let attachment =
+        attachment::claim_session_attachment(&store, "smoke", None, &parent).expect("attachment");
     let config = AgentConfig {
         cwd: Some(dir.path().to_path_buf()),
         ..AgentConfig::new(loopflow_execution::config::Agent::parse("codex").unwrap())
     };
     let mut harness = CodexDriver::new(
         &loopflow_execution::harness::launch_for_test(
-            loopflow_execution::harness::HarnessKind::Codex,
+            loopflow_harness::HarnessKind::Codex,
             &config,
-            &loopflow_execution::harness::Admitted {
+            &loopflow_execution::harness::Recording {
                 store,
                 session: "smoke".into(),
                 attachment,

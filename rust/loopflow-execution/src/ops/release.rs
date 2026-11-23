@@ -1976,7 +1976,7 @@ fn wait_for_release_repair(landing: &loopflow_storage::pr_landing::PrLanding) ->
                     landing.pr_number
                 ),
                 continuation: format!(
-                    "observe landing {} and retry after its repair Process exits",
+                    "observe landing {} and retry after its repair run exits",
                     landing.id
                 ),
             });
@@ -2449,7 +2449,8 @@ fn read_bounded_revision_text(
 fn classify_release_notes_degradation(err: &CommandError) -> Option<ReleaseNotesDegradation> {
     let stderr = err.stderr.to_lowercase();
     let message = err.message.to_lowercase();
-    let combined = format!("{stderr}\n{message}");
+    // Codex writes `You’ve`.
+    let combined = format!("{stderr}\n{message}").replace('’', "'");
     let mentions_agent_cli = combined.contains("claude")
         || combined.contains("codex")
         || combined.contains("opencode")
@@ -2463,12 +2464,9 @@ fn classify_release_notes_degradation(err: &CommandError) -> Option<ReleaseNotes
         return Some(ReleaseNotesDegradation::MissingCli);
     }
     if combined.contains("provider usage limit")
-        || combined.contains("usage limit reached")
-        || combined.contains("usage limit has been reached")
-        || combined.contains("you've hit your usage limit")
-        || combined.contains("subscription quota")
-        || combined.contains("quota exceeded")
-        || combined.contains("insufficient_quota")
+        || combined
+            .lines()
+            .any(|line| crate::agent::subscription_limit_text(line).is_some())
     {
         return Some(ReleaseNotesDegradation::Quota);
     }

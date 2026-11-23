@@ -142,7 +142,7 @@ def test_resource_update_invalidates_inventory(tmp_path: Path) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(root / name, target)
     shutil.copytree(root / third_party.NOTICES, tmp_path / third_party.NOTICES)
-    font = tmp_path / "swift/Loopflow/Fonts/JetBrainsMono-Regular.ttf"
+    font = tmp_path / "swift/Loopflow/Fonts/SplineSansMono-Regular.ttf"
     font.write_bytes(font.read_bytes() + b"changed")
     with pytest.raises(ValueError, match="inputs changed"):
         third_party.check(tmp_path)

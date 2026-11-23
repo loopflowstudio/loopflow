@@ -1,63 +1,59 @@
-[
-  {
-    "session_id": "session_fixture",
-    "provider_thread": "thread_fixture",
-    "provider_turn": "turn_fixture",
-    "agent_process_id": null,
-    "lf_process_id": null,
-    "task_id": null,
-    "wave_id": null,
-    "observed_at": 1790620000,
-    "seq": 41,
-    "kind": "usage",
-    "payload": {
-      "total": {
-        "inputTokens": 40,
-        "outputTokens": 10
-      },
-      "last": {
-        "inputTokens": 20,
-        "outputTokens": 5
-      }
-    }
-  },
-  {
-    "session_id": "session_fixture",
-    "provider_thread": "thread_fixture",
-    "provider_turn": "turn_fixture",
-    "agent_process_id": null,
-    "lf_process_id": null,
-    "task_id": null,
-    "wave_id": null,
-    "observed_at": 1790620000,
-    "seq": 42,
-    "kind": "completed",
-    "payload": {
-      "status": "completed",
-      "error": null,
+{
+  "turns": [
+    {
+      "id": 7,
+      "session_id": "session_fixture",
+      "thread": "thread_fixture",
+      "turn": "turn_fixture",
+      "captured_event": 40,
+      "lf_process_id": null,
+      "agent_process_id": null,
+      "task_id": null,
+      "wave_id": null,
+      "project_id": null,
+      "repository": "/repo",
+      "skill": "implement",
+      "graph": "code",
+      "step": "implement",
       "started_at": 1790619900,
-      "completed_at": 1790619999,
-      "duration_ms": 99000
+      "ended_at": 1790619999,
+      "status": "completed",
+      "duration_ms": 99000,
+      "error": null,
+      "provider": "codex",
+      "usage": {
+        "observed_at": 1790619999,
+        "final": false,
+        "partial": false,
+        "usage": {
+          "input_tokens": 20,
+          "output_tokens": 5,
+          "total_input_tokens": 20
+        }
+      },
+      "context": null
     }
-  },
-  {
-    "session_id": "session_fixture",
-    "provider_thread": null,
-    "provider_turn": null,
-    "agent_process_id": null,
-    "lf_process_id": null,
-    "task_id": null,
-    "wave_id": null,
-    "observed_at": 1790620010,
-    "seq": 43,
-    "kind": "observed",
-    "payload": {
-      "input_id": "run_00000000000000000000000000000001",
-      "source": "terminal.json",
-      "evidence": {
-        "outcome": "failed",
-        "ended_at": "2026-09-20T20:05:00Z"
+  ],
+  "events": [
+    {
+      "session_id": "session_fixture",
+      "provider_thread": null,
+      "provider_turn": null,
+      "agent_process_id": null,
+      "lf_process_id": null,
+      "task_id": null,
+      "wave_id": null,
+      "observed_at": 1790620010,
+      "seq": 43,
+      "kind": "observed",
+      "payload": {
+        "input_id": "run_00000000000000000000000000000001",
+        "source": "terminal.json",
+        "evidence": {
+          "outcome": "failed",
+          "ended_at": "2026-09-20T20:05:00Z"
+        }
       }
     }
-  }
-]
+  ]
+}

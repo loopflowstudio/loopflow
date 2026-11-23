@@ -16,8 +16,8 @@ use loopflow_storage::work::task::Task;
 /// `lf --machine M resume <session>`: move the Session, if this Machine knows
 /// it, to `target` unless it is already there. A Task's conversation moves only
 /// with its Task, as `lf task move` moves it, and is the conversation the Task
-/// carries.
-pub fn move_session(id: &str, target: &str, forward_agent: bool) -> Result<()> {
+/// carries, its Graph continuing through `run`.
+pub fn move_session(id: &str, target: &str, forward_agent: bool, run: ContinueRun) -> Result<()> {
     let task = tokio::runtime::Runtime::new()?.block_on(async {
         let Some(store) = crate::store::open_existing_store().await? else {
             return Ok(None);
@@ -34,7 +34,7 @@ pub fn move_session(id: &str, target: &str, forward_agent: bool) -> Result<()> {
         relay(&store, &session, &target).await.map(|()| None)
     })?;
     if let Some((task, session)) = task {
-        move_task(task.as_str(), target, Some(session.as_str()))?;
+        move_task(task.as_str(), target, Some(session.as_str()), run)?;
     }
     Ok(())
 }
@@ -73,10 +73,20 @@ async fn relay(store: &SharedStore, session: &LfSession, target: &Machine) -> Re
     Ok(())
 }
 
+/// How a moved Task's Graph continues: `task.run` from a checkout of its
+/// repository, sent to the Machine that now runs it.
+pub type ContinueRun =
+    fn(&std::path::Path, &str, Option<&str>) -> Result<crate::engine::task::TaskRun>;
+
 /// `lf task move X --machine M`. A Graph the move stopped continues where the
-/// Task arrives. `conversation` is the Session it carries; `None` carries the
-/// Task's own conversation.
-pub fn move_task(issue: &str, target: &str, conversation: Option<&str>) -> Result<TaskOwnership> {
+/// Task arrives, through `run`. `conversation` is the Session it carries;
+/// `None` carries the Task's own conversation.
+pub fn move_task(
+    issue: &str,
+    target: &str,
+    conversation: Option<&str>,
+    run: ContinueRun,
+) -> Result<TaskOwnership> {
     let (ownership, stopped) = tokio::runtime::Runtime::new()?.block_on(async {
         let store: SharedStore = std::sync::Arc::new(
             crate::store::open_existing_store()
@@ -86,7 +96,7 @@ pub fn move_task(issue: &str, target: &str, conversation: Option<&str>) -> Resul
         relay_task(&store, issue, target, conversation).await
     })?;
     if let Some(stopped) = stopped {
-        stopped.resume();
+        stopped.resume(run);
     }
     Ok(ownership)
 }
@@ -107,29 +117,24 @@ struct StoppedRun {
 impl StoppedRun {
     /// Start the Task's run on its new owner. The move already happened, so a
     /// run that does not start is reported, never an error.
-    fn resume(&self) {
+    fn resume(&self, run: ContinueRun) {
         let name = &self.identifier;
         let started = self.repository.clone().and_then(|repository| {
-            crate::engine::task::run(
-                &repository,
-                self.task.as_str(),
-                self.from.as_deref(),
-                None,
-                None,
-                false,
-            )
-            .map_err(|error| error.message)
+            run(&repository, self.task.as_str(), self.from.as_deref())
+                .map_err(|error| format!("{error:#}"))
         });
         match started {
             Ok(crate::engine::task::TaskRun::Running {
                 graph_process,
-                ships,
+                merges,
                 ..
             }) => {
-                eprintln!("Running on {} as Graph process {graph_process}", self.place);
+                eprintln!("Running on {} as Graph run {graph_process}", self.place);
                 eprintln!("  follow: lf task status {name}");
-                if ships {
-                    eprintln!("  ships:  no interactive step is left, so this run may merge the PR; `lf task hold {name}` withdraws");
+                if merges {
+                    eprintln!(
+                        "  merges: this run may merge the PR; `lf task auto off {name}` stops it"
+                    );
                 }
             }
             Ok(run) => {
@@ -254,11 +259,13 @@ async fn relay_task(
             eprintln!("Committed and pushed {name} on {}", checkout.branch);
         }
     }
-    crate::store::ownership::ingest_ownership_marker(
-        &store.sqlite,
-        &task.id,
-        &moved_task.ownership_marker,
-    )?;
+    if target.is_some() {
+        crate::store::ownership::ingest_ownership_marker(
+            &store.sqlite,
+            &task.id,
+            &moved_task.ownership_marker,
+        )?;
+    }
     receive(store, &moved, target.as_ref())
         .await
         .map_err(|error| match &target {
@@ -399,7 +406,7 @@ async fn send_from(
 
 /// Before anything is committed, pushed, stopped or handed off, `target`
 /// answers that it can receive the move and, for a Task, takes it in from
-/// planning, cloning the repository first when it has none.
+/// its plan, cloning the repository first when it has none.
 async fn ready(
     store: &SharedStore,
     target: &Machine,
@@ -432,19 +439,24 @@ async fn ready(
                 .to_string(),
             ]);
         }
-        if let Some(key) = store.sqlite.planning_user_key()? {
-            args.extend(["--planning-key".into(), key]);
+    }
+    let mut checked = crate::machine::ssh::request(target, &args, None).await;
+    // A hub without the repository holds none of its plan; the check has just
+    // cloned it there, so the plan can go now and the Task is found.
+    if let (Err(_), Some((_, repository, _))) = (&checked, task) {
+        let hub = crate::ops::plan_hub::hub(&store.sqlite)?;
+        if let (Some(hub), Some(path)) = (hub, store.sqlite.repository_path(repository)?) {
+            if hub.id == target.id && crate::ops::plan_hub::sync(store, &path).await.is_ok() {
+                checked = crate::machine::ssh::request(target, &args, None).await;
+            }
         }
     }
-    crate::machine::ssh::request(target, &args, None)
-        .await
-        .map(drop)
-        .map_err(|error| {
-            anyhow!(
-                "{what} did not move: {} cannot receive it; nothing was sent\n{error:#}",
-                target.name()
-            )
-        })
+    checked.map(drop).map_err(|error| {
+        anyhow!(
+            "{what} did not move: {} cannot receive it; nothing was sent\n{error:#}",
+            target.name()
+        )
+    })
 }
 
 /// Receive on `target`, over SSH unless it is this Machine (`None`). Either

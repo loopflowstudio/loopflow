@@ -3,25 +3,33 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use crate::agent::{AgentConfig, ProcessConfig};
-use crate::harness::Run;
-use crate::harness::{Admitted, HarnessKind, Launch, Mode, Start};
+use crate::harness::LaunchKind;
+use crate::harness::{Launch, Mode, Recording, Start};
 use crate::process::LfProcessRuntime;
 use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
+use loopflow_harness::HarnessKind;
 
 fn executable(path: &Path, source: &str) {
     std::fs::write(path, source).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
+/// The value the matrix gives every caller-session marker in its own
+/// environment, as if `lf` ran from another conversation's shell.
+const CALLER: &str = "caller";
+
 fn providers(home: &Path) {
     let bin = home.join("bin");
     std::fs::create_dir(&bin).unwrap();
-    let record = r#"
+    let caller_session = serde_json::to_string(crate::agent::CALLER_SESSION_ENV).unwrap();
+    let record = format!(
+        r#"
 import json, os, sys, uuid
 from pathlib import Path
 with (Path(os.environ["LF_HOME"]) / "matrix-argv.jsonl").open("a") as log:
-    log.write(json.dumps({"args":sys.argv[1:], "managed":"LF_PROVIDER_CONTEXT" in os.environ, "delivery":"LF_CONTEXT_DELIVERY" in os.environ, "opencode":os.environ.get("OPENCODE_CONFIG_CONTENT")}) + "\n")
-"#;
+    log.write(json.dumps({{"args":sys.argv[1:], "managed":"LF_PROVIDER_CONTEXT" in os.environ, "delivery":"LF_CONTEXT_DELIVERY" in os.environ, "opencode":os.environ.get("OPENCODE_CONFIG_CONTENT"), "inherited":[name for name in {caller_session} if os.environ.get(name) == "{CALLER}"], "config_dir":os.environ.get("CLAUDE_CONFIG_DIR")}}) + "\n")
+"#
+    );
     executable(
         &bin.join("claude"),
         &format!(
@@ -55,7 +63,7 @@ for line in sys.stdin:
         &bin.join("opencode"),
         &format!(
             "#!/usr/bin/python3\n{record}\n{}",
-            include_str!("../../tests/support/opencode_server.py").replace("__WAIT__", "False").replace("if \"serve\" not in sys.argv:\n    _record_launch()", "if \"serve\" not in sys.argv:\n    print('native diagnostic', file=sys.stderr)\n    _record_launch()")
+            include_str!("../../tests/support/opencode_cli.py").replace("__WAIT__", "False").replace("if \"run\" not in sys.argv:\n    _record_launch()", "if \"run\" not in sys.argv:\n    print('native diagnostic', file=sys.stderr)\n    _record_launch()")
         ),
     );
     // Bare Pi's extension uses the launch snapshot; only managed Pi reports
@@ -71,10 +79,17 @@ if "--mode" not in sys.argv and "LF_PROVIDER_CONTEXT" not in os.environ: sys.exi
             include_str!("testdata/pi_rpc.py")
         ),
     );
+    executable(
+        &bin.join("agy"),
+        &format!(
+            "#!/usr/bin/python3\n{record}\n{}",
+            include_str!("../../tests/support/agy_cli.py")
+        ),
+    );
 }
 
 #[test]
-fn every_harness_runs_bare_managed_and_worker() {
+fn every_harness_runs_all_four_launch_kinds() {
     let ledger = crate::journal::TestLedgerGuard::new();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let home = ledger.home();
@@ -85,6 +100,7 @@ fn every_harness_runs_bare_managed_and_worker() {
         "PATH",
         "CODEX_HOME",
         "OPENCODE_CONFIG_CONTENT",
+        "CLAUDE_CONFIG_DIR",
     ]);
     std::env::set_var("LF_BIN", binary);
     std::env::set_var(
@@ -92,25 +108,38 @@ fn every_harness_runs_bare_managed_and_worker() {
         format!("{}:/usr/bin:/bin", home.join("bin").display()),
     );
     let _server = loopflow_test_support::MachineServer::start(binary, home);
+    // From here the test runs as if inside a Claude Code or Codex shell: their
+    // markers must not reach a provider, while a person's own setting does.
+    // lf's markers stay unset: this process is lf and reads them itself.
+    let provider_markers: Vec<&str> = crate::agent::CALLER_SESSION_ENV
+        .iter()
+        .copied()
+        .filter(|name| !name.starts_with("LF_"))
+        .collect();
+    let _caller = crate::test_ambient::EnvGuard::clear(&provider_markers);
+    for name in &provider_markers {
+        std::env::set_var(name, CALLER);
+    }
+    let config_dir = home.join("claude-config");
+    std::env::set_var("CLAUDE_CONFIG_DIR", &config_dir);
 
-    for kind in HarnessKind::ALL {
-        for mode in [Mode::Interactive, Mode::Headless] {
-            for run in [
-                Run::Bare(mode),
-                if mode == Mode::Interactive {
-                    Run::Managed
-                } else {
-                    Run::Worker
-                },
+    for harness in HarnessKind::ALL {
+        for yolo in [true, false] {
+            for (kind, mode, reports) in [
+                (LaunchKind::Chat, Mode::Interactive, false),
+                (LaunchKind::Batch, Mode::Headless, false),
+                (LaunchKind::WorkSession, Mode::Interactive, true),
+                (LaunchKind::Worker, Mode::Headless, true),
             ] {
-                let row = format!("{kind:?} {mode:?} {run:?}");
+                assert_eq!(kind.mode(), mode, "{kind:?}");
+                let row = format!("{harness:?} {kind:?} yolo {yolo}");
                 let directory = tempfile::tempdir_in(home).unwrap();
                 let cwd = directory.path();
                 crate::journal::with_runtime(home, &["lf".into(), "matrix".into()], || {
                     let capture = SessionRecorder::begin_at(
                         home,
                         SessionCaptureSpec {
-                            harness: kind.as_str().into(),
+                            harness: harness.as_str().into(),
                             model: None,
                             surface: if mode == Mode::Interactive {
                                 "tui"
@@ -129,18 +158,13 @@ fn every_harness_runs_bare_managed_and_worker() {
                     )
                     .map(LfProcessRuntime::new)?;
                     capture.claim_session_attachment()?;
-                    let admitted = Admitted::from_runtime(&capture)?;
+                    let recording = Recording::from_runtime(&capture)?;
                     let mut config = AgentConfig {
-                        agent: crate::config::Agent::parse(kind.as_str()).unwrap(),
+                        agent: crate::config::Agent::parse(harness.as_str()).unwrap(),
                         cwd: Some(cwd.into()),
                         system_prompt: "fixed instructions".into(),
                         chrome: Some(true),
-                        skip_permissions: true,
-                        write_scope: if kind == HarnessKind::Pi {
-                            crate::agent::AgentWriteScope::Configured
-                        } else {
-                            crate::agent::AgentWriteScope::Worktree
-                        },
+                        yolo,
                         task_prompt: "say hi".into(),
                         conversation_context: Some(crate::context_block::ContextDelivery {
                             identity: None,
@@ -158,9 +182,9 @@ fn every_harness_runs_bare_managed_and_worker() {
                     config.env.insert("LF_BIN".into(), binary.into());
                     let launch = Launch {
                         config: &config,
-                        harness: kind.harness(),
-                        run,
-                        admitted: &admitted,
+                        harness: crate::harness::launcher(harness),
+                        kind,
+                        recording: &recording,
                         start: Start::New,
                         context_file: None,
                     };
@@ -170,10 +194,9 @@ fn every_harness_runs_bare_managed_and_worker() {
                         .count();
                     let thread = match mode {
                         Mode::Interactive => {
-                            let outcome =
-                                super::native_session::run(&launch, None, Some(&capture))?;
+                            let outcome = super::native_session::run(&launch, None, Some(&capture))?;
                             anyhow::ensure!(!outcome.failed(), "{row}: {:?}", outcome.status);
-                            if kind == HarnessKind::OpenCode {
+                            if harness == HarnessKind::OpenCode {
                                 let log = std::fs::read_to_string(
                                     capture.artifact_dir().join("opencode.stderr.log"),
                                 )?;
@@ -214,29 +237,64 @@ fn every_harness_runs_bare_managed_and_worker() {
                         })
                     };
                     anyhow::ensure!(
-                        flag("--chrome") == (kind == HarnessKind::Claude),
+                        flag("--chrome") == (harness == HarnessKind::Claude),
                         "{row}: Chrome flag ownership"
                     );
+                    // `yolo: false` keeps the vendor's prompts only when someone
+                    // is there to answer them.
+                    let skips = yolo || mode == Mode::Headless;
                     anyhow::ensure!(
-                        !flag("--dangerously-skip-permissions")
-                            && !flag("--dangerously-bypass-approvals-and-sandbox"),
-                        "{row}: yolo escaped worktree policy"
+                        flag("--dangerously-skip-permissions")
+                            == (skips
+                                && matches!(harness, HarnessKind::Claude | HarnessKind::Antigravity)),
+                        "{row}: yolo setting"
                     );
-                    if kind == HarnessKind::OpenCode {
+                    if harness == HarnessKind::Codex && kind == LaunchKind::Chat {
+                        anyhow::ensure!(
+                            flag("danger-full-access") == skips && flag("never") == skips,
+                            "{row}: Codex sandbox and approvals"
+                        );
+                    }
+                    if harness == HarnessKind::OpenCode {
                         let settings = commands
                             .iter()
                             .find_map(|command| command["opencode"].as_str())
                             .ok_or_else(|| anyhow::anyhow!("{row}: no server settings"))?;
                         let settings: serde_json::Value = serde_json::from_str(settings)?;
                         anyhow::ensure!(
-                            settings["permissions"][1]["action"] == "external_directory"
-                                && settings["permissions"][1]["effect"] == "deny",
-                            "{row}: worktree permissions lost"
+                            (settings["permissions"]
+                                == serde_json::json!([{"action":"*", "resource":"*", "effect":"allow"}]))
+                                == skips,
+                            "{row}: OpenCode yolo setting"
+                        );
+                        // A conversation is OpenCode itself; a headless turn is one run.
+                        anyhow::ensure!(
+                            commands.len() == 1 && flag("--standalone") && flag("--session"),
+                            "{row}: one private OpenCode on the named conversation"
+                        );
+                        anyhow::ensure!(
+                            !flag("serve") && !flag("--server"),
+                            "{row}: OpenCode started a server"
+                        );
+                        anyhow::ensure!(
+                            flag("run") == (mode == Mode::Headless)
+                                && flag("--auto") == (mode == Mode::Headless),
+                            "{row}: OpenCode run ownership"
+                        );
+                    }
+                    for command in &commands {
+                        anyhow::ensure!(
+                            command["inherited"].as_array().is_some_and(Vec::is_empty),
+                            "{row}: provider inherited the caller's session: {command}"
+                        );
+                        anyhow::ensure!(
+                            command["config_dir"] == config_dir.to_string_lossy().as_ref(),
+                            "{row}: CLAUDE_CONFIG_DIR did not pass through: {command}"
                         );
                     }
                     let managed = commands.iter().any(|command| command["managed"] == true);
                     anyhow::ensure!(
-                        managed == (run.reports_turns()),
+                        managed == reports,
                         "{row}: wrong hook ownership: {commands:?}"
                     );
                     println!(
@@ -288,10 +346,10 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
             )
             .map(LfProcessRuntime::new)?;
             capture.claim_session_attachment()?;
-            let admitted = Admitted::from_runtime(&capture)?;
-            admitted.store.record_session_agent_session(
-                &admitted.session,
-                &admitted.attachment,
+            let recording = Recording::from_runtime(&capture)?;
+            recording.store.record_session_agent_session(
+                &recording.session,
+                &recording.attachment,
                 &"saved-empty-thread".into(),
             )?;
             let config = AgentConfig {
@@ -303,10 +361,10 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
             };
             // Native launch recovers the stored thread even when the entry has no explicit resume token.
             let launch = Launch {
-                harness: HarnessKind::Codex.harness(),
+                harness: crate::harness::launcher(HarnessKind::Codex),
                 config: &config,
-                run: Run::Managed,
-                admitted: &admitted,
+                kind: LaunchKind::WorkSession,
+                recording: &recording,
                 start: Start::New,
                 context_file: None,
             };
@@ -319,8 +377,116 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
                 "the first prompt must reach the saved thread"
             );
             assert_eq!(
-                admitted.store.session_thread(&admitted.session)?,
+                recording.store.session_thread(&recording.session)?,
                 Some("saved-empty-thread".into())
+            );
+            capture.finish("completed")?;
+            Ok(())
+        },
+    )
+    .unwrap();
+}
+
+/// `/new` in the terminal continues the same `agy` under another
+/// conversation: that one gets the context block, and it is the one the
+/// Session keeps and the next launch reopens.
+#[test]
+fn antigravity_follows_the_conversation_a_person_switches_to() {
+    let ledger = crate::journal::TestLedgerGuard::new();
+    let _ambient = crate::test_ambient::EnvGuard::new();
+    let home = ledger.home();
+    providers(home);
+    let binary = loopflow_test_support::lf_binary();
+    let _environment = crate::test_ambient::EnvGuard::clear(&["LF_BIN", "PATH"]);
+    std::env::set_var("LF_BIN", binary);
+    std::env::set_var(
+        "PATH",
+        format!("{}:/usr/bin:/bin", home.join("bin").display()),
+    );
+    let _server = loopflow_test_support::MachineServer::start(binary, home);
+    let directory = tempfile::tempdir_in(home).unwrap();
+    let cwd = directory.path();
+    crate::journal::with_runtime(
+        home,
+        &["lf".into(), "matrix".into()],
+        || -> anyhow::Result<()> {
+            let capture = SessionRecorder::begin_at(
+                home,
+                SessionCaptureSpec {
+                    harness: "agy".into(),
+                    model: None,
+                    surface: "tui".into(),
+                    cwd: cwd.into(),
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: vec![],
+                    graph: SessionGraphMembership::Independent,
+                    work: None,
+                },
+            )
+            .map(LfProcessRuntime::new)?;
+            capture.claim_session_attachment()?;
+            let recording = Recording::from_runtime(&capture)?;
+            let mut config = AgentConfig {
+                agent: crate::config::Agent::parse("agy").unwrap(),
+                cwd: Some(cwd.into()),
+                task_prompt: "say hi".into(),
+                conversation_context: Some(crate::context_block::ContextDelivery {
+                    identity: None,
+                    repository: None,
+                    repo: home.into(),
+                    home: home.into(),
+                    wave: None,
+                    skill_file: None,
+                    submitted_docs: None,
+                    references: vec![],
+                }),
+                env: capture.environment(),
+                ..crate::agent::AgentConfig::default()
+            };
+            config.env.insert("LF_BIN".into(), binary.into());
+            let launch = Launch {
+                config: &config,
+                harness: crate::harness::launcher(HarnessKind::Antigravity),
+                kind: LaunchKind::WorkSession,
+                recording: &recording,
+                start: Start::New,
+                context_file: None,
+            };
+            std::fs::write(home.join("tui-new"), "a second thought")?;
+            let outcome = super::native_session::run(&launch, None, Some(&capture))?;
+            anyhow::ensure!(!outcome.failed(), "{:?}", outcome.status);
+            let heard: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(home.join("tui-heard.json"))?)?;
+            let second = heard[1]["conversation"].as_str().unwrap();
+            assert_ne!(heard[0]["conversation"], heard[1]["conversation"]);
+            for turn in [&heard[0], &heard[1]] {
+                assert!(
+                    turn["context"]
+                        .as_str()
+                        .is_some_and(|text| !text.is_empty()),
+                    "each conversation starts with the context block: {heard}"
+                );
+            }
+            assert_eq!(
+                crate::session_record::read_provider_session(&capture.artifact_dir())?
+                    .map(|session| session.agent_session),
+                Some(second.into())
+            );
+            // `lf resume` reopens the thread the Session keeps.
+            let kept = recording.store.session_thread(&recording.session)?;
+            assert_eq!(kept, Some(second.into()));
+            let reopened = launch.harness.open(&Launch {
+                start: Start::from_thread(kept.as_ref()),
+                ..launch
+            })?;
+            let args: Vec<_> = reopened.process.get_args().collect();
+            let named = args.iter().position(|arg| *arg == "--conversation");
+            assert_eq!(
+                named.map(|at| args[at + 1]),
+                Some(std::ffi::OsStr::new(second)),
+                "{args:?}"
             );
             capture.finish("completed")?;
             Ok(())
@@ -332,30 +498,30 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
 #[test]
 fn native_limits_and_schemas_require_a_headless_run() {
     let home = tempfile::tempdir().unwrap();
-    let admitted = super::admit_for_test(home.path());
-    for kind in HarnessKind::ALL {
+    let recording = super::admit_for_test(home.path());
+    for harness in HarnessKind::ALL {
         for (max_turns, output_schema) in [
             (Some(7), None),
             (None, Some(serde_json::json!({"type":"object"}))),
         ] {
             let config = AgentConfig {
-                agent: crate::config::Agent::parse(kind.as_str()).unwrap(),
+                agent: crate::config::Agent::parse(harness.as_str()).unwrap(),
                 max_turns,
                 output_schema,
                 ..crate::agent::AgentConfig::default()
             };
             let launch = Launch {
                 config: &config,
-                harness: kind.harness(),
-                run: Run::Bare(crate::harness::Mode::Headless),
-                admitted: &admitted,
+                harness: crate::harness::launcher(harness),
+                kind: LaunchKind::Batch,
+                recording: &recording,
                 start: Start::New,
                 context_file: None,
             };
-            let error = kind.harness().open(&launch).unwrap_err();
+            let error = crate::harness::launcher(harness).open(&launch).unwrap_err();
             assert!(
                 error.to_string().contains("require a headless Run"),
-                "{kind:?}: {error}"
+                "{harness:?}: {error}"
             );
         }
     }

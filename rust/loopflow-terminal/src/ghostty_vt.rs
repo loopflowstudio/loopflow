@@ -340,6 +340,23 @@ impl Terminal {
             .unwrap_or(0)
     }
 
+    /// Whether the program asked for focus in and out reports (DEC mode 1004).
+    pub fn focus_reporting(&self) -> bool {
+        let mut query = ffi::ModeConfig {
+            mode: ffi::MODE_FOCUS_EVENT,
+            value: false,
+        };
+        // SAFETY: query is the mode configuration the mode data key documents.
+        let result = unsafe {
+            ffi::ghostty_terminal_get(
+                self.raw,
+                ffi::DATA_MODE,
+                (&mut query as *mut ffi::ModeConfig).cast(),
+            )
+        };
+        check("mode", result).is_ok() && query.value
+    }
+
     /// Whether the parser is between sequences, so inserted bytes cannot split one.
     pub fn at_ground(&self) -> bool {
         self.data::<bool>(ffi::DATA_VT_GROUND, "vt_ground")
@@ -688,6 +705,16 @@ mod ffi {
     pub const DATA_ACTIVE_SCREEN: i32 = 6;
     pub const DATA_SCROLLBACK_ROWS: i32 = 15;
     pub const DATA_VT_GROUND: i32 = 38;
+    pub const DATA_MODE: i32 = 37;
+    /// DEC private mode 1004: a mode value with the ANSI bit clear.
+    pub const MODE_FOCUS_EVENT: u16 = 1004;
+
+    /// `GhosttyTerminalModeConfig`, a frozen layout.
+    #[repr(C)]
+    pub struct ModeConfig {
+        pub mode: u16,
+        pub value: bool,
+    }
 
     pub const SCREEN_ALTERNATE: i32 = 1;
 
@@ -930,6 +957,16 @@ mod tests {
         let viewer = restored(&repaint);
         assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
         assert_eq!(viewer.cursor(), owner.cursor());
+    }
+
+    #[test]
+    fn focus_reporting_follows_the_programs_mode() {
+        let mut terminal = Terminal::new(80, 24).unwrap();
+        assert!(!terminal.focus_reporting());
+        terminal.write(b"\x1b[?1004h");
+        assert!(terminal.focus_reporting());
+        terminal.write(b"\x1b[?1004l");
+        assert!(!terminal.focus_reporting());
     }
 
     #[test]

@@ -136,7 +136,7 @@ pub fn plan_sync(
     // Stacked children retain their history when integrating the parent.
     let persistent = crate::git::worktrees::is_persistent_worktree(repo)?;
     let replay_stack = match &fork_base {
-        Some(base) => !crate::git::is_ancestor(repo, base, &base_ref)?,
+        Some(base) => crate::git::stack_needs_fork_comparison(repo, base, &base_ref)?,
         None => false,
     };
     let strategy = if fork_base.is_some() || persistent {
@@ -217,16 +217,7 @@ pub(crate) fn sync_for_delivery(
 
 /// Continue a local sync after its conflict paths have been resolved.
 pub fn continue_sync_for_resolution(repo: &Path, adopt: bool) -> OpsResult<()> {
-    continue_sync_after_authorization(repo, adopt, || Ok(()))
-}
-
-pub fn continue_sync_after_authorization(
-    repo: &Path,
-    adopt: bool,
-    before_mutation: impl FnOnce() -> OpsResult<()>,
-) -> OpsResult<()> {
     let authorization = authorize_sync_control(repo, adopt)?;
-    before_mutation()?;
     let result = continue_merge(repo, authorization.owner().target_sha.as_deref())?;
     if result.success {
         verify_control_completion(repo, authorization.owner())?;
@@ -243,16 +234,7 @@ pub fn continue_sync_after_authorization(
 
 /// Abort a local sync that was left open for inline resolution.
 pub fn abort_sync_for_resolution(repo: &Path, adopt: bool) -> OpsResult<()> {
-    abort_sync_after_authorization(repo, adopt, || Ok(()))
-}
-
-pub fn abort_sync_after_authorization(
-    repo: &Path,
-    adopt: bool,
-    before_mutation: impl FnOnce() -> OpsResult<()>,
-) -> OpsResult<()> {
     let authorization = authorize_sync_control(repo, adopt)?;
-    before_mutation()?;
     abort_merge(repo)?;
     authorization.complete()?;
     Ok(())
@@ -462,13 +444,12 @@ fn record_control_task_state(repo: &Path, owner: &GitOperationOwner) -> OpsResul
     };
     if let Some(stacked) = crate::ops::task::task_stack(repo)? {
         let default = get_default_branch(repo)?;
-        let clear_parent = stacked.parent_branch.is_none()
+        let clear_parent = stacked.parent == crate::ops::task::StackParentPr::Merged
             || owner.target_ref == default
             || owner.target_ref == format!("origin/{default}");
         if clear_parent {
             let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
             crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false, &|_| {})?;
-            return crate::ops::task::record_stack_sync(&stacked, target_sha, true);
         }
         return crate::ops::task::record_stack_sync(&stacked, target_sha, clear_parent);
     }

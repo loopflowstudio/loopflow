@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use super::settings::SettingScope;
 use super::{
     placement, AutomationConfig, ConfigDeclarations, ConfigSource, LogConfig, MergeMethod,
-    PlanningConfig, ReleaseConfig, SessionConfig, SummaryConfig, UserConfig,
+    ReleaseConfig, SessionConfig, SummaryConfig, TrackerConfig, UserConfig,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
@@ -155,8 +155,21 @@ impl Definition {
 
     pub fn accepts(&self, path: &[&str]) -> bool {
         let schema = (self.schema)().to_value();
-        schema_path(&schema, &schema, &path[self.key.split('.').count()..])
+        let fields = &path[self.key.split('.').count()..];
+        if self.key == "planning" && !fields.is_empty() {
+            // Validation here receives the released, internally tagged path.
+            return fields == ["provider"]
+                || ["linear", "asana", "git"]
+                    .iter()
+                    .any(|tag| schema_path(&schema, &schema, &[&[*tag][..], fields].concat()));
+        }
+        schema_path(&schema, &schema, fields)
     }
+}
+
+pub(crate) fn tracker_field(fields: &[&str]) -> bool {
+    let schema = schemars::schema_for!(TrackerConfig).to_value();
+    schema_path(&schema, &schema, fields)
 }
 
 fn schema_path(root: &serde_json::Value, node: &serde_json::Value, path: &[&str]) -> bool {
@@ -249,6 +262,32 @@ definitions! {
     files: Vec<String> = "[]", Personal, AppendReset, HostLocal, NextLaunch, Machines, "Home-relative files a remote launch copies to the same path when the destination has none";
 }
 
+/// One heading of a Task's Diff: the files a path pattern matches, or the
+/// files no group matches (`- rest: Everything else`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum DiffGroup {
+    Paths(DiffPathGroup),
+    Rest(DiffRestGroup),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DiffPathGroup {
+    pub title: String,
+    /// Matched against `/` + the file's path, ignoring case: contained
+    /// anywhere, or at the end when the pattern starts with `*`.
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DiffRestGroup {
+    /// The heading; `- rest:` alone takes Desktop's.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub rest: Option<String>,
+}
+
 definitions! {
     Config, DEFINITIONS, "", {
         skills: BTreeMap<String, Value> = BTreeMap::new();
@@ -258,10 +297,10 @@ definitions! {
     };
     agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] choice; every choice precedes every fallback";
     default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] tried first when no applicable agent choice exists; the rest of agents stays behind it";
-    agents: Vec<String> = "[]", Launch, Replace, Portable, NextLaunch, Agents, "Ordered harness[:model] entries Loopflow may pick; a headless step refused by a usage limit moves to the next";
+    agents: Vec<String> = "[]", Launch, Replace, Portable, NextLaunch, Agents, "Ordered harness[:model] entries Loopflow may pick; headless work refused by a usage limit moves to the next";
     context: ContextConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Files and other inputs supplied to the agent";
-    yolo: bool = "false", Launch, Replace, Portable, NextLaunch, Agents, "Skip agent permission prompts: Claude, Codex and OpenCode; Pi keeps its own tool policy";
-    chrome: Option<bool> = "null", Launch, Replace, HostLocal, NextLaunch, Agents, "Claude Chrome integration; unset leaves Claude's own setting; Codex, OpenCode and Pi have no equivalent";
+    yolo: bool = "true", Launch, Replace, Portable, NextLaunch, Agents, "Agents act without asking permission; false keeps the vendor's own prompts in conversations you attend. Unattended runs never ask. Pi keeps its own tool policy";
+    chrome: Option<bool> = "null", Launch, Replace, HostLocal, NextLaunch, Agents, "Claude Chrome integration; unset leaves Claude's own setting; Codex, OpenCode, Pi and Antigravity have no equivalent";
     codex: CodexConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Codex launch preferences; omitted values inherit provider configuration";
     claude: ClaudeConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Claude launch preferences; omitted values inherit provider configuration";
     isolate: bool = "false", Launch, Replace, Portable, Inactive, Agents, "Ignored: every launch runs in the provider's shared home; kept readable for the released lf until Task e1f359";
@@ -269,6 +308,7 @@ definitions! {
     summary_tokens: usize = "5000", Launch, Replace, Portable, Inactive, Agents, "Parsed summary budget; no runtime consumer";
     #[serde(alias = "workflow")]
     graph: Option<String> = "null", General, Replace, Portable, NextLaunch, Agents, "Graph new Tasks take up";
+    auto: Option<super::AutoDefault> = "null", General, Replace, Portable, NextLaunch, Agents, "on: a Task turns auto on as it takes up its Graph, unless someone set it first";
     supported_harnesses: Vec<String> = "[]", General, AppendReset, Portable, NextRead, Agents, "Harnesses offered by model selection";
     automation: AutomationConfig = "{retries: 1}", General, Merge, Portable, NextRead, Agents, "Automatic retry count";
     pools: BTreeMap<String, placement::PoolDeclaration> = "{}", Personal, Merge, HostLocal, NextLaunch, Machines, "Local pools accepting new work; held work stays";
@@ -277,12 +317,14 @@ definitions! {
     machine: placement::Placement = "{}", PersonalScoped, Merge, Portable, NextLaunch, Machines, "Preferred durable Machine IDs or local capacity; existing Task assignments survive";
     machines: BTreeMap<String, placement::MachineDeclaration> = "{}", Personal, Merge, Portable, NextRead, Machines, "Aliases for durable Machine identities";
     connections: HashMap<loopflow_model::durable::MachineId, String> = "{}", Personal, Merge, HostLocal, NextRead, Machines, "This host's connection address for each durable Machine ID";
+    hub: Option<loopflow_model::durable::MachineId> = "null", Personal, Replace, HostLocal, NextRead, Machines, "The Machine holding the plan of every repository without Linear or Asana; unset keeps it here";
     auth_browsers: BTreeMap<String, placement::AuthBrowsers> = "{}", Personal, Merge, HostLocal, DomainAction, Accounts, "Ordered local browser profiles for authentication; discovered browser identities stay local";
     repo_root: Option<PathBuf> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Local repository discovery directory";
     theme: Option<String> = "null", Personal, Replace, ReferencedAssets, NextRead, Desktop, "Appearance theme or light:name,dark:name pair";
-    task_layout: Option<loopflow_storage::work::selection::TaskLayoutTemplate> = "null", General, Replace, Portable, NextLaunch, Desktop, "Tools and splits for Task workspaces without a saved Desktop layout; the winning scope replaces the whole layout";
     portfolio: Option<crate::portfolio::Selection> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Repository navigation selection";
-    planning: Option<PlanningConfig> = "null", Repository, Replace, Portable, DomainAction, Planning, "Tagged planning transport configuration";
+    diff_hidden: Vec<String> = "[scratch/]", Repository, AppendReset, Portable, NextRead, Desktop, "Path patterns a Task's Diff leaves out; every layer adds, [] clears lower ones";
+    diff_groups: Vec<DiffGroup> = r#"[{title: Docs, paths: ["*.md", "*.mdx", "*.rst", "*.txt", "*.adoc", /docs/]}, {title: Data model, paths: [/migrations/, "*.sql", schema, /models/, "*.proto", dto]}, {rest: Everything else}, {title: Tests, paths: [/test/, tests/, /__tests__/, /spec/, /fixtures/, /test_, _test., .test., .spec., tests.]}, {title: Generated and lock files, paths: ["*.lock", "*.snap", "*.pbxproj", "-lock.json", .lock.json, .min., /generated/, /__generated__/, /__snapshots__/, /vendor/]}]"#, Repository, Replace, Portable, NextRead, Desktop, "Ordered headings for a Task's Diff; a file goes to the first group a path pattern matches, and to rest when none does";
+    planning: Option<TrackerConfig> = "null", Repository, Replace, Portable, DomainAction, Planning, "Repository tracker and its settings";
     release: ReleaseConfig = "{targets: {}}", Repository, Merge, ReferencedAssets, DomainAction, Release, "Repository release targets";
     land: String = "gh", Repository, Replace, Portable, DomainAction, Release, "Landing strategy: gh or local";
     merge_method: Option<MergeMethod> = "null", Repository, Replace, Portable, DomainAction, Release, "Preferred allowed merge method";

@@ -308,12 +308,12 @@ async fn prepare_deletion(
 }
 
 fn unsettled_work(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<String>> {
-    // What runs in a shell descends from the `lf` that created its held
-    // terminal; ending the shell ends it.
-    let shells = crate::desktop::shells::hosts(store, task).map_err(task_error)?;
-    let mut allowed: HashSet<_> = shells
+    // Work running in one of the Task's shells or conversation terminals ends
+    // when that terminal does.
+    let mut terminals: HashSet<_> = crate::desktop::shells::hosts(store, task)
+        .map_err(task_error)?
         .into_iter()
-        .filter_map(|(_, launcher)| launcher)
+        .map(|(terminal, _)| terminal)
         .collect();
     for terminal in store.task_session_terminals(task).map_err(task_error)? {
         if store
@@ -325,37 +325,17 @@ fn unsettled_work(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<String
                 "Requested work or a pending request still holds this Task".into(),
             ));
         }
-        // A held terminal is no process: the lf processes that started inside
-        // it stand where the terminal would.
-        allowed.extend(
-            store
-                .held_terminal_processes(&terminal)
-                .map_err(task_error)?,
-        );
+        terminals.insert(terminal);
     }
-    let processes = store.task_open_processes(task).map_err(task_error)?;
-    for (process, _) in crate::ops::task_execution::unresolved_processes(store, &processes)? {
-        // An agent's owners are lf processes, so its walk starts at its parent.
-        let mut current = match process {
-            crate::process::ProcessEntry::Lf(process) => Some(process.id.clone()),
-            crate::process::ProcessEntry::Agent(process) => process.parent_lf_process_id.clone(),
-        };
-        let mut visited = HashSet::new();
-        let mut owned = false;
-        while let Some(id) = current.filter(|id| visited.insert(id.clone())) {
-            if allowed.contains(&id) {
-                owned = true;
-                break;
-            }
-            current = store
-                .lf_process(&id)
-                .map_err(task_error)?
-                .and_then(|p| p.parent_lf_process_id);
-        }
-        if !owned {
+    let work = store.task_open_work(task).map_err(task_error)?;
+    for (work, _) in crate::ops::task_execution::unresolved_work(store, &work)? {
+        if !work
+            .held_terminal()
+            .is_some_and(|terminal| terminals.contains(terminal))
+        {
             return Ok(Some(format!(
-                "Process {} still has live or unresolved work",
-                process.id()
+                "{} still has live or unresolved work",
+                work.label()
             )));
         }
     }

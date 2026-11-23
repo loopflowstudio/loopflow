@@ -132,7 +132,10 @@ pub fn commit_workflow(
         progress.status("Generating commit message...");
         match generate_commit_message(repo, MessageAgent::Chosen(options.agent.as_deref())) {
             Ok(message) => message.text(),
-            Err(_) => format_commit_message(&options.task, &options.sources),
+            Err(error) => {
+                progress.error(&error.to_string());
+                format_commit_message(&options.task, &options.sources)
+            }
         }
     };
 
@@ -242,14 +245,14 @@ fn step_commit_message(step: &str, written: Option<&CommitMessage>) -> String {
 /// A hung provider must not hold the Graph or the skill run that asked.
 const COMMIT_MESSAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// Where an agent named on the command line stands against the
-/// `commit-message` skill's own preference.
+/// Where an agent named on the command line stands against the message
+/// skill's own preference.
 #[derive(Debug, Clone, Copy)]
-enum MessageAgent<'a> {
-    /// `lf commit -a`: the person chose the agent for this message.
+pub(crate) enum MessageAgent<'a> {
+    /// `-a`: the person chose the agent for this message.
     Chosen(Option<&'a str>),
-    /// A step commit: the run's agent writes the message only when
-    /// `commit-message` resolves none of its own.
+    /// A step commit: the run's agent writes the message only when the skill
+    /// resolves none of its own.
     Fallback(Option<&'a str>),
 }
 
@@ -271,65 +274,59 @@ fn generate_commit_message(repo: &Path, agent: MessageAgent<'_>) -> OpsResult<Co
          No markdown fences. No explanation."
     );
 
-    // The skill's own `agent`, `default_agent` and `agents` preferences apply,
-    // so a cheap model can be chosen for `commit-message` alone.
-    let config = load_config_or_default(Some(repo));
-    let config = crate::config::settings::resolve(&config, Some(&skill))
-        .map(|resolved| resolved.config)
-        .unwrap_or(config);
-    let configured = || -> OpsResult<Vec<String>> {
-        Ok(match config.agent_order() {
-            order if order.is_empty() => vec![config.agent()?.to_string()],
-            order => order,
-        })
-    };
-    let agents = match agent {
-        MessageAgent::Chosen(Some(agent)) => vec![agent.to_string()],
-        MessageAgent::Chosen(None) | MessageAgent::Fallback(None) => configured()?,
-        MessageAgent::Fallback(Some(agent)) => {
-            configured().unwrap_or_else(|_| vec![agent.to_string()])
-        }
-    };
     let process = ProcessConfig {
         stream: false,
         timeout: Some(COMMIT_MESSAGE_TIMEOUT),
         ..Default::default()
     };
-    let mut failure = String::new();
-    for agent in agents {
-        let launch = AgentConfig {
-            chrome: config.chrome,
-            codex_service_tier: config.codex.service_tier,
-            task_prompt: prompt.clone(),
-            cwd: Some(repo.to_path_buf()),
-            skip_permissions: true,
-            ..AgentConfig::new(crate::config::Agent::parse(&agent)?.with_configured_model(&config))
-        };
-        match run_agent(
-            &launch,
-            &process,
-            crate::harness::Run::Bare(crate::harness::Mode::Headless),
-        ) {
-            Ok(result) if result.exit_code == 0 => {
-                let combined = format!("{}\n{}", result.stdout, result.stderr);
-                if let Some(message) = parse_commit_message(&combined) {
-                    return Ok(message);
-                }
-                failure = format!("{agent}: no commit message in the reply");
+    let launch = message_launch(repo, &skill, agent, prompt)?;
+    let failure = match run_agent(&launch, &process, crate::harness::LaunchKind::Batch) {
+        Ok(result) if result.exit_code == 0 => {
+            let combined = format!("{}\n{}", result.stdout, result.stderr);
+            if let Some(message) = parse_commit_message(&combined) {
+                return Ok(message);
             }
-            Ok(result) => {
-                failure = format!(
-                    "{agent}: exit {}: {}",
-                    result.exit_code,
-                    result.stderr.trim()
-                );
-            }
-            Err(error) => failure = format!("{agent}: {error}"),
+            "no commit message in the reply".to_owned()
         }
-    }
+        Ok(result) => format!("exit {}: {}", result.exit_code, result.stderr.trim()),
+        Err(error) => error.to_string(),
+    };
     Err(OpsError::Message(format!(
         "commit message generation failed ({failure})"
     )))
+}
+
+/// The launch that writes a message for `skill`. The skill's own `agent`,
+/// `default_agent` and `agents` lead, so a cheap model can be chosen for
+/// `commit-message` or `pr-message` alone, and the rest of the order is where
+/// the launch moves when a provider refuses it.
+pub(crate) fn message_launch(
+    repo: &Path,
+    skill: &crate::graph::Skill,
+    agent: MessageAgent<'_>,
+    prompt: String,
+) -> OpsResult<AgentConfig> {
+    let config = load_config_or_default(Some(repo));
+    let mut config = crate::config::settings::resolve(&config, Some(skill))
+        .map(|resolved| resolved.config)
+        .unwrap_or(config);
+    match agent {
+        MessageAgent::Chosen(Some(agent)) => config.agent = Some(agent.to_owned()),
+        MessageAgent::Fallback(Some(agent)) if config.agent().is_err() => {
+            config.agent = Some(agent.to_owned())
+        }
+        MessageAgent::Chosen(None) | MessageAgent::Fallback(_) => {}
+    }
+    let (agent, fallback_agents) = config.resolve_agents()?;
+    Ok(AgentConfig {
+        chrome: config.chrome,
+        codex_service_tier: config.codex.service_tier,
+        task_prompt: prompt,
+        cwd: Some(repo.to_path_buf()),
+        yolo: config.yolo,
+        fallback_agents,
+        ..AgentConfig::new(agent)
+    })
 }
 
 fn parse_commit_message(raw: &str) -> Option<CommitMessage> {

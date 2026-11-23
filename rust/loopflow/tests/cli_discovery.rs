@@ -231,13 +231,20 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
     assert_eq!(retired.status.code(), Some(2));
     assert!(retired.stdout.is_empty());
     assert!(String::from_utf8_lossy(&retired.stderr).contains("skill not found: list"));
-    let db = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
-    assert_eq!(
-        db.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
-            .get::<_, i64>(0))
-            .unwrap(),
-        0
-    );
+    // A launch would have created the store and a Session in it.
+    let sessions = || {
+        let store = home.path().join(".lf/loopflow.db");
+        if !store.exists() {
+            return 0;
+        }
+        rusqlite::Connection::open(&store)
+            .unwrap()
+            .query_row("SELECT count(*) FROM agent_sessions", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap()
+    };
+    assert_eq!(sessions(), 0);
 
     fs::write(
         repo.path().join(".lf/skills/list.md"),
@@ -279,13 +286,7 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
         success(run(repo.path(), home.path(), &["help", "--", "task"])),
         success(run(repo.path(), home.path(), &["help", "task"]))
     );
-    assert_eq!(
-        db.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
-            .get::<_, i64>(0))
-            .unwrap(),
-        0,
-        "inspection must not start an agent Session"
-    );
+    assert_eq!(sessions(), 0, "inspection must not start an agent Session");
 }
 
 #[test]
@@ -602,12 +603,11 @@ fn open_is_one_root_command_and_keeps_pr_open_explicit() {
         "open",
         "--session",
         "session-exact",
-        "--diff",
         "--json",
     ])
     .unwrap();
     assert!(
-        matches!(&composed.command, Some(Commands::Open(args)) if args.selection.session.as_deref() == Some("session-exact") && args.selection.diff && args.selection.json)
+        matches!(&composed.command, Some(Commands::Open(args)) if args.selection.session.as_deref() == Some("session-exact") && args.selection.json)
     );
     assert!(Cli::command()
         .find_subcommand("desktop")
@@ -656,7 +656,7 @@ fn desktop_state_uses_the_retained_reader_without_an_inspect_alias() {
 }
 
 #[test]
-fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
+fn history_owns_recorded_reads_and_replay() {
     let parse = |args: &[&str]| {
         Cli::try_parse_from(normalize_args(args.iter().map(|s| s.to_string()).collect()).unwrap())
             .unwrap()
@@ -684,11 +684,8 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
     assert_eq!(feed.since, "24h");
     assert!(feed.json);
 
-    for verb in ["list", "show", "replay"] {
-        let mut args = vec!["lf", "history", verb];
-        if matches!(verb, "show" | "replay") {
-            args.push("exact-capture");
-        }
+    for verb in ["show", "replay"] {
+        let args = ["lf", "history", verb, "exact-capture"];
         assert!(matches!(
             parse(&args).command,
             Some(Commands::Session {
@@ -696,7 +693,6 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
             })
         ));
     }
-    assert!(Cli::try_parse_from(["lf", "process", "replay", "exact-capture"]).is_err());
     assert!(matches!(
         parse(&["lf", "replay", "exact-capture"]).command,
         Some(Commands::Session {
@@ -709,25 +705,6 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
             cmd: loopflow::lf::SessionCommand::Usage(_)
         })
     ));
-    for verb in ["ps", "top"] {
-        assert!(matches!(
-            parse(&["lf", verb]).command,
-            Some(Commands::Process { .. })
-        ));
-    }
-    assert!(matches!(
-        parse(&["lf", "monitor", "ps"]).command,
-        Some(Commands::Process {
-            cmd: loopflow::lf::commands::process::ProcessCommand::List { .. }
-        })
-    ));
-    // `lf monitor <retired verb>` moves to `lf process list` and fails there
-    // instead of running a skill named `monitor`.
-    for verb in ["activity", "active"] {
-        let args = normalize_args(["lf", "monitor", verb].map(str::to_owned).to_vec()).unwrap();
-        assert_eq!(args, ["lf", "process", "list", verb]);
-        assert!(Cli::try_parse_from(args).is_err());
-    }
     assert!(Cli::command().find_subcommand("replay").is_none());
 }
 
@@ -735,7 +712,7 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
 fn history_help_is_passive_and_saved_commands_keep_their_evidence_selectors() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
-    for verb in ["list", "show", "usage", "replay"] {
+    for verb in ["show", "usage", "replay"] {
         let help = success(run(repo.path(), home.path(), &["history", verb, "--help"]));
         assert_eq!(
             help,
@@ -872,10 +849,7 @@ fn moved_commands_have_one_owner_and_keep_their_short_names() {
     }
     // `lf planning` is the plans namespace; its old repository spellings move.
     for (old, path) in [
-        (vec!["planning", "key"], vec!["repo", "plan", "key"]),
-        (vec!["planning"], vec!["repo", "plan"]),
-        (vec!["monitor", "ps"], vec!["process", "list"]),
-        (vec!["ship", "--stop"], vec!["task", "hold"]),
+        (vec!["planning"], vec!["repo", "tracker"]),
         (vec!["desktop", "task"], vec!["task", "show"]),
         (vec!["wave", "status", "--sync"], vec!["wave", "sync"]),
         (
@@ -933,9 +907,11 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
             "credentials",
             "doctor",
             "end",
+            "hub",
             "list",
             "ondemand",
             "pool",
+            "prune",
             "public",
             "remove",
             "rename",
@@ -1243,19 +1219,11 @@ fn desktop_verbs_take_pane_paths_without_public_lifetime_tokens() {
     assert!(matches!(cli.command, Some(Commands::Desktop {
         cmd: DesktopCommand::Goto { index: 2, target }
     }) if target.json));
-    let cli = Cli::try_parse_from([
-        "lf",
-        "desktop",
-        "do",
-        "section",
-        "-p",
-        "board",
-        "section=done",
-    ])
-    .unwrap();
+    let cli =
+        Cli::try_parse_from(["lf", "desktop", "do", "page", "-p", "tiles", "page=2"]).unwrap();
     assert!(matches!(cli.command, Some(Commands::Desktop {
         cmd: DesktopCommand::Do { action, args, target }
-    }) if action == "section" && args == ["section=done"] && target.pane.as_deref() == Some("board")));
+    }) if action == "page" && args == ["page=2"] && target.pane.as_deref() == Some("tiles")));
     for removed in [
         &["desktop", "text", "hello"][..],
         &["desktop", "read", "--region", "screen"],
@@ -1592,9 +1560,10 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     assert_eq!(plan.name.as_deref(), Some("Later"));
     assert!(plan.pinned);
     assert_eq!(plan.contents.len(), 1);
-    let layout = invoke(&["desktop", "layout", "repository"]);
-    assert!(layout.status.success());
-    assert_eq!(String::from_utf8_lossy(&layout.stdout).trim(), "null");
+    // Desktop keeps each Work's panes; the command reads only Dashboards.
+    assert!(!invoke(&["desktop", "layout", "repository"])
+        .status
+        .success());
     assert_eq!(counts(), before_reads);
     let stale = invoke(&[
         "desktop",
@@ -1697,62 +1666,14 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     let read: loopflow_execution::work::selection::Dashboard =
         serde_json::from_slice(&read.stdout).unwrap();
     assert_eq!((read.slots, read.revision), (None, arranged.revision + 1));
-    let mut layout: loopflow_execution::work::selection::WorkPaneLayout =
-        serde_json::from_str(include_str!("../../../tests/fixtures/dto/pane_layout.json")).unwrap();
-    layout.revision = 0;
-    // The fixture's conversation is not recorded here; the session pane shows the start state.
-    if let loopflow_execution::work::selection::PaneTree::Split { first, .. } = &mut layout.tree {
-        **first = loopflow_execution::work::selection::PaneTree::Pane {
-            id: "pane-0".into(),
-            content: loopflow_execution::work::selection::PaneIntent::Session {
-                session_id: None,
-                location: None,
-            },
-        };
-    }
-    layout.focused = None;
-    layout.zoomed = None;
-    layout.hidden.clear();
-    let input = serde_json::to_string(&layout).unwrap();
-    let saved = invoke_input(
-        &[
-            "desktop",
-            "layout",
-            "task:task_22222222222222222222222222222222",
-            "--save",
-        ],
-        &input,
-    );
-    assert!(
-        saved.status.success(),
-        "{}",
-        String::from_utf8_lossy(&saved.stderr)
-    );
-    let saved: loopflow_execution::work::selection::WorkPaneLayout =
-        serde_json::from_slice(&saved.stdout).unwrap();
-    assert_eq!(saved.drafts, layout.drafts);
-    assert_eq!(saved.revision, 1);
-    assert!(!invoke_input(
-        &[
-            "desktop",
-            "layout",
-            "task:task_22222222222222222222222222222222",
-            "--save"
-        ],
-        &input
-    )
-    .status
-    .success());
-    let before_read = counts();
-    let reopened = invoke(&[
+    // Desktop keeps each Work's panes; only Dashboards have a stored layout.
+    assert!(!invoke(&[
         "desktop",
         "layout",
         "task:task_22222222222222222222222222222222",
-    ]);
-    let reopened: loopflow_execution::work::selection::WorkPaneLayout =
-        serde_json::from_slice(&reopened.stdout).unwrap();
-    assert_eq!(reopened, saved);
-    assert_eq!(counts(), before_read);
+    ])
+    .status
+    .success());
     assert_eq!((counts().0, counts().1), (before.0, before.1));
     assert_eq!(
         conn.query_row("SELECT count(*) FROM dashboards", [], |row| row
@@ -1760,4 +1681,170 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
             .unwrap(),
         1
     );
+}
+
+#[test]
+fn docs_command_lists_and_reads_embedded_pages_offline() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+
+    let index = String::from_utf8(success(run(repo.path(), home.path(), &["docs"]))).unwrap();
+    assert!(index.contains("agent-api"), "{index}");
+    assert!(index.contains("work"), "{index}");
+    assert!(index.contains("sessions"), "{index}");
+
+    let index_json: serde_json::Value =
+        serde_json::from_slice(&success(run(repo.path(), home.path(), &["docs", "--json"])))
+            .unwrap();
+    let topics: Vec<&str> = index_json
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["topic"].as_str().unwrap())
+        .collect();
+    assert!(topics.contains(&"agent-api"));
+    assert!(topics.contains(&"work"));
+
+    let work =
+        String::from_utf8(success(run(repo.path(), home.path(), &["docs", "work"]))).unwrap();
+    let work_md =
+        String::from_utf8(success(run(repo.path(), home.path(), &["docs", "work.md"]))).unwrap();
+    assert_eq!(work, work_md);
+    assert!(work.starts_with("# Work\n"), "{work}");
+
+    let agent_api_json: serde_json::Value = serde_json::from_slice(&success(run(
+        repo.path(),
+        home.path(),
+        &["docs", "agent-api", "--json"],
+    )))
+    .unwrap();
+    assert_eq!(agent_api_json["topic"], "agent-api");
+    assert_eq!(agent_api_json["title"], "The Agent API");
+    assert!(agent_api_json["content"]
+        .as_str()
+        .unwrap()
+        .contains("lf -b -a codex research"));
+
+    let unknown = run(repo.path(), home.path(), &["docs", "nonexistent-topic"]);
+    assert!(!unknown.status.success());
+    let stderr = String::from_utf8_lossy(&unknown.stderr);
+    assert!(stderr.contains("unknown doc topic"), "{stderr}");
+    assert!(stderr.contains("agent-api"), "{stderr}");
+
+    // Embedded docs require no store, no repo config, and leave ~/.lf untouched.
+    assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
+fn skill_and_loopflow_cli_examples_resolve_against_command_tree() {
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let tree = Cli::command();
+    let mut tree = tree;
+    tree.build();
+
+    let extract_lf_commands = |text: &str| -> Vec<Vec<String>> {
+        let mut commands = Vec::new();
+        let mut in_bash = false;
+        let mut push_line = |raw: &str| {
+            let line = raw.split('#').next().unwrap_or(raw).trim();
+            let Some(rest) = line.strip_prefix("lf ") else {
+                return;
+            };
+            let tokens: Vec<String> = rest.split_whitespace().map(str::to_string).collect();
+            if !tokens.is_empty() {
+                commands.push(tokens);
+            }
+        };
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("```bash") {
+                in_bash = true;
+                continue;
+            }
+            if in_bash && trimmed.starts_with("```") {
+                in_bash = false;
+                continue;
+            }
+            if in_bash {
+                push_line(trimmed);
+                continue;
+            }
+            let mut rest = trimmed;
+            while let Some(start) = rest.find('`') {
+                let after = &rest[start + 1..];
+                let Some(end) = after.find('`') else {
+                    break;
+                };
+                push_line(&after[..end]);
+                rest = &after[end + 1..];
+            }
+        }
+        commands
+    };
+
+    for rel in [
+        "skills/loopflow/SKILL.md",
+        "rust/loopflow-definitions/src/builtins/LOOPFLOW.md",
+    ] {
+        let text = fs::read_to_string(workspace_root.join(rel)).unwrap();
+        let invocations = extract_lf_commands(&text);
+        assert!(!invocations.is_empty(), "{rel} has no lf examples");
+        for tokens in invocations {
+            // Skip root flags before the command or skill name.
+            let mut index = 0;
+            while index < tokens.len() && tokens[index].starts_with('-') {
+                let flag = &tokens[index];
+                index += 1;
+                if matches!(
+                    flag.as_str(),
+                    "-a" | "--agent" | "--machine" | "--repo" | "--wave" | "--task"
+                ) && index < tokens.len()
+                {
+                    index += 1;
+                }
+            }
+            let Some(first) = tokens.get(index) else {
+                continue;
+            };
+            if first == ":"
+                || first.starts_with('<')
+                || first.starts_with('[')
+                || loopflow_definitions::builtins::resolve_builtin_skill(first).is_some()
+                || loopflow_definitions::builtins::resolve_builtin_graph(first).is_some()
+            {
+                continue;
+            }
+            let mut path = vec![first.clone()];
+            if let Some(second) = tokens.get(index + 1) {
+                let looks_like_subcommand = !second.starts_with('-')
+                    && !second.starts_with('<')
+                    && !second.starts_with('[')
+                    && !second.starts_with('\'')
+                    && second != "main"
+                    && second != "<<'EOF'";
+                if looks_like_subcommand
+                    && matches!(
+                        first.as_str(),
+                        "task"
+                            | "pr"
+                            | "session"
+                            | "graph"
+                            | "skill"
+                            | "wave"
+                            | "machine"
+                            | "config"
+                            | "desktop"
+                    )
+                {
+                    path.push(second.clone());
+                }
+            }
+            assert!(
+                loopflow::lf::navigation::resolve_path(&tree, &path).is_ok(),
+                "{rel}: `lf {}` does not resolve in the CLI command tree (from `{}`)",
+                path.join(" "),
+                tokens.join(" ")
+            );
+        }
+    }
 }

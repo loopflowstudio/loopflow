@@ -99,10 +99,10 @@ resume per harness:
 
 | Test | Wiring it proves |
 |---|---|
-| `terminal_launch_and_resume_use_current_policy_and_preserve_native_identity` | Claude terminal, Codex native and OpenCode server: settings reach each provider's argv, thread parameters or config through the owner and PTY; `session resume` continues the same native conversation with current settings |
+| `terminal_launch_and_resume_use_current_policy_and_preserve_native_identity` | Claude terminal, Codex native and OpenCode: settings reach each provider's argv, thread parameters or config through the owner and PTY; `session resume` continues the same native conversation with current settings |
 | `headless_launch_and_graph_keep_current_options` | Claude stream: a headless skill arrives on stream-json stdin; `--yolo --chrome on` reach a Graph step's launch |
 | `codex_headless_start_receives_current_policy_on_the_wire` | Codex headless: model and sandbox reach `thread/start` |
-| `opencode_headless_start_selects_the_model_and_permissions` | OpenCode headless: model, permissions and the context plugin reach the server |
+| `opencode_headless_start_selects_the_model_and_permissions` | OpenCode headless: model, permissions and the context plugin reach `opencode run` |
 | `pi_public_headless_skill_delivers_context`, `pi_native_callbacks_retain_identity_final_output_and_usage` | Pi launch and its native callbacks |
 | `previews_do_not_start_a_provider_and_terminal_schema_is_explicitly_unsupported` | `--context` and the handlers' schema refusals start no provider; a refused resume keeps its Session |
 | `task_conversation_preparation_is_passive_and_connect_uses_shared_launch_settings` | `resume --prepare` starts nothing; a Task conversation's first `lf resume` launches with shared settings and the next continues it |
@@ -111,12 +111,12 @@ The rest of `session_launch_contract` covers native authentication, provider swi
 OpenCode diagnostics and Machine dispatch.
 
 Task Graph run and its previews (`task_graph_launch_tests` in the library,
-`global_commands`), one Graph run to an interactive step and one to Auto-Ship:
+`global_commands`), one Graph run to an interactive step and one with auto on:
 
 | Test | Wiring it proves |
 |---|---|
 | `a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named` | `task run` captures the Wave's Graph and stops the Task at its interactive step; a later bare run keeps the Graph a Task named |
-| `task_ship_runs_every_remaining_step_standing_in_at_each_interactive_step` | `-b --task … ship --reason` stands in at each interactive step, reaches `end` and completes the Task |
+| `auto_on_runs_every_remaining_step_standing_in_at_each_interactive_step` | `-b --task … task auto on --reason` stands in at each interactive step, reaches `end` and completes the Task |
 | `task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state` | `task run --explain` flags reach the preview; named, checkout and `--task` selections agree, conflicting ones refuse; the store's bytes don't change; launch refuses with the preview's reason |
 | `task_run_explain_reads_unstarted_work_without_preparing_it` | `LF_AS` reaches context resolution; previewing an unstarted Task leaves it without a checkout |
 | `task_checkout_explain_reuses_explicit_and_inferred_work_without_effects` | `task checkout --explain` flags reach the preview; selections agree; Git and store stay unchanged; `task checkout` acts on the same inferred Task |
@@ -138,8 +138,7 @@ the Rust suites. Schema construction can pass even when a released migration
 was edited; this check also verifies immutable history against main and tags.
 Include `store::sqlite::revisions::tests::store_revisions_cover_every_table`
 when adding a table: give displayed rows revision triggers and classify operation-only
-receipts as never displayed. Wave lifecycle changes also run `--test two_people`;
-its shared repository publishes authored files that lifecycle operations may already commit.
+receipts as never displayed.
 When settings leave SQLite, search fixture SQL in `src/`, `tests/`, and
 `tests/e2e/` for removed columns and tables. Seed preferences through `lf set`;
 keep runtime observations in SQLite. Run account, Machine, Wave lifecycle, and
@@ -160,7 +159,7 @@ Transport cleanup checks wait for both the recorded exit and socket removal:
 the interruption hook records completion before later cleanup hooks run.
 Relay exec changes also run `task_graph_launch_tests` and `land_tests`: a
 viewer's OS exit and its original command's recorded result must agree, including
-failed placement, failed shipping and a Graph held at landing.
+failed placement, failed shipping and a Graph waiting at landing with auto off.
 
 `session_activity` fixtures that stand for a provider's own facts (open tools,
 pending input, yielded) carry the AgentProcess's `attachment_token`; a row
@@ -286,23 +285,29 @@ Cross-provider replay fixtures must install stand-ins for both the recorded and
 override providers, with a fixture/system-only PATH. A developer's installed
 provider must neither satisfy a missing fixture nor receive a test launch.
 
-## Linear acquisition fixtures
+## Work and tracker fixtures
 
-Linear acquisition fixtures live under `rust/loopflow/tests/linear/` and compile
+Work and tracker acquisition fixtures live under `rust/loopflow/tests/work/` and compile
 inside the library, where fetched response types stay private. Focused Cargo tests
 build the current CLI and take its path from Cargo’s artifact output:
 
 ```sh
 cargo test -p loopflow --lib local_planning
-cargo test -p loopflow-execution --lib linear::acceptance
-cargo test -p loopflow-storage --lib sqlite::linear_acceptance
+cargo test -p loopflow-execution --lib linear::events
+cargo test -p loopflow-storage --lib sqlite::linear_events
 ```
 
-Application lifecycle checks stay in `linear::acceptance`; supplied-fact SQL
-checks live in `store::sqlite::linear_acceptance`.
+Application lifecycle checks stay in `linear::events`; supplied-fact SQL
+checks live in `store::sqlite::linear_events`.
 
 CI and the disposable installation runner supply their prepared candidate through
-`LOOPFLOW_TEST_LF`, avoiding Cargo calls in each test process. Only set this to
+`LOOPFLOW_TEST_LF`, avoiding Cargo calls in each test process. Integration test
+binaries under `rust/loopflow/tests/` set it themselves, from the `lf` Cargo
+built beside them, so `cargo test -p loopflow --test session_launch_contract`
+runs no nested build and leaves `target/debug/lf` as Cargo linked it. Lib test
+binaries (`--lib`, which holds `tests/work/`) have no such `lf` and still run the
+nested build; under bare `cargo nextest run` beside integration binaries, set
+`LOOPFLOW_TEST_LF="$PWD/target/debug/lf"`. Only set this to
 the executable built from the current test source and build inputs; never an
 installed CLI. Compiled provenance fields have separate names from build inputs
 so nested Cargo does not invalidate the parent's build.
@@ -390,8 +395,7 @@ conversations, while native authentication stays authoritative. Retired managed
 homes supply transcripts only. Account switching and saved-back credentials are
 outside launch behavior. Use isolated homes and synthetic provider endpoints;
 ordinary retry, usage, binding and review behavior belong in
-`session_lifecycle_tests`, and legacy Linear Project adoption belongs in
-`ops::linear::adoption_tests`.
+`session_lifecycle_tests`.
 
 
 `planning_reconnect_tests` runs public work-watch and Graph-boundary recovery against
@@ -399,28 +403,13 @@ synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
 independent acquisition during failed delivery, local buffering and retained execution.
 The peer implements team deltas with current revision timestamps. Graph acquisition
 waits for a turn/step boundary; only watchers retry on the 30–240-second clock.
-Run these Linux fixtures when changing Linear acquisition, even if macOS checks pass.
-Linear and Git planning run separately; no provider receipt crosses Git.
-`planning_setup_tests` proves configuration selection and personal-key recovery.
-`planning_foreground_tests` exercises disposable custom refs through public CLI and
-Session connections, including offline independent edits, comments, completion and
-unchanged execution. `planning_write` covers atomic local journal capture and import
-through the same typed writer. `task_remote_tests` exercises actual target CLI dispatch
+Run these Linux fixtures when changing Linear fetches, even if macOS checks pass.
+`planning_setup_tests` proves tracker selection and that the released `provider: git`
+reads as no tracker. `machine_commands::the_later_change_shows_on_both_machines_through_the_hub`
+runs a laptop and its hub over the real `ssh … lf server connect` carrier, through
+an offline edit and a lost `plan.apply` answer; `sqlite::plan_carriers` covers the
+exchange's store half. `task_remote_tests` exercises actual target CLI dispatch
 with simulated SSH/providers; it does not establish configured remote installation.
-
-`tests/e2e/codex_connect.py --codex "$(command -v codex)" --lf target/debug/lf
---planning-peers --output <dir>` composes a real Codex engine with a synthetic
-Responses endpoint and disposable Git planning. It launches with `--task`, then
-imports edits, comments and completion for that same Task during live connect and
-explicit resume, including after killing the fixture's driver. Its historical
-Workflow is seeded; its Session, drivers and checkout are created by public commands.
-Exchange preserves Workflow/placement, live driver, Session/native identity and
-append-only history without starting an engine or provider turn. After imported
-completion, the current client explicitly starts and completes another turn on the
-same engine. The controlled protocol client is headless, not a rendered TUI or
-running Workflow-edge proof. It needs re-authoring before it runs again: it seeds the
-renamed `task_workflows` table and resumes a Run, which `lf resume` refuses. Prepare the script's uv dependencies before
-running it through `scripts/test_network.py`.
 
 Only attempted effects acknowledge; equal-desired provider readback can instead
 retire an unattempted intention without another write. The portable `watch` offline-completion test requires a foreground delivery error
@@ -524,8 +513,17 @@ Skill export tests use isolated homes and cover builtin/global definitions,
 personal agent directories and pruning. `sync-skills --repo` exports repository
 skills and Graph recipes into the checkout; default sync exports globally.
 
+Each harness declares where it reads installed skills
+(`Capabilities::installed_skills`), and sync writes exactly those directories.
+The declaration is one directory per scope, so a harness can't be written
+without it. The conformance test syncs into a temporary home and repository and
+reads each harness's declared directories.
+It cannot catch a wrong path. Only the real binary knows where it reads:
+`lf self sync-skills --yes`, then `agy -p "/skills"`.
+
 ```bash
 cargo test -p loopflow-execution --lib skills::tests
+cargo test -p loopflow-execution --lib harness::conformance_tests::every_harness_reads_a_synced_skill
 ```
 
 Settings and recipe changes also run the provider-boundary matrix:
@@ -540,8 +538,8 @@ through composition, live repository skill overrides in global recipes, personal
 file precedence, explicit CLI/environment selection and empty/false/unset values.
 Session/resume fixtures create local Tasks through the CLI and wait for each
 worker before reading its selection. Stand-ins establish launch behavior, not
-configured-provider recovery. Claude's headless permission floor is independent
-of the resolved `yolo` preference; terminal bypass checks own its negation.
+configured-provider recovery. A headless run skips permissions whatever `yolo`
+resolves to; attended terminal checks own its negation.
 Launch and preview fixtures select a harness explicitly or save a fixture-local
 `default_agent`; they must not depend on the developer's installed providers.
 Keep composed launch matrices split into bounded behavioral cases so each stays
@@ -753,7 +751,7 @@ When changing harness event mapping, run the recorded-trace conformance tests
 alongside the provider's unit tests. Keep trace expectations aligned with the
 event contract, including durable final-answer receipts and usage checkpoints.
 
-After Session-history or schema changes, run `lf session history list --json`,
+After Session-history or schema changes, run `lf session history --json`,
 `lf session usage --json` and `lf machine doctor --json` against a disposable Machine with inherited `LF_*` and
 `LOOPFLOW_*` authority removed and `LF_BIN` pinned to the compiled source CLI.
 Never use the installed store to prove an unmerged migration.
@@ -815,7 +813,7 @@ Run the same Linux suite when changing Linear mutation inputs or acknowledgement
 the reconnect peer must accept partial Initiative updates and return `success`.
 
 ```bash
-cargo nextest run -p loopflow-execution --lib -E 'test(linear::) | test(ops::linear::) | test(ops::linear_observe::)' --no-fail-fast
+cargo nextest run -p loopflow-execution --lib -E 'test(linear::) | test(ops::linear::) | test(ops::tracker_events::)' --no-fail-fast
 cargo nextest run -p loopflow --test planning_reconnect_tests --no-fail-fast
 ```
 
@@ -829,7 +827,7 @@ not exercised by macOS-only checks.
 
 Installed-host tests are `#[ignore]`d and use `support::rex::IsolatedRex`, which
 refuses unqualified CLI requests so a fixture cannot reach your own server. Run
-them one at a time: together they can miss a follower's arrival deadline.
+them one at a time: together they can miss a host's reply deadline.
 On macOS, run Rex fixtures directly: `scripts/test_network.py` blocks Rex's
 `/usr/bin/login` launcher before the terminal command executes. These fixtures
 use private homes, an isolated server and stand-in providers.
@@ -981,6 +979,14 @@ Attachment-rejection fixtures must also supply provider version probes and restr
 PATH to their stand-ins: Claude checks `--version` before launching on first input.
 A locally installed provider must not make an otherwise incomplete fixture pass.
 
+A provider stand-in shows lf's hooks only if it runs them. A fixture that
+copies `loopflow-execution/tests/support/tool_turn.py` into `LF_HOME` gets a
+turn with one tool from the Claude, Codex, OpenCode, Pi and Antigravity stand-ins: the start
+hook's block in `hook-context`, `holding` while the tool runs, and after the
+fixture writes `tool-done`, the tool hook's steers in `hook-steer`. lf reads
+usage and final answers from the provider's transcript and skips a turn with
+no timestamp, so a stand-in dates the rows it writes.
+
 Changes to terminal provider probes or spawning must run both `session_cli_tests`
 and `agent_startup_tests`. An executable that exits with an error still started
 and must record its opening; use an absent or non-executable fixture for spawn
@@ -1016,7 +1022,7 @@ Changes to observed definition files or directory traversal also run
 must remain available when a local catalog path is not a directory.
 
 When changing Session activity or Waiting, run `session_cli_tests` and
-`world_recipes` (its `--watch` cases) together. Direct SQL fixtures must carry both the attachment
+`session_list_subscribe` together. Direct SQL fixtures must carry both the attachment
 token and the AgentProcess id, matching the production activity writer. Rebuild both SwiftPM and
 the Xcode test targets after shared model renames; Foundation types such as
 `Foundation.Process` need explicit qualification where names overlap.
@@ -1075,7 +1081,7 @@ cargo test -p loopflow --test served_reads
 cargo test -p loopflow --test transport_tests server_status_does_not_install_or_create_work
 cargo test -p loopflow --test transport_tests server_registration_migrates_old_job_and_respects_disabled_choice -- --ignored
 cargo test -p loopflow --test transport_tests held_session_survives_server_restart
-cargo test -p loopflow --test transport_tests a_held_pane_reads_reconnecting_until_the_next_server_answers
+cargo test -p loopflow --test transport_tests a_resumed_relay_keeps_focus_across_server_restarts
 cargo test -p loopflow --test transport_tests ownership_queues_behind_a_taker_and_tells_the_loser_who_took_it
 ```
 

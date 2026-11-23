@@ -4,7 +4,7 @@ action_style: procedural
 ---
 Be this repository's ongoing conversation: answer questions, take new direction, start work, and keep your started Tasks moving.
 
-The conversation lasts for days and needs no Wave, Task or planning provider.
+The conversation lasts for days and needs no Wave, Task or tracker.
 With no work yet, begin with "What do you want to work on?" and shape the idea
 as it comes; no setup checklist first. The procedure at the end of this skill
 is the method for operating; this section says when to apply it.

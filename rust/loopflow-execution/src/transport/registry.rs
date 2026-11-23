@@ -27,7 +27,9 @@ use loopflow_model::program_status::Records;
 
 use super::held::Source;
 use super::hosted::{Hosted, Pass, Watchers};
-use super::{dimensions, drain, wait_for_activity, CONTROL_ENV, HELD_ENV, PARENT_ENV, STREAM_ENV};
+use super::{
+    dimensions, drain, wait_for_activity, CONTROL_ENV, HELD_ENV, PARENT_ENV, STREAM_ENV, WITHIN_ENV,
+};
 
 /// How long a connection has to name its terminal.
 const ARRIVAL: Duration = Duration::from_secs(5);
@@ -91,8 +93,8 @@ pub struct Start {
 /// The revision of what follows the entrance's answer: the viewer protocol
 /// and the child's control requests. The first exchange itself never changes,
 /// so either side of an install reads the other's revision.
-// Revision 3 also restores paste framing after a lost input claim.
-pub const REVISION: u32 = 3;
+// Revision 4: every view types; attach carries no input claim.
+pub const REVISION: u32 = 4;
 
 /// Where connections to held terminals enter the server.
 pub fn entrance() -> Result<PathBuf> {
@@ -238,17 +240,11 @@ struct Entry {
     reported: Option<Records>,
 }
 
+/// Both steps read the terminal's size when they act: a view that takes the
+/// size meanwhile is what the program is narrowed from and returned to.
 enum Nudge {
-    Replaying {
-        until: u64,
-        rows: u16,
-        cols: u16,
-    },
-    Narrowed {
-        since: Instant,
-        rows: u16,
-        cols: u16,
-    },
+    Replaying { until: u64 },
+    Narrowed { since: Instant },
 }
 
 enum Command {
@@ -373,6 +369,10 @@ impl Registry {
         });
         let mut unsettled = Vec::new();
         let (entries, pending) = registry.adopt(&mut unsettled);
+        // Ends found at startup are recorded before anyone reads the store
+        // through this registry: the recovery pass would otherwise reap the
+        // dead agent first, and its end would read as a move, not a death.
+        unsettled.retain_mut(|exit| !settle(exit));
         *registry.pending.lock().expect("registry lock poisoned") = pending.clone();
         for holder in pending {
             let registry = registry.clone();
@@ -450,9 +450,8 @@ impl Registry {
         };
         meta.write(&self.place, &terminal)?;
         crate::journal::process_ledger()?.create_terminal(&terminal, &self.build)?;
-        let mut client = Client::ensure(&self.place)?;
+        let mut client = Client::ensure(&self.place, &self.build)?;
         let holder = client.hello()?;
-        crate::terminal_holder::client::record(holder.pid);
         let (rows, cols) = dimensions(start.rows, start.cols);
         let mut env: Vec<(String, String)> = start
             .env
@@ -462,6 +461,7 @@ impl Registry {
             .filter(|(name, _)| {
                 ![
                     HELD_ENV,
+                    WITHIN_ENV,
                     PARENT_ENV,
                     CONTROL_ENV,
                     STREAM_ENV,
@@ -474,6 +474,7 @@ impl Registry {
             })
             .collect();
         env.push((HELD_ENV.into(), terminal.to_string()));
+        env.push((WITHIN_ENV.into(), terminal.to_string()));
         env.push((PARENT_ENV.into(), holder.pid.to_string()));
         env.push((CONTROL_ENV.into(), meta.control_key.clone()));
         // An unanswered start may have started the child. The holder's
@@ -598,15 +599,13 @@ impl Registry {
             }
             unsettled.push(Unsettled::recorded(&place, terminal));
         }
-        crate::terminal_holder::client::settle_departed();
         (entries, pending)
     }
 
     /// Take up what the holder at `place` lists.
     fn take_up(&self, place: &Place, mut client: Client) -> Result<TakenUp> {
-        let holder = client.hello()?;
+        client.hello()?;
         let listed = client.list()?;
-        crate::terminal_holder::client::adopt(place, holder.pid);
         let mut taken = TakenUp {
             entries: Vec::new(),
             unsettled: Vec::new(),
@@ -654,7 +653,6 @@ impl Registry {
                         .iter()
                         .map(|terminal| Unsettled::recorded(&holder.place, terminal.clone()))
                         .collect();
-                    crate::terminal_holder::client::settle_departed();
                     (Vec::new(), unsettled)
                 }
                 Ok(client) => match self.take_up(&holder.place, client) {
@@ -701,8 +699,6 @@ impl Registry {
         // the ring no longer holds of the visible screen.
         entry.nudge = Some(Nudge::Replaying {
             until: held.written,
-            rows: held.rows,
-            cols: held.cols,
         });
         Ok(entry)
     }
@@ -1024,23 +1020,19 @@ impl Entry {
         // Output the ring dropped before it was read is missing from the
         // screen; the program is asked to draw it again.
         if source.take_gap().is_some() && self.nudge.is_none() {
-            let (rows, cols) = self.hosted.size();
             self.nudge = Some(Nudge::Replaying {
                 until: source.position(),
-                rows,
-                cols,
             });
         }
+        let (rows, cols) = self.hosted.size();
         match self.nudge {
-            Some(Nudge::Replaying { until, rows, cols }) if source.position() >= until => {
+            Some(Nudge::Replaying { until }) if source.position() >= until => {
                 source.resize(rows, cols.saturating_sub(1).max(2));
                 self.nudge = Some(Nudge::Narrowed {
                     since: Instant::now(),
-                    rows,
-                    cols,
                 });
             }
-            Some(Nudge::Narrowed { since, rows, cols }) if since.elapsed() >= NUDGE => {
+            Some(Nudge::Narrowed { since }) if since.elapsed() >= NUDGE => {
                 source.resize(rows, cols);
                 self.nudge = None;
             }
@@ -1050,7 +1042,7 @@ impl Entry {
 
     fn nudge_at(&self) -> Option<Instant> {
         match self.nudge {
-            Some(Nudge::Narrowed { since, .. }) => Some(since + NUDGE),
+            Some(Nudge::Narrowed { since }) => Some(since + NUDGE),
             _ => None,
         }
     }

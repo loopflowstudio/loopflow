@@ -9,20 +9,10 @@
     }
   },
   "primary": {
-    "actions": [
-      {
-        "help": "Open this Session in a terminal",
-        "kind": "open",
-        "label": "Open here",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "agent_process_id": null,
     "availability": null,
     "cwd": "/private/tmp/.tmpRKKNhK.repo",
@@ -46,7 +36,6 @@
     "program_status": null,
     "provider": "opencode",
     "model": null,
-    "ready_summary": null,
     "state": "unknown",
     "task_ids": [],
     "task_primary": false,
@@ -65,23 +54,17 @@
     "preview": null,
     "transition": null,
     "turn": null,
-    "raw": false
+    "raw": false,
+    "ended": null,
+    "start": null,
+    "outlook": null,
+    "status_line": "unknown"
   },
   "reopened": {
-    "actions": [
-      {
-        "help": "Open this Session in a terminal",
-        "kind": "open",
-        "label": "Open here",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "agent_process_id": null,
     "availability": null,
     "cwd": "/private/tmp/.tmpRKKNhK.repo",
@@ -105,7 +88,6 @@
     "program_status": null,
     "provider": "opencode",
     "model": null,
-    "ready_summary": null,
     "state": "unknown",
     "task_ids": [],
     "task_primary": false,
@@ -124,7 +106,11 @@
     "preview": null,
     "transition": null,
     "turn": null,
-    "raw": false
+    "raw": false,
+    "ended": null,
+    "start": null,
+    "outlook": null,
+    "status_line": "unknown"
   },
   "roadmap": {
     "generated_at": "2026-10-11T22:28:09.267041Z",
@@ -147,14 +133,13 @@
               "current": true,
               "id": "proj_afa19d1ddecc466d956f0bc47eccaad9",
               "krs": [],
-              "linear_id": "project-7b839056-f5c3-44c7-b729-ff62bf8c43ba",
+              "tracker_id": "project-7b839056-f5c3-44c7-b729-ff62bf8c43ba",
               "metric_targets": [],
               "name": "Task PR tests",
               "slug": "task-pr-tests",
               "status": "started",
               "sync": {
-                "changes": [],
-                "connected": false
+                "actions": []
               }
             }
           ],
@@ -204,6 +189,8 @@
           },
           "execution": {
             "captured": null,
+            "died": null,
+            "outlook": null,
             "reason": "No Task Graph has run; independent Sessions may still be active",
             "state": "idle",
             "step": null
@@ -220,6 +207,7 @@
             "owner": "user",
             "reason": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
           },
+          "owned_by_you": false,
           "pr": null,
           "reference": {
             "issue_url": "https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions",
@@ -236,10 +224,6 @@
           "run_control": {
             "unavailable": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
           },
-          "ship_control": {
-            "unavailable": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
-          },
-          "shipping": null,
           "runtime": {
             "completion_pending": null,
             "provider": "opencode",
@@ -259,8 +243,8 @@
           },
           "section": "backlog",
           "task": {
-            "acquisition": {
-              "observed_at": 1791757688,
+            "tracker_state": {
+              "synced_at": 1791757688,
               "state": "available"
             },
             "assignee": null,
@@ -270,13 +254,12 @@
             "follow_up_sources": [],
             "id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7",
             "identifier": "INF-123",
-            "linear_id": "issue-81928071-6f48-4343-b343-29dcb93f7cc9",
+            "tracker_id": "issue-81928071-6f48-4343-b343-29dcb93f7cc9",
             "name": "Prove Task PR transitions",
             "rank": 0,
             "state": null,
             "sync": {
-              "changes": [],
-              "connected": false
+              "actions": []
             },
             "repo_id": "repo_00000000000040008000000000000001",
             "repo": "/private/tmp/.tmpRKKNhK",
@@ -298,20 +281,10 @@
   },
   "sessions": [
     {
-      "actions": [
-        {
-          "help": "Open this Session in a terminal",
-          "kind": "open",
-          "label": "Open here",
-          "unavailable_reason": null
-        },
-        {
-          "kind": "reveal",
-          "label": "Show conversation",
-          "help": "Continue existing history without taking another terminal's input",
-          "unavailable_reason": null
-        }
-      ],
+      "action": {
+        "label": "Open here",
+        "help": "Open this Session in a terminal"
+      },
       "agent_process_id": null,
       "availability": null,
       "cwd": "/private/tmp/.tmpRKKNhK.repo",
@@ -335,7 +308,6 @@
       "program_status": null,
       "provider": "opencode",
       "model": null,
-      "ready_summary": null,
       "state": "unknown",
       "task_ids": [],
       "task_primary": false,
@@ -354,23 +326,17 @@
       "preview": null,
       "transition": null,
       "turn": null,
-      "raw": false
+      "raw": false,
+      "ended": null,
+      "start": null,
+      "outlook": null,
+      "status_line": "unknown"
     },
     {
-      "actions": [
-        {
-          "help": "Open this Session in a terminal",
-          "kind": "open",
-          "label": "Open here",
-          "unavailable_reason": null
-        },
-        {
-          "kind": "reveal",
-          "label": "Show conversation",
-          "help": "Continue existing history without taking another terminal's input",
-          "unavailable_reason": null
-        }
-      ],
+      "action": {
+        "label": "Open here",
+        "help": "Open this Session in a terminal"
+      },
       "agent_process_id": null,
       "availability": null,
       "cwd": "/private/tmp/.tmpRKKNhK",
@@ -394,7 +360,6 @@
       "program_status": null,
       "provider": "opencode",
       "model": null,
-      "ready_summary": null,
       "state": "unknown",
       "task_ids": [
         "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
@@ -418,23 +383,17 @@
       "preview": null,
       "transition": null,
       "turn": null,
-      "raw": false
+      "raw": false,
+      "ended": null,
+      "start": null,
+      "outlook": null,
+      "status_line": "unknown"
     },
     {
-      "actions": [
-        {
-          "help": "Open this Session in a terminal",
-          "kind": "open",
-          "label": "Open here",
-          "unavailable_reason": null
-        },
-        {
-          "kind": "reveal",
-          "label": "Show conversation",
-          "help": "Continue existing history without taking another terminal's input",
-          "unavailable_reason": null
-        }
-      ],
+      "action": {
+        "label": "Open here",
+        "help": "Open this Session in a terminal"
+      },
       "agent_process_id": "cbe8d875-580e-4683-89d4-bd6b51fc277b",
       "availability": null,
       "cwd": "/private/tmp/.tmpRKKNhK.unscoped",
@@ -457,7 +416,6 @@
       "program_status": null,
       "provider": "opencode",
       "model": null,
-      "ready_summary": null,
       "state": "closed",
       "task_ids": [],
       "task_primary": false,
@@ -476,24 +434,18 @@
       "preview": null,
       "transition": null,
       "turn": null,
-      "raw": false
+      "raw": false,
+      "ended": null,
+      "start": null,
+      "outlook": null,
+      "status_line": "closed; `lf resume session_bf12c20b53be450998e36bf24a58b56f` opens it"
     }
   ],
   "task_primary": {
-    "actions": [
-      {
-        "help": "Open this Session in a terminal",
-        "kind": "open",
-        "label": "Open here",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "agent_process_id": null,
     "availability": null,
     "cwd": "/private/tmp/.tmpRKKNhK",
@@ -517,7 +469,6 @@
     "program_status": null,
     "provider": "opencode",
     "model": null,
-    "ready_summary": null,
     "state": "unknown",
     "task_ids": [
       "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
@@ -541,6 +492,10 @@
     "preview": null,
     "transition": null,
     "turn": null,
-    "raw": false
+    "raw": false,
+    "ended": null,
+    "start": null,
+    "outlook": null,
+    "status_line": "unknown"
   }
 }

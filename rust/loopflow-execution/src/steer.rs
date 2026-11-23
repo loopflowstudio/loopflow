@@ -156,7 +156,7 @@ pub fn idle_conversations(
             candidate
                 .identity
                 .is_some_and(|(pid, start)| {
-                    crate::journal::process_identity_evidence(pid, start)
+                    crate::process::os_process::process_identity_evidence(pid, start)
                         == crate::store::ProcessIdentityEvidence::Live
                 })
                 .then_some(candidate.conversation)
@@ -176,7 +176,7 @@ pub fn sessions_to_start(
         .into_iter()
         .filter(|wake| {
             let running = wake.identity.is_some_and(|(pid, start)| {
-                crate::journal::process_identity_evidence(pid, start)
+                crate::process::os_process::process_identity_evidence(pid, start)
                     == crate::store::ProcessIdentityEvidence::Live
             });
             !running && named.insert(wake.session.clone())

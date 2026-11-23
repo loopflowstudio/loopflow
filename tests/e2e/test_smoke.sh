@@ -21,7 +21,7 @@
   # Never let an agent's ambient Run context or development ledger influence
   # the subprocesses this smoke test launches.
   export LF_HOME="$lf_home"
-  unset LF_RUN_ID LF_WAVE_ID
+  unset LF_EXECUTION_ID LF_WAVE_ID
 
   git init --bare "$origin_dir" >/dev/null
   git clone "$origin_dir" "$repo_dir" >/dev/null

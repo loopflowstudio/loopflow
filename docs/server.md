@@ -1,142 +1,94 @@
 # Connect clients
 
 ```bash
-lf server status   # local server readiness and any connection error
-lf install         # update the selected Loopflow installation
+lf server status   # check local client server readiness and any connection error
+lf install         # update Loopflow and keep its server registration in sync
 ```
 
-Open Desktop and connect to your Work. Installation prepares its local server
-automatically; you do not need to start it in another terminal or set up
-Tailscale. `lf server status` reports readiness, the socket and the running server
-instance as JSON. It observes without installing or repairing anything.
+Loopflow Desktop and held Task conversations connect through a local client
+server on your Machine. `lf install` registers and updates it automatically:
+no manual daemon setup or Tailscale configuration needed for local use.
+`lf server status` is read-only: it reports readiness, the socket path, and the
+running build as JSON without installing or modifying anything. `ready` means
+the server answers at a protocol revision this `lf` speaks, whichever build is
+asking; `executable_sha256` names the server's own executable.
 
-## Pick the command for the job
+## Pick the right command
 
-| You want to | Use |
+| You want to… | Use |
 |---|---|
 | Run work on another computer | `lf machine add mini`, then `lf --machine mini …` |
 | Check Desktop's connection to Loopflow | `lf server status` |
 | Install or update Loopflow and its server | `lf install` |
-| Focus a Desktop window or arrange its panes | `lf desktop` |
+| Focus a Desktop window or script its panes | `lf desktop` |
 
-Machine commands manage execution destinations, their connections and capacity.
-The server lets clients reach Work and existing Sessions on a host. Installation
-owns its registration and updates. Desktop's window automation stays with the app.
-Desktop uses this connection for all shared Work reads, changes and live updates.
-Ordinary CLI commands can run without the client server; opening a Task or Wave
-conversation is the exception, because the server starts its agent.
+Machine commands choose **where work runs**. The client server lets local
+clients (Desktop, `lf open`, `lf resume`) reach Work and held conversations on
+this Machine. Ordinary CLI commands work without the server; opening a Task or
+Wave conversation is the exception because the server starts its held agent.
 
-Keep a Task open in Desktop while editing its checkout or waiting for CI. Its
-live reading updates when Loopflow observes a relevant change, including changes
-outside Loopflow's database. Connected views share the server's latest
-observations of running processes, Git state, PR/CI status and repository files;
-external changes appear after the next observation. Ordinary CLI reads observe
-those facts directly, so they need no running server or saved server cache.
+Connected views share the server's live observations of processes, Git state,
+PR/CI status, and repository files, updating automatically as things change on
+disk or on GitHub.
 
-## Keep editing through a connection loss
+## Keep working through a connection loss
 
-Keep a Task list open while Desktop reconnects: live Work updates resume
-automatically from the last retained reading. An unchanged list does not need
-to be downloaded again. If Work changed or the server restarted, Desktop receives
-a complete current reading. If recovery fails, the window reports unavailability
-and retries. Task and Session creations recover through their saved request and
-server receipt. Other Task changes (Complete, Claim, Move, …) show at once and
-are sent again under the same request ID when the connection returns, so the
-server runs each one once. After about ten seconds without the server, change
-controls are disabled and lists show their last reading until it is back. See
-[Changes show at once](surfaces.md#changes-show-at-once).
-
-Desktop reconnects automatically to the same running conversation when the
-server is replaced or its connection drops. Its native status row shows
-**Reconnecting…**; the screen stays visible and input pauses until the
-connection is acknowledged. The pane then continues from where it stopped,
-including output printed while the server was away, without redrawing.
-Selection, copy, Find and scrolling remain available.
-If recovery fails, the last screen remains visible and is marked stale.
-
-If another viewer has control, recovery leaves that viewer in control. The
-read-only pane offers **Move here** to request control explicitly. **Retry**
-repairs the connection after automatic retries are exhausted. It does not take
-control, restart the provider or repeat a command. Uncertain keystrokes and
-unacknowledged commands are never replayed automatically.
-
-An unavailable connection does not mean the Session has ended. Agents run in a
-holder beside the server, not in it, so a stopped or crashed server leaves
-every turn running; [Keep working through an update](sessions.md#keep-working-through-an-update)
-says what each kind of interruption costs. Closing Desktop
-leaves the server, its holders and running Graphs independent of the window.
-Conversations stay running while their scope is open, even without a viewer.
-Completed-Task cleanup waits for pending requests, active turns, running Graphs
-and the Task's viewing grace, even without a checkout. See
-[Sessions](sessions.md#come-back-to-a-conversation) for Task closure and quitting
-an agent.
-Logout or reboot ends live processes; [resume from saved history](sessions.md#after-a-crash-or-reboot)
-afterward.
+- **Lists and edits.** When Desktop reconnects, live Work subscriptions resume
+  automatically from the last reading (or refresh cleanly if the server
+  restarted). Task edits (Complete, Claim, Move) show immediately and retry
+  under the same request ID so each runs at most once. After ~10 seconds
+  without the server, edit controls disable until it returns
+  ([Changes show at once](surfaces.md#changes-show-at-once)).
+- **Conversations.** Agents run in a **holder** process beside the server, not
+  inside it. When `lf install` restarts the server or a connection drops,
+  agents keep running, Desktop shows **Reconnecting…**, input pauses, and the
+  pane catches up from buffered output once reconnected. Selection, copy, Find,
+  and scrollback stay usable throughout. Click **Retry** if automatic retries
+  stop; it never restarts the agent or replays uncertain keystrokes.
+- **Closing Desktop.** Quitting Desktop leaves the server, holders, and running
+  Graphs untouched. After a logout or reboot, the server automatically restarts
+  active Task work sessions and runs
+  ([after a kill or reboot](sessions.md#auto-recovery-after-a-kill-crash-or-reboot)).
 
 ## Recover a submitted creation
 
-Submit once. When the Task or conversation appears, Desktop clears the saved
-submission. If Desktop closes before showing the result, reopening recovers it
-on the original Machine. **Show result** displays the recovered Task or Session
-and clears the submission after it appears. Switching repositories or opening
-another window does not submit it somewhere else.
+Desktop saves Task creations, **Create Task from this conversation**, and
+new-thread requests locally before sending them. If Desktop quits before seeing
+the reply, reopening checks the server's receipt on the original Machine and
+offers **Show result** once confirmed (never duplicating the Task or sending it
+to a different repo).
 
-This recovery also covers **Create Task from this conversation** and starting a
-new thread in an existing Session. Desktop saves each submitted request on this
-device before sending it. If saving fails, the form stays open with the error
-and nothing is sent. This saves submitted creations, not an editable offline
-queue; submissions do not sync to other devices.
+- **Task created; start unconfirmed:** the Task exists, but launch confirmation
+  was lost. Inspect its status and Graph history before starting anything.
+- **Conversation change unconfirmed:** a new-thread request was interrupted
+  while stopping the previous provider. Use **Inspect** to check its receipt;
+  recovery never repeats the stop.
 
-The server's receipt determines what happened. Desktop checks it after reconnect
-or app restart, and sends the identical creation again only when the server
-confirms it is absent or safe to continue. An unavailable server leaves the
-submission unresolved. Once Desktop presents a confirmed result, it removes the
-saved request.
-
-**Task created; start unconfirmed** means the Task exists but its launch has not
-been confirmed. Open the Task and inspect its status and Graph history before
-starting anything. Desktop keeps this submission available for inspection and
-does not launch it again. Recovering a receipt for a removed Task does not
-recreate it.
-
-**Conversation change unconfirmed** means a new-thread request was interrupted
-while stopping the earlier provider. **Inspect** shows the conversation and its
-receipt; recovery does not repeat the stop. Newer input also prevents finishing
-an older unpublished conversation change.
-
-Other changes keep their request ID only while Desktop stays open. A change
-whose answer was lost when Desktop quit shows in the next reading or not at
-all; check the Task before making it again.
+CLI scripts get the same guarantee with `lf task create --request-id <id>` and
+`lf server receipt <id> --json`.
 
 ## Updates and disabled background access
 
-Use `lf install` to update the selected build, at any time: it restarts the
-server and ends no conversation. Running agents stay on the build they started
-with until they end; conversations opened afterward use the new one.
-Installation reconciles the server registration; Desktop and terminal views
-reconnect through the update. `lf server run` is the foreground entry used by
-the OS supervisor, not a routine setup step.
+`lf install` updates `lf` and restarts the server without ending any running
+conversations (existing agents keep running on their build; new conversations
+use the updated build). `lf server run` is the supervisor entrypoint, not a
+command you need to run by hand.
 
-If macOS has disabled Loopflow's background item, enable it in System Settings.
-On Linux, disabled or masked user services likewise require explicit enablement.
-Status checks and Retry respect that choice. They do not repeatedly register a
-helper. For a mismatched build or another startup error, read the diagnosis from
-`lf server status` and check the installation with `lf doctor`.
+If macOS disabled Loopflow's background item, re-enable it in System Settings
+(or re-enable the user service on Linux). Status checks and Retry respect that
+setting and never re-register it behind your back.
 
 ## Phone access
 
 ```bash
-lf server mobile            # private remote access over this host's Tailscale
-lf server mobile --status   # saved approval and live readiness
-lf server mobile --off      # stop remote access; local Sessions keep running
+lf server mobile            # enable private remote access over this host's Tailscale
+lf server mobile --status   # check approval and live readiness
+lf server mobile --off      # disable remote access; local Sessions keep running
 ```
 
-A phone signed in as the host owner's Tailscale user can then
-[attach to a Session's running terminal](../rust/loopflow/src/server/README.md#remote-attach-contract)
-without starting or resuming a provider.
-Local server readiness and adding a Machine as an execution destination do not
-grant phone access.
+A phone signed into the same Tailscale user can attach to running Sessions on
+this Machine. Enabling local server access or adding SSH Machines does not
+enable phone access. For local-only use, no network port is opened; keep the
+local Unix socket private.
 
-Local use needs no network listener. Keep the local socket private.
-
-Next: [Desktop and other surfaces](surfaces.md) · [Connection troubleshooting](troubleshooting.md#desktop-cannot-connect)
+Next: [Surfaces](surfaces.md) · [Connection troubleshooting](troubleshooting.md#desktop-cannot-connect).

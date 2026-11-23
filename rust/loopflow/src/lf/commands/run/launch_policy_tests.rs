@@ -1,5 +1,5 @@
 //! Launch and resume policy as table rows.
-//! Native argv comes from the harness; companions run in the launch matrix.
+//! Native argv comes from the harness; real launches run in the launch matrix.
 //! Owners, PTYs, provider processes, native conversation identity and the
 //! handler's own refusals stay with the full-Machine tests in `tests/README.md`.
 
@@ -81,21 +81,16 @@ impl Table {
     /// `lf FLAGS : hello` in the checkout.
     fn launch(&self, flags: &[&str]) -> anyhow::Result<Launch> {
         let cli = Cli::try_parse_from(std::iter::once("lf").chain(flags.iter().copied()))?;
-        let built = super::build_prompt(
-            loopflow_execution::transport::LaunchInput {
-                batch: cli.batch,
-                interactive: cli.interactive,
-                has_prompt: true,
-            }
-            .mode(),
-            self.repo.path(),
-            None,
-            Some("hello"),
-            &cli,
-        )?;
+        let mode = loopflow_execution::transport::LaunchInput {
+            batch: cli.batch,
+            interactive: cli.interactive,
+            has_prompt: true,
+        }
+        .mode();
+        let built = super::build_prompt(mode, self.repo.path(), None, Some("hello"), &cli)?;
         let args = self.args(
             &built.agent_config,
-            built.mode,
+            mode,
             loopflow_execution::harness::Start::New,
         )?;
         Ok(Launch {
@@ -134,7 +129,7 @@ impl Table {
         let cli = Cli::try_parse_from(std::iter::once("lf").chain(flags.iter().copied()))?;
         let _settings =
             loopflow_execution::config::settings::select_invocation(cli.setting_values()?);
-        let config = resolve_session_config(session, serde_yaml_ng::Value::Null, None, false)?;
+        let config = resolve_session_config(session, serde_yaml_ng::Value::Null, None)?;
         let args = self.args(
             &config,
             loopflow_execution::harness::Mode::Interactive,
@@ -153,36 +148,36 @@ impl Table {
     ) -> anyhow::Result<Vec<String>> {
         use loopflow_execution::harness::{Launch, Mode};
         let kind = config.agent.harness;
-        if kind.harness().capabilities().turn_limit && mode == Mode::Headless {
+        if loopflow_execution::harness::launcher(kind)
+            .capabilities()
+            .turn_limit
+            && mode == Mode::Headless
+        {
             return loopflow_execution::harness::claude::stream_args(
                 config,
                 start.thread().as_ref(),
                 None,
             );
         }
-        if !kind.harness().capabilities().turn_limit {
+        if !loopflow_execution::harness::launcher(kind)
+            .capabilities()
+            .turn_limit
+        {
             return Ok(Vec::new());
         }
         let admitted =
             loopflow_execution::harness::admit_for_test(tempfile::tempdir().unwrap().path());
         let launch = Launch {
             start,
+            kind: loopflow_execution::harness::LaunchKind::Chat,
             ..loopflow_execution::harness::launch_for_test(kind, config, &admitted)
         };
-        Ok(kind
-            .harness()
+        Ok(loopflow_execution::harness::launcher(kind)
             .open(&launch)?
             .process
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect())
-    }
-
-    fn claude_settings(&self, mode: &str) {
-        self.repo.create_file(
-            ".claude/settings.json",
-            &format!(r#"{{"permissions":{{"defaultMode":"{mode}"}}}}"#),
-        );
     }
 }
 
@@ -191,7 +186,7 @@ fn assert_path_eq(left: &Path, right: &Path) {
 }
 
 #[test]
-fn prompt_build_keeps_the_mode_delegation_selected() {
+fn only_a_headless_prompt_build_streams() {
     use loopflow_execution::harness::Mode;
     let table = Table::new();
     table.config(None, "agent: claude");
@@ -205,7 +200,6 @@ fn prompt_build_keeps_the_mode_delegation_selected() {
             &cli.process_options(),
         )
         .unwrap();
-        assert_eq!(built.mode, mode);
         assert_eq!(built.process.stream, mode == Mode::Headless);
     }
 }
@@ -213,8 +207,6 @@ fn prompt_build_keeps_the_mode_delegation_selected() {
 #[test]
 fn launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository() {
     let table = Table::new();
-    // Claude's own attended mode stays in charge unless lf is told to bypass.
-    table.claude_settings("auto");
     const OFF: &str = "agent: claude\nyolo: false\nchrome: false";
     for (personal, repository, flags, bypass, chrome) in [
         (
@@ -232,6 +224,14 @@ fn launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository(
             "--no-chrome",
         ),
         (None, OFF, &["-i"], false, "--no-chrome"),
+        // Unset is on.
+        (
+            None,
+            "agent: claude\nchrome: false",
+            &["-i"],
+            true,
+            "--no-chrome",
+        ),
         (
             None,
             OFF,
@@ -256,20 +256,24 @@ fn launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository(
     }
     // Every harness reads the same setting; its argv mapping is a row in
     // `agent::session::tests`.
-    for harness in ["codex", "opencode", "pi"] {
+    for harness in ["codex", "opencode", "pi", "agy"] {
         for (repository_yolo, flags, expected) in [
-            (false, &[][..], false),
-            (true, &[], true),
-            (false, &["--yolo"], true),
-            (true, &["--setting", "yolo=false"], false),
+            (None, &[][..], true),
+            (Some(false), &[], false),
+            (Some(true), &[], true),
+            (Some(false), &["--yolo"], true),
+            (Some(true), &["--setting", "yolo=false"], false),
         ] {
-            table.config(None, &format!("agent: {harness}\nyolo: {repository_yolo}"));
+            let yolo = repository_yolo
+                .map(|yolo| format!("\nyolo: {yolo}"))
+                .unwrap_or_default();
+            table.config(None, &format!("agent: {harness}{yolo}"));
             let flags = [&["-i"][..], flags].concat();
             let launch = table.launch(&flags).unwrap();
             assert_eq!(launch.config.agent.to_string(), harness);
             assert_eq!(
-                launch.config.skip_permissions, expected,
-                "{harness} yolo: {repository_yolo} {flags:?}"
+                launch.config.yolo, expected,
+                "{harness} yolo: {repository_yolo:?} {flags:?}"
             );
         }
     }
@@ -364,7 +368,7 @@ fn resume_applies_current_policy_and_command_line_overrides() {
                 format!("{provider}:{model}").as_str(),
                 "{row}"
             );
-            assert_eq!(resumed.config.skip_permissions, bypass, "{row}");
+            assert_eq!(resumed.config.yolo, bypass, "{row}");
             if provider == "claude" {
                 assert_eq!(resumed.bypass(), bypass, "{row}");
                 assert_eq!(resumed.chrome(), [chrome], "{row}");

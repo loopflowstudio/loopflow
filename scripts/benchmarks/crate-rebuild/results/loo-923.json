@@ -1,0 +1,3523 @@
+{
+  "base": "7bb879aff4326ece68c05da760cb6e26312b4931",
+  "candidate": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+  "configuration": {
+    "cache_binary": "/Users/jack/.local/share/loopflow/sccache/ca81ec2a2566efc623692741440d99c710268841/bin/sccache",
+    "cache_sha256": "863da74d6ada53050d5f4a220e77a16777fb863a4aaf44ea0c17f5f0e9577871",
+    "cache_version": "sccache 0.19.0",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01) (Homebrew)",
+    "machine": [
+      "Darwin",
+      "Jacks-MacBook-Pro-2.local",
+      "25.0.0",
+      "Darwin Kernel Version 25.0.0: Wed Sep 17 21:41:26 PDT 2025; root:xnu-12377.1.9~141/RELEASE_ARM64_T6041",
+      "arm64"
+    ],
+    "cpus": 16,
+    "jobs": 1,
+    "cohorts": 3,
+    "client_side": true,
+    "max_frame_length": "1073741824",
+    "instrumentation": "two cache-stat RPCs per workspace rustc invocation; included in elapsed/client CPU",
+    "memory": "largest timed process RSS; cache daemon excluded from CPU/RSS"
+  },
+  "validation_driver_sha256": "7583ad15af7a6c27aa748944467491415836a1c2ff34e640a6e3a5880702fb94",
+  "registry_packages_removed": [],
+  "registry_packages_added": [],
+  "summary": [
+    {
+      "label": "base",
+      "case": "warm_root",
+      "n": 3,
+      "wall_seconds": {
+        "median": 123.663,
+        "min": 121.128,
+        "max": 182.054
+      },
+      "cpu_seconds": {
+        "median": 118.72,
+        "min": 117.9,
+        "max": 132.61
+      },
+      "rss_bytes": {
+        "median": 2231222272,
+        "min": 2230878208,
+        "max": 2239332352
+      }
+    },
+    {
+      "label": "base",
+      "case": "command_help",
+      "n": 3,
+      "wall_seconds": {
+        "median": 15.719,
+        "min": 15.62,
+        "max": 16.125
+      },
+      "cpu_seconds": {
+        "median": 30.19,
+        "min": 30.06,
+        "max": 30.59
+      },
+      "rss_bytes": {
+        "median": 2230321152,
+        "min": 2230042624,
+        "max": 2235252736
+      }
+    },
+    {
+      "label": "base",
+      "case": "execution",
+      "n": 3,
+      "wall_seconds": {
+        "median": 40.532,
+        "min": 40.096,
+        "max": 41.259
+      },
+      "cpu_seconds": {
+        "median": 72.67,
+        "min": 72.49,
+        "max": 73.39
+      },
+      "rss_bytes": {
+        "median": 3539681280,
+        "min": 3520036864,
+        "max": 3562078208
+      }
+    },
+    {
+      "label": "base",
+      "case": "task_record",
+      "n": 3,
+      "wall_seconds": {
+        "median": 47.263,
+        "min": 47.015,
+        "max": 47.284
+      },
+      "cpu_seconds": {
+        "median": 84.17999999999999,
+        "min": 84.1,
+        "max": 85.08
+      },
+      "rss_bytes": {
+        "median": 3541745664,
+        "min": 3523788800,
+        "max": 3545661440
+      }
+    },
+    {
+      "label": "base",
+      "case": "harness_format",
+      "n": 3,
+      "wall_seconds": {
+        "median": 39.508,
+        "min": 39.167,
+        "max": 40.186
+      },
+      "cpu_seconds": {
+        "median": 72.02,
+        "min": 71.75,
+        "max": 72.66
+      },
+      "rss_bytes": {
+        "median": 3527393280,
+        "min": 3512647680,
+        "max": 3530784768
+      }
+    },
+    {
+      "label": "base",
+      "case": "harness_test",
+      "n": 3,
+      "wall_seconds": {
+        "median": 35.564,
+        "min": 34.706,
+        "max": 36.854
+      },
+      "cpu_seconds": {
+        "median": 65.49,
+        "min": 64.26,
+        "max": 68.62
+      },
+      "rss_bytes": {
+        "median": 5107695616,
+        "min": 5055741952,
+        "max": 5140987904
+      }
+    },
+    {
+      "label": "candidate",
+      "case": "warm_root",
+      "n": 3,
+      "wall_seconds": {
+        "median": 121.665,
+        "min": 121.136,
+        "max": 121.734
+      },
+      "cpu_seconds": {
+        "median": 119.14,
+        "min": 118.21000000000001,
+        "max": 120.84
+      },
+      "rss_bytes": {
+        "median": 2221785088,
+        "min": 2209480704,
+        "max": 2225569792
+      }
+    },
+    {
+      "label": "candidate",
+      "case": "command_help",
+      "n": 3,
+      "wall_seconds": {
+        "median": 15.487,
+        "min": 15.339,
+        "max": 15.898
+      },
+      "cpu_seconds": {
+        "median": 29.72,
+        "min": 29.64,
+        "max": 30.509999999999998
+      },
+      "rss_bytes": {
+        "median": 2216640512,
+        "min": 2210004992,
+        "max": 2232975360
+      }
+    },
+    {
+      "label": "candidate",
+      "case": "execution",
+      "n": 3,
+      "wall_seconds": {
+        "median": 39.742,
+        "min": 38.991,
+        "max": 41.948
+      },
+      "cpu_seconds": {
+        "median": 71.42,
+        "min": 70.98,
+        "max": 73.77
+      },
+      "rss_bytes": {
+        "median": 3235545088,
+        "min": 3224420352,
+        "max": 3240132608
+      }
+    },
+    {
+      "label": "candidate",
+      "case": "task_record",
+      "n": 3,
+      "wall_seconds": {
+        "median": 47.095,
+        "min": 47.092,
+        "max": 48.901
+      },
+      "cpu_seconds": {
+        "median": 83.83,
+        "min": 83.69999999999999,
+        "max": 85.1
+      },
+      "rss_bytes": {
+        "median": 3227713536,
+        "min": 3211853824,
+        "max": 3229171712
+      }
+    },
+    {
+      "label": "candidate",
+      "case": "harness_format",
+      "n": 3,
+      "wall_seconds": {
+        "median": 41.475,
+        "min": 40.136,
+        "max": 42.718
+      },
+      "cpu_seconds": {
+        "median": 73.16000000000001,
+        "min": 72.96000000000001,
+        "max": 74.27000000000001
+      },
+      "rss_bytes": {
+        "median": 3243229184,
+        "min": 3231186944,
+        "max": 3253714944
+      }
+    },
+    {
+      "label": "candidate",
+      "case": "harness_test",
+      "n": 3,
+      "wall_seconds": {
+        "median": 1.169,
+        "min": 1.151,
+        "max": 1.219
+      },
+      "cpu_seconds": {
+        "median": 2.02,
+        "min": 2.02,
+        "max": 2.07
+      },
+      "rss_bytes": {
+        "median": 339066880,
+        "min": 338624512,
+        "max": 339542016
+      }
+    }
+  ],
+  "receipts": [
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 0,
+      "case": "cold_seed",
+      "exit_code": 0,
+      "wall_seconds": 290.876,
+      "cpu_seconds": 269.93,
+      "rss_bytes": 3534782464,
+      "load_before": [
+        31.97900390625,
+        34.60107421875,
+        35.12841796875
+      ],
+      "load_after": [
+        39.83837890625,
+        36.03173828125,
+        35.46435546875
+      ],
+      "edited_source": null,
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.732,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_storage",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 7.58,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_terminal",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.228,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_definitions",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.203,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 24.125,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.714,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.355,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 259,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 36,
+        "-": 3,
+        "missing input": 2,
+        "-o": 3,
+        "crate-type (proc-macro)": 13
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 0,
+      "case": "cold_seed",
+      "exit_code": 0,
+      "wall_seconds": 286.592,
+      "cpu_seconds": 269.73,
+      "rss_bytes": 3260743680,
+      "load_before": [
+        34.52783203125,
+        35.05859375,
+        35.1279296875
+      ],
+      "load_after": [
+        39.240234375,
+        38.79296875,
+        36.90478515625
+      ],
+      "edited_source": null,
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.752,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_storage",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 7.332,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_terminal",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.215,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_definitions",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.193,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_harness",
+          "package": "loopflow-harness",
+          "crate_type": "lib",
+          "seconds": 0.816,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 23.78,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.357,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.251,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 260,
+      "non_cacheable_reasons": {
+        "-": 3,
+        "-o": 3,
+        "crate-type (bin)": 36,
+        "missing input": 2,
+        "crate-type (proc-macro)": 13
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 1,
+      "case": "warm_root",
+      "exit_code": 0,
+      "wall_seconds": 121.136,
+      "cpu_seconds": 120.84,
+      "rss_bytes": 2209480704,
+      "load_before": [
+        35.02978515625,
+        37.146484375,
+        36.41796875
+      ],
+      "load_after": [
+        34.47607421875,
+        37.154296875,
+        36.578125
+      ],
+      "edited_source": null,
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.169,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_storage",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 0.684,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_terminal",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.12,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_definitions",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.115,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_harness",
+          "package": "loopflow-harness",
+          "crate_type": "lib",
+          "seconds": 0.163,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 1.818,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 14.634,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.263,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 259,
+      "rust_cache_misses": 1,
+      "non_cacheable_reasons": {
+        "-": 3,
+        "-o": 3,
+        "missing input": 2,
+        "crate-type (proc-macro)": 13,
+        "crate-type (bin)": 36
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 1,
+      "case": "command_help",
+      "exit_code": 0,
+      "wall_seconds": 15.898,
+      "cpu_seconds": 30.509999999999998,
+      "rss_bytes": 2216640512,
+      "load_before": [
+        34.47607421875,
+        37.154296875,
+        36.578125
+      ],
+      "load_after": [
+        45.12646484375,
+        39.2548828125,
+        37.33544921875
+      ],
+      "edited_source": "rust/loopflow/src/lf/mod.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 14.237,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.181,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 1,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 1,
+      "case": "execution",
+      "exit_code": 0,
+      "wall_seconds": 41.948,
+      "cpu_seconds": 73.77,
+      "rss_bytes": 3224420352,
+      "load_before": [
+        45.12646484375,
+        39.2548828125,
+        37.33544921875
+      ],
+      "load_after": [
+        46.794921875,
+        40.2119140625,
+        37.767578125
+      ],
+      "edited_source": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 25.945,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 14.227,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.192,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 2,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 1,
+      "case": "task_record",
+      "exit_code": 0,
+      "wall_seconds": 48.901,
+      "cpu_seconds": 85.1,
+      "rss_bytes": 3211853824,
+      "load_before": [
+        46.794921875,
+        40.2119140625,
+        37.767578125
+      ],
+      "load_after": [
+        47.06640625,
+        40.92138671875,
+        38.1455078125
+      ],
+      "edited_source": "rust/loopflow-storage/src/work/task/mod.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_storage",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 7.486,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 24.309,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 14.53,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.188,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 3,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 1,
+      "case": "harness_format",
+      "exit_code": 0,
+      "wall_seconds": 41.475,
+      "cpu_seconds": 73.16000000000001,
+      "rss_bytes": 3243229184,
+      "load_before": [
+        46.42041015625,
+        40.88916015625,
+        38.150390625
+      ],
+      "load_after": [
+        42.31787109375,
+        40.67626953125,
+        38.20556640625
+      ],
+      "edited_source": "rust/loopflow-harness/src/claude_decode.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_harness",
+          "package": "loopflow-harness",
+          "crate_type": "lib",
+          "seconds": 0.896,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 24.496,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 14.196,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.299,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 3,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 1,
+      "case": "harness_test",
+      "exit_code": 0,
+      "wall_seconds": 1.151,
+      "cpu_seconds": 2.02,
+      "rss_bytes": 339066880,
+      "load_before": [
+        47.9677734375,
+        42.07373046875,
+        38.76318359375
+      ],
+      "load_after": [
+        47.9677734375,
+        42.07373046875,
+        38.76318359375
+      ],
+      "edited_source": "rust/loopflow-harness/src/claude_decode.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": "loopflow-harness",
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_harness",
+          "package": "loopflow-harness",
+          "crate_type": null,
+          "seconds": 1.049,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable_reasons": {
+        "crate-type": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 1,
+      "case": "warm_root",
+      "exit_code": 0,
+      "wall_seconds": 121.128,
+      "cpu_seconds": 117.9,
+      "rss_bytes": 2231222272,
+      "load_before": [
+        51.7041015625,
+        43.63330078125,
+        39.4765625
+      ],
+      "load_after": [
+        44.69580078125,
+        42.9716796875,
+        39.70947265625
+      ],
+      "edited_source": null,
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.177,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_storage",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 0.725,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_terminal",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.115,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_definitions",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.113,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 1.859,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.699,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.289,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 258,
+      "rust_cache_misses": 1,
+      "non_cacheable_reasons": {
+        "-": 3,
+        "crate-type (bin)": 36,
+        "missing input": 2,
+        "crate-type (proc-macro)": 13,
+        "-o": 3
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 1,
+      "case": "command_help",
+      "exit_code": 0,
+      "wall_seconds": 15.719,
+      "cpu_seconds": 30.19,
+      "rss_bytes": 2230321152,
+      "load_before": [
+        43.2783203125,
+        42.7060546875,
+        39.634765625
+      ],
+      "load_after": [
+        40.72509765625,
+        42.13916015625,
+        39.48388671875
+      ],
+      "edited_source": "rust/loopflow/src/lf/mod.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 14.151,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.077,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 1,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 1,
+      "case": "execution",
+      "exit_code": 0,
+      "wall_seconds": 41.259,
+      "cpu_seconds": 72.49,
+      "rss_bytes": 3539681280,
+      "load_before": [
+        40.6669921875,
+        42.103515625,
+        39.48681640625
+      ],
+      "load_after": [
+        43.98779296875,
+        42.59326171875,
+        39.7724609375
+      ],
+      "edited_source": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 25.356,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 14.106,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.2,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 2,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 1,
+      "case": "task_record",
+      "exit_code": 0,
+      "wall_seconds": 47.015,
+      "cpu_seconds": 84.1,
+      "rss_bytes": 3523788800,
+      "load_before": [
+        43.90869140625,
+        42.599609375,
+        39.791015625
+      ],
+      "load_after": [
+        39.87548828125,
+        41.7744140625,
+        39.6328125
+      ],
+      "edited_source": "rust/loopflow-storage/src/work/task/mod.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_storage",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 7.286,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 24.215,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.754,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.225,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 3,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 1,
+      "case": "harness_format",
+      "exit_code": 0,
+      "wall_seconds": 39.167,
+      "cpu_seconds": 71.75,
+      "rss_bytes": 3527393280,
+      "load_before": [
+        39.48486328125,
+        41.66162109375,
+        39.60546875
+      ],
+      "load_after": [
+        36.06591796875,
+        40.63818359375,
+        39.3310546875
+      ],
+      "edited_source": "rust/loopflow-execution/src/harness/claude_decode.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 24.23,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.396,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.061,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 2,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 1,
+      "case": "harness_test",
+      "exit_code": 0,
+      "wall_seconds": 36.854,
+      "cpu_seconds": 68.62,
+      "rss_bytes": 5107695616,
+      "load_before": [
+        37.1220703125,
+        40.24853515625,
+        39.349609375
+      ],
+      "load_after": [
+        36.82958984375,
+        39.81640625,
+        39.224609375
+      ],
+      "edited_source": "rust/loopflow-execution/src/harness/claude_decode.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": "loopflow-execution",
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 36.647,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable_reasons": {
+        "crate-type": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 2,
+      "case": "warm_root",
+      "exit_code": 0,
+      "wall_seconds": 182.054,
+      "cpu_seconds": 132.61,
+      "rss_bytes": 2230878208,
+      "load_before": [
+        46.27685546875,
+        41.75341796875,
+        39.95556640625
+      ],
+      "load_after": [
+        60.52294921875,
+        53.60107421875,
+        45.4599609375
+      ],
+      "edited_source": null,
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.21,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_storage",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 0.75,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_terminal",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.127,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_definitions",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.109,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 2.16,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 14.371,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.506,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 258,
+      "rust_cache_misses": 1,
+      "non_cacheable_reasons": {
+        "-": 3,
+        "crate-type (proc-macro)": 13,
+        "missing input": 2,
+        "-o": 3,
+        "crate-type (bin)": 36
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 2,
+      "case": "command_help",
+      "exit_code": 0,
+      "wall_seconds": 16.125,
+      "cpu_seconds": 30.59,
+      "rss_bytes": 2230042624,
+      "load_before": [
+        60.64111328125,
+        53.740234375,
+        45.556640625
+      ],
+      "load_after": [
+        71.8828125,
+        56.61376953125,
+        46.7275390625
+      ],
+      "edited_source": "rust/loopflow/src/lf/mod.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 14.296,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.284,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 1,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 2,
+      "case": "execution",
+      "exit_code": 0,
+      "wall_seconds": 40.532,
+      "cpu_seconds": 73.39,
+      "rss_bytes": 3562078208,
+      "load_before": [
+        71.8828125,
+        56.61376953125,
+        46.7275390625
+      ],
+      "load_after": [
+        79.294921875,
+        60.7890625,
+        48.77587890625
+      ],
+      "edited_source": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 24.926,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.766,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.279,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 2,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 2,
+      "case": "task_record",
+      "exit_code": 0,
+      "wall_seconds": 47.263,
+      "cpu_seconds": 84.17999999999999,
+      "rss_bytes": 3541745664,
+      "load_before": [
+        79.294921875,
+        60.7890625,
+        48.77587890625
+      ],
+      "load_after": [
+        76.697265625,
+        62.890625,
+        50.23681640625
+      ],
+      "edited_source": "rust/loopflow-storage/src/work/task/mod.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_storage",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 7.44,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 24.395,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.596,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.209,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 3,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 2,
+      "case": "harness_format",
+      "exit_code": 0,
+      "wall_seconds": 39.508,
+      "cpu_seconds": 72.02,
+      "rss_bytes": 3512647680,
+      "load_before": [
+        76.697265625,
+        62.890625,
+        50.23681640625
+      ],
+      "load_after": [
+        103.18115234375,
+        71.01318359375,
+        53.76806640625
+      ],
+      "edited_source": "rust/loopflow-execution/src/harness/claude_decode.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 24.22,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.65,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.185,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 2,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 2,
+      "case": "harness_test",
+      "exit_code": 0,
+      "wall_seconds": 34.706,
+      "cpu_seconds": 64.26,
+      "rss_bytes": 5140987904,
+      "load_before": [
+        133.43115234375,
+        93.3779296875,
+        64.5283203125
+      ],
+      "load_after": [
+        117.23828125,
+        93.966796875,
+        65.91552734375
+      ],
+      "edited_source": "rust/loopflow-execution/src/harness/claude_decode.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": "loopflow-execution",
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 34.509,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable_reasons": {
+        "crate-type": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 2,
+      "case": "warm_root",
+      "exit_code": 0,
+      "wall_seconds": 121.734,
+      "cpu_seconds": 118.21000000000001,
+      "rss_bytes": 2221785088,
+      "load_before": [
+        95.65673828125,
+        91.67431640625,
+        66.3828125
+      ],
+      "load_after": [
+        55.384765625,
+        76.8203125,
+        63.7626953125
+      ],
+      "edited_source": null,
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.186,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_storage",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 0.703,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_terminal",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.12,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_definitions",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.107,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_harness",
+          "package": "loopflow-harness",
+          "crate_type": "lib",
+          "seconds": 0.157,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 1.903,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.51,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.036,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 259,
+      "rust_cache_misses": 1,
+      "non_cacheable_reasons": {
+        "missing input": 2,
+        "-": 3,
+        "crate-type (proc-macro)": 13,
+        "crate-type (bin)": 36,
+        "-o": 3
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 2,
+      "case": "command_help",
+      "exit_code": 0,
+      "wall_seconds": 15.339,
+      "cpu_seconds": 29.64,
+      "rss_bytes": 2210004992,
+      "load_before": [
+        62.80078125,
+        78.001953125,
+        64.255859375
+      ],
+      "load_after": [
+        55.80126953125,
+        75.7265625,
+        63.68505859375
+      ],
+      "edited_source": "rust/loopflow/src/lf/mod.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.691,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.138,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 1,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 2,
+      "case": "execution",
+      "exit_code": 0,
+      "wall_seconds": 38.991,
+      "cpu_seconds": 70.98,
+      "rss_bytes": 3235545088,
+      "load_before": [
+        56.61767578125,
+        75.56494140625,
+        63.6982421875
+      ],
+      "load_after": [
+        61.6669921875,
+        74.54736328125,
+        63.87451171875
+      ],
+      "edited_source": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 23.787,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.58,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.168,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 2,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 2,
+      "case": "task_record",
+      "exit_code": 0,
+      "wall_seconds": 47.095,
+      "cpu_seconds": 83.69999999999999,
+      "rss_bytes": 3227713536,
+      "load_before": [
+        61.6669921875,
+        74.54736328125,
+        63.87451171875
+      ],
+      "load_after": [
+        40.18603515625,
+        66.81982421875,
+        61.62744140625
+      ],
+      "edited_source": "rust/loopflow-storage/src/work/task/mod.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_storage",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 7.504,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 23.953,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.663,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.211,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 3,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 2,
+      "case": "harness_format",
+      "exit_code": 0,
+      "wall_seconds": 40.136,
+      "cpu_seconds": 72.96000000000001,
+      "rss_bytes": 3231186944,
+      "load_before": [
+        40.18603515625,
+        66.81982421875,
+        61.62744140625
+      ],
+      "load_after": [
+        37.7734375,
+        62.6513671875,
+        60.32421875
+      ],
+      "edited_source": "rust/loopflow-harness/src/claude_decode.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_harness",
+          "package": "loopflow-harness",
+          "crate_type": "lib",
+          "seconds": 0.825,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 23.723,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.995,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.108,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 3,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 2,
+      "case": "harness_test",
+      "exit_code": 0,
+      "wall_seconds": 1.219,
+      "cpu_seconds": 2.07,
+      "rss_bytes": 338624512,
+      "load_before": [
+        32.666015625,
+        60.30078125,
+        59.52587890625
+      ],
+      "load_after": [
+        32.666015625,
+        60.30078125,
+        59.52587890625
+      ],
+      "edited_source": "rust/loopflow-harness/src/claude_decode.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": "loopflow-harness",
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_harness",
+          "package": "loopflow-harness",
+          "crate_type": null,
+          "seconds": 1.104,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable_reasons": {
+        "crate-type": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 3,
+      "case": "warm_root",
+      "exit_code": 0,
+      "wall_seconds": 121.665,
+      "cpu_seconds": 119.14,
+      "rss_bytes": 2225569792,
+      "load_before": [
+        28.791015625,
+        55.54833984375,
+        57.82177734375
+      ],
+      "load_after": [
+        29.15234375,
+        47.4697265625,
+        54.341796875
+      ],
+      "edited_source": null,
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.181,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_storage",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 0.724,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_terminal",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.125,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_definitions",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.107,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_harness",
+          "package": "loopflow-harness",
+          "crate_type": "lib",
+          "seconds": 0.17,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 1.918,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.667,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.039,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 259,
+      "rust_cache_misses": 1,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 36,
+        "crate-type (proc-macro)": 13,
+        "-o": 3,
+        "missing input": 2,
+        "-": 3
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 3,
+      "case": "command_help",
+      "exit_code": 0,
+      "wall_seconds": 15.487,
+      "cpu_seconds": 29.72,
+      "rss_bytes": 2232975360,
+      "load_before": [
+        27.69873046875,
+        46.8642578125,
+        54.08740234375
+      ],
+      "load_after": [
+        23.13232421875,
+        44.9248046875,
+        53.26904296875
+      ],
+      "edited_source": "rust/loopflow/src/lf/mod.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.73,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.257,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 1,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 3,
+      "case": "execution",
+      "exit_code": 0,
+      "wall_seconds": 39.742,
+      "cpu_seconds": 71.42,
+      "rss_bytes": 3240132608,
+      "load_before": [
+        23.13232421875,
+        44.9248046875,
+        53.26904296875
+      ],
+      "load_after": [
+        26.99267578125,
+        43.603515625,
+        52.42578125
+      ],
+      "edited_source": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 24.154,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.697,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.272,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 2,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 3,
+      "case": "task_record",
+      "exit_code": 0,
+      "wall_seconds": 47.092,
+      "cpu_seconds": 83.83,
+      "rss_bytes": 3229171712,
+      "load_before": [
+        25.9521484375,
+        43.11181640625,
+        52.2001953125
+      ],
+      "load_after": [
+        19.24853515625,
+        39.07958984375,
+        50.25341796875
+      ],
+      "edited_source": "rust/loopflow-storage/src/work/task/mod.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_storage",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 7.598,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 23.976,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.679,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.171,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 3,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 3,
+      "case": "harness_format",
+      "exit_code": 0,
+      "wall_seconds": 42.718,
+      "cpu_seconds": 74.27000000000001,
+      "rss_bytes": 3253714944,
+      "load_before": [
+        18.1875,
+        38.5302734375,
+        49.99365234375
+      ],
+      "load_after": [
+        13.7724609375,
+        34.54638671875,
+        47.935546875
+      ],
+      "edited_source": "rust/loopflow-harness/src/claude_decode.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_harness",
+          "package": "loopflow-harness",
+          "crate_type": "lib",
+          "seconds": 0.846,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 24.974,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 14.257,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.973,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 3,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "candidate",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "cohort": 3,
+      "case": "harness_test",
+      "exit_code": 0,
+      "wall_seconds": 1.169,
+      "cpu_seconds": 2.02,
+      "rss_bytes": 339542016,
+      "load_before": [
+        13.29150390625,
+        33.7548828125,
+        47.49755859375
+      ],
+      "load_after": [
+        12.62744140625,
+        33.27734375,
+        47.24853515625
+      ],
+      "edited_source": "rust/loopflow-harness/src/claude_decode.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_harness",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": "loopflow-harness",
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_harness",
+          "package": "loopflow-harness",
+          "crate_type": null,
+          "seconds": 1.058,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable_reasons": {
+        "crate-type": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 3,
+      "case": "warm_root",
+      "exit_code": 0,
+      "wall_seconds": 123.663,
+      "cpu_seconds": 118.72,
+      "rss_bytes": 2239332352,
+      "load_before": [
+        15.1337890625,
+        31.23193359375,
+        45.84912109375
+      ],
+      "load_after": [
+        12.59130859375,
+        24.47314453125,
+        41.13037109375
+      ],
+      "edited_source": null,
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.18,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_storage",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 0.838,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_terminal",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.115,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_definitions",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.103,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 2.057,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.809,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.199,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 258,
+      "rust_cache_misses": 1,
+      "non_cacheable_reasons": {
+        "-o": 3,
+        "crate-type (proc-macro)": 13,
+        "missing input": 2,
+        "crate-type (bin)": 36,
+        "-": 3
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 3,
+      "case": "command_help",
+      "exit_code": 0,
+      "wall_seconds": 15.62,
+      "cpu_seconds": 30.06,
+      "rss_bytes": 2235252736,
+      "load_before": [
+        12.3037109375,
+        24.2158203125,
+        40.94189453125
+      ],
+      "load_after": [
+        10.931640625,
+        23.32421875,
+        40.33056640625
+      ],
+      "edited_source": "rust/loopflow/src/lf/mod.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.904,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.104,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 1,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 3,
+      "case": "execution",
+      "exit_code": 0,
+      "wall_seconds": 40.096,
+      "cpu_seconds": 72.67,
+      "rss_bytes": 3520036864,
+      "load_before": [
+        10.931640625,
+        23.32421875,
+        40.33056640625
+      ],
+      "load_after": [
+        21.67578125,
+        24.36669921875,
+        39.91796875
+      ],
+      "edited_source": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 24.436,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.953,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.228,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 2,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 3,
+      "case": "task_record",
+      "exit_code": 0,
+      "wall_seconds": 47.284,
+      "cpu_seconds": 85.08,
+      "rss_bytes": 3545661440,
+      "load_before": [
+        20.10009765625,
+        23.9951171875,
+        39.6953125
+      ],
+      "load_after": [
+        17.669921875,
+        22.66357421875,
+        38.38623046875
+      ],
+      "edited_source": "rust/loopflow-storage/src/work/task/mod.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_storage",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 7.454,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 24.395,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.814,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.068,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 3,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 3,
+      "case": "harness_format",
+      "exit_code": 0,
+      "wall_seconds": 40.186,
+      "cpu_seconds": 72.66,
+      "rss_bytes": 3530784768,
+      "load_before": [
+        16.4150390625,
+        22.3203125,
+        38.1728515625
+      ],
+      "load_after": [
+        12.89501953125,
+        20.60302734375,
+        36.81005859375
+      ],
+      "edited_source": "rust/loopflow-execution/src/harness/claude_decode.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": null,
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 24.482,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "loopflow",
+          "package": "loopflow",
+          "crate_type": "rlib",
+          "seconds": 13.966,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {}
+        },
+        {
+          "crate": "lf",
+          "package": "loopflow",
+          "crate_type": "bin",
+          "seconds": 1.264,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type (bin)": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 2,
+      "non_cacheable_reasons": {
+        "crate-type (bin)": 1
+      },
+      "cache_error_counts_unchanged": true
+    },
+    {
+      "label": "base",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "cohort": 3,
+      "case": "harness_test",
+      "exit_code": 0,
+      "wall_seconds": 35.564,
+      "cpu_seconds": 65.49,
+      "rss_bytes": 5055741952,
+      "load_before": [
+        15.009765625,
+        19.44189453125,
+        34.9990234375
+      ],
+      "load_after": [
+        13.173828125,
+        18.4658203125,
+        34.013671875
+      ],
+      "edited_source": "rust/loopflow-execution/src/harness/claude_decode.rs",
+      "libraries": [
+        "loopflow_definitions",
+        "loopflow_execution",
+        "loopflow_model",
+        "loopflow_storage",
+        "loopflow_terminal"
+      ],
+      "owner": "loopflow-execution",
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 35.36,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          }
+        }
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable_reasons": {
+        "crate-type": 1
+      },
+      "cache_error_counts_unchanged": true
+    }
+  ],
+  "runtime_identities": [
+    {
+      "root": "/private/tmp/lf650-build-dnvyqadi/base-0",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "observed": "/private/tmp/lf650-build-dnvyqadi/base-0|7bb879aff4326ece68c05da760cb6e26312b4931-dirty",
+      "dirty": true
+    },
+    {
+      "root": "/private/tmp/lf650-build-dnvyqadi/candidate-0",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "observed": "/private/tmp/lf650-build-dnvyqadi/candidate-0|7953d9a7c577c4aef9133ccedd804bb9c5be23a2-dirty",
+      "dirty": true
+    },
+    {
+      "root": "/private/tmp/lf650-build-dnvyqadi/base-1",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "observed": "/private/tmp/lf650-build-dnvyqadi/base-1|7bb879aff4326ece68c05da760cb6e26312b4931-dirty",
+      "dirty": true
+    },
+    {
+      "root": "/private/tmp/lf650-build-dnvyqadi/candidate-1",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "observed": "/private/tmp/lf650-build-dnvyqadi/candidate-1|7953d9a7c577c4aef9133ccedd804bb9c5be23a2-dirty",
+      "dirty": true
+    },
+    {
+      "root": "/private/tmp/lf650-build-dnvyqadi/base-2",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "observed": "/private/tmp/lf650-build-dnvyqadi/base-2|7bb879aff4326ece68c05da760cb6e26312b4931-dirty",
+      "dirty": true
+    },
+    {
+      "root": "/private/tmp/lf650-build-dnvyqadi/candidate-2",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "observed": "/private/tmp/lf650-build-dnvyqadi/candidate-2|7953d9a7c577c4aef9133ccedd804bb9c5be23a2-dirty",
+      "dirty": true
+    },
+    {
+      "root": "/private/tmp/lf650-build-dnvyqadi/base-3",
+      "revision": "7bb879aff4326ece68c05da760cb6e26312b4931",
+      "observed": "/private/tmp/lf650-build-dnvyqadi/base-3|7bb879aff4326ece68c05da760cb6e26312b4931-dirty",
+      "dirty": true
+    },
+    {
+      "root": "/private/tmp/lf650-build-dnvyqadi/candidate-3",
+      "revision": "7953d9a7c577c4aef9133ccedd804bb9c5be23a2",
+      "observed": "/private/tmp/lf650-build-dnvyqadi/candidate-3|7953d9a7c577c4aef9133ccedd804bb9c5be23a2-dirty",
+      "dirty": true
+    }
+  ],
+  "source_paths": {
+    "1_base_source_paths": [
+      {
+        "crate": "loopflow",
+        "seed_root_bytes": true,
+        "current_root_bytes": true
+      },
+      {
+        "crate": "loopflow_definitions",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_execution",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_model",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_storage",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_terminal",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      }
+    ],
+    "1_candidate_source_paths": [
+      {
+        "crate": "loopflow",
+        "seed_root_bytes": true,
+        "current_root_bytes": true
+      },
+      {
+        "crate": "loopflow_definitions",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_execution",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_harness",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_model",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_storage",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_terminal",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      }
+    ],
+    "2_base_source_paths": [
+      {
+        "crate": "loopflow",
+        "seed_root_bytes": true,
+        "current_root_bytes": true
+      },
+      {
+        "crate": "loopflow_definitions",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_execution",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_model",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_storage",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_terminal",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      }
+    ],
+    "2_candidate_source_paths": [
+      {
+        "crate": "loopflow",
+        "seed_root_bytes": true,
+        "current_root_bytes": true
+      },
+      {
+        "crate": "loopflow_definitions",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_execution",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_harness",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_model",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_storage",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_terminal",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      }
+    ],
+    "3_base_source_paths": [
+      {
+        "crate": "loopflow",
+        "seed_root_bytes": true,
+        "current_root_bytes": true
+      },
+      {
+        "crate": "loopflow_definitions",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_execution",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_model",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_storage",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_terminal",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      }
+    ],
+    "3_candidate_source_paths": [
+      {
+        "crate": "loopflow",
+        "seed_root_bytes": true,
+        "current_root_bytes": true
+      },
+      {
+        "crate": "loopflow_definitions",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_execution",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_harness",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_model",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_storage",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      },
+      {
+        "crate": "loopflow_terminal",
+        "seed_root_bytes": true,
+        "current_root_bytes": false
+      }
+    ]
+  },
+  "catalogue": [
+    {
+      "case": "before",
+      "schema_sha256": "03cce0949bb9e8b03cd535982fab45baa602b14db50a6162c0c395e70df42c66",
+      "catalogue_sha256": "a0d06ee557008f38725e1d278e6b0b928dd2730f6ca929e94d2b9f01497a52e1",
+      "migration_count": 128,
+      "drafts": []
+    },
+    {
+      "case": "unmerged",
+      "schema_sha256": "03cce0949bb9e8b03cd535982fab45baa602b14db50a6162c0c395e70df42c66",
+      "catalogue_sha256": "73eafde32bbcb3a67c518ec594dfbfb35b3729ee4d327602ffc12d077fce8feb",
+      "migration_count": 129,
+      "drafts": [
+        "loo_650_catalog_probe"
+      ]
+    },
+    {
+      "case": "main_advanced",
+      "schema_sha256": "03cce0949bb9e8b03cd535982fab45baa602b14db50a6162c0c395e70df42c66",
+      "catalogue_sha256": "40cb401ade7b1e8a144c4bcc035dc2a7e4669a6c34fc50dfcb2bc263d2338e0b",
+      "migration_count": 129,
+      "drafts": []
+    },
+    {
+      "case": "packed",
+      "schema_sha256": "03cce0949bb9e8b03cd535982fab45baa602b14db50a6162c0c395e70df42c66",
+      "catalogue_sha256": "40cb401ade7b1e8a144c4bcc035dc2a7e4669a6c34fc50dfcb2bc263d2338e0b",
+      "migration_count": 129,
+      "drafts": []
+    },
+    {
+      "case": "loose_after_packed",
+      "schema_sha256": "03cce0949bb9e8b03cd535982fab45baa602b14db50a6162c0c395e70df42c66",
+      "catalogue_sha256": "73eafde32bbcb3a67c518ec594dfbfb35b3729ee4d327602ffc12d077fce8feb",
+      "migration_count": 129,
+      "drafts": [
+        "loo_650_catalog_probe"
+      ]
+    },
+    {
+      "case": "source_package",
+      "schema_sha256": "03cce0949bb9e8b03cd535982fab45baa602b14db50a6162c0c395e70df42c66",
+      "catalogue_sha256": "40cb401ade7b1e8a144c4bcc035dc2a7e4669a6c34fc50dfcb2bc263d2338e0b",
+      "migration_count": 129,
+      "drafts": []
+    }
+  ],
+  "cache_root_validation": null,
+  "raw_receipts": "loo-923-raw.json.gz"
+}

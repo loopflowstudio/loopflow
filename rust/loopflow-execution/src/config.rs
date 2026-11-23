@@ -7,12 +7,12 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(not(test))]
-use crate::agent::check_cli_available;
 use crate::error::LoadError;
+use loopflow_harness::HarnessKind;
 
 pub mod catalog;
 mod definitions;
@@ -130,10 +130,6 @@ pub const CLAUDE_MODEL_FAMILIES: [&str; 4] = ["fable", "opus", "sonnet", "haiku"
 /// The family Claude Code runs when a launch names no model.
 pub const CLAUDE_DEFAULT_MODEL_FAMILY: &str = "fable";
 
-/// The models a bare `claude` step falls through to when the one it runs
-/// hits a scoped limit, best first.
-pub const CLAUDE_MODEL_RUNGS: [&str; 3] = ["opus", "sonnet", "haiku"];
-
 /// An explicit invocation-wide choice; definitions and defaults never set it.
 pub const YOLO_OVERRIDE_ENV: &str = "LF_YOLO_OVERRIDE";
 pub const CHROME_OVERRIDE_ENV: &str = "LF_CHROME_OVERRIDE";
@@ -168,17 +164,17 @@ pub(crate) fn resume_choice(provider: &str, model: Option<&str>, selected: Optio
 /// Select automatically only when exactly one supported harness is installed.
 pub fn default_agent() -> Option<&'static str> {
     #[cfg(test)]
-    let is_installed = |agent: &str| agent == crate::harness::HarnessKind::Codex.as_str();
+    let is_installed = |agent: HarnessKind| agent == HarnessKind::Codex;
     #[cfg(not(test))]
-    let is_installed = check_cli_available;
+    let is_installed = |kind: HarnessKind| crate::harness::launcher(kind).installed();
     installed_agent(is_installed)
 }
 
-fn installed_agent(is_installed: impl Fn(&str) -> bool) -> Option<&'static str> {
-    let mut installed = crate::harness::HarnessKind::ALL
+fn installed_agent(is_installed: impl Fn(HarnessKind) -> bool) -> Option<&'static str> {
+    let mut installed = HarnessKind::ALL
         .into_iter()
-        .map(crate::harness::HarnessKind::as_str)
-        .filter(|agent| is_installed(agent));
+        .filter(|agent| is_installed(*agent))
+        .map(HarnessKind::as_str);
     let only = installed.next()?;
     installed.next().is_none().then_some(only)
 }
@@ -298,6 +294,14 @@ pub enum ReleaseCompletion {
     GithubRelease,
 }
 
+/// `auto: on`: each Task turns auto on as it takes up its Graph, unless
+/// someone set it first. It has no other value; leave it out for none.
+#[derive(schemars::JsonSchema, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoDefault {
+    On,
+}
+
 /// Repository merge policy; GitHub's allowed methods remain authoritative.
 #[derive(schemars::JsonSchema, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -307,62 +311,31 @@ pub enum MergeMethod {
     Rebase,
 }
 
-/// One synchronization destination for the repository's local planning.
-/// Repository configuration overrides the personal default as one value.
-/// Every remote provider names the team that owns the repository's Tasks.
+/// The repository's tracker. Without one the plan is in Loopflow's store,
+/// on this Machine's hub when it has one. Every tracker names the team that
+/// owns the repository's Tasks.
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(try_from = "RawPlanningConfig", into = "RawPlanningConfig")]
-pub enum PlanningConfig {
-    Git {
-        remote: String,
-        plan: GitPlan,
-    },
+#[serde(try_from = "RawTrackerConfig", into = "RawTrackerConfig")]
+pub enum TrackerConfig {
     /// The Linear Team's ID; `lf wave plan connect` finds or creates it.
-    Linear {
-        team: Option<String>,
-    },
+    Linear { team: Option<String> },
     /// The Asana team's gid or URL. Tasks live in the team project named
     /// after the repository; Wave Projects are Asana projects in the team.
-    Asana {
-        team: String,
-    },
-    /// The Notion page's ID or URL. It holds the Tasks and Projects databases.
-    Notion {
-        team: String,
-    },
-}
-
-/// Which ref on the planning remote carries this repository's plan.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GitPlan {
-    /// `refs/loopflow/planning/shared/<name>`, read and written by everyone.
-    Shared(String),
-    /// `refs/loopflow/planning/users/<planning user key>`, one person's plan.
-    Personal,
-}
-
-impl Default for GitPlan {
-    fn default() -> Self {
-        Self::Shared("main".into())
-    }
-}
-
-impl GitPlan {
-    /// A personal plan has no reference until its user key exists.
-    pub fn reference(&self, user_key: Option<&str>) -> Option<String> {
-        match self {
-            Self::Shared(name) => Some(format!("refs/loopflow/planning/shared/{name}")),
-            Self::Personal => user_key.map(|key| format!("refs/loopflow/planning/users/{key}")),
-        }
-    }
+    Asana { team: String },
+    /// `provider: git`, which the released `lf` still writes and reads: no
+    /// tracker here. LOO-973 removes it once that release is gone.
+    ReleasedGit,
 }
 
 #[derive(schemars::JsonSchema, Clone, Serialize, Deserialize)]
+// Released shape until LOO-784 writes canonical spellings.
 #[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
-enum RawPlanningConfig {
+#[schemars(!tag)]
+enum RawTrackerConfig {
+    /// Read as no tracker; its keys are accepted and ignored.
     Git {
-        #[serde(default = "default_planning_remote")]
-        remote: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        remote: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         shared: Option<String>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -379,87 +352,49 @@ enum RawPlanningConfig {
     /// The Asana team's gid or URL. Tasks live in the team project named
     /// after the repository; Wave Projects are Asana projects in the team.
     Asana { team: String },
-    /// The Notion page's ID or URL. It holds the Tasks and Projects databases.
-    Notion { team: String },
 }
 
-impl TryFrom<RawPlanningConfig> for PlanningConfig {
-    type Error = String;
-
-    fn try_from(raw: RawPlanningConfig) -> Result<Self, Self::Error> {
-        let (remote, shared, personal) = match raw {
-            RawPlanningConfig::Git {
-                remote,
-                shared,
-                personal,
-            } => (remote, shared, personal),
-            RawPlanningConfig::Linear { team } => return Ok(Self::Linear { team }),
-            RawPlanningConfig::Asana { team } => return Ok(Self::Asana { team }),
-            RawPlanningConfig::Notion { team } => return Ok(Self::Notion { team }),
-        };
-        let plan = match (shared, personal) {
-            (Some(name), true) => {
-                return Err(format!(
-                    "planning sets both `shared: {name}` and `personal: true`; keep one"
-                ))
-            }
-            (Some(name), false) => GitPlan::Shared(name),
-            (None, true) => GitPlan::Personal,
-            (None, false) => GitPlan::default(),
-        };
-        Ok(Self::Git { remote, plan })
+impl From<RawTrackerConfig> for TrackerConfig {
+    fn from(raw: RawTrackerConfig) -> Self {
+        match raw {
+            RawTrackerConfig::Git { .. } => Self::ReleasedGit,
+            RawTrackerConfig::Linear { team } => Self::Linear { team },
+            RawTrackerConfig::Asana { team } => Self::Asana { team },
+        }
     }
 }
 
-impl From<PlanningConfig> for RawPlanningConfig {
-    fn from(config: PlanningConfig) -> Self {
+impl From<TrackerConfig> for RawTrackerConfig {
+    fn from(config: TrackerConfig) -> Self {
         match config {
-            PlanningConfig::Git { remote, plan } => {
-                let (shared, personal) = match plan {
-                    GitPlan::Shared(name) => (Some(name), false),
-                    GitPlan::Personal => (None, true),
-                };
-                Self::Git {
-                    remote,
-                    shared,
-                    personal,
-                }
-            }
-            PlanningConfig::Linear { team } => Self::Linear { team },
-            PlanningConfig::Asana { team } => Self::Asana { team },
-            PlanningConfig::Notion { team } => Self::Notion { team },
+            TrackerConfig::ReleasedGit => Self::Git {
+                remote: None,
+                shared: None,
+                personal: false,
+            },
+            TrackerConfig::Linear { team } => Self::Linear { team },
+            TrackerConfig::Asana { team } => Self::Asana { team },
         }
     }
 }
 
-fn default_planning_remote() -> String {
-    "origin".into()
-}
-
-impl PlanningConfig {
-    /// The remote planning provider's product name; Git planning has none.
-    pub fn remote_name(&self) -> Option<&'static str> {
+impl TrackerConfig {
+    /// The tracker's product name.
+    pub fn name(&self) -> &'static str {
         match self {
-            Self::Git { .. } => None,
-            Self::Linear { .. } => Some("Linear"),
-            Self::Asana { .. } => Some("Asana"),
-            Self::Notion { .. } => Some("Notion"),
-        }
-    }
-}
-
-impl Default for PlanningConfig {
-    fn default() -> Self {
-        Self::Git {
-            remote: default_planning_remote(),
-            plan: GitPlan::default(),
+            Self::Linear { .. } => "Linear",
+            Self::Asana { .. } => "Asana",
+            Self::ReleasedGit => unreachable!("planning_transport reads provider: git as None"),
         }
     }
 }
 
 impl Config {
-    pub fn planning_transport(&self) -> PlanningConfig {
-        self.planning.clone().unwrap_or_default()
+    /// Linear or Asana; `None` when the plan is in Loopflow's store.
+    pub fn planning_transport(&self) -> Option<TrackerConfig> {
+        self.planning
+            .clone()
+            .filter(|tracker| *tracker != TrackerConfig::ReleasedGit)
     }
 }
 
@@ -544,7 +479,7 @@ impl Config {
         Ok((first, fallback))
     }
 
-    /// The agents a headless step may move to when a usage limit refuses its
+    /// The agents headless work may move to when a usage limit refuses its
     /// own: the rest of [`Config::agent_order`]. An `agent` choice has none.
     pub fn fallback_agents(&self) -> Vec<String> {
         self.agent_order().into_iter().skip(1).collect()
@@ -562,20 +497,20 @@ pub(crate) fn agent_list(value: &str) -> impl Iterator<Item = &str> {
 /// A selected harness and its provider model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agent {
-    pub harness: crate::harness::HarnessKind,
+    pub harness: HarnessKind,
     pub model: Option<String>,
 }
 
 impl Agent {
     pub fn parse(value: &str) -> Result<Self, LoadError> {
         let (name, model) = parse_agent(value);
-        let harness = crate::harness::HarnessKind::parse(&name)
-            .ok_or_else(|| LoadError::InvalidAgent(value.to_owned()))?;
+        let harness =
+            HarnessKind::parse(&name).ok_or_else(|| LoadError::InvalidAgent(value.to_owned()))?;
         Ok(Self { harness, model })
     }
 
     pub fn with_configured_model(mut self, config: &Config) -> Self {
-        if self.harness == crate::harness::HarnessKind::Claude && self.model.is_none() {
+        if self.harness == HarnessKind::Claude && self.model.is_none() {
             self.model = config.claude.model.clone();
         }
         self
@@ -592,13 +527,18 @@ impl std::fmt::Display for Agent {
     }
 }
 
-/// Parse agent string like 'claude:opus' into (harness, model).
+/// Parse agent string like 'claude:opus' into (harness, model). An empty
+/// model (`claude:`) leaves the choice to the provider.
 pub fn parse_agent(agent: &str) -> (String, Option<String>) {
-    if let Some((harness, model)) = agent.split_once(':') {
-        return (harness.to_string(), Some(model.to_string()));
+    match agent.split_once(':') {
+        Some((harness, model)) => (
+            harness.to_string(),
+            Some(model.trim())
+                .filter(|model| !model.is_empty())
+                .map(str::to_string),
+        ),
+        None => (agent.to_string(), None),
     }
-
-    (agent.to_string(), None)
 }
 
 /// Load YAML file, returning None if not present or empty.
@@ -692,22 +632,76 @@ pub fn load_wave_config(
     repo_root: Option<&Path>,
     wave: Option<&str>,
 ) -> Result<Option<Config>, LoadError> {
-    load_wave_config_with(repo_root, wave, &PersonalSettings::read(repo_root, wave))
+    Ok(Some(resolved(repo_root, wave)?.config.clone()))
 }
 
-/// [`load_wave_config`] with your `lf set` values already read, so a reading
-/// of many Tasks reads them once per repository and Wave.
-pub fn load_wave_config_with(
+/// Settings for work in a checkout and Wave. Served readings share one value
+/// until a file it came from changes; a bare command resolves for itself.
+pub fn resolved(
     repo_root: Option<&Path>,
     wave: Option<&str>,
-    personal: &PersonalSettings,
-) -> Result<Option<Config>, LoadError> {
-    let layers = config_layers_with(repo_root, wave, personal)?;
-    settings::resolve_layers(&layers, None).map(|resolved| Some(resolved.config))
+) -> Result<Arc<settings::ResolvedSettings>, LoadError> {
+    resolved_with(repo_root, repo_root, wave, &settings::outside()?)
 }
 
-/// The effective planning transport, resolved once per bounded planning hook.
-pub fn load_planning_transport(repo_root: &Path) -> Result<PlanningConfig, LoadError> {
+/// [`resolved`] for a Task: checked-in files come from its checkout, your own
+/// file from its repository, which is there before the checkout and after it.
+pub fn resolved_for_task(
+    checkout: &Path,
+    repository: &Path,
+    wave: Option<&str>,
+) -> Result<Arc<settings::ResolvedSettings>, LoadError> {
+    resolved_with(
+        Some(checkout),
+        Some(repository),
+        wave,
+        &settings::outside()?,
+    )
+}
+
+/// [`resolved`] inside a computation whose key already holds `outside`.
+/// `repository` is the checkout your settings file is found from.
+pub(crate) fn resolved_with(
+    repo_root: Option<&Path>,
+    repository: Option<&Path>,
+    wave: Option<&str>,
+    outside: &settings::Outside,
+) -> Result<Arc<settings::ResolvedSettings>, LoadError> {
+    // A Wave named by ID is found by walking the checkout, which no reading
+    // observes: the shared value is kept under the name.
+    let wave = selected_wave(repo_root, wave)?;
+    let key = crate::observe::Derived::Settings {
+        checkout: repo_root.map(Path::to_owned),
+        repository: repository.map(Path::to_owned),
+        wave: wave.clone(),
+        outside: outside.clone(),
+    };
+    outside.shared(key, || {
+        let layers = file_layers(
+            repo_root,
+            repository,
+            wave.as_deref(),
+            &outside.home,
+            outside.remote.as_deref(),
+        )?;
+        settings::resolve_with(&layers, None, outside).map(Arc::new)
+    })
+}
+
+fn selected_wave(
+    repo_root: Option<&Path>,
+    wave: Option<&str>,
+) -> Result<Option<String>, LoadError> {
+    match (repo_root, wave) {
+        (Some(repo), Some(wave)) => files::wave_name(repo, wave)
+            .map(Some)
+            .map_err(|error| LoadError::InvalidGraph(error.to_string())),
+        (_, wave) => Ok(wave.map(str::to_owned)),
+    }
+}
+
+/// The repository's tracker, resolved once per bounded planning hook.
+pub fn load_planning_transport(repo_root: &Path) -> Result<Option<TrackerConfig>, LoadError> {
     Ok(load_config(Some(repo_root))?
         .unwrap_or_default()
         .planning_transport())
@@ -727,22 +721,25 @@ pub fn config_layers(
     repo_root: Option<&Path>,
     wave: Option<&str>,
 ) -> Result<Vec<ConfigDeclarations>, LoadError> {
-    config_layers_with(repo_root, wave, &PersonalSettings::read(repo_root, wave))
+    let wave = selected_wave(repo_root, wave)?;
+    file_layers(
+        repo_root,
+        repo_root,
+        wave.as_deref(),
+        &crate::store::lf_home_dir(),
+        remote::incoming_text().as_deref(),
+    )
 }
 
-pub fn config_layers_with(
+/// The checkout's `.lf/config.yaml`, the named Wave's own file, then your
+/// settings files under `home` and beside `repository`.
+fn file_layers(
     repo_root: Option<&Path>,
+    repository: Option<&Path>,
     wave: Option<&str>,
-    personal_values: &PersonalSettings,
+    home: &Path,
+    remote: Option<&str>,
 ) -> Result<Vec<ConfigDeclarations>, LoadError> {
-    let wave = match (repo_root, wave) {
-        (Some(repo), Some(wave)) => Some(
-            files::wave_name(repo, wave)
-                .map_err(|error| LoadError::InvalidGraph(error.to_string()))?,
-        ),
-        (_, wave) => wave.map(str::to_owned),
-    };
-    let wave = wave.as_deref();
     let mut layers = Vec::new();
     if let Some(repo_root) = repo_root {
         let repo_path = repo_root.join(".lf/config.yaml");
@@ -767,24 +764,8 @@ pub fn config_layers_with(
             }
         }
     }
-    layers.extend(
-        personal_values
-            .0
-            .as_ref()
-            .map_err(|message| LoadError::InvalidGraph(message.clone()))?
-            .clone(),
-    );
+    layers.extend(personal_file_layers(repository, wave, home, remote)?);
     Ok(layers)
-}
-
-/// Personal file declarations cached for one bounded Work reading.
-#[derive(Debug, Clone)]
-pub struct PersonalSettings(Result<Vec<ConfigDeclarations>, String>);
-
-impl PersonalSettings {
-    pub fn read(repo_root: Option<&Path>, wave: Option<&str>) -> Self {
-        Self(personal_file_layers(repo_root, wave).map_err(|error| error.to_string()))
-    }
 }
 
 pub(crate) fn private_wave_layers(
@@ -832,22 +813,15 @@ pub(crate) fn private_wave_layers(
 fn personal_file_layers(
     repo_root: Option<&Path>,
     wave: Option<&str>,
+    home: &Path,
+    remote: Option<&str>,
 ) -> Result<Vec<ConfigDeclarations>, LoadError> {
-    let wave = match (repo_root, wave) {
-        (Some(repo), Some(wave)) => Some(
-            files::wave_name(repo, wave)
-                .map_err(|error| LoadError::InvalidGraph(error.to_string()))?,
-        ),
-        (_, wave) => wave.map(str::to_owned),
-    };
-    let wave = wave.as_deref();
-    if let Some(layers) = remote::layers(repo_root, wave)
-        .map_err(|error| LoadError::InvalidGraph(error.to_string()))?
-    {
-        return Ok(layers);
+    if let Some(profile) = remote {
+        return remote::layers(profile, home, repo_root, wave)
+            .map_err(|error| LoadError::InvalidGraph(error.to_string()));
     }
     let mut layers = Vec::new();
-    let path = global_config_path();
+    let path = home.join("config.yaml");
     if let Some(value) = load_yaml_file(&path)? {
         layers.push(ConfigDeclarations {
             source: ConfigSource::Personal,
@@ -857,6 +831,9 @@ fn personal_file_layers(
         });
     }
     if let Some(repo) = repo_root {
+        // Where the personal file lives depends on whether `repo` is a
+        // checkout yet: a worktree that appears later moves it.
+        crate::observe::exists(&repo.join(".git"));
         let path = files::private_path(repo)
             .map_err(|error| LoadError::InvalidGraph(error.to_string()))?;
         if let Some(mut value) = load_yaml_file(&path)? {
@@ -906,7 +883,7 @@ pub fn repository_root() -> Result<Option<PathBuf>, LoadError> {
     Ok(load_global_config()?.and_then(|config| config.repo_root))
 }
 
-fn global_config_path() -> PathBuf {
+pub(crate) fn global_config_path() -> PathBuf {
     crate::store::lf_home_dir().join("config.yaml")
 }
 
@@ -940,7 +917,8 @@ mod tests {
     #[test]
     fn private_wave_reads_skip_malformed_entries_but_validate_authored_identity() {
         let repo = tempfile::tempdir().unwrap();
-        let path = repo.path().join("lf.config.local.yaml");
+        let path = repo.path().join(".lf/config.local.yaml");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let document = serde_yaml_ng::from_str("waves: {}\n").unwrap();
         assert!(
             super::private_wave_layers(repo.path(), Some("missing"), &path, &document)
@@ -982,7 +960,10 @@ mod tests {
 
     #[test]
     fn default_agent_is_the_one_installed() {
-        assert_eq!(installed_agent(|agent| agent == "claude"), Some("claude"));
+        assert_eq!(
+            installed_agent(|agent| agent == HarnessKind::Claude),
+            Some("claude")
+        );
         assert_eq!(installed_agent(|_| true), None);
         assert_eq!(installed_agent(|_| false), None);
     }
@@ -1037,9 +1018,15 @@ mod tests {
 
     #[test]
     fn bare_harnesses_defer_model_selection_to_the_provider() {
-        for harness in ["claude", "codex", "opencode", "pi"] {
+        for harness in HarnessKind::ALL.map(HarnessKind::as_str) {
             assert_eq!(parse_agent(harness), (harness.to_string(), None));
         }
+    }
+
+    #[test]
+    fn an_empty_model_defers_to_the_provider() {
+        assert_eq!(parse_agent("claude:"), ("claude".to_string(), None));
+        assert_eq!(Agent::parse("codex: ").unwrap().to_string(), "codex");
     }
 
     #[test]
@@ -1076,9 +1063,9 @@ mod tests {
         let config = load_repo_config(temp.path()).unwrap().unwrap();
         assert_eq!(
             config.planning_transport(),
-            PlanningConfig::Linear {
+            Some(TrackerConfig::Linear {
                 team: Some(team.to_string())
-            }
+            })
         );
     }
 
@@ -1088,9 +1075,9 @@ mod tests {
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(
             config.planning_transport(),
-            PlanningConfig::Asana {
+            Some(TrackerConfig::Asana {
                 team: "9876543210".to_string(),
-            }
+            })
         );
     }
 
@@ -1104,7 +1091,7 @@ mod tests {
         assert!(config.agent.is_none());
         assert_eq!(config.agent().unwrap(), "codex");
         assert!(config.supported_harnesses.is_empty());
-        assert!(!config.yolo);
+        assert!(config.yolo);
         assert!(config.context.docs.is_empty());
         assert!(!config.context.diff_files);
         assert!(!config.context.diff);
@@ -1467,39 +1454,27 @@ release:
 
 #[cfg(test)]
 mod planning_config_tests {
-    use super::{Config, GitPlan, PlanningConfig};
+    use super::{Config, TrackerConfig};
 
     #[test]
-    fn planning_variants_keep_their_typed_defaults() {
+    fn a_released_git_tracker_reads_as_no_tracker() {
         let config: Config =
             serde_yaml_ng::from_str("planning: {provider: linear, team: team}").unwrap();
         assert_eq!(
             config.planning_transport(),
-            PlanningConfig::Linear {
+            Some(TrackerConfig::Linear {
                 team: Some("team".into())
-            }
+            })
         );
-        assert_eq!(
-            Config::default().planning_transport(),
-            PlanningConfig::Git {
-                remote: "origin".into(),
-                plan: GitPlan::Shared("main".into())
-            }
-        );
-        let personal: Config =
-            serde_yaml_ng::from_str("planning:\n  provider: git\n  personal: true\n").unwrap();
-        assert_eq!(
-            personal.planning_transport(),
-            PlanningConfig::Git {
-                remote: "origin".into(),
-                plan: GitPlan::Personal
-            }
-        );
-        let both = serde_yaml_ng::from_str::<Config>(
-            "planning:\n  provider: git\n  shared: team\n  personal: true\n",
-        )
-        .unwrap_err();
-        assert!(both.to_string().contains("personal: true"), "{both}");
+        assert_eq!(Config::default().planning_transport(), None);
+        for released in [
+            "planning:\n  provider: git\n",
+            "planning:\n  provider: git\n  personal: true\n",
+            "planning:\n  provider: git\n  remote: upstream\n  shared: team\n",
+        ] {
+            let config: Config = serde_yaml_ng::from_str(released).unwrap();
+            assert_eq!(config.planning_transport(), None, "{released}");
+        }
         assert!(serde_yaml_ng::from_str::<Config>(
             "planning:\n  provider: linear\n  shared: employees\n"
         )

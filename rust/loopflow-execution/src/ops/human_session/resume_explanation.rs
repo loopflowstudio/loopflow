@@ -18,8 +18,9 @@ pub enum SessionResumeIntent {
     Start,
     /// Saved provider history resumes.
     Resume,
-    /// A retained terminal or client holds it and hands it over; if it is
-    /// gone, saved history resumes.
+    /// Its held terminal gains a view here; if it ended, saved history resumes.
+    View,
+    /// A client lf can't share runs it; that client ends and it continues here.
     TakeOver,
     /// Another harness starts a new thread seeded from the conversation log.
     NewThread,
@@ -40,7 +41,8 @@ pub struct SessionResumeExplanation {
     pub resolution: ContextExplanation,
     pub action: Option<SessionResumeAction>,
     pub state: Option<SessionState>,
-    pub actions: Vec<SessionAction>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub opening: Option<SessionAction>,
     pub impediments: Vec<String>,
     pub unavailable: Vec<String>,
 }
@@ -51,7 +53,7 @@ impl SessionResumeExplanation {
             resolution: ContextExplanation::unavailable(reason.to_string()),
             action: None,
             state: None,
-            actions: Vec::new(),
+            opening: None,
             impediments: Vec::new(),
             unavailable: vec![reason.to_string()],
         }
@@ -63,8 +65,11 @@ impl SessionResumeExplanation {
             let intent = match action.intent {
                 SessionResumeIntent::Start => "Start this conversation",
                 SessionResumeIntent::Resume => "Resume saved provider history",
+                SessionResumeIntent::View => {
+                    "View its running terminal here; if it ended, resume saved provider history"
+                }
                 SessionResumeIntent::TakeOver => {
-                    "Take over from the terminal or client holding it; if none remains, resume saved provider history"
+                    "Take over from the client running it; that client ends, unsent text there is lost"
                 }
                 SessionResumeIntent::NewThread => {
                     "Start a new thread from this conversation's log"
@@ -75,13 +80,13 @@ impl SessionResumeExplanation {
                 .as_deref()
                 .map(|agent| format!(" on {agent}"))
                 .unwrap_or_default();
-            let holder = if action.fork {
-                "fork into a new conversation; whatever holds this one keeps it"
+            let fork = if action.fork {
+                "; fork into a new conversation, whatever holds this one keeps it"
             } else {
-                "take it over; a terminal showing it hands it over, a client lf started stops, unsent text there is lost"
+                ""
             };
             lines.push(format!(
-                "Action: {intent}{agent}; {holder}{}",
+                "Action: {intent}{agent}{fork}{}",
                 if action.prepare_only {
                     " (preparation only; no client takeover)"
                 } else {
@@ -89,12 +94,8 @@ impl SessionResumeExplanation {
                 }
             ));
         }
-        for action in &self.actions {
-            lines.push(format!(
-                "{}: {}",
-                action.label,
-                action.unavailable_reason.as_deref().unwrap_or(&action.help)
-            ));
+        if let Some(action) = &self.opening {
+            lines.push(format!("{}: {}", action.label, action.help));
         }
         lines.extend(
             self.impediments
@@ -122,25 +123,7 @@ pub async fn explain_resume(
     prepare_only: bool,
 ) -> SessionResumeExplanation {
     use crate::session::PrimaryScope;
-    let selected = async {
-        let target = super::resolve_target(store, target).await?;
-        if let super::SessionTarget::Session(id) = target {
-            return Ok((None, Some(id.to_string())));
-        }
-        let Some(scope) = super::checkout_scope(store, cwd, target).await? else {
-            if let Some(id) = super::checkout_conversation(store, cwd).await? {
-                return Ok((None, Some(id)));
-            }
-            return Err(super::unassociated_checkout(cwd)?);
-        };
-        let session = match &scope {
-            PrimaryScope::Task(task) => super::primary::task_conversation(store, task).await?,
-            _ => store.sqlite.primary_session(&scope)?,
-        };
-        Ok::<_, anyhow::Error>((Some(scope), session.map(|session| session.id.to_string())))
-    }
-    .await;
-    let (scope, selector) = match selected {
+    let (scope, selector) = match super::existing_connection(store, cwd, target).await {
         Ok(selected) => selected,
         Err(error) => return SessionResumeExplanation::unavailable(error),
     };
@@ -158,12 +141,11 @@ pub async fn explain_resume(
             cwd,
             WorkSelection { task, wave },
             selector.as_deref(),
-            None,
         )
         .await,
         action: None,
         state: None,
-        actions: Vec::new(),
+        opening: None,
         impediments: Vec::new(),
         unavailable: Vec::new(),
     };
@@ -204,12 +186,10 @@ pub async fn explain_resume(
             fork: false,
             prepare_only,
         });
-        report.actions = vec![SessionAction {
-            kind: super::SessionActionKind::Open,
+        report.opening = Some(SessionAction {
             label: "Start conversation".into(),
-            help: "No existing conversation; start one explicitly".into(),
-            unavailable_reason: None,
-        }];
+            help: "No existing conversation; opening starts one".into(),
+        });
     }
     report
 }
@@ -225,28 +205,17 @@ async fn read_resume(
         report.unavailable.push(format!("Session {selector} is not recorded; provider-conversation admission is not performed by explanation"));
         return Ok(());
     };
-    let provider = session
-        .artifact_key
-        .as_deref()
-        .map(|key| store.sqlite.input_provider_session(key))
-        .transpose()?
-        .flatten();
-    // A metadata read does not acquire viewer control or probe the endpoint.
-    let connection = store.sqlite.session_terminal(&session.id)?;
-    // Opening checks the harness before any holder: another agent never
-    // takes over the running one, it starts a thread from the log.
-    let handoff = provider.as_ref().and(super::handoff_agent(&session));
-    // Opening refuses a worker or a batch whatever the flags, so nothing would happen.
+    // Opening refuses a worker or a batch whatever the flags.
     let refusal = super::run_refusal(&store.sqlite, &session)?;
-    let intent = if !fork && !prepare_only && handoff.is_some() {
-        SessionResumeIntent::NewThread
-    } else if !prepare_only && connection.is_some() {
-        SessionResumeIntent::TakeOver
-    } else if provider.is_none() {
-        SessionResumeIntent::Start
-    } else {
-        SessionResumeIntent::Resume
-    };
+    // Explanation and opening use the same recorded Process evidence; a
+    // metadata read does not acquire viewer control or probe the endpoint.
+    let metadata = session_projection::session_summary(
+        &store.sqlite,
+        &session.id,
+        report.resolution.observed_at,
+    )?
+    .ok_or_else(|| super::session_not_found(&session.id))?;
+    let intent = super::invocation_intent(&session, &metadata, fork, prepare_only);
     match refusal {
         Some(refusal) => report.impediments.push(refusal),
         None => {
@@ -258,7 +227,7 @@ async fn read_resume(
             })
         }
     }
-    if connection.is_some() {
+    if metadata.held {
         report.unavailable.push("Retained execution endpoint is not probed; an unavailable owner leaves continuity unknown".into());
     }
     if !prepare_only {
@@ -272,7 +241,7 @@ async fn read_resume(
                 ));
             }
         }
-        if provider.is_some() {
+        if metadata.has_provider_history {
             if let Err(error) =
                 crate::harness::native_session::require_session_task(&store.sqlite, &session)
             {
@@ -284,15 +253,7 @@ async fn read_resume(
                 .into(),
         );
     }
-    // Explanation and opening use the same recorded Process evidence.
-    let metadata = session_projection::session_summary(
-        &store.sqlite,
-        &session.id,
-        report.resolution.observed_at,
-    )?
-    .ok_or_else(|| super::session_not_found(&session.id))?;
-    let state = super::session_state(&metadata);
-    report.state = Some(state);
-    report.actions = super::projected_actions(&metadata);
+    report.state = Some(super::session_state(&metadata));
+    report.opening = super::session_action(&metadata);
     Ok(())
 }

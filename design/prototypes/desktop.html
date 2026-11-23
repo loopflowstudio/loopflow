@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en" data-fonts="new" data-stops="person">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loopflow for Mac, before and after the rules</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Old+Standard+TT:wght@400;700&family=Atkinson+Hyperlegible+Next:ital,wght@0,200..800;1,200..800&family=Spline+Sans+Mono:wght@300..700&family=Cormorant+Garamond:wght@500&family=Lato:wght@400;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="desktop.css">
+</head>
+<body>
+
+
+<main class="page">
+<h1>Loopflow for Mac, before and after the rules</h1>
+<p class="lede">Two screens of the Mac app rebuilt in HTML with every rule in DESIGN.md applied: the Task workspace and a Wave's backlog. Same layout, same panes, same theme colors, same content. Left is a screenshot of the app today; right is the prototype, and it is live: hover, tab and click through it.</p>
+<p><a href="desktop-more.html">More screens: the Task pane, the dashboard and the theme chooser.</a></p>
+<p class="soft">The numbers on the prototype match the notes under each pair; click a note or a number to find its partner. Colors are the bundled Loopflow Light and Loopflow Dark themes, value for value. The screenshots exist in light only.</p>
+
+<form class="switches" onsubmit="return false">
+  <fieldset><legend>Fonts</legend>
+    <label><input type="radio" name="fonts" value="new" checked><span>Old Standard, Atkinson, Spline Sans Mono</span></label>
+    <label><input type="radio" name="fonts" value="app"><span>The app's own (Cormorant, Lato, JetBrains Mono)</span></label></fieldset>
+  <fieldset><legend>Theme</legend><select name="theme" aria-label="Theme"></select></fieldset>
+  <fieldset><legend>Layout</legend>
+    <label><input type="radio" name="layout" value="side" checked><span>Side by side</span></label>
+    <label><input type="radio" name="layout" value="full"><span>Stacked, full size</span></label></fieldset>
+  <fieldset><legend>Steps that stop for you</legend>
+    <label><input type="radio" name="stops" value="person" checked><span>Person icon</span></label>
+    <label><input type="radio" name="stops" value="word"><span>The word "you"</span></label>
+    <label><input type="radio" name="stops" value="ink"><span>Underlined burgundy</span></label>
+    <label><input type="radio" name="stops" value="none"><span>Sentence only</span></label>
+    <label><input type="radio" name="stops" value="diamond"><span>Diamond</span></label></fieldset>
+  <fieldset><legend>Numbers</legend>
+    <label><input type="radio" name="pins" value="on" checked><span>Shown</span></label>
+    <label><input type="radio" name="pins" value="off"><span>Hidden</span></label></fieldset>
+</form>
+
+<table>
+  <tr><th></th><th>The app today (whole app, from the audit)</th><th>These two prototype screens</th></tr>
+  <tr><td>Font sizes</td><td>20, with half-point sizes 24 times</td><td>6 named steps (26, 17, 13, 11, mono 12, terminal 13)</td></tr>
+  <tr><td>Smallest text</td><td>8 pt</td><td>11 pt</td></tr>
+  <tr><td>Corner radii</td><td>6 is the most used and is not in the scale</td><td>3, one per kind of thing: control 4, row 8, pane 12</td></tr>
+  <tr><td>Spacing</td><td>166 literal paddings</td><td>8 named steps only</td></tr>
+  <tr><td>Prose set in mono</td><td>Summaries, statuses, counts, notices</td><td>None. Mono is IDs, paths and the terminal</td></tr>
+  <tr><td>Fields ending in "…" in a sidebar row</td><td>3</td><td>0</td></tr>
+</table>
+
+<h2>The Task workspace</h2>
+<div class="pair">
+  <figure><figcaption>Today</figcaption><img src="desktop-dev.png" alt="The Task workspace in the Mac app today"></figure>
+  <figure><figcaption>With the rules applied</figcaption>
+    <div class="stage"><div class="scale">
+      <div class="app">
+        <div class="titlebar" data-pin="1">
+          <span class="lights"><i></i><i></i><i></i></span>
+          <button class="icon" aria-label="Hide sidebar"><svg><use href="#i-side"/></svg></button>
+          <button class="icon" aria-label="Back"><svg><use href="#i-left"/></svg></button>
+          <button class="icon" aria-label="Forward"><svg><use href="#i-right"/></svg></button>
+          <nav class="crumbs" aria-label="Location"><button>loopflow</button><svg><use href="#i-right"/></svg><button>Product</button><svg><use href="#i-right"/></svg><span class="here"><span class="mono">LOO-515</span><span class="long">Make Task PR, file-browser and brief views useful beside the conversation</span></span></nav>
+          <span class="state">Moving</span>
+        </div>
+        <div class="body task">
+          <aside class="side">
+            <p class="repo"><span>loopflow</span><span class="meta second num" data-pin="4">27</span></p>
+            <ul class="tasks">
+              <li><a href="#" aria-current="page" data-pin="2"><p>Make Task PR, file-browser and brief views useful beside the conversation</p><p class="ask">Fable limit reached. Choose how to continue.</p><p><span class="mono" data-pin="3">LOO-515</span><span class="st blocked num">Blocked since 12:07</span></p></a></li>
+              <li><a href="#"><p>Keep interrupted terminal pastes from swallowing Session input</p><p><span class="mono">LOO-912</span><span class="st available">Available</span></p></a></li>
+              <li><a href="#"><p>Keep Desktop scrolling responsive under build load</p><p><span class="mono">LOO-910</span><span class="st available">Available</span></p></a></li>
+              <li><a href="#"><p>Keep one plan at every size: stamped saves over Git, a hub or a tracker</p><p><span class="mono">LOO-938</span><span class="st available">Available</span></p></a></li>
+              <li><a href="#"><p>launching a new task should get to new session instantaneously</p><p><span class="mono">LOO-944</span><span class="st available">Available</span></p></a></li>
+            </ul>
+            <ul class="waves">
+              <li><a href="#"><svg><use href="#i-wave"/></svg><span>Engbot</span><span class="n num">0</span></a></li>
+              <li><a href="#"><svg><use href="#i-wave"/></svg><span>Growth</span><span class="n num">0</span></a></li>
+              <li><a href="#"><svg><use href="#i-wave"/></svg><span>Infrastructure</span><span class="n num">4</span></a></li>
+              <li><button class="new"><svg><use href="#i-plus"/></svg><span>New Wave</span></button></li>
+            </ul>
+          </aside>
+          <div class="work">
+            <div class="flow">
+              <span class="mono" data-pin="5">feature</span>
+              <ol class="steps" aria-label="Steps of feature"><li class="you done" title="Stops for you"><svg><use href="#i-person"/></svg>explore<small>you</small></li><li class="done">plan</li><li class="now" aria-current="step">build</li><li class="you" title="Stops for you"><svg><use href="#i-person"/></svg>human-review<small>you</small></li><li>deliver</li><li class="you" title="Stops for you"><svg><use href="#i-person"/></svg>verify<small>you</small></li></ol>
+              <span class="second">build is running. You are next needed at human-review.</span>
+              <button class="btn end" data-pin="6">Auto-Ship</button>
+            </div>
+            <div class="panes">
+              <section class="pane">
+                <header>
+                  <button class="pick">Claude <svg><use href="#i-down"/></svg></button>
+                  <span class="status" data-pin="7"><i class="dot"></i>Blocked, a dialog is open</span><button class="btn" id="todialog">Go to dialog</button>
+                  <span class="end"><button class="icon" aria-label="Restart conversation"><svg><use href="#i-restart"/></svg></button><button class="icon" aria-label="New conversation"><svg><use href="#i-chat"/></svg></button><button class="icon" aria-label="Zoom pane"><svg><use href="#i-expand"/></svg></button><button class="icon" aria-label="Hide pane"><svg><use href="#i-hide"/></svg></button></span>
+                </header>
+                <p class="notice" data-pin="8">New conversation; earlier one left behind</p>
+<div class="term" tabindex="0" data-pin="9">✻ Baked for 1s · done 12:04 PM
+
+› Message from @Loopflow: &amp;lt;lf:steers&amp;gt; (ctrl+o to expand)
+
+● Same step, with detail: concept-review is running in run c51b513f. No
+  change since the last update.
+
+✻ Churned for 1s · done 12:04 PM
+
+› Message from @Loopflow: &amp;lt;lf:steers&amp;gt; (ctrl+o to expand)
+
+● concept-review finished; LOO-515 is back at loop-or-next, deciding
+  whether the review's findings need another pass. Still moving.
+
+✻ Baked for 2s · done 12:07 PM
+
+› Message from @Loopflow: &amp;lt;lf:steers&amp;gt; (ctrl+o to expand)
+
+● The loop chose another pass: LOO-515 is back at implement (loop 3,
+  pass 2), acting on the concept review. Still moving.
+
+✻ Baked for 1s · done 12:07 PM
+
+› Message from @Loopflow: &amp;lt;lf:steers&amp;gt; (ctrl+o to expand)
+  ⎿  You've hit your Fable limit · resets Nov 25 at 4am
+     (America/Los_Angeles)
+<hr>  What do you want to do?
+
+  ❯ 1. Stop and wait for limit to reset
+    2. Wait here, then continue automatically at Nov 25 at 4am
+    3. Switch to usage credits
+
+  Enter to confirm · Esc to cancel</div>
+              </section>
+              <section class="pane">
+                <header>
+                  <div class="tabs" role="tablist" data-pin="12"><button role="tab" aria-selected="false" data-tab="brief">Brief</button><button role="tab" aria-selected="false" data-tab="diff">Diff</button><button role="tab" aria-selected="true" data-tab="files">Files</button></div>
+                  <span class="end" data-panel="files"><button class="pick" data-pin="10"><span class="mono">questions.md</span><span class="meta second">1 of 3</span><svg><use href="#i-down"/></svg></button><button class="pick">Read <svg><use href="#i-down"/></svg></button></span>
+                </header>
+                <p class="where" data-panel="files"><span>This Mac</span><span class="mono">loopflow.loo-515-make-task-pr/scratch</span></p>
+                <div class="doc" tabindex="0" data-panel="files">
+                  <h4 data-pin="11">LOO-515 open questions and assumptions</h4>
+                  <ul>
+                    <li>Assumed (kickoff 2026-10-28): PR becomes part of a <b>Changes</b> page rather than its own page, and the GitHub patch list is deleted in favour of the local Diff plus <code>Open on GitHub</code>. Reversible in review; Jack Heart's demo decides.</li>
+                    <li>Assumed: ⌥⌘1/2/3 for Brief/Changes/Files (no existing binding).</li>
+                    <li>Assumed: "relevant dependencies" = Task identifiers detected in the brief text; no Linear relations read in this Task.</li>
+                    <li>Assumed: page, scroll and tree expansion are retained in-app across Task switches, not across app restart (persisted intent belongs to LOO-497/416).</li>
+                    <li>2026-10-28: Jack asked for three HTML prototypes before choosing; they are in <code>scratch/prototypes/</code> (A · Pages = this draft, B · Dossier, C · Navigator). The choice is pending and decides the layout for <code>pursue</code>.</li>
+                    <li>2026-11-14: Jack requested <code>lf sync</code> and a review of T3 Code, Paseo, and Paradev, especially T3 Code. Sync completed without conflicts; research is in <code>scratch/task-details-research.md</code> and its HTML reading page. The earlier prototypes remain provisional.</li>
+                  </ul>
+                </div>
+                <div class="doc" data-panel="brief" hidden><p class="second">The brief is not drawn in this prototype.</p></div>
+                <div class="doc pr" tabindex="0" data-panel="diff" hidden>
+                  <p class="second">Pull request <span class="mono">#1949</span>, open</p>
+                  <h4>Make Task PR, file-browser and brief views useful beside the conversation</h4>
+                  <p class="second"><span class="mono">loo-515-make-task-pr</span> into <span class="mono">main</span></p>
+                  <p class="num">6 files, <span class="ok">184 added</span>, <span class="bad">42 removed</span></p>
+                  <h5>Checks <span>2 passed, 1 failed</span></h5>
+                  <p class="line"><span class="mono">rust-lint</span><span class="end num"><span class="ok">Passed</span>42 s</span></p>
+                  <p class="line"><span class="mono">swift-views</span><span class="end num"><span class="ok">Passed</span>18 s</span></p>
+                  <p class="line"><span class="mono">rust-test</span><span class="end"><span class="bad">Failed</span><button class="btn">Run again</button></span></p>
+                  <p class="behind"><span><span class="mono">main</span> is 2 commits ahead of this branch.</span><button class="btn">Sync branch</button></p>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+  </figure>
+</div>
+<ol class="notes">
+  <li><i>1</i><div><b>One title bar.</b> The two screenshots have different title bars: bare breadcrumbs here, a grey capsule with a moon button on the backlog. Both screens now use this one. Each control is a 24 pt target. <small>Rule: one component per job.</small></div></li>
+  <li><i>2</i><div><b>The sidebar row lost its stripe and its border, and its summary earns its place.</b> Every row drew a colored edge whether or not it had a status, and the selected row added a border and a fill. Selection is now the theme's solid fill and nothing else. The mono "Summary · Jack Heart finds the…" lines are gone. A row that needs you gets one line, in the interface face, saying what it is asking. Titles wrap in full. <small>Rules: no stripe without a status; mono is not for prose; quiet until it matters.</small></div></li>
+  <li><i>3</i><div><b>The last line carries two whole fields, not four clipped ones.</b> It read "LOO-515 Block… #1949 Jack…". It is now the ID, and the status with the time it began, in tabular digits. The pull request and the owner are in the Task's own pane. <small>Rule: drop a field; don't clip three.</small></div></li>
+  <li><i>4</i><div><b>Counts are in the interface face.</b> "27", "0" and "4" were mono. They are sans with tabular digits, so they still line up. <small>Rule: mono is for things you could paste into a terminal.</small></div></li>
+  <li><i>5</i><div><b>The workflow line names every step and says when you are next needed.</b> It was four dots, one blue, then "demo → verify" with a typed arrow. Each step is a word; a mark shows the steps that stop for you (five ways to draw it are in the switch at the top); the running step is strong and in the working color; and a sentence says it outright. This is the only workflow drawing in the prototype; the app has three. <small>Rules: state is never color alone; glyphs are not icons; one component per job. The screenshot names only two of its four steps, so the names here are the current <code>feature</code> Graph's.</small></div></li>
+  <li><i>6</i><div><b>Auto-Ship is an ordinary button.</b> It was a solid green block, the loudest thing on the screen, in the color that means success. An action that has not happened yet is not a success. <small>Rule: ordinary controls use neutral ink; status colors are for status.</small></div></li>
+  <li><i>7</i><div><b>One status mark, in words, with its next step.</b> The header had a brown dot at the far left, a sparkle before "Claude", and "Blocked · dialog open" in amber mono. It is one dot and one phrase in the interface face, and a button that takes you to the dialog. <small>Rules: a status is a word first; every state offers its next step.</small></div></li>
+  <li><i>8</i><div><b>The notice has its own line.</b> "New conversation; earlier one left behind" was drawn on top of the first terminal line, so both were unreadable. Same words, in a strip above the terminal.</div></li>
+  <li><i>9</i><div><b>The terminal uses the app's mono, with ligatures off and a little more line height.</b> Today Loopflow sets the terminal's size (13) and leaves the face to Ghostty, so an unconfigured terminal is JetBrains Mono beside the app's own mono. Here it is the app's mono at 13, a named <code>terminal</code> step, at about 10% more line height. A person's Ghostty config still wins. <small>Rule: one component per job. The <code>&amp;lt;lf:steers&amp;gt;</code> text is in the screenshot too: a bug in what lf prints, left visible.</small></div></li>
+  <li><i>10</i><div><b>The open file is named in full.</b> Three file tabs were squeezed into the pane and the active one read "que". It is one menu showing <code>questions.md</code> and how many are open. "this Mac" is a place, not a path, so it is sans; the path stays mono. <small>Rule: nothing meaningful truncates.</small></div></li>
+  <li><i>11</i><div><b>The document heading is a ramp step.</b> It was about 17.5 pt and the body 13.5 pt. They are 17 and 13. With Old Standard in use, the 17 pt step moves from serif to sans, because that serif falls apart under 24 pt. That is a change to the ramp, so it belongs in DESIGN.md if this goes ahead.</div></li>
+  <li><i>12</i><div><b>Failures come with their fix. Click Diff to see it.</b> The pull request's checks are summed up in one line ("2 passed, 1 failed"), each state is a word, the failed check has "Run again" beside it, and a branch that has fallen behind has "Sync branch" beside the sentence that says so. <small>Rule: every failure offers its next step. This pane is not in the screenshot; the check names and numbers are stand-ins.</small></div></li>
+</ol>
+
+<h2>A Wave's backlog</h2>
+<div class="pair">
+  <figure><figcaption>Today</figcaption><img src="desktop-backlog.png" alt="A Wave's backlog in the Mac app today"></figure>
+  <figure><figcaption>With the rules applied</figcaption>
+    <div class="stage"><div class="scale">
+      <div class="app">
+        <div class="titlebar">
+          <span class="lights"><i></i><i></i><i></i></span>
+          <button class="icon" aria-label="Hide sidebar"><svg><use href="#i-side"/></svg></button>
+          <button class="icon" aria-label="Back"><svg><use href="#i-left"/></svg></button>
+          <button class="icon" aria-label="Forward"><svg><use href="#i-right"/></svg></button>
+          <nav class="crumbs" aria-label="Location"><button>loopflow</button><svg><use href="#i-right"/></svg><button>Product</button><svg><use href="#i-right"/></svg><span class="here"><span>Backlog</span></span></nav>
+          <button class="icon end" aria-label="Switch appearance"><svg><use href="#i-moon"/></svg></button>
+        </div>
+        <div class="body wave">
+          <aside class="side">
+            <p class="repo"><span>loopflow</span><span class="meta second num">3</span></p>
+            <button class="new"><svg><use href="#i-plus"/></svg><span>New idea</span><span class="n">⌘N</span></button>
+            <ul class="tasks">
+              <li><a href="#" data-pin="1"><p>Redesign backlog management so choosing and shaping the next work feels clear</p><p><span class="mono">LOO-903</span><span class="st">Backlog exploration</span></p></a></li>
+              <li><a href="#"><p>Make Task PR, file-browser and brief views useful beside the conversation</p><p><span class="mono">LOO-515</span><span class="st">Task workspace</span></p></a></li>
+              <li><a href="#"><p>Make repeatable delivery approachable from the Task workspace</p><p><span class="mono">LOO-434</span><span class="st">Delivery exploration</span></p></a></li>
+            </ul>
+            <ul class="waves">
+              <li><a href="#"><svg><use href="#i-wave"/></svg><span>Engbot</span></a></li>
+              <li><a href="#"><svg><use href="#i-wave"/></svg><span>Growth</span></a></li>
+              <li><a href="#"><svg><use href="#i-wave"/></svg><span>Infrastructure</span></a></li>
+              <li><a href="#"><svg><use href="#i-wave"/></svg><span>Intelligence</span></a></li>
+              <li><a href="#"><svg><use href="#i-wave"/></svg><span>List</span></a></li>
+              <li><a href="#" aria-current="page"><svg><use href="#i-wave"/></svg><span>Product</span><span class="n num">46</span></a></li>
+              <li><a href="#"><svg><use href="#i-wave"/></svg><span>Spend</span></a></li>
+            </ul>
+          </aside>
+          <section class="talk">
+            <h4>Product conversation</h4>
+<pre>› what should we pick up next?
+
+LOO-903 is the only Task here with a design ready. LOO-515 and LOO-434 both touch the Task workspace; reading them together before starting either would keep them from colliding.</pre>
+            <p class="conn" data-pin="2">No live provider is connected. <button>Connect one</button></p>
+            <input type="text" placeholder="Ask the Wave" aria-label="Ask the Wave">
+          </section>
+          <section class="backlog">
+            <div class="head"><h4 data-pin="3">Product</h4><button class="pick second">Chapter demo-20260924 <svg><use href="#i-down"/></svg></button><button class="icon end" aria-label="New Task"><svg><use href="#i-plus"/></svg></button></div>
+            <div class="filters">
+              <div class="seg" data-pin="4"><button aria-pressed="true">All<span class="num">46</span></button><button aria-pressed="false">Mine<span class="num">0</span></button><button aria-pressed="false">Available<span class="num">43</span></button></div>
+              <button class="pick second">Unstarted <svg><use href="#i-down"/></svg></button>
+              <label class="find"><svg><use href="#i-find"/></svg><input type="text" placeholder="Find work by title or brief" aria-label="Find work by title or brief"></label>
+            </div>
+            <div class="acts" data-pin="5">
+              <span>1 selected</span>
+              <button class="btn gap" disabled>Start with feature <svg><use href="#i-down"/></svg></button><button class="btn">Claim</button><button class="btn">Edit</button><button class="btn">Move <svg><use href="#i-down"/></svg></button><button class="btn">Abandon…</button>
+              <span class="end second"><span class="num">8 of 46</span><button class="icon" aria-label="Previous Task"><svg><use href="#i-up"/></svg></button><button class="icon" aria-label="Next Task"><svg><use href="#i-dn"/></svg></button></span>
+            </div>
+            <ul class="list">
+              <li><div class="r" data-pin="6"><input type="checkbox" aria-label="Select LOO-458"><button class="icon" aria-label="Show brief"><svg><use href="#i-right"/></svg></button><span class="mono second">LOO-458</span><span>lf account shows each login with a bar and how much is left</span><span></span><button class="icon" aria-label="More for LOO-458"><svg><use href="#i-more"/></svg></button></div></li>
+              <li><div class="r"><input type="checkbox" aria-label="Select LOO-456"><button class="icon" aria-label="Show brief"><svg><use href="#i-right"/></svg></button><span class="mono second">LOO-456</span><span>lf monitor opens with one line saying how many sessions are running and how many wait on you</span><span></span><button class="icon" aria-label="More for LOO-456"><svg><use href="#i-more"/></svg></button></div></li>
+              <li><div class="r"><input type="checkbox" aria-label="Select LOO-452"><button class="icon" aria-label="Show brief"><svg><use href="#i-right"/></svg></button><span class="mono second">LOO-452</span><span>Customize Desktop shortcuts and explain effective bindings</span><span></span><button class="icon" aria-label="More for LOO-452"><svg><use href="#i-more"/></svg></button></div></li>
+              <li><div class="r"><input type="checkbox" aria-label="Select LOO-423"><button class="icon" aria-label="Show brief"><svg><use href="#i-right"/></svg></button><span class="mono second">LOO-423</span><span>Fix what the herdr and cmux trial finds</span><span class="meta second" data-pin="7">Growth, claimed</span><button class="icon" aria-label="More for LOO-423"><svg><use href="#i-more"/></svg></button></div></li>
+              <li><div class="r"><input type="checkbox" aria-label="Select LOO-392"><button class="icon" aria-label="Show brief"><svg><use href="#i-right"/></svg></button><span class="mono second">LOO-392</span><span>Fit an opened Flow exec's step diagram inside its pane</span><span></span><button class="icon" aria-label="More for LOO-392"><svg><use href="#i-more"/></svg></button></div></li>
+              <li><div class="r"><input type="checkbox" aria-label="Select LOO-391"><button class="icon" aria-label="Show brief"><svg><use href="#i-right"/></svg></button><span class="mono second">LOO-391</span><span>Prove Workflows with a real provider, real data and a real screen</span><span></span><button class="icon" aria-label="More for LOO-391"><svg><use href="#i-more"/></svg></button></div></li>
+              <li><div class="r"><input type="checkbox" aria-label="Select LOO-387"><button class="icon" aria-label="Show brief"><svg><use href="#i-right"/></svg></button><span class="mono second">LOO-387</span><span>Recommend skills beside the native Session input</span><span></span><button class="icon" aria-label="More for LOO-387"><svg><use href="#i-more"/></svg></button></div></li>
+              <li class="open"><div class="r"><input type="checkbox" checked aria-label="Select LOO-384"><button class="icon" aria-label="Hide brief" aria-expanded="true"><svg><use href="#i-down"/></svg></button><span class="mono second">LOO-384</span><b>Show an interactive conversation as Waiting when it stops or asks</b><span></span><button class="icon" aria-label="More for LOO-384"><svg><use href="#i-more"/></svg></button></div>
+                <div class="more" data-pin="8"><p>Follow-up to LOO-353 (PR #1439), deferred by Jack Heart on October 6.</p><p>Who benefits: Jack, working in Desktop with one primary Task conversation.</p><p>LOO-353 added one Waiting state, but lf only knows it for conversations whose event stream it owns: headless Runs and Codex. An interactive Claude or OpenCode conversation, which is what a primary Task conversation usually is, never shows as Waiting. Jack: "seems like not the right product experience, but OK to defer to land this."</p><p><button>Show all 160 words</button></p></div></li>
+              <li><div class="r"><input type="checkbox" aria-label="Select LOO-333"><button class="icon" aria-label="Show brief"><svg><use href="#i-right"/></svg></button><span class="mono second">LOO-333</span><span>Operate Waves recursively and assess the repository with VSM</span><span></span><button class="icon" aria-label="More for LOO-333"><svg><use href="#i-more"/></svg></button></div></li>
+              <li><div class="r"><input type="checkbox" aria-label="Select LOO-510"><button class="icon" aria-label="Show brief"><svg><use href="#i-right"/></svg></button><span class="mono second">LOO-510</span><span>Adopt Loopflow without replacing your existing way of working</span><span></span><button class="icon" aria-label="More for LOO-510"><svg><use href="#i-more"/></svg></button></div></li>
+              <li><div class="r"><input type="checkbox" aria-label="Select LOO-511"><button class="icon" aria-label="Show brief"><svg><use href="#i-right"/></svg></button><span class="mono second">LOO-511</span><span>Make automation permissions and failure recovery understandable before the first run</span><span></span><button class="icon" aria-label="More for LOO-511"><svg><use href="#i-more"/></svg></button></div></li>
+              <li><div class="r"><input type="checkbox" aria-label="Select LOO-514"><button class="icon" aria-label="Show brief"><svg><use href="#i-right"/></svg></button><span class="mono second">LOO-514</span><span>Make Wave backlogs, conversations and open-Task dashboards work together</span><span></span><button class="icon" aria-label="More for LOO-514"><svg><use href="#i-more"/></svg></button></div></li>
+            </ul>
+            <p class="foot" data-pin="9"><span>Design preview of a planning snapshot. Edits stay here.</span><span>Preview only. Start would claim <span class="mono">LOO-384</span> and run it with feature.</span></p>
+          </section>
+        </div>
+      </div>
+    </div></div>
+  </figure>
+</div>
+<ol class="notes">
+  <li><i>1</i><div><b>The same sidebar row as the other screen.</b> Here the rows had no stripe and two mono lines under the title; there they had a stripe and three. It is one row: title, then ID and one short field. "Backlog exploration" is a name, so it is sans. <small>Rule: one component per job.</small></div></li>
+  <li><i>2</i><div><b>A dead end became a next step.</b> "Live provider not connected" was a mono caption with nothing to press. It is a sentence with the action beside it. <small>Rule: every state offers its next step. The action's wording is mine; I don't know what the app can offer here.</small></div></li>
+  <li><i>3</i><div><b>The Wave's name is the one serif thing on the screen.</b> It was bold sans at about 20 pt, a size outside the ramp. It is the 34 pt display step, in the theme's emphasis ink. <small>Rule: one idea per surface; named steps only.</small></div></li>
+  <li><i>4</i><div><b>Filters are one control at one size.</b> "All 46 / Mine 0 / Available 43" used grey-on-grey for the unselected parts, and a loose "unstarted" sat beside it with no shape. The selected part uses the selection fill, counts are tabular, and "Unstarted" is drawn as a menu. <small>I could not tell from the screenshot what "unstarted" does, so its shape is a guess.</small></div></li>
+  <li><i>5</i><div><b>The action bar says what it acts on.</b> Five buttons in three heights and three text sizes, with "Abandon…" as bare text at the far edge. All are the one button at 24 pt high and 13 pt text, they begin with "1 selected", and Abandon sits with the other actions. "Start · feature" reads "Start with feature".</div></li>
+  <li><i>6</i><div><b>Two controls before each title, not three.</b> Checkbox, "…" and chevron stood in front of every ID. The "…" menu moved to the end of the row, where the dashed circle was.</div></li>
+  <li><i>7</i><div><b>Ownership is a word.</b> A filled person icon meant claimed and a dashed circle meant unclaimed, with no label on either. A claimed row says so; an unclaimed row says nothing, because "Available 43" above already does. <small>Rule: state is never shape or color alone.</small></div></li>
+  <li><i>8</i><div><b>The brief is body text on the ramp.</b> It was about 14 pt against 13 pt row titles. It is 13 pt with more line height, held to a readable width.</div></li>
+  <li><i>9</i><div><b>The footer is two sentences.</b> Middle dots became full stops, and the Task ID is the only mono in it. The words are otherwise the app's.</div></li>
+</ol>
+
+<h2>What I had to decide, and what I left alone</h2>
+<ul class="plain">
+  <li><b>Fonts.</b> The prototype opens in Old Standard, Atkinson Hyperlegible Next and Spline Sans Mono. Switch to the app's own fonts at the top to see the rules without the font change.</li>
+  <li><b>The burgundy title bar stays.</b> It is the app's accent used as repository identity, which DESIGN.md allows.</li>
+  <li><b>Sidebar titles are regular weight; only the selected one is strong.</b> The ramp reserves the strong step for selected rows. In the app today every title is bold.</li>
+  <li><b>Status words keep their theme colors</b> (Blocked in the waiting color, Available in the available color), except on the selected row, where they take the selection's text color so contrast holds.</li>
+  <li><b>Stand-ins.</b> The fifth sidebar row's ID and status are cut off in the screenshot, so "LOO-944, Available" is invented. So are the sidebar's "Fable limit reached" line (drawn from the dialog in the terminal) and everything in the Diff pane.</li>
+  <li><b>Only rows that need you get the extra line and the time.</b> The three Available rows have neither, because the screenshot doesn't say what they are waiting on or since when.</li>
+  <li><b>Not drawn:</b> empty, loading and failure states, the narrowest window, and any theme besides the two Loopflow ones. DESIGN.md's checklist asks for all of them before a real change merges.</li>
+</ul>
+</main>
+
+<script src="desktop-themes.js"></script>
+<script src="desktop.js"></script>
+</body>
+</html>

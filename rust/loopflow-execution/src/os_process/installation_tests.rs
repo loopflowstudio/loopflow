@@ -74,7 +74,7 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
     let delivery_path = files.path().join("delivery.json");
     fs::write(&delivery_path, serde_json::to_vec(&delivery).unwrap()).unwrap();
     let hooks = delivery
-        .hook_settings(crate::harness::Run::Managed)
+        .hook_settings(crate::harness::LaunchKind::WorkSession)
         .unwrap();
     let hook = hooks["Stop"][0]["hooks"][0]["command"].as_str().unwrap();
     assert!(hook.contains(gate.to_str().unwrap()));
@@ -142,37 +142,28 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
     let pending = store.session_steers(&session.id, 0, 100).unwrap();
     assert_eq!(pending.pending, 1);
     assert_eq!(pending.items[0].steer.id, steer.id);
+    // The provider's LF_BIN was the failing install, so a step that exits 0
+    // ran the replacement.
     let connection = Connection::open(&database).unwrap();
-    let child_command: String = connection.query_row(
-        "SELECT p.command FROM graph_process_steps s JOIN processes p ON p.id=s.lf_process_id WHERE p.exit_code=0",
-        [], |row| row.get(0),
-    ).unwrap();
-    assert!(
-        child_command.contains(replacement.to_str().unwrap()),
-        "{child_command}"
+    let attributed: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM graph_processes WHERE graph='entry-proof' AND caller_session_id=?1",
+            [&session.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        attributed, 1,
+        "the provider's Graph launch carries its Session"
     );
     let steps: i64 = connection
         .query_row(
-            "SELECT count(*) FROM graph_process_steps s JOIN processes p ON p.id=s.lf_process_id WHERE p.exit_code=0",
+            "SELECT count(*) FROM graph_process_steps WHERE exit_code=0",
             [],
             |row| row.get(0),
         )
         .unwrap();
     assert_eq!(steps, 2);
-    // Reads record no Process, so the provider's Graph launch carries attribution.
-    let attributed: Vec<String> = connection
-        .prepare("SELECT command FROM processes WHERE caller_session_id=?1 AND via_agent=1")
-        .unwrap()
-        .query_map([&session.id], |row| row.get(0))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
-    assert!(
-        attributed
-            .iter()
-            .any(|command| command.contains("entry-proof")),
-        "{attributed:?}"
-    );
     drop(connection);
     drop(store);
     fs::remove_dir_all(root).unwrap();
@@ -194,9 +185,12 @@ fn graph_live_across_switch_runs_next_step_on_selected_install() {
     crate::store::migrations::apply_sqlite(&Connection::open(&database).unwrap()).unwrap();
     let files = tempfile::tempdir().unwrap();
     let binary = loopflow_test_support::lf_binary();
-    // Step 1 holds at its first git call, a fifo, until the switch settles.
+    // Inside a step, git's parent is that step's lf: the shim writes the
+    // binary it runs. Step 1 holds at its first git call, a fifo, until the
+    // switch settles.
     let release = files.path().join("release");
     let held = files.path().join("held");
+    let ran = files.path().join("ran");
     assert!(Command::new("mkfifo")
         .arg(&release)
         .status()
@@ -207,7 +201,8 @@ fn graph_live_across_switch_runs_next_step_on_selected_install() {
     fs::write(
         tools.join("git"),
         format!(
-            "#!/bin/sh\nif [ -n \"${graph}\" ] && mkdir '{}' 2>/dev/null; then read _ < '{}'; fi\nexec /usr/bin/git \"$@\"\n",
+            "#!/bin/sh\nif [ -n \"${graph}\" ]; then echo \"$PPID $(readlink /proc/$PPID/exe)\" >> '{}'; fi\nif [ -n \"${graph}\" ] && mkdir '{}' 2>/dev/null; then read _ < '{}'; fi\nexec /usr/bin/git \"$@\"\n",
+            ran.display(),
             held.display(),
             release.display(),
             graph = crate::ops::graph_process::GRAPH_ID_ENV,
@@ -256,24 +251,11 @@ fn graph_live_across_switch_runs_next_step_on_selected_install() {
                 .args(["-eo", "pid,ppid,args"])
                 .output()
                 .unwrap();
-            let recorded = Connection::open(&database)
-                .unwrap()
-                .prepare("SELECT command, exit_code FROM processes ORDER BY rowid")
-                .unwrap()
-                .query_map([], |row| {
-                    Ok(format!(
-                        "{} -> {:?}",
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<i64>>(1)?
-                    ))
-                })
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
+            let ran = fs::read_to_string(&ran).unwrap_or_default();
             let _ = runner.kill();
             let output = runner.wait_with_output().unwrap();
             panic!(
-                "step 1 never held on the prior install: {:?}\n{}\n{recorded:#?}\n{}\n{}",
+                "step 1 never held on the prior install: {:?}\n{}\n{ran}\n{}\n{}",
                 output.status,
                 String::from_utf8_lossy(&ps.stdout),
                 String::from_utf8_lossy(&output.stdout),
@@ -285,6 +267,17 @@ fn graph_live_across_switch_runs_next_step_on_selected_install() {
     // Promote while the Graph's first step is running on the prior install.
     let active = selection(&replacement, &database);
     switch(&root, &prior, &active, &gate);
+    let (previous, updated) = (
+        fs::canonicalize(&prior_cli).unwrap(),
+        fs::canonicalize(&replacement).unwrap(),
+    );
+    // The gate execs the selected install, so the runner's pid is that lf.
+    let runner_pid = runner.id().to_string();
+    assert_eq!(
+        fs::read_link(format!("/proc/{runner_pid}/exe")).unwrap(),
+        previous,
+        "the runner keeps its lf across the switch"
+    );
     fs::write(&release, "go\n").unwrap();
     let output = runner.wait_with_output().unwrap();
     // Exited on its own: the runner was never stopped or relaunched.
@@ -301,42 +294,29 @@ fn graph_live_across_switch_runs_next_step_on_selected_install() {
         .unwrap();
     assert_eq!(graphs, 1, "one Graph, no relaunch");
     let steps = connection
-        .prepare(
-            "SELECT s.node, p.command, p.exit_code FROM graph_process_steps s
-             JOIN processes p ON p.id=s.lf_process_id ORDER BY s.seq",
-        )
+        .prepare("SELECT node, exit_code FROM graph_process_steps ORDER BY seq")
         .unwrap()
         .query_map([], |row| {
-            Ok((
-                row.get::<_, u32>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<i64>>(2)?,
-            ))
+            Ok((row.get::<_, u32>(0)?, row.get::<_, Option<i64>>(1)?))
         })
         .unwrap()
         .collect::<rusqlite::Result<Vec<_>>>()
         .unwrap();
-    let nodes = steps.iter().map(|(node, _, _)| *node).collect::<Vec<_>>();
+    let nodes = steps.iter().map(|(node, _)| *node).collect::<Vec<_>>();
     assert_eq!(nodes.len(), 2, "each node once, no replay: {steps:?}");
     assert_ne!(nodes[0], nodes[1], "{steps:?}");
-    assert!(
-        steps.iter().all(|(_, _, exit)| *exit == Some(0)),
-        "{steps:?}"
-    );
-    let (previous, updated) = (prior_cli.to_str().unwrap(), replacement.to_str().unwrap());
-    assert!(steps[0].1.contains(previous), "{steps:?}");
-    assert!(steps[1].1.contains(updated), "{steps:?}");
-    let runner: String = connection
-        .query_row(
-            "SELECT p.command FROM graph_processes g JOIN processes p ON p.id=g.lf_process_id",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert!(
-        runner.contains(previous),
-        "the runner keeps its lf: {runner}"
-    );
+    assert!(steps.iter().all(|(_, exit)| *exit == Some(0)), "{steps:?}");
+    // One binary per step, in the order the steps ran.
+    let ran = fs::read_to_string(&ran).unwrap();
+    let mut binaries: Vec<(&str, &Path)> = Vec::new();
+    for line in ran.lines() {
+        let (pid, exe) = line.split_once(' ').unwrap();
+        if pid != runner_pid && !binaries.iter().any(|(seen, _)| *seen == pid) {
+            binaries.push((pid, Path::new(exe)));
+        }
+    }
+    let binaries = binaries.iter().map(|(_, exe)| *exe).collect::<Vec<_>>();
+    assert_eq!(binaries, [previous.as_path(), updated.as_path()], "{ran}");
     drop(connection);
     fs::remove_dir_all(root).unwrap();
     fs::remove_dir_all(home).unwrap();

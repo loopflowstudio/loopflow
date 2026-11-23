@@ -40,13 +40,13 @@ Session/Process caller provenance supplies ancestry and mutation authority.
   fixtures and `session_events` historical source labels retain their original
   bytes. Historical cohort readers in `scripts/context_ablation.py` still decode
   `launch`, `run_id` and `parent_run_id` from their frozen inputs.
-- `LF_RUN_ID` / `LF_RUN_DIR` occur only in launch scrubbing, rejection fixtures
+- `LF_EXECUTION_ID` / `LF_RUN_DIR` occur only in launch scrubbing, rejection fixtures
   and the checksum-pinned released-CLI preservation fixture. Current execution
   reads `LF_CAPTURE_KEY` and typed Session/Process provenance. Capture context does
   not confer Graph or Task settlement authority.
 - GitHub workflow/check runs, release-run operations, gate execution receipts,
   launchd `RunAtLoad`, Swift attributed-text runs and ordinary execution verbs
-  name other things. Published release notes, dated benchmark reports and chapter
+  name other things. Published release notes, dated benchmark reports and old
   archives retain historical terminology. The old heading anchor above preserves
   documentation links, not a runtime interface.
 - Current Wave JSON exposes `history: Evidence<SessionHistory>`; Rust, Swift and

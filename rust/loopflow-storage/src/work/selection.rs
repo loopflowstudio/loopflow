@@ -3,12 +3,7 @@ use loopflow_model::id::WaveId;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-mod panes;
 mod query;
-pub use panes::{
-    BrowserTab, ChangeComparison, FileDraft, FileTab, PaneIntent, PaneKind, PaneTree, ShellTab,
-    TaskLayoutTemplate, WorkPaneLayout,
-};
 
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
@@ -120,12 +115,12 @@ pub enum SelectionState {
     Idle,
     Active,
     Moving,
-    Shipping,
     /// Board axis: the Task's `TaskSection`.
     Backlog,
     Working,
-    Autonomous,
     Done,
+    /// Setting axis: the open Task's auto setting is on.
+    Auto,
 }
 
 /// The source path contains authored IDs, never array indexes or current focus.
@@ -390,8 +385,7 @@ impl Selection {
                                     .as_ref()
                                     .is_some_and(|parent| descendants.contains(parent.as_str()));
                             // The repository and a Wave list the board's Working
-                            // section; the others are `state:backlog`, `state:autonomous`
-                            // and `state:done`.
+                            // section; the others are `state:backlog` and `state:done`.
                             in_scope && item.states.contains(&SelectionState::Working)
                         }
                     };
@@ -750,8 +744,6 @@ pub struct ViewPlan {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ViewContent {
-    pub pane_revision: Option<i64>,
-    pub face: Option<PaneIntent>,
     pub work: WorkWorkspaceKey,
     pub title: String,
     pub states: BTreeSet<SelectionState>,

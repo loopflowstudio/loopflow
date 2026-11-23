@@ -42,7 +42,7 @@ An unreadable owner makes the Task unknown: report it and leave it.
 
 | Disposition | When, and what to do |
 | --- | --- |
-| moving | A live Graph process is running. Leave it alone. An open conversation is not a Graph process. |
+| moving | A live Graph run. Leave it alone. An open conversation is not a Graph run. |
 | acted | This pass continued, repaired or delivered it with an `lf` command, then reread status and saw the change. |
 | available | A review, demo, choice or merge click is ready, with its conversation link or PR. Never complete or approve it for them. |
 | dependency or capacity | Waiting on a named Task, PR, running check, account or limit. |
@@ -52,9 +52,9 @@ An unreadable owner makes the Task unknown: report it and leave it.
 "Ready" and "needs reconciliation" are not dispositions. Take the first row
 that fits:
 
-- **Look for a live Graph first.** Check every Graph and unfinished Process in
-  `lf task status <issue> --json` against `lf process list`. A live process
-  makes the Task moving, whoever launched it.
+- **Look for a live Graph first.** In `lf task status <issue> --json`, a
+  position with `running` true is a live run, read from its own pid. A live
+  run makes the Task moving, whoever launched it.
 - **Repair before reporting a blocker.** Read the failed step's log and what
   it changed, fix the cause if you can, and relaunch what remains with
   `lf task run <issue-id> --reason "<what changed>"`. A stopped Graph is
@@ -63,15 +63,16 @@ that fits:
   doesn't complete the Task. A Task at an interactive step is available to the
   person there: never continue past their step, pick a new direction or arm a
   merge they didn't approve.
-- **Finish merged work.** Let a live ship Graph finish. Otherwise, when the
+- **Finish merged work.** Let a live Graph finish. Otherwise, when the
   outcome holds, run `lf task complete <issue>` and reread status. Retry
   completion alone, never by rerunning gate or re-arming a merged PR.
 
 Tasks progress independently of this pass; their Graphs do the work, so don't
 perform a Graph's steps here. `lf task run <issue-id>` continues a Task you
-own to its next interactive step, and `lf task status` follows it. `lf -b
-task run`, `lf ship`, and any run with no interactive step left ahead approve
-Auto-Ship and may merge the PR: only when asked to ship or land. Start
+own to its next interactive step, and `lf task status` follows it. `lf task
+auto on` turns auto on, so the run stands in at interactive steps and may
+merge the PR; `lf -b task run` stands in for its own run, and a run with no
+interactive step left ahead may merge it too. Use them only when asked to ship or land. Start
 remaining work on your Tasks without asking. Don't approve reviews, cancel
 Tasks or change direction.
 

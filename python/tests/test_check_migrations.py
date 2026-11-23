@@ -287,3 +287,36 @@ def test_source_moves_keep_original_order_age_and_immutable_bytes(repo: Path):
     result = check(repo)
     assert result.returncode != 0
     assert "z_expand.sql differs from origin/main" in result.stderr
+
+
+def test_a_leaving_mark_names_a_current_member_and_a_task(repo: Path):
+    marking = repo / MIGRATIONS / "stop_names.sql"
+    marking.write_text("-- leaving: waves.id LOO-1\n-- leaving: graphs LOO-2\n")
+    result = check(repo)
+    assert result.returncode == 0, result.stderr
+
+    marking.write_text("-- leaving: waves.colour LOO-1\n")
+    result = check(repo)
+    assert result.returncode == 1
+    assert "marks waves.colour leaving, but no such table or column" in result.stderr
+
+    marking.write_text("-- leaving: waves.id\n")
+    result = check(repo)
+    assert result.returncode == 1
+    assert "is not `-- leaving: <table>[.<column>] <Task ID>`" in result.stderr
+
+
+def test_a_contract_of_a_marking_migration_drops_only_marked_members(repo: Path):
+    merge(repo, "add_name.sql", "ALTER TABLE waves ADD COLUMN name TEXT;\n", 40)
+    merge(repo, "add_title.sql", "-- leaving: waves.name LOO-1\n-- leaving: graphs LOO-1\n", 31)
+    contract = repo / MIGRATIONS / "drop_marked.sql"
+
+    contract.write_text(CONTRACT + "ALTER TABLE waves DROP COLUMN id;\n")
+    result = check(repo)
+    assert result.returncode == 1
+    assert "drops column waves.id, which add_title does not mark leaving" in result.stderr
+
+    contract.write_text(CONTRACT + "ALTER TABLE waves DROP COLUMN name;\nDROP TABLE graphs;\n")
+    result = check(repo)
+    assert result.returncode == 0, result.stderr
+

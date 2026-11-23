@@ -5,7 +5,7 @@ import Testing
 @testable import LoopflowMac
 
 /// A window's subscriptions, served by stand-ins or by a private Loopflow server.
-/// Every window starts with the plan and the live-process subscription.
+/// Every window starts with the plan subscription.
 @Suite("Workspace subscription transport", .serialized)
 struct WorkObservationTransportTests {
     @Test("A server command completes from an async caller")
@@ -81,14 +81,19 @@ struct WorkObservationTransportTests {
         let subscriptions = FakeSubscriptions()
         let observation = try WorkSubscriptions.observe(launch: subscriptions.launch)
         var frames = observation.frames.makeAsyncIterator()
+        try await subscriptions.answer(.allPlans, 0)
+        #expect(try await frames.next()?.sequence == 1)
+        observation.request(.scope(id: 2, WorkScope(repo: nil, headless: false, task: "LOO-1", activity: nil, taskListWave: nil)))
+        #expect(try await frames.next()?.answers == 2)
+        let task = ServedRead.taskGet(directory: "/", issue: "LOO-1")
         observation.request(.checkpoint(id: 5, replay: []))
         try await subscriptions.answer(.allPlans, 5)
         #expect(try await frames.next()?.answers == 5)
-        #expect(subscriptions.requests(.processList) == [#"{"id":5}"#])
-        // The live-process subscription has not answered, so nothing is confirmed yet.
-        try await subscriptions.answer(.processList, 5)
+        #expect(subscriptions.requests(task).contains(#"{"id":5}"#))
+        // The Task subscription has not answered, so nothing is confirmed yet.
+        try await subscriptions.answer(task, 5)
         let answered = try await frames.next()
-        #expect(answered?.content.part == "activity")
+        #expect(answered?.content.part == "task")
         let checkpoint = try await frames.next()
         #expect(checkpoint?.content.part == "checkpoint")
         #expect(checkpoint?.answers == 5)
@@ -177,7 +182,7 @@ private final class FakeSubscriptions: @unchecked Sendable {
             return LineSubscription(lines: lines, send: { [self] line in
                 lock.withLock { subscriptions[index].sent.append(String(decoding: line, as: UTF8.self)
                     .trimmingCharacters(in: .newlines)) }
-            }, cancel: { continuation.finish() })
+            }, cancel: { continuation.finish() }, unreadable: { nil })
         }
     }
 

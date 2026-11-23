@@ -61,9 +61,9 @@ pub struct LinearRequestRecord {
     pub repository: Option<String>,
     /// The Linear object the request names: an issue, comment or Project.
     pub target: Option<String>,
-    pub requests: Option<Allowance>,
-    pub complexity: Option<Allowance>,
-    pub cost: Option<i64>,
+    /// What the response's rate-limit headers reported.
+    #[serde(flatten)]
+    pub allowances: Allowances,
 }
 
 /// Whether this Machine records Linear requests.
@@ -118,9 +118,7 @@ impl PendingRequest {
                 lf_process_id: process.map(|id| id.to_string()),
                 repository: repository.map(|path| path.display().to_string()),
                 target,
-                requests: None,
-                complexity: None,
-                cost: None,
+                allowances: Allowances::default(),
             },
         })
     }
@@ -132,9 +130,7 @@ impl PendingRequest {
         if exchange.outcome.spent() {
             record.duration_ms = Some(self.started.elapsed().as_millis() as u64);
         }
-        record.requests = exchange.allowances.requests;
-        record.complexity = exchange.allowances.complexity;
-        record.cost = exchange.allowances.cost;
+        record.allowances = exchange.allowances;
         if let Err(error) = append(&self.path, record) {
             tracing::debug!(%error, "Linear request log unavailable");
         }
@@ -161,7 +157,7 @@ impl Exchange {
 }
 
 /// `query Name(...)` or `mutation Name(...)`: whether it writes, and its name.
-fn operation(query: &str) -> (bool, String) {
+pub(super) fn operation(query: &str) -> (bool, String) {
     let mut words = query
         .trim_start()
         .split(|c: char| c.is_whitespace() || c == '(' || c == '{')
@@ -225,7 +221,7 @@ impl Tally {
         } else {
             self.held += 1;
         }
-        self.cost += record.cost.unwrap_or(0);
+        self.cost += record.allowances.cost.unwrap_or(0);
     }
 }
 
@@ -295,8 +291,8 @@ pub fn summarize(since_ms: i64, records: &[LinearRequestRecord]) -> RequestSumma
             .map(|(start_ms, tally)| HourTotal { start_ms, tally })
             .collect(),
         callers,
-        requests: latest(|record| record.requests),
-        complexity: latest(|record| record.complexity),
+        requests: latest(|record| record.allowances.requests),
+        complexity: latest(|record| record.allowances.complexity),
     }
 }
 
@@ -335,9 +331,10 @@ mod tests {
             lf_process_id: None,
             repository: None,
             target: None,
-            requests: None,
-            complexity: None,
-            cost: Some(2),
+            allowances: Allowances {
+                cost: Some(2),
+                ..Allowances::default()
+            },
         }
     }
 

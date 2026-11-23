@@ -87,7 +87,7 @@ struct TaskSessionLaunchProofTests {
         """#
         try script.write(to: helper, atomically: true, encoding: .utf8)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
-        try #require(try LocalWaveAgentLauncher.controlLfPath() == helper.path)
+        try #require(try LocalWaveAgentLauncher.machineLf().path == helper.path)
         try JSONSerialization.data(withJSONObject: ["worktree": checkout.path, "machine_id": fixtureMachineId]).write(
             to: directory.appendingPathComponent("receipt.json"))
 

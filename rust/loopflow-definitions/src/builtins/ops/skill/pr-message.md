@@ -13,7 +13,12 @@ language, concrete verbs, exact command spelling.
 
 Then **What changes**, in a short paragraph or a few bullets. The diff shows
 what the code does; spend the words on what it can't show: why it was built
-this way, what people said that shaped it, what a run showed. Note real risks
+this way, what people said that shaped it, what a run showed. Say what the change added to and removed from
+the system's model: stored data, public interfaces and lines of code, with
+before and after counts where they can be measured. Say the same for what people
+use: each command, screen, view or setting added or removed. Skip either when
+nothing moved.
+Note real risks
 and limits. Use only the sections the change needs, and when scope changes,
 rewrite around the current diff rather than keeping a diary.
 

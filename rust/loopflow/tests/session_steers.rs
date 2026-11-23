@@ -1,6 +1,5 @@
 //! Public launch proofs for the Session delivery cutover.
 use crate::support;
-use loopflow_execution::process::attachment;
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -42,33 +41,31 @@ fn launch_startup_proof_through(
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }
     let provider = bin.join("claude");
-    fs::write(&provider, r#"#!/usr/bin/python3
-import fcntl, hashlib, json, os, pathlib, select, shlex, subprocess, sys
+    fs::write(&provider, support::claude_stand_in(r#"#!/usr/bin/python3
+import json, os, pathlib, shlex, subprocess, sys
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
 home = pathlib.Path(os.environ['LF_HOME'])
 sys.stderr = open(home / 'provider-errors', 'w', buffering=1)
 caller = json.loads(os.environ['LF_AGENT_CALLER'])
-lock = home / 'loopflow.session-locks' / hashlib.sha256(caller['session_id'].encode()).hexdigest()
-# Force a hook/input overlap without draining a byte of the combined seed.
-assert select.select([sys.stdin], [], [], 5)[0], 'no initial input'
-with open(lock, 'r+') as fence:
-    fcntl.flock(fence, fcntl.LOCK_SH)
-    settings = json.load(open(sys.argv[sys.argv.index('--settings') + 1]))
-    hook = settings['hooks']['SessionStart'][0]['hooks'][0]['command']
-    arguments = shlex.split(hook)
-    assert 'LF_PROVIDER_CONTEXT' not in os.environ
-    assert 'Stop' not in settings['hooks'], list(settings['hooks'])
-    commands = [h['command'].split()[-1] for group in settings['hooks']['SessionStart'] for h in group['hooks']]
-    assert commands == ['start', 'compact'], commands
-    output = subprocess.check_output(hook, shell=True, input=json.dumps({'session_id': 'startup-native', 'hook_event_name': 'SessionStart', 'source': 'startup'}).encode())
-    context_text = json.loads(output)['hookSpecificOutput']['additionalContext']
-    assert len(context_text.encode()) <= 10000
-    if (home / 'expect-steer').exists():
-        assert 'STARTUP_DIRECTION' in context_text
-        assert '[excerpt; full source above]' in context_text
-    (home / 'startup-complete').touch()
+# Drain both messages before launching hooks so hook latency cannot block the seed write.
+context = json.loads(sys.stdin.readline())
+query = json.loads(sys.stdin.readline())
+settings = json.load(open(sys.argv[sys.argv.index('--settings') + 1]))
+hook = settings['hooks']['SessionStart'][0]['hooks'][0]['command']
+arguments = shlex.split(hook)
+assert 'LF_PROVIDER_CONTEXT' not in os.environ
+assert 'Stop' not in settings['hooks'], list(settings['hooks'])
+commands = [h['command'].split()[-1] for group in settings['hooks']['SessionStart'] for h in group['hooks']]
+assert commands == ['start', 'compact'], commands
+output = subprocess.check_output(hook, shell=True, input=json.dumps({'session_id': 'startup-native', 'hook_event_name': 'SessionStart', 'source': 'startup'}).encode())
+context_text = json.loads(output)['hookSpecificOutput']['additionalContext']
+assert len(context_text.encode()) <= 10000
+if (home / 'expect-steer').exists():
+    assert 'STARTUP_DIRECTION' in context_text
+    assert '[excerpt; full source above]' in context_text
+(home / 'startup-complete').touch()
 # A bare launch's tool hook reads its steers from the store, with no server.
 adapter = json.loads(os.environ['LF_BARE_STEER'])
 assert adapter['agent_process_id'] == caller['agent_process_id']
@@ -84,8 +81,6 @@ subprocess.check_call([arguments[2], 'steer', caller['session_id'], 'BARE_DIRECT
 steered = json.loads(after_tool())['hookSpecificOutput']
 assert steered['hookEventName'] == 'PostToolUse' and 'BARE_DIRECTION' in steered['additionalContext'], steered
 assert after_tool() == '', 'the steer arrived twice'
-context = json.loads(sys.stdin.readline())
-query = json.loads(sys.stdin.readline())
 assert context['shouldQuery'] is False
 expected = (home / 'clipboard').read_text()
 assert expected in context['message']['content'], 'incomplete non-query context'
@@ -93,11 +88,12 @@ assert query['message']['content'][0]['text'].endswith('QUERY_END'), 'incomplete
 assert len(json.dumps(context).encode()) > 131133
 assert query['uuid']
 query['session_id'] = 'startup-native'
+keep_claude_turn(query, 'CORRELATED_STARTUP_ANSWER')
 print(json.dumps(query), flush=True)
 print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'startup-native'}), flush=True)
 print(json.dumps({'type': 'result', 'uuid': 'answer-id', 'session_id': 'startup-native', 'subtype': 'success', 'is_error': False, 'result': 'CORRELATED_STARTUP_ANSWER'}), flush=True)
 sys.stdin.read()
-"#).unwrap();
+"#)).unwrap();
     fs::set_permissions(provider, fs::Permissions::from_mode(0o755)).unwrap();
     Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()
@@ -156,17 +152,6 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
     let output = launch_startup_proof(&repo, home.path(), Some("INF-123"));
     assert_launched(&output, home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let (native, answer, turn): (String, String, String) = db
-        .query_row(
-            "SELECT s.provider_thread,json_extract(e.payload,'$.text'),e.provider_turn
-         FROM agent_sessions s JOIN session_events e ON e.session_id=s.id WHERE e.kind='output'",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .unwrap();
-    assert_eq!(native, "startup-native");
-    assert_eq!(answer, "CORRELATED_STARTUP_ANSWER");
-    assert!(!turn.is_empty());
     let session: String = db
         .query_row(
             "SELECT id FROM agent_sessions WHERE provider_thread='startup-native'",
@@ -174,6 +159,21 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
             |r| r.get(0),
         )
         .unwrap();
+    // The answer is the one Claude kept for the query's turn.
+    let answer = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path())
+        .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        .args(["history", "show", &session, "--final"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(answer.status.success(), "{answer:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&answer.stdout).trim(),
+        "CORRELATED_STARTUP_ANSWER"
+    );
     let receipts = store.session_steers(&session, 0, 32).unwrap();
     assert_eq!(receipts.items[0].steer.id, steer.id);
     // The startup hook claimed it, printed it and stamped it.
@@ -382,9 +382,9 @@ fn an_interactive_task_resume_with_no_machine_server_fails_naming_it() {
 #[test]
 fn a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server() {
     let task = InteractiveTask::launched_then_stopped();
-    let (_, argv) = task.prepared(&["session", "resume", "--task", "INF-123"]);
+    let (id, argv) = task.prepared(&["session", "resume", "--task", "INF-123"]);
     assert!(
-        argv.ends_with(&["--task".into(), "INF-123".into()]),
+        argv.ends_with(&["session".into(), "resume".into(), id]),
         "{argv:?}"
     );
     assert_names_missing_server(&task.run_program(&argv[0], &argv[1..]));
@@ -399,7 +399,7 @@ fn a_task_pane_reopened_by_session_id_fails_naming_a_missing_server() {
     let (id, _) = task.prepared(&["session", "resume", "--task", "INF-123"]);
     let (_, argv) = task.prepared(&["session", "resume", &id, "--task", "INF-123"]);
     assert!(
-        argv.ends_with(&[id.clone(), "--task".into(), "INF-123".into()]),
+        argv.ends_with(&["session".into(), "resume".into(), id]),
         "{argv:?}"
     );
     assert_names_missing_server(&task.run_program(&argv[0], &argv[1..]));
@@ -407,9 +407,7 @@ fn a_task_pane_reopened_by_session_id_fails_naming_a_missing_server() {
 }
 
 #[test]
-fn public_context_capability_survives_claim_changes_and_rejects_children_and_replacement() {
-    use loopflow_model::id::LfProcessId;
-
+fn public_context_capability_rejects_children_and_replacement() {
     use std::io::Write;
     use std::time::{Duration, Instant};
 
@@ -478,6 +476,15 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         serde_json::from_str(declaration["caller"].as_str().unwrap()).unwrap();
     let session = caller["session_id"].as_str().unwrap();
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "ATTACH ?1 AS history",
+        [
+            loopflow_storage::history::history_path(&home.path().join("loopflow.db"))
+                .to_string_lossy()
+                .as_ref(),
+        ],
+    )
+    .unwrap();
     loop {
         let native: Option<String> = db
             .query_row(
@@ -501,7 +508,7 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         let published: bool = db
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1
-                 AND json_extract(payload,'$.evidence.provider_session_id')='handoff-native')",
+                 AND kind='captured' AND provider_thread='handoff-native')",
                 [session],
                 |r| r.get(0),
             )
@@ -513,24 +520,6 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         std::thread::sleep(Duration::from_millis(10));
     }
     let first = store.session_attachment(session).unwrap().unwrap();
-    let other = LfProcessId::new();
-    db.execute(
-        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-        [&other],
-    )
-    .unwrap();
-    let second =
-        attachment::claim_session_attachment(&store, session, Some(&first), &other, false).unwrap();
-    let third = attachment::claim_session_attachment(
-        &store,
-        session,
-        Some(&second),
-        first.lf_process_id.as_ref().unwrap(),
-        false,
-    )
-    .unwrap();
-    assert_eq!(first.agent_process_id, third.agent_process_id);
-    assert_ne!(first.token, third.token);
     // The Machine server records each boundary; the hook claims its own steers.
     let hook = |payload: serde_json::Value| {
         let mut hook = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -600,8 +589,7 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
     assert!(!rejected.contains("NEXT_DIRECTION") && !rejected.contains("HANDOFF_DIRECTION"));
     assert_eq!(store.session_steers(session, 0, 32).unwrap().pending, 1);
     // Exercise the shipped OpenCode plugin against the real Machine server.
-    // Internal stream retries reuse one transformed value; a later callback has
-    // another adapter invocation and must replace that ephemeral context copy.
+    // Later requests retain the steer in the model context without claiming it again.
     let plugin = home.path().join("transform.mjs");
     let delivery_path = declaration["delivery"].as_str().unwrap();
     let delivery: serde_json::Value =
@@ -636,9 +624,9 @@ await hooks.context(output);
 const first = JSON.stringify(output);
 assert(first.includes('NEXT_DIRECTION'));
 assert.equal(JSON.stringify(structuredClone(output)), first);
-const afterLostTransform = {sessionID:'handoff-native',system:[],messages:[]};
-await hooks.context(afterLostTransform);
-assert(!JSON.stringify(afterLostTransform).includes('NEXT_DIRECTION'));
+const later = {sessionID:'handoff-native',system:[],messages:[]};
+await hooks.context(later);
+assert.equal(JSON.stringify(later).match(/NEXT_DIRECTION/g)?.length, 1);
 assert.equal(output.messages.length,0); // stored/native conversation remains untouched
 clearInterval(alive);
 
@@ -737,7 +725,7 @@ clearInterval(alive);
     assert!(answered.status.success());
     let gaps: i64 = db
         .query_row(
-            "SELECT count(*) FROM session_events WHERE session_id=?1
+            "SELECT count(*) FROM history.session_history WHERE session_id=?1
              AND json_extract(payload,'$.source')='store-gap'",
             [session],
             |r| r.get(0),
@@ -754,7 +742,7 @@ clearInterval(alive);
     assert!(!marker.exists(), "the answered hook closes its gap");
     let selected: String = db
         .query_row(
-            "SELECT json_extract(payload,'$.transition.from_provider_session') FROM session_events
+            "SELECT json_extract(payload,'$.transition.from_provider_session') FROM history.session_history
              WHERE session_id=?1 AND json_extract(payload,'$.type')='provider_transition'
              AND json_extract(payload,'$.transition.to_provider_session')='cleared-native'",
             [session],

@@ -1,3 +1,4 @@
-# Integrate upstream changes, then reconcile the plan and code.
+description: Integrate upstream changes, then reconcile the plan and code.
+steps:
 - cmd: sync
 - realign

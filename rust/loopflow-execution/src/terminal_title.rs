@@ -231,7 +231,7 @@ pub(crate) struct TerminalTitle {
 impl TerminalTitle {
     pub fn prepare(
         environment: &BTreeMap<String, String>,
-        harness: &str,
+        harness: loopflow_harness::HarnessKind,
         command: &mut Command,
     ) -> Option<Self> {
         if !std::io::stderr().is_terminal() {
@@ -253,9 +253,7 @@ impl TerminalTitle {
             }
         };
         // Called before adding any subcommand, positional input or `--` boundary.
-        if let Some(harness) = crate::harness::HarnessKind::parse(harness) {
-            command.args(harness.harness().title_args(&title.provider_name));
-        }
+        command.args(harness.harness().title_args(&title.provider_name));
         if let Err(error) = write!(
             std::io::stderr().lock(),
             "\x1b]0;{}\x07",
@@ -270,7 +268,7 @@ impl TerminalTitle {
 
     fn viewing(held: &loopflow_model::id::TerminalId) -> Option<Self> {
         let load = || -> anyhow::Result<Option<Self>> {
-            let store = SqliteStore::open_processes_read_only(
+            let store = SqliteStore::open_read_only(
                 &crate::store::database_path_from_env()?,
                 crate::store::token_key::encryption_key,
             )?;
@@ -291,7 +289,7 @@ impl TerminalTitle {
     }
 
     fn load(input: &str) -> anyhow::Result<Option<Self>> {
-        let store = SqliteStore::open_processes_read_only(
+        let store = SqliteStore::open_read_only(
             &crate::store::database_path_from_env()?,
             crate::store::token_key::encryption_key,
         )?;
@@ -324,7 +322,7 @@ impl TerminalTitle {
                 let previous = std::mem::replace(&mut self.names, names);
                 self.publish(Some(&previous));
             }
-            // A handed-off attachment must stop changing the old terminal's names.
+            // A replaced or released attachment must stop changing the old terminal's names.
             Ok(None) => self.host = None,
             Err(error) => {
                 tracing::warn!(%error, "cannot refresh terminal Session name");
@@ -418,7 +416,7 @@ impl TitleReader {
             while let Ok(request) = requested.recv() {
                 let mut read = || -> anyhow::Result<Option<String>> {
                     if store.is_none() {
-                        store = Some(SqliteStore::open_processes_read_only(
+                        store = Some(SqliteStore::open_read_only(
                             &path,
                             crate::store::token_key::encryption_key,
                         )?);
@@ -627,8 +625,7 @@ mod tests {
             )
             .unwrap();
         let attachment =
-            attachment::claim_session_attachment(&store, &session.id, None, &process, true)
-                .unwrap();
+            attachment::claim_session_attachment(&store, &session.id, None, &process).unwrap();
         let terminal = loopflow_model::id::TerminalId::new();
         store.create_terminal(&terminal, "build").unwrap();
         rusqlite::Connection::open(&path)
@@ -670,7 +667,6 @@ mod tests {
             &title.session,
             Some(&attachment),
             &process,
-            false,
         )
         .unwrap();
         assert_eq!(title.read_names().unwrap(), None);

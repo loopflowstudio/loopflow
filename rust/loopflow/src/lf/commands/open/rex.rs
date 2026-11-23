@@ -1,15 +1,13 @@
 //! Rex CLI adapter: resolve the caller, create native sessions and tabs, and focus them.
 use std::path::Path;
-use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use super::OpenHost;
 use loopflow_execution::transport::local_directory_report;
-use loopflow_storage::work::selection::SplitAxis;
 
-use loopflow_execution::terminal_host::{rex_endpoint, RexLocation};
+use loopflow_execution::terminal_host::{rex_command, rex_endpoint, RexLocation};
 
 #[derive(Debug, Clone)]
 pub(super) struct Rex {
@@ -45,7 +43,11 @@ impl Rex {
     }
 
     fn call(&self, method: &str, args: Value) -> Result<Value> {
-        let mut command = Command::new("rex");
+        let mut command = rex_command(
+            self.caller
+                .as_ref()
+                .and_then(|caller| caller.bin_dir.as_deref()),
+        );
         command.args(["--autostart=false", "--timeout", "2s", "-S", &self.server]);
         command.args(["api", "call", method, &serde_json::to_string(&args)?]);
         let output = super::run_host(command, "Rex").with_context(|| format!("Rex {method}"))?;
@@ -70,7 +72,7 @@ impl Rex {
             location.filter(|location| server.is_none_or(|server| server == location.server));
         let endpoint = match &location {
             Some(location) => location.server.clone(),
-            None => rex_endpoint(server)?,
+            None => rex_endpoint(server, None)?,
         };
         let rex = Self {
             server: endpoint,
@@ -108,10 +110,6 @@ impl Rex {
             .as_str()
             .context("Rex create reply omitted window identity; outcome is unknown")?
             .into())
-    }
-
-    pub(super) fn sessions(&self) -> Result<Vec<Value>> {
-        array(self.call("session.list", json!({}))?, "sessions")
     }
 
     fn windows(&self, container: &str) -> Result<Vec<Value>> {
@@ -166,8 +164,8 @@ impl Rex {
 pub(super) fn focus_view(placement: &str) -> Result<()> {
     let location: RexLocation = serde_json::from_str(placement)?;
     let rex = Rex {
-        server: location.server,
-        caller: None,
+        server: location.server.clone(),
+        caller: Some(location.clone()),
     };
     let windows = rex.windows(&location.session)?;
     let window = windows
@@ -187,13 +185,6 @@ pub(super) fn focus_view(placement: &str) -> Result<()> {
     let result = rex.focus(&location.session, id)?;
     anyhow::ensure!(!result.contains("unconfirmed"), "{result}");
     Ok(())
-}
-
-pub(super) fn split(axis: SplitAxis, ratio: f64, before: Value, after: Value) -> Value {
-    json!({"split":{
-        "direction": if axis == SplitAxis::Vertical { "horizontal" } else { "vertical" },
-        "ratio": ratio, "before": before, "after": after,
-    }})
 }
 
 fn array(mut value: Value, key: &str) -> Result<Vec<Value>> {

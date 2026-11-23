@@ -132,6 +132,20 @@ else:
     run(sys.argv[1], sys.argv[2:])
 "#;
 
+/// A Python Claude stand-in that can call
+/// `keep_claude_turn(request, answer, structured=None)` to keep each turn in
+/// Claude's transcript, where lf reads final answers.
+#[allow(dead_code)] // Shared native provider fixture compiled into multiple test crates.
+pub fn claude_stand_in(script: &str) -> String {
+    let (shebang, body) = script
+        .split_once('\n')
+        .expect("a stand-in script starts with its shebang line");
+    format!(
+        "{shebang}\n{}\n{body}",
+        include_str!("claude_transcript.py")
+    )
+}
+
 #[cfg(unix)]
 #[allow(dead_code)] // Shared native provider fixture compiled into multiple test crates.
 pub fn install_native_codex(bin: &Path) {
@@ -233,24 +247,52 @@ pub fn codex_app_server_script(output: &str, setup: &str) -> String {
     let output = serde_json::to_string(output)
         .expect("encode mock Codex output")
         .replace('\'', r#"'"'"'"#);
+    let rollout = codex_rollout_script();
+    // Codex names threads and turns with UUIDs; a resumed thread keeps its id.
     codex_socket_script(&r#"#!/bin/sh
 __SETUP__
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
 read -r initialized
 read -r thread_start
-echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thread-test"}}}'
+thread=$(printf '%s' "$thread_start" | python3 -c 'import json, sys, uuid; print(json.load(sys.stdin).get("params", {}).get("threadId") or uuid.uuid4())')
+turn=$(python3 -c 'import uuid; print(uuid.uuid4())')
+echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"'"$thread"'"}}}'
 read -r turn_start
-echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
-echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"inProgress"}}}'
-printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"turn-test","itemId":"message-test","delta":__OUTPUT__}}'
-printf '%s\n' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-test","turnId":"turn-test","item":{"type":"agentMessage","id":"message-test","text":__OUTPUT__,"phase":"final_answer"}}}'
-echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"completed"}}}'
+echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"'"$turn"'"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"inProgress"}}}'
+# A fixture that left `tool_turn.py` gets the hooks lf declared, run around a tool.
+if [ -f "$LF_HOME/tool_turn.py" ]; then
+    hooks=$(printf '%s' "$thread_start" | python3 -c 'import json, sys; print(json.dumps(json.load(sys.stdin)["params"]["config"]["hooks"]))')
+    python3 "$LF_HOME/tool_turn.py" "$thread" "$hooks" || exit 1
+fi
+# A fixture that left `hold-turn` holds the turn open until it is removed.
+if [ -f "$LF_HOME/hold-turn" ]; then
+    printf '%s' "$thread" > "$LF_HOME/holding"
+    while [ -f "$LF_HOME/hold-turn" ]; do sleep 0.05; done
+fi
+printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","itemId":"message-test","delta":__OUTPUT__}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","item":{"type":"agentMessage","id":"message-test","text":__OUTPUT__,"phase":"final_answer"}}}'
+python3 '__ROLLOUT__' "$thread" "$turn" '__OUTPUT__' || exit 1
+echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"completed"}}}'
 if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
 while read -r line; do :; done
 "#
     .replace("__SETUP__", setup)
+    .replace("__ROLLOUT__", &rollout)
     .replace("__OUTPUT__", &output))
+}
+
+/// The script that appends a completed turn to the rollout Codex keeps,
+/// where lf reads final answers, quoted for a single-quoted shell word:
+/// `python3 '<script>' THREAD TURN ANSWER_JSON`.
+#[allow(dead_code)] // Shared provider mock compiled into multiple test crates.
+pub fn codex_rollout_script() -> String {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/codex_rollout.py"
+    )
+    .replace('\'', r#"'"'"'"#)
 }
 
 #[allow(dead_code)] // Shared provider transport compiled into multiple test crates.
@@ -267,6 +309,66 @@ fi
 {script}
 "#,
         script = script.strip_prefix("#!/bin/sh\n").unwrap_or(script),
+    )
+}
+
+/// A Codex whose first turn the provider refuses, in the words Codex sends:
+/// the rollout holds the thread and nothing the agent said.
+#[allow(dead_code)] // Shared provider mock compiled into multiple test crates.
+pub fn refused_codex_script() -> String {
+    codex_socket_script(
+        r#"#!/bin/sh
+read -r initialize
+echo '{"jsonrpc":"2.0","id":1,"result":{}}'
+read -r initialized
+read -r thread_start
+thread=$(python3 -c 'import uuid; print(uuid.uuid4())')
+turn=$(python3 -c 'import uuid; print(uuid.uuid4())')
+echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"'"$thread"'"}}}'
+read -r turn_start
+echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"'"$turn"'"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"inProgress"}}}'
+day="$CODEX_HOME/sessions/$(date -u +%Y/%m/%d)"
+mkdir -p "$day"
+printf '%s\n' \
+  '{"type":"session_meta","payload":{"id":"'"$thread"'","cwd":"'"$PWD"'"}}' \
+  '{"type":"response_item","payload":{"type":"reasoning","id":"thought","summary":[{"type":"summary_text","text":"Checking the task."}]}}' \
+  > "$day/rollout-$(date -u +%Y-%m-%dT%H-%M-%S)-$thread.jsonl"
+echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","willRetry":false,"error":{"message":"You’ve hit your usage limit. Upgrade to Pro, or try again at 9:41 PM.","codexErrorInfo":null,"additionalDetails":null}}}'
+echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"failed","error":{"message":"You’ve hit your usage limit. Upgrade to Pro, or try again at 9:41 PM.","codexErrorInfo":null,"additionalDetails":null}}}}'
+if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
+while read -r line; do :; done
+"#,
+    )
+}
+
+/// A Claude that answers one turn with `answer` and keeps the prompt it was
+/// sent in `received`.
+#[allow(dead_code)] // Shared provider mock compiled into multiple test crates.
+pub fn answering_claude_script(answer: &str, received: &Path) -> String {
+    r#"#!/usr/bin/python3
+import json, sys
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+message = json.loads(sys.stdin.readline())
+open(__RECEIVED__, 'w').write(message['message']['content'][0]['text'])
+message['session_id'] = 'fixture-thread'
+print(json.dumps(message), flush=True)
+print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'fixture-thread'}), flush=True)
+answer = __ANSWER__
+print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': answer}]}}), flush=True)
+print(json.dumps({'type': 'result', 'uuid': 'fixture-result', 'session_id': 'fixture-thread', 'subtype': 'success', 'is_error': False, 'result': answer}), flush=True)
+for line in sys.stdin:
+    pass
+"#
+    .replace(
+        "__RECEIVED__",
+        &serde_json::to_string(&received.display().to_string()).expect("encode path"),
+    )
+    .replace(
+        "__ANSWER__",
+        &serde_json::to_string(answer).expect("encode answer"),
     )
 }
 
@@ -427,25 +529,40 @@ pub fn select_wave_graph(
     wave: &WaveId,
     name: &str,
 ) {
+    set_wave_setting(repo, store, wave, "graph", name);
+}
+
+/// Set `key` in a Wave's committed `config.yaml` in `repo`.
+#[allow(dead_code)] // Shared helper compiled into integration tests without Wave settings.
+pub fn set_wave_setting(
+    repo: &Path,
+    store: &loopflow::store::sqlite::SqliteStore,
+    wave: &WaveId,
+    key: &str,
+    value: &str,
+) {
     let wave = store.get_wave(wave).unwrap().unwrap();
     let path = repo.join(".lf/wave").join(wave.slug()).join("config.yaml");
     let mut config: serde_yaml_ng::Mapping = fs::read_to_string(&path)
         .ok()
         .and_then(|content| serde_yaml_ng::from_str(&content).ok())
         .unwrap_or_default();
-    config.insert("graph".into(), name.into());
+    config.insert(key.into(), value.into());
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(&path, serde_yaml_ng::to_string(&config).unwrap()).unwrap();
     for args in [
         vec!["add", "--", path.to_str().unwrap()],
-        vec!["commit", "--quiet", "-m", "Select the Wave's graph"],
+        vec!["commit", "--quiet", "-m", "Set the Wave's configuration"],
     ] {
         let status = std::process::Command::new("git")
             .current_dir(repo)
             .args(args)
             .status()
             .unwrap();
-        assert!(status.success(), "git could not commit the Wave's graph");
+        assert!(
+            status.success(),
+            "git could not commit the Wave's configuration"
+        );
     }
 }
 
@@ -507,7 +624,7 @@ fn register_task_fixture(
 
         summary: String::new(),
         status: loopflow::work::project::ProjectStatus::Started,
-        linear_id: Some(
+        tracker_id: Some(
             LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
         ),
         slug: "task-pr-tests".to_string(),
@@ -515,7 +632,7 @@ fn register_task_fixture(
         description: "Keep Task PR transitions durable.".to_string(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
         created_at: now,
@@ -530,13 +647,13 @@ fn register_task_fixture(
         id: TaskId::new(),
 
         revision: 0,
-        linear_id: Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id")),
+        tracker_id: Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id")),
         identifier: "INF-123".to_string(),
         title: "Prove Task PR transitions".to_string(),
         description: "Exercise the persisted lifecycle.".to_string(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
-        pm_writeback: LinearWritebackState::Current,
+        tracker_writeback: LinearWritebackState::Current,
         wave_id: Some(wave.id().clone()),
         project_id: Some(project.id.clone()),
         worktree: Some(worktree.to_path_buf()),
@@ -632,7 +749,7 @@ pub fn register_sibling_task(
     let now = OffsetDateTime::now_utc();
     let mut task = registered.task.clone();
     task.id = TaskId::new();
-    task.linear_id =
+    task.tracker_id =
         Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"));
     task.identifier = identifier.to_string();
     task.title = format!("Sibling {identifier}");
@@ -703,7 +820,7 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
     }
 }
 
-/// Record a Graph the way `lf graph` leaves one: a Graph process, its GraphProcess row
+/// Record a Graph the way `lf graph` leaves one: a Graph process, its GraphExecution row
 /// and one step Process in `cwd`, both exited. Returns the Graph process's id, which
 /// names the Graph.
 #[allow(dead_code)] // Shared helper compiled into integration tests that record no Graph.
@@ -759,7 +876,7 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
             cwd.to_string_lossy()
         ],
     )
-    .expect("record GraphProcess");
+    .expect("record GraphExecution");
     db.execute(
         "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations) VALUES(?1,?2,0,'[[]]')",
         rusqlite::params![graph_process.as_str(), step.as_str()],
@@ -768,15 +885,18 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
     graph_process.to_string()
 }
 
-/// Every Graph in launch order: its process's outcome and each recorded step as
-/// `{graph, label, key, iterations, argv}`, `argv` without the binary path.
+/// Every Graph in launch order: how it ended (`succeeded`, `interrupted`,
+/// `failed`, or `None` while it runs or when nobody saw it end) and each
+/// recorded step as `{graph, label, key, iterations}`.
 #[allow(dead_code)] // Shared helper compiled into integration tests that read no Graph.
 pub fn recorded_graphs(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value>)> {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
     let mut graph_processes = db
         .prepare(
-            "SELECT d.id,d.outcome,g.graph,g.compiled FROM graph_processes g JOIN processes d ON d.id=g.lf_process_id
-             ORDER BY d.rowid",
+            "SELECT lf_process_id,CASE WHEN ended_at IS NULL OR exit_code IS NULL THEN NULL
+                 WHEN exit_code=0 THEN 'succeeded'
+                 WHEN exit_code=130 AND error IS NULL THEN 'interrupted' ELSE 'failed' END,
+                 graph,compiled FROM graph_processes ORDER BY rowid",
         )
         .expect("select Graph processes");
     let rows = graph_processes
@@ -800,29 +920,23 @@ pub fn recorded_graphs(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Valu
             }
             let mut steps = db
                 .prepare(
-                    "SELECT e.command,s.node,s.iterations FROM graph_process_steps s
-                     JOIN processes e ON e.id=s.lf_process_id WHERE s.graph_lf_process_id=?1 ORDER BY s.seq",
+                    "SELECT node,iterations FROM graph_process_steps
+                     WHERE graph_lf_process_id=?1 ORDER BY seq",
                 )
                 .expect("select Graph steps");
             let steps = steps
                 .query_map([graph_process], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, u32>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
+                    Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?))
                 })
                 .expect("read Graph steps")
                 .map(|row| {
-                    let (argv, key, iterations) = row.expect("a Graph step");
-                    let argv: Vec<String> = serde_json::from_str(&argv).expect("a JSON argv");
+                    let (key, iterations) = row.expect("a Graph step");
                     serde_json::json!({
                         "graph": graph,
                         "label": label(&compiled.steps, key).expect("a compiled node"),
                         "key": key,
                         "iterations": serde_json::from_str::<serde_json::Value>(&iterations)
                             .expect("iteration counts"),
-                        "argv": argv[1..],
                     })
                 })
                 .collect();
@@ -837,7 +951,7 @@ pub mod planning_tasks;
 
 pub mod task_graph;
 
-/// Prepare a conversation with its first input; `resume` supplies the managed launch path.
+/// Prepare a Task-bound conversation with its first input for a Managed resume.
 #[allow(dead_code)] // Shared support is compiled by every application test binary.
 pub fn prepare_native_conversation(
     database: &std::path::Path,
@@ -860,7 +974,42 @@ pub fn prepare_native_conversation(
     session.skill = skill.map(str::to_owned);
     session.request = Some(request.into());
     session.interactive = true;
-    crate::store::sessions::create_session(&store, session, None)
+    let session = crate::store::sessions::create_session(&store, session, None).unwrap();
+    let cwd = cwd.canonicalize().unwrap();
+    let task = store
+        .task_checkouts()
+        .unwrap()
+        .into_iter()
+        .find(|checkout| checkout.worktree.canonicalize().unwrap() == cwd)
+        .map(|checkout| checkout.task_id)
+        .unwrap_or_else(|| {
+            store
+                .create_task(&loopflow_storage::work::task::NewTask {
+                    id: loopflow_model::durable::TaskId::new(),
+                    repository_id: crate::repository::location::ensure_repository(
+                        &store,
+                        &crate::repository::discover(&cwd).unwrap().to_string(),
+                    )
+                    .unwrap(),
+                    project_id: None,
+                    title: "Native conversation".into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap()
+                .id
+        });
+    store
+        .bind_session_prepared(
+            &session.id,
+            session.captured,
+            &task,
+            &session.cwd,
+            &loopflow_storage::sqlite::SessionCaller {
+                agent: None,
+                capture_key: None,
+            },
+        )
         .unwrap()
         .id
         .to_string()

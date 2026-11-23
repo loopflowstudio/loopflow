@@ -51,15 +51,16 @@ runs when the boundary was the process's first **or** named a new address
 so running it twice delivers once.
 
 **Work sessions leave waiting steers to the wake.** In `read_news`, a Start
-the server answered on an interactive Session claims nothing; it still
-writes Task updates and the startup baseline, and prints the context block.
-The next tool or prompt boundary claims anything the wake could not deliver
-(unreachable inbox, failed send), so the fallback is today's behavior.
-Chats (no server, `LF_BARE_STEER`) and workers (`interactive=0`, never
-woken) keep the start claim. Made for review: skip keyed on
-`answered && interactive` rather than a new answer field, because
-`SessionBoundaryAnswer` is `deny_unknown_fields` and hooks from the released
-build would reject a new field.
+the server answered, on a conversation the server can wake
+(`idle_conversation_candidates` names this AgentProcess), claims nothing; it
+still writes Task updates and the startup baseline, and prints the context
+block. The next tool or prompt boundary claims anything the wake could not
+deliver (unreachable inbox, failed send: `wake::tests::an_unreachable_inbox_leaves_its_news_for_the_next_boundary`),
+so the fallback is today's behavior. Chats (no server, `LF_BARE_STEER`),
+workers (`interactive=0`, never woken) and a Claude whose inbox key is not yet
+published keep the start claim. Decided in the hook from the store, not a new
+answer field: `SessionBoundaryAnswer` is `deny_unknown_fields` and released
+hooks would reject one.
 
 **Codex reports its own first boundary.** `open_native` already records the
 connection and binds the delivery before the TUI attaches. It then sends one
@@ -107,9 +108,8 @@ prompt once and hears the steer once.
   - a first boundary that is a prompt leaves it working; the wake sends
     nothing.
   - a Codex launch's start report wakes an idle reopened Session through its
-    endpoint (`wake::tests::codex_app_server` stand-in).
-- `context.rs` unit: an answered Start on an interactive Session claims no
-  steer; a chat's Start claims it.
+    endpoint (`codex_app_server` stand-in).
+- `lf::commands::context::tests::a_wakeable_start_leaves_waiting_steers_to_the_wake`.
 - `tests/e2e/idle_wake.py` by hand on OpenCode and Pi (reopen leg), plus the
   same reopen by hand on real Claude and Codex. Pi is not installed on this
   Machine: `npm install -g` it at Machine level for the run.
@@ -138,30 +138,26 @@ prompt once and hears the steer once.
 
 ## Slices
 
-1. **Built:** `record_first_boundary` (read first, so later boundaries take no
-   write lock; interactive Sessions only), its call at the top of `answer`,
-   `Reachable` on first-or-new-address, the Start-claim skip. The skip keys on
-   "the server can wake this conversation" (`idle_conversation_candidates`
-   names this process), not on `interactive` alone: a Claude whose inbox key
-   is not yet published still folds the steer into its start, as today,
-   instead of waiting for a typed turn. Tests: `boundary::tests`
-   (`a_reopened_conversation_is_idle_at_its_first_boundary_and_woken_once`,
-   `a_first_boundary_that_is_a_prompt_leaves_the_conversation_working`),
+1. **Built:** `record_first_boundary` (reads first, so later boundaries take
+   no write lock; interactive Sessions only), its call at the top of
+   `answer`, `Reachable` on first-or-new-address, the Start-claim skip, README
+   rewrites. Tests: `boundary::tests::a_reopened_conversation_is_idle_at_its_first_boundary_and_woken_once`,
+   `boundary::tests::a_first_boundary_that_is_a_prompt_leaves_the_conversation_working`,
    `context::tests::a_wakeable_start_leaves_waiting_steers_to_the_wake`.
-   **Not run:** the real Claude reopen probe (the inbox-at-SessionStart risk
-   above). It needs a held terminal and the account's Claude login; run it at
-   qa with the branch `lf` on a private Machine: quit, `lf steer`, `lf resume`,
-   watch for a turn and `lf session steers` reading `delivered`. If Claude
-   drops the early message, the steer shows `delivered` with no turn: then
-   build the bounded `sessions/<pid>.json` `status: idle` wait in the wake.
-2. **Built:** `open_native` reports Start (reopen) or the opening prompt
-   (before `start_turn`) through `hook_request`; `HOOK_DEADLINE` moved to
-   `machine::client`. Test:
+2. **Built:** `codex.rs::report_first_boundary` sends Start (reopen) or the
+   opening prompt (before `start_turn`) through `hook_request`;
+   `HOOK_DEADLINE` moved to `machine::client`. Test:
    `wake::tests::a_reopened_codex_work_session_starts_a_turn_on_its_waiting_steer`
-   (stand-in app-server, server side only). **Not run:** real Codex reopen.
-3. **Remaining:** OpenCode/Pi reopen through `idle_wake.py` (the script has no
-   reopen leg yet; add one: quit the TUI, steer, `lf resume`, wait for the
-   marker); the unreachable-inbox fallback test; README rewrite is done.
+   (stand-in app-server, server side only).
+3. **Next:** a reopen leg in `tests/e2e/idle_wake.py` (after the wake leg:
+   quit the TUI, `lf steer`, `lf resume --task`, wait for a marker turn with
+   nothing typed, then `lf session steers` reads `delivered` once). Run it on
+   OpenCode and Pi; Pi is not installed here, `npm install -g` it first.
+4. **qa, real providers:** the same reopen by hand on real Claude and Codex
+   with the branch `lf` (held terminal, the account's logins). Claude's run
+   answers the inbox-at-SessionStart risk above: `delivered` with no turn
+   means Claude dropped the early message; then build the bounded
+   `sessions/<pid>.json` `status: idle` wait in the wake.
 
 ## Checks
 

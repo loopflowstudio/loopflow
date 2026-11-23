@@ -1,10 +1,11 @@
 # Open questions
 
-1. Work-session Start skips its steer claim when the server answered and the
-   Session is interactive, decided in the hook from the store, not from a new
-   `SessionBoundaryAnswer` field (released hooks reject unknown fields).
-   Passed over: an answer field `wakes: bool`. Revisit with LOO-838's answer
-   cleanup.
+1. Work-session Start skips its steer claim when the server answered and can
+   wake this conversation (an idle candidate on this AgentProcess), decided
+   in the hook from the store. Passed over: an answer field `wakes: bool`
+   (released hooks reject unknown fields; revisit with LOO-838's answer
+   cleanup), and `interactive` alone, which leaves a steer for a Claude with
+   no published inbox until the first typed turn.
 
 2. Codex's first boundary is reported by lf's launch (`open_native`) with a
    SessionStart-shaped callback, because Codex fires SessionStart only inside
@@ -14,9 +15,3 @@
 
 3. Claude launched with an opening prompt and a waiting steer may run two
    turns (prompt, then the woken steer). Steers arrive once. Left as is.
-
-4. The Start-claim skip asks the store whether the server can wake this
-   conversation (an idle candidate on this AgentProcess) rather than whether
-   the Session is interactive. A work session whose wake has no address yet
-   reads its steers at start, as before. Passed over: `interactive` alone,
-   which leaves such a steer for the first typed turn.

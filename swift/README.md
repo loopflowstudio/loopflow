@@ -318,6 +318,11 @@ values alongside the edited declaration, and expand each row's provenance badge
 into an ordered precedence ladder with YAML previews for **Reset Layer** and
 **Move** plus **Undo** ([Settings](../docs/surfaces.md#settings)).
 
+In **Settings → Context**, choose a checkout and switch **Save in** between
+**My settings** and **Shared settings**. Expand **In effect** to see which file
+sets Diff for the next launch. **Reset layer…** shows the change to the selected
+file. Undo restores the declaration even after switching destinations.
+
 Choose **Settings → Appearance** (**⌘,**) to pick a theme for every window,
 Ghostty, and iPhone. Pick **System**, **Light**, or **Dark**; System follows
 macOS and lists both sides, Light or Dark lists only its own. Each side's

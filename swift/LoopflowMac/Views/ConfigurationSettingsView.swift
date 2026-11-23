@@ -154,8 +154,8 @@ enum ConfigurationDestination: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .personalGlobal: "My global preferences"
-        case .personalRepository: "My project preferences"
-        case .sharedRepository: "Shared project preferences"
+        case .personalRepository: "My repository settings"
+        case .sharedRepository: "Shared repository settings"
         case .personalWave: "My Wave preferences"
         case .sharedWave: "Shared Wave preferences"
         }
@@ -195,12 +195,12 @@ struct ConfigurationInspection: Decodable {
     let settings: [String: ConfigurationValue]
 }
 
-struct ConfigurationValue: Decodable {
+struct ConfigurationValue: Codable {
     let value: JSONValue
     let candidates: [ConfigurationCandidate]
 }
 
-struct ConfigurationCandidate: Decodable {
+struct ConfigurationCandidate: Codable {
     let key: String
     let source: String
     let reason: String

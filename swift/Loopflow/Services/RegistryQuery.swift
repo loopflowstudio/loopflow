@@ -51,6 +51,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case waveList
     case machineSelf
     case desktopPortfolio
+    case configScope(directory: String)
     case configSettings(directory: String, wave: String?, skill: String?, graph: String?, step: String?)
     case graphList(directory: String)
     case desktopViewGet(directory: String, expression: String?)
@@ -130,6 +131,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["desktop", "view", "list", "--all", "--json"] + (expression.map { ["--expression", $0] } ?? [])
         case .desktopPortfolio:
             return ["desktop", "portfolio", "--json"]
+        case .configScope: return ["config", "scope", "--json"]
         case .configSettings(_, let wave, let skill, let graph, let step):
             return ["config", "settings", "--json"] + (wave.map { ["--wave", $0] } ?? [])
                 + (skill.map { ["--skill", $0] } ?? []) + (graph.map { ["--graph", $0] } ?? [])
@@ -230,6 +232,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .viewSelect(let expression):
             TaggedFields("view.select", ["expression": expression])
         case .desktopPortfolio: TaggedFields("desktop.portfolio")
+        case .configScope(let directory): TaggedFields("config.scope", ["directory": directory])
         case .configSettings(let directory, let wave, let skill, let graph, let step):
             TaggedFields("config.settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
         case .graphList(let directory): TaggedFields("graph.list", ["directory": directory])

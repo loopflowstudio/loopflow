@@ -13,7 +13,7 @@ struct SettingsWorkflowTests {
         var navigation = SettingsNavigation()
         let appearance = AppearanceStore(paths: .temporary(), systemDark: false)
         let window = SettingsWindow(navigation: Binding(get: { navigation }, set: { navigation = $0 }),
-                                    appearance: appearance)
+                                    appearance: appearance, checkout: nil)
         let split = try window.inspect().find(ViewType.NavigationSplitView.self)
         let sidebar = try split.sidebarView()
         for pane in SettingsPane.allCases {

@@ -38,38 +38,47 @@ A toggle or picker commits immediately. Text commits on Return or focus loss and
 - Machines separates connection health from placement and other preferences. Reuse the identity-checked status probe and ended-rental handling from `lf machine status` in the served path. Use up to four in flight, the existing 20-second probe deadline, and refresh while the pane is visible. Distinguish checking, reachable, error and ended rental. [CLI status](../rust/loopflow/src/lf/commands/machine.rs), [connection probe](../rust/loopflow-execution/src/machine/connection.rs).
 - Delete the five-tab shell and `ConfigurationSettingsView` with its path text fields, raw explanation formatter and key-by-key loading. Move DTOs still used by `TaskChangesView` to their shared owner. Retain CLI, launch and iPhone behavior through their current owners. New wire request/results use required fields and Rust/Swift fixtures. Update the Desktop and server operation docs as the interfaces change.
 
-## Legacy Context shape
-
-The first CLI probe found a counterexample in a released configuration shape. With
-`diff: true` and `context: [README.md]`, `config get context.diff` returned null
-while `config explain context.diff` returned true. Setting it to false replaced
-the documents list. Unsetting it left `diff: true` active. Before building the
-Context toggle, give the file owner a lossless edit for both spellings. Its
-preview and inverse must cover the original document list and any flat key it
-moves. Exercise that fixture alongside the ordinary and linked checkout cases.
-
 ## Built
 
-The split window now opens on General, with pane-name search, the autosave
-switch and Undo, a grouped Shortcuts reference shared with the separate window,
-and a direct route from Choose Theme to Appearance. Configuration remains under
-Workflow until the scoped panes replace it.
+The split window opens on General, with pane-name search, the autosave switch and
+Undo, a grouped Shortcuts reference shared with the separate window, and a direct
+route from Choose Theme to Appearance. Configuration remains under Workflow until
+the other scoped panes replace it.
+
+Context follows one checkout. My and Shared show their own Diff declarations,
+the scope reading names the effective source, and the disclosure shows the
+ordered candidates. Reset previews the selected file patch. Set, Reset and Undo
+check both spellings under the file lock. The writer edits a released flat
+`diff` beside `context: [README.md]` in place, so the list and its comment
+survive. A linked checkout reads its own Shared file and the clone’s My file.
+
+The launch fixture found that the provider receives a `-changes.md` reference
+in its start-context manifest when Diff is On. With My Off the reference
+disappeared and the same explicit README still reached the provider. The
+fixture checks this delivery during an ordinary batch skill run.
 
 ## Remaining slices
 
-1. **One row from Settings to launch.** Add the Context row for `context.diff` to the split Settings scene after the legacy file edit is lossless. Fix Applies to at a single fixture checkout and switch Save in between My and Shared. Begin with Shared On and My absent. Save My Off and see the next ordinary launch omit the diff. Switch Save in to Shared, save Off then On, and see the launch remain Off with the private source named. Reset My to expose Shared On, then Undo to restore My Off. Stage a reset from a stale reading, edit the private file externally, and verify that the new value survives and the row can refresh and retry. Check the actual CLI reads, YAML patch and launch from the same fixture. Repeat from a linked checkout with a different shared value to verify checkout-specific shared files and a common private file.
-2. **All scoped rows and actions.** Fill native controls and YAML disclosures, connect checkout/Wave and Advanced selectors, add the Promote preview/recovery/Undo path, and remove the old Configuration view. Exercise explicit empty versus absent docs, pin versus fallback, tagged tracker, coupled Machine keys, Wave rename and reuse, and Task Diff from the existing Rust owners.
-3. **App panes and health.** Add the global catalog rows to General, apply theme selection instantly with Undo, retain the staged ThemeEditor, and wire the shared Mobile observation and Machine statuses. Remove the old chooser transaction.
-4. **Search across panes.** Wire keyboard selection, row highlighting and in-place edits to the same address and edit state. Verify no-results, a stale reading, error recovery, accessibility, window resizing and light/dark.
+1. **All scoped rows and actions.** Fill native controls and YAML disclosures, connect checkout/Wave and Advanced selectors, add the Promote preview/recovery/Undo path, and remove the old Configuration view. Exercise explicit empty versus absent docs, pin versus fallback, tagged tracker, coupled Machine keys, Wave rename and reuse, and Task Diff from the existing Rust owners.
+2. **App panes and health.** Add the global catalog rows to General, apply theme selection instantly with Undo, retain the staged ThemeEditor, and wire the shared Mobile observation and Machine statuses. Remove the old chooser transaction.
+3. **Search across panes.** Wire keyboard selection, row highlighting and in-place edits to the same address and edit state. Verify no-results, a stale reading, error recovery, accessibility, window resizing and light/dark.
 
 ## Sidebar checks
 
 - `swift build --package-path swift --build-tests` and `scripts/test_desktop.sh --skip-build --filter 'SettingsWorkflowTests|DesignDisciplineTests'` passed locally. Seven tests covered both suites. Gate runs the Desktop checks again.
 - Native window renders at 960 × 620 showed the full Configuration label and search field in General (light) and Shortcuts (dark) after widening the sidebar. The final demo covers the remaining panes and window sizes.
 
+## Context checks
+
+- A private Machine served 31 warm `config.scope` requests over one Unix socket with Shared On, My Off and a legacy document list. Median 23.7 ms, p95 131.7 ms against the 150 ms target. Gate repeats the measurement when the rest of the catalog is present.
+- `cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(config::files::context_diff::tests::) | test(checkout_scope_and_checked_edit_share_the_desktop_wire_shape) | test(the_checked_in_schema_is_what_describe_prints)'` passed four tests. Gate includes the server and DTO checks.
+- `cargo test -p loopflow --test served_reads configuration_edits_use_the_server_without_work_processes` passed. The checkout reading arrived with an unreadable Work registry.
+- `scripts/test_desktop.sh --skip-build --filter ContextSettingsWorkflowTests` passed in 37.6 seconds with the built CLI, a private server and the Pi fixture. The toggle, Save in, Reset, Undo, stale preview and linked checkout all reached the expected CLI or launch result. The configuration DTO, sidebar and design suites also passed.
+- `cargo clippy --all-targets -- -D warnings` passed. Gate runs the documented command checks and the shared Swift protocol checks.
+
 ## Gate and demo
 
-Run `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|ThemeWorkflowTests|MobilePairingTests|DesignDisciplineTests'`. Build `SettingsWorkflowTests` around the branch’s `lf`, a local server and temporary checkouts using the ThemeWorkflow fixture pattern. The focused Rust checks cover preview/write parity, interrupted promotion and DTOs. Swift coverage checks the real controls, selected destination versus effective value, context changes during reads, Undo across navigation, theme selection and a staged editor, and shared Mobile detail/sidebar status. Run the iOS protocol and pairing gate when shared wire code changes.
+Run `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ContextSettingsWorkflowTests|ConfigurationSettingsTests|ThemeWorkflowTests|MobilePairingTests|DesignDisciplineTests'`. Build `SettingsWorkflowTests` around the branch’s `lf`, a local server and temporary checkouts using the ThemeWorkflow fixture pattern. The focused Rust checks cover preview/write parity, interrupted promotion and DTOs. Swift coverage checks the real controls, selected destination versus effective value, context changes during reads, Undo across navigation, theme selection and a staged editor, and shared Mobile detail/sidebar status. Run the iOS protocol and pairing gate when shared wire code changes.
 
 For the visual demo, `uv run python scripts/loopflow-dev.py run` against the branch server on a private Machine. Open Settings with ⌘,, search Diff, and switch Save in between My and Shared while Applies to stays on the demo checkout. Change, inspect, Reset and Undo. Preview a Promote to an empty slot and apply it. Pick and undo a theme, then compare the Mobile panel with its sidebar dot. Check Light and Dark with the window resized. The required gate uses headless fixtures and view inspection.
 

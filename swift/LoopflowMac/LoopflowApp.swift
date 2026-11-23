@@ -201,7 +201,8 @@ struct LoopflowApp: App {
         .defaultSize(width: 480, height: 240)
 
         Settings {
-            SettingsWindow(navigation: $settings, appearance: appearance)
+            SettingsWindow(navigation: $settings, appearance: appearance,
+                           checkout: launchRepoURL?.path ?? loadLoopflowState()?.selectedRepoPath)
         }
         .defaultSize(width: 960, height: 620)
         Window("Keyboard Shortcuts", id: "keyboard-shortcuts") { KeyboardShortcutsView() }

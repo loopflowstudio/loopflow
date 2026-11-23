@@ -444,6 +444,10 @@ Swift async process fixtures install `terminationHandler` before `run()` and
 await its completion. Don't call blocking `waitUntilExit()` on a cooperative
 executor; it can stay in Foundation's run loop after the child has exited.
 
+Swift fixtures modeling an installed Machine can run `lf desktop portfolio --json`
+in the fixture home before starting `LocalServerFixture`. This finishes first-open
+SQLite migrations before server readiness or view timing is measured.
+
 Headless Swift view tests inspect production leaf views directly when a parent
 needs `@Environment` Observation objects, which ViewInspector can't inject.
 Keep those views internal for `@testable` access. Mounted terminal frame checks

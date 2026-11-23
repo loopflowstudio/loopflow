@@ -194,24 +194,6 @@ public struct WorkFrame: Sendable {
         WorkFrame(sequence: sequence, answers: answers, unavailable: unavailable, content: content, wire: wire, readAt: readAt)
     }
 
-    /// Every field is required; an absent one is a parse error, not a nil.
-    private struct Envelope<Body: Decodable>: Decodable {
-        let answers: Int?
-        let unavailable: String?
-        let body: Body?
-        let readAt: Revisions?
-
-        enum CodingKeys: String, CodingKey { case answers, unavailable, body, readAt = "read_at" }
-
-        init(from decoder: any Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            answers = try container.decode(Int?.self, forKey: .answers)
-            unavailable = try container.decode(String?.self, forKey: .unavailable)
-            body = try container.decode(Body?.self, forKey: .body)
-            readAt = try container.decode(Revisions?.self, forKey: .readAt)
-        }
-    }
-
     public struct TaskStatusReading: Decodable {
         public let overview: TaskOverview?
         public let graphProcesses: [GraphProcessDetail]
@@ -227,10 +209,10 @@ public struct WorkFrame: Sendable {
 
     /// Decode one line of `part`'s subscription, read for `scope`.
     public static func decode(part: WorkPart, scope: WorkScope, sequence: Int, line: Data) throws -> WorkFrame {
-        func envelope<Body: Decodable>(_: Body.Type) throws -> Envelope<Body> {
-            try JSONDecoder().decode(Envelope<Body>.self, from: line)
+        func envelope<Body: Decodable>(_: Body.Type) throws -> SubscriptionFrame<Body> {
+            try JSONDecoder().decode(SubscriptionFrame<Body>.self, from: line)
         }
-        func frame<Body>(_ envelope: Envelope<Body>, _ content: Content, unavailable: String? = nil,
+        func frame<Body>(_ envelope: SubscriptionFrame<Body>, _ content: Content, unavailable: String? = nil,
                          wire: Wire? = nil) -> WorkFrame {
             WorkFrame(sequence: sequence, answers: envelope.answers, unavailable: envelope.unavailable ?? unavailable,
                       content: content, wire: wire, readAt: envelope.readAt)
@@ -297,7 +279,7 @@ extension WorkFrame {
     /// throws when the line is not a reading at all.
     static func unread(part: WorkPart, sequence: Int, line: Data, reason: String) throws -> WorkFrame {
         struct Unread: Decodable { init(from decoder: any Decoder) {} }
-        let read = try JSONDecoder().decode(Envelope<Unread>.self, from: line)
+        let read = try JSONDecoder().decode(SubscriptionFrame<Unread>.self, from: line)
         let content: Content = switch part {
         case .planning: .planning(nil)
         case .selections: .selections(nil)
@@ -332,6 +314,24 @@ extension DecodingError {
 private func zip<A, B>(_ a: A?, _ b: B?) -> (A, B)? {
     guard let a, let b else { return nil }
     return (a, b)
+}
+
+/// Every field is required; an absent one is a parse error, not a nil.
+public struct SubscriptionFrame<Body: Decodable>: Decodable {
+    public let answers: Int?
+    public let unavailable: String?
+    public let body: Body?
+    public let readAt: Revisions?
+
+    enum CodingKeys: String, CodingKey { case answers, unavailable, body, readAt = "read_at" }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        answers = try container.decode(Int?.self, forKey: .answers)
+        unavailable = try container.decode(String?.self, forKey: .unavailable)
+        body = try container.decode(Body?.self, forKey: .body)
+        readAt = try container.decode(Revisions?.self, forKey: .readAt)
+    }
 }
 
 /// One served subscription speaking `lf <read> --json --subscribe`'s newline-delimited JSON.

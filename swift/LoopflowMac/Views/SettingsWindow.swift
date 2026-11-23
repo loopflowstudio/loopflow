@@ -6,9 +6,12 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     case appearance = "Appearance"
     case shortcuts = "Shortcuts"
     case mobile = "Mobile"
+    case context = "Context"
     case configuration = "Configuration"
 
     var id: Self { self }
+
+    var isWorkflow: Bool { self == .configuration || self == .context }
 
     var badge: (symbol: String, color: Color) {
         switch self {
@@ -16,6 +19,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .appearance: ("paintpalette.fill", .purple)
         case .shortcuts: ("keyboard", .indigo)
         case .mobile: ("iphone", .green)
+        case .context: ("doc.text.fill", .orange)
         case .configuration: ("slider.horizontal.3", .blue)
         }
     }
@@ -39,6 +43,8 @@ struct SettingsNavigation {
 struct SettingsWindow: View {
     @Binding var navigation: SettingsNavigation
     let appearance: AppearanceStore
+    let checkout: String?
+    @State private var context = ContextSettingsModel()
     @State private var notices = NoticeCenter()
     @Environment(\.undoManager) private var undoManager
 
@@ -49,8 +55,8 @@ struct SettingsWindow: View {
                 set: { if let pane = $0 { navigation.open(pane) } }
             )) {
                 let panes = navigation.matches
-                sidebarSection("App", panes: panes.filter { $0 != .configuration })
-                sidebarSection("Workflow", panes: panes.filter { $0 == .configuration })
+                sidebarSection("App", panes: panes.filter { !$0.isWorkflow })
+                sidebarSection("Workflow", panes: panes.filter(\.isWorkflow))
             }
             .listStyle(.sidebar)
             .overlay {
@@ -66,11 +72,18 @@ struct SettingsWindow: View {
                 case .appearance: ThemeChooser(appearance: appearance)
                 case .shortcuts: KeyboardShortcutsView()
                 case .mobile: MobileSettings()
+                case .context: ContextSettings(model: context, notices: notices)
                 case .configuration: ConfigurationSettingsView()
                 }
             }
             .navigationTitle(navigation.pane.rawValue)
             .overlay(alignment: .bottom) { NoticeView(center: notices) }
+        }
+        .task(id: context.observation) {
+            if let checkout = context.checkout { await context.observe(checkout) }
+        }
+        .onChange(of: navigation.pane, initial: true) { _, pane in
+            if pane == .context, context.checkout == nil { context.checkout = checkout }
         }
         .frame(minWidth: 760, minHeight: 560)
         .environment(\.palette, appearance.effectiveTheme.palette)

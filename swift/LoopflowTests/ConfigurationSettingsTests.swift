@@ -6,6 +6,23 @@ import Testing
 
 @Suite("Configuration destinations")
 struct ConfigurationSettingsTests {
+    @Test func checkoutScopeAndCheckedEditShareTheRustWireShape() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let fixture = try JSONDecoder().decode([String: JSONValue].self, from:
+            Data(contentsOf: root.appending(path: "tests/fixtures/dto/configuration_scope.json")))
+        func json(_ value: some Encodable) throws -> JSONValue {
+            try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value))
+        }
+        let scope = try JSONDecoder().decode(ConfigurationScope.self, from: JSONEncoder().encode(fixture["scope"]))
+        #expect(try json(scope) == fixture["scope"])
+        let mine = try #require(scope.files.first { $0.owner == .personalRepository })
+        #expect(try json(ServedRead.configScope(directory: "/project")) == fixture["read"])
+        #expect(try json(ConfigOperation.editDiff(destination: mine.destination, expected: mine.diff, change: .reset)) == fixture["write"])
+        let receipt = try JSONDecoder().decode(DiffEditReceipt.self, from: JSONEncoder().encode(fixture["receipt"]))
+        #expect(try json(receipt) == fixture["receipt"])
+    }
+
     @Test func catalogueIncludesFeatureCategory() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

@@ -231,9 +231,10 @@ fn assert_codex_service_tier(mode: &str, setting: Option<&str>, expected: Option
     if resume_tier.is_some() {
         args.extend(["--setting", "codex.service_tier=default"]);
     }
-    args.extend(["resume", &session]);
     if mode == "-b" {
-        args.extend(["--message", "Resume tier probe"]);
+        args.extend(["steer", &session, "Resume tier probe"]);
+    } else {
+        args.extend(["resume", &session]);
     }
     run(&args);
     assert_eq!(
@@ -2047,9 +2048,8 @@ fn explicit_documents_native_reconnect_supplies_only_the_new_selection() {
         "codex",
         "--docs",
         first_path.to_str().unwrap(),
-        "resume",
+        "steer",
         session,
-        "--message",
         "FIRST-REQUEST-662",
     ])
     .output()
@@ -2064,9 +2064,8 @@ fn explicit_documents_native_reconnect_supplies_only_the_new_selection() {
         "-b",
         "--docs",
         next_path.to_str().unwrap(),
-        "resume",
+        "steer",
         session,
-        "--message",
         "Read the new document.",
     ])
     .output()

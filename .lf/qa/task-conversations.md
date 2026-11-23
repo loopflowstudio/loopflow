@@ -45,6 +45,18 @@ a PTY tails unlinked temp files. PTY drivers must drain output continuously:
 an undrained PTY blocks the caller on write and looks like a hang. Don't name
 a Python driver `pty.py`: it shadows the module it imports.
 
+Workers and batches on real Claude, without lf-world: a plain repository with
+a local identity, `default_agent: claude`, a one-line skill and a Graph file
+`- <skill>`. Give it a bare `origin` with `main` pushed (`git init --bare`), or
+the step finishes and the Graph's push fails, leaving the Task done. A skill
+that runs `sleep 90` keeps a worker running long enough to steer. The worker's
+ID is in `lf task status <task> --json` under `sessions` (`interactive:
+false`). A finished batch (`lf -b : '…'`) is in no listing; read its ID from
+`agent_sessions` with Python's `sqlite3` on `file:…/loopflow.db?mode=ro`
+(the `sqlite3` CLI fails to open the live store read-only). The Task's primary
+conversation waits on Claude's `--add-dir` trust dialog for a fresh `/tmp`
+repository; attach with `lf resume --task <task>` and choose "Yes, add it".
+
 An earlier build's Session owner: in a fresh home, before the branch opens it,
 run the installed `lf -i -a claude : '<msg>'` (with `LF_BIN` unset) under a PTY
 driver that double-forks and `setsid`s, answering `ESC[6n` and `ESC[5n`; 0.16

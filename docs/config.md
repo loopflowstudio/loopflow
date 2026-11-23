@@ -360,6 +360,7 @@ What enters a launch:
   and the active Wave's `GOAL.md`/`MEMORY.md` (plus ancestor Waves) in a
   refreshed block that survives compaction.
 - `--docs` / `context.docs` enter as complete UTF-8 bodies. `-c` appends the clipboard.
+  Documents selected with `lf -b --docs PATH steer SESSION TEXT` enter that turn.
 - `--diff files` lists changed paths in a reference file. `--diff patch`
   puts every changed path, its line counts (or a binary marker), and a Git
   command to read its patch in the first turn. For a rename, the command

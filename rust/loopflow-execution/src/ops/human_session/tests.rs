@@ -130,10 +130,10 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
             let forked = super::open(&store, home, &session.id, None, None, true, true, Default::default()).await;
             let running = provider.try_wait()?.is_none();
             provider.kill().await?;
-            assert!(running, "resume stopped the Run's provider");
+            assert!(running, "resume stopped the batch's provider");
             for refused in [opened, forked] {
                 let message = refused.unwrap_err().to_string();
-                assert!(message.contains("is a Run (implement · running)"), "{message}");
+                assert!(message.contains("is a batch (implement · running)"), "{message}");
                 assert!(message.contains("`lf resume` opens this checkout's Session"), "{message}");
             }
             assert_eq!(store.sqlite.session_attachment(&session.id)?, Some(first));

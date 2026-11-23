@@ -1427,8 +1427,31 @@ async fn open_prepared(
     }
 }
 
-/// Why `lf resume` refuses a Run (a headless conversation, alone or a Graph
-/// step), running or finished: it takes only Sessions. None for a Session.
+/// Whether the Session's agent is running, so it reads a steer at its next
+/// boundary.
+pub fn agent_running(store: &SqliteStore, session: &LfSession) -> Result<bool> {
+    let summary = session_projection::session_summary(
+        store,
+        &session.id,
+        loopflow_storage::rows::now_unix(),
+    )?
+    .ok_or_else(|| session_not_found(&session.id))?;
+    Ok(summary.completed_at.is_none()
+        && summary.agent_process_evidence == crate::store::ProcessIdentityEvidence::Live)
+}
+
+/// What a headless Session is called: a worker runs a Graph step, a batch
+/// runs alone (`lf -b`).
+fn headless_kind(session: &LfSession) -> &'static str {
+    if session.graph_lf_process_id.is_some() {
+        "worker"
+    } else {
+        "batch"
+    }
+}
+
+/// Why `lf resume` refuses a worker or a batch, running or finished: it opens
+/// only work sessions and chats. None for an interactive Session.
 pub fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Option<String>> {
     if session.interactive {
         return Ok(None);
@@ -1451,8 +1474,9 @@ pub fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Option<St
         None => "`lf resume` opens this checkout's Session".to_string(),
     };
     Ok(Some(format!(
-        "{} is a Run ({}); `lf resume` takes only Sessions. {pointer}.",
+        "{} is a {} ({}); `lf resume` opens only work sessions and chats. {pointer}.",
         session.id,
+        headless_kind(session),
         what.join(" · ")
     )))
 }

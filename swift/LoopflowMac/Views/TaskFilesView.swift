@@ -47,8 +47,8 @@ struct TaskFilesView: View {
                 ReviewCommentsStrip(store: store, isFocused: isFocused, addToConversation: addToConversation)
                 filesPage
             }
+            notice
         }
-        .overlay(alignment: .bottom) { notice }
         .background(palette.background)
         .onGeometryChange(for: CGFloat.self, of: \.size.width) { paneWidth = $0 }
         .overlay {
@@ -74,10 +74,12 @@ struct TaskFilesView: View {
     }
 
     @ViewBuilder private var notice: some View {
-        if let request = store.browser.presented {
+        switch store.browser.notice {
+        case .presented(let request) where page != .brief:
             notice("Presented " + request.path) { store.openPresentation(request) }
-        } else if let path = store.browser.updated.last {
+        case .updated(let path) where page == .files:
             notice("Updated " + path) { read(path) }
+        default: EmptyView()
         }
     }
 
@@ -85,7 +87,13 @@ struct TaskFilesView: View {
         HStack {
             Text(text).lineLimit(1).truncationMode(.middle)
             Spacer()
-            Button("Open", action: open).buttonStyle(LoopflowButtonStyle())
+            Button("Open") {
+                store.browser.notice = nil
+                open()
+            }.buttonStyle(LoopflowButtonStyle())
+            Button { store.browser.notice = nil } label: { Image(systemName: "xmark") }
+                .buttonStyle(.plain).accessibilityLabel("Dismiss file notice")
+                .accessibilityIdentifier("files-dismiss-notice")
         }
         .font(Typography.meta).padding(.horizontal, Spacing.sm).padding(.vertical, Spacing.xxs)
         .background(palette.surfaceMuted)
@@ -404,6 +412,9 @@ struct TaskFilesView: View {
             HStack {
                 Text(path).font(Typography.mono).lineLimit(1).truncationMode(.middle)
                 if store.documents[path]?.dirty == true { UnsavedDraftMark() }
+                if store.browser.presentations.contains(where: { $0.path == path }) {
+                    Image(systemName: "doc.badge.clock").accessibilityLabel("Presented")
+                }
                 if store.browser.updated.contains(path) {
                     Image(systemName: "circle.fill").font(Typography.meta).foregroundStyle(palette.actionInk)
                         .accessibilityLabel("Updated")
@@ -433,6 +444,10 @@ struct TaskFilesView: View {
                 TaskFileReadingView(document: document, baseURL: store.query.remoteMachine == nil
                     ? URL(fileURLWithPath: store.cwd).appendingPathComponent(document.path) : nil,
                     store: store, visit: store.visit, addToConversation: addToConversation, ready: { reportVisible(document.path) })
+                    .onAppear { store.browser.visibleReadPath = document.path }
+                    .onDisappear {
+                        if store.browser.visibleReadPath == document.path { store.browser.visibleReadPath = nil }
+                    }
                     .id(document.path)
             } else if snapshot.state == .text {
                 TaskDocumentView(document: document, isFocused: isFocused && store.find == nil, ready: { reportVisible(document.path) })

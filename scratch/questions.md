@@ -29,3 +29,5 @@
 - **Notice banner placement & dismissal (Post-build Concept Review Q3):** Chosen **3a** — separate persistent Open & Scratch rail badges from an ephemeral dismissible (`×`) layout banner shown in Files (and in Diff for deferred presentations), never raised for the file already visible in Files Read. Alternative **3b**: keep the bottom overlay bar without dismissal.
 
 - A scratch write uses the owning Machine’s current directory listing to check which names survived an atomic save. The checkout-wide picker inventory can lag this event by three seconds.
+
+- An explicit presentation keeps its banner through passive writes. Later writes still mark their files in Open & Scratch. Grep returns the byte offset of its cropped excerpt so Desktop can distinguish repeated occurrences after a Unicode prefix.

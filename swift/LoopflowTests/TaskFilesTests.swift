@@ -550,6 +550,49 @@ struct TaskFilesTests {
         #expect(store.scratchPaths == ["scratch/page.html"] && store.documents.isEmpty)
     }
 
+    @Test func fileNoticesCanBeDismissedAndReplacedWhileRailOffersRemain() throws {
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/checkout", query: RegistryQuery { _, _ in "{}" })
+        store.selectFile("main.swift", mode: .edit)
+        let page = "scratch/report.html"
+        store.browser.noteWrites([page], present: [page])
+        let view = TaskFilesView(store: store, checkoutBase: nil)
+        _ = try view.inspect().find(text: "Updated " + page)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "files-dismiss-notice").button().tap()
+        #expect(store.browser.notice == nil && store.browser.updated == [page])
+
+        let offer = FilesBrowserState.Presentation(path: page, lines: 4...5)
+        store.browser.offer(.init(path: "scratch/first.md"))
+        store.browser.offer(offer)
+        store.page = .changes
+        _ = try view.inspect().find(text: "Presented " + page)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "files-dismiss-notice").button().tap()
+        #expect(store.browser.notice == nil && store.browser.presentations.last == offer)
+        store.browser.offer(offer)
+        store.selectFile("other.swift")
+        #expect(store.browser.notice == nil && store.openAndScratch.contains(page))
+    }
+
+    @Test func rewritingVisibleHTMLReconcilesWithoutAnOpenNotice() async throws {
+        let path = "scratch/page.html"
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/peer", query: RegistryQuery { args, _ in
+            if args.contains("files") {
+                return #"{"path":"scratch","entries":[{"path":"scratch/page.html","kind":"file"}],"next_cursor":null}"#
+            }
+            return #"{"path":"scratch/page.html","recoveries":[],"issue_identifier":"TEST-1","task_id":"task","state":"text","content":"new","revision":"new","read_only_reason":null,"size_bytes":3}"#
+        }.onMachine("peer", repository: "plan"))
+        store.selectFile(path)
+        let document = store.document(path)
+        await document.reconcile(snapshot("old", path: path))
+        let reader = try TaskFilesView(store: store, checkoutBase: nil).inspect().find(TaskFileReadingView.self)
+        try reader.callOnAppear()
+        store.invalidate([], ignoredScratch: [path])
+        try await eventually { document.text == "new" }
+        #expect(store.browser.notice == nil && store.browser.updated.isEmpty)
+        try reader.callOnDisappear()
+        store.invalidate([], ignoredScratch: [path])
+        try await eventually { store.browser.notice == .updated(path) }
+    }
+
     @Test func initialScratchChoiceSurvivesAMissingComparisonAndIsNeverRepeated() async throws {
         let query = RegistryQuery { args, _ in
             guard args.contains("find") else { throw RegistryQueryError("Missing base") }

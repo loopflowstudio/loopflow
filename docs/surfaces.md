@@ -41,8 +41,10 @@ lf desktop files src/parser.rs:24-31 --mode diff
 
 A path opens in **Read** by default. Desktop keeps the prior reading position
 in Files’ jump history and preserves drafts, Undo and terminal focus. During
-active editing or Diff review, the path appears in **Open & Scratch** with a
-`Presented <path> · Open` bar. An unattached Desktop returns exit status 4.
+active editing or Diff review in a visible pane, the path appears in **Open & Scratch** with a
+dismissible `Presented <path> · Open` bar. Dismissing it keeps the file in the
+rail. Presenting from a zoomed conversation reveals the file beside it and
+keeps keyboard focus in the terminal. An unattached Desktop returns exit status 4.
 
 `lf session rename SESSION 'Resume repair'` updates the
 terminal title via standard OSC sequences, plus native cmux tabs/workspaces and

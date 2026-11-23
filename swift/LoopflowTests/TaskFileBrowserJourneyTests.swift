@@ -209,8 +209,9 @@ struct TaskFileBrowserJourneyTests {
         defer { withExtendedLifetime(socket) {} }
         let present = ["desktop", "files", page, "-p", "session"]
         _ = try await lf.run(present, cwd: checkout)
-        #expect(files.browser.presented?.path == page && files.selection == call)
-        files.openPresentation(try #require(files.browser.presented))
+        let offer = FilesBrowserState.Presentation(path: page)
+        try #require(files.browser.notice == .presented(offer) && files.selection == call)
+        files.openPresentation(offer)
         #expect(files.selection == page && workspace.multiplexer.focusedPane.id == terminal.id)
         files.selectFile(call)
         #expect(files.mode == .edit && doc.editor === editor && editor.selectedRange() == range)

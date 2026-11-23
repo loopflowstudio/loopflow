@@ -11,14 +11,34 @@ final class FilesBrowserState {
         var mode = TaskFilesStore.Mode.read
     }
 
+    enum Notice: Equatable {
+        case presented(Presentation)
+        case updated(String)
+
+        var path: String {
+            switch self {
+            case .presented(let request): request.path
+            case .updated(let path): path
+            }
+        }
+    }
+
+    var notice: Notice?
+    var visibleReadPath: String? {
+        didSet {
+            guard let visibleReadPath else { return }
+            updated.removeAll { $0 == visibleReadPath }
+            if notice == .updated(visibleReadPath) { notice = nil }
+        }
+    }
     var showsRail: Bool?
     var hasChosenInitialFile = false
     var updated: [String] = []
     private(set) var presentations: [Presentation] = []
-    var presented: Presentation? { presentations.last }
     func offer(_ request: Presentation) {
         presentations.removeAll { $0.path == request.path }
         presentations.append(request)
+        notice = .presented(request)
     }
     let jumps = FileJumps()
     var visit: FileVisit?
@@ -29,8 +49,14 @@ final class FilesBrowserState {
 
     var selection: String? {
         didSet {
-            if oldValue != selection { visit = nil; jumps.readingLine = 1; jumps.dismiss() }
+            if oldValue != selection {
+                notice = nil
+                visit = nil
+                jumps.readingLine = 1
+                jumps.dismiss()
+            }
             guard let path = selection else { return }
+            if notice?.path == path { notice = nil }
             hasChosenInitialFile = true
             if !tabs.contains(where: { $0.path == path }) {
                 tabs.append(WorkFileTab(id: UUID().uuidString, path: path))
@@ -44,6 +70,7 @@ final class FilesBrowserState {
         get { selection.flatMap { modes[$0] } ?? .read }
         set {
             guard let selection else { return }
+            if mode == .edit && newValue != .edit { notice = nil }
             if newValue != mode { jumps.dismiss() }
             modes[selection] = newValue == .read ? nil : newValue
         }
@@ -73,7 +100,11 @@ final class FilesBrowserState {
 
     func noteWrites(_ paths: Set<String>, present: Set<String>) {
         updated.removeAll { paths.contains($0) }
-        updated.append(contentsOf: present.sorted())
+        let unread = present.filter { $0 != visibleReadPath }.sorted()
+        updated.append(contentsOf: unread)
+        if case .presented = notice { return }
+        if let latest = unread.last { notice = .updated(latest) }
+        else if case .updated(let path) = notice, paths.contains(path) { notice = nil }
     }
 }
 #endif

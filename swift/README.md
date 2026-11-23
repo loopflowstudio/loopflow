@@ -687,13 +687,15 @@ including edits in the draft.
 
 The first visit to an empty Files pane opens the newest scratch Markdown or
 HTML page, then falls back to the first changed file or the picker. Later
-writes, including ignored scratch pages, show an **Updated · Open** bar and
-leave focus and selection in place. Visible HTML reloads at its reading
-position after 800 ms of quiet.
+scratch writes mark the file in **Open & Scratch** and offer a dismissible
+**Updated · Open** bar in Files. A page already open in Read updates in place.
+Visible HTML keeps its reading position and reloads after 800 ms of quiet.
 
 `lf desktop files src/parser.rs:24-31` presents those lines and records the
 previous position. Add `--mode diff` to open the comparison. During editing
-or Diff review, **Presented · Open** lets you choose when to switch.
+or Diff review, **Presented · Open** lets you choose when to switch. Dismiss
+the bar to keep the file in the rail for later. Presenting from a zoomed
+conversation opens Files beside it and keeps terminal focus.
 
 Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.

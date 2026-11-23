@@ -549,7 +549,7 @@ struct DesktopAction {
             }
             let request = FilesBrowserState.Presentation(path: path, lines: lines, mode: mode == "diff" ? .diff : .read)
             let workspace = try context.task
-            if let pane = workspace.multiplexer.browserPane, !workspace.multiplexer.collapsedPaneIds.contains(pane.id) {
+            if let pane = workspace.multiplexer.browserPane, workspace.multiplexer.isVisible(pane) {
                 switch pane.content.selectedBrowserTab {
                 case .files, .changes:
                     let files = try workspace.files(for: pane.content, task: nil, query: RegistryQueryLocal.shared)

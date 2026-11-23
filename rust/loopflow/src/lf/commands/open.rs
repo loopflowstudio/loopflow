@@ -5,7 +5,6 @@
 use loopflow_execution::store::session_projection;
 mod cmux;
 mod conversation;
-mod files;
 mod herdr;
 mod rex;
 mod tmux;
@@ -1113,9 +1112,6 @@ pub struct OpenArgs {
     /// Reveal an existing conversation view; create nothing
     #[arg(long, conflicts_with_all = ["workspace", "available"])]
     pub focus: bool,
-    /// Present original files in an attached Desktop Files view
-    #[arg(long = "file", value_name = "PATH", conflicts_with_all = ["session", "link", "here", "tab", "focus", "workspace", "available"])]
-    pub files: Vec<PathBuf>,
     /// Open the repository or Wave overview: started, unfinished Tasks as tabs
     #[arg(long)]
     pub workspace: bool,
@@ -1138,7 +1134,6 @@ impl OpenArgs {
             here: false,
             tab: false,
             focus: false,
-            files: Vec::new(),
             workspace: true,
             available: false,
             no_focus: false,
@@ -1219,9 +1214,6 @@ pub fn url_links(directory: &Path, url: &str) -> Result<Vec<WorkLink>> {
 }
 
 pub fn explain(cli: &crate::lf::Cli, args: &OpenArgs, json: bool) -> Result<()> {
-    if !args.files.is_empty() {
-        return files::run(cli, args, true);
-    }
     if args.opens_workspace() {
         let mut selection = args.selection.clone();
         selection.json = json;
@@ -1247,9 +1239,6 @@ pub fn explain(cli: &crate::lf::Cli, args: &OpenArgs, json: bool) -> Result<()> 
 }
 
 pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
-    if !args.files.is_empty() {
-        return files::run(cli, args, false);
-    }
     if args.opens_workspace() {
         return run_workspace(cli, args);
     }

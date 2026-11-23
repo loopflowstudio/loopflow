@@ -71,10 +71,9 @@ final class FilesBrowserState {
         }
     }
 
-    func noteWrites(_ paths: [String]) {
-        let seen = Set(paths)
-        updated.removeAll { seen.contains($0) }
-        updated.append(contentsOf: paths)
+    func noteWrites(_ paths: Set<String>, present: Set<String>) {
+        updated.removeAll { paths.contains($0) }
+        updated.append(contentsOf: present.sorted())
     }
 }
 #endif

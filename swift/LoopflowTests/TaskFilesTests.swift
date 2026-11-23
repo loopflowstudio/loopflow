@@ -488,12 +488,14 @@ struct TaskFilesTests {
     }
 
     @Test func ignoredScratchWritesOfferThePageWithoutOpeningItOrReadingAComparison() async throws {
-        let reads = OSAllocatedUnfairLock(initialState: [String]())
         let query = RegistryQuery { args, _ in
-            let command = args[args.firstIndex(of: "task")! + 1]
-            reads.withLock { $0.append(command) }
-            guard command == "find" else { throw RegistryQueryError("Unexpected read") }
-            return #"{"paths":[],"scratch":["scratch/page.html"],"latest_scratch_page":"scratch/page.html","truncated":false}"#
+            guard args.contains("files"), args.contains("--show-ignored"), args.contains("scratch") else {
+                throw RegistryQueryError("Expected the current scratch directory from its Machine")
+            }
+            if args.contains("--cursor") {
+                return #"{"path":"scratch","entries":[{"path":"scratch/page.html","kind":"file"}],"next_cursor":null}"#
+            }
+            return #"{"path":"scratch","entries":[],"next_cursor":"next"}"#
         }.onMachine("peer", repository: "plan")
         let store = TaskFilesStore(issue: "TEST-1", cwd: "/peer/checkout", query: query)
         store.selectFile("src/reader.swift", mode: .edit)
@@ -503,7 +505,6 @@ struct TaskFilesTests {
         try await eventually { store.browser.updated == ["scratch/page.html"] }
         #expect(store.mode == .edit && store.tabs == tabs && store.selection == "src/reader.swift")
         #expect(store.scratchPaths == ["scratch/page.html"] && store.documents.isEmpty)
-        #expect(reads.withLock { $0 } == ["find"])
     }
 
     @Test func initialScratchChoiceSurvivesAMissingComparisonAndIsNeverRepeated() async throws {
@@ -2045,6 +2046,9 @@ struct TaskFilesTests {
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
         let readings = OSAllocatedUnfairLock(initialState: 0)
         let store = TaskFilesStore(issue: "TEST-1", cwd: checkout.path, query: RegistryQuery { args, _ in
+            if args[1] == "files", args.contains("scratch") {
+                return #"{"path":"scratch","entries":[{"path":"scratch/page.html","kind":"file"}],"next_cursor":null}"#
+            }
             if args[1] == "find" {
                 return #"{"paths":[],"scratch":["scratch/page.html"],"latest_scratch_page":"scratch/page.html","truncated":false}"#
             }

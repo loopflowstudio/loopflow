@@ -315,15 +315,12 @@ final class TaskFilesStore {
         let comparisonChanged = committed || !visible.isEmpty
         await tree.rereadDirectories(holding: tree.showIgnored ? changed : visible)
         guard !Task.isCancelled else { return }
-        let pages = changed.filter(Self.isScratchPage).sorted()
-        if !pages.isEmpty || changed.contains("") || visible.contains(where: { $0.hasPrefix("scratch/") || $0 == "scratch" }) {
+        let pages = changed.filter(Self.isScratchPage)
+        if changed.contains("") || visible.subtracting(pages).contains(where: { $0 == "scratch" || $0.hasPrefix("scratch/") }) {
             await refreshScratch()
-            guard !Task.isCancelled else { return }
-            // An atomic save writes a temporary sibling and renames it over the
-            // page; offer only pages the checkout still holds.
-            let present = Set(scratchPaths)
-            browser.noteWrites(scratchError == nil ? pages.filter(present.contains) : pages)
         }
+        if !pages.isEmpty { await reconcileScratchWrites(pages) }
+        guard !Task.isCancelled else { return }
         // Re-read retained documents even when another file or terminal is visible.
         for (path, document) in documents where Self.touches(changed, path) {
             do {
@@ -344,6 +341,32 @@ final class TaskFilesStore {
         if page == .changes, diffReview.comparison != workingTree.comparison { await diffReview.reviewReading.refresh() }
         if !Task.isCancelled, mode == .diff { await loadDiff() }
         if !Task.isCancelled, page == .changes { await diffReview.loadReview(changed: committed ? nil : visible) }
+    }
+
+    /// A write can precede the checkout inventory's next observation. Read the
+    /// affected directory on its Machine to distinguish the page from a vanished rename sibling.
+    private func reconcileScratchWrites(_ paths: Set<String>) async {
+        let directories = Dictionary(grouping: paths) { ($0 as NSString).deletingLastPathComponent }
+        for (directory, writes) in directories.sorted(by: { $0.key < $1.key }) {
+            let wanted = Set(writes)
+            var present = Set<String>()
+            var cursor: String?
+            do {
+                repeat {
+                    let page = try await query.taskFiles(issue: issue, directory: directory, cursor: cursor, showIgnored: true)
+                    guard !Task.isCancelled else { return }
+                    for entry in page.entries where entry.kind == .file && wanted.contains(entry.path) {
+                        present.insert(entry.path)
+                    }
+                    cursor = page.nextCursor
+                } while cursor != nil && present != wanted
+                scratchPaths = Set(scratchPaths).subtracting(wanted).union(present).sorted()
+                browser.noteWrites(wanted, present: present)
+            } catch {
+                guard !Task.isCancelled else { return }
+                scratchError = error.localizedDescription
+            }
+        }
     }
 
     /// Whether a changed path is `path`, a folder above it, or the whole checkout.

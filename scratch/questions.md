@@ -182,3 +182,31 @@ Answers (Jack Heart): "1a 2a 3b 4b 5 not sure, explain"
 - 5 answers (Jack Heart): "5c -- i thin kthere should be a way to explicitly
   bind the current session to the task, but i dont think that binding a
   worktree shoul auto bind in a session", "5.2c", "5.3 b", "5.4b".
+
+## Implement after the plan hub (2026-11-22)
+
+- **`planning_revision` kept** (1a contradicted): it is the Task edit's
+  compare-and-set, not a dead peer clock. Passed over: replacing it with
+  `plan_stamps` (per-field, second resolution, no single Task counter).
+- **Carrier and Graph run stay two process records** (3b contradicted):
+  different OS processes. Open for a person: should the carrier record
+  itself as the run (a `graph_processes` row of its own) or run the Graph
+  in-process, so liveness has one home? Either is launch work, not storage.
+- **A run's overlap guard stays** (5.1c). Read "binding a worktree shoul[d
+  not] auto bind in a session" as about Sessions; the path clause in
+  `task_open_graph_pairs` keeps a Task from starting a second run in a
+  checkout where one is already running, and adds nothing to its history.
+  Passed over: deleting it as the plan said, which allows two overlapping
+  runs in one checkout.
+- **`lf session bind` stays primary-only.** It is already the explicit way
+  to give a Session its Task. A bind that joins without becoming primary
+  (`--not-primary`, say) is new behavior, not built.
+- **Two Tasks on one root resolve to the lower id**, where `counted_task`
+  failed with "Multiple Tasks claim this checkout". Live: no shared roots.
+  Passed over: an error, which no other reader of the same rule raises.
+- **The Session list's workspace resolver** (`human_session/workspace.rs`)
+  still derives `task_ids` from Git roots and overrides the stored Task.
+  Left: it is presentation with its own unavailable-checkout states;
+  moving it onto `task_holding` is the next unification.
+- **`'inherited'` reads as `declared`** through a serde alias for 771
+  history events. Passed over: rewriting the events' payloads.

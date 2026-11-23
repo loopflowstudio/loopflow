@@ -83,7 +83,7 @@ now, mark `-- leaving: <member> LOO-877` (or the Task named), drop after the
 |---|---|---|
 | id, repository_id, project_id, issue_identifier, external_issue_id, created_at, updated_at | keep | identity, binding to the provider (`external_issue_id` is how `pm_items` joins) |
 | issue_title, issue_description, planning_state, planning_completed_at, planning_due_date, planning_assignee, planning_rank, planning_deleted_at | keep | desired values; edits and the queue write them (`planning_write.rs:86-96`) |
-| planning_revision | keep | the peer exchange's clock (`planning_peers.rs`) |
+| planning_revision | keep | the Task's edit revision: `edit_task` refuses a stale one (`task_content.rs` `validate_edit`) |
 | workspace_slug, abandon_reason, abandoned_at, completion_request, completion_error, paused, shipped_at | keep | Task lifecycle |
 | planning_url, planning_branch_name, planning_team_id | keep | the Task's URL, branch and team, shown and carried to peers on every Machine; the branch is written by lf under Git planning (`record_task_branch_in`) |
 | planning_provider_revision | **leaving** | the provider's clock for one observation = `pm_items.revision` |
@@ -370,50 +370,69 @@ ship the release whose peer protocol accepts a `Disposition` without
 
 ## Next: implement (concept review after the plan hub, 2026-11-22)
 
-Main through #2022 is merged (`9f10bb15`); sync with main again first. The
-review is `scratch/concept-review.html`; the answers, word for word, are in
-`scratch/questions.md`. Build these, in this order, then gate as below.
+Main through #2026 is merged (`def5dfdded`). The review is
+`scratch/concept-review.html`; the answers, word for word, are in
+`scratch/questions.md`. Status of its six changes:
 
-1. **`tasks.planning_revision` leaves** (1a). #1983 replaced the peer exchange
-   with `plan_stamps`; the column is only incremented
-   (`planning_write.rs:252`) and selected as column 12 of `TASK_COLUMNS`
-   (`children.rs:1831`), which the row mapper drops. Mark
-   `-- leaving: tasks.planning_revision LOO-877` in `task_facts_once.sql`,
-   delete the increment and the select, move the inventory row to leaving.
-2. **A run's OS process has one home** (3b). `task_graphs.run_pid`,
-   `run_os_started_at` and `run_died_at` repeat `graph_processes.pid`,
-   `os_started_at` and its end. `task_graphs` keeps the Task's step and the
-   run id; liveness, recovery (#1972) and retirement read the run. Check first
-   whether the carrier claims the step (`start_run_in`) before the run
-   registers (`record_graph`); if it does, the claim registers the run in the
-   same transaction rather than keeping a second pid. Staged: mark the three
-   columns leaving.
-3. **Work already in a checkout never joins the Task that takes it** (5.1c).
-   Delete the auto-join of open Sessions in `write_task_checkout_in`
-   (`children.rs:67-75`) and the path clause in `task_open_graph_pairs`, so a
-   run outside the Task can't block it. Joining is explicit: "there should be
-   a way to explicitly bind the current session to the task". `lf session
-   bind` exists but binds the Task's primary conversation; give it (or its
-   help) a way to bind the current Session as one of the Task's Sessions
-   without making it primary. The upgrade backfill keeps its checkout rule
-   for Sessions and runs written before the migration (that is history, not
-   adoption).
-4. **One definition of "the Task holding this directory"** (5.2c). One
-   storage function answers it; `counted_task` (`ops/task.rs:2592`) calls it
-   with the worktree root it already computes, and the scan of every
-   `task_checkouts` row goes. Decide once, in that function, the nested
-   worktree case and two Tasks on one root, and test both. Counterexample to
-   check first: `task_checkouts.worktree` rows stored uncanonicalized.
-5. **The primary mark's upgrade day** (5.3b). This release keeps
-   `task_primary_sessions` as the home that writers write, and readers learn
-   to read the mark; no writer sets `primary_scope='task'` yet, so a released
-   lf still running beside the new store keeps seeing the Task's primary.
-   LOO-877 flips writers to the mark and drops the table; record the flip
-   there. Update the migration's comments and the SCHEMA.md leaving mark to
-   match.
-6. **`work_source='inherited'` goes now** (5.4b). Remove the value from the
-   CHECK in the `agent_sessions` rebuild (map any stored rows to `declared`),
-   from the Rust and Swift enums, and from fixtures.
+1. **`tasks.planning_revision` stays** (1a, contradicted). It is not dead: it
+   is `Task.revision`, the compare-and-set every Task edit checks
+   (`task_content.rs` `validate_edit`: "Task changed; read its current
+   revision before editing"), taken from callers by `lf desktop dashboard
+   rename task:<id> --revision` and `edit_task`, and tested by
+   `local_planning` (a stale revision is refused). Inventory row: keep, as
+   "the Task's edit revision", not "the peer exchange's clock". Nothing built.
+2. **A run's OS process: two processes, not two homes** (3b, contradicted).
+   `task_graphs.run_pid` is the carrier, `lf task run`; `graph_processes.pid`
+   is the `lf graph` child it spawns (`run_task_graph_for`), which registers
+   later with its own `LfProcessId` (`RunOwner::TaskCarrier` vs `GraphRun`).
+   `carrier_may_run` and retention ask about the carrier, which can be alive
+   before the child registers or after it ends. One home means the carrier
+   records itself in `graph_processes`, or runs the Graph in-process; either
+   reshapes launch, larger than this Task (questions.md). Nothing built.
+3. **Built** (`f8a5ef1f1f`). `write_task_checkout_in` no longer gives open
+   taskless Sessions the Task; `lf session bind` is the explicit way (it makes
+   the Session the Task's primary; a non-primary bind is in questions.md).
+   Kept: `task_open_graph_pairs`' path clause, which only stops a second run
+   overlapping one already in the checkout and adds nothing to history
+   (questions.md). Tests: the four `admission_lifecycle_tests` expect the
+   Session to stay taskless; `task_work::` 8 passed.
+4. **Built** (`1605ad1d72`). `SqliteStore::task_holding(dir)` is the one
+   answer: deepest checkout, lower id on a shared root, `dir` matched as
+   named and as it resolves. `counted_task` and bare `lf resume`'s
+   `worktree_task` call it; the scan and the prefix match are gone, and so is
+   `counted_task`'s Git subprocess. Counterexample found: fixtures recorded
+   `/var/folders` paths while children ask with `/private/var`;
+   `task_fixture_at` now records the resolved path, as Git does in
+   production (106 of 106 live checkouts that exist are canonical). Still a
+   third copy: `human_session/workspace.rs` `WorkspaceResolver` derives
+   `task_ids` for the Session list from Git roots (questions.md).
+   Tests: `the_task_holding_a_directory_is_its_deepest_checkout`,
+   `ops::task::tests::` 35, `ops::human_session::` 51, `work_route` 6.
+5. **Not built: the primary mark's upgrade day** (5.3b). Writers go back to
+   `task_primary_sessions` and no writer sets `primary_scope='task'`. What it
+   reaches, found this pass: `counts_for_task` already counts NULL and
+   `'task'` alike, so membership tolerates the mark. But "which Session is the
+   primary" is read from `primary_scope` in ~25 places: `sessions.rs`
+   (filter `SessionPrimary::Task`, `primary_scope()`, the cwd update's
+   `primary_scope IS NOT NULL`, `SESSION_SELECT` column 25 that Swift's
+   `taskPrimary` derives from), `session_recovery.rs:43`, `task_retirement`,
+   `processes`, `children`, `open.rs`, `waves.rs`, `server/recovery.rs:328`
+   and `server/service.rs:3840` (both write the mark directly), plus seven
+   `human_session` readers. Shape: one SQL expression for "the Session's
+   scope", `CASE WHEN EXISTS(task_primary_sessions …) THEN 'task' ELSE
+   s.primary_scope END`, used wherever `primary_scope` is read; writers
+   (`mark_task_primary_in`, the two server writes) upsert
+   `task_primary_sessions`; drop the mirror triggers
+   (`task_primary_sessions_mark_*`, `agent_sessions_task_primary_row`) and the
+   rebuild's `THEN 'task'` backfill; remove
+   `-- leaving: task_primary_sessions`, so the guard stops refusing it.
+   Keep the CHECK accepting `'task'` and the plain index: LOO-877 flips
+   writers to the mark. Rewrite the trigger tests at `sessions.rs:2438-2520`
+   as "released lf sees the primary this build chose".
+6. **Built** (`c957535ac8`). `'inherited'` leaves the CHECK; the rebuild
+   maps the 750 live rows to `'declared'`; `WorkSource::Declared` reads the
+   771 history events that say `inherited` (serde alias). Swift reads the
+   value as a string; `server_schema.json` regenerated.
 
 Demo at gate (4b): `lf task move` then `lf task status` show the new rank;
 Desktop's Working board after merge and install. Auto stays a Machine fact

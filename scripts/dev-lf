@@ -56,8 +56,7 @@ run_dev_lf() {
         if [[ "$isolated" -eq 1 ]]; then
             export RUSTC_WRAPPER= RUSTC_WORKSPACE_WRAPPER= SCCACHE_DISABLE=1
         fi
-        uv run --project "$repo" python "$repo/scripts/build_cache.py" \
-            cargo build -p loopflow --bin lf --manifest-path "$repo/Cargo.toml" </dev/null >&2
+        cargo build -p loopflow --bin lf --manifest-path "$repo/Cargo.toml" </dev/null >&2
         echo "running: $target/debug/lf $*" >&2
 
         exit_code=0

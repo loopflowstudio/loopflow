@@ -8,11 +8,12 @@ import re
 import shutil
 import statistics
 import subprocess
-import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import Callable
+
+from compiler_receipt import install_wrapper
 
 ROOT = Path(__file__).resolve().parents[3]
 CASES = (
@@ -347,13 +348,8 @@ def main() -> None:
     )
     root = Path(temporary).resolve()
     try:
-        wrapper = root / "sccache"
-        wrapper.write_text(
-            f"#!{sys.executable}\n" + (Path(__file__).with_name("compiler_receipt.py")).read_text()
-        )
-        wrapper.chmod(0o755)
         env.update(
-            RUSTC_WRAPPER=str(wrapper),
+            RUSTC_WRAPPER=str(install_wrapper(root)),
             SCCACHE_SERVER_UDS=str(root / "cache.sock"),
             SCCACHE_CONF=str(root / "sccache.toml"),
         )

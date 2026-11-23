@@ -18,8 +18,8 @@
   --warn-tint: #f8e9e4;
   --busy: #20528a;
   --error: #9c2b2b;
-  --proposed-bg: #eef4fa;
-  --proposed-ink: #1d4e78;
+  --built-bg: #e3f3ea;
+  --built-ink: #12624c;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -34,14 +34,14 @@
     --warn-tint: #3a231c;
     --busy: #92c5ff;
     --error: #ff9d9d;
-    --proposed-bg: #1b2c3b;
-    --proposed-ink: #a6d1f7;
+    --built-bg: #213b31;
+    --built-ink: #9fe5c6;
   }
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--paper); color: var(--ink); font: 1rem/1.55 system-ui, sans-serif; }
 main { width: min(72rem, calc(100% - 2.5rem)); margin: 3rem auto 4.5rem; }
-header { max-width: 56rem; }
+header { max-width: 58rem; }
 h1, h2 { font-family: ui-serif, Georgia, serif; line-height: 1.12; }
 h1 { font-size: clamp(2.1rem, 5vw, 3.6rem); margin: .3rem 0 .85rem; letter-spacing: -.04em; }
 h2 { font-size: clamp(1.5rem, 2.8vw, 1.95rem); margin: 0 0 .8rem; letter-spacing: -.02em; }
@@ -62,10 +62,10 @@ code { overflow-wrap: anywhere; font-size: .88em; }
   border-radius: .35rem;
   vertical-align: middle;
 }
-.badge-built { background: var(--paper); border: 1px solid var(--line); color: var(--muted); }
-.badge-proposed { background: var(--proposed-bg); border: 1px solid var(--proposed-ink); color: var(--proposed-ink); }
+.badge-before { background: var(--paper); border: 1px solid var(--line); color: var(--muted); }
+.badge-built { background: var(--built-bg); border: 1px solid var(--built-ink); color: var(--built-ink); }
 .trace, .callout { background: var(--surface); border: 1px solid var(--line); border-radius: .9rem; padding: clamp(.9rem, 3vw, 1.5rem); }
-.callout { border-inline-start: .3rem solid var(--warn); }
+.callout { border-inline-start: .3rem solid var(--accent); }
 .steps { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0 1rem; }
 .steps button {
   border: 1px solid var(--line);
@@ -90,7 +90,7 @@ code { overflow-wrap: anywhere; font-size: .88em; }
   border-bottom: 1px solid var(--line);
   background: var(--paper);
 }
-.sidebar.proposed header { background: var(--proposed-bg); color: var(--proposed-ink); }
+.sidebar.built header { background: var(--built-bg); color: var(--built-ink); }
 .sidebar-bar {
   display: flex;
   align-items: center;
@@ -113,7 +113,7 @@ code { overflow-wrap: anywhere; font-size: .88em; }
 .rows { padding: .45rem; margin: 0; list-style: none; }
 .rows li {
   display: grid;
-  grid-template-columns: 2rem 1fr auto;
+  grid-template-columns: 2.3rem 1fr auto;
   gap: .45rem;
   align-items: baseline;
   padding: .45rem .5rem;
@@ -132,7 +132,8 @@ code { overflow-wrap: anywhere; font-size: .88em; }
 .step-tag { color: var(--muted); }
 .step-tag.bad { color: var(--warn); font-weight: 650; }
 kbd { color: var(--muted); font-size: .78rem; font-family: ui-monospace, monospace; }
-.notice { min-height: 1.8rem; margin: .2rem .75rem .55rem; font-size: .8rem; color: var(--warn); }
+.notice { min-height: 1.8rem; margin: .2rem .75rem .55rem; font-size: .8rem; color: var(--muted); }
+.notice.warn { color: var(--warn); }
 #observation { margin-top: .95rem; font-size: .95rem; }
 .fit { font-weight: 700; white-space: nowrap; }
 .yes { color: var(--accent); }
@@ -140,7 +141,7 @@ kbd { color: var(--muted); font-size: .78rem; font-family: ui-monospace, monospa
 .mapping { width: 100%; border-collapse: collapse; }
 .mapping th, .mapping td { padding: .72rem .55rem; text-align: left; vertical-align: top; border-top: 1px solid var(--line); }
 .mapping thead th { color: var(--muted); font-size: .82rem; }
-.mapping tbody th { width: 23%; font-weight: 650; }
+.mapping tbody th { width: 24%; font-weight: 650; }
 .mapping small { display: block; margin-top: .2rem; }
 .scenarios { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem 1.35rem; margin: 0; }
 .scenarios dt { font-weight: 650; }
@@ -165,61 +166,61 @@ kbd { color: var(--muted); font-size: .78rem; font-family: ui-monospace, monospa
 <body>
 <main>
 <header>
-  <p class="reference">LOO-1063 · Concept review of built B1 work at <code>1e3b4007ce</code> (against base <code>3578f78f6d</code>)</p>
+  <p class="reference">LOO-1063 · Concept review (pass 2) of built B1 work at <code>eca5ec7bef</code> against base <code>5d5bf92c72</code></p>
   <h1>Working Task order, status and sidebar</h1>
-  <p><strong>Area reviewed:</strong> Working Task ordering, one-shot status sorting, row status &amp; Graph step display, write recovery, and New Task fonts across Desktop, CLI, and iOS — widened to the whole sidebar and selection model because B1 introduced a shared start-time stack, a status sort, a Graph step wire field, and OSC 7501 <code>done</code> availability on top of PR #2025’s drag-and-drop repair.</p>
+  <p><strong>Area reviewed:</strong> Working Task ordering, one-shot status sorting, row status &amp; Graph step display, Desktop write recovery, OSC 7501 <code>done</code>/<code>error</code> handling, and packaged New Task fonts across Desktop, CLI, and iOS — widened to the whole sidebar and selection model rather than only the last commits.</p>
 </header>
 
-<section class="callout" aria-labelledby="biggest-mismatch">
-  <h2 id="biggest-mismatch">Biggest mismatch: “Status” in Sort by status disagrees with “Status” on the row</h2>
-  <p><span class="badge badge-built">Built at 1e3b4007ce</span> Two separate precedence rules exist for the same word. On the row, Mac (<code>ProgramStatusState.summaryOrder</code>) and iOS (<code>WorkViewPlan.Content.status</code>) rank <code>Blocked &gt; Error &gt; Busy &gt; Available</code>. In the one-shot sort, Rust (<code>status_bucket</code>) ranks <code>Blocked &gt; Available &gt; Idle &gt; Busy</code> and ignores <code>Error</code> altogether. Clicking <strong>Sort by status</strong> puts a row whose label says <strong>Busy</strong> (one working Session, one idle Session) <em>above</em> <strong>Idle</strong> rows, and drops a red <strong>Error</strong> row <em>below</em> <strong>Available</strong> rows.</p>
-  <p><span class="badge badge-proposed">Proposed</span> Give row status and one-shot sort one vocabulary and one precedence: project OSC 7501 <code>error</code> into <code>SelectionState::Error</code> (also surfacing <code>Error</code> in <code>attention</code> and on iOS), and bucket <code>Blocked → Error → Available → Idle → Busy</code> using the row’s own winner so a dual-state row labeled <strong>Busy</strong> sorts with <strong>Busy</strong> while still matching both <code>state:available</code> and <code>state:busy</code> filters.</p>
-  <p><strong>Two related mismatches found in the same pass:</strong></p>
+<section class="callout" aria-labelledby="verdict">
+  <h2 id="verdict">Verdict: Product concepts and code concepts line up</h2>
+  <p><span class="badge badge-built">Built at eca5ec7bef</span> All eight product-to-code pairings now match. No model change is needed before gate. The three mismatches found in pass 1 (at <code>1e3b4007ce</code>) are resolved across Rust, macOS, and iOS, and the subsequent compression pass (<code>c083970f43</code>) consolidated selection reads into <code>read_projected</code>, <code>RepositoryViews</code>, and one batched <code>fill_task_contents_in</code> query.</p>
   <ul>
-    <li><strong>Two Desktop write paths for one Working order:</strong> Dragging routes through <code>PendingChanges</code> (retries blips under one <code>requestID</code>, disables offline, protects Notices), while <code>WorkModel.sortWorkingTasksByStatus()</code> bypasses it — failing on a blip, staying enabled while the Machine is away, and letting an in-flight drag replay over a newer sort.</li>
-    <li><strong>Graph step sentinels leak into the sidebar:</strong> <code>fill_graph_steps_in</code> returns raw <code>task_graphs.step</code> values <code>"start"</code> and <code>"end"</code> instead of matching <code>TaskGraph::read</code>’s <code>current_step = None</code>; and iOS <code>TaskListView</code> drops <code>graphStep</code> even though the wire already sends it.</li>
+    <li><strong>One status vocabulary and precedence:</strong> <code>SelectionState::Error</code> projects OSC 7501 <code>error</code> across queries, <code>attention</code>, Mac, and iOS. <code>status_bucket</code> ranks <code>Blocked → Error → Available → Idle → Busy</code> using the row’s own winner (<code>Busy</code> beats <code>Available</code> on dual-state rows), while <code>state:available</code> and <code>state:busy</code> stay independent set filters.</li>
+    <li><strong>One Desktop write path for Working order:</strong> Both drags (<code>PendingCommand.reorder</code>) and status sorts (<code>PendingCommand.sortWorkingTasks</code>) route through <code>WorkModel.editWorkingOrder</code> → <code>PendingChanges.make</code>, serialized per Working list in <code>orderWrites</code> so clicks reach the Machine in order across reconnects, Sort disables when away, and pre-sort drag previews are superseded.</li>
+    <li><strong>Consistent Graph step across Mac and phone:</strong> <code>fill_task_contents_in</code> resolves a live <code>run_start</code> cursor via <code>CapturedGraph::step_name_of</code>, falls back to parked <code>task_graphs.step</code>, and strips <code>START</code>/<code>END</code> sentinels to <code>None</code>. Both Mac <code>WorkNavigator</code> and iOS <code>TaskListView</code> render <code>graphStep</code> in <code>TaskRow</code>.</li>
   </ul>
   <p class="reference">
-    <a href="../rust/loopflow-storage/src/sqlite/selections.rs#L272-L282">status_bucket</a> ·
-    <a href="../rust/loopflow-storage/src/sqlite/selections.rs#L371-L385">task_activity_in</a> ·
-    <a href="../swift/Loopflow/Models/ProgramStatus.swift#L20">summaryOrder</a> ·
-    <a href="../swift/LoopflowMac/WorkModel.swift#L3561-L3568">sortWorkingTasksByStatus</a> ·
-    <a href="../rust/loopflow-storage/src/sqlite/selections.rs#L553-L570">fill_graph_steps_in</a>
+    <a href="../rust/loopflow-storage/src/sqlite/selections.rs#L200-L297">TaskOrder &amp; status_bucket</a> ·
+    <a href="../rust/loopflow-storage/src/sqlite/selections.rs#L559-L624">fill_task_contents_in</a> ·
+    <a href="../swift/Loopflow/Services/PendingChanges.swift#L23-L141">PendingChanges</a> ·
+    <a href="../swift/LoopflowMac/WorkModel.swift#L3599-L3643">editWorkingOrder</a> ·
+    <a href="../swift/LoopflowiOS/TaskListView.swift#L394-L404">iOS TaskRow</a>
   </p>
 </section>
 
 <section class="trace" aria-labelledby="trace-title">
-  <h2 id="trace-title">See the three mismatches side by side</h2>
-  <p>Switch between the three concrete interactions to compare what <code>1e3b4007ce</code> does today against the proposed model.</p>
+  <h2 id="trace-title">Walk the built interactions against base &amp; pass 1</h2>
+  <p>Switch scenarios to compare prior behavior (base <code>5d5bf92c72</code> or pass 1 <code>1e3b4007ce</code>) against what is built at <code>eca5ec7bef</code>.</p>
 
   <div class="steps" role="group" aria-label="Interaction scenario">
-    <button type="button" data-scene="sort" aria-pressed="true">1 · Click “Sort by status”</button>
-    <button type="button" data-scene="blip" aria-pressed="false">2 · Drag, blip, then Sort</button>
-    <button type="button" data-scene="sentinels" aria-pressed="false">3 · Graph at start / end + iOS</button>
+    <button type="button" data-scene="turns" aria-pressed="true">1 · Send a prompt (base vs built)</button>
+    <button type="button" data-scene="sort" aria-pressed="false">2 · Click “Sort by status”</button>
+    <button type="button" data-scene="blip" aria-pressed="false">3 · Drag, blip, then Sort</button>
+    <button type="button" data-scene="sentinels" aria-pressed="false">4 · Graph step on Mac &amp; iOS</button>
   </div>
 
   <div class="comparison">
     <article class="sidebar">
       <header>
-        <h3>Built</h3>
-        <span class="badge badge-built">Existing · 1e3b4007ce</span>
+        <h3 id="before-title">Before</h3>
+        <span class="badge badge-before" id="before-badge">Prior</span>
+      </header>
+      <div class="sidebar-bar" id="before-bar"></div>
+      <ol class="rows" id="before-rows" aria-label="Prior behavior"></ol>
+      <p class="notice warn" id="before-notice"></p>
+    </article>
+    <article class="sidebar built">
+      <header>
+        <h3>Built now</h3>
+        <span class="badge badge-built">Built · eca5ec7bef</span>
       </header>
       <div class="sidebar-bar" id="built-bar"></div>
       <ol class="rows" id="built-rows" aria-label="Built behavior"></ol>
       <p class="notice" id="built-notice"></p>
     </article>
-    <article class="sidebar proposed">
-      <header>
-        <h3>Proposed</h3>
-        <span class="badge badge-proposed">Next pass</span>
-      </header>
-      <div class="sidebar-bar" id="proposed-bar"></div>
-      <ol class="rows" id="proposed-rows" aria-label="Proposed behavior"></ol>
-      <p class="notice" id="proposed-notice"></p>
-    </article>
   </div>
   <p id="observation" role="status"></p>
-  <noscript><p>1) Sort by status: Built puts dual-state Busy above Idle and Error below Available; Proposed orders Blocked, Error, Available, Idle, Busy matching every row label. 2) Drag + blip + Sort: Built drops Sort on a blip, leaves Sort enabled offline, and replays a pending drag over a newer sort; Proposed routes Sort through PendingChanges. 3) Graph step: Built prints raw "start" and "end" sentinels and omits step on iOS; Proposed omits sentinels and shows step on iOS.</p></noscript>
+  <noscript><p>1) Turns: base moved Bravo to the bottom when it turned Busy; built keeps Bravo in place across Idle, Busy, and Available. 2) Sort by status: pass 1 put dual-state Busy above Idle and Error below Available; built orders Blocked, Error, Available, Idle, Busy matching every row label. 3) Drag + blip + Sort: pass 1 bypassed PendingChanges for Sort; built serializes both in PendingChanges per list. 4) Graph step: pass 1 leaked "start"/"end" sentinels and omitted step on iOS; built omits sentinels and shows step on Mac and iOS.</p></noscript>
 </section>
 
 <section aria-labelledby="pairs">
@@ -229,58 +230,58 @@ kbd { color: var(--muted); font-size: .78rem; font-family: ui-monospace, monospa
       <tr>
         <th scope="col">Product concept</th>
         <th scope="col">Code concept</th>
-        <th scope="col">Built (1e3b4007ce)</th>
-        <th scope="col">Proposed</th>
+        <th scope="col">Aligns?</th>
+        <th scope="col">Notes (at <code>eca5ec7bef</code>)</th>
       </tr>
     </thead>
     <tbody>
       <tr>
         <th scope="row">Working membership</th>
-        <td><code>TaskSection</code> derives Working vs Backlog vs Done from lifecycle and ownership.</td>
+        <td><code>TaskSection::of</code> → <code>SelectionState::Working</code> / <code>Backlog</code> / <code>Done</code>.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td><span class="fit yes">Yes</span></td>
+        <td>One section predicate feeds roadmap, repository/Wave selections, sidebar, and phone.</td>
       </tr>
       <tr>
         <th scope="row">Default order: newest-started on top, steady across turns</th>
-        <td><code>TaskOrder</code> / <code>TaskPosition</code>: <code>New(Reverse(started_at)) &lt; Saved(pos) &lt; Planning(rank)</code>. First non-unclaim ownership, then started event, then <code>created_at</code>.</td>
-        <td><span class="fit yes">Yes</span><small>Decoupled from Backlog <code>planning_rank</code>; handoffs keep original start time.</small></td>
+        <td><code>TaskOrder</code> / <code>TaskPosition</code>: <code>New(Reverse(started_at)) &lt; Saved(pos) &lt; Planning(rank)</code>; <code>start_times_in</code> reads first non-unclaim ownership, then first <code>started</code> event, then <code>created_at</code>.</td>
         <td><span class="fit yes">Yes</span></td>
+        <td>Decoupled from Backlog <code>planning_rank</code>; handoffs keep original start time; shared by repository, Wave, roadmap, CLI, and iOS.</td>
       </tr>
       <tr>
         <th scope="row">Drag a row above or below another</th>
-        <td><code>DropSide</code> → <code>PendingCommand.reorder</code> → <code>TaskOrderEdit::Move</code> → <code>commit_task_order</code> CAS loop.</td>
-        <td><span class="fit yes">Yes</span><small>Preserves chosen side across concurrent reorders; missing target returns <code>not_found</code> with ID.</small></td>
+        <td><code>DropSide</code> → <code>PendingCommand.reorder</code> → <code>ServedWrite.desktopDashboardMove</code> → <code>TileEdit::Move</code> → <code>TaskOrderEdit::Move</code> → <code>commit_task_order</code> CAS loop.</td>
         <td><span class="fit yes">Yes</span></td>
+        <td>Immediate preview, side-aware across concurrent reorders; absent target refuses as <code>not_found</code> naming the Task, with <code>NoticeCenter.reread(keeping:)</code> protecting the refusal.</td>
       </tr>
       <tr>
-        <th scope="row">Finished turn reads Available and clears on typing</th>
-        <td><code>available_sql</code> counts <code>done</code> without <code>working</code> on live interactive Sessions; <code>SessionProgramStatus</code> renders <code>Available</code> (pane keeps <code>Finished</code>); <code>acknowledge_results</code> + <code>ProgramStatusReducer.interaction</code> clear <code>done</code>/<code>error</code> on typing.</td>
+        <th scope="row">One-shot “Sort by status” matches the row’s status</th>
+        <td><code>TaskOrderEdit::SortByStatus</code> + <code>status_bucket</code> (<code>Blocked → Error → Available → Idle → Busy</code>), <code>SelectionState::Error</code>, <code>ProgramStatusState.summaryOrder</code>, and <code>WorkViewPlan.Content.status</code>.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td><span class="fit yes">Yes</span></td>
+        <td>Resolved from pass 1: dual-state <code>Busy+Available</code> rows read <strong>Busy</strong> and sort as <strong>Busy</strong> while still matching both <code>state:available</code> and <code>state:busy</code>; <code>Error</code> sorts second, joins <code>attention</code>, appears on iOS, and clears from cached readings on restore.</td>
       </tr>
       <tr>
-        <th scope="row">New Task sheet uses packaged fonts</th>
-        <td><code>scripts/app_bundle.py</code> copies <code>*.bundle</code> for Dev, QA &amp; Release; <code>AppFontRegistration</code> resolves packaged <code>.ttf</code> by absolute URL with same-size system fallback.</td>
+        <th scope="row">Working order edits share one write path and recovery model</th>
+        <td>Rust: <code>TaskOrderEdit</code> (<code>Move</code>, <code>SortByStatus</code>). Swift: <code>WorkModel.editWorkingOrder</code> → <code>PendingChanges.make</code> + per-list <code>orderWrites</code> queue.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td><span class="fit yes">Yes</span></td>
-      </tr>
-      <tr>
-        <th scope="row">“Status” in Sort by status matches the row’s status</th>
-        <td><code>status_bucket</code> in <code>selections.rs</code> vs <code>ProgramStatusState.summaryOrder</code> &amp; <code>WorkViewPlan.Content.status</code>.</td>
-        <td><span class="fit no">No</span><small><strong>One name, two rules.</strong> Dual-state <code>Available</code>+<code>Busy</code> displays <strong>Busy</strong> on Mac &amp; iOS but sorts into <strong>Available</strong> above Idle. <code>Error</code> displays red <strong>Error</strong> on Mac (#2 priority) but sorts as <strong>Idle</strong> below Available and vanishes on iOS.</small></td>
-        <td><span class="fit yes">Yes</span><small><span class="badge badge-proposed">Proposed</span> Add <code>SelectionState::Error</code>; order buckets <code>Blocked → Error → Available → Idle → Busy</code> using the row’s summary winner (<code>Busy</code> beats <code>Available</code> when both are present).</small></td>
-      </tr>
-      <tr>
-        <th scope="row">Every Working order edit survives a blip and disables offline</th>
-        <td>Rust unified both in <code>TaskOrderEdit</code>; Swift uses <code>PendingChanges</code> for drag, raw <code>query.sortWorkingTasksByStatus()</code> for sort.</td>
-        <td><span class="fit no">No</span><small><strong>Action with split ownership.</strong> Sort fails on a 1 s blip instead of retrying, ignores <code>pendingChanges.acceptsChanges</code> offline, and lets an in-flight drag replay over a newer sort.</small></td>
-        <td><span class="fit yes">Yes</span><small><span class="badge badge-proposed">Proposed</span> Add <code>PendingCommand.sortWorkingTasks</code>; route Sort through <code>PendingChanges.make</code>, disable when <code>!acceptsChanges</code>, and supersede earlier <code>.reorder</code> previews for that repo.</small></td>
+        <td>Resolved from pass 1: drags and sorts serialize in click order across reconnects, Sort disables when <code>!acceptsChanges</code> and supersedes earlier drag previews, and post-Sort drags still preview immediately.</td>
       </tr>
       <tr>
         <th scope="row">Row shows current Graph step when at one</th>
-        <td><code>fill_graph_steps_in</code> reads <code>task_graphs</code> into <code>ViewContent.graph_step</code>; Mac passes to <code>TaskRow</code>, iOS omits it.</td>
-        <td><span class="fit no">No</span><small><strong>Internal sentinels leaked.</strong> Raw <code>"start"</code> and <code>"end"</code> appear as step names (while <code>TaskGraph::read</code> returns <code>current_step = None</code>). iOS drops <code>graphStep</code> despite decoding it.</small></td>
-        <td><span class="fit yes">Yes</span><small><span class="badge badge-proposed">Proposed</span> Filter <code>task_work::START</code> and <code>task_work::END</code> to <code>None</code> in <code>fill_graph_steps_in</code>; pass <code>context: task.graphStep</code> in iOS <code>TaskListView</code>.</small></td>
+        <td><code>fill_task_contents_in</code> resolves live <code>run_start</code> cursor or parked step (stripping <code>START</code>/<code>END</code>) into required-nullable <code>ViewContent.graph_step</code>; Mac <code>WorkNavigator</code> and iOS <code>TaskListView</code> pass it to <code>TaskRow</code>.</td>
+        <td><span class="fit yes">Yes</span></td>
+        <td>Resolved from pass 1: no raw <code>"start"</code>/<code>"end"</code> sentinels leak; Mac and phone rows agree; one batched query serves all plans.</td>
+      </tr>
+      <tr>
+        <th scope="row">Finished turn reads Available and clears on typing</th>
+        <td><code>available_sql</code> counts <code>done</code> without <code>working</code> on live interactive Sessions; <code>SessionProgramStatus</code> renders <code>Available</code> (terminal pane keeps <code>Finished</code>); <code>acknowledge_results</code> + <code>ProgramStatusReducer.interaction</code> clear <code>done</code>/<code>error</code> on typing.</td>
+        <td><span class="fit yes">Yes</span></td>
+        <td>Matches both Ghostty and held terminals; non-interactive Sessions never treat <code>done</code> as waiting for input.</td>
+      </tr>
+      <tr>
+        <th scope="row">New Task sheet uses packaged fonts</th>
+        <td><code>scripts/app_bundle.py</code> copies <code>*.bundle</code> for Dev, QA &amp; Release; <code>AppFontRegistration</code> scans packaged <code>.ttf</code> by absolute URL (<code>Fonts/</code> first) with same-size system fallback.</td>
+        <td><span class="fit yes">Yes</span></td>
+        <td>Verified in packaged Dev bundle (QA round 3) and <code>AppBootstrapResourceTests</code>.</td>
       </tr>
     </tbody>
   </table>
@@ -291,35 +292,35 @@ kbd { color: var(--muted); font-size: .78rem; font-family: ui-monospace, monospa
   <dl class="scenarios">
     <div>
       <dt>Task has one Working Session and one Idle Session</dt>
-      <dd>Both Mac and iOS rows display <strong>Busy</strong>. Under the proposed bucket rule, <strong>Sort by status</strong> places it in <strong>Busy</strong> so the sorted list never shows a <strong>Busy</strong> row above <strong>Idle</strong>. Because <code>SelectionState</code> remains a set, the <strong>Available</strong> and <strong>Busy</strong> filters both still include it.</dd>
+      <dd>Mac and iOS rows both display <strong>Busy</strong>. <strong>Sort by status</strong> places it in <strong>Busy</strong> so no Busy row sorts above Idle. Both <code>state:available</code> and <code>state:busy</code> filters still include it.</dd>
     </div>
     <div>
-      <dt>Task has a Blocked question AND a Working sub-process</dt>
-      <dd><code>Blocked</code> outranks <code>Error</code>, <code>Busy</code>, and <code>Available</code> in both row display and sort bucket (0). The row says <strong>Blocked</strong> and sorts at the very top.</dd>
+      <dt>Task has Blocked + Error + Busy reports</dt>
+      <dd><code>Blocked</code> outranks <code>Error</code>, <code>Busy</code>, and <code>Available</code> in row display and sort bucket (0). If Blocked clears while Error remains, the row reads <strong>Error</strong> and sorts in bucket (1).</dd>
     </div>
     <div>
       <dt>Build or provider emits OSC 7501 <code>error</code>, then person types</dt>
-      <dd><code>Error</code> appears in red on Mac and iOS, joins <code>attention</code>, and sorts right behind <code>Blocked</code> (bucket 1). Typing in the pane clears <code>error</code> via <code>acknowledge_results</code> / <code>ProgramStatusReducer.interaction</code>; the saved order stays put until the next sort or drag.</dd>
+      <dd><code>Error</code> renders red on Mac and iOS, enters <code>attention</code>, and sorts behind <code>Blocked</code>. Typing dismisses <code>error</code> via <code>acknowledge_results</code> / <code>ProgramStatusReducer.interaction</code>; saved order stays put.</dd>
     </div>
     <div>
       <dt>Drag Task C above A, Machine blips 1 s, person clicks Sort by status</dt>
-      <dd>Both writes sit in <code>PendingChanges</code> with distinct <code>requestID</code>s and retry across the blip. Once Sort is queued after the drag, <code>workingOrder</code> stops replaying the pre-sort drag preview over newer readings; a drag made <em>after</em> Sort still previews on top.</dd>
+      <dd>Both writes sit in <code>PendingChanges</code> with distinct <code>requestID</code>s, serialized in <code>orderWrites</code> so the drag lands before Sort. Once Sort is queued, <code>workingOrder</code> stops replaying the pre-sort drag preview; a drag made <em>after</em> Sort previews immediately.</dd>
     </div>
     <div>
       <dt>Machine is offline &gt;10 s (<code>Link.away</code>)</dt>
-      <dd>Both the sidebar <strong>Sort by status</strong> button and ⌘K action respect <code>pendingChanges.acceptsChanges</code> (disabled / away notice), matching every other Work mutation control.</dd>
+      <dd>Sidebar and ⌘K <strong>Sort by status</strong> controls disable and return <code>PendingChanges.awayText</code> if invoked. <em>Minor asymmetry noted:</em> sidebar/grid drags are not disabled while away and instead queue in <code>PendingChanges</code> until reconnect (consistent with other non-button drag gestures; no data loss).</dd>
     </div>
     <div>
       <dt>Task leaves Working (completed/unclaimed) and later re-enters</dt>
-      <dd><em>Counterexample noted:</em> <code>task_orders</code> prunes departed Tasks on the next drag or sort, not on completion/unassign, and <code>started_at</code> uses first claim (<code>MIN(o.at)</code>) so Machine handoffs keep original start time. Reclaiming a Task before any drag/sort keeps its old slot rather than prepending. Acceptable trade-off vs writing <code>task_orders</code> on every completion/unclaim, documented explicitly.</dd>
+      <dd><em>Counterexample noted:</em> <code>task_orders</code> prunes departed Tasks on the next drag or sort, not on completion/unclaim, and <code>started_at</code> uses first claim (<code>MIN(o.at)</code>) so Machine handoffs keep original start time. Reclaiming a Task before any drag/sort keeps its prior slot rather than prepending.</dd>
     </div>
     <div>
       <dt>Graph parked at <code>start</code> or finished at <code>end</code></dt>
-      <dd><code>fill_graph_steps_in</code> returns <code>None</code> when parked at <code>START</code> or <code>END</code> (matching <code>TaskGraph::read</code>). While running (<code>run_start</code> set), it resolves the live cursor step name as today.</dd>
+      <dd><code>fill_task_contents_in</code> filters <code>START</code> and <code>END</code> to <code>None</code> (matching <code>TaskGraph::read</code>). While running (<code>run_start</code> set), it resolves the live cursor step name via <code>CapturedGraph::step_name_of</code>.</dd>
     </div>
     <div>
       <dt>Task blocked by Graph/git condition with no live terminal report</dt>
-      <dd><em>Boundary noted:</em> <code>TaskCondition::Blocked</code> (e.g. missing worktree or merge conflict) is derived during full roadmap snapshots, not in SQLite selection reads. <code>SelectionState::Blocked</code> reflects program/session reports only. Unifying condition derivation into SQLite selections is separate architectural work outside LOO-1063.</dd>
+      <dd><em>Boundary noted:</em> <code>TaskCondition::Blocked</code> (e.g. missing worktree or merge conflict) is derived during full roadmap snapshots, not in SQLite selection reads. <code>SelectionState::Blocked</code> reflects program/session reports only.</dd>
     </div>
   </dl>
 </section>
@@ -331,30 +332,31 @@ kbd { color: var(--muted); font-size: .78rem; font-family: ui-monospace, monospa
     <ul>
       <li><strong>Sorting by Graph step (B2)</strong>, <strong>smart “heading to the end” Auto sink (B3)</strong>, and <strong>manual Close / Park (B4)</strong> — tracked in <a href="explore.html">explore.html</a> and <a href="questions.md">questions.md</a>.</li>
       <li><strong>LOO-937 Project-rank ownership</strong> — deciding whether Working drags rewrite shared Project rank rather than Machine-local <code>task_orders</code>.</li>
-      <li><strong>Surfacing <code>TaskCondition::Blocked</code> in selection queries</strong> — would require moving or caching git/PR/checkout condition checks inside the selection reader.</li>
+      <li><strong>Surfacing <code>TaskCondition::Blocked</code> in selection queries</strong> — requires moving or caching git/PR/checkout condition checks inside the selection reader.</li>
+      <li><strong>Returning Desktop launch stuck on saved planning (“Updating…”)</strong> — observed in QA round 4 (<a href="qa.html">qa.html</a>, <a href="questions.md">questions.md</a>) in workspace restore when opened by link; outside Working order.</li>
     </ul>
   </div>
 </section>
 
 <section aria-labelledby="questions">
-  <h2 id="questions">Choices made for review</h2>
-  <p>In headless Graph execution, the bold choice in each pair is written into <a href="plan.md">scratch/plan.md</a> for the next implement pass. Reply with e.g. <code>1b</code> to override any choice.</p>
+  <h2 id="questions">Choices built for review</h2>
+  <p>These three product choices were made for review and are built as option <strong>a</strong> at <code>eca5ec7bef</code>. All are reversible. Reply with e.g. <code>1b</code> to change any choice.</p>
   <ol class="choices">
     <li>When a Task has one <code>Busy</code> Session and one <code>Available</code> Session, where should <strong>Sort by status</strong> place it?
       <ol type="a">
-        <li><strong>Match the row’s own status word (Busy → bottom bucket).</strong> Chosen for review: both Mac and iOS rows print <strong>Busy</strong>, so sorting it as <strong>Busy</strong> prevents a Busy row from sitting above Idle. Both <code>Available</code> and <code>Busy</code> filters still include it.</li>
-        <li>Keep <code>Available</code> ahead of <code>Busy</code> in the sort, and also change Mac/iOS row display so dual-state rows print <strong>Available</strong> instead of <strong>Busy</strong>.</li>
+        <li><strong>Match the row’s own status word (Busy → bottom bucket).</strong> Built: both Mac and iOS rows print <strong>Busy</strong>, so sorting it as <strong>Busy</strong> prevents a Busy row from sitting above Idle. Both <code>Available</code> and <code>Busy</code> filters still include it.</li>
+        <li>Sort <code>Available</code> ahead of <code>Busy</code>, and change Mac/iOS row display so dual-state rows print <strong>Available</strong> instead of <strong>Busy</strong>.</li>
       </ol>
     </li>
     <li>How should OSC 7501 <code>error</code> sort in <strong>Sort by status</strong>?
       <ol type="a">
-        <li><strong>Project <code>SelectionState::Error</code> and sort <code>Blocked → Error → Available → Idle → Busy</code>.</strong> Chosen for review: matches <code>ProgramStatusState.summaryOrder</code>, keeps failures above Available, and brings red Error status to iOS too.</li>
+        <li><strong>Project <code>SelectionState::Error</code> and sort <code>Blocked → Error → Available → Idle → Busy</code>.</strong> Built: matches <code>ProgramStatusState.summaryOrder</code>, keeps failures above Available, and brings red Error status to iOS too.</li>
         <li>Merge <code>Error</code> into the <code>Blocked</code> bucket without adding a new <code>SelectionState</code> variant (leaves iOS unable to distinguish Error from Idle).</li>
       </ol>
     </li>
     <li>Should <strong>Sort by status</strong> guess a local preview before the Machine replies?
       <ol type="a">
-        <li><strong>Route through <code>PendingChanges</code> without a guessed preview, superseding pre-sort drag previews.</strong> Chosen for review: <code>ViewContent</code> does not carry <code>started_at</code>, so a client preview would guess within-bucket order and flicker when the Machine answers. Routing through <code>PendingChanges</code> still gives blip retry, offline disable, and race-free reconciliation with drags.</li>
+        <li><strong>Route through <code>PendingChanges</code> without a guessed preview, superseding pre-sort drag previews.</strong> Built: <code>ViewContent</code> does not carry <code>started_at</code>, so a client preview would guess within-bucket order and flicker when the Machine answers. Routing through <code>PendingChanges</code> still gives blip retry, offline disable, and click-ordered reconciliation with drags.</li>
         <li>Carry <code>started_at</code> on <code>ViewContent</code> so the client can compute an exact instant preview of Sort by status too.</li>
       </ol>
     </li>
@@ -363,10 +365,31 @@ kbd { color: var(--muted); font-size: .78rem; font-family: ui-monospace, monospa
 </main>
 <script>
 const scenes = {
-  sort: {
-    barBuilt: ['Working Tasks', '<span class="sort-btn">⇅ Sort by status</span>'],
-    barProposed: ['Working Tasks', '<span class="sort-btn">⇅ Sort by status</span>'],
+  turns: {
+    beforeTitle: 'Base (before LOO-1063)',
+    beforeBadge: 'Base · 5d5bf92c72',
+    barBefore: ['Working Tasks (activity-sorted)', '<span>No Sort button</span>'],
+    barBuilt: ['Working Tasks (Start-Time Stack)', '<span class="sort-btn">⇅ Sort by status</span>'],
+    before: [
+      { key: '⌘1', id: 'LOO-101', title: 'Alpha', status: 'Available', cls: 'st-available', step: '' },
+      { key: '⌘2', id: 'LOO-103', title: 'Charlie', status: 'Available', cls: 'st-available', step: '' },
+      { key: '⌘3', id: 'LOO-102', title: 'Bravo (you just pressed Enter here)', status: 'Busy', cls: 'st-busy', step: '', mismatch: true }
+    ],
     built: [
+      { key: '⌘1', id: 'LOO-101', title: 'Alpha', status: 'Available', cls: 'st-available', step: 'implement' },
+      { key: '⌘2', id: 'LOO-102', title: 'Bravo (stays second across turns)', status: 'Busy', cls: 'st-busy', step: 'implement' },
+      { key: '⌘3', id: 'LOO-103', title: 'Charlie', status: 'Available', cls: 'st-available', step: 'review' }
+    ],
+    beforeNotice: 'Pressing Enter in Bravo turned it Busy and jumped it to the bottom of the list.',
+    builtNotice: 'Bravo stays in place across Idle → Busy → Available. Its Graph step updates in place.',
+    observation: 'Working order is decoupled from conversation activity and Backlog planning rank. New arrivals prepend at the top; turns never move rows.'
+  },
+  sort: {
+    beforeTitle: 'Pass 1 (before Slice 1)',
+    beforeBadge: 'Prior · 1e3b4007ce',
+    barBefore: ['Working Tasks', '<span class="sort-btn">⇅ Sort by status</span>'],
+    barBuilt: ['Working Tasks', '<span class="sort-btn">⇅ Sort by status</span>'],
+    before: [
       { key: '⌘1', id: 'LOO-101', title: 'Approve schema change', status: 'Blocked', cls: 'st-blocked', step: 'plan' },
       { key: '⌘2', id: 'LOO-104', title: 'Refactor parser', status: 'Available', cls: 'st-available', step: 'implement' },
       { key: '⌘3', id: 'LOO-103', title: 'Dual-session sync (working + idle)', status: 'Busy', cls: 'st-busy', step: 'implement', mismatch: true },
@@ -374,7 +397,7 @@ const scenes = {
       { key: '⌘5', id: 'LOO-105', title: 'Draft notes', status: 'Idle', cls: 'st-idle', step: 'plan' },
       { key: '⌘6', id: 'LOO-106', title: 'Run test matrix', status: 'Busy', cls: 'st-busy', step: 'gate' }
     ],
-    proposed: [
+    built: [
       { key: '⌘1', id: 'LOO-101', title: 'Approve schema change', status: 'Blocked', cls: 'st-blocked', step: 'plan' },
       { key: '⌘2', id: 'LOO-102', title: 'Fix release script (OSC error)', status: 'Error', cls: 'st-error', step: 'gate' },
       { key: '⌘3', id: 'LOO-104', title: 'Refactor parser', status: 'Available', cls: 'st-available', step: 'implement' },
@@ -382,45 +405,49 @@ const scenes = {
       { key: '⌘5', id: 'LOO-103', title: 'Dual-session sync (working + idle)', status: 'Busy', cls: 'st-busy', step: 'implement' },
       { key: '⌘6', id: 'LOO-106', title: 'Run test matrix', status: 'Busy', cls: 'st-busy', step: 'gate' }
     ],
-    builtNotice: 'Two rows violate the order printed on screen: Busy (LOO-103) sits above Idle, and Error (LOO-102) sits below Available.',
-    proposedNotice: '',
-    observation: 'In the built code, status_bucket checks Available before Busy and ignores Error. Proposed aligns status_bucket with ProgramStatusState.summaryOrder and adds SelectionState::Error.'
+    beforeNotice: 'Pass 1 placed Busy (LOO-103) above Idle and dropped Error (LOO-102) below Available.',
+    builtNotice: 'Sorted order matches every row label: Blocked → Error → Available → Idle → Busy, newest first per bucket.',
+    observation: 'Slice 1 (820bcdc384) added SelectionState::Error and aligned status_bucket with ProgramStatusState.summaryOrder and iOS Content.status.'
   },
   blip: {
-    barBuilt: ['Machine link: brief blip / away', '<span class="sort-btn">⇅ Sort by status</span>'],
-    barProposed: ['Machine link: brief blip / away', '<span class="sort-btn disabled">⇅ Sort by status</span>'],
-    built: [
+    beforeTitle: 'Pass 1 (before Slice 2)',
+    beforeBadge: 'Prior · 1e3b4007ce',
+    barBefore: ['Machine link: brief blip / away', '<span class="sort-btn">⇅ Sort by status</span>'],
+    barBuilt: ['Machine link: brief blip / away', '<span class="sort-btn disabled">⇅ Sort by status</span>'],
+    before: [
       { key: '⌘1', id: 'LOO-106', title: 'Dragged C (still pending in PendingChanges)', status: 'Busy', cls: 'st-busy', step: 'gate', mismatch: true },
       { key: '⌘2', id: 'LOO-104', title: 'Available A', status: 'Available', cls: 'st-available', step: 'implement' },
       { key: '⌘3', id: 'LOO-105', title: 'Idle B', status: 'Idle', cls: 'st-idle', step: 'plan' }
     ],
-    proposed: [
+    built: [
       { key: '⌘1', id: 'LOO-104', title: 'Available A', status: 'Available', cls: 'st-available', step: 'implement' },
       { key: '⌘2', id: 'LOO-105', title: 'Idle B', status: 'Idle', cls: 'st-idle', step: 'plan' },
       { key: '⌘3', id: 'LOO-106', title: 'Dragged C (superseded by newer Sort)', status: 'Busy', cls: 'st-busy', step: 'gate' }
     ],
-    builtNotice: 'Sort bypassed PendingChanges: failed immediately on blip, stayed clickable when away, and pending .reorder replayed C back to ⌘1.',
-    proposedNotice: 'Both drag and Sort share PendingChanges: retries blips under one requestID, disables when away, and newer Sort supersedes pre-sort drag previews.',
-    observation: 'Rust already unified Move and SortByStatus into TaskOrderEdit. Routing Sort through PendingChanges brings Swift to the same single ownership model.'
+    beforeNotice: 'Pass 1 bypassed PendingChanges for Sort: failed on blip, stayed clickable when away, and replayed an earlier drag over Sort.',
+    builtNotice: 'Drag and Sort both go through PendingChanges + orderWrites: click-ordered across reconnects, Sort disables when away, and Sort supersedes pre-sort drag previews.',
+    observation: 'Slice 2 (ca02700fb8) unified Desktop order writes under WorkModel.editWorkingOrder and PendingChanges.'
   },
   sentinels: {
+    beforeTitle: 'Pass 1 (before Slice 3)',
+    beforeBadge: 'Prior · 1e3b4007ce',
+    barBefore: ['Mac sidebar + iOS feed', '<span>Graph step</span>'],
     barBuilt: ['Mac sidebar + iOS feed', '<span>Graph step</span>'],
-    barProposed: ['Mac sidebar + iOS feed', '<span>Graph step</span>'],
-    built: [
+    before: [
       { key: 'Mac', id: 'LOO-201', title: 'Fresh Task (Graph parked at START)', status: 'Active', cls: 'st-idle', step: 'start', badStep: true, mismatch: true },
       { key: 'Mac', id: 'LOO-202', title: 'In-flight Task', status: 'Busy', cls: 'st-busy', step: 'implement' },
       { key: 'Mac', id: 'LOO-203', title: 'Finished Graph (waiting for complete)', status: 'Available', cls: 'st-available', step: 'end', badStep: true, mismatch: true },
       { key: 'iOS', id: 'LOO-202', title: 'Phone feed row (graphStep ignored)', status: 'Busy', cls: 'st-busy', step: '(omitted)', badStep: true, mismatch: true }
     ],
-    proposed: [
+    built: [
       { key: 'Mac', id: 'LOO-201', title: 'Fresh Task (Graph parked at START)', status: 'Active', cls: 'st-idle', step: '' },
       { key: 'Mac', id: 'LOO-202', title: 'In-flight Task', status: 'Busy', cls: 'st-busy', step: 'implement' },
       { key: 'Mac', id: 'LOO-203', title: 'Finished Graph (waiting for complete)', status: 'Available', cls: 'st-available', step: '' },
       { key: 'iOS', id: 'LOO-202', title: 'Phone feed row (graphStep shown)', status: 'Busy', cls: 'st-busy', step: 'implement' }
     ],
-    builtNotice: 'fill_graph_steps_in leaks raw "start" and "end" sentinels, and iOS TaskListView ignores graphStep.',
-    proposedNotice: '',
-    observation: 'TaskGraph::read already treats task_work::START and task_work::END as current_step = None. Filtering them in fill_graph_steps_in and passing task.graphStep to iOS TaskRow aligns all three.'
+    beforeNotice: 'Pass 1 leaked raw "start"/"end" sentinels and omitted graphStep on iOS.',
+    builtNotice: 'START and END sentinels map to None; Mac and iOS render the same Graph step.',
+    observation: 'Slice 3 (ecf3ac66eb) stripped START/END in fill_task_contents_in and passed task.graphStep to iOS TaskRow.'
   }
 };
 
@@ -458,12 +485,14 @@ function renderList(el, items) {
 
 function show(name) {
   const s = scenes[name];
+  document.getElementById('before-title').textContent = s.beforeTitle;
+  document.getElementById('before-badge').textContent = s.beforeBadge;
+  document.getElementById('before-bar').innerHTML = `<span>${s.barBefore[0]}</span>${s.barBefore[1]}`;
   document.getElementById('built-bar').innerHTML = `<span>${s.barBuilt[0]}</span>${s.barBuilt[1]}`;
-  document.getElementById('proposed-bar').innerHTML = `<span>${s.barProposed[0]}</span>${s.barProposed[1]}`;
+  renderList(document.getElementById('before-rows'), s.before);
   renderList(document.getElementById('built-rows'), s.built);
-  renderList(document.getElementById('proposed-rows'), s.proposed);
+  document.getElementById('before-notice').textContent = s.beforeNotice;
   document.getElementById('built-notice').textContent = s.builtNotice;
-  document.getElementById('proposed-notice').textContent = s.proposedNotice;
   document.getElementById('observation').textContent = s.observation;
 }
 
@@ -474,7 +503,7 @@ for (const btn of buttons) {
     show(btn.dataset.scene);
   });
 }
-show('sort');
+show('turns');
 </script>
 </body>
 </html>

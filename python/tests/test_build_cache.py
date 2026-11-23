@@ -318,3 +318,24 @@ def test_caller_supplied_root_configuration_is_read_only(
     if source != "SCCACHE_BASEDIRS":
         assert config.read_text() == original
     assert not build_cache.inventory_path().parent.exists()
+
+
+def test_status_reads_a_fresh_daemon_before_its_first_cache_write(
+    tmp_path, serving_cache, monkeypatch, capsys
+):
+    write_inventory(tmp_path, build_cache.inventory_path())
+    stats = {
+        "basedirs": [str(tmp_path.resolve())],
+        "stats": {"cache_hits": {"counts": {}}, "cache_misses": {"counts": {}}},
+        "cache_size": None,
+        "max_cache_size": 10 * 1024**3,
+    }
+    monkeypatch.setenv("SCCACHE_TEST_STATS", json.dumps(stats))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["build_cache.py", "status"])
+    with pytest.raises(SystemExit) as exit:
+        build_cache.main()
+    assert exit.value.code == 0
+    output = capsys.readouterr().out
+    assert "roots    1 of 1 loaded; this checkout loaded" in output
+    assert "cache    unmeasured" in output

@@ -232,6 +232,8 @@ def install(repo: Path, revision: str) -> None:
     write_inventory(repo, inventory_path(), _default_configuration())
     install_hook(repo)
     configure_cargo(cargo_configuration(), wrapper, cache_environment(revision))
+    # A daemon already serving other repositories must load this one too.
+    register(repo)
 
 
 def configured_cache() -> tuple[Path | None, dict[str, str]]:
@@ -428,10 +430,11 @@ def main() -> None:
                     print(f"Rust     {hits} hits, {misses} misses")
                 else:
                     print("Rust     unmeasured")
+                # A daemon reports no size until its first cache write.
                 print(
                     f"cache    {stats['cache_size'] / 1024**3:.1f} GiB "
                     f"of {stats['max_cache_size'] / 1024**3:.1f} GiB"
-                    if stats
+                    if stats and stats["cache_size"] is not None
                     else "cache    unmeasured"
                 )
             raise SystemExit(result["exit_code"])

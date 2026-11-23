@@ -347,7 +347,9 @@ The installer builds and checks the pin, then writes `build.rustc-wrapper` and
 the existing cache directory and the size cap. Reinstall to update the hook or
 pass `--revision <sha>` to move the pin. The verified binary and stock 0.19.0
 print the same version. The revision in the installation path and socket name
-identifies the pin. CI uses its own Cargo configuration.
+identifies the pin. Installing registers the checkout like the hook does, so
+a daemon already serving other repositories loads it. CI uses its own Cargo
+configuration.
 
 Git's `post-checkout` hook registers the worktree in
 `~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set). The hook

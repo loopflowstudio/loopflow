@@ -50,3 +50,15 @@ running `sh -c 'tty; exec lf session resume <id>'`: the printed tty tells your
 view apart from a held terminal that takes it ("moved to ttysN"). Replacing a
 binary a live server runs: `rm` it and copy the new one, or macOS SIGKILLs the
 next exec (status exits 137); then restart the private server.
+
+## Shared build cache
+
+Drive `scripts/build_cache.py` in an isolated `HOME` and `CARGO_HOME`, keeping
+the real `RUSTUP_HOME`. Copy the installed pin's `bin/sccache` to the same
+revision path under that `HOME`; `install` then skips `cargo install`. Run the
+branch's `.venv/bin/python` directly, since `uv` under a new `HOME` refetches.
+A dependency-free two-crate workspace is enough. Give it `[profile.dev]
+incremental = false`, like the repository; never read `CARGO_MANIFEST_DIR`
+in a crate meant to hit, because that value stays verbatim in the hash. Touch a
+source before a build that must start a daemon: a fresh build compiles nothing.
+Stop that daemon by the PID `status --json` reports.

@@ -703,7 +703,7 @@ provider ([below](#opencode-and-pi-report-from-inside-the-provider)):
 ```text
 → {"type":"hello","revision":7,"min_revision":7,"client":{"kind":"hook","platform":"macos","name":"lf __context-block","version":"0.15.1"}}
 ← {"type":"welcome",…}
-→ {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null,"printed":[],"inbox":"/Users/me/.claude/sessions/4242.9c1d….key"},"select":null,"request_id":null}
+→ {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null,"printed":[],"inbox":{"claude":"/Users/me/.claude/sessions/4242.9c1d….key"}},"select":null,"request_id":null}
 ← {"type":"response","id":"stop","trace_id":"…","result":{"steers":null,"update":null,"waiting":false}}
 ```
 
@@ -714,11 +714,14 @@ JSON the provider sent the hook, unchanged. A conversation lf did not start,
 such as a thread a Codex app-server opened, has no provider context: its hook
 sends only `stop`, with a null `adapter`, and the server only refreshes
 planning. `gap` is the hook's open recording
-gap, `{first, last}`, or null. `inbox` is the key
-file a Claude conversation publishes for peers of its cross-session inbox,
-`sessions/<pid>.<sha256 of socket>.key` in its configuration directory, found
-from the `CLAUDE_CODE_MESSAGING_SOCKET` Claude gives its children; null for
-other providers.
+gap, `{first, last}`, or null. `inbox` is where the conversation
+takes messages while idle, and names which kind it is. From Claude it is
+`{"claude": key}`, the key file the conversation publishes for peers of its
+cross-session inbox, `sessions/<pid>.<sha256 of socket>.key` in its
+configuration directory, found from the `CLAUDE_CODE_MESSAGING_SOCKET` Claude
+gives its children. From an OpenCode or Pi work session it is
+`{"socket": path}`, the Unix socket its plugin or extension listens on. It is
+null from Codex and from workers.
 
 Before answering, the server records what the boundary says: the native turn
 (started at a prompt, yielded at a turn end, with the open background tools and
@@ -780,24 +783,21 @@ and batches, prompt hooks are gated like tool hooks.
 
 The server keeps no list of conversations (`wake.rs`); it reads them from the
 store. A work session is idle when its last recorded native turn yielded
-(`session_activity`) and its AgentProcess is live and reachable: through its
-Codex app-server (`processes.endpoint`), or through where its own process takes
-a wake (`processes.inbox`), read by the Session's provider:
-
-| provider | `processes.inbox` holds | saved by |
-|---|---|---|
-| Claude | its cross-session inbox key; `sessions/<pid>.json` beside it names the socket and must still name the conversation | its first managed boundary |
-| OpenCode, Pi | the plugin's wake socket, `<LF_HOME>/wake/<random>.sock` | every plugin boundary |
-| Antigravity | the launch's wake file: its log path and server token (0600) | the launch |
-
-One server thread waits on the store's change signal (`store::changes`) and
-reads the `task_updates` revision and the newest steer at start and whenever
-either moves; every idle conversation with news gets its unread steers, Task
-updates among them, in one message, and is recorded as in a turn until its next
-Stop. One with no news is not connected to. A turn end checks its own
-conversation the same way. The steers are claimed as a hook claims them and
-stamped once the message is sent, so a failed send leaves a claim that lapses
-for the next boundary:
+(`session_activity`) and its AgentProcess is live, and reachable through its
+Codex app-server (`agent_sessions.agent_endpoint`), the wake file an
+Antigravity launch saved in `agent_sessions.agent_inbox`, or what its boundaries
+saved: a Claude inbox key in `agent_sessions.agent_inbox`, where
+`sessions/<pid>.json` beside the key names the socket and must still name the
+conversation, or the socket an OpenCode plugin or Pi extension listens on in
+`agent_sessions.agent_socket`. One
+server thread waits on the store's change signal (`store::changes`) and reads
+the `task_updates` revision and the newest steer at start and whenever either
+moves; every idle conversation with news gets its unread steers, Task updates
+among them, in one message, and is recorded as in a turn until its next Stop.
+One with no news is not connected to. A turn end checks
+its own conversation the same way. The steers are claimed as a hook claims
+them and stamped once the message is sent, so a failed send leaves a claim
+that lapses for the next boundary:
 
 - Claude: a message in its cross-session inbox, from `loopflow`, which Claude
   runs as the conversation's next turn. Managed Claude launches set
@@ -806,14 +806,13 @@ for the next boundary:
   review. Bare launches keep Claude's default.
 - Codex: a `turn/start` on the Session's private app-server whose tool output
   is the message.
-- OpenCode and Pi: one line, `{"type":"steers","text":…}`, on the plugin's wake
-  socket. OpenCode's plugin queues it as a synthetic message on the
-  conversation (`session.synthetic`, `delivery: "queue"`); Pi's extension sends
-  it as a `loopflow-steer` message with `deliverAs: "followUp"` and
-  `triggerTurn`. Both start a turn when idle and wait behind one that is
-  running, and the transcript shows the message as lf's, not typed. The plugin
-  answers `{"type":"accepted"}` once the provider took it; an `error` answer is
-  a failed send. A launch that records no turns binds no socket.
+- OpenCode and Pi: one JSON line, `{"thread", "text"}`, on the socket the
+  plugin or extension opened under `/tmp/lf-wake-…/` when its work session
+  started. It asks its provider for a turn (`session.synthetic`; Pi's
+  `sendMessage` with `triggerTurn`) and answers `started`. One that runs
+  another conversation, or whose provider refuses, closes without answering.
+  A turn already running takes the message as a steer. OpenCode's TUI shows
+  the answer but not the message that caused it.
 - Antigravity: `SendUserCascadeMessage` on `agy`'s loopback language server,
   with the conversation as `cascadeId` and the token the launch set
   (`ANTIGRAVITY_SERVER_CSRF_TOKEN`). The port is read from the launch's
@@ -821,15 +820,14 @@ for the next boundary:
   undocumented (seen on `agy` 1.5.14); when a release breaks it, the wake fails
   in `logs/lf.log` and the steer arrives at the next boundary.
 
-OpenCode's plugin names its conversation at turn end (`Stop`) and at each
-typed prompt after the first, which selects it (`UserPromptSubmit`), so its
-work session shows as idle like the others;
-Pi's idle comes from `agent_settled`.
+A conversation reopened after it was quit runs no turn until someone types.
+The first boundary that names a new inbox or socket records its provider as
+idle and sends what was saved while it was closed: an OpenCode plugin names
+its socket as it loads, a Pi extension at `session_start`. Claude's start hook
+reads those steers into its context instead, and starts no turn.
 
 A server that restarts reads the same conversations again. An unreachable
-inbox, socket or language server leaves its news unclaimed. A Session started
-by an `lf` without this reach saved no inbox and hears steers at its next
-boundary. After a failed send the steers arrive
+Claude inbox or socket leaves its news unclaimed. After a failed send the steers arrive
 again. Chats and batches are never woken. No
 process or clock runs per Session: the watcher's only clock is the change
 signal's 60 s fallback for a missed checkpoint or a Machine's sleep.

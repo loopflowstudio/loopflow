@@ -25,3 +25,5 @@
   for Pi, which would add a second idle writer.
 - Antigravity's wake file and log live in `<LF_HOME>/context-deliveries/` beside the delivery, not
   `.lf/prompts/`. Passed over: the checkout's prompts dir, which moves with the checkout.
+
+- Sync with main: keep its OpenCode and Pi wake protocol, reopened-session handling and OpenCode model selection. Antigravity still reads its launch file from `agent_inbox`.

@@ -38,20 +38,27 @@ pub struct IdleConversation {
     pub reach: IdleReach,
 }
 
-/// How the Machine server starts a turn in an idle conversation, chosen by
-/// its provider from `agent_inbox` (Codex: `agent_endpoint`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IdleReach {
-    /// The inbox key file Claude publishes beside its session record.
-    Claude(std::path::PathBuf),
     /// The Session's private app-server.
     Codex(std::path::PathBuf),
-    /// The wake socket an OpenCode plugin or Pi extension listens on inside
-    /// the provider's process.
-    Plugin(std::path::PathBuf),
-    /// The wake file an Antigravity launch wrote: `agy`'s log, which names
-    /// its language server's port, and the token that server was started with.
+    /// What the provider's own code listens on.
+    Inbox(Inbox),
+    /// The wake file naming Antigravity's language-server log and launch token.
     Antigravity(std::path::PathBuf),
+}
+
+/// Where code the provider loads takes a message for an idle conversation,
+/// as its hook, plugin or extension names it at a boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum Inbox {
+    /// The key file Claude publishes for peers of its cross-session inbox,
+    /// `sessions/<pid>.<sha256 of socket>.key` in its configuration
+    /// directory; the server reads the key when it sends.
+    Claude(std::path::PathBuf),
+    /// The Unix socket an OpenCode plugin or Pi extension listens on.
+    Socket(std::path::PathBuf),
 }
 
 impl std::fmt::Debug for SteerAdapter {

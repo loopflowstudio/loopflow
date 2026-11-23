@@ -4,12 +4,11 @@
 //! the store's `task_updates` revision moves, one watcher reads them and wakes
 //! each one it has news for. A server restart forgets nothing. No process or
 //! clock per Session: Claude takes the message in its cross-session inbox,
-//! Codex as a turn its app-server starts, OpenCode and Pi on the wake socket
-//! lf's plugin listens on inside the provider, Antigravity as a message to
-//! `agy`'s own language server. A conversation the server cannot reach hears
-//! it at its next boundary.
+//! Codex as a turn its app-server starts, OpenCode and Pi as a turn their
+//! plugin or extension starts, and Antigravity through its language server.
+//! A conversation the server cannot reach hears it at its next boundary.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
@@ -18,17 +17,15 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::json;
 
 use loopflow_execution::harness::antigravity::LanguageServer;
-use loopflow_execution::steer::{IdleConversation, IdleReach};
+use loopflow_execution::steer::{IdleConversation, IdleReach, Inbox};
 use loopflow_storage::sqlite::SqliteStore;
 
 /// How long the watcher waits for a store change before reading the revision
 /// anyway: the change signal can miss a checkpoint or a Machine's sleep.
 const UNSIGNALLED: Duration = Duration::from_secs(60);
 const SEND_DEADLINE: Duration = Duration::from_secs(2);
-/// A Codex turn start loads nothing new; it answers once the turn exists.
-const CODEX_DEADLINE: Duration = Duration::from_secs(15);
-/// A plugin answers once its provider queued the message, before the turn runs.
-const PLUGIN_DEADLINE: Duration = Duration::from_secs(5);
+/// A provider's turn start loads nothing new; it answers once the turn exists.
+const TURN_START_DEADLINE: Duration = Duration::from_secs(15);
 
 /// Wake `session` now if it is idle and has news: a turn just ended, so an
 /// update that arrived during it waits no longer. Blocking.
@@ -128,13 +125,13 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
         // Connect before claiming, so an unreachable conversation keeps its
         // news for its next boundary.
         let reach = match reach {
-            IdleReach::Claude(key) => match open_inbox(key, thread)? {
-                Some((socket, token)) => Reach::Inbox(socket, token),
+            IdleReach::Inbox(Inbox::Claude(key)) => match open_inbox(key, thread)? {
+                Some((socket, token)) => Reach::Claude(socket, token),
                 None => return Ok(()),
             },
-            IdleReach::Codex(endpoint) => Reach::Codex(endpoint),
-            IdleReach::Plugin(socket) => Reach::Plugin(open_plugin(socket)?),
             IdleReach::Antigravity(wake) => Reach::Antigravity(LanguageServer::find(wake)?),
+            IdleReach::Codex(endpoint) => Reach::Codex(endpoint),
+            IdleReach::Inbox(Inbox::Socket(socket)) => Reach::Socket(open_socket(socket)?),
         };
         let steers = loopflow_execution::steer::claim(
             store,
@@ -147,12 +144,12 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
             return Ok(());
         };
         match reach {
-            Reach::Inbox(mut socket, token) => {
+            Reach::Claude(mut socket, token) => {
                 send_inbox(&mut socket, &token, thread, &steers.text)?
             }
-            Reach::Codex(endpoint) => start_codex_turn(endpoint, thread, &steers.text)?,
-            Reach::Plugin(socket) => send_plugin(socket, &steers.text)?,
             Reach::Antigravity(server) => server.send(thread, &steers.text)?,
+            Reach::Codex(endpoint) => start_codex_turn(endpoint, thread, &steers.text)?,
+            Reach::Socket(mut socket) => start_extension_turn(&mut socket, thread, &steers.text)?,
         }
         store.record_woken(adapter)?;
         loopflow_execution::steer::delivered(store, session, &steers);
@@ -164,10 +161,38 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
 }
 
 enum Reach<'a> {
-    Inbox(UnixStream, String),
+    Claude(UnixStream, String),
     Codex(&'a Path),
-    Plugin(UnixStream),
+    Socket(UnixStream),
     Antigravity(LanguageServer),
+}
+
+/// The socket an OpenCode plugin or Pi extension listens on while its work
+/// session runs.
+fn open_socket(socket: &Path) -> Result<UnixStream> {
+    let stream = UnixStream::connect(socket)
+        .with_context(|| format!("wake socket {} unreachable", socket.display()))?;
+    stream.set_write_timeout(Some(SEND_DEADLINE))?;
+    stream.set_read_timeout(Some(TURN_START_DEADLINE))?;
+    Ok(stream)
+}
+
+/// One JSON line naming the conversation and the message, then this side
+/// closes. The plugin or extension asks its provider for a turn and answers
+/// `started` once the provider took the message; a turn already running
+/// queues it as a steer.
+fn start_extension_turn(socket: &mut UnixStream, thread: &str, text: &str) -> Result<()> {
+    socket.write_all(format!("{}\n", json!({"thread":thread,"text":text})).as_bytes())?;
+    socket.shutdown(std::net::Shutdown::Write)?;
+    let mut answer = String::new();
+    socket
+        .read_to_string(&mut answer)
+        .context("the provider did not answer the turn start")?;
+    anyhow::ensure!(
+        answer.trim() == "started",
+        "the provider did not start a turn"
+    );
+    Ok(())
 }
 
 /// Claude's inbox socket and key for `thread`, from the key it publishes
@@ -208,37 +233,12 @@ fn start_codex_turn(endpoint: &Path, thread: &str, text: &str) -> Result<()> {
         .build()?;
     runtime.block_on(async {
         tokio::time::timeout(
-            CODEX_DEADLINE,
+            TURN_START_DEADLINE,
             loopflow_execution::harness::codex_connection::deliver_update(endpoint, thread, text),
         )
         .await
         .map_err(|_| anyhow!("Codex turn start timed out"))?
     })
-}
-
-fn open_plugin(socket: &Path) -> Result<UnixStream> {
-    let stream = UnixStream::connect(socket)
-        .with_context(|| format!("wake socket {} unreachable", socket.display()))?;
-    stream.set_write_timeout(Some(SEND_DEADLINE))?;
-    stream.set_read_timeout(Some(PLUGIN_DEADLINE))?;
-    Ok(stream)
-}
-
-/// One line each way: the steers, then whether the provider took them. The
-/// plugin hands them to its provider as lf's message, not the person's.
-fn send_plugin(mut socket: UnixStream, text: &str) -> Result<()> {
-    socket.write_all(format!("{}\n", json!({"type":"steers","text":text})).as_bytes())?;
-    let mut answer = String::new();
-    BufReader::new(socket).read_line(&mut answer)?;
-    let answer: serde_json::Value = serde_json::from_str(&answer)
-        .with_context(|| format!("wake socket answered {answer:?}"))?;
-    match answer["type"].as_str() {
-        Some("accepted") => Ok(()),
-        _ => Err(anyhow!(
-            "provider refused the wake: {}",
-            answer["message"].as_str().unwrap_or("no reason given")
-        )),
-    }
 }
 
 /// Claude's own peer envelope, so its transcript attributes the message to
@@ -271,7 +271,7 @@ mod tests {
     use super::{after_turn, wake_idle, Watcher};
     use crate::server::wire::{BoundaryMoment, SessionBoundary};
     use loopflow_execution::context_block::ContextDelivery;
-    use loopflow_execution::steer::{NativeBoundary, SteerAdapter};
+    use loopflow_execution::steer::{Inbox, NativeBoundary, SteerAdapter};
     use loopflow_storage::sqlite::SqliteStore;
     use std::io::{BufRead, Read, Write};
     use std::os::unix::net::UnixListener;
@@ -335,7 +335,7 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "UPDATE agent_sessions SET interactive=1,provider='claude' WHERE id=?1",
+                "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
                 [session],
             )
             .unwrap();
@@ -412,45 +412,12 @@ mod tests {
             key
         }
 
-        /// An OpenCode or Pi conversation whose turn ended, its plugin's wake
-        /// socket answering each wake with `answer` from a thread that
-        /// returns the line it read.
-        fn idle_plugin(
-            &self,
-            provider: &str,
-            answer: serde_json::Value,
-        ) -> std::thread::JoinHandle<serde_json::Value> {
-            self.store
-                .conn
-                .lock()
-                .unwrap()
-                .execute(
-                    "UPDATE agent_sessions SET provider=?2 WHERE id=?1",
-                    [&self.adapter.session, provider],
-                )
-                .unwrap();
-            let socket = self.home.path().join("wake.sock");
-            let listener = UnixListener::bind(&socket).unwrap();
-            self.stop(&self.store, &socket);
-            std::thread::spawn(move || {
-                let (stream, _) = listener.accept().unwrap();
-                let mut line = String::new();
-                std::io::BufReader::new(&stream)
-                    .read_line(&mut line)
-                    .unwrap();
-                (&stream)
-                    .write_all(format!("{answer}\n").as_bytes())
-                    .unwrap();
-                serde_json::from_str(&line).unwrap()
-            })
-        }
-
         /// The conversation's turn ends; its hook names its inbox.
         fn stop(&self, store: &SqliteStore, inbox: &Path) {
-            self.turn_end(store, Some(inbox));
+            self.turn_end(store, Some(Inbox::Claude(inbox.to_owned())));
         }
 
-        fn turn_end(&self, store: &SqliteStore, inbox: Option<&Path>) {
+        fn turn_end(&self, store: &SqliteStore, inbox: Option<Inbox>) {
             super::super::boundary::answer(
                 store,
                 &SessionBoundary {
@@ -460,10 +427,59 @@ mod tests {
                     callback: serde_json::json!({"hook_event_name":"Stop","session_id":"native"}),
                     gap: None,
                     printed: Vec::new(),
-                    inbox: inbox.map(Path::to_owned),
+                    inbox,
                 },
             )
             .unwrap();
+        }
+
+        /// An OpenCode or Pi work session's turn ends, as its plugin or
+        /// extension reports it, naming the socket it listens on.
+        fn settle(&self, provider: &str, socket: &Path) {
+            let thread = match provider {
+                "pi" => "/pi/session.jsonl",
+                _ => "native",
+            };
+            self.store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET provider=?1,provider_thread=?2 WHERE id=?3",
+                    [provider, thread, &self.adapter.session],
+                )
+                .unwrap();
+            let report = |moment, callback| {
+                super::super::boundary::answer(
+                    &self.store,
+                    &SessionBoundary {
+                        moment,
+                        delivery: self.delivery.clone(),
+                        adapter: Some(self.adapter.clone()),
+                        callback,
+                        gap: None,
+                        printed: Vec::new(),
+                        inbox: Some(Inbox::Socket(socket.to_owned())),
+                    },
+                )
+                .unwrap();
+            };
+            if provider == "pi" {
+                let answer = serde_json::json!({"type":"message_end","message":{"role":"assistant",
+                    "content":[{"type":"text","text":"Done."}],"stopReason":"stop"}});
+                report(
+                    BoundaryMoment::Event,
+                    serde_json::json!({"type":"agent_settled","aborted":false,"sessionFile":thread,
+                        "turn":uuid::Uuid::new_v4().to_string(),"openTools":0,"pendingInput":0,
+                        "events":[answer]}),
+                );
+                report(BoundaryMoment::Stop, serde_json::json!({}));
+            } else {
+                report(
+                    BoundaryMoment::Stop,
+                    serde_json::json!({"hook_event_name":"Stop","session_id":thread}),
+                );
+            }
         }
 
         fn comment(&self, store: &SqliteStore, id: &str, body: &str) {
@@ -490,6 +506,91 @@ mod tests {
         wire.lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    /// A plugin or extension listening for the server: every message it
+    /// takes, each answered as `answer`.
+    fn extension(
+        socket: &Path,
+        answer: &'static str,
+    ) -> std::sync::mpsc::Receiver<serde_json::Value> {
+        let listener = UnixListener::bind(socket).unwrap();
+        let (taken, messages) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let mut wire = String::new();
+                stream.read_to_string(&mut wire).unwrap();
+                let _ = std::io::Write::write_all(&mut stream, answer.as_bytes());
+                if taken.send(serde_json::from_str(&wire).unwrap()).is_err() {
+                    return;
+                }
+            }
+        });
+        messages
+    }
+
+    #[test]
+    fn an_idle_opencode_or_pi_work_session_starts_a_turn_on_its_direction_once() {
+        for (provider, thread) in [("opencode", "native"), ("pi", "/pi/session.jsonl")] {
+            let session = format!("wake-{provider}");
+            let fixture = fixture(&session);
+            let socket = fixture.home.path().join("s");
+            let messages = extension(&socket, "started\n");
+            fixture.settle(provider, &socket);
+            fixture.comment(&fixture.store, "c-1", "use the staging bucket");
+            after_turn(&fixture.store, &session);
+            let message = messages.try_recv().expect(provider);
+            assert_eq!(message["thread"], thread);
+            let text = message["text"].as_str().unwrap();
+            assert!(text.contains("use the staging bucket"), "{text}");
+            assert_eq!(
+                fixture
+                    .store
+                    .session_steers(&session, 0, 8)
+                    .unwrap()
+                    .pending,
+                0
+            );
+            // Woken, it is in a turn: nothing more goes out until that ends.
+            fixture.comment(&fixture.store, "c-2", "and the eu region");
+            wake_idle(&fixture.store, None);
+            assert!(messages.try_recv().is_err(), "{provider} woken mid-turn");
+            fixture.settle(provider, &socket);
+            after_turn(&fixture.store, &session);
+            let text = messages.try_recv().expect(provider)["text"].to_string();
+            assert!(text.contains("and the eu region"));
+            assert!(!text.contains("staging bucket"), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_work_session_that_starts_no_turn_keeps_its_news_for_the_next_boundary() {
+        // Nothing listens on the first socket; the second takes the message
+        // and closes without starting a turn.
+        for refused in [false, true] {
+            let session = format!("wake-refused-{refused}");
+            let fixture = fixture(&session);
+            let socket = fixture.home.path().join("s");
+            let _messages = refused.then(|| extension(&socket, ""));
+            fixture.settle("opencode", &socket);
+            fixture.comment(&fixture.store, "c-1", "use the staging bucket");
+            after_turn(&fixture.store, &session);
+            assert_eq!(
+                loopflow_execution::steer::idle_conversations(&fixture.store, Some(&session))
+                    .unwrap()
+                    .len(),
+                1,
+                "still idle"
+            );
+            // Claimed or not, nothing was stamped as read.
+            let page = fixture.store.session_steers(&session, 0, 8).unwrap();
+            assert!(
+                !page.items.is_empty() && page.items.iter().all(|row| row.delivered_at.is_none()),
+                "refused: {refused}: {:?}",
+                page.items
+            );
+        }
     }
 
     #[test]
@@ -532,76 +633,6 @@ mod tests {
         assert!(
             !wire.contains("staging bucket") && !wire.contains("pr/1"),
             "delivered news is not repeated"
-        );
-    }
-
-    #[test]
-    fn an_idle_opencode_or_pi_conversation_takes_its_news_on_its_plugins_wake_socket() {
-        for provider in ["opencode", "pi"] {
-            let session = format!("wake-{provider}");
-            let fixture = fixture(&session);
-            let plugin = fixture.idle_plugin(provider, serde_json::json!({"type":"accepted"}));
-            fixture.comment(&fixture.store, "c-1", "use the staging bucket");
-            after_turn(&fixture.store, &session);
-            let wake = plugin.join().unwrap();
-            assert_eq!(wake["type"], "steers", "{provider}");
-            let text = wake["text"].as_str().unwrap();
-            assert!(
-                text.contains("use the staging bucket"),
-                "{provider}: {text}"
-            );
-            assert_eq!(
-                fixture
-                    .store
-                    .session_steers(&session, 0, 8)
-                    .unwrap()
-                    .pending,
-                0,
-                "{provider}: delivered"
-            );
-            assert!(
-                loopflow_execution::steer::idle_conversations(&fixture.store, Some(&session))
-                    .unwrap()
-                    .is_empty(),
-                "{provider}: woken, it is in a turn"
-            );
-        }
-    }
-
-    #[test]
-    fn a_plugin_that_refuses_the_wake_keeps_its_news_for_the_next_boundary() {
-        let fixture = fixture("wake-refused");
-        let plugin = fixture.idle_plugin(
-            "opencode",
-            serde_json::json!({"type":"error","message":"Session.NotFoundError"}),
-        );
-        fixture.comment(&fixture.store, "c-1", "use the staging bucket");
-        after_turn(&fixture.store, "wake-refused");
-        plugin.join().unwrap();
-        let page = fixture.store.session_steers("wake-refused", 0, 8).unwrap();
-        assert_eq!(page.items[0].delivered_at, None, "never confirmed");
-        // Its claim lapses, and the next boundary hears it.
-        fixture
-            .store
-            .conn
-            .lock()
-            .unwrap()
-            .execute("UPDATE steer_delivered SET claimed_at=claimed_at-60", [])
-            .unwrap();
-        assert_eq!(
-            fixture
-                .store
-                .session_steers("wake-refused", 0, 8)
-                .unwrap()
-                .pending,
-            1
-        );
-        assert_eq!(
-            loopflow_execution::steer::idle_conversations(&fixture.store, Some("wake-refused"))
-                .unwrap()
-                .len(),
-            1,
-            "still idle"
         );
     }
 

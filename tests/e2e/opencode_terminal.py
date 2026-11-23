@@ -12,7 +12,6 @@ import subprocess
 import tempfile
 import termios
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -79,17 +78,6 @@ class _Handler(BaseHTTPRequestHandler):
                     }
                 ).encode()
             )
-
-
-def _wait(tui: _Tui, predicate, description: str, seconds: float = 30) -> None:
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        tui.drain(0.1)
-        if predicate():
-            return
-        if tui.child.poll() is not None:
-            break
-    raise AssertionError(description + "\n" + "\n".join(tui.screen.display))
 
 
 def _responses(tui: _Tui) -> int:
@@ -163,7 +151,7 @@ def _probe(lf: Path, native: Path, dependencies: Path, output: Path, expect_over
     tui = _Tui([str(lf), "-i", "-a", "opencode", ":", "Reply with fixture response"], work, env)
     output.mkdir(parents=True, exist_ok=True)
     try:
-        _wait(tui, lambda: _Handler.failures >= 1, "initial request did not reach local API")
+        tui.wait(lambda: _Handler.failures >= 1, "initial request did not reach local API")
         os.write(tui.master, b"draft survives retry")
 
         def stream_errors() -> int:
@@ -176,7 +164,7 @@ def _probe(lf: Path, native: Path, dependencies: Path, output: Path, expect_over
             )
             return evidence.count(b'message="stream error"')
 
-        _wait(tui, lambda: stream_errors() >= 3, "provider did not retry")
+        tui.wait(lambda: stream_errors() >= 3, "provider did not retry")
         tui.drain(0.5)
         (output / "retry-screen.txt").write_text("\n".join(tui.screen.display))
         raw_overlay = b"level=ERROR" in tui.raw
@@ -203,22 +191,20 @@ def _probe(lf: Path, native: Path, dependencies: Path, output: Path, expect_over
         )
         assert b"level=ERROR" not in tui.raw
         _Handler.failing = False
-        _wait(
-            tui,
+        tui.wait(
             lambda: _responses(tui) >= 1 and "retrying" not in "\n".join(tui.screen.display),
             "retry did not recover",
             45,
         )
         os.write(tui.master, b"\r")
-        _wait(
-            tui,
+        tui.wait(
             lambda: any("draft survives retr!" in json.dumps(body) for body in _Handler.requests),
             "edited draft was not submitted",
         )
-        _wait(tui, lambda: _responses(tui) >= 2, "edited draft did not complete")
+        tui.wait(lambda: _responses(tui) >= 2, "edited draft did not complete")
         (output / "success-screen.txt").write_text("\n".join(tui.screen.display))
         os.write(tui.master, b"\x03")
-        _wait(tui, lambda: tui.child.poll() is not None, "terminal did not exit")
+        tui.wait(lambda: tui.child.poll() is not None, "terminal did not exit")
         assert tui.child.returncode == 0
         with sqlite3.connect(root / "lf/loopflow.db") as db:
             session = db.execute(
@@ -230,12 +216,11 @@ def _probe(lf: Path, native: Path, dependencies: Path, output: Path, expect_over
         (output / "session.json").write_text(json.dumps(session))
         successful = _Tui([str(lf), "-i", "-a", "opencode", ":", "Normal launch"], work, env)
         try:
-            _wait(successful, lambda: _responses(successful) >= 1, "normal launch did not complete")
+            successful.wait(lambda: _responses(successful) >= 1, "normal launch did not complete")
             assert b"level=ERROR" not in successful.raw
             (output / "normal-screen.txt").write_text("\n".join(successful.screen.display))
             os.write(successful.master, b"\x03")
-            _wait(
-                successful,
+            successful.wait(
                 lambda: successful.child.poll() is not None,
                 "normal launch did not exit",
             )

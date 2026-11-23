@@ -97,10 +97,15 @@ pub(crate) fn add_opencode_context(
     context: &ContextDelivery,
     instructions: &str,
     kind: LaunchKind,
+    thread: &str,
 ) -> Result<()> {
-    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "turns":kind.is_managed(),
-        "steers":loopflow_storage::steer_markers::latest_marker(&context.home), "server":server_spec("lf opencode plugin"),
-        "wake":context.home.join("wake")});
+    // A work session listens for the server on the conversation lf named.
+    let wake = (kind == LaunchKind::WorkSession).then_some(thread);
+    // The configuration's model picks a new conversation's; the plugin sets it
+    // on a reopened one.
+    let model = config.get("model").cloned();
+    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "turns":kind.is_managed(), "wake":wake, "model":model,
+        "steers":loopflow_storage::steer_markers::latest_marker(&context.home), "server":server_spec("lf opencode plugin")});
     let delivery = write_prompt_log(
         &context.repo,
         &serde_json::to_string(context)?,
@@ -143,10 +148,10 @@ pub(crate) fn pi_args(
         .unwrap_or_else(crate::store::lf_home_dir);
     let source = format!(
         "const spec = {};\n{}\n{}",
-        json!({"native":native, "turns":kind.is_managed(), "executable":crate::os_process::resolve_lf_binary()?,
+        json!({"native":native, "turns":kind.is_managed(), "wake":native && kind == LaunchKind::WorkSession, "executable":crate::os_process::resolve_lf_binary()?,
             "log":home.join("logs").join("pi-extension.log"), "server":server_spec("lf pi extension"),
             "steers":loopflow_storage::steer_markers::latest_marker(&home),
-            "wake":home.join("wake"), "bashGuard":pi_bash_guard()}),
+            "bashGuard":pi_bash_guard()}),
         include_str!("context_pi.mjs"),
         include_str!("server_connection.js")
     );
@@ -395,9 +400,8 @@ mod tests {
 
     /// A stand-in Machine server on the plugin's socket: it welcomes every
     /// `hello` (a frozen one never does), answers each boundary, and keeps
-    /// each hello and request in `server.json`. `wakeOnce` wakes the plugin
-    /// as the server does: one line to its socket, one answer back.
-    const STAND_IN_SERVER: &str = r#"import { connect, createServer } from 'node:net';
+    /// each hello and request in `server.json`.
+    const STAND_IN_SERVER: &str = r#"import { createServer } from 'node:net';
 import { writeFileSync } from 'node:fs';
 const seen = { hellos: [], requests: [] };
 const keep = () => writeFileSync(SEEN, JSON.stringify(seen));
@@ -425,14 +429,19 @@ const server = createServer((socket) => {
   });
 });
 await new Promise((resolve) => server.listen(SOCKET, resolve));
-const wakeOnce = (inbox, text) => new Promise((resolve, reject) => {
-  const socket = connect(inbox);
+"#;
+
+    /// What the Machine server does at a work session's socket: one line
+    /// naming the conversation and the message, then whatever comes back.
+    const WAKE: &str = r#"import { connect as connectWake } from 'node:net';
+const wake = (path, thread, text) => new Promise((resolve, reject) => {
+  const socket = connectWake(path);
   let answer = '';
   socket.setEncoding('utf8');
-  socket.on('error', reject);
   socket.on('data', (chunk) => { answer += chunk; });
-  socket.on('end', () => resolve(JSON.parse(answer)));
-  socket.write(JSON.stringify({ type: 'steers', text }) + '\n');
+  socket.on('close', () => resolve(answer));
+  socket.on('error', reject);
+  socket.end(JSON.stringify({ thread, text }) + '\n');
 });
 "#;
 
@@ -452,7 +461,11 @@ const wakeOnce = (inbox, text) => new Promise((resolve, reject) => {
             .replace("SOCKET", &serde_json::to_string(&socket).unwrap())
             .replace("FROZEN", &frozen.to_string());
         let probe = directory.join("probe.mjs");
-        std::fs::write(&probe, format!("{server}\n{source}\nprocess.exit(0);\n")).unwrap();
+        std::fs::write(
+            &probe,
+            format!("{server}\n{WAKE}\n{source}\nprocess.exit(0);\n"),
+        )
+        .unwrap();
         let mut node = std::process::Command::new("node");
         node.arg(&probe)
             .env("LF_CONTEXT_DELIVERY", directory.join("delivery.json"))
@@ -493,9 +506,7 @@ const wakeOnce = (inbox, text) => new Promise((resolve, reject) => {
     }
 
     /// One conversation through the OpenCode plugin: a prompt, three model
-    /// requests with a compaction before the third, then the turn's end. A
-    /// managed one is then woken twice, once refused, and a typed prompt
-    /// follows.
+    /// requests with a compaction before the third, then the turn's end.
     fn opencode_turn(kind: LaunchKind) -> Probe {
         let turns = kind.is_managed();
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
@@ -514,8 +525,8 @@ const wakeOnce = (inbox, text) => new Promise((resolve, reject) => {
             submitted_docs: None,
             references: Vec::new(),
         };
-        let mut config = serde_json::json!({});
-        add_opencode_context(&mut config, &context, "Fixed instructions", kind).unwrap();
+        let mut config = serde_json::json!({"model":"opencode/gemini-4-carbon"});
+        add_opencode_context(&mut config, &context, "Fixed instructions", kind, "native").unwrap();
         let plugin = config["plugins"][0].as_str().unwrap();
         run_probe(
             repo.path(),
@@ -525,23 +536,31 @@ const wakeOnce = (inbox, text) => new Promise((resolve, reject) => {
                 r#"import assert from 'node:assert/strict';
 import plugin from {plugin};
 const hooks = {{}};
-const synthetic = [];
 let end;
 const ended = new Promise((resolve) => {{ end = resolve; }});
+const woken = [];
+const switched = [];
 const close = await plugin.setup({{
-  session: {{
-    hook: async (name, callback) => {{ hooks[name] = callback; }},
-    synthetic: async (input) => {{
-      if (input.text === 'refused') throw new Error('Session.NotFoundError');
-      synthetic.push(input);
-    }},
-  }},
+  session: {{ hook: async (name, callback) => {{ hooks[name] = callback; }},
+    synthetic: async (message) => {{ woken.push(message); }},
+    switchModel: async (request) => {{ switched.push(request); }} }},
   event: {{ subscribe: async function* () {{
     await ended;
     yield {{ type: 'session.execution.succeeded', data: {{ sessionID: 'native' }} }};
   }} }},
 }});
+// A reopened work session's first turn may be a wake, before anyone types.
+if ({wakes}) {{
+  while (!seen.requests[0]?.inbox) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(await wake(seen.requests[0].inbox.socket, 'native', 'saved while closed'), 'started\n');
+  assert.equal(switched.length, 1, 'the woken turn ran on the earlier model');
+}}
 await hooks.prompt({{ sessionID: 'native' }});
+await hooks.prompt({{ sessionID: 'native' }});
+// The launch's model is set once, before its first turn, typed or woken: a
+// reopened conversation answers on it, and a later pick in the TUI holds.
+assert.deepEqual(switched, [{{ sessionID: 'native',
+  model: {{ providerID: 'opencode', id: 'gemini-4-carbon' }} }}]);
 const texts = [];
 for (const compact of [false, false, true]) {{
   if (compact) await hooks.compaction({{ sessionID: 'native' }});
@@ -554,18 +573,19 @@ for (const compact of [false, false, true]) {{
 assert.deepEqual(texts.map((text) => text[1]), ['STEER BLOCK', 'STEER BLOCK', 'STEER BLOCK']);
 end();
 await new Promise((resolve) => setTimeout(resolve, 200));
-if ({turns}) {{
-  const inbox = seen.requests.at(-1).inbox;
-  assert.deepEqual(await wakeOnce(inbox, 'use the new API'), {{ type: 'accepted' }});
-  assert.deepEqual(synthetic, [{{ sessionID: 'native', text: 'use the new API',
-    description: 'Loopflow', delivery: 'queue' }}]);
-  assert.equal((await wakeOnce(inbox, 'refused')).type, 'error');
-  // The typed prompt's report goes out before the next request's.
-  await hooks.prompt({{ sessionID: 'native' }});
-  await hooks.context({{ sessionID: 'native', system: [] }});
+// Only a work session listens for the server while it is idle. A message
+// for its conversation starts a turn; one for another is not taken.
+const inbox = seen.requests.at(-1)?.inbox?.socket ?? null;
+assert.equal(inbox !== null, {wakes});
+if (inbox) {{
+  assert.equal(await wake(inbox, 'native', 'use the other table'), 'started\n');
+  assert.equal(await wake(inbox, 'another', 'not for this one'), '');
+  assert.deepEqual(woken, [{{ sessionID: 'native', text: 'saved while closed' }},
+    {{ sessionID: 'native', text: 'use the other table' }}]);
 }}
 await close();
 "#,
+                wakes = kind == LaunchKind::WorkSession,
                 plugin = serde_json::to_string(&format!("{plugin}/index.js")).unwrap(),
             ),
         )
@@ -580,23 +600,29 @@ await close();
             .map(|call| call.rsplit(' ').next().unwrap())
             .collect();
         assert_eq!(calls, ["start", "steer", "compact"], "{}", managed.calls);
+        // Before any prompt it names its conversation and socket, so one
+        // reopened idle can be woken. The turn's first request also says a
+        // turn began, and its end names the conversation, so the server knows
+        // when the work session is idle.
         assert_eq!(
             moments(&managed),
-            ["start", "tool", "compact", "stop", "tool", "tool"]
+            ["tool", "start", "tool", "tool", "compact", "stop"]
         );
         let requests = managed.server["requests"].as_array().unwrap();
-        // The turn end and the typed prompt name the conversation, and each
-        // boundary says where the plugin takes a wake.
-        assert_eq!(
-            requests[3]["callback"],
-            serde_json::json!({"session_id":"native","hook_event_name":"Stop"})
+        assert_eq!(requests[0]["callback"]["session_id"], "native");
+        assert!(
+            requests[0]["inbox"]["socket"].is_string(),
+            "{}",
+            requests[0]
         );
         assert_eq!(
-            requests[4]["callback"],
+            requests[2]["callback"],
             serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit"})
         );
-        let inbox = requests[3]["inbox"].as_str().unwrap();
-        assert!(inbox.ends_with(".sock"), "{inbox}");
+        assert_eq!(
+            requests[5]["callback"],
+            serde_json::json!({"session_id":"native","hook_event_name":"Stop"})
+        );
         // One connection per boundary, each opened with a hook's hello.
         let hellos = managed.server["hellos"].as_array().unwrap();
         assert_eq!(hellos.len(), 6, "{}", managed.server);
@@ -606,6 +632,17 @@ await close();
         assert_eq!(
             managed.server["requests"][1]["adapter"]["session"],
             "session"
+        );
+    }
+
+    #[test]
+    fn an_opencode_worker_reports_its_turn_end_unnamed_and_listens_for_no_wake() {
+        // lf reads a worker's turns from the stream it owns.
+        let worker = opencode_turn(LaunchKind::Worker);
+        assert_eq!(moments(&worker), ["start", "tool", "compact", "stop"]);
+        assert_eq!(
+            worker.server["requests"][3]["callback"],
+            serde_json::json!({})
         );
     }
 
@@ -673,10 +710,7 @@ const fire = async (name, event) => {{
 const pi = {{
   on: (name, handler) => {{ (handlers[name] ??= []).push(handler); }},
   getSettings: () => ({{}}), getAllTools: () => [], getActiveTools: () => [],
-  sendMessage: (message, options) => {{
-    assert.equal(message.customType, 'loopflow-steer');
-    steers.push([message.content, options.deliverAs, options.triggerTurn ?? false]);
-  }},
+  sendMessage: (message, options) => {{ steers.push([message.content, options]); }},
 }};
 const ctx = {{ cwd: '/', sessionManager: {{ getSessionFile: () => '/pi/session.jsonl' }},
   abort() {{}}, shutdown() {{}} }};
@@ -695,15 +729,20 @@ for (const tool of ['one', 'two']) {{
 }}
 await fire('agent_settled', {{ type: 'agent_settled' }});
 // One steer check finds the launch has never checked; later ones find nothing newer.
-assert.deepEqual(steers, [["STEER ", "steer", false]]);
-// Idle, a wake starts a turn with lf's message.
-const inbox = seen.requests.at(-1)?.inbox;
+assert.deepEqual(steers, [["STEER ", {{ deliverAs: "steer" }}]]);
+// Only a work session listens for the server while it is idle. A message
+// for its conversation starts a turn; one for another is not taken.
+const inbox = seen.requests.at(-1)?.inbox?.socket ?? null;
+assert.equal(inbox !== null, {wakes});
 if (inbox) {{
-  assert.deepEqual(await wakeOnce(inbox, 'use the new API'), {{ type: 'accepted' }});
-  assert.deepEqual(steers.at(-1), ['use the new API', 'followUp', true]);
+  assert.equal(await wake(inbox, '/pi/session.jsonl', 'use the other table'), 'started\n');
+  assert.equal(await wake(inbox, '/pi/another.jsonl', 'not for this one'), '');
+  assert.deepEqual(steers[1], ["use the other table", {{ triggerTurn: true }}]);
+  assert.equal(steers.length, 2);
 }}
 await fire('session_shutdown', {{}});
 "#,
+                wakes = native && kind == LaunchKind::WorkSession && !frozen,
                 extension = serde_json::to_string(&args[1]).unwrap(),
                 ran =
                     serde_json::to_string(&home.path().join("ran").display().to_string()).unwrap(),
@@ -743,12 +782,6 @@ await fire('session_shutdown', {{}});
             ]
         );
         assert_eq!(requests[2]["callback"]["sessionFile"], "/pi/session.jsonl");
-        assert!(
-            requests.last().unwrap()["inbox"]
-                .as_str()
-                .is_some_and(|inbox| inbox.ends_with(".sock")),
-            "the extension reports where it takes a wake"
-        );
     }
 
     #[test]
@@ -900,6 +933,7 @@ await fire('session_shutdown', {{}});
             &context,
             "Fixed instructions",
             LaunchKind::WorkSession,
+            "native",
         )
         .unwrap();
         assert_eq!(config["permissions"], original["permissions"]);

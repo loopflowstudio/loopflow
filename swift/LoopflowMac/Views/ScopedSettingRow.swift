@@ -67,7 +67,7 @@ struct ScopedSettingRow: View {
                         draft = Draft(text: nil, file: file)
                     }.controlSize(.small)
                 } else {
-                    Button("Reset") { save(.reset, to: file) }.controlSize(.small)
+                    Button("Reset") { save(definition.change(to: nil, in: file), to: file) }.controlSize(.small)
                 }
             }
             moveControls
@@ -159,10 +159,7 @@ struct ScopedSettingRow: View {
                                 file: file, notices: notices, manager: manager)
         case .choices(let choices):
             Picker(definition.title, selection: Binding(get: { declared }, set: { selection in
-                switch selection {
-                case .absent: save(.reset, to: file)
-                case .present(let value): save(.set(value.settingsYAML), to: file)
-                }
+                save(definition.change(to: selection.value, in: file), to: file)
             })) {
                 Text(unsetText).tag(ConfigurationScope.Authored.absent)
                 if declared == .present(.null) {

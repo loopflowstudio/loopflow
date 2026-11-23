@@ -28,20 +28,17 @@ struct ScopedSettings: View {
             } else if pane == .project {
                 scopeSelector
             }
-            if pane == .project && model.checkout == nil {
+            if pane == .project && model.work.checkout == nil {
                 Text("Choose a checkout to edit its settings.")
             } else if let scope = model.reading.value {
                 if pane == .machines {
                     MachineConnections(location: model.location, declaration: model.file?.slots["machines"]?.declared)
                 }
-                if case .step = model.target, scope.files.allSatisfy({ $0.slots["agent"] == nil }) {
+                if case .step = model.work.target, scope.files.allSatisfy({ $0.slots["agent"] == nil }) {
                     Section { Text("This Graph step is read-only. Give it an id: in its Graph YAML to edit step preferences.") }
                 }
                 let definitions = model.catalogue.filter { definition in
-                    if pane != .project { return definition.pane == pane }
-                    return (definition.pane == .project || definition.pane == .agents)
-                        && (model.wave == nil || definition.applicability != "repository")
-                        && (model.target == .general || definition.applicability == "launch")
+                    definition.panes.contains(pane) && model.work.scope(for: definition) == model.work
                 }
                 ForEach(SettingsSection.allCases) { group in
                     let rows = group.keys.compactMap { key in definitions.first { $0.key == key } }
@@ -55,9 +52,9 @@ struct ScopedSettings: View {
                     }
                 }
                 if pane == .project {
-                    if model.wave != nil && model.target == .general {
+                    if model.work.wave != nil && model.work.target == .general {
                         Section("Git & Release") {
-                            Button("Inspect repository settings") { model.select(checkout: model.checkout) }
+                            Button("Inspect repository settings") { model.select(checkout: model.work.checkout) }
                         }
                     }
                     let other = definitions.filter { $0.section == nil && !$0.isContainer }
@@ -119,7 +116,7 @@ struct ScopedSettings: View {
             } else {
                 SettingProvenance(title: definition.title, value: definition.displayText(for: effective.value), effective: effective, definition: definition)
                     .settingsRow(key, highlighted: highlightedKey)
-                if key == "machine", model.target == .general {
+                if key == "machine", model.work.target == .general {
                     Text("Machine placement is a personal preference.").foregroundStyle(.secondary)
                     if let owner = scope.files.first(where: { $0.owner?.isWave == model.destination.isWave &&
                         $0.owner != .personalGlobal && $0.slots[key] != nil })?.owner {
@@ -137,7 +134,7 @@ struct ScopedSettings: View {
                     ForEach(checkouts, id: \.self) { path in
                         Button(URL(fileURLWithPath: path).lastPathComponent) { model.select(checkout: path) }.help(path)
                     }
-                    if let checkout = model.checkout {
+                    if let checkout = model.work.checkout {
                         let origin = WaveOrigin.resolve(checkout).normalizedFilePath
                         let choices = waves.filter { WaveOrigin.resolve($0.repo).normalizedFilePath == origin }
                         if !choices.isEmpty {
@@ -157,14 +154,14 @@ struct ScopedSettings: View {
                 }
                 .fixedSize()
             }
-            if model.target != .general {
+            if model.work.target != .general {
                 Text("Showing launch settings for this target. Repository and general settings apply to all work.")
                     .foregroundStyle(.secondary)
-                Button("Inspect general work") { model.target = .general }
+                Button("Inspect general work") { model.work.target = .general }
             }
-            if let checkout = model.checkout {
+            if let checkout = model.work.checkout {
                 let owners = model.reading.value?.files.compactMap(\.owner).filter {
-                    $0 != .personalGlobal && $0.isWave == (model.wave != nil)
+                    $0 != .personalGlobal && $0.isWave == (model.work.wave != nil)
                 } ?? []
                 if !owners.isEmpty {
                     Picker("Save in", selection: $model.destination) {
@@ -177,9 +174,9 @@ struct ScopedSettings: View {
     }
 
     private var scopeTitle: String {
-        var parts = [model.checkout.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Choose checkout"]
-        if let wave = model.wave { parts.append(waves.first { $0.id == wave }?.displayName ?? wave) }
-        switch model.target {
+        var parts = [model.work.checkout.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Choose checkout"]
+        if let wave = model.work.wave { parts.append(waves.first { $0.id == wave }?.displayName ?? wave) }
+        switch model.work.target {
         case .general: break
         case .skill(let name): parts.append("Skill \(name)")
         case .step(let graph, let step): parts.append("\(graph) / \(step)")
@@ -231,6 +228,8 @@ extension ConfigurationDefinition {
         if applicability != "personal" { return .project }
         return category == "Machines" ? .machines : .general
     }
+    // Agent preferences appear both as personal defaults and project overrides.
+    var panes: [SettingsPane] { pane == .agents ? [.agents, .project] : [pane] }
     var opensFile: Bool { section == nil && (pane == .general || pane == .machines) }
     var isContainer: Bool { ["context", "claude", "codex", "forward"].contains(key) }
     var title: String {

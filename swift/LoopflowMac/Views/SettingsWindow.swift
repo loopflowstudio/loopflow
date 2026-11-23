@@ -117,7 +117,7 @@ struct SettingsWindow: View {
                 switch navigation.pane {
                 case .general, .agents, .machines, .project:
                     ScopedSettings(model: model(for: navigation.pane), pane: navigation.pane,
-                        checkouts: Array(Set(portfolio.repos.map(\.path) + [checkout, project.checkout].compactMap { $0 })).sorted(),
+                        checkouts: Array(Set(portfolio.repos.map(\.path) + [checkout, project.work.checkout].compactMap { $0 })).sorted(),
                         waves: waves, notices: notices, highlightedKey: scrollTarget)
                 case .appearance: ThemeChooser(appearance: appearance, notices: notices, highlightedKey: scrollTarget)
                 case .shortcuts: KeyboardShortcutsView()
@@ -134,10 +134,10 @@ struct SettingsWindow: View {
         }
         .task(id: personal.observation) { await personal.observe() }
         .onChange(of: checkout ?? portfolio.repos.first?.path, initial: true) { _, path in
-            if project.checkout == nil { project.select(checkout: path) }
+            if project.work.checkout == nil { project.select(checkout: path) }
         }
         .task(id: project.observation) {
-            if project.checkout != nil { await project.observe() }
+            if project.work.checkout != nil { await project.observe() }
         }
         .task { await mobile.observe() }
         .task { await portfolio.refresh() }
@@ -163,11 +163,7 @@ struct SettingsWindow: View {
 
     private func open(_ match: SettingsMatch) {
         if case .setting(let definition, .project) = match {
-            if definition.applicability == "repository", project.wave != nil {
-                project.select(checkout: project.checkout)
-            } else if definition.applicability != "launch" {
-                project.target = .general
-            }
+            project.work = project.work.scope(for: definition)
         }
         navigation.open(match.pane, row: match.key)
     }

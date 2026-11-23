@@ -292,8 +292,6 @@ public enum ServerOperation: Encodable, Sendable {
 /// never a file plus a scope. Mirrors `Read::Config*` and `Write::Config*`.
 public enum ConfigOperation: Encodable, Sendable {
     case configCatalog
-    case configGet(destination: JSONValue, key: String)
-    case configExplain(destination: JSONValue, key: String)
     /// `value` is YAML.
     case configSet(destination: JSONValue, key: String, value: String)
     case preview(destination: JSONValue, key: String, expected: [ConfigurationEntry], change: ConfigurationChange)
@@ -310,10 +308,6 @@ public enum ConfigOperation: Encodable, Sendable {
     private var tagged: TaggedFields {
         switch self {
         case .configCatalog: TaggedFields("config.catalog")
-        case .configGet(let destination, let key):
-            TaggedFields("config.get", ["destination": destination, "key": key])
-        case .configExplain(let destination, let key):
-            TaggedFields("config.explain", ["destination": destination, "key": key])
         case .configSet(let destination, let key, let value):
             TaggedFields("config.set", ["destination": destination, "key": key, "value": value])
         case .preview(let destination, let key, let expected, let change):

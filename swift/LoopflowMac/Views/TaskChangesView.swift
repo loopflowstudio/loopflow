@@ -173,7 +173,7 @@ struct TaskChangesView: View {
 
     /// Your own settings for this repository, in its `.lf/config.local.yaml`.
     private var personalFile: JSONValue {
-        ConfigurationDestination.personalRepository.address(repository: store.cwd, wave: "")
+        .object(["kind": .string(ConfigurationDestination.personalRepository.rawValue), "repo": .string(store.cwd)])
     }
 
     private func readSettings() async {

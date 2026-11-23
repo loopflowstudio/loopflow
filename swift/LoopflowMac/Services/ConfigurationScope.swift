@@ -2,7 +2,7 @@ import Foundation
 import Loopflow
 
 // Rust derives paths and applicability from the destination.
-enum ConfigurationDestination: String, CaseIterable, Identifiable {
+enum ConfigurationDestination: String, Identifiable {
     case personalGlobal = "personal_global"
     case personalRepository = "personal_repo"
     case sharedRepository = "shared_repo"
@@ -19,13 +19,6 @@ enum ConfigurationDestination: String, CaseIterable, Identifiable {
         case .personalWave: "My Wave preferences"
         case .sharedWave: "Shared Wave preferences"
         }
-    }
-
-    func address(repository: String, wave: String) -> JSONValue {
-        var value: [String: JSONValue] = ["kind": .string(rawValue)]
-        if self != .personalGlobal { value["repo"] = .string(repository) }
-        if isWave { value["wave"] = .string(wave) }
-        return .object(value)
     }
 }
 

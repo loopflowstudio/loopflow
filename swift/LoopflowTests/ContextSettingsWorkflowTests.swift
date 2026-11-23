@@ -215,7 +215,7 @@ struct ContextSettingsWorkflowTests {
             #expect(try String(contentsOf: linked.appending(path: ".lf/config.yaml"), encoding: .utf8) == "context: [README.md] # included at launch\n")
             watch.cancel()
             await watch.value
-            model.target = .skill("probe")
+            model.work.target = .skill("probe")
             watch = Task { await model.observe() }
             try await awaitReading { model.file != nil }
             let targeted = try view.inspect()
@@ -226,7 +226,7 @@ struct ContextSettingsWorkflowTests {
             }
             navigation.search = "Landing method"
             try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView().find(ViewType.TextField.self).callOnSubmit()
-            #expect(model.target == .general)
+            #expect(model.work.target == .general)
             #expect(navigation.pane == .project && navigation.highlightedKey == "land")
 
         } catch {

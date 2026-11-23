@@ -14,7 +14,7 @@ struct SettingsTargetPicker: View {
     var body: some View {
         DisclosureGroup("Skill or Graph step", isExpanded: $expanded) {
             Menu("Inspect Skill") {
-                ForEach(skills, id: \.self) { name in Button(name) { model.target = .skill(name) } }
+                ForEach(skills, id: \.self) { name in Button(name) { model.work.target = .skill(name) } }
             }
             Picker("Graph", selection: $graph) {
                 Text("Choose Graph").tag(String?.none)
@@ -26,7 +26,7 @@ struct SettingsTargetPicker: View {
                         if case .object(let occurrence) = inspection.occurrence,
                            case .string(let graph) = occurrence["graph"],
                            case .string(let step) = occurrence["id"] == .null ? occurrence["address"] : occurrence["id"] {
-                            Button("\(inspection.skill ?? step) · \(graph) / \(step)") { model.target = .step(graph: graph, step: step) }
+                            Button("\(inspection.skill ?? step) · \(graph) / \(step)") { model.work.target = .step(graph: graph, step: step) }
                         }
                     }
                 }
@@ -48,7 +48,7 @@ struct SettingsTargetPicker: View {
             steps = []
             guard let graph else { return }
             do {
-                let value = try await ServerClient.read(.configSettings(directory: checkout, wave: model.wave, skill: nil,
+                let value = try await ServerClient.read(.configSettings(directory: checkout, wave: model.work.wave, skill: nil,
                     graph: graph, step: nil), location: model.location).decode([ConfigurationInspection].self)
                 if !Task.isCancelled { steps = value; error = nil }
             } catch { if !Task.isCancelled { self.error = error.localizedDescription } }

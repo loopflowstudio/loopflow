@@ -21,3 +21,4 @@
 - Keep search anchored to the catalog key across destinations. A draft, its Reset preview and its move confirmation belong to the declaration address until the editor closes.
 - Give Log Linear requests the same switch in search and General. List each contributing source when an unset list combines declarations.
 - Appearance shows its selectable configuration path directly. The project pane places its path beside **Open file…**.
+- Search and the form use the same checkout, Wave and target to determine where a preference applies. Changing only the Skill or Graph step keeps the selected file.

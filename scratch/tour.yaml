@@ -1,4 +1,4 @@
-at: 9892821b5062556ee55b57eb0a0adec6da165a2b
+at: d03af827926b71b24e2cd7ebcb4373b0eb07cd27
 first:
   - path: docs/surfaces.md
     why: Follow a setting from search through Undo
@@ -7,27 +7,29 @@ first:
   - path: scratch/plan.md
     why: Design choices and remaining visual checks
   - path: rust/loopflow-execution/src/config/catalog.rs
-    why: Agent preferences name their own defaults
+    why: Each preference names its applicability and fallback
   - path: rust/loopflow-execution/src/engine/config/scope.rs
-    why: Effective values and editable declarations from one reading
+    why: Effective values and editable declarations share one reading
   - path: swift/LoopflowMac/Services/ConfigurationScope.swift
-    why: Map catalog fields to controls and label their sources
+    why: Map declarations to controls and label their sources
   - path: swift/Loopflow/Models/ConfigurationEdit.swift
     why: Checked edits, move previews and receipts
   - path: swift/LoopflowMac/Services/ScopedSettingsModel.swift
-    why: Observe the selected work and save checked edits
+    why: Choose applicable work and observe its files
   - path: swift/LoopflowMac/Views/ScopedSettings.swift
-    why: Select applicable rows for each pane and target
-  - path: swift/LoopflowMac/Views/ScopedSettingRow.swift
-    why: Read fallbacks, inspect sources and reset a declaration
+    why: Place settings in personal and project panes
   - path: swift/LoopflowMac/Views/SettingsWindow.swift
-    why: Search opens the applicable pane and target
+    why: Open search results at their applicable scope
   - path: swift/LoopflowMac/Views/SettingsSearch.swift
-    why: Find the same controls from search
+    why: Search uses each setting’s pane destinations
+  - path: swift/LoopflowMac/Views/ScopedSettingRow.swift
+    why: Edit a declaration and inspect its provenance
+  - path: rust/loopflow/src/lf/commands/setting.rs
+    why: Read or subscribe from the CLI
   - path: rust/loopflow-execution/src/engine/config.rs
     why: Shared operations for CLI and Desktop
   - path: rust/loopflow-execution/src/config/keys.rs
-    why: The spellings both readers and writers recognize
+    why: Spellings both readers and writers recognize
   - path: rust/loopflow-execution/src/config/files/edit.rs
     why: Check and restore entries inside a configuration block
   - path: rust/loopflow-execution/src/engine/config/promotion.rs

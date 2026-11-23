@@ -66,8 +66,7 @@ extension SettingsNavigation {
         var rows = SettingsPane.allCases.map(SettingsMatch.pane)
         rows += [.autosave, .appearanceMode, .theme, .mobileAccess]
         for definition in catalogue where !definition.isContainer && definition.pane != .appearance {
-            rows.append(.setting(definition, definition.pane))
-            if definition.pane == .agents { rows.append(.setting(definition, .project)) }
+            rows += definition.panes.map { .setting(definition, $0) }
         }
         let found = rows.filter { row in
             var terms = row.terms
@@ -124,10 +123,10 @@ struct SettingsSearchRow: View {
     private func destinationLabel(for toggle: ScopedBooleanToggle) -> String {
         let file = toggle.file
         var parts = [file.owner?.title ?? file.path]
-        if file.owner != .personalGlobal, let checkout = scope.checkout {
+        if file.owner != .personalGlobal, let checkout = scope.work.checkout {
             parts.append(URL(fileURLWithPath: checkout).lastPathComponent)
         }
-        if file.owner?.isWave == true, let wave = scope.wave { parts.append(wave) }
+        if file.owner?.isWave == true, let wave = scope.work.wave { parts.append(wave) }
         if let key = file.slots[toggle.definition.key]?.key, key != toggle.definition.key { parts.append(key) }
         return parts.joined(separator: " · ")
     }

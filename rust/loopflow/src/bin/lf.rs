@@ -1661,34 +1661,10 @@ fn run() -> anyhow::Result<()> {
                         );
                     }
                     Some(Commands::Config {
-                        cmd:
-                            loopflow::lf::ConfigCommand::Scope {
-                                skill,
-                                graph,
-                                step,
-                                global,
-                                subscribe,
-                                selection,
-                                ..
-                            },
+                        cmd: loopflow::lf::ConfigCommand::Scope(scope),
                     }) => {
                         journal::mark_effect_free_read();
-                        loopflow_execution::read_stream::select_output(
-                            (!selection.select.is_empty()).then(|| selection.select.clone()),
-                        );
-                        return loopflow::lf::commands::setting::scope(
-                            (!*global)
-                                .then(|| configuration_directory(&cli))
-                                .transpose()?
-                                .as_deref(),
-                            cli.wave.as_deref(),
-                            loopflow_execution::engine::config::ScopeTarget::from_options(
-                                skill.as_deref(),
-                                graph.as_deref(),
-                                step.as_deref(),
-                            )?,
-                            *subscribe,
-                        );
+                        return scope.run(cli.wave.as_deref(), || configuration_directory(&cli));
                     }
                     Some(Commands::Config {
                         cmd: loopflow::lf::ConfigCommand::Catalog { json },
@@ -3089,24 +3065,8 @@ fn execute_command(
             loopflow::lf::ConfigCommand::Migrate { accept } => {
                 loopflow_execution::config::migrate::run(*accept)
             }
-            loopflow::lf::ConfigCommand::Scope {
-                global,
-                subscribe,
-                skill,
-                graph,
-                step,
-                ..
-            } => in_directory_runtime(args, |repo| {
-                loopflow::lf::commands::setting::scope(
-                    (!*global).then_some(repo),
-                    cli.wave.as_deref(),
-                    loopflow_execution::engine::config::ScopeTarget::from_options(
-                        skill.as_deref(),
-                        graph.as_deref(),
-                        step.as_deref(),
-                    )?,
-                    *subscribe,
-                )
+            loopflow::lf::ConfigCommand::Scope(scope) => in_directory_runtime(args, |repo| {
+                scope.run(cli.wave.as_deref(), || Ok(repo.to_owned()))
             }),
             loopflow::lf::ConfigCommand::Catalog { json } => {
                 loopflow::lf::commands::config::catalog(*json)

@@ -2974,23 +2974,7 @@ pub enum ConfigCommand {
         json: bool,
     },
     /// Inspect effective settings and declarations for Global, a checkout or a Wave
-    Scope {
-        #[arg(long)]
-        global: bool,
-        #[arg(long, conflicts_with = "graph")]
-        skill: Option<String>,
-        #[arg(long, requires = "step")]
-        graph: Option<String>,
-        #[arg(long, requires = "graph")]
-        step: Option<String>,
-        #[arg(long)]
-        json: bool,
-        /// Print a reading whenever a settings file changes, until stdin closes
-        #[arg(short = 's', long, requires = "json")]
-        subscribe: bool,
-        #[command(flatten)]
-        selection: Selection,
-    },
+    Scope(commands::setting::ScopeArgs),
     /// Show effective settings and their sources without launching
     Settings {
         #[arg(long)]

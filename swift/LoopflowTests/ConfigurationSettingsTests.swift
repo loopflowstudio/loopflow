@@ -68,17 +68,10 @@ struct ConfigurationSettingsTests {
         #expect(catalogue[0].category == "Desktop")
     }
 
-    @Test func destinationsMatchRustWithoutIndependentScopeOrPath() throws {
-        let fixture = try loadFixtureData("configuration_destinations.json")
-        let expected = try JSONDecoder().decode([JSONValue].self, from: fixture)
-        let actual = ConfigurationDestination.allCases.map {
-            $0.address(repository: "/project/task", wave: "product")
-        }
-        #expect(actual == expected)
-        #expect(ConfigurationDestination.personalGlobal.address(repository: "/stale", wave: "stale")
-            == .object(["kind": .string("personal_global")]))
-        #expect(ConfigurationDestination.personalRepository.address(repository: "/project", wave: "stale")
-            == .object(["kind": .string("personal_repo"), "repo": .string("/project")]))
+    @Test func destinationKindsMatchTheRustFiles() throws {
+        let files = try JSONDecoder().decode([JSONValue].self, from: loadFixtureData("configuration_destinations.json"))
+        let owners = files.map { ConfigurationScope.File(destination: $0, path: "", slots: [:]).owner }
+        #expect(owners == [.personalGlobal, .personalRepository, .sharedRepository, .personalWave, .sharedWave])
     }
 }
 #endif

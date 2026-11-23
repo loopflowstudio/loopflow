@@ -1,13 +1,35 @@
 import Loopflow
 import SwiftUI
 
+/// The work inspected by one Settings subscription. Save in can change independently.
+struct SettingsWork: Equatable {
+    var checkout: String?
+    var wave: String?
+    var target = ConfigurationTarget.general
+
+    func scope(for definition: ConfigurationDefinition) -> Self {
+        var work = self
+        if definition.applicability == "repository" { work.wave = nil }
+        if definition.applicability != "launch" { work.target = .general }
+        return work
+    }
+}
+
 @MainActor @Observable
 final class ScopedSettingsModel {
     let location: ServerLocation
-    private(set) var checkout: String?
-    private(set) var wave: String?
-    var target = ConfigurationTarget.general {
-        didSet { if target != oldValue { reading = .loading; errors.removeAll(); refresh() } }
+    var work = SettingsWork() {
+        didSet {
+            guard work != oldValue else { return }
+            if work.checkout != oldValue.checkout || work.wave != oldValue.wave {
+                if work.wave != nil { destination = .personalWave }
+                else if work.checkout != nil { destination = .personalRepository }
+                else { destination = .personalGlobal }
+            }
+            reading = .loading
+            errors.removeAll()
+            refresh()
+        }
     }
     var destination = ConfigurationDestination.personalGlobal
     private(set) var observation = UUID()
@@ -53,14 +75,8 @@ final class ScopedSettingsModel {
     var editsDisabled: Bool { saving || reading.failure != nil }
 
     func select(checkout: String?, wave: String? = nil) {
-        guard self.checkout != checkout || self.wave != wave else { return }
-        target = .general
-        self.checkout = checkout
-        self.wave = wave
-        destination = wave != nil ? .personalWave : checkout != nil ? .personalRepository : .personalGlobal
-        reading = .loading
-        errors.removeAll()
-        refresh()
+        guard checkout != work.checkout || wave != work.wave else { return }
+        work = SettingsWork(checkout: checkout, wave: wave)
     }
 
     func refresh() {
@@ -103,7 +119,7 @@ final class ScopedSettingsModel {
             }
         }
         guard !Task.isCancelled, observation == id else { return }
-        let stream = ServerClient.subscribe(.configScope(directory: checkout, wave: wave, target: target), location: location)
+        let stream = ServerClient.subscribe(.configScope(directory: work.checkout, wave: work.wave, target: work.target), location: location)
         self.stream = stream
         do {
             for try await line in stream.lines {
@@ -178,7 +194,7 @@ final class ScopedSettingsModel {
         let id = observation
         guard let address = file.slots[key]?.key else { return nil }
         let destination = file.destination
-        let wave = self.wave
+        let wave = work.wave
         do {
             let result = try await move(address, destination: destination, wave: wave, action: action)
             errors[RowAddress(file, key)] = nil

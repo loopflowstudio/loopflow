@@ -33,7 +33,7 @@
 <h1>Does a reopened work session hear its steers the way people expect?</h1>
 <p class="lede">Area reviewed: how a steer reaches a person's managed conversation — the hook's claim at a
 boundary, the server's wake of an idle conversation, and what "idle" means — with all of LOO-1068
-(slices 1–3, against <code>3578f78f6d</code>) in it. Chosen because the Task changes who owns a waiting
+(slices 1–4, against base <code>7487986a30</code>) in it. Chosen because the Task changes who owns a waiting
 steer at the moment a provider process starts, which touches all three.</p>
 
 <h2>What a person knows</h2>
@@ -61,19 +61,19 @@ separate concept to a person; it is idle. Before this Task the code disagreed on
 <tr><td>Where it can be reached</td><td><code>agent_inbox</code> · <code>agent_socket</code> · <code>agent_endpoint</code> (Codex), written by <code>record_agent_inbox</code> and <code>record_session_connection</code></td>
   <td class="no">partly</td><td>One idea, three columns and two writers. Pre-existing and harmless; the candidates query is its one reader.</td></tr>
 <tr><td>The provider started</td><td>Claude/OpenCode/Pi: their own hook. Codex: <b>lf's launch sends a <code>SessionStart</code>/<code>UserPromptSubmit</code> payload it wrote itself</b></td>
-  <td class="no">no</td><td>One name for two reporters, and the label is wrong on a new conversation (below).</td></tr>
+  <td class="yes">yes</td><td><span class="tag built">built</span> Two reporters, one shape. Slice 4 made the label true: <code>resume</code> for a saved thread, <code>startup</code> for a new one (below).</td></tr>
 </table>
 
-<h2>Biggest mismatch: Codex's start is reported in Codex's voice</h2>
+<h2>Biggest mismatch (fixed in slice 4): Codex's start is reported in Codex's voice</h2>
 <p>Codex runs its start hook only inside its first turn, so the launch reports the start itself
 (<code>codex.rs::report_first_boundary</code>). That part is right: the launch is the one place that knows
 the process opened, its address and whether an opening prompt is coming. What is off is the payload. It is
 shaped as Codex's own hook, with <code>"source":"resume"</code> hard-coded.</p>
-<div class="old"><b>Existing (built)</b><br>
+<div class="old"><b>Before slice 4</b><br>
 <code>{"hook_event_name":"SessionStart","session_id":thread,"source":"resume"}</code> on every launch with no opening prompt.
 A new work session launched with no prompt (<code>saved</code> is <code>None</code>) writes a <code>resume</code> provider transition into its history
 (<code>with_provider_context</code> → <code>provider_transitions::observe_in</code>) for a conversation that was never resumed.</div>
-<div class="new"><b>Proposed</b> <span class="tag new-t">plan</span><br>
+<div class="new"><b>Now</b> <span class="tag built">built</span> (<code>first_boundary</code>, test <code>a_launch_reports_its_first_boundary_as_codex_would</code>)<br>
 <code>"source"</code> is <code>"resume"</code> when the launch resumed a saved thread and <code>"startup"</code> otherwise — what Codex's own hook would have said.
 Keep the shape; no wire change. A <code>BoundaryMoment::Open</code> would name it more honestly but is a wire change for one caller
 (<code>SessionBoundary</code> is <code>deny_unknown_fields</code>), and the history label is what a person can see.</div>
@@ -87,8 +87,16 @@ Keep the shape; no wire change. A <code>BoundaryMoment::Open</code> would name i
 <tr><td>Claude with an opening prompt</td><td>Prompt, then the woken steer as a second turn. Delivered once.</td><td class="yes">accepted (questions #3)</td></tr>
 <tr><td>Wake can't reach the inbox</td><td>Start skipped the claim; the next prompt boundary claims it. Same as before this Task.</td><td class="yes">holds</td></tr>
 <tr><td>Server silent at Codex launch, back by the first typed turn</td><td>Codex's in-turn <code>SessionStart</code> becomes the first boundary and records the conversation idle mid-turn; the wake may send <code>turn/start</code> into a running turn. Claims stay exclusive, so the steer still arrives once (as a steer, or at the next boundary after a refused send); the turn's Stop corrects the state.</td><td class="no">rare; noted, not fixed</td></tr>
-<tr><td>Claude drops an inbox message sent during startup</td><td>Steer stamped <code>delivered</code>, never heard. Unanswered until a real Claude reopen (slice 4).</td><td class="no">open risk</td></tr>
+<tr><td>Claude drops an inbox message sent during startup</td><td>Steer stamped <code>delivered</code>, never heard. Unanswered until a real Claude reopen (slice 5, qa).</td><td class="no">open risk</td></tr>
 </table>
+
+<h2>One small fix in this work</h2>
+<div class="new"><b>Proposed</b> <span class="tag new-t">plan</span><br>
+<code>record_first_boundary</code> reads first so later boundaries take no write lock, but the read only asks "does a row for this process with
+<code>observed_at&lt;&gt;0</code> exist?". A worker (<code>interactive=0</code>), or a process with no steer capability, answers no until its stream writes a
+row, and each of its boundaries then runs an <code>INSERT … SELECT</code> that matches nothing — still a write statement on the Machine's one
+SQLite write lock. Fold eligibility into the read (interactive Session, this process current, capability present), so only a boundary that
+will write takes the lock. No behaviour change; one query.</div>
 
 <h2>Outside this work</h2>
 <p>The wake has three entry points for two ideas: <em>news arrived</em> (watcher on steer and Task-update revisions) and
@@ -100,12 +108,12 @@ without measuring; a separate Task if pursued.</p>
 
 <h2>Verdict</h2>
 <p>The concepts line up. The change made the model smaller: "a new process is idle until its first turn" has one owner, and the inbox write
-went back to saving an address. One label to fix before qa, one rare edge to know about, one risk only a real Claude can answer.</p>
+went back to saving an address. The one wrong label is fixed. Left: a one-query write-lock fix, one rare edge to know about, and one risk only a real Claude can answer.</p>
 
 <h2>Questions</h2>
 <ol class="q">
   <li>Codex's launch report:
-    <ol><li>keep the Codex-shaped payload, fix <code>source</code> (planned)</li>
+    <ol><li>keep the Codex-shaped payload with a truthful <code>source</code> (built)</li>
         <li>add <code>BoundaryMoment::Open</code> now and accept the wire change</li></ol></li>
   <li>The server-silent-at-launch Codex edge:
     <ol><li>leave it (planned)</li>
@@ -113,6 +121,9 @@ went back to saving an address. One label to fix before qa, one rare edge to kno
   <li>Wake entry points:
     <ol><li>leave three (planned)</li>
         <li>file a Task to make "became idle" a store revision, measured against a 10,000-Task store first</li></ol></li>
+  <li><code>record_first_boundary</code>'s read:
+    <ol><li>fold eligibility into it so ineligible boundaries never take the write lock (planned)</li>
+        <li>leave it: the window ends when the worker's stream writes its first row</li></ol></li>
 </ol>
 </body>
 </html>

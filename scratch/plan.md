@@ -84,7 +84,7 @@ queue the steers as Claude's next turn while the prompt runs. Claims are
 exclusive, so the steers arrive once; the prompt and the wake each run
 once. Codex avoids the race by reporting the prompt first. Accepted as is.
 
-## Risk the real Claude reopen answers (slice 5)
+## Risk the real Claude reopen answers (slice 6)
 
 Claude's inbox at SessionStart, still unanswered. The wake writes a
 `priority:"next"` message with no acknowledgement and stamps it delivered. If
@@ -164,7 +164,17 @@ prompt once and hears the steer once.
    answers its in-turn `SessionStart`, that becomes the first boundary and
    records the conversation idle mid-turn. Claims stay exclusive, so the steer
    arrives once; the turn's Stop corrects the state.
-5. **Next (qa), real providers:** the same reopen by hand on real Claude and Codex
+5. **Next (implement), one query:** `record_first_boundary`'s read asks only
+   whether this process has a row with `observed_at<>0`. A worker
+   (`interactive=0`) or a process without the steer capability answers no
+   until its stream writes a row, so each of its boundaries runs the
+   `INSERT … SELECT` that matches nothing, which still takes the Machine's
+   one SQLite write lock. Fold the write's eligibility (interactive Session,
+   this process current on it, capability present) into the read so only a
+   boundary that will write takes the lock. No behaviour change. Test: a
+   non-interactive Session's boundary answers under a held `BEGIN IMMEDIATE`
+   (beside the existing busy-timeout test in `boundary::tests`).
+6. **Then (qa), real providers:** the same reopen by hand on real Claude and Codex
    with the branch `lf` (held terminal, the account's logins). Claude's run
    answers the inbox-at-SessionStart risk above: `delivered` with no turn
    means Claude dropped the early message; then build the bounded

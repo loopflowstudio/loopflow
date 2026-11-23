@@ -23,7 +23,9 @@ execution in each mode. For each mode: fresh app edit, two further app edits,
 execution edit in the same target, two further execution edits. Also measure
 a fresh execution-only worktree in cache mode. Record at least three complete
 paired cohorts. Select incremental for the test profile only if it wins the median
-three-edit total in both app and execution. Concurrent-worktree capacity is unmeasured.
+three-edit total in both app and execution. Concurrent-worktree capacity is
+unmeasured; the November 16 delivery comment says to "report concurrent-worktree
+capacity as unmeasured unless a separate permitted experiment exists".
 
 ## Checks and remaining work
 
@@ -67,7 +69,9 @@ three-edit total in both app and execution. Concurrent-worktree capacity is unme
 
 `install` seeds the Machine inventory and installs the Git hook. The hook and
 manual `register` use the same operation: list the root, then request the
-approved stop if the serving pinned client-side daemon lacks it. Keep the
+approved stop if the serving pinned client-side daemon lacks it. Today
+`register` lists the root only through `cache_status` → `refresh`
+(`scripts/build_cache.py`), so it must call the writer itself. Keep the
 serialized registration and atomic inventory write. The next Cargo command
 starts a daemon when needed. Checkout remains fail-soft. Caller-owned root
 settings stay read-only, and an isolated build bypasses the cache.

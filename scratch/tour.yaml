@@ -1,0 +1,19 @@
+at: ee2d2ede690e0fd86aa31989824db27fd47670a8
+first:
+  - path: rust/loopflow/src/server/README.md
+    why: the four reaches and what agent_inbox holds per provider
+  - path: rust/loopflow-storage/src/steer.rs
+    why: IdleReach gains Plugin and Antigravity
+  - path: rust/loopflow-storage/src/sqlite/steers.rs
+    why: idle candidates pick their reach by provider
+  - path: rust/loopflow/src/server/wake.rs
+    why: the plugin socket and language-server sends, with tests
+  - path: rust/loopflow-execution/src/harness/server_connection.js
+    why: the wake socket every plugin binds and reports
+  - path: rust/loopflow-execution/src/harness/context_opencode.js
+    why: synthetic wake; Stop and prompt name the conversation
+  - path: rust/loopflow-execution/src/harness/context_pi.mjs
+    why: followUp + triggerTurn wake
+  - path: rust/loopflow-execution/src/harness/antigravity.rs
+    why: launch token, log file, wake file; LanguageServer send
+hide: []

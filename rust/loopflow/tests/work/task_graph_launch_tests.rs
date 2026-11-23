@@ -2277,6 +2277,107 @@ with (home / 'build-input').open('rb') as pipe:
     assert!(live(&daemon), "interrupt stopped a detached service");
 }
 
+/// Invoke pause from an independent CLI while the process being paused is
+/// still inside the launch or Git operation that called this fixture.
+fn pause_fixture(task: &GraphTask, path: &Path, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, os, subprocess, sys
+lf = {binary}
+env = {{k: v for k, v in os.environ.items() if not k.startswith(('LF_', 'GIT_'))}}
+env.update(LF_HOME={home}, LF_BIN=lf)
+def task(action, *args):
+    return subprocess.run([lf, 'task', action, 'INF-123', *args], cwd={repo}, env=env,
+                          stdin=subprocess.DEVNULL, capture_output=True, text=True)
+
+{body}
+"#,
+        home = serde_json::json!(task.home.path()),
+        binary = serde_json::json!(loopflow_test_support::lf_binary()),
+        repo = serde_json::json!(task.repo.path()),
+    );
+    fs::write(path, script).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn pause_after_run_admission_stops_the_graph_before_its_first_step() {
+    let task = GraphTask::new();
+    let shim = task.home.path().join("lf");
+    pause_fixture(
+        &task,
+        &shim,
+        r#"if sys.argv[-2:] == ['graph', 'run']:
+    task('pause').check_returncode()
+os.execv(lf, [lf, *sys.argv[1:]])"#,
+    );
+
+    let ran = command(
+        task.repo.path(),
+        task.home.path(),
+        &["-b", "task", "run", "INF-123", "proof"],
+    )
+    .env("LF_BIN", shim)
+    .output()
+    .unwrap();
+    assert_eq!(ran.status.code(), Some(130), "{ran:?}");
+    assert_eq!(task.state(), "paused");
+    assert!(
+        support::recorded_graphs(task.home.path())
+            .iter()
+            .all(|(_, steps)| steps.is_empty()),
+        "a step started after pause"
+    );
+    assert!(refusal(task.run(&["task", "run", "INF-123"])).contains("lf task unpause"));
+    task.task_run_ok(&["task", "unpause", "INF-123", "--run"]);
+    assert_eq!(task.graph()["position"], at("end"));
+}
+
+#[test]
+fn pause_during_land_finishes_the_merge_and_stops_before_the_next_step() {
+    let task = GraphTask::new();
+    task.repo.push_new_branch("main");
+    task.repo.create_file(
+        ".lf/graphs/landing.yaml",
+        "- cmd: pr land --local\n- cmd: task sync --plan\n",
+    );
+    task.repo.create_file("feature.txt", "land this change");
+    task.repo.stage_all();
+    task.repo.commit("Land the change locally");
+    let feature = task.repo.head_sha();
+    task.repo.push_new_branch("launch-proof");
+    let hook = task.repo.path().join(".git/hooks/pre-merge-commit");
+    task.publish(false);
+    pause_fixture(
+        &task,
+        &hook,
+        r#"paused = task('pause')
+assert paused.returncode == 0, paused.stderr
+assert 'pausing' in paused.stdout and 'finishing' in paused.stdout, paused.stdout
+status = task('status', '--json')
+assert status.returncode == 0, status.stderr
+sentence = json.loads(status.stdout)['graph']['sentence']
+assert 'pr land --local is finishing' in sentence, sentence
+unpause = task('unpause')
+assert unpause.returncode != 0 and 'still finishing' in unpause.stderr, unpause"#,
+    );
+
+    let ran = task.task_run(&["-b", "task", "run", "INF-123", "landing"]);
+    assert_eq!(ran.code, Some(130), "{}", ran.text);
+    assert!(Command::new("git")
+        .args(["merge-base", "--is-ancestor", &feature, "main"])
+        .current_dir(task.repo.path())
+        .status()
+        .unwrap()
+        .success());
+    let graphs = support::recorded_graphs(task.home.path());
+    assert_eq!(graphs.len(), 1);
+    assert_eq!(graphs[0].1.len(), 1, "the next command started");
+    assert_eq!(task.state(), "paused");
+    task.ok(&["task", "unpause", "INF-123"]);
+}
+
 #[test]
 fn pause_retry_stops_the_saved_build_and_unassign_returns_it_to_backlog() {
     use loopflow_execution::process::OsProcess;

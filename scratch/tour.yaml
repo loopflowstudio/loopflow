@@ -1,17 +1,21 @@
-at: 44b4012d25422ef245ea51c33b569a09db3f8b6a
+at: c3a44d5a6a610547f12ff5dd6e2176c7c07dc4ac
 first:
   - path: docs/work.md
-    why: The intended pause and unpause experience
+    why: What pausing and unpausing do
   - path: scratch/plan.md
-    why: Worker teardown and remaining pause work
-  - path: rust/loopflow-execution/src/os_process/lifeline.rs
-    why: Establish worker ownership before provider execution
-  - path: rust/loopflow-execution/src/harness/agent_process.rs
-    why: Select the jobs an attached provider owns
-  - path: rust/loopflow-execution/src/process/os_process.rs
-    why: Read live OS session members
-  - path: rust/loopflow-execution/src/os_process.rs
-    why: Signal verified jobs and check who survived
+    why: Scope, macOS checks, and remaining work
+  - path: rust/loopflow-storage/src/sqlite/task_pause.rs
+    why: The hold and the worker identities it protects
+  - path: rust/loopflow-execution/src/ops/task/pause.rs
+    why: Stop a Task and finish interrupted cleanup
+  - path: rust/loopflow-execution/src/harness/native_exit.rs
+    why: Distinguish a departure from a personal quit
+  - path: rust/loopflow-execution/src/ops/recovery.rs
+    why: Decide when a primary conversation comes back
+  - path: rust/loopflow-storage/src/sqlite/steers.rs
+    why: Leave steers unread while their target is paused
+  - path: rust/loopflow-execution/src/ops/human_session/moves.rs
+    why: Carry the pause across Machines and acknowledge retries
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
-    why: Interrupt a build after its shell exits
+    why: Exercise teardown, quiet wakes, Backlog, and unpause
 hide: []

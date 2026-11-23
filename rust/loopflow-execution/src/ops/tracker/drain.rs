@@ -152,13 +152,10 @@ async fn drain(
     scope: Scope<'_>,
     bound: Bound,
 ) -> OpsResult<Pass> {
-    let creating: HashSet<String> = actions
+    let creating: HashSet<ActionOwner> = actions
         .iter()
         .filter(|action| action.kind == ActionKind::Create)
-        .filter_map(|action| match &action.owner {
-            ActionOwner::Project(id) => Some(id.to_string()),
-            _ => None,
-        })
+        .map(|action| action.owner.clone())
         .collect();
     let pass = Drain {
         store,
@@ -176,8 +173,8 @@ async fn drain(
         resolved: AtomicUsize::new(0),
     };
     pass.round(grouped(actions, scope), bound.concurrency).await;
-    // Owners run concurrently, so a Task can wait on a Project created in the
-    // same round; those get one more turn once the round has resolved it.
+    // Owners run concurrently, so a Task can wait on a Project or a parent
+    // created in the same round; those get one more turn once it has resolved.
     if !pass.creating.is_empty() {
         let mut owners = grouped(
             store
@@ -188,7 +185,9 @@ async fn drain(
         );
         owners.retain(|(_, queued)| {
             queued.iter().any(|action| {
-                parent_named(action).is_some_and(|project| pass.creating.contains(&project))
+                parents_named(action)
+                    .iter()
+                    .any(|parent| pass.creating.contains(parent))
                     && !pass.parent_uncreated(action)
             })
         });
@@ -225,22 +224,25 @@ fn grouped(
     owners
 }
 
-/// The Project a Task creation or membership edit names.
-fn parent_named(action: &TrackerAction) -> Option<String> {
-    match action.kind {
-        ActionKind::Create => values(action)
-            .ok()?
-            .into_iter()
-            .find_map(|value| match value {
-                WorkValue::TaskProject(project) => project,
-                _ => None,
-            }),
-        ActionKind::Field => match value(action).ok()? {
-            WorkValue::TaskProject(project) => project,
+/// The Project and the parent Task a Task creation or edit names.
+fn parents_named(action: &TrackerAction) -> Vec<ActionOwner> {
+    let values = match action.kind {
+        ActionKind::Create => values(action).unwrap_or_default(),
+        ActionKind::Field => value(action).into_iter().collect(),
+        _ => Vec::new(),
+    };
+    values
+        .into_iter()
+        .filter_map(|value| match value {
+            WorkValue::TaskProject(Some(project)) => Some(ActionOwner::Project(
+                loopflow_model::durable::ProjectId::from_raw(project),
+            )),
+            WorkValue::TaskParent(Some(parent)) => Some(ActionOwner::Task(
+                loopflow_model::durable::TaskId::from_raw(parent),
+            )),
             _ => None,
-        },
-        _ => None,
-    }
+        })
+        .collect()
 }
 
 /// The tracker id an owner is bound to.
@@ -293,8 +295,8 @@ struct Drain<'a> {
     store: &'a Store,
     repo: &'a Path,
     tracker: &'a Tracker,
-    /// Projects whose creation is queued.
-    creating: HashSet<String>,
+    /// Projects and Tasks whose creation is queued.
+    creating: HashSet<ActionOwner>,
     limit: usize,
     until: Instant,
     /// Seconds between looks for one lost reply; 0 looks now.
@@ -335,18 +337,13 @@ impl Drain<'_> {
         false
     }
 
-    /// Whether this action names a Project being created that has no remote id yet.
+    /// Whether this action names a Project or a parent Task being created
+    /// that has no remote id yet.
     fn parent_uncreated(&self, action: &TrackerAction) -> bool {
-        let Some(project) = parent_named(action).filter(|project| self.creating.contains(project))
-        else {
-            return false;
-        };
-        self.store
-            .sqlite
-            .project(&loopflow_model::durable::ProjectId::from_raw(project))
-            .ok()
-            .flatten()
-            .is_none_or(|project| project.tracker_id.is_none())
+        parents_named(action)
+            .iter()
+            .filter(|parent| self.creating.contains(parent))
+            .any(|parent| !matches!(bound(self.store, parent), Ok(Some(_))))
     }
 
     /// Whether this action relates its Task to one with no tracker object yet.
@@ -593,6 +590,7 @@ mod tests {
             self.store
                 .sqlite
                 .create_task(&loopflow_storage::work::task::NewTask {
+                    parent_task_id: None,
                     repository_id: loopflow_storage::test_fixture::repository(
                         &self.store.sqlite,
                         "/repo",

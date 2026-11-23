@@ -290,6 +290,65 @@ fn cleanup_ends_a_done_tasks_held_conversation() {
 }
 
 #[test]
+fn a_closed_tasks_conversations_reopen_in_the_main_checkout() {
+    use crate::ops::human_session::{admit_workspace, select_connection, SessionTarget};
+    let _ledger = crate::journal::TestLedgerGuard::new();
+    let executable = std::env::current_exe().unwrap();
+    let _bin = crate::config::environment::EnvVarGuard::set("LF_BIN", executable.to_str().unwrap());
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let fixture = Workspace::new().await;
+        fixture.due();
+        for session in ["primary", "bound"] {
+            fixture
+                .store
+                .sqlite
+                .test_session(session, &crate::session_record::new_artifact_key());
+            fixture
+                .sql()
+                .execute(
+                    "UPDATE agent_sessions SET task_id=?1,interactive=1,cwd=?2 WHERE id=?3",
+                    params![
+                        fixture.task.id.as_str(),
+                        fixture.checkout.to_str().unwrap(),
+                        session
+                    ],
+                )
+                .unwrap();
+        }
+        fixture
+            .sql()
+            .execute_batch(&format!(
+                "UPDATE agent_sessions SET work_source='bound' WHERE id='bound';
+                 INSERT INTO task_primary_sessions(task_id,session_id) VALUES('{}','primary');",
+                fixture.task.id
+            ))
+            .unwrap();
+        advance(&fixture.store, &fixture.task).await.unwrap();
+        assert!(!fixture.checkout.exists());
+
+        let main = fixture.repo.path().canonicalize().unwrap();
+        // `lf resume <Task>` finds the conversation without rebuilding the checkout.
+        let selected = select_connection(
+            &fixture.store,
+            fixture.repo.path(),
+            SessionTarget::Task(fixture.task.id.as_str()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(selected.id, "primary");
+        for id in ["primary", "bound"] {
+            let session = fixture.store.session(id).await.unwrap().unwrap();
+            let admitted = admit_workspace(&fixture.store, session).await.unwrap();
+            assert_eq!(admitted.cwd.canonicalize().unwrap(), main, "{id}");
+            let recorded = fixture.store.session(id).await.unwrap().unwrap();
+            assert_eq!(recorded.cwd, admitted.cwd);
+            assert_eq!(recorded.task_id.as_ref(), Some(&fixture.task.id));
+        }
+        assert!(!fixture.checkout.exists());
+    });
+}
+
+#[test]
 fn retirement_ends_a_pr_less_tasks_conversations_and_keeps_its_checkout() {
     let _ledger = crate::journal::TestLedgerGuard::new();
     tokio::runtime::Runtime::new().unwrap().block_on(async {

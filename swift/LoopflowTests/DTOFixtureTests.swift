@@ -715,6 +715,8 @@ struct DTOFixtureTests {
         #expect(detail.tasks.items[0].task.sync.actions[0].kind == "create")
         #expect(detail.tasks.items[0].task.id == detail.tasks.items[0].runtime?.workId)
         #expect(detail.tasks.items[0].task.trackerId == "issue-1")
+        // A Task filed from another names it; top-level work carries null.
+        #expect(detail.tasks.items.map(\.task.parentId) == [nil, detail.tasks.items[0].task.id])
         #expect(detail.tasks.items[0].task.completedAt == nil)
         #expect(detail.tasks.items[0].pr?.publication?.github?.number == 912)
         #expect(detail.tasks.items[0].pr?.id == "pr_33333333333333333333333333333333")

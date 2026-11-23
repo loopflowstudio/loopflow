@@ -178,7 +178,7 @@ struct ServerProtocolTests {
     }
 
     @Test func mobileOperationsUseTheSharedFixtures() throws {
-        let task = ServedWrite.taskCreate(directory: "/repo", requestID: "00000000-0000-4000-8000-000000000001", title: nil, request: "Fix the retry test", wave: nil, graph: nil, session: nil, run: true)
+        let task = ServedWrite.taskCreate(directory: "/repo", requestID: "00000000-0000-4000-8000-000000000001", title: nil, request: "Fix the retry test", wave: nil, parent: nil, graph: nil, session: nil, run: true)
         #expect(try encoded(.request(id: "create-1", operation: .command(task), select: nil, requestID: nil)) == value("task_create"))
         #expect(try encoded(.request(id: "sessions-1", operation: .read(.sessionList(
             directory: "/repo", headless: false, after: nil, limit: 100, task: "task_00000000000000000000000000000001")), select: nil, requestID: nil)) == value("session_page"))
@@ -240,7 +240,7 @@ struct ServerProtocolTests {
 
     @Test func sessionAdoptionSharesTheRustWriteContract() throws {
         let request = ServerClientMessage.request(id: "adopt-1", operation: .command(
-            .taskCreate(directory: "/repo", requestID: "fixture-creation", title: "Keep the conversation", request: nil, wave: nil, graph: nil, session: "session_5e55105e000040008000000000000001", run: false)), select: nil, requestID: nil)
+            .taskCreate(directory: "/repo", requestID: "fixture-creation", title: "Keep the conversation", request: nil, wave: nil, parent: nil, graph: nil, session: "session_5e55105e000040008000000000000001", run: false)), select: nil, requestID: nil)
         #expect(try encoded(request) == value("task_from_session"))
     }
 

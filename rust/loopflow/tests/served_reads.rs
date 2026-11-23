@@ -220,6 +220,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
             request_id: format!("adoption-{served_first}"),
             request: None,
             wave: None,
+            parent: None,
             graph: None,
             run: false,
         };
@@ -298,6 +299,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
             request_id: "bad-adoption".into(),
             request: None,
             wave: None,
+            parent: None,
             graph: None,
             run: false,
         })
@@ -560,6 +562,7 @@ fn screen_reads_are_compact_passive_and_match_cli() {
     let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     store
         .create_task(&loopflow_execution::work::task::NewTask {
+            parent_task_id: None,
             id: loopflow_execution::durable::TaskId::new(),
             repository_id: registered.task.repository_id.clone(),
             project_id: None,
@@ -2017,6 +2020,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             title,
             request,
             wave,
+            parent,
             graph,
             session,
             run,
@@ -2026,6 +2030,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 ("--title", title),
                 ("--notes", request),
                 ("--wave", wave),
+                ("--parent", parent),
                 ("--graph", graph),
                 ("--session", session),
             ] {
@@ -2921,6 +2926,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         title: Some("One Task".into()),
         request: None,
         wave: None,
+        parent: None,
         graph: None,
         session: None,
         run: false,
@@ -2980,7 +2986,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     // A repeat returns the same receipt; the reads beside it are taken again.
     let receipt = |mut answer: serde_json::Value| {
         let fields = answer.as_object_mut().unwrap();
-        for read in ["session", "row"] {
+        for read in ["session", "row", "parent"] {
             fields.remove(read).unwrap();
         }
         answer
@@ -3034,6 +3040,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         title: Some("One Task".into()),
         request: None,
         wave: None,
+        parent: Default::default(),
         graph: None,
         session: None,
         worktree: None,

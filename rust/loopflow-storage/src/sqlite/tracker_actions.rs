@@ -72,6 +72,7 @@ impl ActionKind {
             | WorkValue::TaskDescription(_)
             | WorkValue::TaskAssignee(_)
             | WorkValue::TaskProject(_)
+            | WorkValue::TaskParent(_)
             | WorkValue::ProjectName(_)
             | WorkValue::ProjectSummary(_)
             | WorkValue::ProjectDescription(_)
@@ -587,6 +588,7 @@ fn field_baseline(
         WorkValue::MetricTargets(_) => ("o.metric_targets", "o.metric_targets IS NOT NULL"),
         WorkValue::TaskAssignee(_) => ("o.assignee", "o.assignee_observed"),
         WorkValue::TaskProject(_) => ("COALESCE((SELECT id FROM projects WHERE id=o.claimed_project_id OR external_project_id=o.claimed_project_id),o.claimed_project_id)", "o.project_id_observed"),
+        WorkValue::TaskParent(_) => ("(SELECT id FROM tasks WHERE external_issue_id=o.parent_id)", "o.parent_id_observed"),
         _ => return Ok(None),
     };
     let revision = if matches!(edit, WorkValue::ProjectDescription(_)) {
@@ -674,6 +676,7 @@ fn creation_baseline(conn: &Connection, owner: &ActionOwner) -> StoreResult<Vec<
                 WorkValue::TaskAssignee(task.assignee),
                 WorkValue::TaskDueDate(task.due_date),
                 WorkValue::TaskProject(task.project_id.as_ref().map(ToString::to_string)),
+                WorkValue::TaskParent(task.parent_task_id.as_ref().map(ToString::to_string)),
             ]
         }
         ActionOwner::Project(id) => {
@@ -1264,6 +1267,7 @@ mod tests {
         let id = TaskId::new();
         store
             .create_task(&crate::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: crate::test_fixture::repository(store, "/repo"),
                 id: id.clone(),
                 project_id: None,

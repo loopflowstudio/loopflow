@@ -128,34 +128,24 @@ impl SqliteStore {
                 });
             }
         }
-        let abandon = match work {
-            WorkRef::Task(_) => format!(
-                "UPDATE tasks AS t SET abandoned_at=?2 WHERE t.id=?1 AND {}",
-                task_open_sql("t")
-            ),
-            _ => format!(
-                "UPDATE {table} SET work_state='abandoned', work_terminal_at=?2
-                 WHERE id=?1 AND work_state='ready'"
-            ),
+        let abandoned = match work {
+            WorkRef::Task(task_id) => abandon_task_in(&tx, task_id, reason, now)?,
+            _ => {
+                tx.execute(
+                    &format!(
+                        "UPDATE {table} SET work_state='abandoned', work_terminal_at=?2
+                         WHERE id=?1 AND work_state='ready'"
+                    ),
+                    params![id, now],
+                )? == 1
+            }
         };
-        if tx.execute(&abandon, params![id, now])? != 1 {
+        if !abandoned {
             return Err(StoreError::InvalidAuthority(format!(
                 "{} {} is not ready",
                 work.kind(),
                 work.id()
             )));
-        }
-        if let WorkRef::Task(task_id) = work {
-            tx.execute(
-                "UPDATE tasks SET abandon_reason=?2 WHERE id=?1",
-                params![task_id.as_str(), reason],
-            )?;
-            super::task_state::decide_in(&tx, task_id, "canceled")?;
-            super::task_summaries::write_in(
-                &tx,
-                task_id,
-                super::task_summaries::TaskEnd::Abandoned,
-            )?;
         }
         tx.commit()?;
         Ok(AbandonReceipt {
@@ -361,6 +351,27 @@ pub(crate) fn task_state_sql(t: &str) -> String {
 /// SQL: Task row `t` is neither done nor abandoned.
 pub(crate) fn task_open_sql(t: &str) -> String {
     format!("({t}.abandoned_at IS NULL AND {t}.planning_completed IS NOT 1)")
+}
+
+/// Abandon an open Task at `at`. `false` when it is already done or abandoned.
+pub(super) fn abandon_task_in(
+    conn: &Connection,
+    task: &TaskId,
+    reason: &str,
+    at: i64,
+) -> StoreResult<bool> {
+    let abandoned = conn.execute(
+        &format!(
+            "UPDATE tasks AS t SET abandoned_at=?2,abandon_reason=?3 WHERE t.id=?1 AND {}",
+            task_open_sql("t")
+        ),
+        params![task.as_str(), at, reason],
+    )? == 1;
+    if abandoned {
+        super::task_state::decide_in(conn, task, "canceled")?;
+        super::task_summaries::write_in(conn, task, super::task_summaries::TaskEnd::Abandoned)?;
+    }
+    Ok(abandoned)
 }
 
 pub(crate) fn task_state_in(conn: &Connection, task: &TaskId) -> StoreResult<TaskState> {

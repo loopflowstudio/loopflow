@@ -33,6 +33,7 @@ support (`desktop`, `rex`, `cmux`, `herdr`, `tmux`, `terminal`).
 | Missing for this scope | Starts a new one |
 | Running in a held terminal (shown or hidden) | Attaches another view here; existing views stay open |
 | Ended or crashed | Continues the provider thread it saved (paints last screen while reopening), or starts again from its first request |
+| Recorded in a directory that is gone (a done Task's retired checkout) | Continues it in the repository's main checkout |
 | Running in an unshared terminal (`lf <skill>` elsewhere) | Takes it over: ends the other client and continues here |
 
 Need a parallel branch of the same conversation, or a fresh context window?
@@ -208,6 +209,10 @@ lf session steers <session>                          # pending vs. delivered
   automatically when a steer, Task comment, or Graph step update arrives, with no
   per-conversation watcher process required. Pi, OpenCode and Antigravity hear
   updates at their next boundary.
+- **A Task's conversation** also hears about the
+  [follow-ups filed from it](work.md#file-follow-ups-from-a-task) when one
+  stops at an interactive step, fails, merges or closes, not at each step. A
+  steer for a child stays with the child.
 - **Chats** are never woken while idle; in a Task checkout they receive updates
   on their next turn.
 

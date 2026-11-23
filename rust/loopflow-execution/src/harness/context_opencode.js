@@ -59,7 +59,22 @@ export default {
       ["__context-block", "--delivery", delivery, "--moment", moment], {
         env: renderEnv, cwd: lf.cwd, input: JSON.stringify(callback), encoding: "utf8", timeout: 30000,
       })).hookSpecificOutput.additionalContext;
-    await session.hook("prompt", (input) => { owner ??= input.sessionID; });
+    // A reopened conversation keeps the model of its last turn, whatever the
+    // configuration says: the launch's model is set at its first prompt, and
+    // a model picked in the TUI after that holds.
+    let model = spec.model;
+    await session.hook("prompt", async (input) => {
+      owner ??= input.sessionID;
+      if (!model || input.sessionID !== owner) return;
+      const at = model.indexOf("/");
+      const ref = { providerID: model.slice(0, at), id: model.slice(at + 1) };
+      model = undefined;
+      try {
+        await session.switchModel({ sessionID: owner, model: ref });
+      } catch (error) {
+        log(`model ${ref.providerID}/${ref.id} not set: ${String(error?.message ?? error).split("\n")[0]}`);
+      }
+    });
     await session.hook("compaction", (input) => { if (input.sessionID === owner) refresh = "compact"; });
     await session.hook("context", async (input) => {
       owner ??= input.sessionID;

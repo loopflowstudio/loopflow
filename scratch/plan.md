@@ -96,29 +96,43 @@ idle steer and a steer saved while quit both woke it after the compress; a
 changed `agent:` on reopen stayed on carbon. `idle_wake.py` passed on
 OpenCode 2.2.1 and Pi 1.3.0.
 
-## Next slice: from the concept review's answers
+## Built: the concept review's answers
 
-`direction.md` has the answers word for word. Two changes here; the
-reopen rule goes to its own Task.
+`direction.md` has the answers word for word.
 
-1. **Split `agent_inbox` (5b).** Claude's key file stays in `agent_inbox`;
-   the OpenCode or Pi socket goes in a new `agent_socket` column
-   (`src/migrations/loo974_agent_socket.sql`, created empty, additive). The
-   boundary request names which it carries, so `IdleReach` reads its arm from
-   the column and the `provider IN ('opencode','pi')` switch in
-   `idle_conversation_candidates` goes. Mark nothing leaving: the column
-   keeps its Claude meaning. Regenerate the DTO fixture if the wire changes.
-2. **A launch's model reaches a reopened OpenCode session (4b).** The plugin
-   sets the model from `agent:` on the first turn of each launch only, then
-   leaves it. That is what `claude --resume --model` does, and it keeps a
-   `/models` choice made inside the TUI, which a set-every-turn plugin would
-   undo each turn (the cost of 4b as asked). Probe first which plugin hook
-   can change a turn's model on 2.2.1 (`chat.message`, `chat.params`); if
-   none can, stop and record it in `questions.md` 7 rather than restarting
-   the conversation (4c).
+1. **`agent_inbox` split (5b).** Claude's key stays in `agent_inbox`; the
+   OpenCode or Pi socket is in `agent_socket` (`loo974_agent_socket.sql`,
+   additive, nothing leaving). The boundary's `inbox` names its kind:
+   `{"claude": key}` or `{"socket": path}` (`steer::Inbox`), and
+   `IdleReach` is `Codex(endpoint)` or `Inbox(Inbox)`, read from the columns.
+   The `provider IN ('opencode','pi')` switch is gone. The wire shape changed
+   for Claude too, so a hook from an older `lf` against this server fails its
+   boundary (a recording gap) until both are the same build.
+2. **A launch's model reaches a reopened OpenCode session (4b).** OpenCode
+   2.2.1's plugin `session` has `switchModel({sessionID, model: {providerID,
+   id}})`, "the model used by subsequent provider turns". The plugin calls it
+   once, in the first `prompt` hook of the launch, with the configuration's
+   `model` (`spec.model`). Probe (`probes.md`, "switchModel"): at load and in
+   the `prompt` hook both set a reopened session's model, and later turns keep
+   it. The `prompt` hook was chosen because it covers workers and new sessions
+   without knowing the conversation at load.
+
+Checks, each run once on this tree:
+
+- `server::wake::tests::` 8 passed; `server::boundary::`, `server::schema::tests::`,
+  `server::wire::`, `harness::context::tests::` passed after the fixture updates
+  (`server_schema.json`, `session_boundary.json`, Swift `ServerProtocolTests`
+  edited, Swift suite not run here: gate).
+- `harness::context::tests::` and `harness::opencode::tests::`: 18 passed; the
+  OpenCode plugin fixture asserts one `switchModel` across two prompts.
+- `query_plans::`, `sqlite::steers::`, `sqlite::processes::`: 39 passed.
+- `documented_commands::`: 4 passed.
+- `tests/e2e/idle_wake.py` on OpenCode 2.2.1 and Pi 1.3.0 (Pi from nvm
+  v24.22.2; not on this shell's PATH): passed.
 
 Then QA: reopen an OpenCode work session after changing `agent:`; the first
-turn answers on the new model, and a `/models` pick after it holds.
+turn answers on the new model, and a `/models` pick after it holds. Not run
+on a real model yet.
 
 Filed separately as LOO-1068, to run on the `autonomous` Graph once this merges: one owner for "a new provider
 process is idle" at its first boundary on every provider (3b), carrying 2a

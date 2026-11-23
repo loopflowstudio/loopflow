@@ -101,7 +101,10 @@ pub(crate) fn add_opencode_context(
 ) -> Result<()> {
     // A work session listens for the server on the conversation lf named.
     let wake = (kind == LaunchKind::WorkSession).then_some(thread);
-    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "turns":kind.is_managed(), "wake":wake,
+    // The configuration's model picks a new conversation's; the plugin sets it
+    // on a reopened one.
+    let model = config.get("model").cloned();
+    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "turns":kind.is_managed(), "wake":wake, "model":model,
         "steers":loopflow_storage::steer_markers::latest_marker(&context.home), "server":server_spec("lf opencode plugin")});
     let delivery = write_prompt_log(
         &context.repo,
@@ -522,7 +525,7 @@ const wake = (path, thread, text) => new Promise((resolve, reject) => {
             submitted_docs: None,
             references: Vec::new(),
         };
-        let mut config = serde_json::json!({});
+        let mut config = serde_json::json!({"model":"opencode/gemini-4-carbon"});
         add_opencode_context(&mut config, &context, "Fixed instructions", kind, "native").unwrap();
         let plugin = config["plugins"][0].as_str().unwrap();
         run_probe(
@@ -536,15 +539,22 @@ const hooks = {{}};
 let end;
 const ended = new Promise((resolve) => {{ end = resolve; }});
 const woken = [];
+const switched = [];
 const close = await plugin.setup({{
   session: {{ hook: async (name, callback) => {{ hooks[name] = callback; }},
-    synthetic: async (message) => {{ woken.push(message); }} }},
+    synthetic: async (message) => {{ woken.push(message); }},
+    switchModel: async (request) => {{ switched.push(request); }} }},
   event: {{ subscribe: async function* () {{
     await ended;
     yield {{ type: 'session.execution.succeeded', data: {{ sessionID: 'native' }} }};
   }} }},
 }});
 await hooks.prompt({{ sessionID: 'native' }});
+await hooks.prompt({{ sessionID: 'native' }});
+// The launch's model is set once, at its first prompt: a reopened
+// conversation answers on it, and a later pick in the TUI holds.
+assert.deepEqual(switched, [{{ sessionID: 'native',
+  model: {{ providerID: 'opencode', id: 'gemini-4-carbon' }} }}]);
 const texts = [];
 for (const compact of [false, false, true]) {{
   if (compact) await hooks.compaction({{ sessionID: 'native' }});
@@ -593,7 +603,11 @@ await close();
         );
         let requests = managed.server["requests"].as_array().unwrap();
         assert_eq!(requests[0]["callback"]["session_id"], "native");
-        assert!(requests[0]["inbox"]["socket"].is_string(), "{}", requests[0]);
+        assert!(
+            requests[0]["inbox"]["socket"].is_string(),
+            "{}",
+            requests[0]
+        );
         assert_eq!(
             requests[2]["callback"],
             serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit"})

@@ -29,5 +29,11 @@
    that Session was doing. Moves to LOO-1068 with the reopen rule.
 
 7. A reopened OpenCode session keeps the model of its last turn. Answered 4b;
-   built as the plugin setting the model on a launch's first turn only
-   (`plan.md`, next slice).
+   built as `session.switchModel` in the launch's first `prompt` hook. Not
+   probed: whether an idle wake (`session.synthetic`) passes through that
+   hook. If not, a reopened work session whose first turn is a wake answers
+   on the earlier model until someone types.
+
+8. The boundary's `inbox` changed shape for Claude as well. An `lf` hook and
+   server from different builds disagree on it, and the boundary is then a
+   recording gap; nothing in the hook path stays readable across the change.

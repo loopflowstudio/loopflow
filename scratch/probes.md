@@ -94,3 +94,21 @@ models (`neon`, `carbon`, `small` as `small_model`). Each row is one launch of
 A config `model` picks the model of a new session. A reopened session keeps
 the model of its last turn and ignores the config. No `model.json` state file
 was written; the model rides with the session.
+
+# switchModel from the OpenCode plugin, 2026-11-22
+
+OpenCode 2.2.1 TUI under a PTY, scripted local API, config `model`
+`opencode/neon` on every launch. A probe plugin called
+`session.switchModel({sessionID, model: {providerID, id}})` once per launch,
+at load (`setup`) or in its first `prompt` hook. Script: `probes/oc_switch.py`.
+
+| Launch | Models the prompts' requests named |
+|---|---|
+| new session | p1: `neon` |
+| reopened, switch to carbon at load, two prompts | p2: `carbon`; p3: `carbon` |
+| reopened, no switch | p4: `carbon` |
+| another new session, `prompt`-hook switch to carbon | p5: `carbon` |
+| that session reopened, `prompt`-hook switch to neon | p6: `neon` |
+
+Both calls succeeded. The switched model holds for later turns and later
+launches until something switches it again.

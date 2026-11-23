@@ -1,0 +1,13 @@
+at: e222e69e5be0cd7d17ebdff4fffbb907857adc7f
+first:
+  - path: docs/sessions.md
+    why: Opening a conversation and recovering a paused pane
+  - path: swift/LoopflowMac/Services/ServerConnection.swift
+    why: Attachment enables input, connection failures supply banner text
+  - path: swift/LoopflowMac/Views/WorkspacePanesView.swift
+    why: Provider strip, opening spinner and retained output
+  - path: swift/LoopflowTests/ServerConnectionTests.swift
+    why: Live relay readiness, recovery and close reasons
+  - path: swift/LoopflowTests/WorkspacePanesTests.swift
+    why: Fresh and resumed panes keep transition headers hidden
+hide: []

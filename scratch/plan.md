@@ -170,6 +170,9 @@ a log naming its port, a wake file) receives the token header and its `cascadeId
 2. **Pi:** the extension's wake handler (`sendMessage` followUp + triggerTurn), Node test, wake test.
 3. **Antigravity:** launch token, log file, wake file recorded at launch, HTTP send, stand-in test; a
    real `agy` work session woken by `lf steer`.
-4. **Docs:** both READMEs; the table row says `yes` and names the tests.
+4. **Docs:** written ahead (write-docs): `rust/loopflow/src/server/README.md` "Waking an idle
+   conversation" (inbox table by provider, four reaches), `rust/loopflow-execution/src/harness/README.md`
+   idle-wake row `yes` ×5 (the "next turn only" note deleted), `docs/sessions.md` idle bullet.
+   Recheck against the built code: test names, the wake-line shape, the 0600 wake file.
 
 Choices made for review are in `scratch/questions.md`; the concept review is `scratch/concept-review.html`.

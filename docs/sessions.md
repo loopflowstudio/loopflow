@@ -204,10 +204,10 @@ lf session steers <session>                          # pending vs. delivered
 
 - **Running Sessions** receive steers at their next provider boundary (after a
   tool call or turn).
-- **Idle work sessions** (Claude or Codex held by the server) wake
-  automatically when a steer, Task comment, or Graph step update arrives, with no
-  per-conversation watcher process required. Pi, OpenCode and Antigravity hear
-  updates at their next boundary.
+- **Idle work sessions** wake when a steer, Task comment, or Graph step update
+  arrives: a turn starts in that terminal with lf's message, on Claude, Codex,
+  OpenCode, Pi and Antigravity alike, with nobody typing and no
+  per-conversation watcher process.
 - **Chats** are never woken while idle; in a Task checkout they receive updates
   on their next turn.
 

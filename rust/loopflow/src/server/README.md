@@ -780,18 +780,24 @@ and batches, prompt hooks are gated like tool hooks.
 
 The server keeps no list of conversations (`wake.rs`); it reads them from the
 store. A work session is idle when its last recorded native turn yielded
-(`session_activity`) and its AgentProcess is live, and reachable through its
-Codex app-server (`processes.endpoint`) or the Claude inbox key its first
-managed boundary saved (`processes.inbox`); `sessions/<pid>.json` beside that
-key names the socket and must still name the conversation. One
-server thread waits on the store's change signal (`store::changes`) and reads
-the `task_updates` revision and the newest steer at start and whenever either
-moves; every idle conversation with news gets its unread steers, Task updates
-among them, in one message, and is recorded as in a turn until its next Stop.
-One with no news is not connected to. A turn end checks
-its own conversation the same way. The steers are claimed as a hook claims
-them and stamped once the message is sent, so a failed send leaves a claim
-that lapses for the next boundary:
+(`session_activity`) and its AgentProcess is live and reachable: through its
+Codex app-server (`processes.endpoint`), or through where its own process takes
+a wake (`processes.inbox`), read by the Session's provider:
+
+| provider | `processes.inbox` holds | saved by |
+|---|---|---|
+| Claude | its cross-session inbox key; `sessions/<pid>.json` beside it names the socket and must still name the conversation | its first managed boundary |
+| OpenCode, Pi | the plugin's wake socket, `<LF_HOME>/wake/<random>.sock` | every plugin boundary |
+| Antigravity | the launch's wake file: its log path and server token (0600) | the launch |
+
+One server thread waits on the store's change signal (`store::changes`) and
+reads the `task_updates` revision and the newest steer at start and whenever
+either moves; every idle conversation with news gets its unread steers, Task
+updates among them, in one message, and is recorded as in a turn until its next
+Stop. One with no news is not connected to. A turn end checks its own
+conversation the same way. The steers are claimed as a hook claims them and
+stamped once the message is sent, so a failed send leaves a claim that lapses
+for the next boundary:
 
 - Claude: a message in its cross-session inbox, from `loopflow`, which Claude
   runs as the conversation's next turn. Managed Claude launches set
@@ -800,9 +806,29 @@ that lapses for the next boundary:
   review. Bare launches keep Claude's default.
 - Codex: a `turn/start` on the Session's private app-server whose tool output
   is the message.
+- OpenCode and Pi: one line, `{"type":"steers","text":…}`, on the plugin's wake
+  socket. OpenCode's plugin queues it as a synthetic message on the
+  conversation (`session.synthetic`, `delivery: "queue"`); Pi's extension sends
+  it as a `loopflow-steer` message with `deliverAs: "followUp"` and
+  `triggerTurn`. Both start a turn when idle and wait behind one that is
+  running, and the transcript shows the message as lf's, not typed. The plugin
+  answers `{"type":"accepted"}` once the provider took it; an `error` answer is
+  a failed send. A launch that records no turns binds no socket.
+- Antigravity: `SendUserCascadeMessage` on `agy`'s loopback language server,
+  with the conversation as `cascadeId` and the token the launch set
+  (`ANTIGRAVITY_SERVER_CSRF_TOKEN`). The port is read from the launch's
+  `--log-file` at each wake, since `agy` picks it at random. This RPC is
+  undocumented (seen on `agy` 1.5.14); when a release breaks it, the wake fails
+  in `logs/lf.log` and the steer arrives at the next boundary.
+
+OpenCode's plugin names its conversation at turn end (`Stop`) and at a typed
+prompt (`UserPromptSubmit`), so its work session shows as idle like the others;
+Pi's idle comes from `agent_settled`.
 
 A server that restarts reads the same conversations again. An unreachable
-Claude inbox leaves its news unclaimed. After a failed send the steers arrive
+inbox, socket or language server leaves its news unclaimed. A Session started
+by an `lf` without this reach saved no inbox and hears steers at its next
+boundary. After a failed send the steers arrive
 again. Chats and batches are never woken. No
 process or clock runs per Session: the watcher's only clock is the change
 signal's 60 s fallback for a missed checkpoint or a Machine's sleep.

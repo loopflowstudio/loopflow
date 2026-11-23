@@ -1,23 +1,27 @@
-at: 53b444c70a06ab145c5a343fe6ab670a15b70f7d
+at: cacb3c9efcf0e7d7799bf0de2f57791af6eae403
 first:
   - path: docs/surfaces.md
-    why: Where File and Start take the draft
+    why: File, Start and editing a recovered draft
   - path: rust/loopflow/src/server/README.md
-    why: Creation selectors, refusals and receipt replay
+    why: Admission and receipt replay on the Machine
   - path: rust/loopflow/src/lf/commands/write.rs
-    why: Existing Wave IDs and legacy names on the wire
+    why: Existing Wave IDs and legacy names
   - path: rust/loopflow-execution/src/engine/creation.rs
     why: Receipts take precedence over changed selections
   - path: rust/loopflow-execution/src/ops/task.rs
     why: Resolve the destination and capture the workflow
   - path: rust/loopflow-storage/src/sqlite/children.rs
-    why: Recheck membership before committing admission
-  - path: swift/LoopflowMac/Views/NewTaskSheet.swift
-    why: Edit the draft after a refusal
-  - path: swift/LoopflowMac/WorkModel.swift
-    why: Submit the selection and open the returned destination
+    why: Recheck Wave membership before committing admission
   - path: swift/Loopflow/Services/CreationJournal.swift
-    why: Which failures allow a fresh request
+    why: Confirm refusal and atomically replace the saved draft
+  - path: swift/Loopflow/Services/RegistryQuery.swift
+    why: File keeps its Start choice locally
+  - path: swift/LoopflowMac/CreationSubmissions.swift
+    why: Recovery offers Edit draft in each window
+  - path: swift/LoopflowMac/Views/NewTaskSheet.swift
+    why: Reopen the words, choices and refusal
+  - path: swift/LoopflowMac/WorkModel.swift
+    why: Submit and open the returned destination
   - path: swift/LoopflowMac/WorkProjection.swift
     why: Leaving the backlog releases its borrowed row
   - path: swift/LoopflowMac/Views/BacklogView.swift
@@ -25,9 +29,9 @@ first:
   - path: rust/loopflow/tests/task_create_tests.rs
     why: Removal, replacement, rename and replay on one Machine
   - path: swift/LoopflowTests/NewTaskTests.swift
-    why: File and Start through refusal and reconnect
+    why: Correct or discard a refused replay after restart
   - path: swift/LoopflowTests/CreationSubmissionTests.swift
-    why: Retirement and recovery on the original Machine
+    why: Storage failures, competing windows and late receipts
   - path: swift/LoopflowTests/WorkDestinationTests.swift
     why: Session installation and replies after navigation
 hide:

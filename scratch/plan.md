@@ -1,156 +1,117 @@
-# LOO-995 — a Task can be in a Wave with no Project
+# LOO-995 — a Wave is exactly one Project
 
-PR #1997 removed the chapter machinery and is held, unmerged. This slice
-changes how a Task reaches its Wave.
+PR #1997 removed the chapter machinery (current Project, activation,
+rollover, KRs, metric targets, instruments, observations, live metrics) and
+is held, unmerged. This slice replaces the Wave–Project model the branch
+built after that.
 
-Jack Heart, 2026-11-20: "i think a wave can optionally have a project
-associated with it", "if it doesnt, then wehn you a tasks to it, it just goes
-into the project of the parent", then, choosing among three answers for a
-Wave with no Project anywhere above it: "(b) the Task joins the Wave directly
-with no Project, which adds a wave_id on the Task". On trackers: "then the
-question becomes just how we tell with a tracker that a task in a certain
-wave".
+Jack Heart, 2026-11-22, after the concept review (`scratch/concept-review.html`):
+"wave is at most 1 project for now", then "i think we should just have a wave
+= exactly 1 project for now, and move to 0-1 later", "would that simplify
+tings?", "the old ones just dont matter", "we can drop the history or drop
+the notion of there being history".
 
-## The rule
+Superseded by those words, and to be removed from the branch: the climb rule
+(a Task joins its Wave's Project, else the nearest ancestor's, else none,
+from 2026-11-20 "(b) the Task joins the Wave directly with no Project, which
+adds a wave_id on the Task"), and "a Wave holding several Projects in order"
+(2026-11-19 scope note). The rest of both scope notes stands: Projects are
+real records with a name, summary and status that start and end.
 
-A Task's Project is optional. A new Task added to a Wave:
+## The model
 
-1. joins that Wave's Project, chosen as today when it has one;
-2. else joins the nearest ancestor Wave's Project;
-3. else has no Project.
-
-In all three the Task records its own Wave (`tasks.wave_id`). Nothing
-creates a Project for a Task any more: `join_project_in` making one named for
-the Wave goes, with its callers (`children.rs`, `task_content.rs`,
-`test_fixture.rs`).
-
-A Task's Wave is `tasks.wave_id`, not read through its Project. Every reader
-that reaches a Wave through `tasks.project_id → projects.wave_id` moves to
-`tasks.wave_id`. A Task in an ancestor's Project still lists in its own Wave.
+- A Wave has exactly one Project, made with the Wave. A Project belongs to
+  exactly one Wave. `projects.wave_id` is unique and not null.
+- A Task in a Wave is in that Wave's Project. A Task in no Wave has no
+  Project. A Task's Wave is read through its Project, as on main:
+  `tasks.wave_id`, the `task_wave` plan field, its writer rule, its DTO and
+  fixture changes, and `task_project_in`'s climb all go. A branch-only
+  migration column costs nothing to drop: edit `remove_chapters.sql` in place.
+- Moving a Task to another Wave moves it to that Wave's Project. One rule,
+  for create and move; `task_move_project`'s keep-if-below rule goes.
+- A Project's status is its own (started, completed, …, mirrored from the
+  tracker). An ended Project stays the Wave's Project; new Tasks still join
+  it. No history: nothing lists a Wave's earlier Projects, and nothing
+  orders them (`tracker_wave_projects.position` goes; mark it leaving).
+- No choice to explain: the "in Project <name>" line on `lf task create`
+  and the "newest started" tie-break go.
 
 ## Trackers
 
-Linear and Asana hold an issue in a Project, never in a Wave. A Task in an
-ancestor's Project is that Project's issue in the tracker; which child Wave
-it is in lives only in Loopflow's plan; a connected repository has no Git or
-hub exchange, so another Machine lists it under the Project's Wave. A Task with no Project still goes to the repository's tracker, as
-an issue in no Project (a Linear team issue; in Asana, the repository's team
-project), the path a Task in no Wave already takes. A Task created in the
-tracker joins the Wave linked to its Project.
+- `lf wave plan connect <wave> <linear project>` links the Wave's Project to
+  an existing Linear Project; `lf wave plan connect <wave>` with no Project
+  makes one in the repository's default Team (LOO-980: "Teams and
+  Initiatives matter only at creation"). The Initiative stops deciding which
+  Projects are a Wave's: an import attributes an issue to the Wave whose
+  Project it is in, and a Linear Project linked to no Wave is not imported.
+  The "held until moved back" rule for a Project moved between Initiatives
+  goes. Asana: the same with an Asana project.
+- A Wave created in a connected repository makes its Linear Project with it.
+  A child Wave is its own Linear Project.
+- Every Wave Task is an issue in its Wave's Linear Project, so it crosses
+  Machines through the tracker as on main; the open "second Machine on a
+  connected repository" question in `scratch/questions.md` is gone, and so
+  is the conflict with LOO-980's "Wave membership is derived from the link,
+  not stored" (true again).
+- A Task with no Wave is an issue in no Project (a Linear team issue), as
+  slice 2 built; `Task::goes_to_tracker` stays gone.
 
-Nothing marks the child Wave on the issue: LOO-980's brief decides "Nothing
-Loopflow-only is stored on a tracker item. No Linear attachment". Carrying
-`tasks.wave_id` between Machines on a connected repository belongs to
-LOO-980's "A person's own Machines exchanging through Git on a tracker
-repository"; until then another Machine lists such a Task under its
-Project's Wave, or not at all. LOO-980's brief also says "Wave membership is
-derived from the link, not stored"; this branch stores it, from the
-direction quoted above, so that line of LOO-980 needs changing before it is
-built.
+## Migration (`remove_chapters.sql`, edited in place)
 
-## Schema
+- A live Wave with no Project gets one, named for the Wave, local until
+  connected (36 such Waves in the real store, 2026-11-22).
+- A Wave with several Projects keeps one: the newest started open one, else
+  the newest. Its other Projects are deleted, with their `project_changes`
+  and unsent `tracker_actions` retired; their Tasks move to the kept Project
+  locally, and nothing is written to the tracker for them. ("the old ones
+  just dont matter".) Real store, 2026-11-22: `coverage` 8 Projects,
+  `infrastructure` 7, `product` 6, `academy` 6, `experiments` 5; 1,071 of
+  1,548 Tasks have a Project.
+- Then `projects.wave_id` gets its unique index. If a table rebuild is
+  needed for it, keep every column (additive under the staging rule).
+- Released `lf` still reads `projects` and `tracker_wave_projects`; keep both
+  readable, unwritten where they go.
 
-`tasks.wave_id` is a new column in `remove_chapters.sql`, filled for existing
-rows from their Project's Wave. It is a stamped planning field: the plan
-record, `plan_changes`, the DTOs and fixtures carry it. Check the Wave
-listing's query with `EXPLAIN QUERY PLAN` at about 10,000 Tasks.
+## Later, not here
 
-## Made for review
+Jack Heart, 2026-11-22: "instead of having waves transition, i will introduce
+subwaves that have projects and let the long running ones be initiatives
+rather than projects". A Wave's Project never rolls over to a successor; new
+work that would have been a next chapter is a child Wave with its own
+Project.
 
-- A Wave may still hold several Projects; this slice does not narrow it to
-  one. Asked, not yet answered.
-- Without a tracker, nothing makes a Project once a Task no longer does, so
-  a repository with no tracker has none. Existing Projects stay. Whether a
-  command should make one is open.
-- A Task with no Project goes to the tracker (concept review, 2026-11-20).
-  Slice 1 kept a Wave Task with no Project plan-only, and `lf wave plan
-  connect` links an Initiative, not a Project, so a connected repository sent
-  no Wave Task at all and Tasks filed before a Project existed never went.
-  Passed over: `connect` making a Linear Project per Wave, which brings back a
-  Project made for the Wave. `scratch/concept-review.html`.
-- Moving a Task between Waves keeps its Project only when the new Wave is
-  that Project's Wave or a descendant of it; otherwise the rule above
-  places it again.
+0–1 Projects per Wave ("move to 0-1 later"), which brings back a Task's own
+Wave (`tasks.wave_id`) and a rule for Waves with no Project. LOO-996's one
+nestable kind replaces this again; nothing here blocks it.
 
-## Built (slice 1)
+## Kept from the branch
 
-- `tasks.wave_id` (migration, index `tasks_wave`, trigger) and plan field
-  `task_wave`; `create_task_in` takes the filing Wave and applies the rule
-  (`task_project_in`, recursive over `parent_wave_id`). `join_project_in` is gone.
-- The planning writer sets `task_wave` whenever a `task_project` lands without
-  one and the Task is not already in that Project's Wave or below it. Tracker
-  imports and records from builds without `task_wave` go through it.
-- `move_task` writes both fields; the move preview uses `task_move_project`.
-- Storage readers (listing, counts, steers, CI incidents, Session completion,
-  `task_wave_in`) read `t.wave_id`.
-- Test: `local_planning_tests::a_task_joins_its_wave_project_else_its_nearest_ancestors…`;
-  plan test `query_plans::a_wave_lists_its_own_tasks_by_index`.
-
-Demo run with this build on an isolated home: `x` in `billing/refunds` has no
-Project, lists under `billing/refunds` and not `billing`; the store has 0 Projects.
-The Linear half of the demo is not run here.
-
-Checks:
-- `cargo test -p loopflow-storage --lib`: 365/367 passed, then both fixture
-  failures fixed and rerun (steers, task_work). Run locally.
-- `cargo test -p loopflow-execution --lib` for `store::membership_lifecycle_tests`,
-  `store::ownership::tests`, `store::admission_lifecycle_tests`, `ops::task::explain::tests`:
-  pass. Run locally.
-- clippy on storage and execution: clean. Run locally.
-- `documented_commands::`, `binary(golden_prompt)` (the `split-wave` builtin
-  changed), Swift DTO fixtures and the full suites: for gate and CI.
-
-Raw-SQL `INSERT INTO tasks` without `wave_id`: only
-`rust/loopflow/tests/build_cleanup.rs:487` copies a `project_id`, and it reads
-no Wave; the rest set no Project. Nothing left to implement in this slice.
-
-QA (2026-11-20, branch `lf` on isolated homes; `scratch/qa.html`): first
-visit, a home from the installed base `lf` opened by the branch, a second
-Machine over Git, moves, and a Linear queue with no login. Fixed: a Task in
-an ancestor's Project showed as "unavailable" under its own Wave; a first Git
-import left a Task without a Wave when its Project came in the same batch;
-`lf task create` printed "pending Linear sync" and `lf task sync` failed for
-a Task that never goes to the tracker (`Task::goes_to_tracker`); five
-`local_planning` tests still expected the old rule.
-
-## Built (slice 2, from the concept review)
-
-- `Task::goes_to_tracker` and the `uncreated` clause are gone: every Task in a
-  connected repository gets a tracker `create`, Project or not.
-  `local_planning::a_task_makes_no_project_and_joins_the_newest_started_one`
-  expects the "pending Linear sync" line and a queued create when connected.
-- `unavailable_tasks` is gone from the wire (`lf wave status`, the roadmap),
-  its printer, Swift's model, the Desktop notice, banner and row, the DTO
-  fixtures and `server_schema.json`.
-- `remove_chapters.sql`'s top comment states the climbing rule.
-
-Checks, run locally: nextest `local_planning::a_task_makes_no_project…`,
-`dto_fixtures::`, `status_tests::`, `server::schema::tests::` (70/70);
-clippy on loopflow, storage, execution: clean; `scripts/test_desktop.sh
---filter 'DTOFixtureTests|RegistryQueryTests|WorkDestinationTests|WorkNavigationTests'`
-(193 passed). For gate and CI: `documented_commands::` (docs/work.md changed),
-`binary(golden_prompt)`, the full suites.
-
-Compress after slice 2: one `started_project` test helper in `local_planning`; `with_task_waves` reads its Project's Wave in one step. Checks, run locally: storage `sqlite::plan` (14), nextest `local_planning::a_task_makes_no_project…` and `canonical_status_retains…`.
-
-QA after slice 2 (`scratch/qa.html`): Wave Tasks with no Project queue a
-Linear create and print "pending Linear sync"; `unavailable_tasks` is off
-every JSON read. Docs fixed for two claims that no longer held. Open: what a
-second Machine sees on a connected repository (`scratch/questions.md`).
-
-Concept review after slice 2 (`scratch/concept-review.html`): no code to
-change; the tracker remedy above now follows LOO-980's decisions.
-
-Next: gate publishes the branch so CI runs the suites.
+- Chapter removal, as on #1997 before 2026-11-20.
+- `unavailable_tasks` gone from the wire, the printer, Swift and the DTO
+  fixtures (slice 2).
+- Every Task in a connected repository gets a tracker `create`, Wave or not.
 
 ## Shows it worked
 
 ```bash
 lf wave create billing ; lf wave create billing/refunds
-lf task create --wave billing/refunds 'x'      # no Project; lf wave status billing/refunds lists it
-lf wave plan connect billing                   # Initiative only: x is now queued as a team issue
-# with a Linear Project made in billing's Initiative, then lf wave sync billing
-lf task create --wave billing/refunds 'y'      # in billing's Project; still listed under billing/refunds
+lf wave status billing/refunds                # Project: refunds (local)
+lf task create --wave billing/refunds 'x'     # in refunds' Project; lists under billing/refunds only
+lf task move x --wave billing                 # now in billing's Project
+lf wave plan connect billing <linear project> # billing's Project is that Linear Project; x goes there
 ```
 
-Docs: `docs/work.md` "Projects" ("Its first Task makes one" goes).
+On a copy of the real store: every live Wave has exactly one Project, no
+Task lost its Wave, `coverage` keeps one Project with all its Tasks.
+
+Docs: `docs/work.md` "Projects" and the Linear mapping line ("a Wave maps to
+an Initiative" goes); `docs/dev/reference.md` Wave Project row;
+`docs/dev/reference-models.md`; `AGENTS.md` "Work model" (a Wave is one
+Project).
+
+## Checks
+
+Storage `sqlite::plan` and `local_planning` focused tests; a migration test
+from a store with a Wave of three Projects and a Wave with none; clippy.
+`documented_commands::`, golden prompts, Swift DTO suites and the full
+matrix for gate and CI.

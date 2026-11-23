@@ -1,93 +1,235 @@
 <!doctype html>
 <html lang="en">
+<head>
 <meta charset="utf-8">
-<title>LOO-995 concept review, pass 2: a Task's Wave across Machines</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One Project per Wave</title>
 <style>
-  :root { color-scheme: light dark; --bg:#fbfaf7; --fg:#1d1d1b; --mute:#6b6a65; --line:#dedbd2;
-          --yes:#1f7a3f; --no:#b3261e; --prop:#2a5db0; --propbg:#eaf0fb; --code:#f1efe8; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#161614; --fg:#e9e7e1; --mute:#9c9a93; --line:#34332f;
-            --yes:#6fcf8e; --no:#f28b82; --prop:#8ab4f8; --propbg:#1c2638; --code:#22211e; } }
-  body { background:var(--bg); color:var(--fg); font:16px/1.55 ui-sans-serif, -apple-system, system-ui, sans-serif;
-         max-width:58rem; margin:2.5rem auto; padding:0 1.25rem; }
-  h1 { font-size:1.6rem; margin-bottom:.2rem } h2 { margin-top:2.4rem; font-size:1.2rem }
-  p.lede { color:var(--mute); margin-top:0 }
-  code, pre { font:13.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; background:var(--code); border-radius:4px }
-  code { padding:.05em .3em } pre { padding:.8rem 1rem; overflow-x:auto }
-  table { border-collapse:collapse; width:100%; font-size:.94rem }
-  th, td { text-align:left; vertical-align:top; border-bottom:1px solid var(--line); padding:.5rem .5rem }
-  td.yes { color:var(--yes); font-weight:600 } td.no { color:var(--no); font-weight:600 }
-  .proposed { border-left:4px solid var(--prop); background:var(--propbg); padding:.7rem 1rem; border-radius:0 6px 6px 0 }
-  .proposed::before { content:"Proposed"; display:block; font-weight:600; color:var(--prop); margin-bottom:.3rem }
-  .cols { display:grid; grid-template-columns:1fr 1fr; gap:1rem } @media (max-width:46rem){ .cols{grid-template-columns:1fr} }
-  .card { border:1px solid var(--line); border-radius:6px; padding:.7rem 1rem }
-  .card h3 { margin:.1rem 0 .5rem; font-size:1rem }
-  ol.q > li { margin-bottom:.7rem } ol.q ol { list-style:lower-alpha; margin-top:.25rem }
+:root {
+  --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b675f; --line: #e2ded5; --card: #ffffff;
+  --yes: #2f7a4b; --yes-bg: #e8f3ec; --no: #a33a2a; --no-bg: #f8e9e5;
+  --part: #8a6410; --part-bg: #f6efdc; --prop: #2c5fa8; --prop-bg: #e7eef9;
+  --code-bg: #f2efe8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161614; --fg: #e9e6df; --muted: #9b978e; --line: #2e2d29; --card: #1e1d1b;
+    --yes: #7cc995; --yes-bg: #1c2a21; --no: #ef8f7d; --no-bg: #2f1d19;
+    --part: #e0b95c; --part-bg: #2b2516; --prop: #8fb4ee; --prop-bg: #1a2433;
+    --code-bg: #24231f;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161614; --fg: #e9e6df; --muted: #9b978e; --line: #2e2d29; --card: #1e1d1b;
+  --yes: #7cc995; --yes-bg: #1c2a21; --no: #ef8f7d; --no-bg: #2f1d19;
+  --part: #e0b95c; --part-bg: #2b2516; --prop: #8fb4ee; --prop-bg: #1a2433;
+  --code-bg: #24231f;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 32px 16px 80px; }
+h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.01em; }
+h2 { font-size: 20px; margin: 44px 0 10px; }
+h3 { font-size: 16px; margin: 22px 0 6px; }
+p, li { max-width: 72ch; }
+.lede { color: var(--muted); margin-top: 0; }
+code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13.5px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px; overflow-x: auto; margin: 8px 0; }
+pre code { background: none; padding: 0; }
+blockquote { margin: 10px 0; padding: 6px 14px; border-left: 3px solid var(--line); color: var(--muted); }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+table { border-collapse: collapse; width: 100%; min-width: 720px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 14.5px; }
+th { font-weight: 600; color: var(--muted); font-size: 13px; }
+tr:last-child td { border-bottom: none; }
+.mark { display: inline-block; min-width: 46px; text-align: center; font-weight: 600; font-size: 12.5px;
+  padding: 2px 8px; border-radius: 999px; }
+.yes { color: var(--yes); background: var(--yes-bg); }
+.no { color: var(--no); background: var(--no-bg); }
+.part { color: var(--part); background: var(--part-bg); }
+.prop { color: var(--prop); background: var(--prop-bg); }
+.callout { border: 1px solid var(--no); background: var(--no-bg); border-radius: 10px; padding: 14px 16px; margin: 14px 0; }
+.callout p { margin: 6px 0; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+.panel { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--card); min-width: 0; }
+.panel.proposed { border-color: var(--prop); }
+.panel h3 { margin-top: 2px; }
+.tag { font-size: 12px; font-weight: 600; padding: 1px 7px; border-radius: 999px; margin-left: 6px; vertical-align: 2px; }
+ol.q > li { margin: 14px 0; }
+ol.q ol { list-style: lower-alpha; margin-top: 4px; }
+ol.q ol li { margin: 3px 0; }
+.rec { font-weight: 600; color: var(--prop); }
+.small { font-size: 14px; color: var(--muted); }
+svg text { fill: var(--fg); font: 13px -apple-system, BlinkMacSystemFont, sans-serif; }
+svg .box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+svg .boxp { fill: var(--prop-bg); stroke: var(--prop); stroke-width: 1.5; }
+svg .boxx { fill: var(--no-bg); stroke: var(--no); stroke-width: 1.5; }
+svg .ln { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+svg .lnp { stroke: var(--prop); stroke-width: 1.8; fill: none; }
+svg .sub { fill: var(--muted); font-size: 11.5px; }
 </style>
-<h1>Do a Task's Wave, Project and tracker issue line up, now that slice 2 is built?</h1>
-<p class="lede">Area reviewed: how a Task belongs to a Wave and how that membership travels, with the whole LOO-995 branch
-in against <code>main</code> (chapters gone, no first Project, <code>tasks.wave_id</code>, every Task to the tracker). Pass 1 argued
-from "the Wave lives in Loopflow's plan, carried by Git and the hub". QA then showed a connected repository has no Git or hub
-exchange, so this pass re-checks what carries a Task's Wave.</p>
+</head>
+<body>
+<main>
 
-<h2>One interaction, walked</h2>
-<pre>lf wave create billing ; lf wave create billing/refunds
-lf wave plan connect billing                 # Initiative; a Linear Project "Billing" made in it
-lf task create --wave billing/refunds 'y'    # joins Billing (ancestor's Project), wave_id = billing/refunds
-lf task create --wave docs 'z'               # nothing above docs has a Project: a Linear team issue</pre>
-<div class="cols">
-<div class="card"><h3>This Machine</h3><code>y</code> lists under <code>billing/refunds</code>, <code>z</code> under <code>docs</code>. Both are in Linear. Correct.</div>
-<div class="card"><h3>A second Machine, same repository</h3>Plan exchange skips connected repositories (<code>plan_git.rs:48</code>);
-the import reads issues per Project. <code>y</code> lists under <code>billing</code>; <code>z</code> arrives with no Wave, or not at all.
-<code>docs/work.md</code> says so.</div>
-</div>
-<p>On <code>main</code> every Wave had a made Project, so a Wave Task crossed Machines in its Wave. This branch trades that for
-"a Task can be in a Wave with no Project", as directed. The recovery is not in this Task.</p>
+<h1>One Project per Wave</h1>
+<p class="lede">LOO-995 concept review, 2026-11-22, after “wave is at most 1 project for now”. PR #1997 at <code>765e0e2df0</code>, read against main, with LOO-996’s plan (<code>../loopflow.subwaves2/scratch/plan.md</code>, <code>said.md</code>) and LOO-980’s brief beside it.</p>
 
-<h2>Product concepts against code concepts</h2>
+<p><strong>Area taken:</strong> what ties a Wave to a tracker Project, from <code>lf wave plan connect</code> through a Task’s filing, a move, a Project ending, and import back from Linear. This is the Task’s title (“a Project is a Wave’s optional tracker link”). The climb rule and <code>tasks.wave_id</code> are already built on the branch. With one Project per Wave, the rest of the area has to change around them.</p>
+
+<h2>Where the three plans already stand</h2>
+<ul>
+  <li><strong>LOO-980, decided:</strong> “A Wave links to a Project on both trackers.” “Teams and Initiatives matter only at creation. A repository names one default Team (optionally an Initiative), used to create a new Wave’s Project”.</li>
+  <li><strong>LOO-996’s plan, 2026-11-22:</strong> “connections: at most one tracker item”. It deletes “Project as a stored level between them (<code>tracker_wave_projects</code>, a Wave’s Project list)” and “Team and initiative links”. Locked item 17a: “For now a Wave is not connected to a Linear team or initiative. The tracker connections are a Project and an issue.”</li>
+  <li><strong>This branch:</strong> a Wave holds any number of Projects. They reach it through a linked Linear Initiative. A new Task picks “the newest started Project” and prints which one it chose.</li>
+</ul>
+<p>“At most 1 project” agrees with the first two and contradicts the third. That contradiction is not in the climb rule. It is in how a Wave gets its Projects at all.</p>
+
+<h2>One interaction, as built</h2>
+<p>A Linear repository. The person connects <code>billing</code>. Linear has three Projects in the Initiative named billing.</p>
+<pre><code>$ lf wave plan connect billing                 # links an Initiative
+$ lf wave status billing                       # Invoicing (started) · Dunning (started) · Tax (planned)
+$ lf task create --wave billing --title "Meter usage events"
+Meter usage events · LOO-12 in Project Invoicing   # newest started, by created_at
+$ lf task create --wave billing/refunds --title "Refund a mischarged invoice"
+Refund a mischarged invoice · LOO-14              # climbs: billing's newest started Project</code></pre>
+<p><strong>Failure:</strong> a teammate moves Dunning to another Initiative in Linear. Loopflow holds the move “until moved back, because the Initiative determines which Wave owns it” (<code>docs/work.md</code>). <strong>Recovery:</strong> someone moves it back in Linear. A person who never thinks about Initiatives has to learn about one here.</p>
+
+<h2>The same interaction, proposed <span class="tag prop">proposed</span></h2>
+<pre><code>$ lf wave plan connect billing linear:project/invoicing    # this Wave's one Project
+$ lf task create --wave billing/refunds --title "Refund a mischarged invoice"
+Refund a mischarged invoice · LOO-14 in Project Invoicing   # billing/refunds has none; billing's
+$ lf wave status billing/refunds
+Project: none (Tasks go to billing's Invoicing)</code></pre>
+<p><strong>Failure:</strong> Invoicing completes in Linear. <code>billing</code> keeps it, shown as ended. New Tasks climb past it to the parent Wave’s Project, else to none. <strong>Recovery:</strong> <code>lf wave plan connect billing linear:project/invoicing-v2</code> replaces the link. Invoicing stays a record with its Tasks, which still list under their own Waves. Moving a Project between Initiatives in Linear changes nothing here.</p>
+
+<svg viewBox="0 0 900 230" width="100%" role="img" aria-label="Before: an Initiative brings many Projects into a Wave. After: a Wave links to one Project and child Waves climb to it.">
+  <text x="10" y="18" font-weight="600">Built</text>
+  <rect class="boxx" x="10" y="32" width="150" height="44" rx="8"/><text x="22" y="52">Initiative “billing”</text><text class="sub" x="22" y="68">decides membership</text>
+  <rect class="box" x="10" y="110" width="150" height="40" rx="8"/><text x="22" y="135">Wave billing</text>
+  <rect class="box" x="200" y="20" width="130" height="34" rx="8"/><text x="212" y="42">Invoicing</text>
+  <rect class="box" x="200" y="64" width="130" height="34" rx="8"/><text x="212" y="86">Dunning</text>
+  <rect class="box" x="200" y="108" width="130" height="34" rx="8"/><text x="212" y="130">Tax</text>
+  <path class="ln" d="M160 54 L200 37 M160 54 L200 81 M160 54 L200 125"/>
+  <path class="ln" d="M85 76 L85 110"/>
+  <text class="sub" x="200" y="168">tracker_wave_projects(position)</text>
+  <text class="sub" x="200" y="184">+ projects.wave_id + “newest started”</text>
+
+  <text x="470" y="18" font-weight="600">Proposed</text>
+  <rect class="box" x="470" y="32" width="150" height="40" rx="8"/><text x="482" y="57">Wave billing</text>
+  <rect class="boxp" x="680" y="32" width="150" height="40" rx="8"/><text x="692" y="57">Invoicing</text>
+  <path class="lnp" d="M620 52 L680 52"/><text class="sub" x="628" y="44">one link</text>
+  <rect class="box" x="470" y="120" width="150" height="40" rx="8"/><text x="482" y="145">billing/refunds</text>
+  <path class="ln" d="M545 72 L545 120"/>
+  <path class="lnp" stroke-dasharray="5 4" d="M620 140 C 700 140, 740 110, 750 72"/>
+  <text class="sub" x="640" y="170">no Project of its own: its Tasks climb</text>
+  <text class="sub" x="470" y="200">projects.wave_id, unique; Initiative only when making a Project</text>
+</svg>
+
+<h2>Do the product’s concepts and the code’s line up?</h2>
+<div class="table-wrap">
 <table>
-<tr><th>What a person knows</th><th>Code</th><th>Lines up?</th><th>What is wrong</th></tr>
-<tr><td>A Task is in the Wave it was filed in</td><td><code>tasks.wave_id</code>, plan field <code>task_wave</code></td><td class="yes">yes</td><td>On one Machine, or a repository carried by Git or a hub.</td></tr>
-<tr><td>The same, on my other Machine, Linear-connected</td><td>nothing carries <code>task_wave</code></td><td class="no">no</td><td>Known and documented. The carrier belongs to LOO-980.</td></tr>
-<tr><td>A Project is a Wave's link to a tracker Project</td><td><code>projects.wave_id</code>, <code>external_project_id</code></td><td class="yes">yes</td><td>Only the tracker makes one now.</td></tr>
-<tr><td>Which tracker Project holds the issue</td><td><code>tasks.project_id</code>, <code>task_project_in</code></td><td class="yes">yes</td><td>Two fields: plan truth and tracker truth.</td></tr>
-<tr><td>"My repository syncs with Linear"</td><td>every Task gets a tracker <code>create</code></td><td class="yes">yes</td><td>Fixed in slice 2: <code>goes_to_tracker</code> is gone.</td></tr>
-<tr><td>Move a Task to another Wave</td><td><code>move_task</code>, <code>task_move_project</code></td><td class="yes">yes</td><td>One owner.</td></tr>
-<tr><td>(nothing)</td><td><code>unavailable_tasks</code></td><td class="yes">gone</td><td>Removed in slice 2.</td></tr>
+<thead><tr><th>What a person knows or does</th><th>What the code has</th><th></th><th>What is wrong</th></tr></thead>
+<tbody>
+<tr><td>A Wave</td><td><code>waves</code>, <code>parent_wave_id</code></td><td><span class="mark yes">yes</span></td><td></td></tr>
+<tr><td>A Task is in a Wave</td><td><code>tasks.wave_id</code> (this branch)</td><td><span class="mark yes">yes</span></td><td>Matches LOO-996’s parent direction. LOO-980’s “membership is derived from the link, not stored” needs its line changed (already noted).</td></tr>
+<tr><td>A Wave’s Project, the tracker link</td><td><code>projects.wave_id</code> (many), <code>tracker_wave_projects.position</code>, and Initiative membership in <code>linear_events.rs</code></td><td><span class="mark no">no</span></td><td>One idea held three ways. With one Project per Wave, <code>projects.wave_id</code> alone, unique, says it.</td></tr>
+<tr><td>Connect a Wave to Linear</td><td><code>lf wave plan connect</code> links an Initiative; its Projects arrive by import</td><td><span class="mark no">no</span></td><td>The person thinks “this Wave is that Project”, and the code links something that holds many. Initiative appears in 685 lines over 68 files, much of it LOO-980’s to remove.</td></tr>
+<tr><td>A new Task’s Project</td><td><code>task_project_in</code>: climb, then <code>status='started' DESC, created_at DESC</code></td><td><span class="mark part">partly</span></td><td>The climb is right. The tie-break, and the “in Project Invoicing” line that explains it, exist only because a Wave holds several.</td></tr>
+<tr><td>Move a Task</td><td><code>task_move_project</code>: keep the Project if the new Wave is its Wave or below, else place again</td><td><span class="mark part">partly</span></td><td>A second rule beside create’s. With one Project per Wave, “where would a new Task here go” answers it. They differ only when the new Wave sits below the old Project and has its own.</td></tr>
+<tr><td>A Project ends</td><td><code>work_state</code>, <code>work_terminal_at</code>, status from the tracker; <code>OPEN_PROJECT</code> skips it</td><td><span class="mark yes">yes</span></td><td>Already climbs past an ended Project. Keeps “Projects that end are wanted”.</td></tr>
+<tr><td>Make a Project</td><td>Nothing, since <code>join_project_in</code> went</td><td><span class="mark part">partly</span></td><td>Matches LOO-980 if <code>connect</code> can make one in the default Team. Without a tracker there is no Project to link, so the “no tracker, no Projects” question answers itself.</td></tr>
+<tr><td>(nothing a person sees)</td><td>A Project with no Wave, after a replace or the migration below</td><td><span class="mark prop">new</span></td><td>A tracker Project Loopflow knows about with no Wave linked to it. Its Tasks still list under their own Waves. Not shown on its own.</td></tr>
+</tbody>
 </table>
+</div>
 
-<h2>The biggest mismatch: this branch and LOO-980 disagree about where a Task's Wave lives</h2>
-<p>LOO-980's brief, under "Decided":</p>
-<ul>
-<li>"Wave membership is derived from the link, not stored." This branch stores it in <code>tasks.wave_id</code>, from the direction
-quoted in the plan: "(b) the Task joins the Wave directly with no Project, which adds a wave_id on the Task".</li>
-<li>"Nothing Loopflow-only is stored on a tracker item. No Linear attachment." The plan named "a description marker or an
-Attachment" in LOO-980 as the way to mark the child Wave. LOO-980 rules both out.</li>
-<li>Under "To design here": "A person's own Machines exchanging through Git on a tracker repository". That is where
-<code>task_wave</code> would cross Machines on a connected repository.</li>
-</ul>
-<div class="proposed">No code change here. The plan's Trackers section and <code>scratch/questions.md</code> now name LOO-980's Git exchange
-as the carrier and drop the marker. LOO-980's "derived from the link, not stored" is stale once this merges; that sentence
-needs changing before LOO-980 is built.
-<p><b>Before:</b> the plan says a marker in LOO-980 fixes cross-Machine Waves. <b>After:</b> the plan says LOO-980's own-Machines Git
-exchange carries <code>task_wave</code>, and flags the stored-versus-derived contradiction.</p></div>
-<p>Counterexample kept: two people, not one person's two Machines. LOO-980 sends no Loopflow-only data between people, so a
-teammate always sees <code>y</code> under <code>billing</code>. That follows from child Waves without child Projects and holds under
-either design.</p>
+<div class="callout">
+<p><strong>The biggest mismatch:</strong> the branch rewrote how a Task reaches a Project, but a Wave still gets its Projects from an Initiative. With one Project per Wave, the Initiative is the wrong thing to link. It is also what makes the Wave hold several, so the “newest started” choice and its message cannot be deleted while it decides.</p>
+<p><strong>Recommendation:</strong> make the link a Project in this Task. <code>lf wave plan connect &lt;wave&gt; &lt;project&gt;</code> sets <code>projects.wave_id</code>, unique per Wave. Import attributes an issue’s Wave through that link. The Initiative and Team are used only when <code>connect</code> makes a new Project, as LOO-980 decides. Delete <code>tracker_wave_projects</code> (mark it leaving), the tie-break, the chosen-Project message, the Initiative hold on moves, and <code>task_move_project</code>’s separate rule.</p>
+</div>
 
-<h2>Larger than this work</h2>
+<div class="cols">
+  <div class="panel">
+    <h3>Before (branch)</h3>
+    <ul class="small">
+      <li>Wave ⟵ Initiative ⟶ N Projects, ordered by <code>position</code></li>
+      <li>New Task: climb, newest started, print the choice</li>
+      <li>Move: keep if below the Project’s Wave</li>
+      <li>Project moved between Initiatives: held</li>
+      <li>No tracker: no way to get a Project</li>
+    </ul>
+  </div>
+  <div class="panel proposed">
+    <h3>After <span class="tag prop">proposed</span></h3>
+    <ul class="small">
+      <li>Wave ⟶ 0 or 1 Project (<code>projects.wave_id</code> unique)</li>
+      <li>New Task, and a moved one: the nearest open Project up the tree, else none</li>
+      <li>Ended Project: kept on the Wave and skipped</li>
+      <li>Initiatives: only for making a Project</li>
+      <li>No tracker: no Projects; Waves and <code>tasks.wave_id</code> carry it</li>
+    </ul>
+  </div>
+</div>
+
+<h3>Counterexamples tried</h3>
 <ul>
-<li>Carry <code>task_wave</code> between a person's Machines on a connected repository (LOO-980).</li>
-<li>An older <code>lf</code> inserting a Task row writes no <code>wave_id</code> (pass 1, still unanswered).</li>
+  <li><strong>An issue moved in Linear to a Project linked to another Wave.</strong> The Task follows to that Wave, using the planning writer’s existing “not already within” rule. It holds.</li>
+  <li><strong>An issue moved to a Project linked to no Wave.</strong> The Task keeps its Wave, and its <code>project_id</code> is the tracker’s. Loopflow does not move it back. It holds, but only if the writer sends a Project change on a Loopflow move and never on reconciliation.</li>
+  <li><strong>Drop <code>tasks.project_id</code> and derive it from the climb.</strong> Passed over: an ended Project could no longer list its own Tasks, and an issue in an unlinked Project would read as being in the climb’s Project.</li>
+  <li><strong>The real store.</strong> <code>coverage</code> holds 8 Projects (8 open), <code>infrastructure</code> 7 (4 open), <code>product</code> 6 (3 open), <code>academy</code> 6, <code>experiments</code> 5. Most are chapter leftovers (“Game — Chapter 20260924…”). 1,071 of 1,548 Tasks have a Project. The migration must pick one per Wave, and that choice is hard to take back once other Machines have it (question 2).</li>
 </ul>
+
+<h3>Outside this Task</h3>
+<p>LOO-980 keeps the rest: removing Team claims, ingesting whole Teams, and <code>validate_project_ownership</code>. It also keeps “your slice” and the two orders. Its line “Wave membership is derived from the link, not stored” changes to “a Task records its Wave; the link decides its Project”. LOO-996’s later slices replace Wave and Task with one kind. Nothing here blocks that: the link becomes that kind’s single tracker connection.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>LOO-980 says Wave membership is "derived from the link, not stored".
-  <ol><li>Change LOO-980: membership is <code>tasks.wave_id</code>, as built here.</li><li>Keep LOO-980: narrow this branch back to membership through a Project.</li></ol></li>
-<li>On a connected repository, a Task's child Wave crosses a person's own Machines through:
-  <ol><li>LOO-980's Git exchange.</li><li>Nothing; the ancestor's Wave is enough.</li></ol></li>
-<li>Pass 1's open questions stand: <code>connect</code> making a Project, an insert trigger for an older <code>lf</code>, one Project per Wave.
-  <ol><li>Unchanged.</li></ol></li>
+  <li>Where the Project link replaces the Initiative link:
+    <ol>
+      <li><span class="rec">in LOO-995 (recommended):</span> <code>connect</code> takes a Project, and the tie-break, message and <code>tracker_wave_projects</code> go. This means another implement round on #1997.</li>
+      <li>LOO-995 lands as built, with several Projects per Wave, and one per Wave becomes LOO-980’s first slice.</li>
+    </ol>
+  </li>
+  <li>Waves that hold several Projects today (8, 7, 6 above), once migrated:
+    <ol>
+      <li><span class="rec">recommended:</span> keep the one today’s rule picks (newest started open) and unlink the rest. Tasks keep their Wave and Project, and nothing is written to Linear.</li>
+      <li>keep that one linked and mark the rest ended here, without writing that to Linear.</li>
+      <li>turn each extra Project into a child Wave linked to it.</li>
+    </ol>
+  </li>
+  <li>When a Wave’s Project ends:
+    <ol>
+      <li><span class="rec">recommended:</span> the Wave keeps it, shown ended. New Tasks climb past it until another Project is connected.</li>
+      <li>new Tasks still join the ended Project.</li>
+      <li>an ended Project unlinks itself.</li>
+    </ol>
+  </li>
+  <li>Connecting a Project to a Wave that already has one:
+    <ol>
+      <li><span class="rec">recommended:</span> it replaces the link, and the old Project stays a record with its Tasks.</li>
+      <li>it says which Project is linked and asks for <code>--replace</code>.</li>
+    </ol>
+  </li>
+  <li>Making a Project:
+    <ol>
+      <li><span class="rec">recommended:</span> <code>lf wave plan connect billing --new</code> makes a Linear Project in the repository’s default Team (and Initiative, if named). Without a tracker there are no Projects.</li>
+      <li><code>connect</code> only links existing Projects.</li>
+      <li>trackerless repositories get local Projects too.</li>
+    </ol>
+  </li>
+  <li>Moving a Task:
+    <ol>
+      <li><span class="rec">recommended:</span> it takes the Project a new Task in that Wave would get.</li>
+      <li>keep the branch’s rule: the Project stays while the new Wave is below it.</li>
+    </ol>
+  </li>
 </ol>
+<p class="small">Question 2 is the one that is hard to undo once shipped. The others can change later.</p>
+
+</main>
+</body>
 </html>

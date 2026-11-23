@@ -470,7 +470,7 @@ fn a_task_filed_or_moved_into_a_wave_is_in_its_project() {
         None,
     );
     assert!(filed.is_err());
-    assert_eq!(store.list_projects(Some(&wave)).unwrap().len(), 1);
+    assert_eq!(store.project_of_wave(&wave).unwrap().unwrap().id, project);
     fail("DROP TRIGGER reject;
           CREATE TRIGGER reject BEFORE UPDATE OF project_id ON tasks BEGIN SELECT RAISE(ABORT,'injected'); END;");
     assert!(store.move_task(&standalone.id, None, Some(&wave)).is_err());
@@ -489,7 +489,6 @@ fn a_task_filed_or_moved_into_a_wave_is_in_its_project() {
     )
     .unwrap();
     store.move_task(&standalone.id, None, Some(&wave)).unwrap();
-    assert_eq!(store.list_projects(Some(&wave)).unwrap().len(), 1);
     for task in [filed, store.task(&standalone.id).unwrap().unwrap()] {
         assert_eq!(
             (task.wave_id.as_ref(), task.project_id.as_ref()),

@@ -36,7 +36,7 @@ fn project_name_receipt_does_not_reconstruct_unrelated_order_evidence() {
         crate::planning_sync::TrackerKind::Linear,
     )
     .unwrap();
-    let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
+    let project = store.project_of_wave(wave.id()).unwrap().unwrap();
     store
         .conn
         .lock()
@@ -91,7 +91,7 @@ fn project_prose_unobserved_baseline_stays_unknown_at_the_same_revision() {
         crate::planning_sync::TrackerKind::Linear,
     )
     .unwrap();
-    let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
+    let project = store.project_of_wave(wave.id()).unwrap().unwrap();
     store
         .edit_project_fields(
             &project.id,
@@ -152,7 +152,7 @@ fn project_prose_partial_observation_retains_its_original_baseline_and_age() {
         crate::planning_sync::TrackerKind::Linear,
     )
     .unwrap();
-    let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
+    let project = store.project_of_wave(wave.id()).unwrap().unwrap();
     observed.description = None;
     observed.revision = Some("2026-10-10T12:01:00Z".into());
     observed.summary = "New summary".into();
@@ -299,7 +299,7 @@ fn a_linked_projects_url_is_kept_from_the_tracker_read() {
     };
     let url = "https://linear.app/loopflow/project/product-1a2b3c4d5e6f";
     read("2026-10-10T12:00:00Z", url.into());
-    let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
+    let project = store.project_of_wave(wave.id()).unwrap().unwrap();
     assert_eq!(
         store.project_url(&project.id).unwrap().as_deref(),
         Some(url)

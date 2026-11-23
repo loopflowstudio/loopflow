@@ -137,10 +137,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
         assert_eq!(text.contains("\nPlanning: "), error, "{text}");
     }
     assert_eq!(runtime.block_on(store.list_tasks(None)).unwrap().len(), 3);
-    assert!(runtime
-        .block_on(store.list_projects(None))
-        .unwrap()
-        .is_empty());
+    assert!(runtime.block_on(store.list_projects()).unwrap().is_empty());
     assert_eq!(
         loopflow_execution::git::worktrees::list_worktrees(repo.path())
             .unwrap()

@@ -286,6 +286,14 @@ regenerated), `status_tests::`, `wave_lifecycle::`,
 read the Project; Swift `DTOFixtureTests|WaveDetailReadingTests|WorkModelTests|RegistryQueryTests|MockWaveFixtureTests|WorkNavigationTests|ServerProtocolTests`
 (202 pass); clippy clean.
 
+Compress after slice 5: storage reads a Wave's Project as one record,
+`project_of_wave(wave) -> Option<Project>`; `list_projects` takes no Wave and
+lists every Project (Task rows' names). Tests that asserted a Wave had one
+Project (the unique index says so) went with the list. Storage `project_`,
+`sqlite::children::`; execution `store::`, `ops::linear::` planning and connect;
+CLI `waves::tests::`, `local_planning::`, `planning_lookup_tests::` pass;
+clippy clean.
+
 ## Remains
 
 Nothing left to build here; `git grep` finds no list-shaped Project on the

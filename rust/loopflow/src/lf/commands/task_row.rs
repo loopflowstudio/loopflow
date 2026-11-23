@@ -185,7 +185,7 @@ impl TaskNames {
             .list_waves(None)
             .await
             .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
-        let projects = store.list_projects(None).await?;
+        let projects = store.list_projects().await?;
         Ok(Self {
             waves: waves
                 .iter()

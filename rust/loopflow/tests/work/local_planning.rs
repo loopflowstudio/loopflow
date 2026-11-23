@@ -982,9 +982,7 @@ fn a_wave_is_made_with_one_project_and_every_task_joins_it() {
         assert_eq!(added["created"], true);
         let store = loopflow_execution::store::open_sqlite(&path).unwrap();
         let wave = loopflow_model::id::WaveId::parse(added["id"].as_str().unwrap()).unwrap();
-        let projects = store.list_projects(Some(&wave)).unwrap();
-        assert_eq!(projects.len(), 1);
-        let project = projects[0].clone();
+        let project = store.project_of_wave(&wave).unwrap().unwrap();
         assert_eq!(project.name, "product");
         let plan = lf(
             repo.path(),
@@ -1044,7 +1042,7 @@ fn a_wave_is_made_with_one_project_and_every_task_joins_it() {
         for task in store.list_tasks(Some(&wave)).unwrap() {
             assert_eq!(task.project_id.as_ref(), Some(&project.id));
         }
-        assert_eq!(store.list_projects(None).unwrap().len(), 1);
+        assert_eq!(store.list_projects().unwrap().len(), 1);
         let status = String::from_utf8(
             command(repo.path(), home.path(), &["wave", "status", "product"])
                 .output()
@@ -1107,15 +1105,12 @@ fn project_reads_keep_canonical_identity_after_edits() {
                 },
             })
             .unwrap();
-        let projects = store.list_projects(Some(wave.id())).unwrap();
-        assert_eq!(
-            projects.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
-            ["first"]
-        );
+        let project = store.project_of_wave(wave.id()).unwrap().unwrap();
+        assert_eq!(project.name, "first");
         let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         conn.execute(
             "UPDATE projects SET updated_at=1 WHERE id=?1",
-            [projects[0].id.as_str()],
+            [project.id.as_str()],
         )
         .unwrap();
         let saved = store.task_by_issue("FIX-1").unwrap().unwrap();
@@ -1123,7 +1118,7 @@ fn project_reads_keep_canonical_identity_after_edits() {
             if edited {
                 store
                     .edit_project_fields(
-                        &projects[0].id,
+                        &project.id,
                         &[WorkValue::ProjectName(Some("Edited".into()))],
                     )
                     .unwrap();
@@ -1181,10 +1176,10 @@ fn project_reads_keep_canonical_identity_after_edits() {
             assert_eq!(retained.tracker_synced_at, saved.tracker_synced_at);
             {
                 let row = &status["project"]["value"];
-                assert_eq!(row["id"], projects[0].id.as_str());
+                assert_eq!(row["id"], project.id.as_str());
                 assert_eq!(
                     row["tracker_id"],
-                    projects[0].tracker_id.as_ref().unwrap().as_str()
+                    project.tracker_id.as_ref().unwrap().as_str()
                 );
                 assert!(row.get("work_id").is_none());
                 assert!(row["sync"].is_object());
@@ -1237,7 +1232,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
-        let project_id = store.list_projects(Some(wave.id())).unwrap()[0].id.clone();
+        let project_id = store.project_of_wave(wave.id()).unwrap().unwrap().id;
         let conn = rusqlite::Connection::open(&path).unwrap();
         if !mapped {
             conn.execute(

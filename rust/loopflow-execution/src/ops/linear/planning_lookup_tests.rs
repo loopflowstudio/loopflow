@@ -106,7 +106,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
                 assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
                 assert!(!fixture.store.task_owned(&task.id).await.unwrap());
             }
-            assert_eq!(fixture.store.list_projects(None).await.unwrap().len(), 1);
+            assert_eq!(fixture.store.list_projects().await.unwrap().len(), 1);
             assert_eq!(fixture.wave_refresh_at(&wave), None);
 
             // A list carries membership, not another copy of the Task's title.
@@ -248,14 +248,19 @@ async fn an_inventory_without_the_project_keeps_its_facts() {
         .seed_inventory(snapshot.clone(), None)
         .await
         .unwrap();
-    let retained = fixture.store.list_projects(Some(wave.id())).await.unwrap();
-    assert_eq!(retained[0].name, "Renamed in Linear");
+    let retained = fixture
+        .store
+        .project_of_wave(wave.id())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.name, "Renamed in Linear");
     snapshot.snapshot.projects.clear();
     snapshot.synced_at = 3;
     fixture.store.seed_inventory(snapshot, None).await.unwrap();
     assert_eq!(
-        fixture.store.list_projects(Some(wave.id())).await.unwrap(),
-        retained
+        fixture.store.project_of_wave(wave.id()).await.unwrap(),
+        Some(retained)
     );
 }
 
@@ -1051,10 +1056,10 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
                     .unwrap();
                 let original = fixture
                     .store
-                    .list_projects(Some(wave.id()))
+                    .project_of_wave(wave.id())
                     .await
                     .unwrap()
-                    .remove(0);
+                    .unwrap();
                 // Evict normalized provider facts, retaining durable work as on a cold detail read.
                 let conn = rusqlite::Connection::open(&fixture.database).unwrap();
                 conn.execute_batch(
@@ -1081,10 +1086,10 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
                     assert_eq!(
                         fixture
                             .store
-                            .list_projects(Some(&original.wave_id))
+                            .project_of_wave(&original.wave_id)
                             .await
                             .unwrap(),
-                        vec![original]
+                        Some(original)
                     );
                 }
                 assert_eq!(fixture.wave_refresh_at(&wave), None);

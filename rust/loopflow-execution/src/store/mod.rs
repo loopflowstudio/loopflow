@@ -1709,11 +1709,10 @@ mod tests {
         );
         // The other Wave's own Project stays unlinked.
         assert!(store
-            .list_projects(Some(other.id()))
+            .project_of_wave(other.id())
             .await
             .unwrap()
-            .iter()
-            .all(|project| project.tracker_id.is_none()));
+            .is_none_or(|project| project.tracker_id.is_none()));
         store.seed_inventory(snapshot, None).await.unwrap();
         assert_eq!(
             store

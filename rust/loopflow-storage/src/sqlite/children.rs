@@ -1350,27 +1350,23 @@ impl SqliteStore {
         Ok(held_wave_project_in(&conn, wave)?.unwrap_or_else(|| ProjectId::for_wave(wave)))
     }
 
-    pub fn list_projects(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Project>> {
+    /// The Wave's Project record, once one has been made.
+    pub fn project_of_wave(&self, wave: &WaveId) -> StoreResult<Option<Project>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let query = match wave_id {
-            Some(_) => {
-                format!("{PROJECT_COLUMNS} WHERE wave_id=?1 ORDER BY planning_rank,created_at,id")
-            }
-            None => format!("{PROJECT_COLUMNS} ORDER BY wave_id,planning_rank,created_at,id"),
-        };
-        let mut statement = conn.prepare(&query)?;
-        let mut projects = Vec::new();
-        if let Some(wave_id) = wave_id {
-            let rows = statement.query_map(params![wave_id], map_project_row)?;
-            for row in rows {
-                projects.push(row?);
-            }
-        } else {
-            let rows = statement.query_map([], map_project_row)?;
-            for row in rows {
-                projects.push(row?);
-            }
-        }
+        let project = conn
+            .prepare_cached(&format!("{PROJECT_COLUMNS} WHERE wave_id=?1"))?
+            .query_row(params![wave], map_project_row)
+            .optional()?;
+        Ok(project)
+    }
+
+    pub fn list_projects(&self) -> StoreResult<Vec<Project>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement =
+            conn.prepare(&format!("{PROJECT_COLUMNS} ORDER BY wave_id,created_at,id"))?;
+        let projects = statement
+            .query_map([], map_project_row)?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(projects)
     }
 }
@@ -2758,11 +2754,7 @@ mod local_planning_tests {
         for wave in [&billing, &refunds] {
             crate::test_fixture::wave(&store, wave);
         }
-        let project = |wave: &Wave| {
-            let projects = store.list_projects(Some(wave.id())).unwrap();
-            assert_eq!(projects.len(), 1);
-            projects.into_iter().next().unwrap()
-        };
+        let project = |wave: &Wave| store.project_of_wave(wave.id()).unwrap().unwrap();
         let refunds_project = project(&refunds);
         assert_eq!(refunds_project.name, "refunds");
         assert_eq!(refunds_project.status, ProjectStatus::Started);

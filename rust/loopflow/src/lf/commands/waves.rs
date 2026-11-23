@@ -405,8 +405,7 @@ pub struct ProjectSummary {
 
 async fn project_planning(store: &SharedStore, wave: &Wave) -> Reading<Option<ProjectSummary>> {
     let result = async {
-        let id = store.sqlite.wave_project(wave.id())?;
-        let Some(project) = store.get_project(&id).await? else {
+        let Some(project) = store.project_of_wave(wave.id()).await? else {
             return Ok(None);
         };
         Ok(Some(ProjectSummary {
@@ -3708,14 +3707,11 @@ mod tests {
         super::validate_linear_ownership(&store, &waves, &mut Default::default())
             .await
             .unwrap();
-        assert_eq!(
-            store
-                .sqlite
-                .list_projects(Some(waves[0].id()))
-                .unwrap()
-                .len(),
-            1
-        );
+        assert!(store
+            .sqlite
+            .project_of_wave(waves[0].id())
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]

@@ -337,12 +337,13 @@ impl Store {
         .await
     }
 
-    pub async fn list_projects(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Project>> {
-        let wave_id = wave_id.cloned();
-        run_sqlite(&self.sqlite, move |store| {
-            store.list_projects(wave_id.as_ref())
-        })
-        .await
+    pub async fn project_of_wave(&self, wave: &WaveId) -> StoreResult<Option<Project>> {
+        let wave = wave.clone();
+        run_sqlite(&self.sqlite, move |store| store.project_of_wave(&wave)).await
+    }
+
+    pub async fn list_projects(&self) -> StoreResult<Vec<Project>> {
+        run_sqlite(&self.sqlite, move |store| store.list_projects()).await
     }
 }
 

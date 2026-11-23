@@ -216,11 +216,10 @@ esac
                 seed_provider_task(&runtime, &state, &repo, "Cancel me", "Keep history").unwrap();
             let timestamp = time::OffsetDateTime::now_utc();
             let project = runtime
-                .block_on(fixture.store.list_projects(Some(wave.id())))
+                .block_on(fixture.store.project_of_wave(wave.id()))
                 .unwrap()
-                .into_iter()
-                .find(|project| project.tracker_id.as_ref().unwrap().as_str() == "project-1")
                 .unwrap();
+            assert_eq!(project.tracker_id.as_ref().unwrap().as_str(), "project-1");
             let task = Task {
                 parent_task_id: None,
                 repository_id: crate::repository::location::ensure_repository(
@@ -468,13 +467,14 @@ fn foreign_projects_do_not_block_refresh() {
         runtime.block_on(async {
             let provider = state.lock().await;
             assert_eq!(provider.extra_projects, vec![foreign.clone()]);
-            let projects = fixture.store.list_projects(Some(wave.id())).await.unwrap();
-            assert_eq!(projects.len(), 1);
-            assert_eq!(
-                projects[0].tracker_id.as_ref().unwrap().as_str(),
-                "project-1"
-            );
-            assert_eq!(projects[0].name, "Project");
+            let project = fixture
+                .store
+                .project_of_wave(wave.id())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(project.tracker_id.as_ref().unwrap().as_str(), "project-1");
+            assert_eq!(project.name, "Project");
         });
     });
     server.abort();

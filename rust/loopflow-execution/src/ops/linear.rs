@@ -244,11 +244,11 @@ pub(crate) async fn issue_client() -> OpsResult<LinearClient> {
 /// The Linear Project `wave` links: its Project's tracker id, once it has one.
 pub(crate) async fn linked_project(store: &Store, wave: &Wave) -> OpsResult<Option<String>> {
     Ok(store
-        .list_projects(Some(wave.id()))
+        .project_of_wave(wave.id())
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
-        .into_iter()
-        .find_map(|project| project.tracker_id.map(|id| id.as_str().to_owned())))
+        .and_then(|project| project.tracker_id)
+        .map(|id| id.as_str().to_owned()))
 }
 
 /// The Linear Project Wave `wave` links, read from this Machine's store alone.
@@ -1931,9 +1931,12 @@ mod tests {
             .into_iter()
             .find(|wave| wave.slug() == "ops")
             .expect("ops is registered");
-        let mut projects = fixture.store.sqlite.list_projects(Some(ops.id())).unwrap();
-        assert_eq!(projects.len(), 1, "a Wave is one Project");
-        projects.remove(0)
+        fixture
+            .store
+            .sqlite
+            .project_of_wave(ops.id())
+            .unwrap()
+            .unwrap()
     }
 
     #[test]
@@ -2386,11 +2389,10 @@ mod tests {
                 for wave in ["survival", "survival/infrastructure"] {
                     let locator = crate::work::wave::discover(repo.path(), wave).unwrap();
                     let registered = resolved.store.get_wave_at(&locator).await.unwrap().unwrap();
-                    let projects = resolved.store.list_projects(Some(registered.id())).await.unwrap();
-                    assert_eq!(projects.len(), 1);
+                    let project = resolved.store.project_of_wave(registered.id()).await.unwrap().unwrap();
                     let teams: String = rusqlite::Connection::open(&database).unwrap().query_row(
                         "SELECT team_ids FROM tracker_projects WHERE id=?1",
-                        [projects[0].tracker_id.as_ref().unwrap().as_str()], |r| r.get(0)
+                        [project.tracker_id.as_ref().unwrap().as_str()], |r| r.get(0)
                     ).unwrap();
                     assert_eq!(serde_json::from_str::<Vec<String>>(&teams).unwrap(), ["team-loo"]);
                 }
@@ -2628,10 +2630,10 @@ mod tests {
                 } else {
                     assert_eq!(resumed.moves[0].new_identifier.as_deref(), Some("LOO-1"));
                 }
-                let projects = resolved.store.list_projects(Some(wave.id())).await.unwrap();
+                let project = resolved.store.project_of_wave(wave.id()).await.unwrap().unwrap();
                 let teams: String = rusqlite::Connection::open(&database).unwrap().query_row(
                         "SELECT team_ids FROM tracker_projects WHERE id=?1",
-                        [projects[0].tracker_id.as_ref().unwrap().as_str()], |r| r.get(0)
+                        [project.tracker_id.as_ref().unwrap().as_str()], |r| r.get(0)
                     ).unwrap();
                     assert_eq!(serde_json::from_str::<Vec<String>>(&teams).unwrap(), ["team-loo"]);
                 let tasks = resolved.store.list_tasks(Some(wave.id())).await.unwrap();

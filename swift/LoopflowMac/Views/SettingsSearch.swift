@@ -131,7 +131,7 @@ struct SettingsSearchRow: View {
                             .font(Typography.meta).foregroundStyle(.secondary)
                             .help(toggle.file.path)
                         if let error = scope.errors[.init(toggle.file, toggle.definition.key)] {
-                            Text(error).font(Typography.meta).foregroundStyle(.secondary)
+                            Text(error.message).font(Typography.meta).foregroundStyle(.secondary)
                         }
                     } else if result.key != nil {
                         Text(result.pane.rawValue).font(Typography.meta).foregroundStyle(.secondary)

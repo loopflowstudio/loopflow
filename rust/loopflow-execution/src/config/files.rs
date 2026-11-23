@@ -12,6 +12,7 @@ use serde_yaml_ng::Value;
 use yaml_edit::{Mapping, YamlFile};
 
 use super::{settings::SettingScope, ConfigSource};
+use crate::engine::Error;
 
 /// Your own settings for a clone, beside the committed `.lf/config.yaml`.
 pub const PRIVATE_FILE: &str = ".lf/config.local.yaml";
@@ -389,8 +390,7 @@ pub(crate) fn update_settings<T>(
         };
         ensure!(
             settings_text(path, root)? == starting,
-            "{} changed during this edit",
-            path.display()
+            Error::conflict(format!("{} changed during this edit", path.display()))
         );
         Ok((text, result))
     })
@@ -532,8 +532,10 @@ impl LockedFile {
         }
         ensure!(
             read_text(&self.path)? == original,
-            "{} changed during this edit; retry with the current file",
-            self.path.display()
+            Error::conflict(format!(
+                "{} changed during this edit; retry with the current file",
+                self.path.display()
+            ))
         );
         atomic_write(&self.path, &text)?;
         Ok(result)

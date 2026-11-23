@@ -117,7 +117,9 @@ struct SettingsWorkflowTests {
 
             #expect(await !model.apply(.set("no-such-graph"), key: "wave.graph", to: shared, notices: notices, manager: nil))
             let graph = try pane(.agents).inspect().find(viewWithId: "wave.graph")
-            _ = try graph.find(button: "Refresh")
+            let typo = try #require(model.errors[.init(shared, "wave.graph")])
+            _ = try graph.find(text: typo.message)
+            #expect(typo.recovery == nil)
             #expect(try !graph.find(ViewType.TextField.self).isDisabled())
 
             let machines = try pane(.machines).inspect()

@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 
 use crate::config::files::{self, edit, Destination, ResolvedDestination};
 use crate::config::settings::EffectiveSetting;
+use crate::engine::Error;
 
 fn broader(source: &Destination) -> Option<Destination> {
     match source {
@@ -234,15 +235,19 @@ impl<'a> Move<'a> {
             installed[i] = actual == edit.after;
             ensure!(
                 actual == edit.before || (recovering && installed[i]),
-                "{} changed in {}; review that file before continuing the move",
-                self.key,
-                address.path.display()
+                Error::conflict(format!(
+                    "{} changed in {}; review that file before continuing the move",
+                    self.key,
+                    address.path.display()
+                ))
             );
         }
         ensure!(
             !installed[1] || installed[0],
-            "receiving declaration changed in {}; review both files",
-            edits[0].0.path.display()
+            Error::conflict(format!(
+                "receiving declaration changed in {}; review both files",
+                edits[0].0.path.display()
+            ))
         );
         for ((address, edit), done) in edits.into_iter().zip(installed) {
             if !done {
@@ -452,7 +457,11 @@ mod tests {
         )
         .unwrap();
         set(&shared, key, "false").unwrap();
-        assert!(run(&mine, key, None, &Action::Resume).is_err());
+        let error = run(&mine, key, None, &Action::Resume).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<crate::engine::Error>().unwrap().code,
+            crate::engine::ErrorCode::Conflict
+        );
         let journal_bytes = std::fs::read(&record).unwrap();
         let contents =
             || [&mine, &shared].map(|file| std::fs::read(file.resolve().unwrap().path).unwrap());

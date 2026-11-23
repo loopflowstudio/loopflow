@@ -20,7 +20,6 @@ struct ScopedSettingRow: View {
     @State private var previewError: String?
     @State private var moveReview: MoveReview?
     @State private var updatedReview = false
-    @State private var failedResume = false
     @FocusState private var focused: Bool
 
     private var key: String { definition.key }
@@ -31,7 +30,7 @@ struct ScopedSettingRow: View {
     }
     private var declared: ConfigurationScope.Authored { slot?.declared ?? .absent }
     private var authored: JSONValue? { declared.value }
-    private var editError: String? { model.errors[address] }
+    private var editError: ScopedSettingsModel.RowError? { model.errors[address] }
     private var field: String? {
         switch key {
         case "user": "name"
@@ -59,8 +58,8 @@ struct ScopedSettingRow: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             control.help(definition.description)
             if let editError {
-                Text(editError).foregroundStyle(.secondary).textSelection(.enabled)
-                Button("Refresh") { refreshRow() }
+                Text(editError.message).foregroundStyle(.secondary).textSelection(.enabled)
+                if editError.recovery == .refresh { Button("Refresh") { refreshRow() } }
             }
             if file.owner != .personalGlobal && definition.section != .policy {
                 SettingProvenance(title: declared == .absent ? "Inherited" : "In effect",
@@ -90,7 +89,6 @@ struct ScopedSettingRow: View {
             previewError = nil
             moveReview = nil
             updatedReview = false
-            failedResume = false
         }
         .task(id: PreviewInput(draft: draft?.text, resetting: reset != nil, expected: (reset ?? draft?.file)?.slots[key]?.entries, entries: slot?.entries ?? [])) {
             patch = nil
@@ -132,7 +130,7 @@ struct ScopedSettingRow: View {
             if promotion["kind"] == .string("resume") {
                 Text("A move between files was interrupted.")
                 Button("Finish interrupted move…") { promote(.resume) }
-                if failedResume {
+                if editError?.recovery == .dismissMove {
                     Text("Dismiss keeps both files as they are.")
                     Button("Dismiss pending move") { promote(.dismiss) }
                 }
@@ -203,7 +201,6 @@ struct ScopedSettingRow: View {
             guard isCurrentRow else { return }
             moveReview = review
             if case .confirm = action { updatedReview = review != nil } else { updatedReview = false }
-            if case .resume = action { failedResume = editError != nil }
         }
     }
 

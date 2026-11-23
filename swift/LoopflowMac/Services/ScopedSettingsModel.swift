@@ -23,7 +23,19 @@ final class ScopedSettingsModel {
         }
     }
 
-    private(set) var errors: [RowAddress: String] = [:]
+    struct RowError {
+        enum Recovery { case refresh, dismissMove }
+        let message: String
+        let recovery: Recovery?
+
+        init(_ error: Error, move: MoveAction? = nil) {
+            message = error.localizedDescription
+            if (error as? ServerError)?.code == .conflict {
+                if case .resume = move { recovery = .dismissMove } else { recovery = .refresh }
+            } else { recovery = nil }
+        }
+    }
+    private(set) var errors: [RowAddress: RowError] = [:]
     private(set) var saving = false
     @ObservationIgnored private var stream: LineSubscription?
     @ObservationIgnored private var checkpoint = 0
@@ -186,7 +198,7 @@ final class ScopedSettingsModel {
                 }
                 notices.post(Notice("Moved \(key)", key: key, action: undo))
             }
-        } catch { report(error, id: id, key: key, file: file, notices: nil) }
+        } catch { report(error, id: id, key: key, file: file, notices: nil, move: action) }
         return nil
     }
 
@@ -201,8 +213,8 @@ final class ScopedSettingsModel {
             expected: slot.entries, change: change), as: String.self, location: location)
     }
 
-    private func report(_ error: Error, id: UUID, key: String, file: ConfigurationScope.File, notices: NoticeCenter?) {
-        if observation == id { errors[RowAddress(file, key)] = error.localizedDescription }
+    private func report(_ error: Error, id: UUID, key: String, file: ConfigurationScope.File, notices: NoticeCenter?, move: MoveAction? = nil) {
+        if observation == id { errors[RowAddress(file, key)] = RowError(error, move: move) }
         notices?.post(Notice(error.localizedDescription, key: key))
     }
 }

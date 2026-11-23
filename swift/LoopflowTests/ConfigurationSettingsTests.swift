@@ -44,6 +44,14 @@ struct ConfigurationSettingsTests {
         }
     }
 
+    @MainActor @Test func dismissIsOfferedOnlyWhenResumingDivergedFiles() {
+        let conflict = ServerError(code: "conflict", message: "Declaration changed", data: .null)
+        let offline = ServerError(code: "unavailable", message: "Machine offline", data: .null)
+        #expect(ScopedSettingsModel.RowError(conflict, move: .resume).recovery == .dismissMove)
+        #expect(ScopedSettingsModel.RowError(conflict).recovery == .refresh)
+        #expect(ScopedSettingsModel.RowError(offline, move: .resume).recovery == nil)
+    }
+
     @Test func rowsSummarizeMapsAndListsInWords() {
         #expect(JSONValue.object(["name": .null]).settingsText == "None")
         #expect(JSONValue.object(["linear_requests": .bool(false)]).settingsText == "Linear Requests: Off")

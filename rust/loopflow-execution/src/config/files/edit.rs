@@ -9,6 +9,7 @@ use crate::config::{
     keys::{self, Root},
     settings,
 };
+use crate::engine::{Error, ErrorCode};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Entry {
@@ -91,8 +92,10 @@ fn insert(document: &mut Value, path: &[&str], value: Value) -> Result<()> {
     for length in 0..path.len() {
         ensure!(
             at(document, &path[..length]).is_none_or(Value::is_mapping),
-            "{} changed shape; refresh before editing",
-            path[..length].join(".")
+            Error::conflict(format!(
+                "{} changed shape; refresh before editing",
+                path[..length].join(".")
+            ))
         );
     }
     settings::insert(document, path, value);
@@ -257,7 +260,10 @@ impl<'a> Setting<'a> {
         super::update_settings(
             &self.destination.path,
             self.destination.root(),
-            |document| self.prepare(document, expected, change),
+            |document| {
+                self.prepare(document, expected, change)
+                    .map_err(|error| Error::refused(&error, ErrorCode::Invalid).into())
+            },
         )
     }
 
@@ -270,9 +276,11 @@ impl<'a> Setting<'a> {
         let before = self.entries(document)?;
         ensure!(
             before == expected,
-            "{} changed in {}; refresh before editing",
-            self.key,
-            self.destination.path.display()
+            Error::conflict(format!(
+                "{} changed in {}; refresh before editing",
+                self.key,
+                self.destination.path.display()
+            ))
         );
         match change {
             Change::Set { value } => self.edit(document, Some(value))?,
@@ -296,8 +304,10 @@ impl<'a> Setting<'a> {
                 for entry in entries {
                     ensure!(
                         at(document, &refs(&entry.path)).is_none(),
-                        "another declaration occupies {}; refresh before restoring",
-                        entry.path.join(".")
+                        Error::conflict(format!(
+                            "another declaration occupies {}; refresh before restoring",
+                            entry.path.join(".")
+                        ))
                     );
                     insert(
                         document,

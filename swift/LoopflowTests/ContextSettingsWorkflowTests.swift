@@ -79,7 +79,7 @@ struct ContextSettingsWorkflowTests {
             let deadline = ContinuousClock.now + .seconds(10)
             while model.saving || !condition() {
                 try #require(model.reading.failure == nil, "\(model.reading.failure ?? "")", sourceLocation: sourceLocation)
-                try #require(ContinuousClock.now < deadline, "Context subscription last showed \(String(describing: model.file?.slots["context.diff"]?.declared.value)); edit error: \(model.errors.values.first ?? "none")", sourceLocation: sourceLocation)
+                try #require(ContinuousClock.now < deadline, "Context subscription last showed \(String(describing: model.file?.slots["context.diff"]?.declared.value)); edit error: \(model.errors.values.first?.message ?? "none")", sourceLocation: sourceLocation)
                 try await Task.sleep(for: .milliseconds(20))
             }
         }
@@ -152,7 +152,7 @@ struct ContextSettingsWorkflowTests {
             let external = "# hand edit\ncontext: {diff: true}\n"
             try external.write(to: mine, atomically: true, encoding: .utf8)
             await model.apply(.reset, key: "context.diff", to: privateOff, notices: notices, manager: nil)
-            #expect(model.errors[.init(privateOff, "context.diff")]?.contains("refresh") == true)
+            #expect(model.errors[.init(privateOff, "context.diff")]?.recovery == .refresh)
             #expect(try String(contentsOf: mine, encoding: .utf8) == external)
             try picker.select(value: ConfigurationDestination.personalRepository)
             try await awaitReading { model.file?.slots["context.diff"]?.declared.value == .bool(true) }
@@ -240,7 +240,7 @@ struct ContextSettingsWorkflowTests {
         func set(_ key: String, _ value: String, _ owner: ConfigurationDestination) async throws {
             let address = try await file(owner)
             let saved = await model.apply(.set(value), key: key, to: address, notices: notices, manager: nil)
-            try #require(saved, "\(model.errors.values.first ?? "Save failed")")
+            try #require(saved, "\(model.errors.values.first?.message ?? "Save failed")")
         }
         func cliValue(_ key: String, _ arguments: [String] = []) async throws -> JSONValue {
             let output = try await lf.run(["config", "get", key, "--json"] + arguments)

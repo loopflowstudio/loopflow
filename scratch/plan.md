@@ -3,16 +3,18 @@
 ## Outcome
 
 `git worktree add` (by hand or by lf for a Task) starts the new checkout's
-`target/debug` as a copy-on-write clone of the newest quiescent target in the
-same repository. Cargo still decides freshness. Registry crates, their build
-scripts (aws-lc-sys, ring, libsqlite3-sys, sha2-asm) and proc macros come back
-`Fresh`. The workspace crates rebuild because checkout gives them new mtimes,
-and sccache serves them as before. Nothing new runs: no daemon, no service.
+`target/debug` as a copy-on-write clone of the newest quiescent **built** target
+in the same repository. Cargo still decides freshness. Registry crates, their
+build scripts (aws-lc-sys, ring, libsqlite3-sys, sha2-asm) and proc macros come
+back `Fresh`. The workspace crates rebuild because checkout gives them new
+mtimes, and sccache serves them as before. Nothing new runs: no daemon, no
+service.
 
 Demo: in a repo with the cache installed, `git worktree add ../x main && cd ../x
 && time cargo build -p loopflow --bin lf` prints 7 `Compiling` lines (workspace
-only), not 256, and finishes in about 40% of the cold time.
-`uv run python scripts/build_cache.py status` shows which target it was seeded from.
+only, when `Cargo.lock` matches), not 256, and finishes in about 40% of the cold
+time. `uv run python scripts/build_cache.py status` shows which built sibling
+and commit it was seeded from.
 
 ## What the probes showed (2026-11-22, base 0b3e42bd41)
 
@@ -53,56 +55,79 @@ and the `-v` logs beside them; the driver is `scratch/probe/measure.sh`.
 - **Quiescence:** Cargo 1.98 keeps `target/debug/.cargo-lock`,
   `.cargo-build-lock` and `.cargo-artifact-lock`. Holding any one of them
   exclusively with `flock` made a second `cargo build` print "Blocking waiting
-  for file lock". The seeder opens or creates all three and takes them with
-  `LOCK_EX|LOCK_NB`. If it cannot hold them all, it skips that source.
+  for file lock". Every built worktree holds Cargo's lock file(s); an unbuilt
+  seed holds none.
 
 ## Design
 
-Source of truth: Cargo's fingerprints. The seeder never edits mtimes, never
-marks anything fresh and never hardlinks.
+Source of truth: Cargo's fingerprints for freshness, and Cargo's lock files for
+both "has Cargo built here?" and quiescence. The seeder never edits file mtimes
+inside a seed, never marks anything fresh, never hardlinks, and never mutates an
+unbuilt sibling.
 
 In `scripts/build_cache.py`:
 
-- `seed_target(repo)`. Do nothing if `repo/target` exists. Otherwise list the
-  repository's worktrees (`_worktree_roots`) that have `target/debug`, newest
-  `target/debug/.fingerprint` mtime first. For the first one whose Cargo locks
-  can all be taken non-blocking, clone the seed into `repo/target/debug.seeding`
-  while holding the locks, then rename it to `target/debug`. The rename is
-  atomic, so a Cargo started mid-seed sees either no target or a whole one.
-  Write `target/.loopflow-seed` with the source path and commit for `status`.
-- What a seed is: exactly three entries of the source's `target/debug`,
+- **Built target vs unbuilt seed (updated in post-build concept review):**
+  A candidate seed source is a sibling worktree (`_worktree_roots`) whose
+  `target/debug` holds all three `SEED_ENTRIES` **and** has been built by Cargo
+  (`any((debug / name).exists() for name in CARGO_LOCKS)`). Unbuilt seeds (such
+  as a pre-warmed `loopflow.ready` or wave worktree that has never run Cargo)
+  are excluded: they are never cloned from, never get Cargo lock files created
+  inside them, and never appear as false commit provenance in another worktree's
+  `status`. (Choice made for review: chaining off an unbuilt seed when no built
+  sibling is idle was passed over because it mutates siblings, records the
+  unbuilt checkout's HEAD as if it had built the units, and breaks tie-breaking
+  once active worktrees start seeded.)
+- **Ranking:** sort built candidates by `target/debug/.fingerprint` mtime,
+  newest first — one key, no `SEED_RECORD` tie-breaker (`target/.loopflow-seed`
+  is permanent provenance for `status`, not a built/unbuilt flag). `_clone_debug`
+  still copies the source's `.fingerprint` directory mtime (`shutil.copystat`)
+  so that once a seeded worktree *does* build, its rank tracks when it last
+  gained a unit rather than when it was cloned.
+- **Quiescence and atomic publish (`seed_target(repo)`):** do nothing if
+  `repo/target` exists (`os.path.lexists`). For the first built candidate whose
+  Cargo locks (`CARGO_LOCKS`) can all be taken non-blocking (`LOCK_EX|LOCK_NB`),
+  clone the seed into `repo/target/debug.seeding` while holding the locks,
+  `copystat` `.fingerprint`, then rename `debug.seeding` to `target/debug`. The
+  rename is atomic, so a Cargo started mid-seed sees either no target or a whole
+  one. Write `target/.loopflow-seed` with the built source's path and commit for
+  `status`. Keeping `open("a")` inside `_quiescent` for built candidates closes
+  any window if Cargo just created its first lock file or after a Cargo version
+  upgrade, while creating zero files on already-built Cargo 1.98 targets and
+  never touching unbuilt seeds.
+- **What a seed is:** exactly three entries of the source's `target/debug`:
   `.fingerprint`, `build` and `deps` (Cargo's freshness records, build-script
   outputs and compiled units), each cloned into the empty `debug.seeding`.
   Everything else is never copied: `incremental/` (path-bound, measured slower
   when carried), the lock files, and the uplifted top-level files (`lf`, `*.d`,
   `*.rlib`). Name what goes in, not what comes out afterwards; there is no
-  delete step. A source missing one of the three is skipped.
-- Clone: on macOS, one `clonefile(2)` call per entry through `ctypes`. It
+  delete step.
+- **Clone:** on macOS, one `clonefile(2)` call per entry through `ctypes`. It
   clones a whole directory tree, symlinks included (probed), and returns an
   error such as EXDEV or ENOTSUP instead of copying. Don't use `cp -c`: its man
   page says it falls back to `copyfile(2)`, a full copy, when it can't clone.
   On Linux, `cp -a --reflink=always` per entry, which fails rather than
-  copying. Any failure removes `debug.seeding` and leaves the checkout
-  unseeded, which is today's cold build. Never make a full copy.
-- The post-checkout hook block already runs `register` on a branch checkout.
-  It now runs `seed` first, only when `$1` is the null OID (a new worktree), and
-  stays silent and best-effort (`|| :`), like register.
-- `status` prints `seed     from <worktree> at <short sha>`, or `seed     none`.
-- On whenever installed: `build_cache.py install` is already the opt-in for
-  this Machine-level wiring, and there is no knob. A cold target is
-  `rm -rf target` after `git worktree add`, which is what the benchmarks
-  already do between arms. (Choice made for review: an env var
-  `LOOPFLOW_SEED_TARGET=0` was passed over because it duplicates deleting the
-  directory and would be one more thing the hook copy and docs must carry.)
-- The hook runs a copy of this script (`loopflow-build-cache.py` in the Git
-  hooks directory), refreshed only by `install`. Existing installs seed after
-  one `uv run python scripts/build_cache.py install`; slice 1 does that here
-  and testing.md says so.
+  copying. Any failure removes `debug.seeding` (and `target/` if empty) and
+  leaves the checkout unseeded, which is today's cold build. Never make a full
+  copy.
+- **Hook and readout:** the post-checkout hook block runs `seed` first only when
+  `$3 = 1` and `$1` is all zeros (a new worktree), then `register`, both silent
+  and best-effort (`|| :`). `status` prints
+  `seed     from <worktree> at <short sha>`, or `seed     none`.
+- **On whenever installed, no knob:** `build_cache.py install` is already the
+  opt-in for this Machine-level wiring. A cold target is `rm -rf target` after
+  `git worktree add`. Every benchmark driver that expects a cold target
+  (`seed_probe.py`'s cold arm and `test_loop.py`) removes `tree / "target"`
+  right after `git worktree add` so rerunning LOO-921's benchmark with seeding
+  installed stays isolated from sibling targets.
+- **Hook script copy:** the hook runs `loopflow-build-cache.py` in the Git hooks
+  directory, refreshed by `uv run python scripts/build_cache.py install`.
+  Existing installs refresh with one `install` run; `testing.md` says so.
 
-Why delete the uplifted files: before its first build, a fresh checkout
-holding another branch's `target/debug/lf` would run that branch's code
+Why exclude uplifted files: before its first build, a fresh checkout holding
+another branch's `target/debug/lf` would run that branch's code
 (`scripts/check_context_launch.py`, the benchmarks' `--lf` default). Every
-workspace unit rebuilds and re-uplifts anyway, so deleting them costs nothing.
+workspace unit rebuilds and re-uplifts anyway.
 
 ## Acceptance check at gate
 
@@ -112,32 +137,41 @@ script). It checks that:
 
 1. A seeded new worktree's `cargo build -v` reports the build-script crate
    `Fresh` and the path crate `Compiling`.
-2. A source whose `.cargo-build-lock` is held is skipped. With no other source
-   there is no `target/`, and the build still passes.
-3. No top-level binary and no `incremental/` from the source exists before
+2. A built source whose `.cargo-build-lock` is held is skipped (with no other
+   built source there is no `target/`, and the build still passes), and holding
+   `_quiescent` on a built source makes Cargo wait with
+   `Blocking waiting for file lock`.
+3. An unbuilt seed is never chosen as a source — including when its own built
+   source was previously seeded (both carry `.loopflow-seed` and equal
+   `.fingerprint` mtimes) and when the unbuilt seed is the only idle sibling —
+   and never has Cargo lock files created inside it. Once Cargo builds in that
+   seeded worktree, it becomes eligible as a source.
+4. No top-level binary and no `incremental/` from the source exists before
    the first build.
-4. When the clone fails partway (the clone function patched to clone the
+5. When the clone fails partway (the clone function patched to clone the
    first entry and then raise), neither `target/debug.seeding` nor
    `target/debug` is left behind, and the next `cargo build` passes.
+6. An existing `target/` is never replaced.
 
-Breaking the lock check or the freshness claim fails one of these.
+Also check `uv run pytest python/tests/test_crate_test_loop.py` after updating
+`test_loop.py` to remove any seeded `target/` on worktree creation.
 
 Machine check, run once by implement and recorded in the PR: slice 2's
 `seed_probe.py` results.
 
 ## Absent and error states
 
-- No source with a target, or all sources busy: no seed, a cold build as
-  today, and `status` says `seed     none`.
+- No built source with a target, or all built sources busy: no seed, a cold
+  build as today, and `status` says `seed     none`.
 - Source on another volume or filesystem without clones: the clone fails and
   there's no seed.
-- Different Cargo.lock or toolchain in the source: units that don't match
-  simply aren't reused (they compile). The stale units share blocks until
-  `lf wt prune --builds` reaps the target.
+- Different Cargo.lock or toolchain in the source (or an aborted partial build
+  that ranked newest): units that don't match or are missing simply compile.
+  Stale units share blocks until `lf wt prune --builds` reaps the target.
 - `build_cleanup` measures `st_blocks`, so it counts a clone at full size.
   It caps bytes removed per run (64 GiB), so it reaps fewer roots per pass and
   overstates what it freed. Nothing is deleted wrongly. This is noted in
-  testing.md and left alone.
+  `scripts/testing.md` and left alone.
 
 ## Exclusions
 
@@ -156,7 +190,9 @@ Machine check, run once by implement and recorded in the PR: slice 2's
 
 ## What goes
 
-Nothing is replaced. The cold path stays as the fallback. In testing.md, "A
+Nothing is replaced. The cold path stays as the fallback. The broken
+`not (tree / "target" / SEED_RECORD).exists()` tie-breaker in `_seed_sources`
+is removed and replaced by the built-target check. In `scripts/testing.md`, "A
 fresh target still compiles and links test executables, binaries, proc-macros
 and build scripts" becomes the seeded behaviour plus what still compiles.
 
@@ -164,13 +200,10 @@ and build scripts" becomes the seeded behaviour plus what still compiles.
 
 1. **Done: seed in the hook, end to end.** `seed_target`, the `seed`
    subcommand, the hook's null-OID branch, the `status` line and fixture tests
-   (seeded `Fresh`/`Compiling`, busy sibling skipped, failed clone leaves no
-   target, existing target untouched) are in. Hook reinstalled on this Machine.
-   Real run (2026-11-22): `git worktree add` took 2.8 s including the clone,
-   seeded from `loopflow.loo-974-run-managed-tasks`; `cargo build -p loopflow
-   --bin lf` printed 7 `Compiling` lines, 76.5 s wall, 85 CPU-s, 2.24 GB RSS,
-   and the built `lf --version` named this checkout's commit. Cargo agreed with
-   the probe; nothing in the plan changed.
+   are in. Real run (2026-11-22): `git worktree add` took 2.8 s including the
+   clone, `cargo build -p loopflow --bin lf` printed 7 `Compiling` lines,
+   76.5 s wall, 85 CPU-s, 2.24 GB RSS, and `lf --version` named this checkout's
+   commit.
 2. **Done: measured arm.** `seed_probe.py` and `report.py --seed-probe` are in;
    [results/loo-922.html](../scripts/benchmarks/crate-rebuild/results/loo-922.html).
    Run 2026-11-22 at bb939942b0, 3 cohorts, load average 17–103 on 16 CPUs.
@@ -189,32 +222,37 @@ and build scripts" becomes the seeded behaviour plus what still compiles.
    | target bytes written, GiB | 4.25 | 4.89 (−13%) |
    | largest process RSS, `lf` build, GiB | 3.17 [3.14–3.18] | 2.09 [2.05–3.20] |
 
-   What it taught, for slice 3's docs:
-   - Seeds came from siblings 18–143 commits away. The one at 140 commits
-     recompiled 31 units, not 7 (Cargo.lock drift); the doc's "7 Compiling
-     lines" is the common case, not a promise.
-   - Bytes: the `lf` build wrote 1.73 GiB into a seeded target vs 2.03 cold,
-     and after the test 52% of the seeded target's allocated bytes were still
-     the cloned files. testing.md's "about 40% had diverged" came from the
-     earlier probe's method; replace it with these numbers.
-   - The seeded `lf` build's largest process was 3.1 GB in all three samples;
-     cold was 2.05 GB in two of three. Unexplained; see questions.md.
-   - The seeded focused test cost 185 CPU-s, close to the "about 200" in
-     testing.md; that sentence holds.
-3. **Docs: done.** `scripts/testing.md` and the crate-rebuild README match the
-   code (status line format, hook paragraph, `seed_probe.py` commands,
-   results link). Realign replaced the earlier probe's "about 40% diverged"
-   with slice 2's bytes, noted Cargo.lock drift (31 units at 140 commits) and
-   linked loo-922.html from testing.md.
-
-4. **Done: exclude a first build in the seed source.** On the old guard,
-   Cargo 1.98.1 printed `Compiling app` inside a freshly seeded sibling.
-   With the lock files created and held, it reported a lock wait, then built
-   and ran the edited binary after release. Busy-source and dependency-reuse
-   checks also passed. Realign found `test_an_unbuilt_seed_ranks_as_old_as_its_source`
-   failing 3 of 8 runs: an unbuilt seed ties its source's mtime and
-   `git worktree list` order broke the tie. A source without a seed record now
-   wins ties; 12 of 12 runs and the full suite (26) passed. Gate runs the suite again.
+3. **Done: docs.** `scripts/testing.md` and the crate-rebuild README match the
+   code and link `loo-922.html`.
+4. **Done: lock contention check.** Verified Cargo 1.98.1 waits with
+   `Blocking waiting for file lock` when `_quiescent` holds `CARGO_LOCKS`.
+5. **Next (from post-build concept review): only built targets are seed
+   sources, and keep `test_loop.py` cold.**
+   - In `scripts/build_cache.py` (`_seed_sources`): require a built target —
+     all `SEED_ENTRIES` exist **and** `any((tree / "target/debug" / lock).exists() for lock in CARGO_LOCKS)`.
+     Drop the `not (tree / "target" / SEED_RECORD).exists()` tie-breaker; sort
+     by `.fingerprint` mtime alone. Keep `shutil.copystat` on `.fingerprint` and
+     keep `CARGO_LOCKS` locking inside `_quiescent` for built candidates.
+   - In `scripts/benchmarks/crate-rebuild/test_loop.py`: right after
+     `git worktree add` creates a measurement worktree, remove `tree / "target"`
+     if present (`shutil.rmtree(tree / "target", ignore_errors=True)`) so
+     LOO-921's cold-target private-cache benchmark is unaffected by the
+     installed seeding hook.
+   - In `python/tests/test_build_cache.py`:
+     - Replace the unbuilt-seed lock test and cold-only tie test with explicit
+       steady-state coverage: (a) a seeded-then-built sibling (`SEED_RECORD`
+       present, built) beats an unbuilt seed cloned from it (no lock files
+       created in the unbuilt seed); (b) an unbuilt seed is skipped even when
+       it is the only idle sibling (built source locked or removed), leaving no
+       `target/` and no lock files in the unbuilt seed; (c) once Cargo builds
+       in that seeded worktree, it seeds later worktrees; (d) holding
+       `_quiescent` on a built sibling blocks Cargo with
+       `Blocking waiting for file lock`.
+   - In `scripts/testing.md` and `.lf/qa/build-cache.md`: state plainly that
+     only built siblings (targets Cargo has built) seed new worktrees, and
+     update the QA lock-race note to reflect that unbuilt seeds are skipped.
+   - Reinstall the hook on this Machine (`uv run python scripts/build_cache.py install`)
+     and run `uv run pytest -q python/tests/test_build_cache.py python/tests/test_crate_test_loop.py`.
 
 The delivery instruction is “ok lg2m ship it when it works”.
 
@@ -222,7 +260,3 @@ Peak memory attribution is tracked separately in LOO-1070.
 
 After verify: check LOO-923 status/liveness, `lf task checkout LOO-923` if
 absent, then `lf ship LOO-923` with these measurements in its context.
-
-Compress checks on macOS:
-- `uv run pytest -q python/tests/test_build_cache.py python/tests/test_crate_test_loop.py` — 40 passed. Gate runs the focused checks again.
-- `report.py --seed-probe` on the six original samples — all table values matched.

@@ -347,6 +347,14 @@ struct WorkspacePanesTests {
         _ = view.sessions.release(record.id)
         let retainedRefresh = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-refresh-session")
         _ = try retainedRefresh.find(ViewType.ProgressView.self)
+        #expect(try retainedRefresh.accessibilityLabel().string() == "Refresh session")
+        #expect(try retainedRefresh.accessibilityValue().string() == "Opening session")
+
+        view.sessions.noteSurfaceClosed(terminal, output: "  \n")
+        let blankRefresh = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-refresh-session")
+        #expect(throws: (any Error).self) { try blankRefresh.find(ViewType.ProgressView.self) }
+        let opening = try view.inspect().find(SessionOpeningView.self).actualView()
+        #expect(opening.screen == nil)
     }
 
     @Test("Every Task pane hides on hover and the header's Show… restores it")

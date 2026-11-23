@@ -462,7 +462,6 @@ struct SessionPaneView: View {
                         if showsStripSpinner {
                             ProgressView()
                                 .controlSize(.mini)
-                                .accessibilityLabel("Opening session")
                         } else {
                             Image(systemName: "arrow.clockwise")
                                 .font(Typography.meta)
@@ -475,7 +474,8 @@ struct SessionPaneView: View {
                 .buttonStyle(.plain)
                 .disabled(changingSession)
                 .help("Reconnect this pane to the existing conversation.")
-                .accessibilityLabel(showsStripSpinner ? "Opening session" : "Refresh session")
+                .accessibilityLabel("Refresh session")
+                .accessibilityValue(showsStripSpinner ? "Opening session" : "")
                 .accessibilityIdentifier("pane-refresh-session")
             }
             if let session = primarySession {

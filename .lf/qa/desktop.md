@@ -358,9 +358,24 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
 - "Not filed." and "Not started.": stop the private server (`kill` its PID),
   wait five seconds, then `lf desktop do new-task`, type, and press File or ⌘↩.
   After a confirmed refusal, check that the sheet still has the request, Wave
-  and workflow. Restart the server and submit from the same sheet. An unwritable `.git` or a repository
-  default naming a missing Graph ends in creation recovery (a notice, and the
-  Task is filed), not in "Not started.".
+  and workflow. Restart the server and submit from the same sheet. SIGSTOP on
+  the server is the same refusal, after 60 s: File and Start read the Machine ID
+  before saving, so nothing is sent.
+- A lost reply after the journal write: put a `git` wrapper first on the
+  server's `PATH` that loops while a flag file exists. Touch the flag, submit,
+  wait for a file in `$LF_HOME/desktop-cache/submissions`, then `kill -9` the
+  server. Admission rolls back and the sheet closes into recovery. Remove the
+  Wave (`lf wave remove`) before restarting the server, and the replay is
+  refused: the notice offers **Edit draft**.
+- The hook takes one `.cmd` per tick and deletes it; its `.cmd.out` stays.
+  Reusing a name reads the old answer, so name each command uniquely
+  (`t$(date +%s)$RANDOM`). A `snap` can take over 20 s.
+- **Discard draft** (`role: .destructive`) answered no hook click while Cancel
+  in the same row did; without the role the same click worked. Check it on a
+  display or through `NewTaskTests`.
+- After its Wave is removed, the window stays on that Wave, even across a
+  relaunch, drawn as an empty page with the repository's name. Click the
+  repository's sidebar row (`click 0 115 64`) to see its backlog.
 - A SwiftUI `ScrollView` that meets the title bar comes back white from
   `cacheDisplay`, background included.
   To see it, build once with the scroll view padded 60 pt from the top; do not

@@ -51,7 +51,7 @@ Pass 2 reran five focused New Task tests against the built Desktop. They passed,
 
 ## Remaining display check
 
-On an unlocked display, use the Workflow menu, correct a refused Start with **Use default**, pick the repository after **Wave unavailable**, and open the admitted conversation. [QA round 2](qa.html) drove File across a server restart live: the brief opened while the Machine was still away. It also fixed Wave links, which name the Wave while Desktop selected them by ID, so New Task opened on **Wave unavailable**.
+On an unlocked display, use the Workflow menu, correct a refused Start with **Use default**, pick the repository after **Wave unavailable** (also from **Edit draft**), open the admitted conversation, and click **Discard draft**. [QA round 3](qa.html) drove rename, same-name replacement, a stalled server and a lost reply refused on replay through **Edit draft**, Cancel and an app restart. The hook could not press Discard draft (destructive role); the menus are out of its reach.
 
 ## Prior checks
 

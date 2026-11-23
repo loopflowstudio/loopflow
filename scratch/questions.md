@@ -25,3 +25,5 @@ I used the Wave resolver’s UUID convention for `lf task create --wave`. A UUID
 In a recovered sheet, Cancel keeps the last saved draft and Discard draft removes it. File keeps the menu’s named workflow in the Desktop journal so Edit draft can restore the selection. Only Start includes it in the Machine command.
 
 For a CLI name, use the Wave returned by the first lookup. Look it up again after provisioning. Admission still checks the selected Wave inside the transaction.
+
+Open from QA round 3: a removed Wave stays selected while its conversation exists, and its page shows the repository's name over an empty list. Recovery's **Edit draft** case usually starts there. Showing the repository, or labeling the page as a removed Wave, are both possible; I changed neither.

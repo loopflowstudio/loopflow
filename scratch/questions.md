@@ -322,3 +322,5 @@ formatting is shared by every Git failure, left for its own change.
   the record only in `record_control_task_state` once `main` is integrated
   (never on `--plan` or an aborted conflict). Passed over: keeping the record
   and leaving no `lf` command to unstack a `--stack` checkout.
+- The Git config edit uses the branch the completed sync verified. This also
+  identifies the branch when `lf sync --continue` takes over a saved operation.

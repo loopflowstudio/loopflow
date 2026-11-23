@@ -1,0 +1,17 @@
+at: 44b4012d25422ef245ea51c33b569a09db3f8b6a
+first:
+  - path: docs/work.md
+    why: The intended pause and unpause experience
+  - path: scratch/plan.md
+    why: Worker teardown and remaining pause work
+  - path: rust/loopflow-execution/src/os_process/lifeline.rs
+    why: Establish worker ownership before provider execution
+  - path: rust/loopflow-execution/src/harness/agent_process.rs
+    why: Select the jobs an attached provider owns
+  - path: rust/loopflow-execution/src/process/os_process.rs
+    why: Read live OS session members
+  - path: rust/loopflow-execution/src/os_process.rs
+    why: Signal verified jobs and check who survived
+  - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
+    why: Interrupt a build after its shell exits
+hide: []

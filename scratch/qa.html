@@ -1,68 +1,100 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>LOO-974 QA: the configured model on OpenCode</title>
+<html><head><meta charset="utf-8"><title>LOO-974 QA: a reopened OpenCode work session's model and wake</title>
 <style>
 body{font:15px/1.5 -apple-system,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em;color:#222}
 pre{background:#111;color:#ddd;padding:10px;overflow-x:auto;font:12px/1.3 Menlo,monospace;border-radius:4px}
 h2{margin-top:2em;font-size:18px}code{background:#eee;padding:1px 4px;border-radius:3px}section{border-top:1px solid #ddd}
+.fix{background:#eef7ee;border-left:3px solid #4a4;padding:4px 10px}
 </style></head><body>
-<h1>LOO-974 QA: the configured model on OpenCode, and the reopen wake after compress</h1>
-<p>2026-11-19, branch <code>lf</code> at e87e68c599 on a private Machine (<code>LF_HOME=/tmp/lfq974m/home</code>), the
-account's real OpenCode 2.2.1 login. The account's own default model is <code>opencode/gemini-4-neon</code>; the
-repository says <code>agent: opencode:opencode/gemini-4-carbon</code>, so the two are told apart on screen.
-The earlier run (idle wake on OpenCode, Pi and Claude) is at <code>bc6cca5603:scratch/qa.html</code>.</p>
+<h1>LOO-974 QA: a reopened OpenCode work session's model and wake</h1>
+<p>2026-11-22, branch <code>lf</code> at 853c4f5dfb plus this run's fixes, on a private Machine (<code>LF_HOME=/tmp/lfq974r/home</code>),
+the account's real OpenCode 2.2.1 login. Task 9c7d85, one work session (<code>ses_febde2ee…</code>) quit and reopened four times.
+The earlier run (new work session on the configured model, idle steers) is at <code>9505a53ad9:scratch/qa.html</code>.</p>
+<p><b>Limit:</b> the account's OpenCode credits ran out on the first turn ("Default is out of credits"), and its free
+models' daily quota too ("You've used today's free messages"). Every turn below names its model in OpenCode's own record and
+then fails, so no model answered. Model choice and wake delivery are visible without an answer.</p>
 
-<section><h2>1. A new work session runs the configured model</h2>
-<p><b>Did:</b> <code>lf task create</code>, <code>lf checkout d744d9</code>, viewed with <code>lf resume --task d744d9</code> in a PTY.</p>
-<p><b>Saw:</b> the footer and every answer say Gemini 4 Carbon. OpenCode's own record agrees:
-<code>session_v2.model = {"id":"gemini-4-carbon","providerID":"opencode"}</code>. The earlier run, same config,
-showed Gemini 4 Neon.</p>
-<pre>     Build · Gemini 4 Carbon · 33.5s · 57.5 tok/s
-  ┃  Build · Gemini 4 Carbon Default / OpenCode
-  /private/tmp/lfq974m/oc.d744d9-add-a-divide:qa/d744d9-add-a-divide             26.1K (2%) · $0.08</pre></section>
+<section><h2>1. Reopen after changing <code>agent:</code>: the first typed turn asks the new model</h2>
+<p><b>Did:</b> the session started on <code>opencode/gemini-4-carbon</code>; <code>/exit</code>; set
+<code>agent: opencode:opencode/deepseek-v4.1-flash-free</code> in the checkout; <code>lf resume --task 9c7d85</code>; typed a prompt.</p>
+<p><b>Saw:</b> the footer said Carbon until the prompt, then "Switched model to DeepSeek V4.1 Flash Free". OpenCode's rows:</p>
+<pre>10|model-switched|deepseek-v4.1-flash-free
+13|user|
+14|assistant|deepseek-v4.1-flash-free</pre></section>
 
-<section><h2>2. Idle steer</h2>
-<p><b>Did:</b> <code>lf steer d744d9 'Reply with only the word QUINCE.'</code>, nothing typed.</p>
-<p><b>Saw:</b> the <code>synthetic</code> message landed the same second as the steer; Carbon took 60 s to answer.
-<code>lf session steers</code>: delivered, 0 pending.</p>
-<pre>     QUINCE
-     Build · Gemini 4 Carbon · 1m 0s · 1.0 tok/s</pre></section>
+<section><h2>2. A <code>/models</code> pick after that holds</h2>
+<p><b>Did:</b> <code>/models</code>, filtered <code>mimo</code>, Enter, sent a prompt.</p>
+<p><b>Saw:</b> no second switch from the plugin; the turn asked MiMo.</p>
+<pre>18|model-switched|mimo-v2.6-flash-free
+21|user|
+22|assistant|mimo-v2.6-flash-free</pre></section>
 
-<section><h2>3. Quit, steer, reopen (the <code>After::Reachable</code> path compress rewrote)</h2>
-<p><b>Did:</b> <code>/exit</code>; status read <i>Conversation: quit 14:01; `lf resume --task d744d9` opens it</i>;
-<code>lf steer … RAMBUTAN</code>; <code>lf resume --task d744d9</code>.</p>
-<p><b>Saw:</b> RAMBUTAN on screen 15 s after the reopen, nothing typed; 0 pending.</p>
-<pre>     RAMBUTAN
-     Build · Gemini 4 Carbon · 6.3s · 2.7 tok/s</pre></section>
+<section><h2>3. A steer saved while quit, after a failed turn: never arrived <span class="fix">fixed</span></h2>
+<p><b>Did:</b> <code>/exit</code>; <code>agent: opencode:opencode/beam-free</code>; <code>lf steer 9c7d85 'Reply with only the word BANANA.'</code>; reopened.</p>
+<p><b>Saw:</b> 70 s later still <code>"pending": 1</code>, no <code>synthetic</code> row, nothing in <code>lf.log</code>. The socket was recorded
+(<code>agent_socket=/tmp/lf-wake-pdIV9d/s</code>), but <code>session_activity</code> read <code>yielded=0</code> under the new provider with
+<code>observed_at</code> from the earlier launch's failed turn.</p>
+<p><b>Cause:</b> the earlier turn failed, so it never reported a turn end. On reopen the held terminal's status stream
+(<code>begin_program_status</code>) moved the reading to the new provider first and kept that <code>yielded=0</code>. When the plugin
+then named its socket, <code>record_agent_inbox</code> saw the row already on this provider and skipped the "new provider is idle"
+reset. The 2026-11-19 reopen worked only because the turn before it had ended.</p>
+<p class="fix"><b>Fix:</b> the status stream zeroes <code>observed_at</code> when the provider changes (the reading isn't this provider's),
+and the idle reset also runs on a reading with <code>observed_at=0</code>. New test
+<code>server::boundary::tests::a_reopened_work_session_is_idle_after_its_terminal_status_moves_first</code> fails without it.</p>
+<p><b>After:</b> rebuilt, reopened: BANANA delivered at once, 0 pending.</p>
+<pre>28|synthetic|
+29|assistant|mimo-v2.6-flash-free</pre></section>
 
-<section><h2>4. A worker step takes the model without <code>--model</code></h2>
-<p><b>Did:</b> <code>lf task run d744d9</code> (Graph <code>implement</code> → <code>interactive: human-review</code>).</p>
-<p><b>Saw:</b> the step committed <code>Add divide(a, b) to calc.py</code> and stopped at human-review. Every assistant
-message of the worker's OpenCode session names <code>gemini-4-carbon</code>; <code>lf history usage --task</code>: 50,603 in,
-1,062 out, $0.15. The Graph's end then woke the work session, which summarised it on Carbon.</p></section>
+<section><h2>4. A woken first turn ran on the earlier model <span class="fix">fixed</span></h2>
+<p><b>Saw</b> in 3: the woken turn asked MiMo (the last <code>/models</code> pick), not <code>beam-free</code> from <code>agent:</code>, and there was no
+<code>model-switched</code> row. <code>session.synthetic</code> does not pass through the plugin's <code>prompt</code> hook (question 7).</p>
+<p class="fix"><b>Fix:</b> the wake handler calls the same once-per-launch <code>switchModel</code> before <code>session.synthetic</code>. The plugin
+fixture now wakes before any prompt and fails without it.</p>
+<p><b>After:</b> <code>/exit</code>, <code>agent: opencode:opencode/hy4-flash-free</code>, <code>lf steer … CHERRY</code>, reopened, nothing typed:</p>
+<pre>33|model-switched|hy4-flash-free
+36|synthetic|
+37|assistant|hy4-flash-free
+     Build · Hy4 flash Free · 360ms</pre>
+<p>This reopen also followed a failed woken turn, so 3's fix held a second time.</p></section>
 
-<section><h2>5. Changing <code>agent:</code> and reopening</h2>
-<p><b>Did:</b> set <code>agent: opencode:opencode/glm-5.2</code> in the checkout, reopened, steered LYCHEE.</p>
-<p><b>Saw:</b> LYCHEE answered on Gemini 4 Carbon. As <code>questions.md</code> 7 says: a reopened OpenCode session
-keeps its last model.</p></section>
+<section><h2>5. Claude idle wake, unchanged by the inbox split</h2>
+<p><b>Did:</b> a second repository with <code>agent: claude</code>, <code>lf checkout 993264</code>, viewed it, trusted the folder, let the
+opening turn finish, <code>lf steer 993264 'Reply with only the word DAMSON.'</code>.</p>
+<pre>› Message from @Loopflow: &lt;lf:steers&gt; (ctrl+o to expand)
+⏺ DAMSON</pre>
+<p>Delivered, 0 pending.</p></section>
 
 <section><h2>6. Scripted idle wake</h2>
-<p><code>tests/e2e/idle_wake.py --harness opencode</code> (2.2.1) and <code>--harness pi</code> (1.3.0): both passed.
-No process naming either run's root was left afterwards.</p></section>
+<p><code>tests/e2e/idle_wake.py --harness opencode</code> (2.2.1) and <code>--harness pi</code> (1.3.0) on the final build: both passed.</p></section>
+
+<h2>Checks</h2>
+<ul>
+<li><code>cargo test -p loopflow --lib server::</code>: 107 passed.</li>
+<li><code>cargo test -p loopflow-execution --lib harness::</code>: 138 passed.</li>
+<li><code>cargo test -p loopflow-storage --lib sqlite::steers::</code>: 17 passed.</li>
+<li><code>cargo test -p loopflow-execution --lib store::</code>: 215 passed, 1 failed
+(<code>task_facts_update_without_rewriting_work_progression</code>, at <code>seed_task</code>, on a loaded Machine); it passed alone. No
+session_activity in it.</li>
+<li>Full <code>loopflow-storage --lib</code> stopped after 12 minutes on the loaded Machine: gate.</li>
+</ul>
 
 <h2>Works now</h2>
 <ul>
-<li>An OpenCode work session and an OpenCode worker both run the model in <code>agent:</code>.</li>
-<li>Idle steers and steers saved while the conversation was quit still start a turn after the compress.</li>
+<li>A reopened OpenCode work session takes the model in <code>agent:</code> at its first turn, typed or woken; a <code>/models</code> pick after it holds.</li>
+<li>A steer saved while a work session was quit arrives on reopen even when the last turn before it failed.</li>
+<li>Idle wake on OpenCode, Pi (scripted) and Claude (real).</li>
 </ul>
 <h2>Not reached</h2>
-<ul><li>Pi on a real model this run: its path did not change; the scripted run covers the shared server side.</li></ul>
+<ul>
+<li>A model answering on OpenCode: account credits and free quota were spent. The turns' model choice and delivery are in OpenCode's record.</li>
+<li>Pi on a real model this run.</li>
+</ul>
 <h2>Still wrong, worst first</h2>
 <ul>
-<li>Changing <code>agent:</code> does not change an existing OpenCode work session's model (question 7).</li>
-<li>While an OpenCode work session is open, <code>lf session history</code> lists its finished turns as
-<code>running</code>; they read <code>completed</code> once OpenCode exits (the exit read writes completions). Not
-changed by this branch.</li>
-<li>From the earlier run, unchanged: after Esc a steer waits until someone types (question 4); OpenCode shows a
-woken answer with no sign of the steer (question 1).</li>
+<li>A failed or interrupted OpenCode turn reports no turn end, so a steer to that still-open session waits until someone types
+(question 4). The reopen case is fixed above; the open one is not.</li>
+<li>When credits run out, OpenCode leaves the typed prompt in the input box; nothing from lf.</li>
+<li>From earlier runs, unchanged: <code>lf session history</code> lists an open OpenCode session's turns as <code>running</code>; a woken
+answer shows no sign of the steer (question 1).</li>
 </ul>
 </body></html>

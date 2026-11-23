@@ -36,8 +36,24 @@ export default {
     // A work session takes the server's steers while idle, as a turn OpenCode
     // starts; one already running queues the message as a steer. The answer
     // shows in the TUI; the message is the model's, not something typed.
+    // A reopened conversation keeps the model of its last turn, whatever the
+    // configuration says: the launch's model is set before its first turn,
+    // typed or woken, and a model picked in the TUI after that holds.
+    let model = spec.model;
+    const takeModel = async () => {
+      if (!model) return;
+      const at = model.indexOf("/");
+      const ref = { providerID: model.slice(0, at), id: model.slice(at + 1) };
+      model = undefined;
+      try {
+        await session.switchModel({ sessionID: owner, model: ref });
+      } catch (error) {
+        log(`model ${ref.providerID}/${ref.id} not set: ${String(error?.message ?? error).split("\n")[0]}`);
+      }
+    };
     const wake = spec.wake ? wakeSocket(async (thread, text) => {
       if (thread !== owner) throw new Error(`this OpenCode runs ${owner}, not ${thread}`);
+      await takeModel();
       await session.synthetic({ sessionID: owner, text });
     }, log) : null;
     // A launch that reports no turns opens no connection and reports no turn end.
@@ -59,21 +75,9 @@ export default {
       ["__context-block", "--delivery", delivery, "--moment", moment], {
         env: renderEnv, cwd: lf.cwd, input: JSON.stringify(callback), encoding: "utf8", timeout: 30000,
       })).hookSpecificOutput.additionalContext;
-    // A reopened conversation keeps the model of its last turn, whatever the
-    // configuration says: the launch's model is set at its first prompt, and
-    // a model picked in the TUI after that holds.
-    let model = spec.model;
     await session.hook("prompt", async (input) => {
       owner ??= input.sessionID;
-      if (!model || input.sessionID !== owner) return;
-      const at = model.indexOf("/");
-      const ref = { providerID: model.slice(0, at), id: model.slice(at + 1) };
-      model = undefined;
-      try {
-        await session.switchModel({ sessionID: owner, model: ref });
-      } catch (error) {
-        log(`model ${ref.providerID}/${ref.id} not set: ${String(error?.message ?? error).split("\n")[0]}`);
-      }
+      if (input.sessionID === owner) await takeModel();
     });
     await session.hook("compaction", (input) => { if (input.sessionID === owner) refresh = "compact"; });
     await session.hook("context", async (input) => {

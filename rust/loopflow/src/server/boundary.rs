@@ -525,6 +525,41 @@ mod tests {
     }
 
     #[test]
+    fn a_reopened_work_session_is_idle_after_its_terminal_status_moves_first() {
+        let (_home, store, adapter, delivery) = fixture();
+        // The provider before it failed its turn, which reports no turn end.
+        let prompt = boundary(
+            BoundaryMoment::Tool,
+            &adapter,
+            &delivery,
+            serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit"}),
+        );
+        answer(&store, &prompt).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE session_activity SET agent_process_id='earlier'", [])
+            .unwrap();
+        // The held terminal's status stream reaches the new provider first.
+        assert!(store
+            .begin_program_status("session", Some(&adapter.agent_process_id), "held:terminal")
+            .unwrap());
+        let mut listening = boundary(
+            BoundaryMoment::Tool,
+            &adapter,
+            &delivery,
+            serde_json::json!({"session_id":"native","hook_event_name":"OpenCodeMessagesTransform"}),
+        );
+        listening.inbox = Some(loopflow_execution::steer::Inbox::Socket(
+            "/tmp/lf-wake-fixture/s".into(),
+        ));
+        answer(&store, &listening).unwrap();
+        let idle = store.idle_conversation_candidates(Some("session")).unwrap();
+        assert_eq!(idle.len(), 1, "a reopened work session the wake cannot see");
+    }
+
+    #[test]
     fn a_turn_end_records_the_yield_and_the_hooks_gap_then_leaves_work_for_after() {
         let (_home, store, adapter, delivery) = fixture();
         store

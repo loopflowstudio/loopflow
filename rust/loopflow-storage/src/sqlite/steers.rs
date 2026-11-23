@@ -252,11 +252,13 @@ impl SqliteStore {
             // A provider naming its inbox for the first time has run no turn
             // yet, whatever the one before it on this Session was doing: a
             // reopened conversation is idle until its first turn says otherwise.
+            // A held terminal's status stream may already have moved the
+            // reading to this provider; with no turn read yet it is still 0.
             conn.execute(
                 "UPDATE session_activity SET agent_process_id=?2,yielded=1,open_tools=0,pending_input=0,
-                    observed_at=unixepoch(),program_status=NULL,cpu_sampled_at=NULL,cpu_quiet_since=NULL,
+                    observed_at=unixepoch(),program_status=CASE WHEN agent_process_id IS ?2 THEN program_status END,cpu_sampled_at=NULL,cpu_quiet_since=NULL,
                     attachment_token=COALESCE((SELECT attachment_token FROM agent_sessions WHERE id=?1),attachment_token)
-                 WHERE session_id=?1 AND agent_process_id IS NOT ?2",
+                 WHERE session_id=?1 AND (agent_process_id IS NOT ?2 OR observed_at=0)",
                 params![adapter.session, adapter.agent_process_id],
             )?;
         }

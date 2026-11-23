@@ -549,10 +549,16 @@ const close = await plugin.setup({{
     yield {{ type: 'session.execution.succeeded', data: {{ sessionID: 'native' }} }};
   }} }},
 }});
+// A reopened work session's first turn may be a wake, before anyone types.
+if ({wakes}) {{
+  while (!seen.requests[0]?.inbox) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(await wake(seen.requests[0].inbox.socket, 'native', 'saved while closed'), 'started\n');
+  assert.equal(switched.length, 1, 'the woken turn ran on the earlier model');
+}}
 await hooks.prompt({{ sessionID: 'native' }});
 await hooks.prompt({{ sessionID: 'native' }});
-// The launch's model is set once, at its first prompt: a reopened
-// conversation answers on it, and a later pick in the TUI holds.
+// The launch's model is set once, before its first turn, typed or woken: a
+// reopened conversation answers on it, and a later pick in the TUI holds.
 assert.deepEqual(switched, [{{ sessionID: 'native',
   model: {{ providerID: 'opencode', id: 'gemini-4-carbon' }} }}]);
 const texts = [];
@@ -574,7 +580,8 @@ assert.equal(inbox !== null, {wakes});
 if (inbox) {{
   assert.equal(await wake(inbox, 'native', 'use the other table'), 'started\n');
   assert.equal(await wake(inbox, 'another', 'not for this one'), '');
-  assert.deepEqual(woken, [{{ sessionID: 'native', text: 'use the other table' }}]);
+  assert.deepEqual(woken, [{{ sessionID: 'native', text: 'saved while closed' }},
+    {{ sessionID: 'native', text: 'use the other table' }}]);
 }}
 await close();
 "#,

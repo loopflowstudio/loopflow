@@ -93,6 +93,13 @@ What to read afterwards:
   steers <session> --json` shows `delivered_at` and `pending`. OpenCode's own
   record of the wake is a `synthetic` row in `session_message`. The harness's
   terminal replies leave `65535u…` in the prompt: send `hex 7f7f…` first.
+- Out of credits ("Default is out of credits", or "You've used today's free
+  messages"): the turn still names its model, so model checks work without an
+  answer. `opencode models | grep free` lists the free ones. Read
+  `json_extract(data,'$.model.id')` of `session_message` rows: a
+  `model-switched` row is the plugin's `switchModel`, `synthetic` a wake. A
+  failed turn reports no turn end, so a reopen right after one is the case
+  that tests "a new provider is idle".
 - Quit and reopen: `/exit` (OpenCode) or `/quit` (Pi; Ctrl+C does not quit it)
   in the view, `lf steer`, then `lf resume --task <task>` again: the steer
   arrives with nothing typed. A conversation quit this way stays quit; one

@@ -152,8 +152,32 @@ before changing it. Chats keep the start-hook claim: nothing wakes a chat.
   this Machine; 2.2.1 is `/opt/homebrew/bin/opencode`.
 - PR #1985 merged on 2026-11-19 (squash) before the idle-wake commits; this
   diff is PR #1988, open. Gate updates it.
-- QA on a real model: reopen an OpenCode work session after changing
-  `agent:`; the first turn answers on the new model, a `/models` pick after
-  it holds, and an idle wake as the first turn of a reopen (`questions.md` 7)
-  also lands on the new model.
+- QA on a real model (2026-11-22, `scratch/qa.html`) found both fixes
+  below. Every OpenCode model on the account was out of quota, so turns
+  named their model and failed; nothing answered.
+
+## Built: a reopen after a failed turn is idle
+
+A reopened work session whose earlier provider ended on a failed turn (no
+turn end reported) never woke: the held terminal's status stream
+(`begin_program_status`) moved `session_activity` to the new provider before
+the plugin named its socket, keeping the old `yielded=0`, so
+`record_agent_inbox` skipped its "new provider is idle" reset. The status
+stream now zeroes `observed_at` when the provider changes, and the reset also
+runs on a reading with `observed_at=0`. Test:
+`server::boundary::tests::a_reopened_work_session_is_idle_after_its_terminal_status_moves_first`
+(fails without the fix). `server::` 107 passed.
+
+## Built: a woken first turn takes the launch's model
+
+A wake does not pass through OpenCode's `prompt` hook, so a reopened work
+session whose first turn was a wake answered on its earlier model. The
+plugin's wake handler now calls the same once-per-launch `switchModel`
+before `session.synthetic`. The plugin fixture wakes before any prompt and
+fails without it. `harness::` 138 passed; real TUI: `model-switched` to the
+new model, then the woken turn on it.
+- `store::tests::task_facts_update_without_rewriting_work_progression`
+  failed once at `seed_task(...).unwrap()` during a 216-test `store::` run on a
+  loaded Machine and passed alone; panic message not captured. Untouched by
+  this branch.
 - Complete LOO-1002 when this merges.

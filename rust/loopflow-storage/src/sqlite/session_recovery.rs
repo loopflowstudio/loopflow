@@ -60,7 +60,7 @@ impl SqliteStore {
              JOIN tasks t ON t.id=tp.task_id
              JOIN task_checkouts c ON c.task_id=t.id
              JOIN agent_sessions s ON s.id=tp.session_id
-             WHERE {here}
+             WHERE {here} AND NOT EXISTS(SELECT 1 FROM task_pauses p WHERE p.task_id=t.id)
              ORDER BY t.updated_at DESC,t.id",
             here = task_conversation_here_sql("s", "t", "c"),
         ))?;

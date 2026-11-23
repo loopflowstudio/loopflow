@@ -207,11 +207,13 @@ pub fn task_selection_states(
         TaskState::Idle => SelectionState::Idle,
         TaskState::Active => SelectionState::Active,
         TaskState::Moving => SelectionState::Moving,
+        TaskState::Paused => SelectionState::Paused,
         TaskState::Done | TaskState::Abandoned => SelectionState::Done,
     });
     states.insert(match TaskSection::of(runtime, owned, plan_state) {
         TaskSection::Backlog => SelectionState::Backlog,
         TaskSection::Working => SelectionState::Working,
+        TaskSection::Paused => SelectionState::Paused,
         TaskSection::Done | TaskSection::Abandoned => SelectionState::Done,
     });
     states

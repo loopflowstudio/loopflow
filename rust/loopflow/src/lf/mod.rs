@@ -1222,6 +1222,8 @@ impl TaskCommand {
             | Self::Update { .. }
             | Self::Move { .. }
             | Self::Auto { .. }
+            | Self::Pause { .. }
+            | Self::Unpause { .. }
             | Self::Interrupt { .. } => true,
         }
     }
@@ -2182,7 +2184,7 @@ pub enum TaskCommand {
         #[arg(long, conflicts_with = "closed")]
         project: Option<String>,
         /// Only Tasks in this state
-        #[arg(long, conflicts_with = "closed", value_parser = ["unstarted", "idle", "active", "moving"])]
+        #[arg(long, conflicts_with = "closed", value_parser = ["unstarted", "idle", "active", "moving", "paused"])]
         state: Option<String>,
         #[arg(long)]
         json: bool,
@@ -2552,6 +2554,14 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[command(subcommand)]
         cmd: AutoCommand,
     },
+    /// Stop the Task's work and conversation while keeping its checkout and claim
+    Pause { issue: String },
+    /// Lift the hold on a Task and optionally run its interrupted step
+    Unpause {
+        issue: String,
+        #[arg(long)]
+        run: bool,
+    },
     /// Stop the Task's running Graph or Task run and its scheduled automation
     Interrupt {
         issue: String,
@@ -2600,6 +2610,8 @@ impl TaskCommand {
             | Self::Delete { issue }
             | Self::Update { issue, .. }
             | Self::Report { issue, .. }
+            | Self::Pause { issue }
+            | Self::Unpause { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. } => Some(issue),
         }
@@ -2634,6 +2646,8 @@ impl TaskCommand {
             | Self::Delete { issue }
             | Self::Update { issue, .. }
             | Self::Report { issue, .. }
+            | Self::Pause { issue }
+            | Self::Unpause { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. } => Some(issue),
         }

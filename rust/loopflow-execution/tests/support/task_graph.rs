@@ -21,7 +21,7 @@ if streamed:
         ready.write('ready')
 # A fixture that left `tool_turn.py` gets the hooks lf declared, run around a tool.
 turn = os.path.join(home, 'tool_turn.py')
-if streamed and os.path.exists(turn):
+if streamed and '--settings' in sys.argv and os.path.exists(turn):
     hooks = json.load(open(sys.argv[sys.argv.index('--settings') + 1]))['hooks']
     subprocess.run([sys.executable, turn, 'stand-in', json.dumps(hooks)], check=True)
 # A fixture that left `hold-turn` holds a headless turn open until it is removed.
@@ -34,6 +34,8 @@ if streamed and os.path.exists(os.path.join(home, 'hold-turn')):
     while os.path.exists(os.path.join(home, 'hold-turn')):
         time.sleep(0.02)
 while not os.path.exists(os.path.join(home, 'release')):
+    if not os.path.isdir(home):
+        sys.exit(0)
     time.sleep(0.02)
 if not streamed:
     sys.exit(0)

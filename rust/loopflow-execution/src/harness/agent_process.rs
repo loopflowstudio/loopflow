@@ -32,6 +32,26 @@ fn record_identity(
     }
 }
 
+/// A pause captures any admitted worker and primary provider before it
+/// publishes the interrupt. Later launches observe the hold before exec.
+fn admit_task_provider(owner: &Recording, kind: LaunchKind) -> Result<Option<std::fs::File>> {
+    use crate::ops::task::pause;
+    use crate::session::PrimaryScope;
+    let store = &owner.store;
+    let task = match kind {
+        LaunchKind::Worker => store.session(&owner.session)?.and_then(|s| s.task_id),
+        LaunchKind::WorkSession => match store.primary_scope(&owner.session)? {
+            Some(PrimaryScope::Task(id)) => Some(id),
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some(id) = task else { return Ok(None) };
+    let lock = pause::admission(&id)?;
+    store.require_task_unpaused(&id)?;
+    Ok(Some(lock))
+}
+
 /// One headless launch sequence for every harness. Keep the attachment fence
 /// through pre-exec recording, and retain failed attempts without inventing an
 /// observed exit. Synchronous admission cannot detach a launch on async cancellation.
@@ -53,6 +73,7 @@ pub fn spawn(
             .get_program()
             .to_string_lossy()
             .into_owned();
+        let _admission = admit_task_provider(owner, kind)?;
         Ok(store.with_session_attachment(session, attachment, || {
             store.record_agent_process_launch(session, attachment, command.as_std(), false)?;
             let spawned = crate::os_process::spawn_agent_process(
@@ -87,6 +108,7 @@ pub(crate) fn spawn_native(
     crate::agent_input_timing::record("provider_spawn_begin", session);
     context_environment(&mut command, owner, kind)?;
     let cwd = command.get_current_dir().map(std::path::Path::to_path_buf);
+    let _admission = admit_task_provider(owner, kind)?;
     let child = store
         .with_session_attachment(session, attachment, || {
             store.record_agent_process_launch(session, attachment, &command, true)?;
@@ -211,6 +233,10 @@ pub(crate) fn exec_native(
         Ok(None) => return std::io::Error::other("AgentProcess birth unavailable before exec"),
         Err(error) => return error,
     };
+    let _admission = match admit_task_provider(owner, kind) {
+        Ok(lock) => lock,
+        Err(error) => return std::io::Error::other(error.to_string()),
+    };
     let admitted = store.with_session_attachment(session, attachment, || {
         store.record_agent_process_launch(session, attachment, &command, true)?;
         store.record_agent_process_identity(session, attachment, pid, started_at)
@@ -281,7 +307,7 @@ pub(crate) fn stop_native(
     .map_err(Into::into)
 }
 
-/// Explicit Move stops the recorded provider under the same fence as takeover.
+/// Moving or pausing a Session stops its provider under the takeover fence.
 /// A native provider shares the terminal's group, so signal only its exact PID.
 /// Headless providers retain the existing descendant/group stop policy.
 /// `departure` says where the conversation goes, for the terminal it leaves.
@@ -318,13 +344,14 @@ pub(crate) fn stop_session_agent(
         return Ok(());
     }
     let stop = || -> Result<()> {
-        let (pid, birth) = agent.pid.zip(agent.os_started_at).ok_or_else(|| {
-            anyhow::anyhow!("AgentProcess identity is unknown; resume was not started")
-        })?;
+        let (pid, birth) = agent
+            .pid
+            .zip(agent.os_started_at)
+            .ok_or_else(|| anyhow::anyhow!("cannot stop AgentProcess with unknown identity"))?;
         match process_identity_evidence(pid, birth) {
             ProcessIdentityEvidence::Dead => return Ok(()),
             ProcessIdentityEvidence::Unknown => {
-                anyhow::bail!("AgentProcess liveness is unknown; resume was not started")
+                anyhow::bail!("cannot confirm AgentProcess liveness")
             }
             ProcessIdentityEvidence::Live => {}
         }
@@ -356,7 +383,7 @@ pub(crate) fn stop_session_agent(
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
         }
-        anyhow::bail!("AgentProcess did not exit; resume was not started")
+        anyhow::bail!("AgentProcess {pid} did not exit")
     };
     attachment::finish_session_attachment(
         store,
@@ -426,6 +453,19 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
         }
         ProcessIdentityEvidence::Live => {}
     }
+    validate_worker_close(store, agent, &agents, pid, started)?;
+    close_agent_process(pid, started)
+        .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
+    Ok(true)
+}
+
+fn validate_worker_close(
+    store: &SqliteStore,
+    agent: &loopflow_storage::process::AgentProcessState,
+    agents: &[loopflow_storage::process::AgentProcessState],
+    pid: u32,
+    started: i64,
+) -> StoreResult<()> {
     if agents.iter().any(|other| {
         other.id != agent.id && other.pid == Some(pid) && other.os_started_at == Some(started)
     }) {
@@ -438,11 +478,52 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
         .as_deref()
         .and_then(loopflow_harness::HarnessKind::parse)
     {
-        crate::harness::launcher(kind).validate_agent_process_close(store, session, &agent.id)?;
+        crate::harness::launcher(kind).validate_agent_process_close(
+            store,
+            &agent.session_id,
+            &agent.id,
+        )?;
     }
-    close_agent_process(pid, started)
-        .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
-    Ok(true)
+    Ok(())
+}
+
+pub(crate) fn capture_worker_jobs(
+    store: &SqliteStore,
+    task: &loopflow_model::durable::TaskId,
+) -> Result<Vec<loopflow_storage::sqlite::task_pause::StoppingSession>> {
+    let workers = store.task_worker_agents(task)?;
+    if workers.is_empty() {
+        return Ok(Vec::new());
+    }
+    let agents = store.agent_processes()?;
+    let mut sessions = Vec::new();
+    for agent in agents
+        .iter()
+        .filter(|a| !a.interactive && workers.contains(&a.id))
+    {
+        let Some((pid, birth)) = agent.pid.zip(agent.os_started_at) else {
+            continue;
+        };
+        let Some(_fence) = store.begin_agent_settlement(agent)? else {
+            continue;
+        };
+        if OsProcess::session_id(pid)? != Some(pid) {
+            continue;
+        }
+        let members = OsProcess::session(pid)?;
+        if !members
+            .iter()
+            .any(|member| member.matches_start(pid, birth))
+        {
+            continue;
+        }
+        validate_worker_close(store, agent, &agents, pid, birth)?;
+        sessions.push(loopflow_storage::sqlite::task_pause::StoppingSession {
+            session: pid,
+            members: members.into_iter().map(|p| (p.pid, p.started_at)).collect(),
+        });
+    }
+    Ok(sessions)
 }
 
 /// Stop an exactly recorded headless process group. The caller holds its Session

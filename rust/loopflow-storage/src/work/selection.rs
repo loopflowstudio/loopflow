@@ -115,6 +115,7 @@ pub enum SelectionState {
     Idle,
     Active,
     Moving,
+    Paused,
     /// Board axis: the Task's `TaskSection`.
     Backlog,
     Working,

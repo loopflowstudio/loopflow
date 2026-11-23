@@ -946,6 +946,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT task_id FROM task_graphs WHERE (run_pid IS NOT NULL OR run_died_at IS NOT NULL)
+             AND NOT EXISTS(SELECT 1 FROM task_pauses p WHERE p.task_id=task_graphs.task_id)
              AND task_id IN (SELECT task_id FROM task_checkouts)",
         )?;
         let rows = query.query_map([], |row| row.get::<_, String>(0))?;

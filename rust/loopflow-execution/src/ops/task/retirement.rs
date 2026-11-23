@@ -26,7 +26,7 @@ pub fn lock(task: &TaskId) -> OpsResult<File> {
     Ok(file)
 }
 
-fn lock_file(name: &str) -> OpsResult<File> {
+pub(super) fn lock_file(name: &str) -> OpsResult<File> {
     let directory = crate::store::lf_home_dir().join("workspace-locks");
     std::fs::create_dir_all(&directory)?;
     Ok(OpenOptions::new()

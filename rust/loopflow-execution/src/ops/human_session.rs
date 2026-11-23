@@ -1201,6 +1201,13 @@ pub async fn open(
             .await?
             .ok_or_else(|| session_not_found(session_id))?,
     };
+    if resume {
+        if let Some(crate::session::PrimaryScope::Task(id)) =
+            store.sqlite.primary_scope(&target.id)?
+        {
+            store.sqlite.require_task_unpaused(&id)?;
+        }
+    }
     if let Some(refusal) = run_refusal(&store.sqlite, &target)? {
         bail!(refusal);
     }

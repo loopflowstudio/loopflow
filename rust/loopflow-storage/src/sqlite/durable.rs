@@ -20,6 +20,7 @@ impl SqliteStore {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
         let task = super::children::task_on(&conn, task_id)?.ok_or(StoreError::NotFound)?;
+        super::task_pause::require_unpaused_in(&conn, task_id)?;
         super::children::require_task_planning(&conn, &task)?;
         let work = WorkRef::Task(task_id.clone());
         require_ready_work(&conn, &work)?;
@@ -336,6 +337,7 @@ pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
         "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' \
          WHEN {t}.planning_completed=1 THEN 'done' \
+         WHEN EXISTS(SELECT 1 FROM task_pauses p WHERE p.task_id={t}.id) THEN 'paused' \
          WHEN EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id AND tg.run_pid IS NOT NULL) \
              OR EXISTS({open_graphs}) \
          THEN 'moving' \

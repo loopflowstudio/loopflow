@@ -66,6 +66,8 @@ pub enum TaskState {
     /// A Graph runs for it. Its auto setting says whether the run stands in
     /// at interactive steps or stops there for a person.
     Moving,
+    /// Execution is held until explicitly unpaused.
+    Paused,
     /// Completed independently of Graph position.
     Done,
     Abandoned,
@@ -78,6 +80,7 @@ impl TaskState {
             Self::Idle => "idle",
             Self::Active => "active",
             Self::Moving => "moving",
+            Self::Paused => "paused",
             Self::Done => "done",
             Self::Abandoned => "abandoned",
         }
@@ -89,6 +92,7 @@ impl TaskState {
             Self::Idle,
             Self::Active,
             Self::Moving,
+            Self::Paused,
             Self::Done,
             Self::Abandoned,
         ]
@@ -133,6 +137,7 @@ pub enum TaskSection {
     Backlog,
     /// Someone's idle, active or moving Task.
     Working,
+    Paused,
     Done,
     Abandoned,
 }
@@ -145,6 +150,7 @@ impl TaskSection {
             TaskState::Done => Self::Done,
             TaskState::Abandoned => Self::Abandoned,
             TaskState::Unstarted => Self::Backlog,
+            TaskState::Paused => Self::Paused,
             _ if !owned => Self::Backlog,
             TaskState::Idle | TaskState::Active | TaskState::Moving => Self::Working,
         }

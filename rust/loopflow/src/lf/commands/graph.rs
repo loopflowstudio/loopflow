@@ -225,7 +225,7 @@ pub fn run_task_graph_for(
     cli: &Cli,
     task: &Task,
     run: &str,
-    release: bool,
+    cursor: i64,
     announce: &mut dyn FnMut(&LfProcessId, Option<&Path>) -> Result<()>,
 ) -> Result<()> {
     let checkout = task.worktree()?;
@@ -235,8 +235,7 @@ pub fn run_task_graph_for(
     let process =
         journal::current_lf_process_id().context("a Task run requires a registered Process")?;
     let work = WorkRef::Task(task.id.clone());
-    let cursor = store.latest_interrupt_id(&work)?;
-    let letting_go = release && lets_launcher_go(cli);
+    let letting_go = lets_launcher_go(cli);
     let mut released = false;
     let mut attempt = 1;
     // The error every failed attempt so far shared, if they all shared one.
@@ -409,16 +408,17 @@ pub fn carry_task_run(
         }
         Ok(())
     };
-    let (step, merges) = match start {
+    let (step, merges, cursor) = match start {
         TaskRunStart::Run {
             step,
             merges,
             stands_in,
+            interrupt_cursor,
         } => {
             if let Some(step) = stands_in {
                 eprintln!("{issue}: standing in at {step}");
             }
-            (step, merges)
+            (step, merges, interrupt_cursor)
         }
         TaskRunStart::Live { run, graph_process } => {
             return announce(&TaskRun::Running {
@@ -436,7 +436,7 @@ pub fn carry_task_run(
     };
     // This process carries the run; its Graph process writes where the
     // Task stopped. A run that never arrives leaves the Task to start it again.
-    run_task_graph_for(cli, &task, &step, true, &mut |graph, log| {
+    run_task_graph_for(cli, &task, &step, cursor, &mut |graph, log| {
         announce(&TaskRun::Running {
             issue: issue.clone(),
             run: step.clone(),

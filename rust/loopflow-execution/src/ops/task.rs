@@ -47,6 +47,7 @@ pub use snapshot::{
 };
 pub mod auto;
 mod file_save;
+pub mod pause;
 pub mod run_recovery;
 pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
@@ -696,6 +697,7 @@ pub enum TaskRunStart {
     /// interactive step.
     Run {
         step: String,
+        interrupt_cursor: i64,
         merges: bool,
         stands_in: Option<String>,
     },
@@ -730,7 +732,15 @@ pub fn task_place(
         ..
     } = options.clone();
     let source = remote::source_for_task(issue)?;
-    let mut task = prepare_task(repo, issue, options, None, source)?;
+    let (mut task, _admission) =
+        prepare_task_with(repo, issue, options, None, source, |store, task| {
+            let lock = pause::admission(&task.id)?;
+            store
+                .sqlite
+                .require_task_unpaused(&task.id)
+                .map_err(task_error)?;
+            Ok(lock)
+        })?;
     block_on_task(async {
         let store = task_store().await?;
         let reason = reason
@@ -1133,6 +1143,10 @@ async fn try_start_task_run(
     }
     Ok(Some(TaskRunStart::Run {
         step: label,
+        interrupt_cursor: store
+            .sqlite
+            .latest_interrupt_id(&loopflow_model::durable::WorkRef::Task(task.id.clone()))
+            .map_err(task_error)?,
         merges,
         stands_in: interactive.filter(|_| auto_on).map(str::to_owned),
     }))
@@ -1243,6 +1257,18 @@ fn prepare_task(
     recover_from: Option<&str>,
     source: Option<remote::TaskSource>,
 ) -> OpsResult<Task> {
+    prepare_task_with(repo, issue, options, recover_from, source, |_, _| Ok(()))
+        .map(|(task, ())| task)
+}
+
+fn prepare_task_with<T>(
+    repo: &Path,
+    issue: &str,
+    options: TaskProcessOptions,
+    recover_from: Option<&str>,
+    source: Option<remote::TaskSource>,
+    admit: impl FnOnce(&SharedStore, &Task) -> OpsResult<T>,
+) -> OpsResult<(Task, T)> {
     options.validate_directive(None)?;
     block_on_task(async {
         let store = task_store().await?;
@@ -1256,6 +1282,7 @@ fn prepare_task(
             Some(task) => task,
             None => fetch_from_tracker(&main, issue, super::linear::LinearRefresh::Auto).await?,
         };
+        let admission = admit(&store, &task)?;
         let destination = store
             .task_execution_route(&task.id)
             .await
@@ -1333,7 +1360,7 @@ fn prepare_task(
         if let Some(source) = &source {
             source.require_checkout(&task)?;
         }
-        Ok(task)
+        Ok((task, admission))
     })
 }
 

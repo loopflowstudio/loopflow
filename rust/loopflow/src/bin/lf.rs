@@ -1373,6 +1373,29 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             &loopflow_execution::engine::task::report(repo, issue, wave.as_deref(), message)?,
             *json,
         ),
+        TaskCommand::Pause { issue } => {
+            println!("{}", loopflow_execution::ops::task::pause::pause(issue)?);
+            Ok(())
+        }
+        TaskCommand::Unpause { issue, run } => {
+            loopflow_execution::ops::task::pause::unpause(issue)?;
+            println!("{issue} unpaused");
+            if *run {
+                let run = loopflow_execution::engine::task::run(
+                    repo,
+                    issue,
+                    None,
+                    None,
+                    cli.agent.as_deref(),
+                    cli.batch,
+                    &[],
+                )?;
+                if let Some(text) = run.render() {
+                    println!("{text}");
+                }
+            }
+            Ok(())
+        }
         TaskCommand::Interrupt { issue, json } => {
             let result = loopflow_execution::engine::task::interrupt(issue)?;
             print_task_control(&result, *json)

@@ -2277,6 +2277,188 @@ with (home / 'build-input').open('rb') as pipe:
     assert!(live(&daemon), "interrupt stopped a detached service");
 }
 
+#[test]
+fn pause_stops_owned_build_and_keeps_claim() {
+    use loopflow_execution::process::OsProcess;
+    use loopflow_storage::session::PrimaryScope;
+
+    let mut task = holding_task();
+    define_worker_graph(&task);
+    let sibling = task.repo.create_named_worktree("neighbor");
+    fs::create_dir_all(sibling.join(".lf/graphs")).unwrap();
+    fs::copy(
+        task.repo.path().join(".lf/graphs/worker.yaml"),
+        sibling.join(".lf/graphs/worker.yaml"),
+    )
+    .unwrap();
+    support::register_sibling_task(&task.registered, "INF-124", "neighbor", &sibling);
+    task.publish(false);
+    task.ok(&["task", "claim", "INF-123"]);
+    let home = task.home.path();
+    let pipe = home.join("build-input");
+    assert!(Command::new("mkfifo")
+        .arg(&pipe)
+        .status()
+        .unwrap()
+        .success());
+    let writer = fs::File::options()
+        .read(true)
+        .write(true)
+        .open(pipe)
+        .unwrap();
+    fs::write(home.join("hold-turn"), "").unwrap();
+
+    fs::write(
+        home.join("tool_turn.py"),
+        r#"import json, os, signal, sqlite3
+from pathlib import Path
+home = Path(os.environ['LF_HOME'])
+if (home / 'hold-turn').exists():
+    with (home / 'build-input').open('rb') as pipe:
+        if os.fork() == 0:
+            os.setpgrp()
+            def on_term(*_):
+                with sqlite3.connect(home / 'loopflow.db') as db:
+                    rows = db.execute('SELECT stopping_processes FROM task_pauses WHERE stopping_processes IS NOT NULL')
+                    if any(pid == os.getpid() for row, in rows for group in json.loads(row)
+                           for pid, birth in group['members']):
+                        Path('pause-observed').touch()
+            signal.signal(signal.SIGTERM, on_term)
+            Path('build.tmp').write_text(str(os.getpid()))
+            Path('build.tmp').rename('build.pid')
+            pipe.read()
+            os._exit(0)
+"#,
+    )
+    .unwrap();
+
+    let start = |issue| {
+        let output = task.run(&["task", "run", issue, "worker", "-a", "claude"]);
+        assert!(output.status.success(), "{issue}: {output:?}");
+        output
+    };
+    let build = |path: &Path| {
+        let path = path.join("build.pid");
+        wait_for("worker build", || path.exists());
+        let pid = fs::read_to_string(path).unwrap().parse().unwrap();
+        OsProcess::read(pid).unwrap().unwrap()
+    };
+    let living = |p: &OsProcess| {
+        OsProcess::read(p.pid)
+            .unwrap()
+            .is_some_and(|live| live.matches_start(p.pid, p.started_at))
+    };
+    let first = start("INF-123");
+    let owned = build(task.repo.path());
+    let second = start("INF-124");
+    let neighbor = build(&sibling);
+    let sqlite = &task.registered.store.sqlite;
+    let id = &task.registered.task.id;
+    let scope = PrimaryScope::Task(id.clone());
+    let primary = || sqlite.primary_session(&scope).unwrap().unwrap();
+    let before = primary();
+    wait_for("the primary provider", || {
+        sqlite
+            .agent_process_identity(before.id.as_str())
+            .unwrap()
+            .is_some()
+    });
+    let (pid, birth) = sqlite
+        .agent_process_identity(before.id.as_str())
+        .unwrap()
+        .unwrap();
+    let attachment = sqlite
+        .session_attachment(before.id.as_str())
+        .unwrap()
+        .unwrap();
+    let thread = loopflow_model::id::AgentSessionId::from("ea535e10-ed6b-4707-8e80-778130633344");
+    sqlite
+        .record_session_agent_session(before.id.as_str(), &attachment, &thread)
+        .unwrap();
+    let claim = || loopflow_execution::store::ownership::task_ownership(sqlite, id).unwrap();
+    let owner = claim();
+    assert!(owner.owner.is_some());
+    let pr = || {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(task.registered.store.active_task_pr(id))
+            .unwrap()
+    };
+    let published = pr().unwrap();
+    let graph = sqlite.task_graph_record(id).unwrap().unwrap();
+    assert!(graph.run_start.is_some());
+
+    task.ok(&["task", "pause", "INF-123"]);
+    assert!(!living(&owned));
+    assert_eq!(task.ran(first).code, Some(130));
+    assert!(
+        task.repo.path().join("pause-observed").exists(),
+        "build was signaled before its identity was saved"
+    );
+    assert!(living(&neighbor));
+    assert_eq!(task.state(), "paused");
+    assert_eq!(sqlite.task_graph_record(id).unwrap().unwrap(), graph);
+    assert_eq!(owner, claim());
+    assert_eq!(published.id, pr().unwrap().id);
+    assert_eq!(
+        fs::read_to_string(task.repo.path().join("build.pid")).unwrap(),
+        owned.pid.to_string()
+    );
+    assert_eq!(primary().id, before.id);
+    assert!(OsProcess::read(pid)
+        .unwrap()
+        .is_none_or(|p| !p.matches_start(pid, birth)));
+    assert_eq!(
+        sqlite.session_thread(before.id.as_str()).unwrap(),
+        Some(thread)
+    );
+    let count = last_graph(home);
+    task.ok(&["task", "pause", "INF-123"]);
+    for args in [
+        vec!["task", "run", "INF-123"],
+        vec!["task", "auto", "on", "INF-123"],
+    ] {
+        assert!(refusal(task.run(&args)).contains("unpause"));
+    }
+    assert!(!sqlite.local_task_runs().unwrap().contains(id));
+    assert!(!sqlite
+        .task_conversations_here()
+        .unwrap()
+        .iter()
+        .any(|c| &c.task == id));
+    assert_eq!(last_graph(home), count);
+
+    task.ok(&["task", "unpause", "INF-123"]);
+    assert_eq!(sqlite.task_graph_record(id).unwrap().unwrap(), graph);
+    fs::remove_file(task.repo.path().join("build.pid")).unwrap();
+    let restarted = task.run(&["task", "run", "INF-123", "-a", "claude"]);
+    assert!(restarted.status.success(), "{restarted:?}");
+    let next_build = build(task.repo.path());
+    task.ok(&["task", "pause", "INF-123"]);
+    assert!(!living(&next_build));
+    assert_eq!(task.ran(restarted).code, Some(130));
+    assert!(living(&neighbor));
+
+    fs::write(home.join("release"), "").unwrap();
+    fs::remove_file(home.join("hold-turn")).unwrap();
+    drop(writer);
+    assert!(task.ran(second).success());
+    drop(task.server);
+    task.server = MachineServer::start_with_path(
+        loopflow_test_support::lf_binary(),
+        home,
+        &std::env::var("PATH").unwrap(),
+    );
+    assert_eq!(task.state(), "paused");
+    assert!(!sqlite
+        .task_conversations_here()
+        .unwrap()
+        .iter()
+        .any(|c| &c.task == id));
+    task.task_run_ok(&["task", "unpause", "INF-123", "--run", "-a", "claude"]);
+    assert_eq!(task.graph()["position"], at("review"));
+}
+
 /// `lf task interrupt` ends a worker's turn while it runs: the turn is recorded
 /// interrupted, nothing starts the run again, and the next `lf task run` takes
 /// the step up and moves the Graph on.

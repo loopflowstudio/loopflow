@@ -3337,6 +3337,7 @@ fn section_label(section: TaskSection) -> &'static str {
     match section {
         TaskSection::Backlog => "BACKLOG",
         TaskSection::Working => "WORKING",
+        TaskSection::Paused => "PAUSED",
         TaskSection::Done => "DONE",
         TaskSection::Abandoned => "ABANDONED",
     }
@@ -3416,6 +3417,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             .clamp(12, 32);
         for section in [
             TaskSection::Working,
+            TaskSection::Paused,
             TaskSection::Backlog,
             TaskSection::Done,
             TaskSection::Abandoned,

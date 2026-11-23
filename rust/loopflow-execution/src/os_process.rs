@@ -502,8 +502,37 @@ pub(crate) fn terminate_worker_jobs(pid: u32, started: i64) -> Result<()> {
         members.is_empty() || members.iter().any(|p| p.matches_start(pid, started)),
         "AgentProcess {pid} no longer owns the OS session"
     );
+    stop_worker_members(pid, members)
+}
+
+pub(crate) fn settle_worker_jobs(
+    saved: &loopflow_storage::sqlite::task_pause::StoppingSession,
+) -> Result<()> {
+    let members = OsProcess::session(saved.session)?;
+    if members.is_empty() {
+        return Ok(());
+    }
+    if !members.iter().any(|p| {
+        saved
+            .members
+            .iter()
+            .any(|&(pid, start)| p.matches_start(pid, start))
+    }) {
+        // A different leader proves that the kernel recycled the session.
+        if members.iter().any(|p| p.pid == saved.session) {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "cannot confirm ownership of the remaining jobs in OS session {}",
+            saved.session
+        );
+    }
+    stop_worker_members(saved.session, members)
+}
+
+fn stop_worker_members(session: u32, members: Vec<OsProcess>) -> Result<()> {
     terminate_session_jobs(
-        pid,
+        session,
         members,
         &[
             (libc::SIGTERM, TERMINATE_GRACE),

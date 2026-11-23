@@ -144,7 +144,11 @@ fn launch_task(cli: &Cli) -> Option<&str> {
         }) if connection.task.is_some() => connection.task.as_deref(),
         // Ownership is written only on the Task's writer.
         Some(Commands::Task {
-            cmd: TaskCommand::Claim { issue, .. } | TaskCommand::Unassign { issue, .. },
+            cmd:
+                TaskCommand::Claim { issue, .. }
+                | TaskCommand::Unassign { issue, .. }
+                | TaskCommand::Pause { issue }
+                | TaskCommand::Unpause { issue, .. },
         }) => Some(issue.as_str()),
         _ => cli.task.as_deref(),
     }

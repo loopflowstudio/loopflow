@@ -63,7 +63,7 @@ pub fn ended_step_recovery(
 /// Status promises an automatic restart only when this holds.
 pub(crate) fn restarts_by_itself(store: &SqliteStore, task: &TaskId) -> OpsResult<bool> {
     Ok(store.task_claimed_here(task).map_err(task_error)?
-        && !store.task_state(task).map_err(task_error)?.is_terminal()
+        && store.task_state(task).map_err(task_error)?.is_started()
         && task_execution_blockers(store, task)?.is_empty())
 }
 

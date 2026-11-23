@@ -9,3 +9,7 @@ Choices made for review (recorded in `scratch/plan.md` and `scratch/concept-revi
 ## Implementation choice
 
 Prove worker teardown through `lf task interrupt` first. Use the worker’s OS session to find builds whose launching shell already exited.
+
+Use a separate per-Task cleanup lock while signaling. Run admission can then report the committed hold immediately, while a concurrent unpause or repeated pause waits for the first cleanup.
+
+This Codex invocation's tool shell was PID and SID 98288, a child of provider PID 62413 in SID 671. A live tool launched that way needs its own execution identity. The Claude worker-session fixture cannot establish that Codex stopped such a build.

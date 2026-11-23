@@ -219,6 +219,12 @@ pub(crate) fn departure_notice(
 ) -> Result<String> {
     use crate::process::Departure;
     Ok(match departure {
+        Departure::Paused { task } => {
+            let issue = store
+                .task(&task)?
+                .map_or_else(|| task.to_string(), |t| t.identifier);
+            format!("Task {issue} was paused: lf task unpause {issue}")
+        }
         Departure::Terminal { to: Some(to) } => {
             format!("This conversation moved to {to}: lf resume {session}")
         }

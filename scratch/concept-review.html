@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept Review · LOO-1069 · Desktop Terminal Keyboard Input</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --surface-muted: #f3f2ef;
+    --border: #e2e0da;
+    --border-strong: #c8c4ba;
+    --text: #1c1b18;
+    --text-muted: #57544c;
+    --yes-bg: #e7f5ec;
+    --yes-fg: #146336;
+    --yes-border: #a7d9ba;
+    --no-bg: #fdeceb;
+    --no-fg: #a1261e;
+    --no-border: #f0b4af;
+    --existing-bg: #f1efe9;
+    --existing-fg: #4a473f;
+    --proposed-bg: #e8f0fe;
+    --proposed-fg: #174ea6;
+    --proposed-border: #aecbfa;
+    --warn-bg: #fef7e0;
+    --warn-fg: #7c4d00;
+    --warn-border: #f5d27a;
+    --code-bg: #f0eee9;
+    --accent: #174ea6;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413;
+      --surface: #1c1c1a;
+      --surface-muted: #242320;
+      --border: #32302c;
+      --border-strong: #4a4740;
+      --text: #eceae4;
+      --text-muted: #a6a298;
+      --yes-bg: #132b1e;
+      --yes-fg: #6bd498;
+      --yes-border: #23573b;
+      --no-bg: #321716;
+      --no-fg: #f48c84;
+      --no-border: #6a2b27;
+      --existing-bg: #262522;
+      --existing-fg: #c2beb3;
+      --proposed-bg: #16243b;
+      --proposed-fg: #8ab4f8;
+      --proposed-border: #2b4c7e;
+      --warn-bg: #2f250d;
+      --warn-fg: #f6c453;
+      --warn-border: #664c16;
+      --code-bg: #262522;
+      --accent: #8ab4f8;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 36px 24px 80px;
+  }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 20px;
+    margin-bottom: 28px;
+  }
+  .eyebrow {
+    font: 600 12px/1.2 var(--mono);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 26px;
+    line-height: 1.25;
+    margin: 0 0 10px;
+    font-weight: 650;
+  }
+  h2 {
+    font-size: 19px;
+    line-height: 1.3;
+    margin: 36px 0 14px;
+    font-weight: 650;
+  }
+  h3 {
+    font-size: 15px;
+    line-height: 1.35;
+    margin: 0 0 8px;
+    font-weight: 650;
+  }
+  p { margin: 0 0 12px; }
+  .lede { color: var(--text-muted); font-size: 15.5px; max-width: 78ch; }
+  code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  kbd {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 1px 5px;
+    border: 1px solid var(--border-strong);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--surface);
+    white-space: nowrap;
+  }
+  .badge {
+    display: inline-block;
+    font: 600 11px/1.2 var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 3px 7px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    vertical-align: middle;
+  }
+  .badge.yes { background: var(--yes-bg); color: var(--yes-fg); border-color: var(--yes-border); }
+  .badge.no { background: var(--no-bg); color: var(--no-fg); border-color: var(--no-border); }
+  .badge.existing { background: var(--existing-bg); color: var(--existing-fg); border-color: var(--border); }
+  .badge.proposed { background: var(--proposed-bg); color: var(--proposed-fg); border-color: var(--proposed-border); }
+  .badge.warn { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-border); }
+
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--no-fg);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin: 18px 0;
+  }
+  .callout.proposed { border-left-color: var(--proposed-fg); }
+  .callout.warn { border-left-color: var(--warn-fg); background: var(--warn-bg); border-color: var(--warn-border); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 14px 0 22px;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 11px 13px;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    background: var(--surface-muted);
+    font: 600 12px/1.3 var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+  }
+  tr:last-child td { border-bottom: none; }
+
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0 24px;
+  }
+  @media (max-width: 820px) {
+    .compare { grid-template-columns: 1fr; }
+  }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .panel.proposed { border-color: var(--proposed-border); }
+  .panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .step {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 11px;
+    background: var(--surface-muted);
+    font-size: 13.5px;
+  }
+  .step.broken {
+    background: var(--no-bg);
+    border-color: var(--no-border);
+  }
+  .step.good {
+    background: var(--yes-bg);
+    border-color: var(--yes-border);
+  }
+  .step.proposed-step {
+    background: var(--proposed-bg);
+    border-color: var(--proposed-border);
+  }
+  .step-title {
+    font-weight: 650;
+    margin-bottom: 3px;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .arrow {
+    text-align: center;
+    color: var(--text-muted);
+    font: 600 12px/1 var(--mono);
+  }
+  .branches {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  @media (max-width: 560px) {
+    .branches { grid-template-columns: 1fr; }
+  }
+
+  .trace-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+    gap: 12px;
+    margin: 14px 0 22px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 13.5px;
+  }
+  .card ul { margin: 6px 0 0; padding-left: 18px; }
+  .card li { margin-bottom: 4px; }
+
+  .questions {
+    counter-reset: q;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: 14px;
+  }
+  .q-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .q-title { font-weight: 650; margin-bottom: 8px; }
+  .q-opts {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .q-opts li {
+    padding: 7px 10px;
+    border-radius: 6px;
+    background: var(--surface-muted);
+    font-size: 13.5px;
+  }
+  .q-opts li.chosen {
+    background: var(--proposed-bg);
+    border: 1px solid var(--proposed-border);
+  }
+  .opt-key {
+    font-family: var(--mono);
+    font-weight: 700;
+    margin-right: 6px;
+  }
+  footer {
+    margin-top: 32px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Concept Review · LOO-1069 · Pre-implementation</div>
+    <h1>Loopflow Desktop keyboard input &amp; shortcut ownership for terminal panes</h1>
+    <p class="lede">
+      <strong>Area reviewed:</strong> All keyboard routing and key translation for Desktop terminal panes (Sessions and Shells), from macOS AppKit event monitors and menu equivalents through <code>GhosttyMetalView</code> and <code>GhosttyManager</code> to the held-terminal relay.
+      <strong>Why this area:</strong> Modifier-key failures in Sessions are not isolated to one key handler — they sit at the seam between AppKit composition, Ghostty's key encoder, Ghostty's standalone-app default keybinds, and Desktop's own shortcut layers.
+    </p>
+  </header>
+
+  <section>
+    <h2>1. Do the product's concepts and the code's concepts line up?</h2>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:22%">Product concept</th>
+          <th style="width:27%">Code concept <span class="badge existing">Existing</span></th>
+          <th style="width:8%">Aligned?</th>
+          <th>What is wrong (where No)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>One physical keystroke</strong><br>A key press, repeat, or release with held modifiers reaches the program or composes text.</td>
+          <td><code>GhosttyMetalView</code> splits one keystroke across 4 paths: <code>performKeyEquivalent</code>, <code>ghosttyShouldHandleKeyDownDirectly</code>, <code>interpretKeyEvents</code> → <code>insertText</code> → <code>ghostty_surface_text</code>, and <code>flagsChanged</code>.</td>
+          <td><span class="badge no">No</span></td>
+          <td><strong>One action with no single owner.</strong> <code>insertText</code> pastes via <code>ghostty_surface_text</code>, dropping Option before Ghostty sees <code>macos-option-as-alt</code>. <code>translateKey</code> hardcodes <code>PRESS</code> (never <code>REPEAT</code>), sets <code>consumed_mods = NONE</code>, strips left/right modifier bits, and passes <code>charactersIgnoringModifiers</code> (which still applies Shift!) as <code>unshifted_codepoint</code>. The direct-bypass heuristic skips <code>interpretKeyEvents</code> for layouts whose ID lacks <code>"inputmethod"</code>, breaking dead keys on US-International / ABC-Extended / European layouts.</td>
+        </tr>
+        <tr>
+          <td><strong>Shortcut ownership</strong><br>Desktop owns app, window, and pane shortcuts; Ghostty owns terminal-surface bindings; the running program gets the rest.</td>
+          <td>Four layers: <code>DesktopActionMonitor</code> (local monitor), <code>WorkPaletteShortcut</code> (2nd local monitor), <code>GhosttyMetalView.performKeyEquivalent</code> (<code>GhosttyTerminalShortcut</code> + unconditional <code>ghostty_surface_key</code>), and <code>ConsoleCommands</code> / <code>LoopflowApp</code> menus.</td>
+          <td><span class="badge no">No</span></td>
+          <td><strong>Two bugs — one existing, one hidden in the kickoff plan.</strong><br>1. <em>Existing:</em> <code>performKeyEquivalent</code> calls <code>ghostty_surface_key</code> on every non-Copy/Paste/Find chord, so in Kitty keyboard mode (Sessions!) it encodes and swallows <kbd>⌘Q</kbd>, <kbd>⌘,</kbd>, <kbd>⌘H</kbd>, <kbd>⌘⇧W</kbd>, <kbd>⌘/</kbd>.<br>2. <em>Hidden in plan:</em> <code>GhosttyManager</code> inherits Ghostty's standalone-app default keybinds (<code>super+q=quit</code>, <code>super+comma=open_config</code>, <code>super+shift+w=close_window</code>, <code>super+d=new_split</code>, <code>super+enter=toggle_fullscreen</code>, <code>super+shift+p=toggle_command_palette</code>), while <code>action_cb</code> returns <code>false</code> for all of them. Querying <code>ghostty_surface_key_is_binding</code> without unbinding those dead defaults STILL swallows <kbd>⌘Q</kbd>, <kbd>⌘,</kbd>, <kbd>⌘⇧W</kbd>, <kbd>⌘D</kbd>, <kbd>⌘↩</kbd>.</td>
+        </tr>
+        <tr>
+          <td><strong>Modifier keys alone</strong><br>Pressing or releasing left vs. right Shift / Control / Option / Command updates modifier state accurately.</td>
+          <td><code>GhosttyMetalView.flagsChanged</code> + <code>translateMods</code>.</td>
+          <td><span class="badge no">No</span></td>
+          <td><strong>Drops left/right identity and runs during IME.</strong> Checks generic <code>modifierFlags.contains(.shift)</code> instead of the keycode's device mask (<code>NX_DEVICEL*</code> / <code>NX_DEVICER*</code>), so releasing Right Shift while Left Shift is held emits <code>PRESS</code> instead of <code>RELEASE</code>, and <code>macos-option-as-alt = left|right</code> cannot work. Does not bail when <code>hasMarkedText()</code> is true.</td>
+        </tr>
+        <tr>
+          <td><strong>Input composition (IME &amp; dead keys)</strong><br>While composing, keys stay inside composition; cancelling sends nothing to the program.</td>
+          <td><code>GhosttyMetalView</code> (<code>NSTextInputClient</code>), plus guards in <code>DesktopActionMonitor</code> and <code>WorkPaletteShortcut</code>.</td>
+          <td><span class="badge no">No</span></td>
+          <td><strong>Two silent breaks.</strong><br>1. Both local shortcut monitors check <code>(firstResponder as? NSTextView)?.hasMarkedText()</code> — <code>GhosttyMetalView</code> is an <code>NSTextInputClient</code>, not an <code>NSTextView</code>, so Desktop shortcuts fire mid-IME.<br>2. <code>setMarkedText("", ...)</code> leaves <code>_markedRange = {0, 0}</code> (<code>hasMarkedText()</code> stuck <code>true</code>!) and never calls <code>ghostty_surface_preedit(surface, nil, 0)</code>.</td>
+        </tr>
+        <tr>
+          <td><strong>Keyboard layout &amp; Ghostty config</strong><br>Terminal respects `~/.config/ghostty/config` and adapts when switching macOS keyboard layouts.</td>
+          <td><code>GhosttyManager.initialize()</code> loads defaults, user files, and <code>embeddedConfig</code>; never observes input-source changes.</td>
+          <td><span class="badge no">No</span></td>
+          <td><strong>Stale layout cache.</strong> <code>ghostty_app_keyboard_changed(app)</code> is never called on <code>NSTextInputContext.keyboardSelectionDidChangeNotification</code>. Ghostty's layout-dependent <code>macos-option-as-alt</code> default and physical-key mapping go stale when switching layouts at runtime.</td>
+        </tr>
+        <tr>
+          <td><strong>Session keyboard modes across reopen / reconnect</strong><br>Reopening a Session pane or recovering the Machine server keeps Kitty / application-cursor modes intact.</td>
+          <td><code>loopflow-terminal/src/repaint.rs</code>, <code>transport/hosted.rs</code>, <code>transport/input.rs</code>, <code>transport.rs</code>.</td>
+          <td><span class="badge yes">Yes</span></td>
+          <td><code>repaint.rs</code> resets and replays the Kitty keyboard stack; <code>input::keys</code> strips only terminal query answers (<code>CSI ?...u</code>, DA, DSR, focus) from non-sizing viewers and passes Kitty key chords (<code>CSI 13;2u</code>, <code>CSI 13;2:2u</code>, <code>ESC b</code>) untouched.</td>
+        </tr>
+        <tr>
+          <td><strong>Session vs. Shell parity &amp; input gating</strong><br>Same keyboard behavior in Sessions and Shells; disconnected panes accept no PTY input; exited children still dismiss locally.</td>
+          <td><code>WorkspacePanesView</code> mounts <code>GhosttyMetalView</code> for both; <code>connectionAcceptsInput</code> + <code>ghostty_surface_process_exited</code> gate input.</td>
+          <td><span class="badge yes">Yes</span></td>
+          <td>Shared view and gating match the mental model. Sessions simply expose the responder bugs faster because providers negotiate Kitty keyboard protocol and rely on <kbd>⇧↩</kbd>, <kbd>⌥←/→/⌫/B/F</kbd>, <kbd>⇧⇥</kbd>, and <kbd>⌃↩</kbd>.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>2. The biggest mismatch — and the hidden trap in the kickoff plan</h2>
+    <div class="callout">
+      <h3>Biggest mismatch: One keystroke is split across four disagreeing translators, and Ghostty's standalone-app bindings collide with Loopflow Desktop</h3>
+      <p>
+        Today, <code>GhosttyMetalView</code> tries to classify keys itself before Ghostty sees them (direct bypass vs. <code>interpretKeyEvents</code> → raw paste vs. unconditional <code>performKeyEquivalent</code>). Meanwhile, <code>GhosttyManager</code> loads Ghostty's entire standalone-app keybind table even though Loopflow Desktop owns Quit, Settings, Windows, Tabs, and Splits and its <code>action_cb</code> ignores them.
+      </p>
+      <p>
+        The kickoff plan fixed the Option-B paste bug, but kept two contradictions: (1) it kept <code>ghosttyShouldHandleKeyDownDirectly</code> alongside the unified <code>interpretKeyEvents</code> path, and (2) it routed <code>ghostty_surface_key_is_binding</code> to <code>keyDown</code> in <code>performKeyEquivalent</code> without unbinding Ghostty's dead app-level bindings (<kbd>⌘Q</kbd>, <kbd>⌘,</kbd>, <kbd>⌘⇧W</kbd>, <kbd>⌘D</kbd>, <kbd>⌘↩</kbd>).
+      </p>
+    </div>
+
+    <div class="compare">
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Before: 4 paths + unguarded Ghostty defaults</h3>
+          <span class="badge existing">Existing</span>
+        </div>
+        <div class="flow">
+          <div class="step">
+            <div class="step-title">1. Local monitors <span class="badge warn">NSTextView only</span></div>
+            <code>DesktopActionMonitor</code> &amp; <code>WorkPaletteShortcut</code> intercept Desktop shortcuts — ignoring <code>GhosttyMetalView.hasMarkedText()</code>.
+          </div>
+          <div class="arrow">↓</div>
+          <div class="step broken">
+            <div class="step-title">2. performKeyEquivalent <span class="badge no">Broken</span></div>
+            Checks <kbd>⌘`</kbd>, <kbd>⌘C/V/F</kbd>, then calls <code>ghostty_surface_key(translateKey)</code> on <em>everything</em> else → in Kitty mode, swallows <kbd>⌘Q</kbd>, <kbd>⌘,</kbd>, <kbd>⌘⇧W</kbd>, <kbd>⌘/</kbd>; drops repeat, text, side mods, and unshifted codepoint.
+          </div>
+          <div class="arrow">↓</div>
+          <div class="branches">
+            <div class="step broken">
+              <div class="step-title">3a. Direct bypass</div>
+              <code>ghosttyShouldHandleKeyDownDirectly</code> skips AppKit for non-Option keys (breaks international dead keys); sends <code>consumed_mods = NONE</code> and shifted <code>unshifted_codepoint</code>.
+            </div>
+            <div class="step broken">
+              <div class="step-title">3b. interpretKeyEvents</div>
+              Option chords hit <code>insertText("∫")</code> → <code>ghostty_surface_text</code> raw paste. Ghostty never sees Option or <code>macos-option-as-alt</code>. Empty <code>setMarkedText("")</code> sticks <code>hasMarkedText() = true</code>.
+            </div>
+          </div>
+          <div class="arrow">↓</div>
+          <div class="step broken">
+            <div class="step-title">4. flagsChanged + GhosttyManager</div>
+            No left/right modifier bits; wrong release when both sides held; never calls <code>ghostty_app_keyboard_changed</code>.
+          </div>
+        </div>
+      </div>
+
+      <div class="panel proposed">
+        <div class="panel-head">
+          <h3>After: One AppKit → Ghostty key path &amp; clean ownership</h3>
+          <span class="badge proposed">Proposed</span>
+        </div>
+        <div class="flow">
+          <div class="step proposed-step">
+            <div class="step-title">1. Desktop shortcut monitors <span class="badge proposed">Fixed guard</span></div>
+            Check <code>(firstResponder as? NSTextInputClient)?.hasMarkedText() != true</code> so Desktop shortcuts never steal active terminal IME / dead-key composition.
+          </div>
+          <div class="arrow">↓</div>
+          <div class="step proposed-step">
+            <div class="step-title">2. performKeyEquivalent <span class="badge proposed">Single owner</span></div>
+            1) <kbd>⌘`</kbd>/<kbd>⌘⇧~</kbd> → AppKit.<br>
+            2) Exact <kbd>⌘C</kbd>/<kbd>⌘V</kbd>/<kbd>⌘F</kbd> → Desktop Copy/Paste/Find.<br>
+            3) <kbd>⌃↩</kbd> → route to <code>keyDown</code> (beats macOS context menu).<br>
+            4) <code>ghostty_surface_key_is_binding</code> (with dead Ghostty app/window/split defaults unbound in <code>GhosttyManager</code>) → route once to <code>keyDown</code>.<br>
+            5) Everything else → return <code>false</code> to AppKit (<kbd>⌘Q</kbd>, <kbd>⌘,</kbd>, <kbd>⌘⇧W</kbd>, <kbd>⌘/</kbd>, <kbd>⌘H</kbd> reach menus; <kbd>⌃C</kbd>, <kbd>⇧↩</kbd>, <kbd>⌥B</kbd> continue to <code>keyDown</code>).
+          </div>
+          <div class="arrow">↓</div>
+          <div class="step proposed-step">
+            <div class="step-title">3. One keyDown path <span class="badge proposed">Bypass deleted</span></div>
+            Query <code>ghostty_surface_key_translation_mods</code> → rebuild <code>NSEvent</code> only when mods changed → run <code>interpretKeyEvents</code> with <code>keyTextAccumulator</code> → emit one <code>ghostty_surface_key</code> with press/repeat, side-aware mods, <code>consumed_mods</code>, <code>characters(byApplyingModifiers: [])</code>, and collected text. Preedit stays in <code>ghostty_surface_preedit</code>; empty <code>setMarkedText("")</code> clears preedit; committed text after preedit drops triggering chord's modifiers.
+          </div>
+          <div class="arrow">↓</div>
+          <div class="step proposed-step">
+            <div class="step-title">4. flagsChanged + layout sync <span class="badge proposed">Side-aware</span></div>
+            <code>flagsChanged</code> checks per-side <code>NX_DEVICEL*</code>/<code>NX_DEVICER*</code> masks and skips while <code>hasMarkedText()</code>. <code>GhosttyManager</code> calls <code>ghostty_app_keyboard_changed</code> on input-source changes.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Concrete walkthroughs &amp; counterexamples that shaped the design</h2>
+    <div class="trace-grid">
+      <div class="card">
+        <h3><kbd>⌥B</kbd> on US layout (normal + config toggle)</h3>
+        <ul>
+          <li><code>macos-option-as-alt = true</code> (or US default): <code>key_translation_mods</code> strips Option → AppKit translates <code>"b"</code> → Ghostty receives <code>ALT + key B + text "b"</code> → emits <code>1b 62</code> (or Kitty Alt+b).</li>
+          <li><code>macos-option-as-alt = false</code>: <code>key_translation_mods</code> keeps Option → original <code>NSEvent</code> goes to AppKit → <code>insertText("∫")</code> accumulated with <code>consumed_mods = ALT</code> → emits UTF-8 <code>∫</code>.</li>
+          <li><code>macos-option-as-alt = left</code>: Left Option sends <code>1b 62</code>; Right Option types <code>∫</code> because <code>GHOSTTY_MODS_ALT_RIGHT</code> is preserved.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><kbd>⌘Q</kbd>, <kbd>⌘,</kbd>, <kbd>⌘⇧W</kbd>, <kbd>⌘D</kbd> in a Kitty Session</h3>
+        <ul>
+          <li><strong>Counterexample caught:</strong> Ghostty defaults bind <code>super+q=quit</code>, <code>super+comma=open_config</code>, <code>super+shift+w=close_window</code>, <code>super+d=new_split</code>, <code>super+enter=toggle_fullscreen</code>.</li>
+          <li>Loopflow's <code>action_cb</code> returns <code>false</code> for all of them. Unbinding unimplemented standalone-app defaults in <code>GhosttyManager</code> makes <code>key_is_binding</code> return <code>false</code>, so Loopflow menus receive <kbd>⌘Q</kbd>/<kbd>⌘,</kbd>/<kbd>⌘⇧W</kbd> and <kbd>⌘↩</kbd>/<kbd>⌘D</kbd> aren't eaten into a no-op.</li>
+          <li>Surface-owned bindings (<kbd>⌘↑</kbd>/<kbd>⌘↓</kbd>, <kbd>⌘A</kbd>, <kbd>⌘+</kbd>/<kbd>⌘-</kbd>/<kbd>⌘0</kbd>, user <code>text:</code> bindings) still match and run once.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Dead keys &amp; IME cancel (counterexamples)</h3>
+        <ul>
+          <li><strong>Plain dead key on US-International:</strong> Typing <kbd>'</kbd> then <kbd>e</kbd> must produce <code>é</code>. Deleting <code>ghosttyShouldHandleKeyDownDirectly</code> ensures non-IME dead-key layouts go through <code>interpretKeyEvents</code>.</li>
+          <li><strong>IME cancel via <code>setMarkedText("")</code>:</strong> Clearing <code>_markedRange</code> to <code>NSNotFound</code> and calling <code>ghostty_surface_preedit(surface, nil, 0)</code> prevents stuck <code>hasMarkedText() == true</code> and sends zero bytes to the PTY.</li>
+          <li><strong>Mid-composition shortcut:</strong> Checking <code>NSTextInputClient.hasMarkedText()</code> in both monitors stops Desktop shortcuts from interrupting composition.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><kbd>⇧↩</kbd>, <kbd>⌃↩</kbd>, <kbd>⇧/</kbd> &amp; Session reopen</h3>
+        <ul>
+          <li><kbd>⌃↩</kbd> is claimed in <code>performKeyEquivalent</code> and routed to <code>keyDown</code> before macOS turns it into a context-menu shortcut.</li>
+          <li><kbd>⇧/</kbd> (<code>?</code>) sends <code>unshifted_codepoint = '/'</code> (via <code>characters(byApplyingModifiers: [])</code>) and <code>consumed_mods = SHIFT</code>, matching Kitty disambiguation.</li>
+          <li>Closing and reopening the Session pane replays Kitty modes through <code>repaint.rs</code>; the same chords emit identical provider bytes before and after reattach.</li>
+          <li>While disconnected (<code>!connectionAcceptsInput</code>), PTY input stays blocked while <kbd>⌘C</kbd>, <kbd>⌘F</kbd>, <kbd>⌘`</kbd>, and Desktop menus still work; an exited child still accepts its local dismiss key.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. Choices made for review &amp; what is outside this work</h2>
+    <div class="callout proposed">
+      <h3>Choices written into <code>scratch/plan.md</code> (all reversible)</h3>
+      <p><strong>1. Delete the direct printable-key bypass (<code>ghosttyShouldHandleKeyDownDirectly</code>) instead of keeping two keyDown paths.</strong> Passed over keeping the bypass for ASCII because it breaks dead keys on non-IME international layouts and creates a second key-translation path that drifts from <code>interpretKeyEvents</code>. Matches upstream Ghostty's single-path responder.</p>
+      <p><strong>2. Unbind Ghostty's unimplemented standalone-app default keybinds in <code>GhosttyManager</code>.</strong> Passed over leaving Ghostty's full default keybind table active because <code>GhosttyManager.action_cb</code> returns <code>false</code> for <code>quit</code>, <code>open_config</code>, <code>close_window</code>, <code>new_split</code>, <code>toggle_fullscreen</code>, <code>toggle_command_palette</code>, etc. — leaving them bound causes <code>ghostty_surface_key_is_binding</code> to swallow <kbd>⌘Q</kbd>, <kbd>⌘,</kbd>, <kbd>⌘⇧W</kbd>, <kbd>⌘D</kbd>, and <kbd>⌘↩</kbd>.</p>
+      <p><strong>3. Keep Ghostty's effective <code>macos-option-as-alt</code> setting (layout-dependent default + user <code>~/.config/ghostty/config</code>) and sync layout switches via <code>ghostty_app_keyboard_changed</code>.</strong> Passed over forcing <code>macos-option-as-alt = true</code> globally in Desktop, which would break Option character entry on non-US keyboards and override explicit user config.</p>
+    </div>
+
+    <div class="card">
+      <h3>Outside this work (separate outcomes)</h3>
+      <ul>
+        <li><strong>Unifying Desktop's two local shortcut monitors (<code>DesktopActionMonitor</code> + <code>WorkPaletteShortcut</code>) into one responder/registry layer:</strong> Fixing their <code>NSTextInputClient</code> guard is in scope here; merging palette focus restoration and slot-hint tracking into <code>DesktopActions</code> is a separate UI architecture cleanup.</li>
+        <li><strong>Modifier support in <code>lf desktop send-key</code> (<code>DesktopKey</code> DTO):</strong> Extending the CLI/socket wire format for modified synthetic keys is a separate feature.</li>
+        <li><strong>iOS hardware keyboard (<code>LoopflowiOS/GhosttySurface.swift</code>) and Rex:</strong> Separate platforms with their own key translation.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. Review questions</h2>
+    <p class="lede">Reply with item numbers and letters (for example, <code>1a, 2a, 3a</code>) to override any choice made in <code>scratch/plan.md</code>.</p>
+    <div class="questions">
+      <div class="q-item">
+        <div class="q-title">1. Default Option key behavior when the user has not set <code>macos-option-as-alt</code> in Ghostty config</div>
+        <ul class="q-opts">
+          <li class="chosen"><span class="opt-key">1a</span> <strong>Chosen for build:</strong> Keep Ghostty's own effective setting (layout-dependent default, overridden by <code>~/.config/ghostty/config</code>) and notify Ghostty on keyboard layout changes via <code>ghostty_app_keyboard_changed</code>.</li>
+          <li><span class="opt-key">1b</span> Default <code>macos-option-as-alt = true</code> (or <code>left</code>) in <code>loopflowConfig</code> before user files so Option acts as Alt on every layout unless overridden.</li>
+        </ul>
+      </div>
+      <div class="q-item">
+        <div class="q-title">2. Standalone Ghostty default keybinds whose actions Loopflow Desktop does not implement (<code>quit</code>, <code>open_config</code>, <code>close_window</code>, <code>new_split</code>, <code>toggle_fullscreen</code>, <code>toggle_command_palette</code>, <code>inspector</code>)</div>
+        <ul class="q-opts">
+          <li class="chosen"><span class="opt-key">2a</span> <strong>Chosen for build:</strong> Unbind Desktop-owned app shortcuts (<kbd>⌘Q</kbd>, <kbd>⌘,</kbd>, <kbd>⌘⇧W</kbd>) in <code>embeddedConfig</code> and unbind unimplemented standalone-Ghostty chrome defaults (splits, fullscreen, command palette, inspector) in <code>loopflowConfig</code> before user files, keeping surface bindings (<kbd>⌘↑/↓</kbd>, <kbd>⌘A</kbd>, font size, scrolling, user <code>text:</code>/<code>csi:</code> bindings).</li>
+          <li><span class="opt-key">2b</span> Also unbind standalone-Ghostty chrome actions even if a user configured them in <code>~/.config/ghostty/config</code> (move all unimplemented-action unbinds to <code>embeddedConfig</code>).</li>
+        </ul>
+      </div>
+      <div class="q-item">
+        <div class="q-title">3. Desktop's two local keyDown monitors (<code>DesktopActionMonitor</code> and <code>WorkPaletteShortcut</code>)</div>
+        <ul class="q-opts">
+          <li class="chosen"><span class="opt-key">3a</span> <strong>Chosen for build:</strong> Fix both monitors to respect <code>NSTextInputClient.hasMarkedText()</code> in this Task, and leave unifying the two monitors as separate cleanup.</li>
+          <li><span class="opt-key">3b</span> Fold <code>WorkPaletteShortcut</code>'s <kbd>⌘K</kbd> and <kbd>⌘\</kbd> interception into <code>DesktopActionMonitor</code> as part of this Task.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Written to <code>scratch/concept-review.html</code> alongside the updated <code>scratch/plan.md</code>. No source code was modified.
+  </footer>
+</main>
+</body>
+</html>

@@ -1099,18 +1099,20 @@ fn a_checkout_created_with_stack_builds_on_this_branch_and_sync_follows_it() {
     );
 }
 
+const GH_STACKED_CHECKOUT: &str = r#"#!/bin/sh
+echo "$*" >> "$LF_HOME/gh.log"
+case "$1 $2" in
+  'pr list') echo '[]';;
+  'pr create') echo 'https://example.com/pr/1';;
+  'pr view') cat "$LF_HOME/parent-pr-state" 2>/dev/null || echo OPEN;;
+esac
+"#;
+
 #[test]
 fn a_stacked_checkout_publishes_onto_its_unpushed_base_and_follows_main_once_it_merges() {
     let home = tempfile::TempDir::new().unwrap();
-    let state = home.path().join("parent-pr-state");
-    let log = home.path().join("gh.log");
-    let gh = format!(
-        "#!/bin/sh\necho \"$*\" >> '{log}'\ncase \"$1 $2\" in\n  'pr list') echo '[]';;\n  'pr create') echo 'https://example.com/pr/1';;\n  'pr view') cat '{state}' 2>/dev/null || echo OPEN;;\nesac\nexit 0\n",
-        log = log.display(),
-        state = state.display(),
-    );
     let repo = TestRepo::new();
-    let _env = EnvGuard::with_lf_home(&[("gh", &gh)], home.path());
+    let _env = EnvGuard::with_lf_home(&[("gh", GH_STACKED_CHECKOUT)], home.path());
     let parent_path = repo.create_named_worktree("parent");
     commit_file(&parent_path, "parent.txt", "parent work\n");
     let output = lf(
@@ -1129,16 +1131,74 @@ fn a_stacked_checkout_publishes_onto_its_unpushed_base_and_follows_main_once_it_
         git(repo.bare_path(), &["rev-parse", "refs/heads/parent"]),
         git(&parent_path, &["rev-parse", "HEAD"])
     );
-    let calls = std::fs::read_to_string(&log).unwrap();
+    let calls = gh_log(home.path());
     assert!(
         calls.contains("pr create") && calls.contains("--base parent"),
         "{calls}"
     );
 
-    std::fs::write(&state, "MERGED\n").unwrap();
+    std::fs::write(home.path().join("parent-pr-state"), "MERGED\n").unwrap();
     let output = lf(&child_path, &["sync", "--plan"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains("base: parent\n"), "{stdout}");
+}
+
+#[test]
+fn syncing_a_stacked_checkout_to_main_detaches_its_sync_and_pr_base() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let _env = EnvGuard::with_lf_home(&[("gh", GH_STACKED_CHECKOUT)], home.path());
+    let parent = repo.create_named_worktree("parent");
+    let output = lf(
+        &parent,
+        &["wt", "create", "child", "--stack", "--persistent", "--json"],
+    );
+    let child: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let child = std::path::Path::new(child["path"].as_str().unwrap());
+    commit_file(child, "child.txt", "child work\n");
+
+    lf(child, &["sync", "--plan", "main"]);
+    let plan = lf(child, &["sync", "--plan"]);
+    assert!(String::from_utf8_lossy(&plan.stdout).contains("base: parent\n"));
+
+    // Main is already integrated. Completing even a no-op sync detaches the branch.
+    lf(child, &["sync", "main"]);
+    commit_file(repo.path(), "main.txt", "later main work\n");
+    repo.push();
+    lf(child, &["sync"]);
+    assert_eq!(
+        std::fs::read_to_string(child.join("main.txt")).unwrap(),
+        "later main work\n"
+    );
+    lf(
+        child,
+        &["pr", "open", "--title", "Child", "--body", "On main"],
+    );
+    let calls = gh_log(home.path());
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("pr create ") && line.contains("--base main")),
+        "{calls}"
+    );
+}
+
+#[test]
+fn conflicted_sync_detaches_a_stacked_checkout_only_after_continuing() {
+    let _env = EnvGuard::new(&[]);
+    let repo = create_conflicting_repo();
+    git(repo.path(), &["branch", "parent", "HEAD~1"]);
+    loopflow_execution::git::worktrees::record_stacked_base(repo.path(), "feature", "parent")
+        .unwrap();
+    let base = || loopflow_execution::git::worktrees::stacked_base(repo.path()).unwrap();
+
+    drop(start_conflicting_recovery(&repo));
+    loopflow_execution::ops::abort_sync_for_resolution(repo.path(), false).unwrap();
+    assert_eq!(base().as_deref(), Some("parent"));
+    drop(start_conflicting_recovery(&repo));
+    repo.create_file("conflict.txt", "resolved\n");
+    continue_sync_for_resolution(repo.path(), false).unwrap();
+    assert_eq!(base(), None);
 }
 
 #[test]

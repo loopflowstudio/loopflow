@@ -100,6 +100,9 @@ Automatic sync checkpoints staged and unstaged edits before merging while
 leaving generated `.lf/tmp/` telemetry local. Resolve merge conflicts normally,
 then run `lf sync --continue` (or `lf sync --abort`).
 
+In a checkout created with `--stack`, run `lf sync main` to follow the default
+branch for future syncs and new PRs. The base changes when the sync completes.
+
 ### Stack dependent Tasks
 
 Stack one Task on any other open Task that has a branch, before the parent

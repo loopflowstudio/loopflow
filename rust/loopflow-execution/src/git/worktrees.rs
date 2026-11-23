@@ -2014,6 +2014,16 @@ pub fn record_stacked_base(repo: &Path, branch: &str, base: &str) -> Result<(), 
     set_branch_config(repo, branch, "loopflow-base", base)
 }
 
+pub(crate) fn clear_stacked_base(repo: &Path, branch: &str) -> Result<(), GitError> {
+    let key = format!("branch.{branch}.loopflow-base");
+    let args = ["config", "--unset-all", &key];
+    let output = super::run_git(repo, &args)?;
+    if output.status.code() == Some(5) {
+        return Ok(()); // The branch already follows the default.
+    }
+    super::successful_stdout(&args, output).map(|_| ())
+}
+
 /// `branch.<current>.<key>` from Git config; `None` when detached or unset.
 fn current_branch_config(
     repo: &Path,

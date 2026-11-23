@@ -128,7 +128,7 @@ keeps every column; it belongs with LOO-939 (naming), not here. Noted in
 | `task_prs.branch/base_commit/parent_pr_id` | keep for now | trigger-copied from `task_checkouts` and enforced equal (`task_machine_local.sql:105-140`); PR delivery reads them for merged PRs too, where the checkout is gone. Not a free duplicate; questions.md |
 | `pr_landings.worktree` | keep | a landing is supervised on one Machine (`supervisor_machine_id`) and may have no Task (`lf land` in any checkout). Execution table already |
 | `agent_sessions.task_id` | keep, backfill | the only Session→Task link |
-| `graph_processes.task_id` | keep, backfill | the only Graph run→Task link; a run that named none may take one once (adoption), then it is fixed |
+| `graph_processes.task_id` | keep, backfill | the only Graph run→Task link; fixed at launch |
 | `processes`, `relocated_task_processes` | leaving (LOO-965, #1974) | not this Task's |
 
 ## Source of truth after the change
@@ -161,10 +161,10 @@ Processes to the calling agent's Task; 5,672 `lf session serve`, plus `commit`,
   the agent that started it arrives named, as `work_source='declared'`,
   through `LF_AS`, which the launch reads after the checkout
   (`select_execution_work`). `'inherited'` has no production writer.
-- Adoption: `write_task_checkout_in` gives open taskless Sessions inside a
-  newly placed checkout its Task. A Graph run already there keeps no Task
-  (`graph_processes_launch_is_immutable` stands as main wrote it) and stays
-  out of the Task's history; it still blocks a second run (questions.md).
+- No adoption: placing a checkout gives work already inside it no Task
+  (concept review 5c). A Session joins by starting there, or by `lf session
+  bind` (as primary). A taskless Graph run already there stays out of the
+  Task's history and still blocks a second run (`task_open_graph_pairs`).
 - Readers: `session_membership`, `session_tasks` and `task_graph_pairs` read
   `task_id` only. Three path matches remain, all about what occupies a
   directory now: `task_open_graph_pairs` for unended runs that recorded no
@@ -257,11 +257,8 @@ every Process/Session association, conflict answers.
    (`task_facts_once.sql`, was `process_task.sql`).* The Process half built
    first (`processes.task_id`, its backfill pass and cursor table) is deleted:
    #1974 stopped writing `processes`. What stands: `starting_task_in` for
-   Session creation and `record_graph`; adoption in `write_task_checkout_in`
-   (recording at start alone misses `place_task` giving a Task a checkout a
-   taskless run is already in, which
-   `adopting_a_checkout_with_a_running_graph_prevents_another_run` checks);
-   readers on `task_id` only. A Session or run in a nested checkout belongs to
+   Session creation and `record_graph`; readers on `task_id` only
+   (adoption was built here, then removed by `f8a5ef1f1f`). A Session or run in a nested checkout belongs to
    the deepest Task only, and a Task keeps its work after its checkout goes.
    Demo: `work_keeps_its_task_when_its_repository_moves_and_its_path_is_reused`
    (a run and a conversation started in a checkout with no `--task`, the
@@ -299,9 +296,7 @@ every Process/Session association, conflict answers.
    the writer stores a stateless completion as `completed`
    (`released_lf_sees_the_completion_a_state_decides`). Contradicted and
    kept: the steer ledger, the intent's title copy, both
-   `pm_snapshot_synced_at` (inventory rows above say why). Also repaired:
-   four `admission_lifecycle_tests` expected a Session to stay taskless after
-   its checkout was placed; slice 1's adoption gives it the Task.
+   `pm_snapshot_synced_at` (inventory rows above say why).
 4. **One order.** *Built (`task_facts_once.sql`, commit "One Task order").
    `cargo nextest run -p loopflow-storage --lib`: 391 passed under the guard,
    which now refuses `task_orders` and `tracker_projects.task_order_json`
@@ -440,9 +435,8 @@ Desktop's Working board after merge and install. Auto stays a Machine fact
 
 ## Then: gate
 
-Every slice is built and pushed (PR #1973, head `2448546730`, which merges
-main through #1980; the acceptance check passed there, 10 tests, and
-`cargo check --all-targets` is clean).
+After item 5 above. PR #1973; branch merges main through #1988
+(`8892ba5671`). The acceptance check last passed at `2448546730` (10 tests).
 
 Run on that head (2026-11-18, clean `LF_*`):
 `cargo test -p loopflow-storage --lib -- task_work:: leaving_members_are_unreadable`
@@ -471,15 +465,9 @@ The three upgrade tests in `task_work::` each take over 60 s (65 s for the
 ten): the cost is replaying to the current schema, not this migration's
 backfill (0.19 s for 22,342 live Sessions).
 
-Open, for a person (questions.md): an open Session in a checkout a Task takes
-joins the Task; a Graph run there does not. Whether they should differ.
-
 Concept review of the first build (2026-11-18) and its four answers are in
 questions.md; all four are applied or handed on (LOO-877, LOO-934).
 
-Concept review as built at `0ef1ad038a` (`scratch/concept-review.html`):
-nothing for implement. Stated there, larger than this Task, and for the PR
-body: launch and store each define "the checkout holding this directory"
-(Mismatch A, fits LOO-934); adoption treats Sessions and runs differently
-(B, already open above); the primary mark's upgrade day; the unwritten
-`work_source='inherited'`. Its four questions are unanswered.
+For the PR body, larger than this Task: launch and store each define "the
+checkout holding this directory" (Mismatch A; store side is `task_holding`
+now, `WorkspaceResolver` remains, fits LOO-934).

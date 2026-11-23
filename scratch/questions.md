@@ -157,7 +157,7 @@ commands in a checkout are not listed as Task work; LOO-965 owns
   holding this directory". Chosen: say so in the plan and on the page, leave
   the code. Passed over: one storage function both call, in this PR; it
   changes what every launch resolves.
-- Four questions on `scratch/concept-review.html` are unanswered: adoption
+- (Answered 2026-11-22 below as 5c, 5.2c, 5.3b, 5.4b.) Four questions on `scratch/concept-review.html` were open: adoption
   for Sessions vs runs, where Mismatch A goes, the primary mark's upgrade
   day, `work_source='inherited'`.
 

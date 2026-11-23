@@ -265,3 +265,6 @@ worktree is gone. Reversible in `checkout_owner_in` (`sqlite/task_work.rs`).
   is the last membership reader that disagrees with `task_id`.
 - **`lf wt create` branches from `main`** (page 2). Open: should a child
   agent's separate checkout start from the Task's branch? Left as is.
+- `lf wt create` inside a Task's checkout (Jack Heart): "a -- there should be
+  a stack flag though". Branch from main stays the default; a stack flag is
+  its own Task.

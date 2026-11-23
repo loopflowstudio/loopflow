@@ -102,8 +102,10 @@ phone feed follow the same relative order. Tasks with saved positions come
 first. The rest follow planning rank, with canonical Task ID breaking ties.
 Before the first drag, every row follows rank.
 
-A drop shows immediately. If the Machine refuses it, both lists show their last
-confirmed order and a Notice explains why, even if the next read fails.
+A drop shows immediately. If another window has already reordered the list,
+the Task still lands on the side of the target you chose. If the Machine
+refuses the drop, both lists show their last confirmed order and a Notice
+explains why, even if the next read fails.
 
 In **⌘K → Sidebar shows**, choose **Working tasks**, **Available**, or **Busy**.
 The filter keeps the list's order. A Task with both available and busy

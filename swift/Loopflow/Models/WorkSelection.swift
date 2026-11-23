@@ -1,5 +1,10 @@
 import Foundation
 
+/// Where a dragged member lands relative to its target in the Machine's current order.
+public enum DropSide: String, Encodable, Sendable {
+    case before, after
+}
+
 /// Authored identity and expression, evaluated only by the shared Rust Work reader.
 public struct WorkSelection: Codable, Equatable, Sendable {
     public let id: String

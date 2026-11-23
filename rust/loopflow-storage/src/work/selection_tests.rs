@@ -193,9 +193,9 @@ fn an_order_must_permute_every_occurrence_including_hidden_ones() {
 #[test]
 fn moving_into_place_is_a_move_not_a_swap() {
     let mut order = vec!["a", "b", "c"];
-    move_into_place(&mut order, 2, 0);
+    move_into_place(&mut order, 2, 0, None);
     assert_eq!(order, ["c", "a", "b"]);
-    move_into_place(&mut order, 1, 2);
+    move_into_place(&mut order, 1, 2, None);
     assert_eq!(order, ["c", "b", "a"]);
 }
 

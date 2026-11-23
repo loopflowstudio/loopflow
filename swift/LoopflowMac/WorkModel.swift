@@ -3563,13 +3563,13 @@ extension WorkModel {
 
     /// Both drop surfaces place the Task on the side chosen in the displayed order.
     @discardableResult
-    func reorderWorkingTask(_ member: WorkWorkspaceKey, to target: String, after: Bool?) -> Task<Void, Never> {
+    func reorderWorkingTask(_ member: WorkWorkspaceKey, to target: String, side: DropSide?) -> Task<Void, Never> {
         guard member.id != target, let repoPath else { return Task {} }
         let scope = repositoryReadingKey(repoPath)
-        let move = PendingCommand.reorder(machine: scope.machineId, member: member, target: target, after: after)
+        let move = PendingCommand.reorder(machine: scope.machineId, member: member, target: target, side: side)
         let write = pendingChanges.make(move, subject: taskPresentation(id: member.id).identifier ?? member.id, verb: "reordered",
             write: .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: "task:" + member.id,
-                                         destination: "task:" + target),
+                                         destination: "task:" + target, side: side),
             notices: navigation.notices, show: nil) { [self] in
             guard self.repoPath.map(repositoryReadingKey) == scope else { return }
             presentSelectionPlans()
@@ -3656,6 +3656,11 @@ extension WorkModel {
 
 /// Drag payload for moving a Task in the shared Working Tasks order.
 enum TaskOrderDrag {
+    static func side<Member: Equatable>(moving source: Member, onto target: Member, in order: [Member]) -> DropSide? {
+        guard let from = order.firstIndex(of: source), let to = order.firstIndex(of: target) else { return nil }
+        return from < to ? .after : .before
+    }
+
     static func token(_ workID: String) -> String { "task-order:" + workID }
     static func taskID(_ token: String) -> String? {
         token.hasPrefix("task-order:") ? String(token.dropFirst("task-order:".count)) : nil

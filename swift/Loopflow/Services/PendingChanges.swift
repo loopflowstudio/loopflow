@@ -20,7 +20,7 @@ public enum PendingCommand: Equatable, Sendable {
     case move(task: String, wave: String?)
     /// The side chosen in the displayed order. A source missing from the grid
     /// has no preview, but the Machine can still resolve its drop.
-    case reorder(machine: String?, member: WorkWorkspaceKey, target: String, after: Bool?)
+    case reorder(machine: String?, member: WorkWorkspaceKey, target: String, side: DropSide?)
     case renameSession(session: String, title: String)
 
     public var task: String? {
@@ -245,12 +245,12 @@ public final class PendingChanges {
     public func workingOrder(_ plan: WorkViewPlan?, machine: String?, readAt: Revisions?) -> WorkViewPlan? {
         guard var plan, !changes.isEmpty else { return plan }
         for change in patches(at: readAt) {
-            guard case .reorder(let origin, let member, let target, let after?) = change.command,
+            guard case .reorder(let origin, let member, let target, let side?) = change.command,
                   origin == machine, member.repository == plan.repository else { continue }
             let members = plan.resolution.members
             guard let from = members.firstIndex(where: { $0.work == member }),
                   let to = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == target }) else { continue }
-            plan.resolution.members.move(fromOffsets: IndexSet(integer: from), toOffset: after ? to + 1 : to)
+            plan.resolution.members.move(fromOffsets: IndexSet(integer: from), toOffset: side == .after ? to + 1 : to)
         }
         return plan
     }

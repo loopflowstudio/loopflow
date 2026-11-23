@@ -3515,7 +3515,7 @@ mod tests {
         check_order(&read(&store, "hand_back").await, [other, active]);
         check_filters(&[active], &[]);
 
-        selections::reorder_task(&store.sqlite, &repo, active, other).unwrap();
+        selections::reorder_task(&store.sqlite, &repo, active, other, None).unwrap();
         check_order(&read(&store, "after_drag").await, [active, other]);
         report_states(4, &[State::Done, State::Working]);
         db.execute_batch(include_str!(

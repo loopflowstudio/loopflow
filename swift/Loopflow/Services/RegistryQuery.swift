@@ -365,7 +365,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case desktopDashboardHide(directory: String, id: String, member: String)
     case desktopDashboardShow(directory: String, id: String, member: String)
     case desktopDashboardSlots(directory: String, id: String, revision: Int64, slots: String)
-    case desktopDashboardMove(directory: String, board: String, member: String, destination: String)
+    case desktopDashboardMove(directory: String, board: String, member: String, destination: String, side: DropSide?)
 
     /// The equivalent `lf` command, without its `--cwd`.
     public var argv: [String] {
@@ -466,8 +466,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return ["desktop", "dashboard", "show", "query:\(id)/\(member)"]
         case .desktopDashboardSlots(_, let id, let revision, _):
             return ["desktop", "dashboard", "slots", "query:" + id, "--revision=\(revision)"]
-        case .desktopDashboardMove(_, let board, let member, let destination):
+        case .desktopDashboardMove(_, let board, let member, let destination, let side):
             return ["desktop", "dashboard", "move", "\(board)/\(member)", "--destination", destination]
+                + argument("--side", side?.rawValue)
         }
     }
 
@@ -689,9 +690,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("desktop.dashboard.show", ["directory": directory, "id": id, "member": member])
         case .desktopDashboardSlots(let directory, let id, let revision, let slots):
             TaggedFields("desktop.dashboard.slots", ["directory": directory, "id": id, "revision": revision, "slots": slots])
-        case .desktopDashboardMove(let directory, let board, let member, let destination):
+        case .desktopDashboardMove(let directory, let board, let member, let destination, let side):
             TaggedFields("desktop.dashboard.move", ["directory": directory, "board": board, "member": member,
-                                       "destination": destination])
+                                       "destination": destination, "side": side])
         }
     }
 
@@ -849,11 +850,10 @@ public struct RegistryQuery: Sendable {
             .desktopDashboardSlots(directory: repoPath, id: id, revision: revision, slots: input)))
     }
 
-    /// Move `member`'s tile into `target`'s place in a Dashboard's order, as the
-    /// repository order's drop does; Rust applies the move and decides the mode.
+    /// Move `member`'s tile into `target`'s place in a saved Dashboard's order.
     public func reorderDashboard(id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey, repoPath: String) async throws -> Dashboard {
         try Self.decode(Dashboard.self, from: await write(
-            .desktopDashboardMove(directory: repoPath, board: "query:" + id, member: member.selector, destination: target.selector)))
+            .desktopDashboardMove(directory: repoPath, board: "query:" + id, member: member.selector, destination: target.selector, side: nil)))
     }
 
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {

@@ -1,7 +1,8 @@
 //! Shared selection and saved intent use lfdb; live pane control uses Desktop's Apple events.
 use anyhow::{bail, Context, Result};
+use clap::ValueEnum;
 use loopflow_execution::store::selections;
-use loopflow_storage::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
+use loopflow_storage::work::selection::{DropSide, WorkWorkspaceKey, WorkWorkspaceKind};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -1887,9 +1888,9 @@ impl TileBoard {
 enum TileEdit {
     Hide,
     Show,
-    /// Take `to`'s place in the order.
     Move {
         to: WorkWorkspaceKey,
+        side: Option<DropSide>,
     },
     /// The tile's share of the space it divides with `toward`.
     Resize {
@@ -1914,6 +1915,11 @@ impl TileEdit {
             "show" => Self::Show,
             "move" => Self::Move {
                 to: peer(arg("destination")?)?,
+                side: args
+                    .get("side")
+                    .map(|side| DropSide::from_str(side, false))
+                    .transpose()
+                    .map_err(DesktopError::Argument)?,
             },
             "resize" => Self::Resize {
                 toward: peer(arg("toward")?)?,
@@ -2055,7 +2061,7 @@ fn edit_tiles(
     };
     let id = match board {
         TileBoard::Tasks => {
-            let TileEdit::Move { to } = edit else {
+            let TileEdit::Move { to, side } = edit else {
                 bail!("Working Tasks and Wave views keep only the shared Task order; save a Dashboard to hide or size tiles. Nothing changed.");
             };
             if member.kind != WorkWorkspaceKind::Task || to.kind != WorkWorkspaceKind::Task {
@@ -2065,7 +2071,7 @@ fn edit_tiles(
                 .into());
             }
             return Ok(DesktopTileRecord::Tasks(
-                selections::reorder_task(&store, repository, &member.id, &to.id).map_err(
+                selections::reorder_task(&store, repository, &member.id, &to.id, *side).map_err(
                     |error| match error {
                         loopflow_execution::store::StoreError::NotFound => absent(member),
                         error => error.into(),
@@ -2090,16 +2096,15 @@ fn edit_tiles(
         )
     };
     let dashboard = match edit {
-        TileEdit::Move { to } => {
+        TileEdit::Move { to, side } => {
             if arrangement.winner(to).is_none() {
                 return Err(absent(to));
             }
-            selections::reorder_dashboard(&store, repository, id, revision, member, to).map_err(
-                |error| match error {
+            selections::reorder_dashboard(&store, repository, id, revision, member, to, *side)
+                .map_err(|error| match error {
                     loopflow_execution::store::StoreError::NotFound => absent(member),
                     error => error.into(),
-                },
-            )?
+                })?
         }
         TileEdit::Hide => {
             let index = arrangement.winner(member).ok_or_else(|| absent(member))?;

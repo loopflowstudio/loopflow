@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use loopflow_storage::work::selection::DropSide;
 
 pub mod aliases;
 mod desktop_inputs;
@@ -1102,6 +1103,9 @@ pub enum DashboardCommand {
         /// Tile whose place it takes
         #[arg(long)]
         destination: String,
+        /// Place the tile before or after the destination in the current order
+        #[arg(long, value_enum)]
+        side: Option<DropSide>,
     },
     /// Resize the divider between two tiles on a saved Dashboard; ratio is the addressed one's share
     Resize {
@@ -1116,17 +1120,29 @@ pub enum DashboardCommand {
 }
 
 impl DashboardCommand {
+    pub(crate) fn move_args(
+        destination: &str,
+        side: Option<DropSide>,
+    ) -> std::collections::BTreeMap<String, String> {
+        let mut args =
+            std::collections::BTreeMap::from([("destination".into(), destination.into())]);
+        if let Some(side) = side {
+            args.insert("side".into(), side.as_str().into());
+        }
+        args
+    }
+
     /// The verb a saved tile edit names, with its arguments, or none for a
     /// Dashboard record edit.
     pub fn tile_verb(&self) -> Option<(&str, &str, std::collections::BTreeMap<String, String>)> {
         match self {
             Self::Hide { tile } => Some(("hide", tile, Default::default())),
             Self::Show { tile } => Some(("show", tile, Default::default())),
-            Self::Move { tile, destination } => Some((
-                "move",
+            Self::Move {
                 tile,
-                [("destination".to_owned(), destination.clone())].into(),
-            )),
+                destination,
+                side,
+            } => Some(("move", tile, Self::move_args(destination, *side))),
             Self::Resize {
                 tile,
                 toward,

@@ -73,13 +73,16 @@ struct DashboardWorkspaceTests {
         #expect(try JSONDecoder().decode(DashboardSlotLayout.self, from: encoded) == below)
     }
 
-    @Test func sidebarAndGridShareTheOrderTheRustWriterReturns() async throws {
-        let ids = ["task_a", "task_b", "task_c"]
+    @Test(arguments: [true, false])
+    func sidebarAndGridShareTheOrderTheRustWriterReturns(sourceInGrid: Bool) async throws {
+        let ids = sourceInGrid ? ["task_a", "task_b", "task_c"] : ["task_a", "task_b"]
         let initial = fixtureWorkingPlan(ids)
         let moved = String(decoding: try JSONEncoder().encode(fixtureWorkingPlan(["task_c", "task_a", "task_b"])), as: UTF8.self)
+        let move = ["desktop", "dashboard", "move", "working-tasks/task:task_c", "--destination", "task:task_a"]
+            + (sourceInGrid ? ["--side", "before"] : [])
         let query = RegistryQuery { args, _ in
             switch args {
-            case ["desktop", "dashboard", "move", "working-tasks/task:task_c", "--destination", "task:task_a"]: return #"["task_c","task_a","task_b"]"#
+            case move: return #"["task_c","task_a","task_b"]"#
             case ["desktop", "view", "show", "--json"], ["desktop", "view", "show", "kind:task state:working", "--json"]: return moved
             default: throw RegistryQueryError("Unexpected command \(args)")
             }
@@ -89,8 +92,9 @@ struct DashboardWorkspaceTests {
         model.applyTaskList(initial, wave: nil, reason: "")
         #expect(model.sidebarTaskIDs == ids)
         let dragged = try #require(TaskOrderDrag.taskID(TaskOrderDrag.token("task_c")))
-        let member = try #require(model.workingTaskMembers.first { $0.work.id == dragged })
-        await model.reorderWorkingTask(member.work, to: "task_a", after: false).value
+        let source = WorkWorkspaceKey(repository: initial.repository, kind: .task, id: dragged)
+        let side = TaskOrderDrag.side(moving: dragged, onto: "task_a", in: ids)
+        await model.reorderWorkingTask(source, to: "task_a", side: side).value
         #expect(model.navigation.notices.current == nil)
         #expect(model.workingTaskIDs == ["task_c", "task_a", "task_b"])
         #expect(model.sidebarTaskIDs == model.workingTaskIDs)

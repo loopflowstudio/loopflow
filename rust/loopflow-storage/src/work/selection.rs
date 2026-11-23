@@ -418,10 +418,34 @@ pub enum ArrangementMode {
     Touched,
 }
 
-/// The one reorder gesture: the item at `from` takes `to`'s place.
-pub fn move_into_place<T>(order: &mut Vec<T>, from: usize, to: usize) {
+/// Where a dragged member lands relative to its target.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, clap::ValueEnum,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DropSide {
+    Before,
+    After,
+}
+
+impl DropSide {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Before => "before",
+            Self::After => "after",
+        }
+    }
+}
+
+/// Place the member on the chosen side, or in the target's slot for a destination-only move.
+pub fn move_into_place<T>(order: &mut Vec<T>, from: usize, target: usize, side: Option<DropSide>) {
     let moved = order.remove(from);
-    order.insert(to, moved);
+    let slot = match side {
+        Some(DropSide::Before) if from < target => target - 1,
+        Some(DropSide::After) if from > target => target + 1,
+        _ => target,
+    };
+    order.insert(slot, moved);
 }
 
 /// Occurrence order. Geometry belongs to the slot layout; members fill it in order.

@@ -58,32 +58,20 @@ The regression follows the rank-2 Task through Idle → Working → Idle before 
 first drag, then reads the saved order after dragging it above rank 1. Desktop
 replays the activity frames in one selected workspace.
 
-## Remaining build slice
+## Concurrent drops
 
-Start with a served-write regression. The sidebar shows A, B, C and drops B
-before A. Another window has already moved A after C, so the Machine reads
-B, C, A. Today's target-index write saves C, A, B. The same request with an
-explicit side should save C, B, A, matching the preview against that reading.
-Exercise the opposite side as well. Assert on the committed sequence and a
-fresh Working read so a client fixture cannot supply the expected result for
-the Machine. Use `rust/loopflow/tests/served_reads.rs` and the existing order
-fixtures in `rust/loopflow-execution/src/store/selections/tests.rs`.
+The sidebar and Working Tasks grid carry the side shown at drop through the
+preview and both Machine write paths. The Machine applies it to the current
+order on each compare-and-commit attempt. A destination-only move still takes
+the target's slot, including a grid drop from a Task absent in its reading.
 
-Carry a single before/after value from the sidebar or grid through
-`WorkModel.reorderWorkingTask`, `PendingCommand` and `ServedWrite` into
-`desktop.dashboard.move` and the one-shot `lf desktop dashboard move` path.
-Have `selections::reorder_task` place the source on that side of the target in
-the current sequence after removing the source. Keep the existing
-destination-only behavior when no side was chosen, including existing CLI
-callers, saved Dashboard moves and a grid drop from a Task absent in its reading.
-Reuse the existing `task_orders` record and compare-and-commit path.
+The served regression starts with three Working Tasks on a private Machine.
+Another window moves A to C's slot, leaving B, C, A. Dropping B before A then
+saves C, B, A. Dropping A after C saves C, A, B. The test reads the Working
+list after each write and repeats each relative move through the CLI.
 
-Keep the preview over each list's confirmed reading. Each subscription retires
-its preview when its reading covers the write receipt. A refusal reveals its
-last confirmed membership and order immediately. The follow-up read keeps the
-refusal Notice visible if either list fails. Test both encodings of the move in
-the Swift and served command tests. Keep the receipt and refusal cases in
-`swift/LoopflowTests/WorkNavigationTests.swift`. [Concept review](concept-review.html)
+The remaining walkthrough needs an unlocked Desktop for a grid drag, keyboard
+navigation and the key-window sidebar filters. [Pre-implementation review](concept-review.html)
 
 ## Docs
 
@@ -116,9 +104,11 @@ the Swift and served command tests. Keep the receipt and refusal cases in
   sidebar through a turn, drag, arrival, relaunch, failed drop and recovery.
   The grid displayed the saved order. The live grid drag, keyboard shortcuts
   and key-window filter still need an unlocked walkthrough.
-- The built Machine's `move_into_place` on B, C, A moves B onto A's index and
-  returns C, A, B. The branch's receipt test gets its resulting order from a
-  stand-in.
+- `cargo test -p loopflow --test served_reads working_task_drop_keeps_its_side_after_another_window_reorders`
+  reproduced C, A, B before the fix and passed both sides after it.
+- `scripts/test_desktop.sh --filter 'workingTaskDropAcrossReceipt|refusedWorkingTaskDrop|sidebarAndGridShareTheOrderTheRustWriterReturns|draggedRowLandsOnRelease|droppingTileCOnAMovesItThroughTheSharedOrderCommand'`
+  passed all five tests, including the grid drop with an absent source and the
+  destination-only saved Dashboard move.
 
 ## Gate
 

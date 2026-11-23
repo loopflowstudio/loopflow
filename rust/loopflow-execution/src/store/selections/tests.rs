@@ -184,18 +184,31 @@ fn dashboard_order_moves_under_its_revision_and_only_reordering_touches() {
     .unwrap();
     assert_eq!(restored.arrangement.mode, ArrangementMode::Auto);
 
-    let moved =
-        selections::reorder_dashboard(&store, &repo, &id, restored.revision, &c.work, &a.work)
-            .unwrap();
+    let moved = selections::reorder_dashboard(
+        &store,
+        &repo,
+        &id,
+        restored.revision,
+        &c.work,
+        &a.work,
+        None,
+    )
+    .unwrap();
     assert_eq!(moved.arrangement.order, [c.clone(), a.clone(), b.clone()]);
     assert_eq!(moved.arrangement.mode, ArrangementMode::Touched);
     assert_eq!(moved.revision, restored.revision + 1);
 
     let revisions = store.revisions().unwrap();
-    assert!(
-        selections::reorder_dashboard(&store, &repo, &id, restored.revision, &a.work, &c.work)
-            .is_err()
-    );
+    assert!(selections::reorder_dashboard(
+        &store,
+        &repo,
+        &id,
+        restored.revision,
+        &a.work,
+        &c.work,
+        None
+    )
+    .is_err());
     assert_eq!(store.revisions().unwrap(), revisions);
     assert_eq!(
         selections::read_dashboard(&store, &repo, &id)
@@ -268,7 +281,7 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
         [one, two]
     );
     assert_eq!(
-        selections::reorder_task(&store, &repo, two, one).unwrap(),
+        selections::reorder_task(&store, &repo, two, one, None).unwrap(),
         [two, one]
     );
     assert_eq!(
@@ -304,16 +317,20 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
         [two, one, three]
     );
     assert_eq!(
-        selections::reorder_task(&store, &repo, three, two).unwrap(),
+        selections::reorder_task(&store, &repo, three, two, None).unwrap(),
         [three, two, one]
     );
 
     let revisions = store.revisions().unwrap();
     // A done Task is not a Working Tasks member; nothing is written.
-    assert!(
-        selections::reorder_task(&store, &repo, "task_44444444444444444444444444444444", one)
-            .is_err()
-    );
+    assert!(selections::reorder_task(
+        &store,
+        &repo,
+        "task_44444444444444444444444444444444",
+        one,
+        None
+    )
+    .is_err());
     assert_eq!(store.revisions().unwrap(), revisions);
     assert_eq!(
         selections::view_plan(&store, &repo, None)

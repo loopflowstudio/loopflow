@@ -270,9 +270,9 @@ struct DashboardTile: View {
                     guard let value = values.first else { return false }
                     if workingTasks, let task = TaskOrderDrag.taskID(value) {
                         let source = WorkWorkspaceKey(repository: plan.repository, kind: .task, id: task)
-                        let members = plan.resolution.members
-                        let after = members.firstIndex { $0.work == source }.map { members[$0...].contains(member) }
-                        model.reorderWorkingTask(source, to: member.work.id, after: after)
+                        let side = TaskOrderDrag.side(moving: source, onto: member.work,
+                                                      in: plan.resolution.members.map(\.work))
+                        model.reorderWorkingTask(source, to: member.work.id, side: side)
                         return true
                     }
                     guard arrangeable, let id = plan.dashboardID, !model.dashboardSaving,

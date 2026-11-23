@@ -258,7 +258,11 @@ struct WorkNavigationTests {
     func refusedWorkingTaskDrop(concurrentWrite: Revisions?) async throws {
         let machine = HeldMachine()
         let feed = WorkFeed()
-        let query = RegistryQuery(change: { try await machine.send($0, $1) }, subscribeWork: { await feed.open() }) { _, _ in
+        let query = RegistryQuery(change: { write, requestID in
+            let json = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(write))
+            #expect(json["side"] == .string("before"))
+            return try await machine.send(write, requestID)
+        }, subscribeWork: { await feed.open() }) { _, _ in
             throw RegistryQueryError("Unexpected one-shot read")
         }
         let model = WorkModel(query: query, repoPath: "/repo")
@@ -279,7 +283,7 @@ struct WorkNavigationTests {
         // The sidebar can receive the new order before the grid.
         try await read(["a", "b"], sequence: 1, grid: ["b", "a"])
         let source = try #require(model.sidebarRows.last?.work)
-        let write = model.reorderWorkingTask(source, to: "a", after: false)
+        let write = model.reorderWorkingTask(source, to: "a", side: .before)
         expectOrder(["b", "a"])
         // Another Task arrived while the Machine was deciding the drop.
         try await read(["c", "a", "b"], sequence: 2)
@@ -304,7 +308,11 @@ struct WorkNavigationTests {
     func workingTaskDropAcrossReceipt() async throws {
         let machine = HeldMachine()
         let feed = WorkFeed()
-        let query = RegistryQuery(change: { try await machine.send($0, $1) }, subscribeWork: { await feed.open() }) { _, _ in
+        let query = RegistryQuery(change: { write, requestID in
+            let json = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(write))
+            #expect(json["side"] == .string("after"))
+            return try await machine.send(write, requestID)
+        }, subscribeWork: { await feed.open() }) { _, _ in
             throw RegistryQueryError("Unexpected one-shot read")
         }
         let model = WorkModel(query: query, repoPath: "/repo")
@@ -321,7 +329,7 @@ struct WorkNavigationTests {
         await frame(1, 4, .taskList(initial))
         try await eventually { model.sidebarTaskIDs == ["a", "b", "c"] }
         let source = try #require(model.workingTaskMembers.first?.work)
-        let write = model.reorderWorkingTask(source, to: "c", after: true)
+        let write = model.reorderWorkingTask(source, to: "c", side: .after)
         // The sidebar observed the commit before the answer. A positional swap would undo it.
         await frame(2, 5, .taskList(moved))
         try await eventually { model.taskListReading.value == moved }
@@ -402,7 +410,7 @@ struct WorkNavigationTests {
         drag.move("a", by: 80, at: 90, order: ["a", "b", "c"])
         #expect(drag.landing(on: "b") == .bottom)
         let landed = drag.end()
-        #expect(landed?.target == "b" && landed?.below == true)
+        #expect(landed?.target == "b" && landed?.side == .after)
         #expect(drag.source == nil && drag.target == nil && drag.offset == 0)
     }
 

@@ -1019,18 +1019,20 @@ writes! {
     )?,
 
     /// `lf desktop dashboard move <board>/<member> --destination <destination>`:
-    /// a Dashboard's tile (`query:<id>`) or the shared Task order (`working-tasks`).
+    /// move to the target's slot, or place the member on its chosen side with `--side before|after`.
     #[serde(rename = "desktop.dashboard.move")]
     DesktopDashboardMove {
         directory: PathBuf,
         board: String,
         member: String,
         destination: String,
+        side: Option<loopflow_storage::work::selection::DropSide>,
     } => crate::lf::commands::desktop::DesktopTileRecord;
     {
         board,
         member,
         destination,
+        side,
         ..
     } => super::desktop::save_tile(
         None,
@@ -1038,7 +1040,7 @@ writes! {
         board,
         member,
         "move",
-        &[("destination".to_owned(), destination.clone())].into(),
+        &crate::lf::DashboardCommand::move_args(destination, *side),
     )?,
 
     /// `lf config set <key> <value> <destination flags> --json`: declare a

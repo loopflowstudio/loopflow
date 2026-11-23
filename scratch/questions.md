@@ -12,4 +12,5 @@
   receive different revisions, and the sidebar already shows the landing line.
 - Send that side to the Machine as part of the drop. When its reading is
   newer, use the same side against that order. A destination-only command
-  still moves into the target's current slot.
+  still moves into the target's current slot. The CLI spells the optional side
+  `--side before` or `--side after`.

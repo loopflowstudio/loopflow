@@ -646,8 +646,8 @@ private struct TaskOrderDragging: ViewModifier {
                     .onChanged { drag.move(work.id, by: $0.translation.height, at: $0.location.y,
                                            order: order) }
                     .onEnded { _ in
-                        guard let (target, below) = drag.end() else { return }
-                        model.reorderWorkingTask(work, to: target, after: below)
+                        guard let (target, side) = drag.end() else { return }
+                        model.reorderWorkingTask(work, to: target, side: side)
                     })
                 .overlay(alignment: drag.landing(on: work.id) ?? .top) {
                     if drag.landing(on: work.id) != nil {
@@ -669,13 +669,14 @@ extension TaskOrderDrag {
         var source: String?
         var target: String?
         /// The dragged row lands after the target when it comes from above.
-        var below = false
+        var side: DropSide?
         var offset: CGFloat = 0
         /// Each row's frame in the list, read only while a drag picks its target.
         @ObservationIgnored var frames: [String: CGRect] = [:]
 
         func landing(on row: String) -> Alignment? {
-            target == row ? (below ? .bottom : .top) : nil
+            guard target == row, let side else { return nil }
+            return side == .after ? .bottom : .top
         }
 
         func move(_ row: String, by translation: CGFloat, at y: CGFloat, order: [String]) {
@@ -684,16 +685,14 @@ extension TaskOrderDrag {
             let under = { (id: String) in self.frames[id].map { $0.minY <= y && y < $0.maxY } == true }
             // Another row under the pointer is the target; back over its own row, none.
             if let over = order.first(where: { $0 != row && under($0) }) { target = over } else if under(row) { target = nil }
-            if let target {
-                below = (order.firstIndex(of: row) ?? 0) < (order.firstIndex(of: target) ?? 0)
-            }
+            side = target.flatMap { TaskOrderDrag.side(moving: row, onto: $0, in: order) }
         }
 
         /// Clears the drag in the same frame the caller moves the row.
-        func end() -> (target: String, below: Bool)? {
-            defer { source = nil; target = nil; offset = 0 }
-            guard let target else { return nil }
-            return (target, below)
+        func end() -> (target: String, side: DropSide)? {
+            defer { source = nil; target = nil; side = nil; offset = 0 }
+            guard let target, let side else { return nil }
+            return (target, side)
         }
     }
 }

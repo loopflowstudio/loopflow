@@ -2149,6 +2149,14 @@
       ],
       "type": "object"
     },
+    "DropSide": {
+      "description": "Where a dragged member lands relative to its target.",
+      "enum": [
+        "before",
+        "after"
+      ],
+      "type": "string"
+    },
     "EffectiveSetting": {
       "properties": {
         "candidates": {
@@ -18513,7 +18521,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf desktop dashboard move <board>/<member> --destination <destination>`:\na Dashboard's tile (`query:<id>`) or the shared Task order (`working-tasks`).",
+          "description": "`lf desktop dashboard move <board>/<member> --destination <destination>`:\nmove to the target's slot, or place the member on its chosen side with `--side before|after`.",
           "properties": {
             "board": {
               "type": "string"
@@ -18530,6 +18538,16 @@
             },
             "member": {
               "type": "string"
+            },
+            "side": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/DropSide"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -18537,7 +18555,8 @@
             "directory",
             "board",
             "member",
-            "destination"
+            "destination",
+            "side"
           ],
           "type": "object",
           "x-result": {

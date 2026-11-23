@@ -1,0 +1,17 @@
+at: 19fafad173afca56be7c400c49ee51b6ff644978
+first:
+  - path: docs/surfaces.md
+    why: What File and Start do in New Task
+  - path: swift/LoopflowMac/Views/NewTaskSheet.swift
+    why: Draft, workflow picker, and both actions
+  - path: swift/LoopflowMac/WorkModel.swift
+    why: Filing the request and selecting its backlog
+  - path: swift/LoopflowMac/Views/BacklogView.swift
+    why: Keeping the selection until its row arrives
+  - path: swift/Loopflow/Services/CreationJournal.swift
+    why: When a refused creation can safely be retried
+  - path: swift/LoopflowTests/NewTaskTests.swift
+    why: Follow both buttons from draft to workspace
+  - path: swift/LoopflowTests/CreationSubmissionTests.swift
+    why: Refused, uncertain, and recovered submissions
+hide: []

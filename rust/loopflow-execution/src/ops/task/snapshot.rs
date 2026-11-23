@@ -513,8 +513,6 @@ pub(super) fn diff_snapshot(
 }
 
 pub fn task_workspace_context(task: &Task) -> OpsResult<String> {
-    const MAX_PATCH_TOKENS: usize = 15_000;
-
     if !crate::git::commit_exists(task.worktree()?, &task.base_commit)? {
         return Ok(format!(
             "The recorded Task comparison base {} is unavailable in {}. The saved checkout and its edits remain the working copy. Inspect Git history and the actual files, recover the comparison base through managed sync, and do not treat the missing diff as an empty change.",
@@ -548,7 +546,7 @@ pub fn task_workspace_context(task: &Task) -> OpsResult<String> {
         .join("\n");
     let include_patch = !diff.binary
         && !diff.truncated
-        && crate::prompt::count_tokens(&diff.patch) < MAX_PATCH_TOKENS;
+        && crate::prompt::count_tokens(&diff.patch) < crate::prompt::change::PATCH_INLINE_TOKENS;
     let patch = if include_patch {
         diff.patch.as_str()
     } else {

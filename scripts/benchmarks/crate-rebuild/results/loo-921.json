@@ -1,0 +1,4578 @@
+{
+  "configuration": {
+    "revision": "d52cf7179effe810dc3364f6f5a68fd97791f8e3",
+    "drivers": [
+      "039d5bf6f491dba830e28cf36e0c4fcf87455e249d3448cc668c0ff66235edb8"
+    ],
+    "cohorts": 3,
+    "temporary": "/private/tmp/lf921-b8auuqds",
+    "cache": "/Users/jack/.local/share/loopflow/sccache/ca81ec2a2566efc623692741440d99c710268841/bin/sccache",
+    "cache_sha256": "863da74d6ada53050d5f4a220e77a16777fb863a4aaf44ea0c17f5f0e9577871",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01) (Homebrew)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: aarch64-apple-darwin\nrelease: 1.98.1\nLLVM version: 22.1.8",
+    "cpus": 16,
+    "machine": [
+      "Darwin",
+      "Jacks-MacBook-Pro-2.local",
+      "25.6.0",
+      "Darwin Kernel Version 25.6.0: Wed Nov 11 21:57:36 PST 2026; root:xnu-12377.161.15.702.20~1/RELEASE_ARM64_T6041",
+      "arm64"
+    ],
+    "jobs": 2,
+    "profiles": {
+      "dev": {
+        "debug": 1,
+        "incremental": false,
+        "package": {
+          "sha2": {
+            "opt-level": 3
+          },
+          "libsqlite3-sys": {
+            "opt-level": 2
+          }
+        }
+      },
+      "test": {
+        "debug": 1,
+        "incremental": false,
+        "package": {
+          "sha2": {
+            "opt-level": 3
+          },
+          "libsqlite3-sys": {
+            "opt-level": 2
+          }
+        }
+      }
+    },
+    "filters": {
+      "app": [
+        "loopflow",
+        "lf::tests::task_deletion_accepts_issue_identity"
+      ],
+      "execution": [
+        "loopflow-execution",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates"
+      ]
+    },
+    "created": 1795397719.990722,
+    "trees": {
+      "0_cache_seed": {
+        "path": "/private/tmp/lf921-b8auuqds/0_cache_seed",
+        "setup_seconds": 0.3324235000036424
+      },
+      "0_incremental_seed": {
+        "path": "/private/tmp/lf921-b8auuqds/0_incremental_seed",
+        "setup_seconds": 0.35520870899927104
+      },
+      "1_cache_mixed": {
+        "path": "/private/tmp/lf921-b8auuqds/1_cache_mixed",
+        "setup_seconds": 0.3598822910062154
+      },
+      "1_incremental_mixed": {
+        "path": "/private/tmp/lf921-b8auuqds/1_incremental_mixed",
+        "setup_seconds": 0.32025937500293367
+      },
+      "2_cache_mixed": {
+        "path": "/private/tmp/lf921-b8auuqds/2_cache_mixed",
+        "setup_seconds": 0.3492532919990481
+      },
+      "2_incremental_mixed": {
+        "path": "/private/tmp/lf921-b8auuqds/2_incremental_mixed",
+        "setup_seconds": 0.346999458000937
+      },
+      "3_cache_mixed": {
+        "path": "/private/tmp/lf921-b8auuqds/3_cache_mixed",
+        "setup_seconds": 0.34187083299912047
+      },
+      "3_incremental_mixed": {
+        "path": "/private/tmp/lf921-b8auuqds/3_incremental_mixed",
+        "setup_seconds": 0.33007324999925913
+      },
+      "1_cache_execution": {
+        "path": "/private/tmp/lf921-b8auuqds/1_cache_execution",
+        "setup_seconds": 0.31493399999453686
+      },
+      "2_cache_execution": {
+        "path": "/private/tmp/lf921-b8auuqds/2_cache_execution",
+        "setup_seconds": 0.34350287500274135
+      },
+      "3_cache_execution": {
+        "path": "/private/tmp/lf921-b8auuqds/3_cache_execution",
+        "setup_seconds": 0.3663994169983198
+      }
+    },
+    "calibration_reason": "The November 16 private cache and receipts were lost from /tmp. This run used the corrected wrapper and warmed the application and execution tests in each mode before the three measured cohorts.",
+    "driver_patch_against_revision": "--- a/scripts/benchmarks/crate-rebuild/test_loop.py\n+++ b/scripts/benchmarks/crate-rebuild/test_loop.py\n@@ -18,7 +18,7 @@\n from run import _timing\n \n sys.path.insert(0, str(Path(__file__).resolve().parents[2]))\n-from build_cache import cargo_configuration, configured_cache, inventory_path, refresh  # noqa: E402\n+from build_cache import cargo_configuration, configured_cache, refresh  # noqa: E402\n from resource_envelope import load_policy  # noqa: E402\n \n ROOT = Path(__file__).resolve().parents[3]\n@@ -223,6 +223,13 @@\n             \"trees\": {},\n         }\n         _write(state, config)\n+    # Git invokes the registration hook while adding the measured worktrees.\n+    # Give the hook the same private inventory and socket as the compilers.\n+    env.update(\n+        SCCACHE_DIR=str(root / \"cache\"),\n+        SCCACHE_SERVER_UDS=str(root / \"cache.sock\"),\n+        SCCACHE_CONF=str(root / \"roots.json\"),\n+    )\n     receipts = json.loads(receipts_path.read_text()) if receipts_path.exists() else []\n     # Register every measured root before starting the private daemon. Creating a\n     # worktree is timed separately and included in its first sample's wall time.\n@@ -284,7 +291,7 @@\n         _run([\"git\", \"worktree\", \"add\", \"--detach\", str(tree), revision], ROOT, env)\n         config[\"trees\"][key] = {\"path\": str(tree), \"setup_seconds\": time.monotonic() - start}\n         _write(state, config)\n-    refresh(ROOT, inventory_path())\n+    refresh(ROOT, Path(env[\"SCCACHE_CONF\"]))\n     # cc-rs recognizes this basename and also routes native compiles through it.\n     wrapper = root / \"sccache\"\n     wrapper.write_text(\n@@ -295,8 +302,6 @@\n         RUSTC_WRAPPER=str(wrapper),\n         LOOPFLOW_REBUILD_CACHE=str(cache),\n         LOOPFLOW_REBUILD_ALL=\"1\",\n-        SCCACHE_DIR=str(root / \"cache\"),\n-        SCCACHE_SERVER_UDS=str(root / \"cache.sock\"),\n     )\n     # The private daemon reads the same inventory and Machine environment as Cargo.\n     # Its lifetime is bounded by this command, including failures and interruptions.\n@@ -490,7 +495,6 @@\n         print(f\"Receipts: {output}; experiment state: {root}\", flush=True)\n     if (output / \"passed.json\").exists():\n         shutil.rmtree(root)\n-        refresh(ROOT, inventory_path())\n \n \n if __name__ == \"__main__\":\n"
+  },
+  "warm_cohorts": [
+    1,
+    2,
+    3
+  ],
+  "machine_verification": {
+    "focused_test_revision": "84b1acee5193ab8f1b69bb61d205587dac9432f8",
+    "focused_test": {
+      "args": [
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--jobs",
+        "1",
+        "--",
+        "--exact"
+      ],
+      "seconds_from_worktree_add": 259.7948106250042,
+      "test_passed": true,
+      "jobs": 1,
+      "incremental_state": true,
+      "profile_incremental": true
+    },
+    "shared_cache_occupancy_bytes": 10699623750,
+    "library_check": {
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "-p",
+        "loopflow-definitions",
+        "--jobs",
+        "1"
+      ],
+      "method": "Build dependencies in each fresh target, then apply the same unique library edit in both linked worktrees. Each measured Cargo invocation rebuilt only loopflow-definitions. Counters cover this invocation on the same daemon before and after.",
+      "producer": {
+        "root": "/private/tmp/lf921-reuse-5tg2istn/producer",
+        "revision": "da9133395265887e20a54a1cb4d34e4946018111",
+        "daemon_pid": 79458,
+        "loaded": true,
+        "unique_edit": "fb61f911300a4da38572803105922fc9",
+        "sha256": "05cedab1b83fdc061e12f72855e27b9cb104b5db03fce5e4eb68fab6a690b2f4",
+        "rust_hits": 0,
+        "rust_misses": 1,
+        "rebuilt_units": [
+          "   Compiling loopflow-definitions v0.16.0 (/private/tmp/lf921-reuse-5tg2istn/producer/rust/loopflow-definitions)"
+        ]
+      },
+      "consumer": {
+        "root": "/private/tmp/lf921-reuse-5tg2istn/consumer",
+        "revision": "da9133395265887e20a54a1cb4d34e4946018111",
+        "daemon_pid": 80009,
+        "loaded": true,
+        "unique_edit": "fb61f911300a4da38572803105922fc9",
+        "sha256": "05cedab1b83fdc061e12f72855e27b9cb104b5db03fce5e4eb68fab6a690b2f4",
+        "rust_hits": 1,
+        "rust_misses": 0,
+        "rebuilt_units": [
+          "   Compiling loopflow-definitions v0.16.0 (/private/tmp/lf921-reuse-5tg2istn/consumer/rust/loopflow-definitions)"
+        ]
+      }
+    }
+  },
+  "registration_during_compile": {
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "-p",
+      "loopflow",
+      "--lib",
+      "lf::tests::task_deletion_accepts_issue_identity",
+      "--",
+      "--exact"
+    ],
+    "revision": "9d45e5011471d5ec9fadd90a4328b2ce353251b6",
+    "wrapper": "/Users/jack/.local/share/loopflow/sccache/ca81ec2a2566efc623692741440d99c710268841/bin/sccache",
+    "original_daemon": 18607,
+    "compiler_pid": 41631,
+    "compiler": "loopflow_execution",
+    "registration_and_drain_seconds": 11.016,
+    "compiler_outlived_daemon": true,
+    "cached_control_rlibs": [
+      "libloopflow_model-29739e4850d7142d.rlib"
+    ],
+    "interrupted_rlibs": {
+      "libloopflow_execution-68f3b1fc336118f1.rlib": false
+    },
+    "cargo_exit": 0,
+    "replacement_daemon": 41868,
+    "new_root_loaded": true,
+    "test_passed": true
+  },
+  "background_load": {
+    "min_1m": 15.720703125,
+    "max_1m": 68.66162109375
+  },
+  "host_interruption": null,
+  "disk_interruption": null,
+  "abandoned_attempts": {},
+  "summary": [
+    {
+      "mode": "cache",
+      "case": "app_new",
+      "n": 3,
+      "wall_seconds": {
+        "median": 213.39671875099884,
+        "min": 157.97501024900703,
+        "max": 276.20259654099937
+      },
+      "cpu_seconds": {
+        "median": 312.08000000000004,
+        "min": 246.81,
+        "max": 380.1
+      },
+      "rss_bytes": {
+        "median": 3992682496,
+        "min": 3947872256,
+        "max": 3999678464
+      },
+      "tree_rss_bytes": {
+        "median": 3982065664,
+        "min": 3931111424,
+        "max": 4045864960
+      },
+      "daemon_cpu_seconds": {
+        "median": 0.43999999999999995,
+        "min": 0.3599999999999999,
+        "max": 0.6299999999999999
+      }
+    },
+    {
+      "mode": "cache",
+      "case": "app_edit_2",
+      "n": 3,
+      "wall_seconds": {
+        "median": 39.53126312499808,
+        "min": 31.26480787499895,
+        "max": 49.2315787080006
+      },
+      "cpu_seconds": {
+        "median": 65.13000000000001,
+        "min": 63.25,
+        "max": 79.06
+      },
+      "rss_bytes": {
+        "median": 2847801344,
+        "min": 2835136512,
+        "max": 2862071808
+      },
+      "tree_rss_bytes": {
+        "median": 2881519616,
+        "min": 2812215296,
+        "max": 3219308544
+      },
+      "daemon_cpu_seconds": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "mode": "cache",
+      "case": "app_edit_3",
+      "n": 3,
+      "wall_seconds": {
+        "median": 40.63094504200126,
+        "min": 31.595150291999744,
+        "max": 42.74222987500252
+      },
+      "cpu_seconds": {
+        "median": 63.05,
+        "min": 61.09,
+        "max": 70.11
+      },
+      "rss_bytes": {
+        "median": 2842165248,
+        "min": 2790539264,
+        "max": 2851504128
+      },
+      "tree_rss_bytes": {
+        "median": 2880929792,
+        "min": 2866675712,
+        "max": 2890661888
+      },
+      "daemon_cpu_seconds": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.009999999999999787
+      }
+    },
+    {
+      "mode": "cache",
+      "case": "execution_after_app",
+      "n": 3,
+      "wall_seconds": {
+        "median": 90.2796319170011,
+        "min": 79.97958004099928,
+        "max": 98.90914929200517
+      },
+      "cpu_seconds": {
+        "median": 165.41,
+        "min": 144.67000000000002,
+        "max": 169.03
+      },
+      "rss_bytes": {
+        "median": 6039584768,
+        "min": 6003392512,
+        "max": 6136479744
+      },
+      "tree_rss_bytes": {
+        "median": 5928157184,
+        "min": 5899173888,
+        "max": 5989384192
+      },
+      "daemon_cpu_seconds": {
+        "median": 0.010000000000000231,
+        "min": 0.0,
+        "max": 0.010000000000000675
+      }
+    },
+    {
+      "mode": "cache",
+      "case": "execution_edit_2",
+      "n": 3,
+      "wall_seconds": {
+        "median": 85.71771837500273,
+        "min": 78.88344633400266,
+        "max": 95.00890958300442
+      },
+      "cpu_seconds": {
+        "median": 151.25,
+        "min": 145.46,
+        "max": 156.34
+      },
+      "rss_bytes": {
+        "median": 6001721344,
+        "min": 5957009408,
+        "max": 6005882880
+      },
+      "tree_rss_bytes": {
+        "median": 6033637376,
+        "min": 5948293120,
+        "max": 6035554304
+      },
+      "daemon_cpu_seconds": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "mode": "cache",
+      "case": "execution_edit_3",
+      "n": 3,
+      "wall_seconds": {
+        "median": 73.55091554200044,
+        "min": 71.24975191699923,
+        "max": 83.75735629099654
+      },
+      "cpu_seconds": {
+        "median": 141.56,
+        "min": 141.17000000000002,
+        "max": 148.07000000000002
+      },
+      "rss_bytes": {
+        "median": 6074417152,
+        "min": 6057213952,
+        "max": 6089654272
+      },
+      "tree_rss_bytes": {
+        "median": 6082576384,
+        "min": 5982273536,
+        "max": 6098944000
+      },
+      "daemon_cpu_seconds": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "mode": "cache",
+      "case": "execution_new",
+      "n": 3,
+      "wall_seconds": {
+        "median": 271.89304741699743,
+        "min": 225.62132575000578,
+        "max": 291.7433974169908
+      },
+      "cpu_seconds": {
+        "median": 359.29,
+        "min": 334.18,
+        "max": 366.45000000000005
+      },
+      "rss_bytes": {
+        "median": 6056067072,
+        "min": 6026592256,
+        "max": 6119243776
+      },
+      "tree_rss_bytes": {
+        "median": 6108332032,
+        "min": 6084788224,
+        "max": 6139674624
+      },
+      "daemon_cpu_seconds": {
+        "median": 0.4099999999999997,
+        "min": 0.40000000000000036,
+        "max": 0.41000000000000014
+      }
+    },
+    {
+      "mode": "incremental",
+      "case": "app_new",
+      "n": 3,
+      "wall_seconds": {
+        "median": 210.43836445799388,
+        "min": 200.89556404200266,
+        "max": 306.05196816600073
+      },
+      "cpu_seconds": {
+        "median": 343.03000000000003,
+        "min": 320.0,
+        "max": 386.57
+      },
+      "rss_bytes": {
+        "median": 3667623936,
+        "min": 3638476800,
+        "max": 3669049344
+      },
+      "tree_rss_bytes": {
+        "median": 3756130304,
+        "min": 3565649920,
+        "max": 3770859520
+      },
+      "daemon_cpu_seconds": {
+        "median": 0.31999999999999984,
+        "min": 0.30000000000000027,
+        "max": 0.33000000000000007
+      }
+    },
+    {
+      "mode": "incremental",
+      "case": "app_edit_2",
+      "n": 3,
+      "wall_seconds": {
+        "median": 8.619687500002328,
+        "min": 7.286600832994736,
+        "max": 18.639964125002734
+      },
+      "cpu_seconds": {
+        "median": 8.870000000000001,
+        "min": 7.51,
+        "max": 13.83
+      },
+      "rss_bytes": {
+        "median": 1753120768,
+        "min": 1749303296,
+        "max": 1753890816
+      },
+      "tree_rss_bytes": {
+        "median": 1761902592,
+        "min": 1614381056,
+        "max": 1889959936
+      },
+      "daemon_cpu_seconds": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.009999999999999787
+      }
+    },
+    {
+      "mode": "incremental",
+      "case": "app_edit_3",
+      "n": 3,
+      "wall_seconds": {
+        "median": 8.975562208004703,
+        "min": 6.535704417001398,
+        "max": 15.702965958997083
+      },
+      "cpu_seconds": {
+        "median": 9.04,
+        "min": 6.75,
+        "max": 12.190000000000001
+      },
+      "rss_bytes": {
+        "median": 1661812736,
+        "min": 1660928000,
+        "max": 1662959616
+      },
+      "tree_rss_bytes": {
+        "median": 2287403008,
+        "min": 1892122624,
+        "max": 2298806272
+      },
+      "daemon_cpu_seconds": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "mode": "incremental",
+      "case": "execution_after_app",
+      "n": 3,
+      "wall_seconds": {
+        "median": 107.25151100000221,
+        "min": 74.84831370900065,
+        "max": 108.03941429100087
+      },
+      "cpu_seconds": {
+        "median": 173.07,
+        "min": 141.39999999999998,
+        "max": 183.72
+      },
+      "rss_bytes": {
+        "median": 5735284736,
+        "min": 5704187904,
+        "max": 5737086976
+      },
+      "tree_rss_bytes": {
+        "median": 5669126144,
+        "min": 5658427392,
+        "max": 5832359936
+      },
+      "daemon_cpu_seconds": {
+        "median": 0.009999999999999787,
+        "min": 0.0,
+        "max": 0.010000000000000231
+      }
+    },
+    {
+      "mode": "incremental",
+      "case": "execution_edit_2",
+      "n": 3,
+      "wall_seconds": {
+        "median": 15.337008583999705,
+        "min": 11.788674333001836,
+        "max": 16.870120291001513
+      },
+      "cpu_seconds": {
+        "median": 14.059999999999999,
+        "min": 11.700000000000001,
+        "max": 15.2
+      },
+      "rss_bytes": {
+        "median": 3563962368,
+        "min": 3563110400,
+        "max": 3564027904
+      },
+      "tree_rss_bytes": {
+        "median": 3572678656,
+        "min": 3413082112,
+        "max": 3663118336
+      },
+      "daemon_cpu_seconds": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "mode": "incremental",
+      "case": "execution_edit_3",
+      "n": 3,
+      "wall_seconds": {
+        "median": 16.56584387500334,
+        "min": 11.623174250002194,
+        "max": 19.888040792000538
+      },
+      "cpu_seconds": {
+        "median": 15.780000000000001,
+        "min": 11.51,
+        "max": 16.85
+      },
+      "rss_bytes": {
+        "median": 3475488768,
+        "min": 3475390464,
+        "max": 3476209664
+      },
+      "tree_rss_bytes": {
+        "median": 3319791616,
+        "min": 3313778688,
+        "max": 3342237696
+      },
+      "daemon_cpu_seconds": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.009999999999999787
+      }
+    }
+  ],
+  "three_edit_totals": [
+    {
+      "owner": "app",
+      "mode": "cache",
+      "median": 284.52313216799666,
+      "min": 229.87076316600724,
+      "max": 368.1764051240025
+    },
+    {
+      "owner": "app",
+      "mode": "incremental",
+      "median": 228.03361416600092,
+      "min": 214.7178692919988,
+      "max": 340.39489825000055
+    },
+    {
+      "owner": "execution",
+      "mode": "cache",
+      "median": 259.75470658300037,
+      "min": 232.41394191700238,
+      "max": 265.1678107920088
+    },
+    {
+      "owner": "execution",
+      "mode": "incremental",
+      "median": 131.4512628740049,
+      "min": 111.6064747920027,
+      "max": 139.15436345900525
+    }
+  ],
+  "default_incremental": true,
+  "concurrent_worktree_capacity": null,
+  "capacity_note": "Unmeasured; all Cargo commands ran serially",
+  "shared_cache_limit": "The shared Machine cache reached its 10 GiB cap during LOO-921 (2026-11-16). These isolated warm-cache samples measure the cost of a surviving entry; they do not establish that an entry survives eviction between worktrees on the shared cache.",
+  "method": "Workspace wrapper records all compiler intervals. Cache deltas are attributed to a compiler only when no other interval overlaps. Two statistics RPCs per workspace compiler are included in timings. Test compiler time includes linking. Memory is sampled every second; sampled peak can miss shorter peaks. Daemon CPU is separate. Published cache observations count all loaded roots and name the measured worktrees.",
+  "measurement_drivers": [
+    "039d5bf6f491dba830e28cf36e0c4fcf87455e249d3448cc668c0ff66235edb8"
+  ],
+  "report_sha256": "ef806d4311d822dd32fd80fda053dee1db1ef7fba9f9d3f51686e09ae03616cd",
+  "receipts": [
+    {
+      "cohort": 0,
+      "mode": "cache",
+      "case": "seed_app",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/0_cache_seed",
+      "edit": null,
+      "edit_suffix": "0_cache_seed_app_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 322.58949887500785,
+      "setup_seconds": 0.3324235000036424,
+      "cpu_seconds": 537.1899999999999,
+      "rss_bytes": 4014702592,
+      "tree_rss_bytes": 4094754816,
+      "daemon_cpu_seconds": 1.3,
+      "load_before": [
+        18.2958984375,
+        37.7333984375,
+        37.3818359375
+      ],
+      "load_after": [
+        63.888671875,
+        39.5263671875,
+        36.98046875
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 302,
+      "non_cacheable": {
+        "-o": 3,
+        "crate-type (bin)": 42,
+        "missing input": 3,
+        "-": 3,
+        "crate-type": 1,
+        "crate-type (proc-macro)": 15
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "pid": 95214,
+          "started": 1795397858.651511,
+          "finished": 1795397860.9256399,
+          "kind": "compile",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 2.209,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_storage",
+          "pid": 99675,
+          "started": 1795397901.059569,
+          "finished": 1795397914.9137018,
+          "kind": "compile",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 13.849,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_terminal",
+          "pid": 2208,
+          "started": 1795397924.128458,
+          "finished": 1795397924.5845199,
+          "kind": "compile",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.447,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_definitions",
+          "pid": 2240,
+          "started": 1795397924.6239638,
+          "finished": 1795397924.969593,
+          "kind": "compile",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.338,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_test_support",
+          "pid": 2309,
+          "started": 1795397925.7049851,
+          "finished": 1795397926.172287,
+          "kind": "compile",
+          "package": "loopflow-test-support",
+          "crate_type": "lib",
+          "seconds": 0.458,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_execution",
+          "pid": 2689,
+          "started": 1795397930.171075,
+          "finished": 1795397999.476968,
+          "kind": "compile",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 69.391,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow",
+          "pid": 6543,
+          "started": 1795397999.541104,
+          "finished": 1795398044.023623,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 44.475,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/0_cache_seed/target/debug/deps/loopflow-c1a14bb19b35bb83"
+      ]
+    },
+    {
+      "cohort": 0,
+      "mode": "cache",
+      "case": "seed_execution",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/0_cache_seed",
+      "edit": null,
+      "edit_suffix": "0_cache_seed_execution_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 151.00679091699567,
+      "setup_seconds": 0,
+      "cpu_seconds": 224.9,
+      "rss_bytes": 5997805568,
+      "tree_rss_bytes": 6106333184,
+      "daemon_cpu_seconds": 0.07000000000000006,
+      "load_before": [
+        63.888671875,
+        39.5263671875,
+        36.98046875
+      ],
+      "load_after": [
+        90.7041015625,
+        60.234375,
+        45.95751953125
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 10,
+      "non_cacheable": {
+        "crate-type (bin)": 2,
+        "crate-type": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 10381,
+          "started": 1795398064.6353521,
+          "finished": 1795398195.116652,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 130.467,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/0_cache_seed/target/debug/deps/loopflow_execution-11ea82c0317abe90"
+      ]
+    },
+    {
+      "cohort": 0,
+      "mode": "incremental",
+      "case": "seed_app",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/0_incremental_seed",
+      "edit": null,
+      "edit_suffix": "0_incremental_seed_app_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 333.8697328760027,
+      "setup_seconds": 0.35520870899927104,
+      "cpu_seconds": 536.93,
+      "rss_bytes": 3733798912,
+      "tree_rss_bytes": 3746136064,
+      "daemon_cpu_seconds": 1.0699999999999998,
+      "load_before": [
+        90.7041015625,
+        60.234375,
+        45.95751953125
+      ],
+      "load_after": [
+        22.93017578125,
+        44.3681640625,
+        44.306640625
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 296,
+      "non_cacheable": {
+        "missing input": 3,
+        "crate-type (proc-macro)": 15,
+        "incremental": 7,
+        "-o": 3,
+        "-": 3,
+        "crate-type (bin)": 42
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "pid": 30658,
+          "started": 1795398391.219276,
+          "finished": 1795398393.711328,
+          "kind": "compile",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 2.481,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_storage",
+          "pid": 33157,
+          "started": 1795398422.259304,
+          "finished": 1795398433.519852,
+          "kind": "compile",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 11.254,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_terminal",
+          "pid": 34091,
+          "started": 1795398433.933307,
+          "finished": 1795398434.198227,
+          "kind": "compile",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.259,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_definitions",
+          "pid": 34102,
+          "started": 1795398434.043962,
+          "finished": 1795398434.3168352,
+          "kind": "compile",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.267,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_test_support",
+          "pid": 34185,
+          "started": 1795398434.6808882,
+          "finished": 1795398435.039385,
+          "kind": "compile",
+          "package": "loopflow-test-support",
+          "crate_type": "lib",
+          "seconds": 0.354,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_execution",
+          "pid": 34595,
+          "started": 1795398437.948211,
+          "finished": 1795398497.2310379,
+          "kind": "compile",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 59.278,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow",
+          "pid": 39452,
+          "started": 1795398497.274486,
+          "finished": 1795398530.840728,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 33.56,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/0_incremental_seed/target/debug/deps/loopflow-e9414e8b4cd097f4"
+      ]
+    },
+    {
+      "cohort": 0,
+      "mode": "incremental",
+      "case": "seed_execution",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/0_incremental_seed",
+      "edit": null,
+      "edit_suffix": "0_incremental_seed_execution_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 67.74576716699812,
+      "setup_seconds": 0,
+      "cpu_seconds": 147.17000000000002,
+      "rss_bytes": 5695275008,
+      "tree_rss_bytes": 5641961472,
+      "daemon_cpu_seconds": 0.040000000000000036,
+      "load_before": [
+        22.93017578125,
+        44.3681640625,
+        44.306640625
+      ],
+      "load_after": [
+        20.68310546875,
+        38.81640625,
+        42.18359375
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 10,
+      "non_cacheable": {
+        "incremental": 1,
+        "crate-type (bin)": 2
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 43486,
+          "started": 1795398538.9481568,
+          "finished": 1795398598.567223,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 59.615,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/0_incremental_seed/target/debug/deps/loopflow_execution-6f439dd516e7b961"
+      ]
+    },
+    {
+      "cohort": 1,
+      "mode": "cache",
+      "case": "app_new",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/1_cache_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "1_cache_app_new_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 157.97501024900703,
+      "setup_seconds": 0.3598822910062154,
+      "cpu_seconds": 246.81,
+      "rss_bytes": 3947872256,
+      "tree_rss_bytes": 4045864960,
+      "daemon_cpu_seconds": 0.3599999999999999,
+      "load_before": [
+        20.68310546875,
+        38.81640625,
+        42.18359375
+      ],
+      "load_after": [
+        16.447265625,
+        30.23876953125,
+        38.14892578125
+      ],
+      "rust_cache_hits": 300,
+      "rust_cache_misses": 2,
+      "non_cacheable": {
+        "missing input": 3,
+        "-o": 3,
+        "crate-type (bin)": 42,
+        "crate-type (proc-macro)": 15,
+        "-": 3,
+        "crate-type": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "pid": 62155,
+          "started": 1795398661.5304809,
+          "finished": 1795398661.854602,
+          "kind": "compile",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.317,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_storage",
+          "pid": 66668,
+          "started": 1795398683.5664,
+          "finished": 1795398684.347296,
+          "kind": "compile",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 0.776,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_terminal",
+          "pid": 67189,
+          "started": 1795398686.219616,
+          "finished": 1795398686.3449678,
+          "kind": "compile",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.121,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_definitions",
+          "pid": 67243,
+          "started": 1795398686.564787,
+          "finished": 1795398686.67825,
+          "kind": "compile",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.109,
+          "exit_code": 0,
+          "cache_hits": 1,
+          "cache_misses": 0,
+          "non_cacheable": {},
+          "overlapped": false
+        },
+        {
+          "crate": "loopflow_test_support",
+          "pid": 67320,
+          "started": 1795398687.0843441,
+          "finished": 1795398687.3261828,
+          "kind": "compile",
+          "package": "loopflow-test-support",
+          "crate_type": "lib",
+          "seconds": 0.237,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_execution",
+          "pid": 69265,
+          "started": 1795398697.4252028,
+          "finished": 1795398733.1515641,
+          "kind": "compile",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 35.723,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {},
+          "overlapped": false
+        },
+        {
+          "crate": "loopflow",
+          "pid": 73216,
+          "started": 1795398733.1815522,
+          "finished": 1795398757.4396338,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 24.255,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/1_cache_mixed/target/debug/deps/loopflow-c1a14bb19b35bb83"
+      ]
+    },
+    {
+      "cohort": 1,
+      "mode": "cache",
+      "case": "app_edit_2",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/1_cache_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "1_cache_app_edit_2_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 31.26480787499895,
+      "setup_seconds": 0,
+      "cpu_seconds": 63.25,
+      "rss_bytes": 2847801344,
+      "tree_rss_bytes": 2812215296,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        16.447265625,
+        30.23876953125,
+        38.14892578125
+      ],
+      "load_after": [
+        17.92041015625,
+        29.01416015625,
+        37.37841796875
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "pid": 76431,
+          "started": 1795398760.104618,
+          "finished": 1795398788.520511,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 28.409,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/1_cache_mixed/target/debug/deps/loopflow-c1a14bb19b35bb83"
+      ]
+    },
+    {
+      "cohort": 1,
+      "mode": "cache",
+      "case": "app_edit_3",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/1_cache_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "1_cache_app_edit_3_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 40.63094504200126,
+      "setup_seconds": 0,
+      "cpu_seconds": 63.05,
+      "rss_bytes": 2790539264,
+      "tree_rss_bytes": 2890661888,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        17.92041015625,
+        29.01416015625,
+        37.37841796875
+      ],
+      "load_after": [
+        19.6904296875,
+        28.07421875,
+        36.64892578125
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "pid": 81590,
+          "started": 1795398791.463281,
+          "finished": 1795398829.2906728,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 37.822,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/1_cache_mixed/target/debug/deps/loopflow-c1a14bb19b35bb83"
+      ]
+    },
+    {
+      "cohort": 1,
+      "mode": "cache",
+      "case": "execution_after_app",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/1_cache_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "1_cache_execution_after_app_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 98.90914929200517,
+      "setup_seconds": 0,
+      "cpu_seconds": 169.03,
+      "rss_bytes": 6136479744,
+      "tree_rss_bytes": 5989384192,
+      "daemon_cpu_seconds": 0.010000000000000231,
+      "load_before": [
+        19.6904296875,
+        28.07421875,
+        36.64892578125
+      ],
+      "load_after": [
+        43.3544921875,
+        33.56201171875,
+        37.78662109375
+      ],
+      "rust_cache_hits": 10,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type": 1,
+        "crate-type (bin)": 2
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 86154,
+          "started": 1795398834.74842,
+          "finished": 1795398928.3609369,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 93.61,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/1_cache_mixed/target/debug/deps/loopflow_execution-11ea82c0317abe90"
+      ]
+    },
+    {
+      "cohort": 1,
+      "mode": "cache",
+      "case": "execution_edit_2",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/1_cache_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "1_cache_execution_edit_2_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 95.00890958300442,
+      "setup_seconds": 0,
+      "cpu_seconds": 156.34,
+      "rss_bytes": 6005882880,
+      "tree_rss_bytes": 6033637376,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        43.3544921875,
+        33.56201171875,
+        37.78662109375
+      ],
+      "load_after": [
+        28.6044921875,
+        31.60400390625,
+        36.6181640625
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 93839,
+          "started": 1795398931.33659,
+          "finished": 1795399023.517589,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 92.166,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/1_cache_mixed/target/debug/deps/loopflow_execution-11ea82c0317abe90"
+      ]
+    },
+    {
+      "cohort": 1,
+      "mode": "cache",
+      "case": "execution_edit_3",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/1_cache_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "1_cache_execution_edit_3_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 71.24975191699923,
+      "setup_seconds": 0,
+      "cpu_seconds": 141.17000000000002,
+      "rss_bytes": 6074417152,
+      "tree_rss_bytes": 5982273536,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        28.6044921875,
+        31.60400390625,
+        36.6181640625
+      ],
+      "load_after": [
+        42.12744140625,
+        33.69873046875,
+        36.923828125
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 98484,
+          "started": 1795399025.811641,
+          "finished": 1795399094.8626502,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 68.998,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/1_cache_mixed/target/debug/deps/loopflow_execution-11ea82c0317abe90"
+      ]
+    },
+    {
+      "cohort": 1,
+      "mode": "incremental",
+      "case": "app_new",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/1_incremental_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "1_incremental_app_new_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 200.89556404200266,
+      "setup_seconds": 0.32025937500293367,
+      "cpu_seconds": 320.0,
+      "rss_bytes": 3638476800,
+      "tree_rss_bytes": 3565649920,
+      "daemon_cpu_seconds": 0.31999999999999984,
+      "load_before": [
+        42.12744140625,
+        33.69873046875,
+        36.923828125
+      ],
+      "load_after": [
+        22.2734375,
+        27.43994140625,
+        33.49365234375
+      ],
+      "rust_cache_hits": 296,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type (proc-macro)": 15,
+        "missing input": 3,
+        "-": 3,
+        "-o": 3,
+        "incremental": 7,
+        "crate-type (bin)": 42
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "pid": 12317,
+          "started": 1795399171.362855,
+          "finished": 1795399172.159296,
+          "kind": "compile",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.791,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_storage",
+          "pid": 15386,
+          "started": 1795399193.202881,
+          "finished": 1795399203.856986,
+          "kind": "compile",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 10.65,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_terminal",
+          "pid": 16896,
+          "started": 1795399208.964303,
+          "finished": 1795399209.682796,
+          "kind": "compile",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.706,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_definitions",
+          "pid": 16954,
+          "started": 1795399210.356172,
+          "finished": 1795399211.7515829,
+          "kind": "compile",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 1.383,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_test_support",
+          "pid": 17105,
+          "started": 1795399212.8220851,
+          "finished": 1795399213.538514,
+          "kind": "compile",
+          "package": "loopflow-test-support",
+          "crate_type": "lib",
+          "seconds": 0.706,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_execution",
+          "pid": 17614,
+          "started": 1795399218.6170619,
+          "finished": 1795399268.500841,
+          "kind": "compile",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 49.878,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow",
+          "pid": 20027,
+          "started": 1795399268.530466,
+          "finished": 1795399296.156259,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 27.621,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/1_incremental_mixed/target/debug/deps/loopflow-e9414e8b4cd097f4"
+      ]
+    },
+    {
+      "cohort": 1,
+      "mode": "incremental",
+      "case": "app_edit_2",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/1_incremental_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "1_incremental_app_edit_2_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 7.286600832994736,
+      "setup_seconds": 0,
+      "cpu_seconds": 7.51,
+      "rss_bytes": 1753120768,
+      "tree_rss_bytes": 1761902592,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        22.2734375,
+        27.43994140625,
+        33.49365234375
+      ],
+      "load_after": [
+        20.0849609375,
+        26.7998046875,
+        33.1953125
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "incremental": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "pid": 21836,
+          "started": 1795399298.746898,
+          "finished": 1795399303.511619,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 4.76,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/1_incremental_mixed/target/debug/deps/loopflow-e9414e8b4cd097f4"
+      ]
+    },
+    {
+      "cohort": 1,
+      "mode": "incremental",
+      "case": "app_edit_3",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/1_incremental_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "1_incremental_app_edit_3_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 6.535704417001398,
+      "setup_seconds": 0,
+      "cpu_seconds": 6.75,
+      "rss_bytes": 1662959616,
+      "tree_rss_bytes": 1892122624,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        20.0849609375,
+        26.7998046875,
+        33.1953125
+      ],
+      "load_after": [
+        19.197265625,
+        26.50390625,
+        33.05322265625
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "incremental": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "pid": 22455,
+          "started": 1795399306.1777012,
+          "finished": 1795399310.0982468,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 3.916,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/1_incremental_mixed/target/debug/deps/loopflow-e9414e8b4cd097f4"
+      ]
+    },
+    {
+      "cohort": 1,
+      "mode": "incremental",
+      "case": "execution_after_app",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/1_incremental_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "1_incremental_execution_after_app_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 74.84831370900065,
+      "setup_seconds": 0,
+      "cpu_seconds": 141.39999999999998,
+      "rss_bytes": 5737086976,
+      "tree_rss_bytes": 5658427392,
+      "daemon_cpu_seconds": 0.010000000000000231,
+      "load_before": [
+        19.197265625,
+        26.50390625,
+        33.05322265625
+      ],
+      "load_after": [
+        26.84765625,
+        26.951171875,
+        32.65478515625
+      ],
+      "rust_cache_hits": 10,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type (bin)": 2,
+        "incremental": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 23553,
+          "started": 1795399314.63806,
+          "finished": 1795399385.06333,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 70.422,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/1_incremental_mixed/target/debug/deps/loopflow_execution-6f439dd516e7b961"
+      ]
+    },
+    {
+      "cohort": 1,
+      "mode": "incremental",
+      "case": "execution_edit_2",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/1_incremental_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "1_incremental_execution_edit_2_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 16.870120291001513,
+      "setup_seconds": 0,
+      "cpu_seconds": 15.2,
+      "rss_bytes": 3563110400,
+      "tree_rss_bytes": 3663118336,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        26.84765625,
+        26.951171875,
+        32.65478515625
+      ],
+      "load_after": [
+        23.18212890625,
+        26.13623046875,
+        32.26416015625
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "incremental": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 29219,
+          "started": 1795399387.376843,
+          "finished": 1795399402.1598258,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 14.779,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/1_incremental_mixed/target/debug/deps/loopflow_execution-6f439dd516e7b961"
+      ]
+    },
+    {
+      "cohort": 1,
+      "mode": "incremental",
+      "case": "execution_edit_3",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/1_incremental_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "1_incremental_execution_edit_3_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 19.888040792000538,
+      "setup_seconds": 0,
+      "cpu_seconds": 16.85,
+      "rss_bytes": 3475488768,
+      "tree_rss_bytes": 3342237696,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        23.18212890625,
+        26.13623046875,
+        32.26416015625
+      ],
+      "load_after": [
+        33.9013671875,
+        28.22314453125,
+        32.85986328125
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "incremental": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 29998,
+          "started": 1795399404.7109618,
+          "finished": 1795399422.0325031,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 17.298,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/1_incremental_mixed/target/debug/deps/loopflow_execution-6f439dd516e7b961"
+      ]
+    },
+    {
+      "cohort": 1,
+      "mode": "cache",
+      "case": "execution_new",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/1_cache_execution",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "1_cache_execution_new_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 291.7433974169908,
+      "setup_seconds": 0.31493399999453686,
+      "cpu_seconds": 359.29,
+      "rss_bytes": 6026592256,
+      "tree_rss_bytes": 6108332032,
+      "daemon_cpu_seconds": 0.4099999999999997,
+      "load_before": [
+        35.5908203125,
+        28.66748046875,
+        32.9892578125
+      ],
+      "load_after": [
+        30.80322265625,
+        32.56005859375,
+        33.9697265625
+      ],
+      "rust_cache_hits": 300,
+      "rust_cache_misses": 1,
+      "non_cacheable": {
+        "crate-type (bin)": 41,
+        "missing input": 3,
+        "-o": 3,
+        "crate-type": 1,
+        "crate-type (proc-macro)": 15,
+        "-": 3
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "pid": 42617,
+          "started": 1795399582.0964549,
+          "finished": 1795399582.880764,
+          "kind": "compile",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.779,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_storage",
+          "pid": 45123,
+          "started": 1795399614.6252968,
+          "finished": 1795399616.117337,
+          "kind": "compile",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 1.479,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_terminal",
+          "pid": 45680,
+          "started": 1795399620.16724,
+          "finished": 1795399620.450075,
+          "kind": "compile",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.272,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_definitions",
+          "pid": 45787,
+          "started": 1795399621.061038,
+          "finished": 1795399621.311201,
+          "kind": "compile",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.244,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_test_support",
+          "pid": 45825,
+          "started": 1795399621.363384,
+          "finished": 1795399622.103589,
+          "kind": "compile",
+          "package": "loopflow-test-support",
+          "crate_type": "lib",
+          "seconds": 0.731,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_execution",
+          "pid": 46317,
+          "started": 1795399627.204627,
+          "finished": 1795399715.182615,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 87.972,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/1_cache_execution/target/debug/deps/loopflow_execution-11ea82c0317abe90"
+      ]
+    },
+    {
+      "cohort": 2,
+      "mode": "incremental",
+      "case": "app_new",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/2_incremental_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "2_incremental_app_new_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 306.05196816600073,
+      "setup_seconds": 0.346999458000937,
+      "cpu_seconds": 386.57,
+      "rss_bytes": 3667623936,
+      "tree_rss_bytes": 3770859520,
+      "daemon_cpu_seconds": 0.30000000000000027,
+      "load_before": [
+        30.80322265625,
+        32.56005859375,
+        33.9697265625
+      ],
+      "load_after": [
+        68.66162109375,
+        46.9833984375,
+        39.7529296875
+      ],
+      "rust_cache_hits": 296,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type (proc-macro)": 15,
+        "incremental": 7,
+        "-": 3,
+        "missing input": 3,
+        "-o": 3,
+        "crate-type (bin)": 42
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "pid": 60337,
+          "started": 1795399803.495137,
+          "finished": 1795399804.471493,
+          "kind": "compile",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.972,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_storage",
+          "pid": 64191,
+          "started": 1795399826.551393,
+          "finished": 1795399841.782944,
+          "kind": "compile",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 15.227,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_terminal",
+          "pid": 66438,
+          "started": 1795399845.0020428,
+          "finished": 1795399845.295367,
+          "kind": "compile",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.287,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_definitions",
+          "pid": 66525,
+          "started": 1795399845.542327,
+          "finished": 1795399845.895037,
+          "kind": "compile",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.345,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        },
+        {
+          "crate": "loopflow_test_support",
+          "pid": 66685,
+          "started": 1795399846.9078982,
+          "finished": 1795399847.2916439,
+          "kind": "compile",
+          "package": "loopflow-test-support",
+          "crate_type": "lib",
+          "seconds": 0.376,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_execution",
+          "pid": 66976,
+          "started": 1795399848.819015,
+          "finished": 1795399930.372854,
+          "kind": "compile",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 81.551,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow",
+          "pid": 71105,
+          "started": 1795399930.430885,
+          "finished": 1795400022.003794,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 91.487,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/2_incremental_mixed/target/debug/deps/loopflow-e9414e8b4cd097f4"
+      ]
+    },
+    {
+      "cohort": 2,
+      "mode": "incremental",
+      "case": "app_edit_2",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/2_incremental_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "2_incremental_app_edit_2_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 18.639964125002734,
+      "setup_seconds": 0,
+      "cpu_seconds": 13.83,
+      "rss_bytes": 1749303296,
+      "tree_rss_bytes": 1889959936,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        68.66162109375,
+        46.9833984375,
+        39.7529296875
+      ],
+      "load_after": [
+        61.38134765625,
+        46.73779296875,
+        39.83251953125
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "incremental": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "pid": 75124,
+          "started": 1795400025.981788,
+          "finished": 1795400041.2037408,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 15.211,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/2_incremental_mixed/target/debug/deps/loopflow-e9414e8b4cd097f4"
+      ]
+    },
+    {
+      "cohort": 2,
+      "mode": "incremental",
+      "case": "app_edit_3",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/2_incremental_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "2_incremental_app_edit_3_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 15.702965958997083,
+      "setup_seconds": 0,
+      "cpu_seconds": 12.190000000000001,
+      "rss_bytes": 1660928000,
+      "tree_rss_bytes": 2287403008,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        61.38134765625,
+        46.73779296875,
+        39.83251953125
+      ],
+      "load_after": [
+        63.35205078125,
+        47.7353515625,
+        40.2998046875
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "incremental": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "pid": 75848,
+          "started": 1795400044.796607,
+          "finished": 1795400056.850108,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 12.048,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/2_incremental_mixed/target/debug/deps/loopflow-e9414e8b4cd097f4"
+      ]
+    },
+    {
+      "cohort": 2,
+      "mode": "incremental",
+      "case": "execution_after_app",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/2_incremental_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "2_incremental_execution_after_app_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 108.03941429100087,
+      "setup_seconds": 0,
+      "cpu_seconds": 183.72,
+      "rss_bytes": 5735284736,
+      "tree_rss_bytes": 5832359936,
+      "daemon_cpu_seconds": 0.009999999999999787,
+      "load_before": [
+        63.35205078125,
+        47.7353515625,
+        40.2998046875
+      ],
+      "load_after": [
+        35.6875,
+        41.4970703125,
+        38.67431640625
+      ],
+      "rust_cache_hits": 10,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "incremental": 1,
+        "crate-type (bin)": 2
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 76775,
+          "started": 1795400065.107787,
+          "finished": 1795400165.364505,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 100.248,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/2_incremental_mixed/target/debug/deps/loopflow_execution-6f439dd516e7b961"
+      ]
+    },
+    {
+      "cohort": 2,
+      "mode": "incremental",
+      "case": "execution_edit_2",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/2_incremental_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "2_incremental_execution_edit_2_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 11.788674333001836,
+      "setup_seconds": 0,
+      "cpu_seconds": 11.700000000000001,
+      "rss_bytes": 3564027904,
+      "tree_rss_bytes": 3572678656,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        35.6875,
+        41.4970703125,
+        38.67431640625
+      ],
+      "load_after": [
+        32.25048828125,
+        40.560546875,
+        38.3740234375
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "incremental": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 82616,
+          "started": 1795400167.4218528,
+          "finished": 1795400176.9667552,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 9.54,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/2_incremental_mixed/target/debug/deps/loopflow_execution-6f439dd516e7b961"
+      ]
+    },
+    {
+      "cohort": 2,
+      "mode": "incremental",
+      "case": "execution_edit_3",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/2_incremental_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "2_incremental_execution_edit_3_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 11.623174250002194,
+      "setup_seconds": 0,
+      "cpu_seconds": 11.51,
+      "rss_bytes": 3476209664,
+      "tree_rss_bytes": 3313778688,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        32.25048828125,
+        40.560546875,
+        38.3740234375
+      ],
+      "load_after": [
+        28.9091796875,
+        39.5703125,
+        38.0478515625
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "incremental": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 83276,
+          "started": 1795400179.255614,
+          "finished": 1795400188.7757719,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 9.515,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/2_incremental_mixed/target/debug/deps/loopflow_execution-6f439dd516e7b961"
+      ]
+    },
+    {
+      "cohort": 2,
+      "mode": "cache",
+      "case": "app_new",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/2_cache_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "2_cache_app_new_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 213.39671875099884,
+      "setup_seconds": 0.3492532919990481,
+      "cpu_seconds": 312.08000000000004,
+      "rss_bytes": 3992682496,
+      "tree_rss_bytes": 3982065664,
+      "daemon_cpu_seconds": 0.43999999999999995,
+      "load_before": [
+        27.154296875,
+        39.029296875,
+        37.86572265625
+      ],
+      "load_after": [
+        37.4150390625,
+        36.79931640625,
+        37.01953125
+      ],
+      "rust_cache_hits": 300,
+      "rust_cache_misses": 2,
+      "non_cacheable": {
+        "crate-type": 1,
+        "-o": 3,
+        "-": 3,
+        "crate-type (bin)": 42,
+        "missing input": 3,
+        "crate-type (proc-macro)": 15
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "pid": 91672,
+          "started": 1795400249.5533812,
+          "finished": 1795400249.871219,
+          "kind": "compile",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.309,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_storage",
+          "pid": 95073,
+          "started": 1795400280.268484,
+          "finished": 1795400282.395651,
+          "kind": "compile",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 2.118,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_terminal",
+          "pid": 95766,
+          "started": 1795400289.2626219,
+          "finished": 1795400289.583526,
+          "kind": "compile",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.316,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_definitions",
+          "pid": 95807,
+          "started": 1795400290.084332,
+          "finished": 1795400290.4237099,
+          "kind": "compile",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.335,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_test_support",
+          "pid": 95917,
+          "started": 1795400291.174498,
+          "finished": 1795400291.6192589,
+          "kind": "compile",
+          "package": "loopflow-test-support",
+          "crate_type": "lib",
+          "seconds": 0.436,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_execution",
+          "pid": 97086,
+          "started": 1795400304.4416971,
+          "finished": 1795400364.641042,
+          "kind": "compile",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 60.172,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {},
+          "overlapped": false
+        },
+        {
+          "crate": "loopflow",
+          "pid": 99903,
+          "started": 1795400364.707985,
+          "finished": 1795400402.800889,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 38.088,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/2_cache_mixed/target/debug/deps/loopflow-c1a14bb19b35bb83"
+      ]
+    },
+    {
+      "cohort": 2,
+      "mode": "cache",
+      "case": "app_edit_2",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/2_cache_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "2_cache_app_edit_2_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 39.53126312499808,
+      "setup_seconds": 0,
+      "cpu_seconds": 65.13000000000001,
+      "rss_bytes": 2862071808,
+      "tree_rss_bytes": 2881519616,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        37.4150390625,
+        36.79931640625,
+        37.01953125
+      ],
+      "load_after": [
+        31.703125,
+        35.14501953125,
+        36.38720703125
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "pid": 3006,
+          "started": 1795400405.805451,
+          "finished": 1795400442.436428,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 36.623,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/2_cache_mixed/target/debug/deps/loopflow-c1a14bb19b35bb83"
+      ]
+    },
+    {
+      "cohort": 2,
+      "mode": "cache",
+      "case": "app_edit_3",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/2_cache_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "2_cache_app_edit_3_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 31.595150291999744,
+      "setup_seconds": 0,
+      "cpu_seconds": 61.09,
+      "rss_bytes": 2851504128,
+      "tree_rss_bytes": 2880929792,
+      "daemon_cpu_seconds": 0.009999999999999787,
+      "load_before": [
+        31.703125,
+        35.14501953125,
+        36.38720703125
+      ],
+      "load_after": [
+        21.91650390625,
+        32.265625,
+        35.283203125
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "pid": 4711,
+          "started": 1795400445.13033,
+          "finished": 1795400474.188542,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 29.052,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/2_cache_mixed/target/debug/deps/loopflow-c1a14bb19b35bb83"
+      ]
+    },
+    {
+      "cohort": 2,
+      "mode": "cache",
+      "case": "execution_after_app",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/2_cache_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "2_cache_execution_after_app_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 79.97958004099928,
+      "setup_seconds": 0,
+      "cpu_seconds": 144.67000000000002,
+      "rss_bytes": 6003392512,
+      "tree_rss_bytes": 5928157184,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        21.91650390625,
+        32.265625,
+        35.283203125
+      ],
+      "load_after": [
+        26.95068359375,
+        30.931640625,
+        34.47314453125
+      ],
+      "rust_cache_hits": 10,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type (bin)": 2,
+        "crate-type": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 6639,
+          "started": 1795400479.390343,
+          "finished": 1795400554.016923,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 74.62,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/2_cache_mixed/target/debug/deps/loopflow_execution-11ea82c0317abe90"
+      ]
+    },
+    {
+      "cohort": 2,
+      "mode": "cache",
+      "case": "execution_edit_2",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/2_cache_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "2_cache_execution_edit_2_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 78.88344633400266,
+      "setup_seconds": 0,
+      "cpu_seconds": 145.46,
+      "rss_bytes": 5957009408,
+      "tree_rss_bytes": 6035554304,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        26.95068359375,
+        30.931640625,
+        34.47314453125
+      ],
+      "load_after": [
+        23.0009765625,
+        28.63623046875,
+        33.28515625
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 11192,
+          "started": 1795400556.528957,
+          "finished": 1795400633.1318421,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 76.597,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/2_cache_mixed/target/debug/deps/loopflow_execution-11ea82c0317abe90"
+      ]
+    },
+    {
+      "cohort": 2,
+      "mode": "cache",
+      "case": "execution_edit_3",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/2_cache_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "2_cache_execution_edit_3_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 73.55091554200044,
+      "setup_seconds": 0,
+      "cpu_seconds": 141.56,
+      "rss_bytes": 6089654272,
+      "tree_rss_bytes": 6098944000,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        23.0009765625,
+        28.63623046875,
+        33.28515625
+      ],
+      "load_after": [
+        15.720703125,
+        25.380859375,
+        31.67236328125
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 15155,
+          "started": 1795400635.636405,
+          "finished": 1795400706.857517,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 71.213,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/2_cache_mixed/target/debug/deps/loopflow_execution-11ea82c0317abe90"
+      ]
+    },
+    {
+      "cohort": 2,
+      "mode": "cache",
+      "case": "execution_new",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/2_cache_execution",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "2_cache_execution_new_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 225.62132575000578,
+      "setup_seconds": 0.34350287500274135,
+      "cpu_seconds": 334.18,
+      "rss_bytes": 6119243776,
+      "tree_rss_bytes": 6139674624,
+      "daemon_cpu_seconds": 0.41000000000000014,
+      "load_before": [
+        15.720703125,
+        25.380859375,
+        31.67236328125
+      ],
+      "load_after": [
+        27.20458984375,
+        24.29736328125,
+        29.56591796875
+      ],
+      "rust_cache_hits": 300,
+      "rust_cache_misses": 1,
+      "non_cacheable": {
+        "crate-type": 1,
+        "crate-type (bin)": 41,
+        "missing input": 3,
+        "-o": 3,
+        "crate-type (proc-macro)": 15,
+        "-": 3
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "pid": 29158,
+          "started": 1795400819.244546,
+          "finished": 1795400819.567036,
+          "kind": "compile",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.31,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_storage",
+          "pid": 31679,
+          "started": 1795400841.434889,
+          "finished": 1795400842.7202508,
+          "kind": "compile",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 1.28,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_terminal",
+          "pid": 32312,
+          "started": 1795400846.7464151,
+          "finished": 1795400847.0509791,
+          "kind": "compile",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.3,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_definitions",
+          "pid": 32352,
+          "started": 1795400847.09142,
+          "finished": 1795400847.236182,
+          "kind": "compile",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.138,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_test_support",
+          "pid": 32440,
+          "started": 1795400847.969423,
+          "finished": 1795400848.3357708,
+          "kind": "compile",
+          "package": "loopflow-test-support",
+          "crate_type": "lib",
+          "seconds": 0.36,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_execution",
+          "pid": 32508,
+          "started": 1795400848.882684,
+          "finished": 1795400932.8518882,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 83.965,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/2_cache_execution/target/debug/deps/loopflow_execution-11ea82c0317abe90"
+      ]
+    },
+    {
+      "cohort": 3,
+      "mode": "cache",
+      "case": "app_new",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/3_cache_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "3_cache_app_new_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 276.20259654099937,
+      "setup_seconds": 0.34187083299912047,
+      "cpu_seconds": 380.1,
+      "rss_bytes": 3999678464,
+      "tree_rss_bytes": 3931111424,
+      "daemon_cpu_seconds": 0.6299999999999999,
+      "load_before": [
+        27.20458984375,
+        24.29736328125,
+        29.56591796875
+      ],
+      "load_after": [
+        45.29248046875,
+        31.7724609375,
+        31.4248046875
+      ],
+      "rust_cache_hits": 300,
+      "rust_cache_misses": 2,
+      "non_cacheable": {
+        "crate-type (proc-macro)": 15,
+        "crate-type": 1,
+        "missing input": 3,
+        "-o": 3,
+        "crate-type (bin)": 42,
+        "-": 3
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "pid": 44927,
+          "started": 1795401042.050516,
+          "finished": 1795401042.4279401,
+          "kind": "compile",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.372,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_storage",
+          "pid": 48815,
+          "started": 1795401077.46354,
+          "finished": 1795401079.272484,
+          "kind": "compile",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 1.783,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_terminal",
+          "pid": 49398,
+          "started": 1795401083.4511192,
+          "finished": 1795401083.7639492,
+          "kind": "compile",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.303,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_definitions",
+          "pid": 49504,
+          "started": 1795401084.686455,
+          "finished": 1795401084.948308,
+          "kind": "compile",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.249,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_test_support",
+          "pid": 49580,
+          "started": 1795401085.5842402,
+          "finished": 1795401086.154114,
+          "kind": "compile",
+          "package": "loopflow-test-support",
+          "crate_type": "lib",
+          "seconds": 0.56,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_execution",
+          "pid": 50619,
+          "started": 1795401096.4988642,
+          "finished": 1795401166.485558,
+          "kind": "compile",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 69.977,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 1,
+          "non_cacheable": {},
+          "overlapped": false
+        },
+        {
+          "crate": "loopflow",
+          "pid": 53245,
+          "started": 1795401166.5525708,
+          "finished": 1795401209.042968,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 42.478,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/3_cache_mixed/target/debug/deps/loopflow-c1a14bb19b35bb83"
+      ]
+    },
+    {
+      "cohort": 3,
+      "mode": "cache",
+      "case": "app_edit_2",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/3_cache_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "3_cache_app_edit_2_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 49.2315787080006,
+      "setup_seconds": 0,
+      "cpu_seconds": 79.06,
+      "rss_bytes": 2835136512,
+      "tree_rss_bytes": 3219308544,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        44.38818359375,
+        31.80908203125,
+        31.439453125
+      ],
+      "load_after": [
+        49.1611328125,
+        34.19384765625,
+        32.29541015625
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "pid": 57278,
+          "started": 1795401212.954787,
+          "finished": 1795401258.6861591,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 45.726,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/3_cache_mixed/target/debug/deps/loopflow-c1a14bb19b35bb83"
+      ]
+    },
+    {
+      "cohort": 3,
+      "mode": "cache",
+      "case": "app_edit_3",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/3_cache_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "3_cache_app_edit_3_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 42.74222987500252,
+      "setup_seconds": 0,
+      "cpu_seconds": 70.11,
+      "rss_bytes": 2842165248,
+      "tree_rss_bytes": 2866675712,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        49.1611328125,
+        34.19384765625,
+        32.29541015625
+      ],
+      "load_after": [
+        37.1640625,
+        33.337890625,
+        32.08837890625
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "pid": 59572,
+          "started": 1795401262.0798342,
+          "finished": 1795401301.469683,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 39.382,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/3_cache_mixed/target/debug/deps/loopflow-c1a14bb19b35bb83"
+      ]
+    },
+    {
+      "cohort": 3,
+      "mode": "cache",
+      "case": "execution_after_app",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/3_cache_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "3_cache_execution_after_app_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 90.2796319170011,
+      "setup_seconds": 0,
+      "cpu_seconds": 165.41,
+      "rss_bytes": 6039584768,
+      "tree_rss_bytes": 5899173888,
+      "daemon_cpu_seconds": 0.010000000000000675,
+      "load_before": [
+        37.1640625,
+        33.337890625,
+        32.08837890625
+      ],
+      "load_after": [
+        34.91796875,
+        33.08154296875,
+        32.08154296875
+      ],
+      "rust_cache_hits": 10,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type": 1,
+        "crate-type (bin)": 2
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 62209,
+          "started": 1795401308.2064042,
+          "finished": 1795401392.0133739,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 83.8,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/3_cache_mixed/target/debug/deps/loopflow_execution-11ea82c0317abe90"
+      ]
+    },
+    {
+      "cohort": 3,
+      "mode": "cache",
+      "case": "execution_edit_2",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/3_cache_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "3_cache_execution_edit_2_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 85.71771837500273,
+      "setup_seconds": 0,
+      "cpu_seconds": 151.25,
+      "rss_bytes": 6001721344,
+      "tree_rss_bytes": 5948293120,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        34.91796875,
+        33.08154296875,
+        32.08154296875
+      ],
+      "load_after": [
+        26.50732421875,
+        30.45068359375,
+        31.14208984375
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 66391,
+          "started": 1795401394.457338,
+          "finished": 1795401478.042597,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 83.578,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/3_cache_mixed/target/debug/deps/loopflow_execution-11ea82c0317abe90"
+      ]
+    },
+    {
+      "cohort": 3,
+      "mode": "cache",
+      "case": "execution_edit_3",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/3_cache_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "3_cache_execution_edit_3_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 83.75735629099654,
+      "setup_seconds": 0,
+      "cpu_seconds": 148.07000000000002,
+      "rss_bytes": 6057213952,
+      "tree_rss_bytes": 6082576384,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        26.50732421875,
+        30.45068359375,
+        31.14208984375
+      ],
+      "load_after": [
+        18.6845703125,
+        26.6689453125,
+        29.6064453125
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "crate-type": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 69964,
+          "started": 1795401480.2322009,
+          "finished": 1795401561.813807,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 81.576,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/3_cache_mixed/target/debug/deps/loopflow_execution-11ea82c0317abe90"
+      ]
+    },
+    {
+      "cohort": 3,
+      "mode": "incremental",
+      "case": "app_new",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/3_incremental_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "3_incremental_app_new_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 210.43836445799388,
+      "setup_seconds": 0.33007324999925913,
+      "cpu_seconds": 343.03000000000003,
+      "rss_bytes": 3669049344,
+      "tree_rss_bytes": 3756130304,
+      "daemon_cpu_seconds": 0.33000000000000007,
+      "load_before": [
+        18.6845703125,
+        26.6689453125,
+        29.6064453125
+      ],
+      "load_after": [
+        15.9375,
+        21.931640625,
+        27.00537109375
+      ],
+      "rust_cache_hits": 296,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "-o": 3,
+        "-": 3,
+        "crate-type (bin)": 42,
+        "incremental": 7,
+        "crate-type (proc-macro)": 15,
+        "missing input": 3
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "pid": 82806,
+          "started": 1795401643.954221,
+          "finished": 1795401645.178108,
+          "kind": "compile",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 1.216,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_storage",
+          "pid": 86099,
+          "started": 1795401673.000569,
+          "finished": 1795401687.658783,
+          "kind": "compile",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 14.653,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_terminal",
+          "pid": 87315,
+          "started": 1795401687.4324942,
+          "finished": 1795401687.874007,
+          "kind": "compile",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.437,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_definitions",
+          "pid": 87364,
+          "started": 1795401688.2006242,
+          "finished": 1795401688.565687,
+          "kind": "compile",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.36,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_test_support",
+          "pid": 87385,
+          "started": 1795401688.595822,
+          "finished": 1795401689.16883,
+          "kind": "compile",
+          "package": "loopflow-test-support",
+          "crate_type": "lib",
+          "seconds": 0.569,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_execution",
+          "pid": 87557,
+          "started": 1795401690.346132,
+          "finished": 1795401740.3211331,
+          "kind": "compile",
+          "package": "loopflow-execution",
+          "crate_type": "lib",
+          "seconds": 49.97,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow",
+          "pid": 89991,
+          "started": 1795401740.365702,
+          "finished": 1795401772.256025,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 31.883,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/3_incremental_mixed/target/debug/deps/loopflow-e9414e8b4cd097f4"
+      ]
+    },
+    {
+      "cohort": 3,
+      "mode": "incremental",
+      "case": "app_edit_2",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/3_incremental_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "3_incremental_app_edit_2_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 8.619687500002328,
+      "setup_seconds": 0,
+      "cpu_seconds": 8.870000000000001,
+      "rss_bytes": 1753890816,
+      "tree_rss_bytes": 1614381056,
+      "daemon_cpu_seconds": 0.009999999999999787,
+      "load_before": [
+        15.9375,
+        21.931640625,
+        27.00537109375
+      ],
+      "load_after": [
+        23.2978515625,
+        23.24951171875,
+        27.40966796875
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "incremental": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "pid": 91501,
+          "started": 1795401775.139518,
+          "finished": 1795401781.2187898,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 6.07,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/3_incremental_mixed/target/debug/deps/loopflow-e9414e8b4cd097f4"
+      ]
+    },
+    {
+      "cohort": 3,
+      "mode": "incremental",
+      "case": "app_edit_3",
+      "owner": "app",
+      "tree": "/private/tmp/lf921-b8auuqds/3_incremental_mixed",
+      "edit": "rust/loopflow/src/lf/mod.rs",
+      "edit_suffix": "3_incremental_app_edit_3_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 8.975562208004703,
+      "setup_seconds": 0,
+      "cpu_seconds": 9.04,
+      "rss_bytes": 1661812736,
+      "tree_rss_bytes": 2298806272,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        23.2978515625,
+        23.24951171875,
+        27.40966796875
+      ],
+      "load_after": [
+        20.77880859375,
+        22.71337890625,
+        27.1708984375
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "incremental": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow",
+          "pid": 92008,
+          "started": 1795401783.885379,
+          "finished": 1795401790.111722,
+          "kind": "test",
+          "package": "loopflow",
+          "crate_type": null,
+          "seconds": 6.22,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/3_incremental_mixed/target/debug/deps/loopflow-e9414e8b4cd097f4"
+      ]
+    },
+    {
+      "cohort": 3,
+      "mode": "incremental",
+      "case": "execution_after_app",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/3_incremental_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "3_incremental_execution_after_app_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 107.25151100000221,
+      "setup_seconds": 0,
+      "cpu_seconds": 173.07,
+      "rss_bytes": 5704187904,
+      "tree_rss_bytes": 5669126144,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        20.77880859375,
+        22.71337890625,
+        27.1708984375
+      ],
+      "load_after": [
+        33.47998046875,
+        25.8720703125,
+        27.81591796875
+      ],
+      "rust_cache_hits": 10,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "incremental": 1,
+        "crate-type (bin)": 2
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 92693,
+          "started": 1795401796.184248,
+          "finished": 1795401897.67552,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 101.399,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/3_incremental_mixed/target/debug/deps/loopflow_execution-6f439dd516e7b961"
+      ]
+    },
+    {
+      "cohort": 3,
+      "mode": "incremental",
+      "case": "execution_edit_2",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/3_incremental_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "3_incremental_execution_edit_2_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 15.337008583999705,
+      "setup_seconds": 0,
+      "cpu_seconds": 14.059999999999999,
+      "rss_bytes": 3563962368,
+      "tree_rss_bytes": 3413082112,
+      "daemon_cpu_seconds": 0.0,
+      "load_before": [
+        33.47998046875,
+        25.8720703125,
+        27.81591796875
+      ],
+      "load_after": [
+        31.0078125,
+        25.65869140625,
+        27.703125
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "incremental": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 97301,
+          "started": 1795401900.318327,
+          "finished": 1795401912.9693491,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 12.617,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/3_incremental_mixed/target/debug/deps/loopflow_execution-6f439dd516e7b961"
+      ]
+    },
+    {
+      "cohort": 3,
+      "mode": "incremental",
+      "case": "execution_edit_3",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/3_incremental_mixed",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "3_incremental_execution_edit_3_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 16.56584387500334,
+      "setup_seconds": 0,
+      "cpu_seconds": 15.780000000000001,
+      "rss_bytes": 3475390464,
+      "tree_rss_bytes": 3319791616,
+      "daemon_cpu_seconds": 0.009999999999999787,
+      "load_before": [
+        31.0078125,
+        25.65869140625,
+        27.703125
+      ],
+      "load_after": [
+        35.3642578125,
+        26.76513671875,
+        28.0546875
+      ],
+      "rust_cache_hits": 0,
+      "rust_cache_misses": 0,
+      "non_cacheable": {
+        "incremental": 1
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_execution",
+          "pid": 98580,
+          "started": 1795401915.702313,
+          "finished": 1795401929.744714,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 14.033,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "incremental": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/3_incremental_mixed/target/debug/deps/loopflow_execution-6f439dd516e7b961"
+      ]
+    },
+    {
+      "cohort": 3,
+      "mode": "cache",
+      "case": "execution_new",
+      "owner": "execution",
+      "tree": "/private/tmp/lf921-b8auuqds/3_cache_execution",
+      "edit": "rust/loopflow-execution/src/ops/task/ship.rs",
+      "edit_suffix": "3_cache_execution_new_attempt_0",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "loopflow-execution",
+        "--lib",
+        "skills::catalog::tests::portable_fallback_is_unique_or_reports_candidates",
+        "--timings",
+        "--message-format=json",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "tests_passed": 1,
+      "wall_seconds": 271.89304741699743,
+      "setup_seconds": 0.3663994169983198,
+      "cpu_seconds": 366.45000000000005,
+      "rss_bytes": 6056067072,
+      "tree_rss_bytes": 6084788224,
+      "daemon_cpu_seconds": 0.40000000000000036,
+      "load_before": [
+        33.4931640625,
+        26.51953125,
+        27.96044921875
+      ],
+      "load_after": [
+        33.08935546875,
+        31.150390625,
+        29.7451171875
+      ],
+      "rust_cache_hits": 300,
+      "rust_cache_misses": 1,
+      "non_cacheable": {
+        "missing input": 3,
+        "crate-type (proc-macro)": 15,
+        "crate-type (bin)": 41,
+        "crate-type": 1,
+        "-o": 3,
+        "-": 3
+      },
+      "workspace_compilers": [
+        {
+          "crate": "loopflow_model",
+          "pid": 10470,
+          "started": 1795402044.953685,
+          "finished": 1795402045.329983,
+          "kind": "compile",
+          "package": "loopflow-model",
+          "crate_type": "lib",
+          "seconds": 0.369,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_storage",
+          "pid": 12769,
+          "started": 1795402078.737698,
+          "finished": 1795402080.324807,
+          "kind": "compile",
+          "package": "loopflow-storage",
+          "crate_type": "lib",
+          "seconds": 1.577,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_terminal",
+          "pid": 13247,
+          "started": 1795402084.6078742,
+          "finished": 1795402084.975529,
+          "kind": "compile",
+          "package": "loopflow-terminal",
+          "crate_type": "lib",
+          "seconds": 0.358,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_definitions",
+          "pid": 13282,
+          "started": 1795402085.041537,
+          "finished": 1795402085.3775969,
+          "kind": "compile",
+          "package": "loopflow-definitions",
+          "crate_type": "lib",
+          "seconds": 0.321,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_test_support",
+          "pid": 13340,
+          "started": 1795402086.036341,
+          "finished": 1795402086.750539,
+          "kind": "compile",
+          "package": "loopflow-test-support",
+          "crate_type": "lib",
+          "seconds": 0.695,
+          "exit_code": 0,
+          "cache_hits": null,
+          "cache_misses": null,
+          "non_cacheable": null,
+          "overlapped": true
+        },
+        {
+          "crate": "loopflow_execution",
+          "pid": 14176,
+          "started": 1795402097.801963,
+          "finished": 1795402202.9861708,
+          "kind": "test",
+          "package": "loopflow-execution",
+          "crate_type": null,
+          "seconds": 105.167,
+          "exit_code": 0,
+          "cache_hits": 0,
+          "cache_misses": 0,
+          "non_cacheable": {
+            "crate-type": 1
+          },
+          "overlapped": false
+        }
+      ],
+      "cargo_units_note": null,
+      "linked_tests": [
+        "/private/tmp/lf921-b8auuqds/3_cache_execution/target/debug/deps/loopflow_execution-11ea82c0317abe90"
+      ]
+    }
+  ],
+  "raw_receipts": "loo-921-raw.json.gz"
+}

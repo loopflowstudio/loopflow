@@ -127,11 +127,132 @@ struct NewTaskTests {
             try sheet.inspect().find(button: model.repositoryName).tap()
         }
         try sheet.inspect().find(button: "Start with code ⌘↩").tap()
-        #expect(model.navigation.palette == nil)
         for await opened in Observations({ model.selection?.kind == .task }) where opened { break }
+        #expect(model.navigation.palette == nil)
         let task = try #require(model.navigation.selectedTaskEvidence?.task)
         let bar = TaskWorkflowBar(model: model, task: task, work: .loading)
         _ = try bar.inspect().find(text: "Starting code")
+    }
+
+    @Test("A removed Wave needs an explicit destination before File or Start")
+    func removedWave() async throws {
+        let (row, filed, planning, _) = try filing()
+        let model = try await model(catalog: .init(initialState: catalogWithCode())) { change in
+            guard case .taskCreate(_, _, _, "keep my words", nil, nil, nil, false) = change else {
+                throw RegistryQueryError("Unexpected File: \(change)")
+            }
+            return filed
+        }
+        let wave = try #require(model.visibleRoadmaps.first?.wave)
+        model.navigation.sidebarWaveID = wave.id
+        let sheet = NewTaskSheet(model: model)
+        try sheet.inspect().find(ViewType.TextField.self).setInput("keep my words")
+        try toggle("code", in: sheet).tap()
+        var snapshot = try #require(JSONSerialization.jsonObject(with: Data(planning.utf8)) as? [String: Any])
+        snapshot["waves"] = []
+        let removed = try RegistryQuery.decode(RoadmapSnapshot.self, from: json(snapshot))
+        model.applyFixture(roadmap: .available(removed), waves: .available([]), workActivity: .loading, repos: [])
+        let view = try sheet.inspect()
+        _ = try view.find(text: "Wave unavailable")
+        #expect(try view.find(button: "File to backlog").isDisabled())
+        #expect(try view.find(button: "Start with code ⌘↩").isDisabled())
+        #expect(try toggle("code", in: sheet).isOn())
+        try toggle("Use default", in: sheet).tap()
+        try view.find(button: model.repositoryName).tap()
+        #expect(try toggle("Use default", in: sheet).isOn())
+        #expect(try sheet.inspect().find(ViewType.TextField.self).input() == "keep my words")
+        try sheet.inspect().find(button: "File to backlog").tap()
+        try await eventually { model.navigation.palette == nil }
+        await CreationRecovery.shared.presented(CreationRecovery.shared.requests(for: .task(row.id)))
+    }
+
+    @Test("A refused named Start can be edited and started with the default")
+    func correctRefusedStart() async throws {
+        let admitted = try json(fixtureArray("task_create_receipt.json")[0])
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let attempts = OSAllocatedUnfairLock<[ServedWrite]>(initialState: [])
+        let journal = CreationSubmissions(directory: directory, machine: { "original" }, lookup: { _ in ReadOutput("null") },
+            send: { data in
+                let payload = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                if payload["graph"] as? String == "code" {
+                    throw ServerError(code: "invalid", message: "Workflow unavailable", data: .null)
+                }
+                return admitted
+            })
+        let model = try await model(catalog: .init(initialState: catalogWithCode())) { change in
+            guard case .taskCreate(_, let id, _, _, _, _, _, _) = change else { throw RegistryQueryError("Expected Start") }
+            attempts.withLock { $0.append(change) }
+            return try await journal.submit(change, requestID: id)
+        }
+        let wave = try #require(model.visibleRoadmaps.first?.wave)
+        let sheet = NewTaskSheet(model: model)
+        try sheet.inspect().find(button: wave.displayName).tap()
+        try sheet.inspect().find(ViewType.TextField.self).setInput("draft")
+        try toggle("code", in: sheet).tap()
+        try sheet.inspect().find(button: "Start with code ⌘↩").tap()
+        try await eventually { (try? sheet.inspect().find(text: "Not started.")) != nil }
+        let refused = try sheet.inspect()
+        #expect(model.navigation.palette == .newTask)
+        _ = try refused.find(text: "Workflow unavailable")
+        #expect(try refused.find(ViewType.TextField.self).input() == "draft")
+        #expect(try toggle("code", in: sheet).isOn())
+        #expect(try await journal.pending().isEmpty)
+
+        try refused.find(ViewType.TextField.self).setInput("edited draft")
+        try toggle("Use default", in: sheet).tap()
+        try sheet.inspect().find(button: "Start with feature ⌘↩").tap()
+        try await eventually { model.selection?.kind == .task }
+        #expect(model.navigation.palette == nil)
+        let writes = attempts.withLock { $0 }
+        try #require(writes.count == 2)
+        guard case .taskCreate(_, let first, nil, "draft", let originalWave, "code", nil, true) = writes[0],
+              case .taskCreate(_, let second, nil, "edited draft", let finalWave, nil, nil, true) = writes[1] else {
+            Issue.record("Unexpected Start submissions: \(writes)")
+            return
+        }
+        #expect(originalWave == wave.name && finalWave == wave.name)
+        #expect(first != second)
+        #expect(try await journal.pending().map(\.id) == [second])
+        await CreationRecovery.shared.presented([second])
+    }
+
+    @Test("A lost Start reply closes the sheet and keeps the original submission")
+    func lostStartReply() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sent = OSAllocatedUnfairLock<[Data]>(initialState: [])
+        let receipts = OSAllocatedUnfairLock<[String: String]>(initialState: [:])
+        let complete = try json(fixtureArray("creation_lookup.json")[0])
+        let journal = CreationSubmissions(directory: directory, machine: { "original" },
+            lookup: { id in ReadOutput(receipts.withLock { $0[id] } ?? "null") },
+            send: { data in
+                sent.withLock { $0.append(data) }
+                let payload = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                let id = try #require(payload["request_id"] as? String)
+                var receipt = try #require(JSONSerialization.jsonObject(with: Data(complete.utf8)) as? [String: Any])
+                receipt["request_id"] = id
+                let answer = String(decoding: try JSONSerialization.data(withJSONObject: receipt), as: UTF8.self)
+                receipts.withLock { $0[id] = answer }
+                throw RegistryQueryError("Connection lost after admission")
+            })
+        let model = try await model(catalog: .init(initialState: "[]")) { change in
+            guard case .taskCreate(_, let id, _, _, _, _, _, _) = change else { throw RegistryQueryError("Expected Start") }
+            return try await journal.submit(change, requestID: id)
+        }
+        let sheet = NewTaskSheet(model: model)
+        try sheet.inspect().find(ViewType.TextField.self).setInput("start once")
+        try sheet.inspect().find(button: "Start with code ⌘↩").tap()
+        try await eventually { model.navigation.palette == nil }
+        let saved = try await journal.pending()
+        let record = try #require(saved.first)
+        #expect(saved.count == 1 && record.destination == "original")
+        let recovered = try #require(try await journal.reconcile(record))
+        #expect(recovered.requestId == record.id && recovered.taskId == "original")
+        #expect(sent.withLock { $0 } == [record.payload])
+        let payload = try #require(JSONSerialization.jsonObject(with: record.payload) as? [String: Any])
+        #expect(payload["request_id"] as? String == record.id)
+        #expect(payload["request"] as? String == "start once")
     }
 
     private func filing() throws -> (row: RoadmapTask, receipt: String, before: String, after: String) {
@@ -158,10 +279,14 @@ struct NewTaskTests {
         let feed = WorkFeed()
         let catalog = OSAllocatedUnfairLock(initialState: try catalogWithCode())
         let attempts = OSAllocatedUnfairLock<[ServedWrite]>(initialState: [])
+        let refusal = AsyncStream<Void>.makeStream()
         let model = try await model(catalog: catalog, planning: beforeFile, subscribe: { await feed.open() }) { change in
             if case .waveSync = change { return "{}" }
             let first = attempts.withLock { $0.append(change); return $0.count == 1 }
-            if first { throw ServerError(code: "unavailable", message: "Wave unavailable", data: .null) }
+            if first {
+                for await _ in refusal.stream {}
+                throw ServerError(code: "unavailable", message: "Wave unavailable", data: .null)
+            }
             return filed
         }
         let keeping = Task { await model.keepWorkCurrent() }
@@ -179,7 +304,10 @@ struct NewTaskTests {
         model.setHidden(.backlog, true, in: destination)
         model.setZoomed(.tiles, in: destination)
         model.navigation.backlogs[destination] = BacklogState(selection: ["other"], filter: .mine, query: "old")
-        await sheet.file()
+        try sheet.inspect().find(button: "File to backlog").tap()
+        #expect(try sheet.inspect().find(button: "Filing…").isDisabled())
+        refusal.continuation.finish()
+        try await eventually { (try? sheet.inspect().find(text: "Not filed.")) != nil }
         let refused = try sheet.inspect()
         #expect(model.navigation.palette == .newTask)
         _ = try refused.find(text: "Not filed.")
@@ -266,7 +394,7 @@ struct NewTaskTests {
             return receipt
         }
         let wave = try #require(model.visibleRoadmaps.first?.wave)
-        let filing = Task { try await model.fileTask(request: row.task.name, wave: wave) }
+        let filing = Task { try await model.submitTask(.file, request: row.task.name, wave: wave) }
         for await _ in sent.stream {}
         model.applyFixture(roadmap: .available(current), waves: .available([]), workActivity: .loading, repos: [])
         reply.continuation.finish()
@@ -295,7 +423,7 @@ struct NewTaskTests {
             return before
         }, repoPath: row.task.repo)
         await model.refreshPlanning()
-        try await model.fileTask(request: row.task.name, wave: nil)
+        try await model.submitTask(.file, request: row.task.name, wave: nil)
         let wave = WorkNavigation.Board.wave(try #require(row.task.waveId))
         #expect(model.navigation.waveView == wave)
         let brief = try #require(model.backlog(wave).opened)
@@ -316,7 +444,7 @@ struct NewTaskTests {
         let (row, receipt, before, _) = try filing()
         let model = try await model(catalog: .init(initialState: "[]"), planning: before) { _ in receipt }
         model.confirmMachine("original")
-        try await model.fileTask(request: row.task.name, wave: nil)
+        try await model.submitTask(.file, request: row.task.name, wave: nil)
         let view = try #require(model.navigation.waveView)
         #expect(model.backlog(view).opened?.id == row.id)
         switch departure {
@@ -350,7 +478,7 @@ struct NewTaskTests {
             guard case .taskCreate(_, let id, _, _, _, _, _, _) = change else { throw RegistryQueryError("Expected File") }
             return try await journal.submit(change, requestID: id)
         }
-        let filing = Task { try await model.fileTask(request: row.task.name, wave: nil) }
+        let filing = Task { try await model.submitTask(.file, request: row.task.name, wave: nil) }
         for await _ in sent.stream {}
         model.selectDashboard("another")
         model.navigation.palette = .newTask

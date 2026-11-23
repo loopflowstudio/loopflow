@@ -103,10 +103,11 @@ from the planning inventory.
 name, and a repository picker when there is more than one to choose from.
 **Create** adds the Wave; with no repository, Create is off.
 
-**⌘N** opens New Task. Type what you want and click **Start**: the sheet closes
-in the click and the Task's workspace shows your words in its conversation, with
-the Task already in Working. Setup prints under them as it finishes, then the
-agent's prompt takes typing:
+**⌘N** opens New Task. Type what you want and choose **File to backlog** to
+open its brief, or **Start with `<workflow>`** to open its conversation. The
+sheet shows **Filing…** or **Starting…** while the Machine answers. On Start
+admission, the Task appears in Working. Its conversation shows your request,
+shows setup progress, then accepts input.
 
 ```
 Fix the flaky reconnect test
@@ -118,9 +119,9 @@ The checkout branches from the default branch as of Loopflow's last background
 fetch; the Task's first sync catches up. A setup step that fails prints its error
 in the pane, and the agent still starts once the checkout exists. Reopening the
 conversation continues setup from the step that stopped; it never starts a
-second Graph. If the Machine refuses before filing, your words stay with the
-error and **Try again**; once it has answered, the Task exists, so a failure to
-open its conversation shows in the Task's pane with Retry, never a second Start.
+second Graph. A confirmed refusal leaves the draft open to edit and submit
+again. After admission, a failure to open the conversation shows in the Task's
+pane with Retry.
 
 Click a row to select its retained workspace. The title-bar **Repo › Wave › Task**
 path follows hierarchy: click a name to go there, or the **›** after it to list and

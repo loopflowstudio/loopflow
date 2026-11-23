@@ -11,3 +11,5 @@ File reveals a hidden destination backlog and leaves another pane's zoom so the 
 The built review keeps the backlog as File's destination and uses the committed row for its brief during reconnect. It keeps the sheet through admission so a refused Start can be corrected in place. If the chosen Wave disappears, the draft waits for a destination choice.
 
 If planning beats the File reply and the Task has moved, open its brief in the backlog that now holds it. If it has entered Working, leave the current destination in place and keep the saved submission available to recovery.
+
+While a selected Wave is unavailable, the workflow menu stays editable. Only File and Start wait for a destination.

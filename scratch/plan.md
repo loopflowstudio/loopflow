@@ -14,11 +14,17 @@ File uses the Task’s recorded scope. The selected backlog borrows its committe
 
 `cargo test -p loopflow --test integration documented_commands::` passed all four checks for the updated File instructions.
 
-## Finish the draft lifecycle
+## Draft lifecycle
 
-- Keep the same sheet through File and Start, showing which action awaits the Machine. Replace the separate read-only Start failure screen. On a refusal before send, or a definitive refusal with confirmed receipt absence, keep the text, scope and named choice editable. The next deliberate submission can use a fresh identity. If the chosen Wave is known to have disappeared, show it as unavailable and let the person choose another Wave or the repository. A missing Wave lookup cannot represent a repository choice.
-- On Start admission, close the sheet and open the returned Task and primary Session. The conversation owns checkout and Graph launch. A failure after admission belongs to the existing Task’s workspace. Keep the existing write and receipt contracts and the exact stored payload for in-flight or recovered submissions. A missing or undecodable answer hands off to recovery. It gives no permission to create under a new ID.
-- Extend the New Task checks for a removed Wave and a refused named Start corrected with **Use default**. Keep the lost-reply check on the original receipt. Update the New Task usage in `docs/surfaces.md` and run `scripts/test_desktop.sh --filter 'NewTaskTests|CreationSubmissionTests|BacklogViewTests|TaskGraphProofTests'`. Demo the Workflow menu and handoff on an unlocked display, including File across a server restart: QA saw “Filed” above “Nothing selected” for about 30 seconds there, and only the held-back-planning tests cover the fix so far.
+The same sheet shows **Filing…** or **Starting…** until the Machine answers. A confirmed refusal leaves the words, destination and workflow editable. A missing Wave shows **Wave unavailable** and requires a destination choice. An admitted Start opens the returned Task and primary Session. An uncertain answer closes the sheet and leaves the saved submission with recovery.
+
+The requested Desktop filter (`scripts/test_desktop.sh --filter 'NewTaskTests|CreationSubmissionTests|BacklogViewTests|TaskGraphProofTests'`) passed with 44 tests reported, including two skipped display diagnostics. A refused named Start used a fresh request ID after correction to **Use default**. A lost reply recovered the original Task with one send.
+
+`scripts/test_desktop.sh --skip-build --filter 'WorkDestinationTests/(newTask|lateCreationReply)'` passed all four tests, including primary Session installation, post-admission opening failure and 12 late-reply cases. `cargo test -p loopflow --test integration documented_commands::` passed all four checks.
+
+## Remaining demo
+
+On an unlocked display, use the Workflow menu, correct a refused Start with **Use default**, and open the admitted conversation. File across a private server restart and check that the brief opens when the Machine answers. Earlier QA saw “Filed” above “Nothing selected” for about 30 seconds. The held-back-planning tests cover the fix headless.
 
 ## Prior checks
 

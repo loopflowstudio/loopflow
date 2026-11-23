@@ -7,8 +7,8 @@ private final class NewTaskDraft {
     var request = ""
     var waveID: String?
     var graph: String?
-    var filing = false
-    var fileError: String?
+    var pending: NewTaskAction?
+    var refusal: (action: NewTaskAction, reason: String)?
 
     init(waveID: String?) { self.waveID = waveID }
 }
@@ -22,13 +22,18 @@ struct NewTaskSheet: View {
 
     init(model: WorkModel) {
         self.model = model
-        _draft = State(initialValue: NewTaskDraft(waveID: model.sidebarWave?.wave.id))
+        _draft = State(initialValue: NewTaskDraft(waveID: model.navigation.sidebarWaveID))
     }
 
     private var wave: WaveSnapshot? { draft.waveID.flatMap { model.wave(id: $0)?.wave } }
+    private var destination: WorkNavigation.Board? {
+        guard draft.waveID != nil else { return .repository }
+        return wave.map { .wave($0.id) }
+    }
+    private var canSubmit: Bool { !trimmed.isEmpty && destination != nil && draft.pending == nil }
     private var trimmed: String { draft.request.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var scopeDefault: WaveGraph.Default? {
-        model.defaultWorkflow(in: wave)
+        destination == nil ? nil : model.defaultWorkflow(in: wave)
     }
     private var startWorkflow: String? { draft.graph ?? scopeDefault?.name }
     private var workflowSource: String? {
@@ -53,16 +58,23 @@ struct NewTaskSheet: View {
                 .focused($focused)
                 .accessibilityIdentifier("new-task-request")
             scopePicker
+            if destination == nil {
+                Text("Choose another Wave or the repository.")
+                    .foregroundStyle(palette.textSecondary)
+            }
             workflowPicker
-            if let fileError = draft.fileError {
-                FailureLine("Not filed.", machine: fileError)
+                .task(id: destination) {
+                    if destination != nil { await model.loadGraphDefault(wave: wave) }
+                }
+            if let refusal = draft.refusal {
+                FailureLine(refusal.action == .file ? "Not filed." : "Not started.", machine: refusal.reason)
                     .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("new-task-file-error")
+                    .accessibilityIdentifier(refusal.action == .file ? "new-task-file-error" : "new-task-error")
             }
             HStack(spacing: Spacing.sm) {
-                Button(draft.filing ? "Filing…" : "File to backlog") { Task { await file() } }
+                Button(draft.pending == .file ? "Filing…" : "File to backlog") { submit(.file) }
                     .buttonStyle(LoopflowButtonStyle())
-                    .disabled(trimmed.isEmpty)
+                    .disabled(!canSubmit)
                     .accessibilityIdentifier("new-task-file")
                 Text("Choose a workflow when you start.")
                     .foregroundStyle(palette.textSecondary)
@@ -72,30 +84,33 @@ struct NewTaskSheet: View {
                 Button("Cancel") { dismiss() }
                     .buttonStyle(LoopflowButtonStyle())
                     .keyboardShortcut(.cancelAction)
-                Button(startWorkflow.map { "Start with \($0) ⌘↩" } ?? "Start ⌘↩") {
-                    StartingTaskView.start(model: model, request: trimmed, wave: wave, graph: draft.graph)
-                }
-                .buttonStyle(LoopflowButtonStyle(.accent))
-                .keyboardShortcut(.return, modifiers: .command)
-                .disabled(trimmed.isEmpty)
-                .accessibilityIdentifier("new-task-create")
+                Button(startLabel) { submit(.start(graph: draft.graph)) }
+                    .buttonStyle(LoopflowButtonStyle(.accent))
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .disabled(!canSubmit)
+                    .accessibilityIdentifier("new-task-create")
             }
         }
         .font(Typography.text)
         .foregroundStyle(palette.text)
-        .disabled(draft.filing)
+        .disabled(draft.pending != nil)
+        .interactiveDismissDisabled(draft.pending != nil)
         .padding(Spacing.xxl)
         .frame(width: 540)
         .background(palette.surface)
         .onAppear { focused = true }
         .task { await model.loadGraphCatalog() }
-        .task(id: draft.waveID) { await model.loadGraphDefault(wave: wave) }
+    }
+
+    private var startLabel: String {
+        if case .start = draft.pending { return "Starting…" }
+        return startWorkflow.map { "Start with \($0) ⌘↩" } ?? "Start ⌘↩"
     }
 
     private var scopePicker: some View {
         HStack(spacing: Spacing.xs) {
             Text("In")
-            Menu(model.scopeName(wave)) {
+            Menu(destination == nil ? "Wave unavailable" : model.scopeName(wave)) {
                 Button(model.repositoryName) { draft.waveID = nil }
                 ForEach(model.visibleRoadmaps, id: \.wave.id) { roadmap in
                     Button(roadmap.wave.displayName) { draft.waveID = roadmap.wave.id }
@@ -110,7 +125,7 @@ struct NewTaskSheet: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.sm) {
                 Text("Workflow for Start")
-                Menu(startWorkflow ?? "…") {
+                Menu(startWorkflow ?? (destination == nil ? "Use default" : "…")) {
                     Toggle("Use default", isOn: Binding(get: { draft.graph == nil }, set: { _ in draft.graph = nil }))
                     Divider()
                     StartFlowItems(model: model, chosen: draft.graph) { draft.graph = $0 }
@@ -129,66 +144,34 @@ struct NewTaskSheet: View {
         }
     }
 
-    func file() async {
-        guard !draft.filing else { return }
-        draft.filing = true
-        defer { draft.filing = false }
-        draft.fileError = nil
-        do {
-            try await model.fileTask(request: trimmed, wave: wave)
-        } catch { draft.fileError = error.localizedDescription }
-    }
-}
-
-/// A New Task between the click and its installed conversation: the words you
-/// typed, and the failure if the request could not be filed.
-struct StartingTaskView: View {
-    let model: WorkModel
-    let starting: StartingTask
-    @Environment(\.palette) private var palette
-
-    /// The sheet closes at once; the answer opens the Task's conversation.
-    @MainActor
-    static func start(model: WorkModel, request: String, wave: WaveSnapshot?, graph: String?) {
-        let owner = model.navigation.performanceOwner
+    private func submit(_ action: NewTaskAction) {
+        guard canSubmit else { return }
+        let request = trimmed
+        let wave = self.wave
         let requestID = UUID().uuidString
-        Perf.userAction(.startTask, scenario: "new_task_to_typing", id: requestID, repository: model.repoPath,
-                        machine: model.machineKind, liveSessions: model.liveSessionCount, owner: owner) {
-            Perf.acknowledged(.startTask, id: requestID, owner: owner)
-            if model.navigation.palette == .newTask { model.navigation.palette = nil }
-            Task {
-                do { try await model.createTask(request: request, wave: wave, graph: graph, requestID: requestID) }
-                catch { Perf.finish(.startTask, id: requestID, owner: owner, outcome: .failed) }
-            }
-        }
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                Text(starting.request)
-                    .font(Typography.lede)
-                    .textSelection(.enabled)
-                if let error = starting.error {
-                    FailureLine("Not started.", machine: error)
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("new-task-error")
-                    HStack(spacing: Spacing.sm) {
-                        Button("Try again") {
-                            Self.start(model: model, request: starting.request, wave: starting.wave, graph: starting.graph)
-                        }
-                        .buttonStyle(LoopflowButtonStyle(.accent))
-                        Button("Discard") { model.navigation.startingTask = nil }
-                            .buttonStyle(LoopflowButtonStyle())
-                    }
-                    .padding(.top, Spacing.sm)
+        let owner = model.navigation.performanceOwner
+        draft.pending = action
+        draft.refusal = nil
+        func send() {
+            // Capture the submitting sheet and repository before navigation can change.
+            Task.immediate {
+                do {
+                    try await model.submitTask(action, request: request, wave: wave, requestID: requestID)
+                } catch {
+                    draft.refusal = (action, error.localizedDescription)
+                    draft.pending = nil
+                    if case .start = action { Perf.finish(.startTask, id: requestID, owner: owner, outcome: .failed) }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(Spacing.xxxl)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(palette.background)
-        .accessibilityIdentifier("starting-task-conversation")
+        switch action {
+        case .file: send()
+        case .start:
+            Perf.userAction(.startTask, scenario: "new_task_to_typing", id: requestID, repository: model.repoPath,
+                            machine: model.machineKind, liveSessions: model.liveSessionCount, owner: owner) {
+                Perf.acknowledged(.startTask, id: requestID, owner: owner)
+                send()
+            }
+        }
     }
 }

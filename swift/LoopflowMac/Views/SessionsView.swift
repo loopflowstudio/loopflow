@@ -1569,9 +1569,7 @@ struct SessionsContentView: View {
 
     private var mainPane: some View {
         ZStack {
-            if let starting = navigation.startingTask {
-                StartingTaskView(model: model, starting: starting)
-            } else if navigation.showsSelection {
+            if navigation.showsSelection {
                 DashboardView(model: model, workspaces: workspaces, sessions: store)
             } else if let key = workspaces.selectedWork {
                 VStack(spacing: 0) {

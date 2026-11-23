@@ -332,8 +332,8 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
   opened in (`repository` or `wave:<id>`), which is how to tell a sidebar
   click on a Wave landed. A Wave's own default: `graph: <name>` in
   `.lf/wave/<name>/config.yaml`, committed. Removing that Wave with the sheet
-  open turns its **In** back to the repository; File then files there, so it
-  is no way to get a refusal.
+  open should show **Wave unavailable**. Select the repository to enable File
+  and Start again.
 - The private server's argv is plain `lf server run` (the `env -i` wrapper
   execs it from `PATH`); find its PID with `ps -E -p <pid> -o command=` and its
   `LF_HOME=`. In zsh `kill $PIDS` with a newline-separated list kills nothing;
@@ -363,12 +363,12 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
   in this repository." beside **New**. Filing a Task brings the page too.
 - "Not filed." and "Not started.": stop the private server (`kill` its PID),
   wait five seconds, then `lf desktop do new-task`, type, and press File or ⌘↩.
-  The sheet then shows "running …" with no step line. Start the server again
-  and **Try again** starts the Task. An unwritable `.git` or a repository
+  After a confirmed refusal, check that the sheet still has the request, Wave
+  and workflow. Restart the server and submit from the same sheet. An unwritable `.git` or a repository
   default naming a missing Graph ends in creation recovery (a notice, and the
   Task is filed), not in "Not started.".
 - A SwiftUI `ScrollView` that meets the title bar comes back white from
-  `cacheDisplay`, background included ("Not started." with no Task selected).
+  `cacheDisplay`, background included.
   To see it, build once with the scroll view padded 60 pt from the top; do not
   commit that.
 - A stand-in `claude` must answer `--version` (exit 0) and then stay alive
@@ -443,8 +443,7 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
 - A real screen capture of that window, title bar included, needs no focus:
   take the window number from `CGWindowListCopyWindowInfo` (owner name is
   the bundle's name, `kCGWindowIsOnscreen` 1) and run `screencapture -x -o
-  -l <number> out.png`. This is the way to see a `ScrollView` that meets the
-  title bar ("Not started." with no Task selected).
+  -l <number> out.png`. This captures a `ScrollView` that meets the title bar.
 - `lf desktop do files path=<file>` follows a file: with another file being
   read it opens a tab and leaves the selection. The Read/Diff control is a
   menu, so a file's own Diff in Files needs a local-only line setting

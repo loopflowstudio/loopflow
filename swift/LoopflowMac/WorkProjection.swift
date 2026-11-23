@@ -295,10 +295,6 @@ final class WorkNavigation {
     /// The window's one Notice: refusals, requested changes and failed reads.
     let notices = NoticeCenter()
     var startingTaskSessions: Set<String> = []
-    /// The New Task request this window submitted and has not opened yet. Its
-    /// words stand in for the Task's conversation from the click until the
-    /// answer installs it.
-    var startingTask: StartingTask?
     /// Successful `task prepare` receipts, available before the next roadmap read.
     var preparedTaskWorktrees: [String: WorkspaceIdentity] = [:]
     /// Tasks whose Comments are expanded; a presentation fact, not a reading.

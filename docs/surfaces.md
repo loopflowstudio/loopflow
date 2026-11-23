@@ -173,26 +173,29 @@ File to backlog   Choose a workflow when you start.
 ```
 
 **In** starts on the Wave you were looking at. Choose another Wave or the
-repository to change where the Task lands.
+repository to change where the Task lands. If the selected Wave disappears,
+**In** shows **Wave unavailable**. Choose a destination to enable File and Start.
 
 **Workflow for Start** follows that scope's default. Pick a named workflow
 to keep it when you change scope, even if its name matches the default.
 **Use default** follows the scope again. The preview shows the workflow's
 steps and marks each one where you take part.
 
-- **Start with `<workflow>`** (⌘↩) starts the workflow and opens the new
-  Task's conversation. The Machine resolves an inherited default at Start.
+- **Start with `<workflow>`** (⌘↩) shows **Starting…** until the Machine
+  admits the Task and its primary conversation. The sheet closes and the
+  conversation opens, makes the checkout and starts the workflow. The
+  Machine resolves an inherited default at Start.
 - **File to backlog** opens the new Task’s brief in its backlog as soon as
   `lf task create` answers, even while the backlog is refreshing.
   When you start the filed Task, it offers the current default and
   [the same workflow list](#start-picks-a-workflow).
 - **Cancel** (Esc) closes the sheet.
 
-A refused File keeps the draft open with “Not filed.” and the Machine's
-reason. A refused Start keeps the request on screen with “Not started.”,
-**Try again** and **Discard**. After admission, setup errors appear in the
-Task's workspace. If the reply is lost, Desktop checks the original
-submission on its Machine.
+A confirmed refusal shows “Not filed.” or “Not started.” and the reason in
+the sheet. Your words, destination and workflow choice stay editable.
+After admission, setup errors appear in the Task's workspace. If the reply
+is lost or unreadable, the sheet closes and Desktop checks the saved
+submission on its original Machine.
 
 #### A Task that has not started
 

@@ -83,13 +83,14 @@ struct TaskReadings<Value> {
     }
 }
 
-/// A New Task submission from the click until its conversation is installed.
-struct StartingTask: Equatable {
-    let id: String
-    let request: String
-    let wave: WaveSnapshot?
-    let graph: String?
-    var error: String?
+enum NewTaskAction: Equatable {
+    case file
+    case start(graph: String?)
+
+    var graph: String? {
+        if case .start(let graph) = self { return graph }
+        return nil
+    }
 }
 
 /// One resolved opening: its companion must never outlive or drift from the Session.
@@ -2327,11 +2328,7 @@ final class WorkModel {
 
     private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true) {
         if navigation.palette == .search || navigation.palette == .sidebarSearch { navigation.palette = nil }
-        if !preservingOpening {
-            dismissTaskLink()
-            // Going elsewhere leaves a submitted New Task to its row and recovery.
-            if navigation.startingTask != nil { navigation.startingTask = nil }
-        }
+        if !preservingOpening { dismissTaskLink() }
         historyLookup?.cancel()
         historyLookup = nil
         if let requested, requested.kind == .task {
@@ -2626,73 +2623,52 @@ final class WorkModel {
         graphDefaults[key] = reading(from: result, lastGood: previous)
     }
 
-    /// New Task: one `lf task create REQUEST --run` files it in `wave` (nil: the
-    /// repository) with its conversation admitted. The click has closed the
-    /// sheet; the words stand in until the answer's Session is installed, and
-    /// nothing else is read or prepared for it. A failure before filing keeps the
-    /// words and Try again; after the answer, the Task exists, so a failure
-    /// opening it belongs to its workspace. A submitted request whose answer is
-    /// lost hands uncertainty to recovery.
-    func createTask(request: String, wave: WaveSnapshot?, graph: String?, requestID: String) async throws {
-        let owner = navigation
-        let starting = StartingTask(id: requestID, request: request, wave: wave, graph: graph)
-        owner.startingTask = starting
-        let presentation = owner.paletteGeneration
-        let destination = destinationGeneration
-        let created: TaskCreated
-        do {
-            created = try await query.createTask(request: request, wave: wave?.name, graph: graph, run: true, cwd: repoPath, requestID: requestID)
-        } catch is SubmittedCreationError {
-            Perf.finish(.startTask, id: requestID, owner: owner.performanceOwner, outcome: .unmeasured)
-            // The saved submission owns recovery. Keeping a submit button here
-            // would turn a lost answer into another creation identity.
-            if owner.startingTask?.id == requestID { owner.startingTask = nil }
-            return
-        } catch {
-            if owner.startingTask?.id == requestID { owner.startingTask?.error = error.localizedDescription }
-            throw error
-        }
-        let receipt = created.receipt
-        Perf.retarget(.startTask, from: requestID, to: receipt.sessionId ?? receipt.task.id,
-                      owner: owner.performanceOwner)
-        CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
-        if owner.startingTask?.id == requestID, owner.paletteGeneration == presentation,
-           navigation === owner, destinationGeneration == destination {
-            await openCreatedTask(created)
-        }
-        if owner.startingTask?.id == requestID { owner.startingTask = nil }
-    }
-
-    /// Close the submitting sheet on success or handoff to recovery. A refusal
-    /// throws back to the draft so its request can be corrected.
-    func fileTask(request: String, wave: WaveSnapshot?) async throws {
+    /// Only a confirmed refusal returns to the draft. A saved submission whose
+    /// answer is unknown stays with recovery on its original Machine.
+    func submitTask(_ action: NewTaskAction, request: String, wave: WaveSnapshot?,
+                    requestID: String = UUID().uuidString) async throws {
         let owner = navigation
         let presentation = owner.paletteGeneration
         let destination = destinationGeneration
         let machine = observingMachineId
-        let requestID = UUID().uuidString
         let created: TaskCreated?
         do {
-            created = try await query.createTask(request: request, wave: wave?.name, graph: nil, run: false,
-                                                 cwd: repoPath, requestID: requestID)
-        } catch is SubmittedCreationError { created = nil }
+            created = try await query.createTask(request: request, wave: wave?.name, graph: action.graph,
+                                                 run: action != .file, cwd: repoPath, requestID: requestID)
+        } catch is SubmittedCreationError {
+            created = nil
+        }
 
+        if case .start = action {
+            if let created {
+                Perf.retarget(.startTask, from: requestID, to: created.receipt.sessionId ?? created.receipt.task.id,
+                              owner: owner.performanceOwner)
+                CreationRecovery.shared.awaitingPresentation(requestID, of: .task(created.receipt.task.id))
+            } else {
+                Perf.finish(.startTask, id: requestID, owner: owner.performanceOwner, outcome: .unmeasured)
+            }
+        }
         guard owner.paletteGeneration == presentation else { return }
         if owner.palette == .newTask { owner.palette = nil }
         guard let created, navigation === owner, destinationGeneration == destination,
               observingMachineId == machine else { return }
+        switch action {
+        case .start: await openCreatedTask(created)
+        case .file: openFiledTask(created.row, requestID: requestID)
+        }
+    }
 
-        let filed = created.row
+    private func openFiledTask(_ filed: RoadmapTask, requestID: String) {
         if let repoPath, repoIdentity(filed.task.repo) != repoIdentity(repoPath) { return }
         let planned = roadmap.current != nil && !showsSavedPlanning ? currentTask(id: filed.id)?.task : nil
         let observed = subscribedTaskRow.current.flatMap { $0.id == filed.id ? $0 : nil }
         let row = planned ?? observed ?? filed
         guard row.section == .backlog else { return }
         let view = row.task.waveId.map(WorkNavigation.Board.wave) ?? .repository
-        if owner.waveView != view { select(row.task.waveId.map { .wave(id: $0) }) }
+        if navigation.waveView != view { select(row.task.waveId.map { .wave(id: $0) }) }
         if isHidden(.backlog, in: view) { setHidden(.backlog, false, in: view) }
         if let zoom = zoomedPart(in: view), zoom != .backlog { setZoomed(nil, in: view) }
-        owner.backlogs[view, default: BacklogState()].showFiled(row, inPlanning: planned != nil)
+        navigation.backlogs[view, default: BacklogState()].showFiled(row, inPlanning: planned != nil)
         CreationRecovery.shared.awaitingPresentation(requestID, of: .task(row.id))
     }
 

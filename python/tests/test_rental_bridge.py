@@ -4,6 +4,8 @@ import base64
 import importlib.util
 import io
 import json
+import shlex
+import subprocess
 import sys
 import types
 import urllib.error
@@ -299,6 +301,24 @@ def test_modal_caps_both_resources_and_stops_at_the_admitted_deadline(
     args = modal.Sandbox.create.call_args.kwargs
     assert (args["cpu"], args["memory"], args["gpu"], args["timeout"]) == (cpu, memory, "L4", 19)
     assert reply["route"] == "ssh://lf@modal.test:4321"
+
+
+def test_modal_non_login_ssh_finds_the_uploaded_cli_and_provider_tools(tmp_path):
+    environment = tmp_path / "environment"
+    for command in bridge.TOOLS:
+        if "/etc/environment" in command:
+            subprocess.run(
+                ["sh", "-ec", command.replace("/etc/environment", shlex.quote(str(environment)))],
+                check=True,
+            )
+    settings = dict(line.split("=", 1) for line in environment.read_text().splitlines())
+    assert "/home/lf/.local/bin" in settings["PATH"].split(":")
+    packages = next(
+        command.split("npm install -g ")[1].split()
+        for command in bridge.TOOLS
+        if "npm install -g " in command
+    )
+    assert {"@openai/codex", "@anthropic-ai/claude-code"} <= set(packages)
 
 
 def test_modal_skips_create_when_the_budget_window_has_elapsed(monkeypatch):

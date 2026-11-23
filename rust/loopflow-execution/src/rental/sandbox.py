@@ -45,14 +45,14 @@ TOOLS = [
     " https://cli.github.com/packages stable main' > /etc/apt/sources.list.d/github-cli.list"
     " && apt-get update -qq && apt-get install -y -qq gh",
     "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -"
-    " && apt-get install -y -qq nodejs && npm install -g @anthropic-ai/claude-code",
+    " && apt-get install -y -qq nodejs && npm install -g @anthropic-ai/claude-code @openai/codex",
     "curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path"
     " && chmod -R a+rwX /usr/local/rustup /usr/local/cargo",
     "curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh",
     "useradd -m -s /bin/bash lf && echo 'lf ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/lf",
     # sshd sessions read the environment from here, not from the image.
     "printf 'RUSTUP_HOME=/usr/local/rustup\\nCARGO_HOME=/usr/local/cargo\\nIS_SANDBOX=1\\n"
-    "PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\\n'"
+    f"PATH={ENV['PATH']}:/home/lf/.local/bin\\n'"
     " > /etc/environment",
 ]
 

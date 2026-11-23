@@ -454,9 +454,13 @@ access token, clones and binds the
 repository, then hands off. A sandbox that never answers SSH is deleted at once.
 An unanswered create is `unconfirmed` until its name finds it (then deleted,
 since it has no route) or the create's window passes (`lost`); it is never
-resent. With `LF_RENT_LINUX_BIN` naming a Linux build, the laptop uploads that
-binary instead of the published `lf`, so a development build rents sandboxes
-running its own code.
+resent. The caller asks the sandbox for its architecture. For a release, it
+downloads the Linux package at the caller's tag and checks its SHA-256. For
+a packaged dev build, it downloads the Linux artifact from the same CI run
+using its own GitHub login. The sandbox promotes the uploaded executable.
+The caller checks its revision and waits for the selected server to report ready
+before recording the Machine. For an unpublished build, set `LF_RENT_LINUX_BIN`
+to the Linux executable. It runs with its own disposable Machine home.
 
 `lf [--repo REPO] [--wave WAVE] set machine.capacity R`, naming a pool or on-demand, sets the
 scope's personal Tasks capacity preference in place of a Tasks
@@ -470,7 +474,7 @@ Providers are reached through one embedded bridge
 (`rust/loopflow-execution/src/rental/sandbox.py`) under `uv`, with the provider's pinned
 SDK where it has one (RunPod speaks plain HTTP). It creates, finds and
 deletes machines by the name lf gave them. Daytona and Modal build an image (an
-`lf` user, git, gh, Node and Claude Code, Rust, uv); RunPod and AWS boot
+`lf` user, git, gh, Node, Claude Code, Codex, Rust, uv); RunPod and AWS boot
 stock Ubuntu 24.04 and install the same tools before admitting `lf`. Modal runs
 key-only sshd behind a TCP tunnel; Daytona's SSH gateway takes a token valid for
 the sandbox's life, which rides in the Machine route; RunPod maps port 22 on a

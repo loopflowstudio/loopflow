@@ -4,14 +4,16 @@
 //! Provider calls block, so these commands keep a runtime only for the async
 //! store open and SSH probe and talk to SQLite directly.
 
+use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Context};
 use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::lf::{OndemandCommand, PoolCommand};
+use loopflow_execution::installation::{ArtifactIdentity, ArtifactRole};
 use loopflow_execution::machine_records::CopyCounts;
 use loopflow_execution::rental::recovery::{
     delete_sandbox, give_back, held_ids, now, open_store, refresh_all,
@@ -437,23 +439,34 @@ const LINUX_LF_ENV: &str = "LF_RENT_LINUX_BIN";
 
 /// SSH that trusts a sandbox's fresh host key once; Machine routes then
 /// check it strictly like any other.
-fn first_contact(route: &str, script: &str, stdin: Stdio) -> std::io::Result<bool> {
-    Command::new("ssh")
-        .args([
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=10",
-            route,
-            script,
-        ])
-        .stdin(stdin)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
+fn first_contact(route: &str, script: &str) -> Command {
+    let mut ssh = Command::new("ssh");
+    ssh.args([
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=10",
+        "--",
+        route,
+        script,
+    ])
+    .stdin(Stdio::null());
+    ssh
+}
+
+fn run_bootstrap(route: &str, script: &str, stdin: Stdio) -> anyhow::Result<Vec<u8>> {
+    let output = first_contact(route, script).stdin(stdin).output()?;
+    // SSH diagnostics can contain Daytona's access token in the destination.
+    anyhow::ensure!(output.status.code() != Some(255), "SSH connection failed");
+    anyhow::ensure!(
+        output.status.success(),
+        "remote command failed ({}): {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(output.stdout)
 }
 
 /// A tunnel port may be reused by a later sandbox with another host key.
@@ -472,6 +485,24 @@ fn forget_host_key(route: &str) {
         .status();
 }
 
+// Source experiments can carry unmerged migrations; keep their disposable home.
+const INSTALL_PRIVATE_CLI: &str = r#"set -e
+mkdir -p ~/.local/bin
+candidate=$(mktemp ~/.local/bin/lf.XXXXXXXX)
+trap 'rm -f "$candidate"' EXIT
+cat > "$candidate"
+chmod 755 "$candidate"
+mv "$candidate" ~/.local/bin/lf
+printf 'LF_HOME=%s/.lf-dev\nLF_BIN=%s/.local/bin/lf\n' "$HOME" "$HOME" | sudo tee -a /etc/environment >/dev/null"#;
+
+const INSTALL_PACKAGED_CLI: &str = r#"set -e
+dir=$(mktemp -d)
+trap 'rm -rf "$dir"' EXIT
+cat > "$dir/lf"
+chmod 755 "$dir/lf"
+"$dir/lf" install promote --cli-target "$HOME/.local/bin/lf" --sync-skills >&2
+"$HOME/.local/bin/lf" install preflight --json"#;
+
 /// Wait for SSH, install lf (published, or `LF_RENT_LINUX_BIN`), then add it
 /// as a Machine.
 fn attach(
@@ -479,12 +510,16 @@ fn attach(
     sqlite: &SqliteStore,
     rental: &Rental,
     route: &str,
-    linux_lf: Option<&std::path::Path>,
+    linux_lf: Option<&Path>,
 ) -> anyhow::Result<Machine> {
     forget_host_key(route);
-    let started = Instant::now();
-    while !first_contact(route, "true", Stdio::null())? {
-        if started.elapsed() > SSH_WAIT {
+    let deadline = SystemTime::now() + SSH_WAIT;
+    let arch = loop {
+        let output = first_contact(route, "uname -m").output()?;
+        if output.status.success() {
+            break String::from_utf8(output.stdout)?;
+        }
+        if SystemTime::now() >= deadline {
             return Err(anyhow!(
                 "{} does not answer SSH after {} minutes; it is deleted by {}",
                 rental.provider_name,
@@ -493,33 +528,44 @@ fn attach(
             ));
         }
         std::thread::sleep(Duration::from_secs(2));
-    }
-    let installed = match linux_lf {
-        // A development build runs as one does anywhere: on its own disposable
-        // home, which it may create and which the published install never
-        // claims. sshd sessions read the selection from /etc/environment.
-        Some(binary) => {
-            println!("Uploading {} as its lf", binary.display());
-            first_contact(
-                route,
-                "mkdir -p ~/.local/bin && cat > ~/.local/bin/lf.new && chmod 755 ~/.local/bin/lf.new && mv ~/.local/bin/lf.new ~/.local/bin/lf \
-                 && printf 'LF_HOME=%s/.lf-dev\\nLF_BIN=%s/.local/bin/lf\\n' \"$HOME\" \"$HOME\" | sudo tee -a /etc/environment >/dev/null",
-                Stdio::from(std::fs::File::open(binary)?),
-            )?
-        }
-        None => first_contact(
-            route,
-            loopflow_execution::machine::connection::INSTALL_COMMAND,
-            Stdio::null(),
-        )?,
     };
-    if !installed {
-        return Err(anyhow!(
-            "could not install lf on {}; it is deleted by {}",
-            rental.provider_name,
-            clock(rental.deadline)
-        ));
+    let temporary = tempfile::tempdir()?;
+    let revision = crate::build_info::source_revision();
+    let (binary, script) = match linux_lf {
+        Some(path) => (path.to_path_buf(), INSTALL_PRIVATE_CLI),
+        None => {
+            let binary = super::install::rental_cli(arch.trim(), temporary.path())
+                .with_context(|| format!(
+                    "could not fetch Linux lf for revision {revision}; set {LINUX_LF_ENV} to its Linux executable"
+                ))?;
+            (binary, INSTALL_PACKAGED_CLI)
+        }
+    };
+    let expected = ArtifactIdentity::capture(ArtifactRole::Cli, &binary)?;
+    let output = run_bootstrap(route, script, Stdio::from(std::fs::File::open(&binary)?))
+        .with_context(|| format!("install lf on {}", rental.provider_name))?;
+    if linux_lf.is_none() {
+        let preflight: super::install::PromotionPreview =
+            serde_json::from_slice(&output).context("read the installed Linux build's identity")?;
+        anyhow::ensure!(
+            preflight.candidate.source_revision == revision,
+            "rental installed revision {}, expected {revision}; set {LINUX_LF_ENV} to its Linux executable",
+            preflight.candidate.source_revision
+        );
     }
+    let command = format!(
+        "{}; exec lf install server",
+        loopflow_execution::machine::ssh::remote_path()
+    );
+    let output = run_bootstrap(route, &command, Stdio::null())
+        .with_context(|| format!("start the server on {}", rental.provider_name))?;
+    let status: loopflow_execution::machine::client::Status =
+        serde_json::from_slice(&output).context("read rental server readiness")?;
+    anyhow::ensure!(
+        status.ready && status.executable_sha256.as_ref() == Some(&expected.sha256),
+        "the selected Linux lf is not serving {}",
+        rental.provider_name
+    );
     let probe = runtime.block_on(loopflow_execution::machine::connection::probe(route, false))?;
     let label = next_label(sqlite, &rental.ondemand)?;
     let machine =

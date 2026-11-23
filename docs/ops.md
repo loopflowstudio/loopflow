@@ -244,6 +244,9 @@ Returned modal-1 (2 sessions copied; ceiling estimate $0.24)
   in `lf ondemand list` and `lf machine end` is labeled as a ceiling estimate.
   In rental JSON, `ceiling_estimate_usd` gives that estimate. Rentals created
   before Modal limits were recorded keep their original `cost_usd`.
+- A rental runs the Linux build matching the caller. Your Machine fetches the
+  release or dev package before forwarding logins. For a local build or an
+  expired CI artifact, set `LF_RENT_LINUX_BIN` to the Linux executable.
 - **Credentials on rentals:** Owned SSH machines use their own native logins.
   For unattended rentals, forward explicitly named tokens or auth files via
   `forward.env` / `forward.files`, and push rotated files to a live Machine
@@ -272,11 +275,11 @@ launchctl bootout gui/$(id -u)/com.loopflow.refresh
 ```
 
 Re-enable with `launchctl enable gui/$(id -u)/com.loopflow.refresh && lf schedule`.
-On Linux, remove the `# loopflow install schedule` crontab line. On container
-Linux without `crontab` or a systemd user service, `lf install` succeeds
-while reporting that automatic updates are unscheduled, and the local server
-runs detached without systemd (explicit `lf install schedule` still fails if
-`crontab` is missing).
+On Linux, remove the `# loopflow install schedule` crontab line. When
+`crontab` is missing, `lf install` finishes and reports that automatic
+updates and cleanup are unscheduled. An explicit `lf install schedule`
+reports the missing command. On a container without a systemd user manager,
+the first connection starts a detached server and logs to `~/.lf/logs/server.log`.
 
 For any other recurring job, such as settling landings with Desktop closed
 (`lf pr reconcile`) or running a daily `wave-operate` or release, use your OS

@@ -8,3 +8,5 @@
 - **Make overwriting forwarded files explicit (`lf machine forward <label>`) with opt-in targeted restart (`--task <id>` or `--session <id>`).** Passed over clobbering destination files on ordinary launch or restarting all provider Sessions automatically, so rotating one login does not interrupt unrelated work and targeting a Task’s primary Session does not require looking up a remote Session UUID.
 
 - **Record the Modal sizing mode at admission.** Old declarations live in personal YAML, while old rentals keep their hardware in SQLite. A missing mode on a declaration selects burst for the next create. A missing mode on a recorded rental retains its original full request and unbounded maximum. Only a recorded burst or reserved mode carries `ceiling_estimate_usd`.
+
+- **Pin packaged dev builds by GitHub Actions run ID.** The main package workflow checks out the triggering CI run's revision. Its own workflow head can already have advanced. Recording its run ID lets a packaged caller fetch a sibling Linux artifact directly. Clean source builds look up their commit, and the serving binary must match the uploaded bytes.

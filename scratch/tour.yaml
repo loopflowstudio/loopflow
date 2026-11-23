@@ -1,4 +1,4 @@
-at: f6e806d4668341e4dc9167379dd0c62f242792ea
+at: ceec08df10cdb38a520ea7a9ad0d73f6b9e8de72
 first:
   - path: docs/work.md
     why: What pausing and unpausing do
@@ -24,6 +24,16 @@ first:
     why: Explain when execution can resume
   - path: rust/loopflow/src/lf/commands/waves.rs
     why: Project the hold into board and status
+  - path: swift/Loopflow/Design/TaskActions.swift
+    why: Choose Pause or Unpause and explain when cleanup must finish
+  - path: swift/Loopflow/Services/PendingChanges.swift
+    why: Move rows immediately and restore them if the Machine refuses
+  - path: swift/LoopflowMac/WorkModel.swift
+    why: Read the selected section and leave paused conversations closed
+  - path: swift/LoopflowiOS/TaskWorkspaceView.swift
+    why: Read a paused conversation and unpause from the phone
+  - path: swift/LoopflowTests/TaskConceptTests.swift
+    why: Select a paused Task and click Unpause in the Mac workflow bar
   - path: rust/loopflow/tests/machine_commands.rs
     why: Pause remotely and read the owner's answer
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs

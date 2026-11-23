@@ -43,7 +43,12 @@ Clipboard paste, `lf desktop send`/`send-key`, selection, focus, connection reco
 ## Build and check
 
 1. **Built the Option-B slice.** Desktop key equivalents now probe for a binding before sending a key. The shared Session and Shell responder lets AppKit interpret Option on the side Ghostty selected, then encodes committed text with the original key. Clipboard paste still uses the paste API.
-2. **Next, finish keyboard, IME, and shortcut ownership.** Complete side-specific modifier-only transitions, input-source notifications, composition guards in both Desktop monitors, standalone binding removals, and the Select All responder. Check them alongside the new key path.
+2. **Next, finish keyboard, IME, and shortcut ownership.** Slice 1 already shipped side masks in `translateMods`, `isARepeat` → `GHOSTTY_ACTION_REPEAT`, `unshifted_codepoint` from `characters(byApplyingModifiers: [])`, the `key_is_binding` probe and empty-`setMarkedText` unmark. Still missing in code (checked 2026-11-22):
+   - `GhosttyTerminalView.flagsChanged` (`GhosttyTerminalView.swift:1308`): skip while `hasMarkedText()`; press/release from the keycode's `NX_DEVICE*` bit, not generic `.shift`/`.option`.
+   - `DesktopActions.swift:672` and `WorkPalette.swift:315` still cast to `NSTextView`; change to `NSTextInputClient`.
+   - `GhosttyManager.swift`: no `keyboardSelectionDidChangeNotification` → `ghostty_app_keyboard_changed`; no unbinds of standalone defaults.
+   - No `selectAll(_:)` responder on `GhosttyMetalView`.
+   Check them alongside the new key path.
    - Kitty mode: distinct bytes for `Return`, `Shift-Return`, and `Control-Return`; shifted printable keys (`Shift-A`, `Shift-/`) proving `unshifted_codepoint` and `consumed_mods`; Control letter; modified navigation (`Option-Left`, `Shift-Tab`); repeat (`isARepeat` -> `GHOSTTY_ACTION_REPEAT`) and release (`keyUp`, side-aware `flagsChanged`).
    - IME & dead keys: composed text commits once without triggering-chord modifiers; `setMarkedText("")` clears `hasMarkedText()` and emits zero bytes; `DesktopActionMonitor` / `WorkPaletteShortcut` defer when `GhosttyMetalView.hasMarkedText()` is `true`; `flagsChanged` is ignored while composing.
    - Shortcut ownership & config: in Kitty mode, `performKeyEquivalent` returns `false` for `⌘Q`, `⌘,`, `⌘⇧W`, `⌘H`, `⌘/` (AppKit menus remain reachable) and dispatches real Ghostty bindings (`⌘↑`/`⌘↓`, `⌘A`, and an `unconsumed:` binding) once; `GhosttyManager` updates Ghostty on `keyboardSelectionDidChangeNotification`; mounted split shortcut test keeps focus routing intact.

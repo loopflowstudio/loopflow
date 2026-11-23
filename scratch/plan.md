@@ -59,7 +59,7 @@ fixture checks this delivery during an ordinary batch skill run.
 
 ## Remaining slices
 
-1. **All scoped rows and actions.** Fill native controls and YAML disclosures, connect checkout/Wave and Advanced selectors, add the Promote preview/recovery/Undo path, and remove the old Configuration view. Exercise explicit empty versus absent docs, pin versus fallback, tagged tracker, coupled Machine keys, Wave rename and reuse, and Task Diff from the existing Rust owners.
+1. **All scoped rows and actions.** Fill native controls and YAML disclosures, connect checkout/Wave and Advanced selectors, add the Promote preview/recovery/Undo path, and remove the old Configuration view. Exercise explicit empty versus absent docs, pin versus fallback, tagged tracker, coupled Machine keys, Wave rename and reuse, and Task Diff from the existing Rust owners. Today `lf config scope` reads only Context and `config/files/context_diff.rs` hand-codes the two `diff` spellings; generalize both to every catalog key through the canonical key codecs and delete the Diff-only `Spelling`/`Declarations` path in the same change.
 2. **App panes and health.** Add the global catalog rows to General, apply theme selection instantly with Undo, retain the staged ThemeEditor, and wire the shared Mobile observation and Machine statuses. Remove the old chooser transaction.
 3. **Search across panes.** Wire keyboard selection, row highlighting and in-place edits to the same address and edit state. Verify no-results, a stale reading, error recovery, accessibility, window resizing and light/dark.
 

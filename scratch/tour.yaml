@@ -1,0 +1,19 @@
+at: ee696d48d79d3ec857909e5401908035ae12d2d3
+first:
+  - path: scratch/plan.md
+    why: The implemented reader and remaining Files workflows
+  - path: swift/README.md
+    why: The Files walkthrough and shortcuts
+  - path: swift/LoopflowMac/TaskFileDocument.swift
+    why: Document lifetime, access, drafts and per-file modes
+  - path: swift/LoopflowMac/Grammar.swift
+    why: Source lines and colors shared by Read and Diff
+  - path: swift/LoopflowMac/Views/TaskFilesView.swift
+    why: How the selected document opens for reading or editing
+  - path: swift/LoopflowMac/Views/TaskCodeReader.swift
+    why: Selectable numbered source lines
+  - path: swift/LoopflowMac/DesktopActions.swift
+    why: Edit shortcut routing for the addressed pane
+  - path: swift/LoopflowTests/TaskFilesTests.swift
+    why: Reading, editing, switching files and undoing a draft
+hide: []

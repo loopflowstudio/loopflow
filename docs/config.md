@@ -154,9 +154,9 @@ lf context --json                              # context budgets and current usa
 files. Desktop's [Settings](surfaces.md#settings) window (`⌘,`) reads and
 writes the same files. **Project & Wave Config** has the **Applies to** and
 **Save in** selectors, a precedence ladder, YAML previews for Reset and Move,
-and Undo. For nullable
-choices such as `chrome`, **Inherited** removes the declaration. Selecting
-**Explicit null** keeps the key in YAML. The resolver skips null declarations
+and Undo. An unset control shows the value in effect and where it comes
+from, such as **On (Default)**; choosing that option removes the declaration.
+For nullable choices such as `chrome`, **Explicit null** keeps the key in YAML. The resolver skips null declarations
 when choosing the effective value.
 
 ## Where settings live

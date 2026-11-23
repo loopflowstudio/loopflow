@@ -124,6 +124,10 @@ struct ConfigurationScope: Codable {
     func source(_ key: String) -> String? {
         let locators = Set(settings[key]?.candidates.filter { $0.reason == "selected" }.map(\.locator) ?? [])
         guard locators.count == 1, let path = locators.first else { return nil }
+        return title(locator: path)
+    }
+
+    func title(locator path: String) -> String {
         if path == "builtin" { return "Default" }
         return files.first { file in
             if file.owner == .personalWave { return path.hasPrefix(file.path + "#waves.") }

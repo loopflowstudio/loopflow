@@ -176,6 +176,18 @@ struct SettingsWorkflowTests {
             let fresh = try #require(model.file)
             #expect(await model.apply(.reset, key: "chrome", to: fresh, notices: notices, manager: nil))
             #expect(model.file?.slots["chrome"]?.declared == .absent)
+
+            // An unset control shows the value in effect and where it comes from.
+            _ = try pane(.project).inspect().find(viewWithId: "chrome").find(text: "None (Default)")
+            let agentsPane = try pane(.agents)
+            #expect(try agentsPane.inspect().find(viewWithId: "default_agent").find(ScopedSettingRow.self).actualView().unsetText == "None (Default)")
+            #expect(try agentsPane.inspect().find(viewWithId: "yolo").find(ScopedSettingRow.self).actualView().unsetText == "On (Default)")
+            for settings in [SettingsPane.general, .agents, .machines, .project] {
+                let rows = try pane(settings).inspect().findAll(ScopedSettingRow.self).map { try $0.actualView() }
+                #expect(!rows.isEmpty)
+                #expect(rows.allSatisfy { !$0.unsetText.contains("Inherited") })
+                #expect(throws: (any Error).self) { try pane(settings).inspect().find(text: "Inherited") }
+            }
         } catch {
             watch.cancel()
             await watch.value

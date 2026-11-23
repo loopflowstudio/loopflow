@@ -1,3 +1,4 @@
+import Foundation
 import Loopflow
 import SwiftUI
 
@@ -48,7 +49,7 @@ struct ScopedSettingRow: View {
                 if editError.recovery == .refresh { Button("Refresh") { refreshRow() } }
             }
             if file.owner != .personalGlobal && definition.section != .policy {
-                SettingProvenance(title: declared == .absent ? "Inherited" : "In effect",
+                SettingProvenance(title: "In effect",
                     value: [effective.value.settingsText, source].compactMap { $0 }.joined(separator: " · "),
                     effective: effective, files: model.reading.value?.files ?? [], key: key, path: file.path)
             }
@@ -121,6 +122,26 @@ struct ScopedSettingRow: View {
         }
     }
 
+    /// What applies while this file declares nothing, and where it comes from.
+    /// The agent keys read their own declarations: their effective value is the combined agent order.
+    var unsetText: String {
+        if key == "agents" || key == "default_agent" {
+            guard let candidate = effective.candidates.last(where: { $0.key == key }) else {
+                // The catalog's defaults for these keys are the JSON literals `null` and `[]`.
+                let builtin = try? JSONDecoder().decode(JSONValue.self, from: Data(definition.default.utf8))
+                return labeled(builtin ?? .null, origin: "Default")
+            }
+            let origin = model.reading.value?.title(locator: candidate.locator) ?? candidate.locator
+            return labeled(candidate.value, origin: origin)
+        }
+        let value = definition.editedField.map { effective.value[$0] ?? .null } ?? effective.value
+        return labeled(value, origin: source ?? "Default")
+    }
+
+    private func labeled(_ value: JSONValue, origin: String) -> String {
+        origin == "Default" ? "\(value.settingsText) (Default)" : "\(value.settingsText) (from \(origin))"
+    }
+
     private var usesYAML: Bool {
         definition.controlType != "string" && definition.controlType != "integer" && definition.editedField == nil
     }
@@ -141,19 +162,19 @@ struct ScopedSettingRow: View {
                 case .present(let value): save(.set(value.settingsYAML), to: file)
                 }
             })) {
-                Text("Inherited").tag(ConfigurationScope.Authored.absent)
+                Text(unsetText).tag(ConfigurationScope.Authored.absent)
                 if definition.nullable {
                     Text("Explicit null").tag(ConfigurationScope.Authored.present(.null))
                 }
                 ForEach(choices, id: \.self) { Text($0.settingsText).tag(ConfigurationScope.Authored.present($0)) }
             }
         } else if definition.controlType == "array", case .object(let item) = definition.controlSchema["items"], item["type"] == .string("string") {
-            OrderedSetting(title: definition.title, value: authored,
+            OrderedSetting(title: definition.title, value: authored, unsetText: unsetText,
                            canClearInherited: definition.combination == "append_reset" && file.owner != .personalGlobal, save: { values in
                 await model.apply(.set(JSONValue.array(values.map(JSONValue.string)).settingsYAML), key: key, to: file, notices: notices, manager: manager)
             })
         } else if !usesYAML {
-            TextField(definition.title, text: input, prompt: Text(declared == .present(.null) ? "Explicit null" : "Inherited"))
+            TextField(definition.title, text: input, prompt: Text(declared == .present(.null) ? "Explicit null" : unsetText))
                 .focused($focused)
                 .onSubmit { commitText() }
                 .onChange(of: focused) { _, focused in if !focused { commitText() } }
@@ -280,6 +301,7 @@ extension ConfigurationDefinition {
 private struct OrderedSetting: View {
     let title: String
     let value: JSONValue?
+    let unsetText: String
     let canClearInherited: Bool
     let save: ([String]) async -> Bool
     @State private var addition = ""
@@ -312,7 +334,7 @@ private struct OrderedSetting: View {
             }
             if canClearInherited && value != .array([]) { Button("Save empty list") { Task { _ = await save([]) } } }
         } label: {
-            LabeledContent(title, value: value?.settingsText ?? "Inherited").lineLimit(1)
+            LabeledContent(title, value: value?.settingsText ?? unsetText).lineLimit(1)
         }
     }
 

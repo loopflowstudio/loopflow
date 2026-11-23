@@ -10,14 +10,15 @@ During the live demo of PR #2033, Jack chose **Policy B** (`1b`, `2a`) plus a vi
 
 **Built in this slice.** The seven-pane sidebar has two dividers, monochrome symbols, and a capsule search field. Personal preferences and Project & Wave Config have independent live readings. The project pane holds Context, Git & Release, agent overrides, and Machine placement. Search can open either an agent default or its scoped override. File-only global results reveal the global file button.
 
-**Next slice.** Replace the declaration placeholders in scalar and ordered-list controls with their actual value or runtime default. `"Inherited"` still shows in `swift/LoopflowMac/Views/ScopedSettingRow.swift`: the choice Picker's absent tag (~line 144), the TextField prompt (~156), the `OrderedSetting` label fallback (~315), and the `SettingProvenance` title (~51). A test in `SettingsWorkflowTests` should fail if any of them returns. Keep Reset and explicit null distinct, make precedence quiet, and check the Light and Dark window at compact and wide sizes. The resolver returns the combined agent order for `agents` and `default_agent`; displaying that list as the starting preference would give the wrong answer.
+**Built: no "Inherited" display values.** `ScopedSettingRow.unsetText` labels an unset control with the value in effect and its origin (`On (Default)`, `GitHub PR (from Shared repository settings)`); the choice Picker's absent option, the TextField prompt and the ordered-list label all use it, and the provenance disclosure is always titled "In effect". `agents` and `default_agent` read the highest other declaration of their own key from the candidates, else the catalog default, because their effective value is the combined agent order. Absent, `Explicit null` and authored values stay distinct tags. `sharedCheckoutKeepsItsDestinationThroughValidationAndGlobalMachineEdits` fails if "Inherited" returns to any Settings pane.
+
+**Next.** Live Light and Dark visual QA at compact and wide sizes (qa/gate).
 
 **Checks for this slice**
 
-- `scripts/test_desktop.sh --filter 'sidebarSeparatesPersonalPreferencesFromProjectConfiguration|sharedCheckoutKeepsItsDestinationThroughValidationAndGlobalMachineEdits|checkoutDiffFromSettingsToLaunch|DesignDisciplineTests'` — all seven passed across the build and the focused rerun. The file assertion resolves the macOS `/tmp` symlink before comparing URLs.
-- `cargo test -p loopflow --test integration documented_commands::` — four passed.
-- `uv run python scripts/check_swift_multiplatform_boundaries.py` — passed.
-- Live Light and Dark windows and compact scrolling remain for visual QA.
+- `scripts/test_desktop.sh --filter 'SettingsWorkflowTests'` — 9 passed (both settings suites).
+- `cargo test -p loopflow --test integration documented_commands::` — 4 passed.
+- Live Light and Dark windows at compact and wide sizes remain for qa/gate.
 
 ### 1. Clear policy for what belongs in `⌘,` Settings (Policy B · `2a`)
 

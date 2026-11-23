@@ -160,6 +160,11 @@ its checkout. Repository and Wave primary conversations keep their own scope,
 even in a Task checkout. The Task's conversation list and breadcrumb Session
 picker use the same membership.
 
+In the sidebar, a Task’s current Graph step appears beside its ID and status.
+Working Tasks start newest first, and new arrivals go above the saved order.
+**Sort by status** in the repository sidebar or **⌘K** saves a one-time order
+of Blocked, Available, Idle and Busy Tasks.
+
 A Task's row is its whole title, wrapped rather than cut, then its ID and one
 status word. A row that needs someone adds one line saying why:
 
@@ -172,8 +177,9 @@ Approve the plan?
 
 The word is the first of these that applies:
 
-1. What the Task's program reports: **Busy**, **Available**, **Blocked**,
-   **Done**. A blocked program's line is what it asked.
+1. A program can report **Busy**, **Available**, **Blocked**, or **Error**.
+   A finished turn on a live interactive Session reads **Available** once its
+   programs have stopped reporting work. A blocked program's line is what it asked.
 2. **Blocked** or **Waiting**, when the Task's condition says so and no
    program reports. The line is the condition's reason, the one
    `lf plan list` prints. A Task whose Graph has never run waits on nobody,

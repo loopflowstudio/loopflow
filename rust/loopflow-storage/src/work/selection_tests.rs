@@ -474,6 +474,10 @@ fn query_selection_plan_wire_roundtrips() {
         serde_json::to_value(&plan).unwrap(),
         serde_json::from_str::<serde_json::Value>(fixture).unwrap()
     );
+    assert_eq!(plan.contents[0].graph_step.as_deref(), Some("review"));
+    let mut content = serde_json::to_value(&plan.contents[0]).unwrap();
+    content.as_object_mut().unwrap().remove("graph_step");
+    assert!(serde_json::from_value::<super::selection::ViewContent>(content).is_err());
     assert_eq!(plan.projection, plan.arrangement.project());
     plan.arrangement.validate(&plan.resolution.members).unwrap();
 }

@@ -74,7 +74,17 @@ struct WorkNavigator: View {
                 let scope = model.navigation.sidebarScope
                 let dragOrder = scope == .repository ? rows.map(\.work.id) : []
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    NewTaskRow(model: model)
+                    HStack {
+                        NewTaskRow(model: model)
+                        if scope == .repository {
+                            Button { Task { await model.sortWorkingTasksByStatus() } } label: {
+                                Label("Sort by status", systemImage: "arrow.up.arrow.down").labelStyle(.iconOnly)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Sort by status")
+                            .disabled(model.repoPath == nil)
+                        }
+                    }
                     if case .dashboard = scope {
                         HStack {
                             Text(listTitle).font(Typography.textStrong).lineLimit(1)
@@ -241,7 +251,7 @@ struct WorkNavigator: View {
         // row's hover, so a crossing re-renders that hint, not rows or the sidebar.
         return RowHover { hover in TaskRow(
             id: id, presentation: presentation, task: found?.task, status: status,
-            auto: row.states.contains(.auto), selected: selected, muted: muted,
+            graphStep: row.graphStep, auto: row.states.contains(.auto), selected: selected, muted: muted,
             slotHint: slotHint, showsSlotHint: model.navigation.showsSlotHints, hover: hover)
         .background {
             Button {

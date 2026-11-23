@@ -5,12 +5,13 @@ use crate::execution::{TaskSection, TaskState};
 
 use crate::work::selection::{
     Arrangement, Dashboard, DashboardId, DashboardReading, Selection, SelectionExpression,
-    SelectionId, SelectionResolution, SelectionState, SelectionWork, SlotLayout, WorkWorkspaceKey,
-    WorkWorkspaceKind,
+    SelectionId, SelectionResolution, SelectionState, SelectionWork, SlotLayout, ViewPlan,
+    WorkWorkspaceKey, WorkWorkspaceKind,
 };
 use crate::{StoreError, StoreResult};
 use loopflow_model::durable::RepositoryId;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
@@ -69,6 +70,7 @@ fn work_in(
     conn: &Connection,
     repository: &RepositoryId,
     projection: &SessionProjection,
+    order_by: WorkingOrder,
 ) -> StoreResult<Vec<SelectionWork>> {
     let repo: String = conn.query_row(
         "SELECT repo FROM repository_plans WHERE id=?1",
@@ -82,7 +84,7 @@ fn work_in(
         kind,
         id,
     };
-    let mut tasks = super::children::repository_tasks_in(conn, repository)?;
+    let tasks = super::children::repository_tasks_in(conn, repository)?;
     let reading = task_selection_in(conn, repository, &repo, projection)?;
     // State, publication and ownership for every Task in a fixed number of
     // statements: a query per Task costs thousands on a large repository.
@@ -92,8 +94,7 @@ fn work_in(
     let auto_on = super::task_details::auto_on_in(conn, &ids_json)?;
     let published = super::task_started::published_in(conn, &ids)?;
     let owners = super::task_ownership::owners_in(conn, &ids)?;
-    tasks.sort_by_cached_key(|task| reading.order.key(task.id.as_str(), task.rank));
-    let mut work = Vec::with_capacity(tasks.len() + waves.len() + 1);
+    let mut rows = Vec::with_capacity(tasks.len());
     for task in tasks {
         let state = *task_states
             .get(&task.id)
@@ -107,14 +108,33 @@ fn work_in(
             task.state.as_deref(),
             activity,
         );
-        work.push(SelectionWork {
-            key: key(WorkWorkspaceKind::Task, task.id.to_string()),
-            parent_wave: task.wave_id,
-            name: task.identifier,
-            states,
-            activity_known: activity.is_none_or(|activity| activity.known),
-        });
+        rows.push((
+            task.rank,
+            SelectionWork {
+                key: key(WorkWorkspaceKind::Task, task.id.to_string()),
+                parent_wave: task.wave_id,
+                name: task.identifier,
+                states,
+                activity_known: activity.is_none_or(|activity| activity.known),
+            },
+        ));
     }
+    let starts = start_times_in(
+        conn,
+        rows.iter()
+            .filter(|(_, row)| row.states.contains(&SelectionState::Working))
+            .map(|(_, row)| row.key.id.as_str()),
+    )?;
+    rows.sort_by_cached_key(|(rank, row)| {
+        reading.order.key(
+            &row.key.id,
+            *rank,
+            starts.get(&row.key.id).copied(),
+            &row.states,
+            order_by,
+        )
+    });
+    let mut work: Vec<_> = rows.into_iter().map(|(_, row)| row).collect();
     // Tasks precede the alphabetized Waves, then the repository.
     for wave in waves {
         work.push(SelectionWork {
@@ -152,14 +172,69 @@ pub struct TaskSelectionReading {
 #[derive(Debug)]
 pub struct TaskOrder(HashMap<String, usize>);
 
+#[derive(Debug, Clone, Copy)]
+pub enum WorkingOrder {
+    Saved,
+    ByStatus,
+}
+
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum TaskPosition {
+    New(Reverse<i64>),
+    Saved(usize),
+    Status(u8, Reverse<i64>),
+    Planning(u32),
+}
+
 impl TaskOrder {
-    pub fn key(&self, id: &str, rank: u32) -> (usize, u32, String) {
-        (
-            self.0.get(id).copied().unwrap_or(usize::MAX),
-            rank,
-            id.to_owned(),
-        )
+    pub fn key(
+        &self,
+        id: &str,
+        rank: u32,
+        started_at: Option<i64>,
+        states: &BTreeSet<SelectionState>,
+        order: WorkingOrder,
+    ) -> (TaskPosition, String) {
+        let position = match (started_at, order) {
+            (None, _) => TaskPosition::Planning(rank),
+            (Some(at), WorkingOrder::Saved) => self
+                .0
+                .get(id)
+                .copied()
+                .map_or(TaskPosition::New(Reverse(at)), TaskPosition::Saved),
+            (Some(at), WorkingOrder::ByStatus) => {
+                let bucket = if states.contains(&SelectionState::Blocked) {
+                    0
+                } else if states.contains(&SelectionState::Available) {
+                    1
+                } else if states.contains(&SelectionState::Busy) {
+                    3
+                } else {
+                    2
+                };
+                TaskPosition::Status(bucket, Reverse(at))
+            }
+        };
+        (position, id.to_owned())
     }
+}
+
+fn start_times_in<'a>(
+    conn: &Connection,
+    ids: impl Iterator<Item = &'a str>,
+) -> StoreResult<HashMap<String, i64>> {
+    let mut statement = conn.prepare(
+        "SELECT t.id, COALESCE(
+            (SELECT MIN(o.at) FROM task_ownership o WHERE o.task_id=t.id AND o.kind != 'unclaim'),
+            (SELECT e.created_at FROM task_events e WHERE e.task_id=t.id
+             AND json_extract(e.kind_json,'$.kind')='started' ORDER BY e.id LIMIT 1),
+            t.created_at)
+         FROM tasks t WHERE t.id IN (SELECT value FROM json_each(?1))",
+    )?;
+    let rows = statement.query_map([super::children::ids_json(ids)], |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 /// The same lifecycle, section, auto setting and activity set for roadmap rows
@@ -293,7 +368,7 @@ fn resolve_in(
     selection
         .resolve(
             repository.as_str(),
-            &work_in(conn, repository, projection)?,
+            &work_in(conn, repository, projection, WorkingOrder::Saved)?,
             &definitions(catalog),
         )
         .map_err(StoreError::from)
@@ -316,8 +391,8 @@ fn plan_in(
     saved: Option<&Dashboard>,
     queries: &BTreeMap<DashboardId, Selection>,
     work: &[SelectionWork],
-) -> StoreResult<crate::work::selection::ViewPlan> {
-    use crate::work::selection::{ViewContent, ViewLocation, ViewPlan};
+) -> StoreResult<ViewPlan> {
+    use crate::work::selection::{ViewContent, ViewLocation};
     let resolution = selection
         .resolve(repository.as_str(), work, queries)
         .map_err(StoreError::from)?;
@@ -339,6 +414,7 @@ fn plan_in(
             title: facts.map_or_else(|| key.id.clone(), |item| item.name.clone()),
             states: facts.map_or_else(BTreeSet::new, |item| item.states.clone()),
             identifier: None,
+            graph_step: None,
             primary_session: None,
             location: None,
             argv: None,
@@ -414,14 +490,50 @@ fn plan_in(
     })
 }
 
+/// Resolve the captured cursor in execution, where the Graph's step names live.
+type RunningStep = fn(&str, &str) -> StoreResult<Option<String>>;
+
+fn fill_graph_steps_in(
+    conn: &Connection,
+    plans: &mut [ViewPlan],
+    running_step: RunningStep,
+) -> StoreResult<()> {
+    let tasks: BTreeSet<_> = plans
+        .iter()
+        .flat_map(|plan| &plan.contents)
+        .filter(|content| {
+            content.work.kind == WorkWorkspaceKind::Task && content.identifier.is_some()
+        })
+        .map(|content| content.work.id.as_str())
+        .collect();
+    let mut query = conn.prepare(
+        "SELECT task_id,step,CASE WHEN run_start IS NOT NULL THEN graph END,run_start
+         FROM task_graphs WHERE task_id IN (SELECT value FROM json_each(?1))",
+    )?;
+    let mut rows = query.query([super::children::ids_json(tasks)])?;
+    let mut steps = HashMap::<String, String>::new();
+    while let Some(row) = rows.next()? {
+        let parked = row.get(1)?;
+        let step = match row.get::<_, Option<String>>(3)? {
+            Some(cursor) => running_step(&row.get::<_, String>(2)?, &cursor)?.unwrap_or(parked),
+            None => parked,
+        };
+        steps.insert(row.get(0)?, step);
+    }
+    for content in plans.iter_mut().flat_map(|plan| &mut plan.contents) {
+        content.graph_step = steps.get(&content.work.id).cloned();
+    }
+    Ok(())
+}
+
 fn plan_selection_in(
     conn: &Connection,
     repository: &RepositoryId,
     selection: Selection,
     projection: &SessionProjection,
-) -> StoreResult<crate::work::selection::ViewPlan> {
+) -> StoreResult<ViewPlan> {
     let catalog = catalog_in(conn, repository)?;
-    let work = work_in(conn, repository, projection)?;
+    let work = work_in(conn, repository, projection, WorkingOrder::Saved)?;
     let saved = selection
         .referenced_query()
         .and_then(|id| catalog.iter().find(|saved| &saved.id == id));
@@ -459,14 +571,15 @@ impl SqliteStore {
         selection: Selection,
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-    ) -> StoreResult<Option<crate::work::selection::ViewPlan>> {
+        running_step: RunningStep,
+    ) -> StoreResult<Option<ViewPlan>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(snapshot) = inputs.pin(&mut conn)? else {
             return Ok(None);
         };
-        Ok(Some(plan_selection_in(
-            &snapshot, repository, selection, projection,
-        )?))
+        let mut plan = plan_selection_in(&snapshot, repository, selection, projection)?;
+        fill_graph_steps_in(&snapshot, std::slice::from_mut(&mut plan), running_step)?;
+        Ok(Some(plan))
     }
 
     /// One consistent reading of the same selection across `repos` (canonical
@@ -478,7 +591,8 @@ impl SqliteStore {
         repos: &[String],
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-    ) -> StoreResult<Option<Vec<crate::work::selection::ViewPlan>>> {
+        running_step: RunningStep,
+    ) -> StoreResult<Option<Vec<ViewPlan>>> {
         let selection = match source {
             Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
             None => repository_default(),
@@ -492,7 +606,7 @@ impl SqliteStore {
         for repo in repos {
             if let Some(repository) = super::repositories::repository_id_in(&snapshot, repo)? {
                 if !waves.is_empty()
-                    && !work_in(&snapshot, &repository, projection)?
+                    && !work_in(&snapshot, &repository, projection, WorkingOrder::Saved)?
                         .iter()
                         .any(|item| {
                             item.key.kind == WorkWorkspaceKind::Wave
@@ -511,6 +625,7 @@ impl SqliteStore {
                 )?);
             }
         }
+        fill_graph_steps_in(&snapshot, &mut plans, running_step)?;
         Ok(Some(plans))
     }
 
@@ -520,14 +635,15 @@ impl SqliteStore {
         repository: &RepositoryId,
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-    ) -> StoreResult<Option<Vec<crate::work::selection::ViewPlan>>> {
+        running_step: RunningStep,
+    ) -> StoreResult<Option<Vec<ViewPlan>>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(snapshot) = inputs.pin(&mut conn)? else {
             return Ok(None);
         };
         let catalog = catalog_in(&snapshot, repository)?;
         let queries = definitions(&catalog);
-        let work = work_in(&snapshot, repository, projection)?;
+        let work = work_in(&snapshot, repository, projection, WorkingOrder::Saved)?;
         let mut plans = vec![plan_in(
             &snapshot,
             repository,
@@ -567,6 +683,7 @@ impl SqliteStore {
                 &work,
             )?);
         }
+        fill_graph_steps_in(&snapshot, &mut plans, running_step)?;
         Ok(Some(plans))
     }
 
@@ -663,7 +780,7 @@ impl SqliteStore {
         };
         Ok(Some(DashboardEditInputs {
             catalog: catalog_in(&snapshot, repository)?,
-            work: work_in(&snapshot, repository, projection)?,
+            work: work_in(&snapshot, repository, projection, WorkingOrder::Saved)?,
             arrangement: arrangement_in(&snapshot, repository, id, expression)?
                 .map(|(_, arrangement)| arrangement),
         }))
@@ -758,12 +875,21 @@ impl SqliteStore {
         Ok(saved)
     }
 
+    pub fn task_start_times<'a>(
+        &self,
+        ids: impl Iterator<Item = &'a str>,
+    ) -> StoreResult<HashMap<String, i64>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        start_times_in(&conn, ids)
+    }
+
     /// Read the saved order and membership before application reordering.
     pub fn task_order_inputs(
         &self,
         repository: &RepositoryId,
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
+        order: WorkingOrder,
     ) -> StoreResult<Option<(Vec<String>, Vec<SelectionWork>)>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(snapshot) = inputs.pin(&mut conn)? else {
@@ -771,7 +897,7 @@ impl SqliteStore {
         };
         Ok(Some((
             task_order_in(&snapshot, repository)?,
-            work_in(&snapshot, repository, projection)?,
+            work_in(&snapshot, repository, projection, order)?,
         )))
     }
 

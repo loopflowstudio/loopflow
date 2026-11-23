@@ -250,7 +250,7 @@ fn owned_unstarted_task_is_open_but_excluded_from_working_queries() {
 }
 
 #[test]
-fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
+fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
     let (_dir, store, repo) = fixture();
     let (one, two, three) = (
         "task_11111111111111111111111111111111",
@@ -266,6 +266,12 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
             "INSERT INTO task_checkouts(task_id,worktree) SELECT id,'/repo/fix-1' FROM tasks WHERE issue_identifier='FIX-1'",
             [],
         )
+        .unwrap();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute("UPDATE tasks SET planning_rank=0 WHERE id=?1", [two])
         .unwrap();
     assert_eq!(
         selections::view_plan(&store, &repo, None)
@@ -310,13 +316,12 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
             .unwrap()
             .resolution
             .task_ids(),
-        [two, one, three]
-    );
-    assert_eq!(
-        selections::reorder_task(&store, &repo, three, two, None)
-            .unwrap()
-            .unwrap(),
         [three, two, one]
+    );
+    // Sorting idle Tasks ignores their saved slots and planning ranks.
+    assert_eq!(
+        selections::sort_tasks_by_status(&store, &repo).unwrap(),
+        [three, one, two]
     );
 
     let revisions = store.revisions().unwrap();
@@ -335,8 +340,49 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
             .unwrap()
             .resolution
             .task_ids(),
-        [three, two, one]
+        [three, one, two]
     );
+}
+
+#[test]
+fn sidebar_step_follows_the_captured_cursor_and_disappears_without_a_graph() {
+    let (_dir, store, repo) = fixture();
+    let id =
+        loopflow_model::durable::TaskId::parse("task_22222222222222222222222222222222").unwrap();
+    let step = || {
+        selections::view_plan(&store, &repo, None)
+            .unwrap()
+            .contents
+            .into_iter()
+            .find(|content| content.work.id == id.as_str())
+            .unwrap()
+            .graph_step
+    };
+    assert_eq!(step(), None);
+    let graph = crate::task_graph::CapturedGraph::load("code", _dir.path())
+        .unwrap()
+        .unwrap();
+    let cursor = graph.find("implement").unwrap().cursor();
+    store
+        .take_up_task_graph(&id, &serde_json::to_string(&graph).unwrap())
+        .unwrap();
+    store.set_task_graph_step(&id, "review").unwrap();
+    assert_eq!(step().as_deref(), Some("review"));
+    let carrier = store.test_lf_process();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE task_graphs SET lf_process_id=?2,run_start=?3 WHERE task_id=?1",
+            rusqlite::params![
+                id.as_str(),
+                carrier,
+                serde_json::to_string(&cursor).unwrap()
+            ],
+        )
+        .unwrap();
+    assert_eq!(step().as_deref(), Some("implement"));
 }
 
 #[test]
@@ -1126,7 +1172,12 @@ fn a_task_order_changed_after_preparation_keeps_the_new_order() {
     let (_dir, store, repo) = fixture();
     let reading = crate::store::session_projection::Reading::acquire(&store, 500, None).unwrap();
     let (read, work) = store
-        .task_order_inputs(&repo, &reading.inputs, &reading.values)
+        .task_order_inputs(
+            &repo,
+            &reading.inputs,
+            &reading.values,
+            loopflow_storage::sqlite::selections::WorkingOrder::Saved,
+        )
         .unwrap()
         .unwrap();
     let later: Vec<_> = work
@@ -1138,7 +1189,12 @@ fn a_task_order_changed_after_preparation_keeps_the_new_order() {
     assert!(store.commit_task_order(&repo, &read, &later).unwrap());
     assert!(!store.commit_task_order(&repo, &read, &[]).unwrap());
     let (retained, _) = store
-        .task_order_inputs(&repo, &reading.inputs, &reading.values)
+        .task_order_inputs(
+            &repo,
+            &reading.inputs,
+            &reading.values,
+            loopflow_storage::sqlite::selections::WorkingOrder::Saved,
+        )
         .unwrap()
         .unwrap();
     assert_eq!(retained, later);

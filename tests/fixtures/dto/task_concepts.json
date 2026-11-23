@@ -292,98 +292,6 @@
     "tasks": [
       {
         "actions": {
-          "reason": "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first",
-          "recommended": "run"
-        },
-        "condition": {
-          "evidence_age_secs": 1794709650,
-          "local_progress": {
-            "authored_commits": null,
-            "dirty": null,
-            "reason": null,
-            "recovery_required": null,
-            "state": "not_applicable",
-            "unsettled": false
-          },
-          "observed_at": "2026-11-15T02:27:31.446882Z",
-          "reason": "ready",
-          "state": "waiting",
-          "unresolved_execution": true
-        },
-        "execution": {
-          "captured": null,
-          "died": null,
-          "outlook": null,
-          "reason": "No Task Graph has run; independent Sessions may still be active",
-          "state": "idle",
-          "step": null
-        },
-        "graph_name": "code",
-        "graph_source": "builtin",
-        "latest_graph_process": null,
-        "lifecycle": "unstarted",
-        "next_move": {
-          "owner": "wave",
-          "reason": "ready"
-        },
-        "pr": null,
-        "reference": {
-          "issue_url": null,
-          "workspace": null
-        },
-        "run_control": {
-          "unavailable": null
-        },
-        "runtime": {
-          "completion_pending": null,
-          "owner": {
-            "machine": {
-              "id": null,
-              "label": null
-            },
-            "person": null,
-            "person_id": null,
-            "person_key": null
-          },
-          "provider": "codex",
-          "reason": "No Task Graph has run; independent Sessions may still be active",
-          "status": "unstarted",
-          "updated_at": "1970-01-01T00:00:01Z",
-          "work_id": "task_11111111111111111111111111111111"
-        },
-        "section": "backlog",
-        "owned_by_you": false,
-        "selection_states": [
-          "open",
-          "unstarted",
-          "backlog"
-        ],
-        "task": {
-          "tracker_state": {
-            "synced_at": null,
-            "state": "available"
-          },
-          "assignee": null,
-          "completed_at": null,
-          "description": "",
-          "due_date": null,
-          "id": "task_11111111111111111111111111111111",
-          "identifier": "FIX-1",
-          "tracker_id": null,
-          "name": "Started, no checkout",
-          "project_id": "proj_11111111111111111111111111111111",
-          "rank": 1,
-          "repo": "/repo",
-          "repo_id": "repo_11111111111111111111111111111111",
-          "state": null,
-          "sync": {
-            "actions": []
-          },
-          "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
-      },
-      {
-        "actions": {
           "reason": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged",
           "recommended": "no_action"
         },
@@ -487,6 +395,98 @@
           "repo": "/repo",
           "repo_id": "repo_11111111111111111111111111111111",
           "state": "unstarted",
+          "sync": {
+            "actions": []
+          },
+          "wave_id": "11111111-1111-1111-1111-111111111111"
+        }
+      },
+      {
+        "actions": {
+          "reason": "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first",
+          "recommended": "run"
+        },
+        "condition": {
+          "evidence_age_secs": 1794709650,
+          "local_progress": {
+            "authored_commits": null,
+            "dirty": null,
+            "reason": null,
+            "recovery_required": null,
+            "state": "not_applicable",
+            "unsettled": false
+          },
+          "observed_at": "2026-11-15T02:27:31.446882Z",
+          "reason": "ready",
+          "state": "waiting",
+          "unresolved_execution": true
+        },
+        "execution": {
+          "captured": null,
+          "died": null,
+          "outlook": null,
+          "reason": "No Task Graph has run; independent Sessions may still be active",
+          "state": "idle",
+          "step": null
+        },
+        "graph_name": "code",
+        "graph_source": "builtin",
+        "latest_graph_process": null,
+        "lifecycle": "unstarted",
+        "next_move": {
+          "owner": "wave",
+          "reason": "ready"
+        },
+        "pr": null,
+        "reference": {
+          "issue_url": null,
+          "workspace": null
+        },
+        "run_control": {
+          "unavailable": null
+        },
+        "runtime": {
+          "completion_pending": null,
+          "owner": {
+            "machine": {
+              "id": null,
+              "label": null
+            },
+            "person": null,
+            "person_id": null,
+            "person_key": null
+          },
+          "provider": "codex",
+          "reason": "No Task Graph has run; independent Sessions may still be active",
+          "status": "unstarted",
+          "updated_at": "1970-01-01T00:00:01Z",
+          "work_id": "task_11111111111111111111111111111111"
+        },
+        "section": "backlog",
+        "owned_by_you": false,
+        "selection_states": [
+          "open",
+          "unstarted",
+          "backlog"
+        ],
+        "task": {
+          "tracker_state": {
+            "synced_at": null,
+            "state": "available"
+          },
+          "assignee": null,
+          "completed_at": null,
+          "description": "",
+          "due_date": null,
+          "id": "task_11111111111111111111111111111111",
+          "identifier": "FIX-1",
+          "tracker_id": null,
+          "name": "Started, no checkout",
+          "project_id": "proj_11111111111111111111111111111111",
+          "rank": 1,
+          "repo": "/repo",
+          "repo_id": "repo_11111111111111111111111111111111",
+          "state": null,
           "sync": {
             "actions": []
           },
@@ -2371,6 +2371,106 @@
     "tasks": [
       {
         "actions": {
+          "reason": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged",
+          "recommended": "no_action"
+        },
+        "condition": {
+          "evidence_age_secs": 1794709651,
+          "local_progress": {
+            "authored_commits": null,
+            "dirty": null,
+            "reason": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged",
+            "recovery_required": true,
+            "state": "missing",
+            "unsettled": true
+          },
+          "observed_at": "2026-11-15T02:27:32.09542Z",
+          "reason": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged",
+          "state": "blocked",
+          "unresolved_execution": true
+        },
+        "execution": {
+          "captured": null,
+          "died": null,
+          "outlook": null,
+          "reason": "No Task Graph has run; independent Sessions may still be active",
+          "state": "idle",
+          "step": null
+        },
+        "graph_name": "code",
+        "graph_source": "builtin",
+        "latest_graph_process": null,
+        "lifecycle": "idle",
+        "next_move": {
+          "owner": "wave",
+          "reason": "ready"
+        },
+        "pr": null,
+        "reference": {
+          "issue_url": null,
+          "workspace": {
+            "base_commit": "",
+            "branch": "",
+            "local_exists": false,
+            "machine_id": "home_ab0d76f1087a726425139e42407b223e",
+            "machine_label": null,
+            "slug": "",
+            "worktree": "/repo/fix-1"
+          }
+        },
+        "run_control": {
+          "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
+        },
+        "runtime": {
+          "completion_pending": null,
+          "owner": {
+            "machine": {
+              "id": null,
+              "label": null
+            },
+            "person": null,
+            "person_id": null,
+            "person_key": null
+          },
+          "provider": "codex",
+          "reason": "No Task Graph has run; independent Sessions may still be active",
+          "status": "idle",
+          "updated_at": "1970-01-01T00:00:01Z",
+          "work_id": "task_11111111111111111111111111111111"
+        },
+        "section": "working",
+        "owned_by_you": false,
+        "selection_states": [
+          "open",
+          "idle",
+          "working"
+        ],
+        "task": {
+          "tracker_state": {
+            "synced_at": null,
+            "state": "available"
+          },
+          "assignee": null,
+          "completed_at": null,
+          "description": "",
+          "due_date": null,
+          "id": "task_11111111111111111111111111111111",
+          "identifier": "FIX-1",
+          "tracker_id": null,
+          "name": "Started, no checkout",
+          "project_id": "proj_11111111111111111111111111111111",
+          "rank": 1,
+          "repo": "/repo",
+          "repo_id": "repo_11111111111111111111111111111111",
+          "state": null,
+          "sync": {
+            "actions": []
+          },
+          "wave_id": "11111111-1111-1111-1111-111111111111"
+        }
+      },
+      {
+        "actions": {
           "reason": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged",
           "recommended": "no_action"
         },
@@ -2466,106 +2566,6 @@
           "repo": "/repo",
           "repo_id": "repo_11111111111111111111111111111111",
           "state": "unstarted",
-          "sync": {
-            "actions": []
-          },
-          "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
-      },
-      {
-        "actions": {
-          "reason": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged",
-          "recommended": "no_action"
-        },
-        "condition": {
-          "evidence_age_secs": 1794709651,
-          "local_progress": {
-            "authored_commits": null,
-            "dirty": null,
-            "reason": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged",
-            "recovery_required": true,
-            "state": "missing",
-            "unsettled": true
-          },
-          "observed_at": "2026-11-15T02:27:32.09542Z",
-          "reason": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged",
-          "state": "blocked",
-          "unresolved_execution": true
-        },
-        "execution": {
-          "captured": null,
-          "died": null,
-          "outlook": null,
-          "reason": "No Task Graph has run; independent Sessions may still be active",
-          "state": "idle",
-          "step": null
-        },
-        "graph_name": "code",
-        "graph_source": "builtin",
-        "latest_graph_process": null,
-        "lifecycle": "idle",
-        "next_move": {
-          "owner": "wave",
-          "reason": "ready"
-        },
-        "pr": null,
-        "reference": {
-          "issue_url": null,
-          "workspace": {
-            "base_commit": "",
-            "branch": "",
-            "local_exists": false,
-            "machine_id": "home_ab0d76f1087a726425139e42407b223e",
-            "machine_label": null,
-            "slug": "",
-            "worktree": "/repo/fix-1"
-          }
-        },
-        "run_control": {
-          "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
-        },
-        "runtime": {
-          "completion_pending": null,
-          "owner": {
-            "machine": {
-              "id": null,
-              "label": null
-            },
-            "person": null,
-            "person_id": null,
-            "person_key": null
-          },
-          "provider": "codex",
-          "reason": "No Task Graph has run; independent Sessions may still be active",
-          "status": "idle",
-          "updated_at": "1970-01-01T00:00:01Z",
-          "work_id": "task_11111111111111111111111111111111"
-        },
-        "section": "working",
-        "owned_by_you": false,
-        "selection_states": [
-          "open",
-          "idle",
-          "working"
-        ],
-        "task": {
-          "tracker_state": {
-            "synced_at": null,
-            "state": "available"
-          },
-          "assignee": null,
-          "completed_at": null,
-          "description": "",
-          "due_date": null,
-          "id": "task_11111111111111111111111111111111",
-          "identifier": "FIX-1",
-          "tracker_id": null,
-          "name": "Started, no checkout",
-          "project_id": "proj_11111111111111111111111111111111",
-          "rank": 1,
-          "repo": "/repo",
-          "repo_id": "repo_11111111111111111111111111111111",
-          "state": null,
           "sync": {
             "actions": []
           },

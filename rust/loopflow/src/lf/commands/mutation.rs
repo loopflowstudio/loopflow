@@ -176,6 +176,13 @@ fn local(
             }
             Ok(())
         }
+        Commands::Desktop {
+            cmd: crate::lf::DesktopCommand::Sort,
+        } => {
+            let order = super::desktop::sort_working_tasks(cli.repository.as_ref(), directory)?;
+            writeln!(io.output, "{}", serde_json::to_string(&order)?)?;
+            Ok(())
+        }
         Commands::Desktop { cmd } => {
             let saved =
                 super::desktop::save_arrangement(cli.repository.as_ref(), directory, cmd, io.input)

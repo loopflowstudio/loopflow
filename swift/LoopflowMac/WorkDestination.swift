@@ -5,6 +5,7 @@ import SwiftUI
 
 /// Work destinations and scoped actions; navigation preserves the retained workspace.
 enum WorkDestination: Hashable {
+    case sortWorkingTasks
     case repository
     case openRepository(String)
     case wave(String)

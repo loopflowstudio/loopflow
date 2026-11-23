@@ -500,6 +500,7 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         ["desktop", "hide" | "show" | "move" | "resize"] => Some(schema::<DesktopTileOutput<'_>>()),
         ["open"] => Some(schema::<super::open::OpenReport>()),
         ["desktop", "ls"] => Some(schema::<DesktopWindowInspection>()),
+        ["desktop", "sort"] => Some(schema::<Vec<String>>()),
         ["desktop", "actions"] => Some(schema::<Vec<DesktopActionDescriptor>>()),
         ["desktop", "capture"] => Some(schema::<DesktopTextReading>()),
         ["desktop", "events"] => Some(schema::<DesktopChange>()),
@@ -983,6 +984,17 @@ pub fn saved_layout(
     )?)
 }
 
+pub(crate) fn sort_working_tasks(
+    selected: Option<&loopflow_model::durable::RepositoryId>,
+    directory: &Path,
+) -> Result<Vec<String>> {
+    let store = loopflow_execution::store::open_sqlite(
+        &loopflow_execution::store::database_path_from_env()?,
+    )?;
+    let repository = repository_in(selected, directory, &store)?;
+    Ok(selections::sort_tasks_by_status(&store, &repository)?)
+}
+
 /// `lf desktop dashboard <verb>`: save the
 /// arrangement in `selected` or the repository containing `directory`,
 /// reading a layout or slots from `input`, and return what the command
@@ -1387,7 +1399,9 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             json,
             cmd: None,
         } => return view_plan(cli, expression.as_deref(), false, *json || cli.json),
-        DesktopCommand::Dashboard { .. } | DesktopCommand::Portfolio { .. } => {
+        DesktopCommand::Sort
+        | DesktopCommand::Dashboard { .. }
+        | DesktopCommand::Portfolio { .. } => {
             unreachable!("shared mutation dispatch precedes this command")
         }
         _ => {}
@@ -1828,6 +1842,7 @@ impl Verb {
             | DesktopCommand::View { .. }
             | DesktopCommand::Dashboard { .. }
             | DesktopCommand::Portfolio { .. }
+            | DesktopCommand::Sort
             | DesktopCommand::Layout { .. } => unreachable!("saved intent is not a live verb"),
         };
         Ok(Self { kind, target })
@@ -2024,6 +2039,7 @@ pub fn runs_without_desktop(command: &crate::lf::DesktopCommand) -> bool {
             | DesktopCommand::View { .. }
             | DesktopCommand::Dashboard { .. }
             | DesktopCommand::Portfolio { .. }
+            | DesktopCommand::Sort
             | DesktopCommand::Layout { .. }
     )
 }
@@ -3522,7 +3538,7 @@ pub(super) fn is_saved_mutation(command: &crate::lf::DesktopCommand) -> bool {
     use crate::lf::DesktopCommand;
     matches!(
         command,
-        DesktopCommand::Dashboard { .. } | DesktopCommand::Portfolio { .. }
+        DesktopCommand::Sort | DesktopCommand::Dashboard { .. } | DesktopCommand::Portfolio { .. }
     )
 }
 

@@ -2184,16 +2184,18 @@ final class WorkModel {
         let id: String
         let work: WorkWorkspaceKey
         let states: [WorkSelectionState]
+        let graphStep: String?
     }
 
     private func taskRows(_ plan: WorkViewPlan?) -> [SidebarTaskRow] {
         guard let plan else { return [] }
-        let states = Dictionary(plan.contents.map { ($0.work, $0.states) }, uniquingKeysWith: { first, _ in first })
+        let contents = Dictionary(plan.contents.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
         var seen = Set<String>()
         return plan.taskTiles.compactMap { member in
             let id = task(id: member.work.id)?.task.id ?? member.work.id
             guard seen.insert(id).inserted else { return nil }
-            return SidebarTaskRow(id: id, work: member.work, states: states[member.work] ?? [])
+            return SidebarTaskRow(id: id, work: member.work, states: contents[member.work]?.states ?? [],
+                                  graphStep: contents[member.work]?.graphStep)
         }
     }
 
@@ -3558,6 +3560,27 @@ extension WorkModel {
         } catch { navigation.notices.post(Notice(error.localizedDescription)) }
     }
 
+    func sortWorkingTasksByStatus() async {
+        guard let repoPath else { return }
+        let scope = repositoryReadingKey(repoPath)
+        do {
+            try await query.sortWorkingTasksByStatus(repoPath: repoPath)
+            try await refreshWorkingOrder(in: scope)
+        } catch { navigation.notices.post(Notice(error.localizedDescription)) }
+    }
+
+    private func refreshWorkingOrder(in scope: RepositoryReadingKey) async throws {
+        guard repoPath.map(repositoryReadingKey) == scope else { return }
+        presentSelectionPlans()
+        if query.streamsWork {
+            try await confirmWorkUpdate()
+        } else {
+            async let grid: Void = refreshPlan(nil, in: scope)
+            if taskListReading.value != nil { await refreshTaskList() }
+            try await grid
+        }
+    }
+
     /// Both drop surfaces place the Task on the side chosen in the displayed order.
     @discardableResult
     func reorderWorkingTask(_ member: WorkWorkspaceKey, to target: String, side: DropSide?) -> Task<Void, Never> {
@@ -3568,15 +3591,7 @@ extension WorkModel {
             write: .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: member.selector,
                                          destination: "task:" + target, side: side),
             notices: navigation.notices, show: nil) { [self] in
-            guard self.repoPath.map(repositoryReadingKey) == scope else { return }
-            presentSelectionPlans()
-            if query.streamsWork {
-                try await confirmWorkUpdate()
-            } else {
-                async let grid: Void = refreshPlan(nil, in: scope)
-                if taskListReading.value != nil { await refreshTaskList() }
-                try await grid
-            }
+            try await refreshWorkingOrder(in: scope)
         }
         presentSelectionPlans()
         return write

@@ -98,9 +98,15 @@ conversation turns Busy and then Available again.
 
 Drag a row in the repository sidebar or the Working Tasks grid to save its
 position on this Machine. Wave views, `lf task list`, `lf wave show`, and the
-phone feed follow the same relative order. Tasks with saved positions come
-first. The rest follow planning rank, with canonical Task ID breaking ties.
-Before the first drag, every row follows rank.
+phone feed follow the same relative order. Working Tasks start newest first,
+with canonical Task ID breaking ties. New arrivals appear above rows you’ve
+arranged. Each sidebar row shows its current Graph step beside its status
+when the Task has taken up a Graph.
+
+Choose **Sort by status** in the repository sidebar or from **⌘K**, or run
+`lf desktop sort`. This puts Blocked Tasks first, then Available, Idle and
+Busy. Each group starts with its newest Task. The order stays put as
+conversations change status.
 
 A drop shows immediately. If another window has already reordered the list,
 the Task still lands on the side of the target you chose. If the Machine
@@ -399,6 +405,8 @@ lf help desktop --all --json              # full schema of every Desktop command
 
 Programs running in a Desktop shell can also emit OSC 7501 (Rex's Program
 Status protocol) to mark a pane available when waiting for input.
+A live interactive Session that reports a finished turn is Available once
+its last working report clears. Typing dismisses finished and error reports.
 
 ## Reference
 

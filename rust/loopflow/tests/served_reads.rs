@@ -177,7 +177,12 @@ fn working_task_drop_keeps_its_side_after_another_window_reorders() {
             .resolution
             .task_ids()
     };
+    let status_sort = || Write::DesktopSort {
+        directory: repo.path().to_owned(),
+    };
     let [a, b, c]: [String; 3] = working().try_into().unwrap();
+    // All three are idle, so the status snapshot uses their original start order.
+    assert_eq!(server_write(status_sort()), serde_json::json!([a, b, c]));
     let move_tile = |member: &str, target: &str, side| Write::DesktopDashboardMove {
         directory: repo.path().to_owned(),
         board: "working-tasks".into(),
@@ -256,7 +261,14 @@ fn working_task_drop_keeps_its_side_after_another_window_reorders() {
         .map(|tile| &tile.work.id)
         .collect();
     assert_eq!(order, [&b, &c, &a]);
-    assert_eq!(working(), [c, a, b]);
+    assert_eq!(working(), [&c, &a, &b].map(String::as_str));
+
+    let sorted = read(repo.path(), home.path(), &["desktop", "sort"], None);
+    assert_eq!(
+        serde_json::from_str::<Vec<String>>(&sorted).unwrap(),
+        [a.clone(), b.clone(), c.clone()]
+    );
+    assert_eq!(working(), [a.as_str(), b.as_str(), c.as_str()]);
 }
 
 #[test]
@@ -1437,6 +1449,7 @@ fn server_operations_match_their_lf_commands() {
         | Write::DesktopDashboardHide { .. }
         | Write::DesktopDashboardShow { .. }
         | Write::DesktopDashboardSlots { .. }
+        | Write::DesktopSort { .. }
         | Write::DesktopDashboardMove { .. }
         // configuration_edits_use_the_server_without_work_processes covers settings.
         | Write::ConfigSet { .. }
@@ -2923,6 +2936,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 &format!("--revision={revision}"),
             ]),
         ),
+        Write::DesktopSort { directory } => (path(directory), words(&["desktop", "sort"])),
         Write::DesktopDashboardMove {
             directory,
             board,

@@ -100,6 +100,26 @@ struct DashboardWorkspaceTests {
         #expect(model.sidebarTaskIDs == model.workingTaskIDs)
     }
 
+    @Test func sortByStatusUpdatesTheSidebarAndGrid() async throws {
+        let initial = fixtureWorkingPlan(["a", "b"])
+        let sorted = String(decoding: try JSONEncoder().encode(fixtureWorkingPlan(["b", "a"])), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            switch args {
+            case ["desktop", "sort"]: return #"["b","a"]"#
+            case ["desktop", "view", "show", "--json"], ["desktop", "view", "show", "kind:task state:working", "--json"]: return sorted
+            default: throw RegistryQueryError("Unexpected command \(args)")
+            }
+        }
+        let model = WorkModel(query: query, repoPath: "/repo")
+        model.applySelectionPlans([initial], reason: "")
+        model.applyTaskList(initial, wave: nil, reason: "")
+        #expect(model.searchDestinations("Sort by status").first?.id == .sortWorkingTasks)
+        await model.sortWorkingTasksByStatus()
+        #expect(model.navigation.notices.current == nil)
+        #expect(model.sidebarTaskIDs == ["b", "a"])
+        #expect(model.workingTaskIDs == model.sidebarTaskIDs)
+    }
+
     @Test func workingTasksOpensOnlyTheTasksItsGridShows() throws {
         var json = try #require(JSONSerialization.jsonObject(with: loadFixtureData("view_plan.json")) as? [String: Any])
         json["dashboard_id"] = NSNull()
@@ -114,7 +134,7 @@ struct DashboardWorkspaceTests {
         resolution["members"] = members
         json["resolution"] = resolution
         json["projection"] = ["visible": members, "suppressed": []]
-        json["contents"] = members.map { ["work": $0["work"]!, "title": "t", "states": [], "identifier": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": []] }
+        json["contents"] = members.map { ["work": $0["work"]!, "title": "t", "states": [], "identifier": NSNull(), "graph_step": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": []] }
         let plan = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: json))
         let model = WorkModel(query: RegistryQuery { args, _ in throw RegistryQueryError("Unexpected command \(args)") }, repoPath: "/repo")
         let registry = SessionsWorkspaceRegistry(localMachineId: "local")

@@ -19,6 +19,7 @@ extension WorkModel {
         var rows: [WorkPaletteRow] = []
         if let repoPath {
             let name = URL(fileURLWithPath: repoIdentity(repoPath)).lastPathComponent
+            rows.append(.init(id: .sortWorkingTasks, title: "Sort by status", detail: "Working Tasks in \(name)", key: "Sort by status"))
             rows.append(.init(id: .repository, title: name, detail: "Repository", key: name))
         }
         for repo in repos where repo.path.normalizedFilePath != repoPath?.normalizedFilePath {

@@ -14871,6 +14871,13 @@
             "null"
           ]
         },
+        "graph_step": {
+          "description": "Where this Task stands on its captured Graph, including a running step.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "identifier": {
           "description": "A Task's short name, as people say it: `LOO-809`.",
           "type": [
@@ -14919,6 +14926,7 @@
         "title",
         "states",
         "identifier",
+        "graph_step",
         "primary_session",
         "location",
         "argv",
@@ -18517,6 +18525,30 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Dashboard"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf desktop sort` saves the current status order of this repository's Working Tasks.",
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "desktop.sort",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory"
+          ],
+          "type": "object",
+          "x-result": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         {

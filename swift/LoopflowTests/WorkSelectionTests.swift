@@ -15,6 +15,7 @@ struct WorkSelectionTests {
         }
         let plan = try await query.viewPlan(expression: "state:backlog", repoPath: "/repo")
         #expect(plan.contents.first?.title == "Backlog")
+        #expect(plan.contents.first?.graphStep == "review")
         #expect(plan.contents.first?.primarySession == nil)
         #expect(plan.contents.first?.argv == nil)
         #expect(plan.resolution.members.count == 2)
@@ -23,6 +24,15 @@ struct WorkSelectionTests {
         #expect(plan.savedRevision == 3)
         let restored = try JSONDecoder().decode(WorkViewPlan.self, from: JSONEncoder().encode(plan))
         #expect(restored == plan)
+    }
+
+    @Test func aTaskWithoutAGraphEncodesAnExplicitNullStep() throws {
+        let content = fixtureViewContent(work: .init(repository: "repo", kind: .task, id: "a"), title: "A")
+        let data = try JSONEncoder().encode(content)
+        var fields = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(fields.removeValue(forKey: "graph_step") is NSNull)
+        let missing = try JSONSerialization.data(withJSONObject: fields)
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(WorkViewPlan.Content.self, from: missing) }
     }
 
     @Test func everyStateRustSendsDecodes() throws {
@@ -84,7 +94,7 @@ func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content],
 func fixtureStartedPlan(_ tasks: [(id: String, states: [WorkSelectionState])], repository: String = "repo") -> WorkViewPlan {
     let members = tasks.map {
         WorkViewPlan.Content(work: .init(repository: repository, kind: .task, id: $0.id), title: $0.id,
-            states: $0.states, identifier: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
+            states: $0.states, identifier: nil, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
     }
     return fixtureViewPlan(owner: .init(repository: repository, kind: .repository, id: repository), members: members)
 }
@@ -106,5 +116,5 @@ extension WorkModel {
 
 func fixtureViewContent(work: WorkWorkspaceKey, title: String) -> WorkViewPlan.Content {
     WorkViewPlan.Content(work: work, title: title,
-        states: [.open], identifier: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
+        states: [.open], identifier: nil, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
 }

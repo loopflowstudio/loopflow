@@ -2,7 +2,9 @@
 use crate::store::session_projection::Reading;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::RepositoryId;
-use loopflow_storage::sqlite::selections::{repository_default, TaskSelectionReading};
+use loopflow_storage::sqlite::selections::{
+    repository_default, TaskSelectionReading, WorkingOrder,
+};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::selection::{
     move_into_place, Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId,
@@ -24,6 +26,7 @@ pub fn plan_selection(
             selection.clone(),
             &reading.inputs,
             &reading.values,
+            running_step,
         )? {
             let mut plan = result;
             prepare_plan(store, &mut plan)?;
@@ -39,9 +42,13 @@ pub fn all_view_plans(
 ) -> StoreResult<Vec<ViewPlan>> {
     loop {
         let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
-        if let Some(result) =
-            store.projected_all_view_plans(source, repos, &reading.inputs, &reading.values)?
-        {
+        if let Some(result) = store.projected_all_view_plans(
+            source,
+            repos,
+            &reading.inputs,
+            &reading.values,
+            running_step,
+        )? {
             let mut plans = result;
             for plan in &mut plans {
                 prepare_plan(store, plan)?;
@@ -57,9 +64,12 @@ pub fn selection_plans(
 ) -> StoreResult<Vec<ViewPlan>> {
     loop {
         let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
-        if let Some(result) =
-            store.projected_selection_plans(repository, &reading.inputs, &reading.values)?
-        {
+        if let Some(result) = store.projected_selection_plans(
+            repository,
+            &reading.inputs,
+            &reading.values,
+            running_step,
+        )? {
             let mut plans = result;
             for plan in &mut plans {
                 prepare_plan(store, plan)?;
@@ -169,6 +179,11 @@ pub fn edit_dashboard(
         &selection,
         &arrangement.to_edit(),
     )
+}
+
+fn running_step(graph: &str, cursor: &str) -> StoreResult<Option<String>> {
+    let graph: crate::task_graph::CapturedGraph = serde_json::from_str(graph)?;
+    Ok(graph.step_name_of(&serde_json::from_str(cursor)?))
 }
 
 fn prepare_plan(store: &SqliteStore, plan: &mut ViewPlan) -> StoreResult<()> {
@@ -287,27 +302,46 @@ pub fn reorder_task<'a>(
     to: &'a str,
     side: Option<DropSide>,
 ) -> StoreResult<Result<Vec<String>, &'a str>> {
+    edit_working_order(store, repository, WorkingOrder::Saved, |order| {
+        let position = |id: &'a str| order.iter().position(|working| working == id).ok_or(id);
+        let from = position(task)?;
+        let target = position(to)?;
+        move_into_place(order, from, target, side);
+        Ok(())
+    })
+}
+
+pub fn sort_tasks_by_status(
+    store: &SqliteStore,
+    repository: &RepositoryId,
+) -> StoreResult<Vec<String>> {
+    edit_working_order(store, repository, WorkingOrder::ByStatus, |_| Ok(()))?
+}
+
+fn edit_working_order<E>(
+    store: &SqliteStore,
+    repository: &RepositoryId,
+    order_by: WorkingOrder,
+    edit: impl Fn(&mut Vec<String>) -> Result<(), E>,
+) -> StoreResult<Result<Vec<String>, E>> {
     for _ in 0..3 {
         let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
         let Some((read, work)) =
-            store.task_order_inputs(repository, &reading.inputs, &reading.values)?
+            store.task_order_inputs(repository, &reading.inputs, &reading.values, order_by)?
         else {
             continue;
         };
-        let resolution = repository_default()
-            .resolve(
-                repository.as_str(),
-                &work,
-                &std::collections::BTreeMap::new(),
-            )
-            .map_err(StoreError::from)?;
-        let mut order = resolution.task_ids();
-        let position = |id: &'a str| order.iter().position(|working| working == id).ok_or(id);
-        let (from, target) = match (position(task), position(to)) {
-            (Ok(from), Ok(target)) => (from, target),
-            (Err(absent), _) | (_, Err(absent)) => return Ok(Err(absent)),
-        };
-        move_into_place(&mut order, from, target, side);
+        let mut order: Vec<_> = work
+            .into_iter()
+            .filter(|row| {
+                row.states
+                    .contains(&loopflow_storage::work::selection::SelectionState::Working)
+            })
+            .map(|row| row.key.id)
+            .collect();
+        if let Err(absent) = edit(&mut order) {
+            return Ok(Err(absent));
+        }
         if store.commit_task_order(repository, &read, &order)? {
             return Ok(Ok(order));
         }

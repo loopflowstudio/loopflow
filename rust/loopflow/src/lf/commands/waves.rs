@@ -1838,10 +1838,20 @@ async fn snapshot_tasks(
     {
         orders.insert(repository.as_str(), shared.selections(store, repository)?);
     }
+    let starts = store.sqlite.task_start_times(
+        details
+            .iter()
+            .filter(|task| task.section == TaskSection::Working)
+            .map(|task| task.task.id.as_str()),
+    )?;
     details.sort_by_cached_key(|task| {
-        orders[task.task.repository_id.as_str()]
-            .order
-            .key(&task.task.id, task.task.rank)
+        orders[task.task.repository_id.as_str()].order.key(
+            &task.task.id,
+            task.task.rank,
+            starts.get(&task.task.id).copied(),
+            &task.selection_states,
+            loopflow_storage::sqlite::selections::WorkingOrder::Saved,
+        )
     });
     unavailable_tasks.sort_by(|left, right| {
         left.task_identifier
@@ -3525,7 +3535,12 @@ mod tests {
         ))
         .unwrap();
         let working = read(&store, "unassigned_working").await;
-        let task = &working["tasks"][0];
+        let task = working["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["task"]["id"] == active)
+            .unwrap();
         assert_eq!(task["task"]["id"], active);
         assert_eq!(task["lifecycle"], "active");
         assert_eq!(task["section"], "backlog");
@@ -3565,6 +3580,24 @@ mod tests {
                 [active]
             );
         }
+        // The snapshot promotes an available or blocked conversation once. A prompt
+        // makes it busy without moving it until the next explicit sort.
+        assert_eq!(
+            selections::sort_tasks_by_status(&store.sqlite, &repo).unwrap(),
+            [active, other]
+        );
+        report_states(6, &[State::Working]);
+        check_order(&read(&store, "busy_after_sort").await, [active, other]);
+        assert_eq!(
+            selections::sort_tasks_by_status(&store.sqlite, &repo).unwrap(),
+            [other, active]
+        );
+        report_states(7, &[State::Done]);
+        assert_eq!(
+            selections::sort_tasks_by_status(&store.sqlite, &repo).unwrap(),
+            [active, other]
+        );
+        report_states(8, &[State::Blocked, State::Working]);
         // A conflicting planning label never withdraws started execution.
         db.execute(
             "UPDATE tasks SET planning_state='completed' WHERE id=?1",

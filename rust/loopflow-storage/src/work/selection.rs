@@ -764,6 +764,9 @@ pub struct ViewContent {
     pub states: BTreeSet<SelectionState>,
     /// A Task's short name, as people say it: `LOO-809`.
     pub identifier: Option<String>,
+    /// Where this Task stands on its captured Graph, including a running step.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub graph_step: Option<String>,
     pub primary_session: Option<String>,
     pub location: Option<ViewLocation>,
     /// An explicit connect command, never a fallback shell or provider launch argv.

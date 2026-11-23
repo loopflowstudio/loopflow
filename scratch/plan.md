@@ -117,8 +117,7 @@ timed out under the parallel run and passes alone (15 s). clippy
 
 - `relocate_waves` (storage, under `lf wave rename`) writes the Wave's
   Project `ProjectSlug`/`ProjectName` as plan edits in the same transaction
-  as the Wave's rename, while `external_project_id IS NULL`. A linked Project
-  keeps the tracker's name; nothing new goes to the tracker. A `create`
+  as the Wave's rename (linked or not since slice 4). A `create`
   already queued keeps its snapshot of the old name; the rename queues a
   `project_name` field action behind it, so Linear ends on the new name.
 - `retire_waves` (under `lf wave remove`) retires the queued tracker actions
@@ -126,7 +125,6 @@ timed out under the parallel run and passes alone (15 s). clippy
   A `sent` action is left to resolve. A queued Task `create` naming that
   Project names the Task's current one (QA found it stuck otherwise).
 - Tests: `tracker_actions::tests::a_removed_waves_project_is_not_created_in_the_tracker`,
-  `…::renaming_a_wave_renames_its_unlinked_project_and_not_a_linked_one`
   (pass), `…::a_task_moved_out_of_a_removed_wave_is_created_in_its_new_project`;
   clippy clean. QA ran rename and removal through the CLI (`scratch/qa.html`).
 
@@ -140,10 +138,6 @@ in CI, and the `oauth_tests` contention failure checked on the base.
 Initiative names left in `rust/` are released-schema readers
 (`ProjectInitiatives`, `planning_initiatives`, `tracker_wave_sync.initiative`
 written empty, the ignored Wave `linear:` key) and fixtures that test them.
-
-Not here (on the page as questions): the removal line "N Projects stay
-readable in history" and `WaveRemoval.projects`; Desktop's **Projects**
-button; upgraded child Waves' Projects named by full path.
 
 ## Tracker decisions (built in slice 2)
 
@@ -264,3 +258,9 @@ Swift `WaveDetailReadingTests|DTOFixtureTests|WorkModelTests|RegistryQueryTests|
 150 pass. `ServerProtocolTests` had been failing since slice 2 added
 `project` to `wave.plan.connect`; Swift's `wavePlanConnect` now carries it.
 `status_tests::` passes (one fixture gained `"url": null`); clippy clean.
+
+## Remains
+
+Nothing to implement. Gate: Swift DTO suites (`scripts/test_desktop.sh`),
+the full matrix in CI, the `oauth_tests` contention failure checked on the
+base. Open, not this Task: question 5 (a queued create's field snapshot).

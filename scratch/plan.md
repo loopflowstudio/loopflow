@@ -458,7 +458,8 @@ The `adoption.rs` special case is gone. Tests:
 bare resume there says "no associated work conversation" (execution
 `ops::task::adoption:: ops::task::tests:: ops::human_session:: ops::run::`
 107 passed); `work_route` 6 passed; clippy clean. Not run: `lf land` in a
-nested worktree end to end (gate/CI: `land_tests`).
+nested worktree end to end (gate/CI: `land_tests`). Left for compress: `counted_task` is now a
+one-line wrapper over `SqliteStore::task_holding`; callers can ask the store.
 
 ## Then: gate
 
@@ -466,14 +467,15 @@ QA on `86fe72ab65` (2026-11-22, `scratch/qa.html`) found one regression and
 fixed it: `lf task create --worktree` refused a worktree nested inside another
 Task's checkout ("<outer> already has a different checkout"), because
 `task_holding` answers by containment where the old `counted_task` compared
-Git roots. Adoption now takes a holding Task as the checkout's only when its
-checkout is that root (`a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout`).
+Git roots. The inline adoption patch for it is gone: adoption asks
+`checkout_owner` (section above), and
+`a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout` covers it.
 Also repaired: `creation_adopts_only_the_selected_work` still expected
 adoption to give the open conversation the Task (change 3 removed that).
 `ops::task::adoption::` 9 and `ops::task::tests::` 35 passed.
 
-Items 1-6 are settled. PR #1973; branch merges main through #1988
-(`8892ba5671`). The acceptance check last passed at `2448546730` (10 tests).
+Items 1-6 are settled. PR #1973; branch merges main through #2024
+(`7487986a30`, conflict-free; nothing it touched calls the split functions). The acceptance check last passed at `2448546730` (10 tests).
 
 Run on that head (2026-11-18, clean `LF_*`):
 `cargo test -p loopflow-storage --lib -- task_work:: leaving_members_are_unreadable`

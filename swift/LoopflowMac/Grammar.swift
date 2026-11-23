@@ -223,6 +223,22 @@ extension Grammar.Highlight {
     }
 }
 
+/// One displayed source line and its colors from the whole-file parse.
+struct CodeLine: Sendable {
+    let text: String
+    let highlights: [Grammar.Highlight]
+
+    static func read(_ text: String, grammar: Grammar?) -> [Self] {
+        // Keep CR in the offsets for Tree-sitter, and leave it out of displayed CRLF lines.
+        let raw = text.utf8.split(separator: 10, omittingEmptySubsequences: false)
+            .map { String(decoding: $0, as: UTF8.self) }
+        let spans = Grammar.Highlight.byLine(grammar?.highlights(of: text) ?? [], lines: raw)
+        return zip(raw, spans).map { line, highlights in
+            Self(text: line.last == "\r" ? String(line.dropLast()) : line, highlights: highlights)
+        }
+    }
+}
+
 /// The colored pieces of a changed file's rows: removed rows by their old line
 /// number, context and added rows by their new one.
 struct FileHighlights: Equatable, Sendable {
@@ -243,11 +259,9 @@ struct FileHighlights: Equatable, Sendable {
     }
 
     private static func numbered(_ text: String, grammar: Grammar) -> [Int: [Grammar.Highlight]] {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var result: [Int: [Grammar.Highlight]] = [:]
-        for (index, spans) in Grammar.Highlight.byLine(grammar.highlights(of: text), lines: lines).enumerated()
-        where !spans.isEmpty {
-            result[index + 1] = spans
+        for (index, line) in CodeLine.read(text, grammar: grammar).enumerated() where !line.highlights.isEmpty {
+            result[index + 1] = line.highlights
         }
         return result
     }

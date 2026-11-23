@@ -128,6 +128,19 @@ struct DesktopActionContext {
         }
     }
 
+    fileprivate var editableFile: TaskFilesStore? {
+        guard let pane, let workspace, tab == nil || tab == pane.content.selectedTabID else { return nil }
+        switch pane.content.selectedBrowserTab {
+        case .files, .changes:
+            let task = model.task(id: workspace.key.id)?.task
+            guard let files = try? workspace.files(for: pane.content, task: task, query: RegistryQueryLocal.shared),
+                  files.shownPage(hasTask: task != nil) == .files,
+                  files.mode == .edit || files.selectedDocument?.canEdit == true else { return nil }
+            return files
+        default: return nil
+        }
+    }
+
     /// The addressed pane's terminal: a shell's addressed or selected tab, or the session.
     fileprivate var terminal: TerminalIdentity {
         get throws {
@@ -515,6 +528,13 @@ struct DesktopAction {
                 }
             }
             return outcome
+        },
+        DesktopAction("files-edit", "Toggle File Editing", scope: .pane,
+            keys: [.init(.character("e"), [.control, .command])], available: { $0.editableFile != nil }) { context in
+            guard let files = context.editableFile else { throw DesktopTargetError("Open a text file in Files to edit it.") }
+            files.mode = files.mode == .edit ? .read : .edit
+            files.noteInteraction()
+            return nil
         },
         DesktopAction("details", "Show Task Details", scope: .pane,
             arguments: [.init(name: "page", kind: .string, required: true)],

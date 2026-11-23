@@ -4,7 +4,7 @@ import Combine
 import Loopflow
 import Observation
 
-/// One native buffer per Task/path. Its view, undo stack and selection outlive navigation.
+/// The working document. Its native editor stays with it after the first edit.
 @MainActor
 @Observable
 final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTextStorageDelegate {
@@ -16,9 +16,19 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     private(set) var saving = false
     private(set) var text = ""
     private(set) var editVersion = 0
-    let editor = TaskFileTextView(usingTextLayoutManager: true)
-    let scroll = NSScrollView()
-    private let undo = UndoManager()
+    @ObservationIgnored private(set) var retainedEditor: TaskFileTextView?
+    @ObservationIgnored private lazy var undo = UndoManager()
+    @ObservationIgnored lazy var scroll: NSScrollView = {
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.documentView = editor
+        return scroll
+    }()
+
+    private var composing: Bool { retainedEditor?.hasMarkedText() == true }
+    private(set) var canEdit = false {
+        didSet { retainedEditor?.isEditable = canEdit }
+    }
     private var incomingGeneration = 0
     private var deferredSnapshot: TaskFileSnapshot?
     private var applyingIncoming = false
@@ -34,17 +44,16 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
 
     var canSave: Bool {
         dirty && !saving && external == nil && deferredSnapshot == nil
-            && editor.isEditable && !editor.hasMarkedText()
+            && canEdit && !composing
     }
 
     func reconcile(_ next: TaskFileSnapshot) async {
-        defer { editor.recordReadiness() }
         incomingGeneration += 1
         let generation = incomingGeneration
         updateAccess(next)
         // Content reads skip history; keep what the last Save disclosed.
         if !next.recoveries.isEmpty { recoveries = next.recoveries }
-        guard !saving, !editor.hasMarkedText() else {
+        guard !saving, !composing else {
             deferredSnapshot = next
             return
         }
@@ -59,13 +68,18 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
             onEdit?()
             return
         }
+        if !dirty, retainedEditor == nil {
+            loadSnapshot(next)
+            saveMessage = "Updated from disk"
+            return
+        }
         let local = text, version = editVersion
         let (merged, edits) = await Task.detached(priority: .userInitiated) {
             let merged = TaskTextEdit.merge(base: base, local: local, disk: incoming)
             return (merged, TaskTextEdit.between(local, merged))
         }.value
         guard !Task.isCancelled, generation == incomingGeneration, snapshot?.content == base else { return }
-        guard !saving, !editor.hasMarkedText() else {
+        guard !saving, !composing else {
             deferredSnapshot = next
             return
         }
@@ -75,14 +89,21 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
         applyIncoming(merged, edits: edits)
         // Native Undo contains offsets into the old disk version. Rebase its
         // boundary to the surviving local draft; Undo must never restore LLM text.
-        undo.removeAllActions()
-        if merged != incoming { registerLocalUndo(incoming) }
+        if retainedEditor != nil {
+            undo.removeAllActions()
+            if merged != incoming { registerLocalUndo(incoming) }
+        }
         saveMessage = "Updated from disk"
         onEdit?()
     }
 
     private func applyIncoming(_ value: String, edits: [TaskTextEdit]? = nil) {
         guard value != text else { return }
+        guard let editor = retainedEditor else {
+            text = value
+            editVersion += 1
+            return
+        }
         let edits = edits ?? TaskTextEdit.between(text, value)
         var selection = editor.selectedRange()
         func moved(_ position: Int) -> Int {
@@ -126,9 +147,15 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     init(path: String) {
         self.path = path
         super.init()
+    }
+
+    var editor: TaskFileTextView {
+        if let retainedEditor { return retainedEditor }
+        let editor = TaskFileTextView(usingTextLayoutManager: true)
+        retainedEditor = editor
         editor.isRichText = false
         editor.allowsUndo = true
-        editor.usesFindBar = true
+        editor.usesFindBar = false
         editor.isAutomaticQuoteSubstitutionEnabled = false
         editor.isAutomaticDashSubstitutionEnabled = false
         editor.isAutomaticTextReplacementEnabled = false
@@ -147,9 +174,11 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
                 self.onEdit?()
             }
         }
+        editor.string = text
+        editor.isEditable = canEdit
         editor.textStorage?.delegate = self
-        scroll.hasVerticalScroller = true
-        scroll.documentView = editor
+        if dirty, let base = snapshot?.content { registerLocalUndo(base) }
+        return editor
     }
 
     /// The editor's colors, syntax included. Setting the text color clears
@@ -185,7 +214,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     }
 
     private func paintSyntax() {
-        guard let theme, let colored, colored.version == editVersion, !editor.hasMarkedText(),
+        guard let theme, let colored, colored.version == editVersion, !composing,
               let storage = editor.textStorage, let font = editor.font else { return }
         let inks = SyntaxInks.of(theme)
         let whole = NSRange(location: 0, length: storage.length)
@@ -225,12 +254,12 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
             content: draft.baseContent, data: nil, state: .text, revision: draft.baseRevision,
             readOnlyReason: "Recovered draft; checking the current file", sizeBytes: UInt64(draft.baseContent.utf8.count))
         applyIncoming(draft.text)
-        editor.isEditable = false
+        canEdit = false
         readOnlyReason = "Recovered draft; checking the current file"
     }
 
     private func loadSnapshot(_ next: TaskFileSnapshot) {
-        guard !dirty, !editor.hasMarkedText() else {
+        guard !dirty, !composing else {
             external = next.revision != snapshot?.revision || next.state != snapshot?.state ? next : nil
             return
         }
@@ -241,14 +270,14 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
         }
         snapshot = next
         text = next.content ?? ""
-        editor.string = text
-        editor.undoManager?.removeAllActions()
+        retainedEditor?.string = text
+        retainedEditor?.undoManager?.removeAllActions()
         editVersion += 1
     }
 
     private func updateAccess(_ next: TaskFileSnapshot) {
         readOnlyReason = next.readOnlyReason
-        editor.isEditable = next.state == .text && next.readOnlyReason == nil
+        canEdit = next.state == .text && next.readOnlyReason == nil
         onEdit?()
     }
 
@@ -305,7 +334,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
         Task { [weak self] in
             await Task.yield()
             guard let self else { return }
-            if let pending = self.deferredSnapshot, !self.editor.hasMarkedText(), !self.saving {
+            if let pending = self.deferredSnapshot, !self.composing, !self.saving {
                 await self.reconcile(pending)
             }
             self.onEdit?()
@@ -315,18 +344,15 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
 
 @MainActor
 final class TaskFileTextView: NSTextView {
-    var contentsReady: (() -> Void)?
     var compositionEnded: (() -> Void)?
+    var focusOnMount = false
 
-    func recordReadiness() {
-        guard window != nil, !isHiddenOrHasHiddenAncestor, !visibleRect.isEmpty,
-              isEditable, acceptsFirstResponder else { return }
-        contentsReady?()
-    }
-
-    override func layout() {
-        super.layout()
-        recordReadiness()
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let window, focusOnMount {
+            focusOnMount = false
+            window.makeFirstResponder(self)
+        }
     }
 
     override func unmarkText() {
@@ -378,27 +404,23 @@ final class TaskFilesStore {
 
     let performanceOwner = UUID()
 
-    func selectFileFromInput(_ path: String, mode: Mode) {
-        Perf.userAction(.openFile, scenario: "file_to_visible_editor", id: path,
+    func selectFileFromInput(_ path: String) {
+        if selection == path, page == .files {
+            selectFile(path)
+            return
+        }
+        Perf.userAction(.openFile, scenario: "file_to_visible_reader", id: path,
                         repository: measurementRepository, liveSessions: nil, owner: performanceOwner) {
-            let document = document(path)
-            document.editor.contentsReady = { [weak self, weak document] in
-                guard let self, let document, self.selection == path,
-                      document.snapshot?.state == .text, document.snapshot?.path == path,
-                      document.editor.string == document.text else { return }
-                Perf.stateObserved(.openFile, id: path, owner: self.performanceOwner)
-            }
-            selectFile(path, mode: mode)
+            selectFile(path)
             Perf.acknowledged(.openFile, id: path, owner: performanceOwner)
-            document.editor.recordReadiness()
         }
     }
 
-    func selectFile(_ path: String, mode: Mode) {
+    func selectFile(_ path: String, mode: Mode? = nil) {
         entering = nil
         page = .files
         selection = path
-        self.mode = mode
+        if let mode { self.mode = mode }
         dismissNavigator()
         noteInteraction()
     }
@@ -545,7 +567,7 @@ final class TaskFilesStore {
             if current.kind == .directory {
                 await setDirectory(current.path, expanded: !tree.isExpanded(current.path))
             } else {
-                selectFile(current.path, mode: .read)
+                selectFileFromInput(current.path)
             }
         }
     }
@@ -569,11 +591,6 @@ final class TaskFilesStore {
         case read = "Read"
         case edit = "Edit"
         case diff = "Diff"
-    }
-
-    /// Read mode shows Markdown and HTML rendered; other text stays in the editor.
-    var rendersSelection: Bool {
-        mode == .read && selection.map(Self.isRenderable) == true
     }
 
     var measurementRepository: String?
@@ -601,6 +618,7 @@ final class TaskFilesStore {
         if selection == removed.path {
             selection = tabs.isEmpty ? nil : tabs[min(index, tabs.count - 1)].path
         }
+        modes.removeValue(forKey: removed.path)
         // Documents (including unsaved drafts and Undo) remain Task-owned.
     }
 
@@ -627,7 +645,15 @@ final class TaskFilesStore {
                                  baseRevision: revision, baseContent: base, text: document.text)
         }.sorted { $0.path < $1.path }
     }
-    var mode = Mode.read
+    private var modes: [String: Mode] = [:]
+    var mode: Mode {
+        get { selection.flatMap { modes[$0] } ?? .read }
+        set {
+            guard let selection else { return }
+            modes[selection] = newValue == .read ? nil : newValue
+        }
+    }
+
     private(set) var changes: TaskChangesSnapshot? {
         didSet { changeCounts = Dictionary((changes?.files ?? []).map { ($0.path, $0.changes) }) { first, _ in first } }
     }

@@ -99,6 +99,16 @@ struct GrammarTests {
         #expect(Grammar.named("build.gradle.kts")?.name == "kotlin")
     }
 
+    @Test func plainTextAtTheFileSizeLimitKeepsEveryLine() {
+        let line = String(repeating: "x", count: 98)
+        let text = String(repeating: line + "\r\n", count: 10_000)
+        let lines = CodeLine.read(text, grammar: Grammar.named("notes.txt"))
+        #expect(lines.count == 10_001)
+        #expect(lines.first?.text == line)
+        #expect(lines.last?.text == "")
+        #expect(lines.allSatisfy { $0.highlights.isEmpty })
+    }
+
     /// A hunk that opens inside a docstring colors as a docstring once the
     /// whole file is read; parsed from its own lines, it reads as code.
     @Test func aDocstringRowColorsFromTheWholeFile() throws {

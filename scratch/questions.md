@@ -7,3 +7,5 @@
 - **Read / Edit / Diff scope (Concept Review Q3):** Chosen **3a** — per-file view mode (Read by default, draft visible in Read, lazy `NSTextView` on Edit, Files' Diff steps within that file only). Alternative **3b**: single global mode resetting on every file switch.
 - **Jump history keys (Concept Review Q4):** Chosen **4a** — register `files-back`/`files-forward` (`⌘[`/`⌘]`) in `DesktopAction`, falling through to Desktop window Back/Forward when Files' jump stack is empty. Alternative **4b**: bind Files jump history to `⌃-`/`⌃⇧-`.
 - **Edit shortcut:** Kickoff chose `⌃⌘E` for the focused Files pane (`⇧⌘E` already toggles the browser).
+
+- **Implementation order.** Build Read and per-file Edit first so the checkout picker and its preview can share the code reader. The existing Task file read already supplies content from the owning Machine.

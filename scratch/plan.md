@@ -41,12 +41,22 @@ Delete `TaskFilesStore.follow`, `autoSelected`, `quietInterval`, `lastInteractio
 
 ## Build order
 
+**First increment of step 1.** Opening code now uses the line-numbered reader and the existing whole-file grammar colors. Read, Edit and Diff are remembered per open path. Edit has a single-click control and a pane-scoped `⌃⌘E` action. Read, draft restoration and incoming writes can run before a native editor exists. The first Edit creates the editor, which stays with the document across file switches.
+
+**Next increment.** Connect the owning Machine's `task.files.find` to the Files picker. Preview an unopened path using the reader without changing the open document. Grep, definitions and jump history still need implementation. Steps 2–4, including Read change marks and comments, remain open.
+
 1. **Remote find, Read viewer & jump-to-definition (vertical slice):** Implement `task.files.find`, `task.files.grep` (with `whole_word`) and `task.files.symbols` (pure-Rust `grep-searcher` + comment/string-aware declaration scanner) through `ops/task` → `Read` → `RegistryQuery` + CLI + DTO fixtures. Build the Files picker (`⌘P`), Read-only syntax-colored line-numbered code viewer (with lazy `NSTextView` on `Edit` / `⌃⌘E`), local Tree-sitter outline/enclosing/same-file defs, cross-file `⌘-click`/`gd` peek, and jump stack (`⌘[`/`⌘]` via `DesktopAction`). Prove the whole remote + local architecture end to end: `⌘P` previews an unopened Rust file on a remote checkout, Return opens it in Read at a line, `⌘-click` on a method with two definitions peeks both, pick #2 and go back. Replace the old expanded-folder `⌘P` search here.
 2. **State split, chrome & calm updates:** Split `TaskFilesStore` into coordinator + `FilesBrowserState` + `DiffReviewState` with separated `workingChanges` and `scratch` inventory. Land the 32-point breadcrumb header, responsive 236-point rail (Open & Scratch, Changed in Task, Checkout with compaction, auto-reveal and Show Ignored reset), per-file view mode, one-time initial choice, scratch-passing local & peer watchers, calm update bar, `.id(document.path)` 800 ms HTML settle debounce, and deliberate `lf open --host desktop --file` (plus builtin skill updates). Delete the 3-state navigator, pin shortcut, static location row, tab counter, `follow()`/`autoSelected`/120s timer and passive document creation. Move open-file readiness timing to the displayed reader and update superseded tests.
 3. **Unified Find & line review:** Wire descendant-aware `PaneFocusTarget` and inline `⌘F` across Read, Edit, Markdown, HTML (`callJavaScript`) and Diff, with promotion to Grep (`⇧⌘F`) and full Changed/preview picker modes. Add typed `ReviewSelection.Source` (`.file` vs. `.diff`), Read gutter change marks, shared `ReviewCommentEditor` / `ReviewCommentsStrip` across Read and Diff, and per-file-only stepping in Files' Diff mode. Reconcile focus, edit/save and review tests and `swift/README.md`.
 4. **Polish & full language/CLI coverage:** Verify all core languages + fallback in declaration scanner and local Tree-sitter outline, `gr` references, dirty-buffer live overlays, cache invalidation, truncated states, narrow/wide responsive layouts, and CLI/server reference docs. No change to iOS navigation or existing Diff comparison controls.
 
 ## Gate and demo
+
+Reader checks on November 22:
+
+- `swift build --build-tests --package-path swift` passed. Gate and CI cover the Desktop suite.
+- `scripts/test_desktop.sh --skip-build --filter 'codeOpensInReadAndKeepsItsDraftAndEditorAcrossFiles|readModeRendersHTMLAsAPageAndMarkdownAsBlocks|twoShellsAndFilesRestoreIdentitiesSelectionAndDrafts|diskWinsOverlapKeepsOtherLocalEditsAndUndoNeverRevertsDisk|sameRevisionAccessChangePreservesDraftSelectionAndUndo|compositionDefersIncomingChangesAndSave|plainTextAtTheFileSizeLimitKeepsEveryLine|aDocstringRowColorsFromTheWholeFile'` passed all eight. The 1,000,000-byte plain-text fixture produced 10,001 lines in a 0.089 s headless test. This measures line preparation and assertions.
+- `scripts/test_desktop.sh --skip-build --filter 'codeOpensInReadAndKeepsItsDraftAndEditorAcrossFiles|aRecoveredDraftStaysReadOnlyWhenTheFileHasDisappeared|twoShellsAndFilesRestoreIdentitiesSelectionAndDrafts|sameRevisionAccessChangePreservesDraftSelectionAndUndo|compositionDefersIncomingChangesAndSave'` passed all five after the access-state change. Display-capable QA still owns mounted keyboard focus and visual layout.
 
 Planned headless gate from the repository root, with the source-built CLI and the new Swift integration scenario:
 

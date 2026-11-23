@@ -27,8 +27,8 @@ struct TaskFilesTests {
         return try JSONDecoder().decode(FilesFixture.self, from: Data(contentsOf: url))
     }
 
-    private func snapshot(_ text: String, revision: String? = nil) -> TaskFileSnapshot {
-        TaskFileSnapshot(recoveries: [], issueIdentifier: "TEST-1", taskId: "task-files", path: "note.txt",
+    private func snapshot(_ text: String, revision: String? = nil, path: String = "note.txt") -> TaskFileSnapshot {
+        TaskFileSnapshot(recoveries: [], issueIdentifier: "TEST-1", taskId: "task-files", path: path,
                          content: text, data: nil, state: .text, revision: revision ?? text, readOnlyReason: nil, sizeBytes: UInt64(text.utf8.count))
     }
 
@@ -262,18 +262,76 @@ struct TaskFilesTests {
             await document.reconcile(TaskFileSnapshot(recoveries: [], issueIdentifier: "TEST-1", taskId: "task-files",
                 path: path, content: text, data: nil, state: .text, revision: text, readOnlyReason: nil, sizeBytes: UInt64(text.utf8.count)))
             store.selection = path
-            #expect(store.rendersSelection)
+            #expect(document.retainedEditor == nil)
         }
         let page = TaskFileReadingView(document: store.document("scratch/explore.html"), baseURL: nil)
         #expect(throws: Never.self) { try page.inspect().find(viewWithAccessibilityIdentifier: "files-rendered-html") }
         let note = TaskFileReadingView(document: store.document("scratch/plan.md"), baseURL: nil)
         #expect(try note.inspect().find(MarkdownBlocks.self).actualView().source == "# Plan")
-        // Edit is a mode you switch into; other files read as text.
-        store.mode = .edit
-        #expect(!store.rendersSelection)
-        store.mode = .read
-        store.selection = "Cargo.toml"
-        #expect(!store.rendersSelection)
+    }
+
+    @Test func codeOpensInReadAndKeepsItsDraftAndEditorAcrossFiles() async throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let location = fixtureWorkspace("/fixture")
+        let workspace = fixtureWork(registry, location)
+        let pane = try #require(workspace.multiplexer.showBrowser(.files, location: location))
+        let query = RegistryQuery { _, _ in
+            #"{"recoveries":[],"issue_identifier":"TEST-1","task_id":"task-files","path":"Store.swift","content":"// 😀\r\nstruct Store {}","data":null,"state":"text","revision":"1","read_only_reason":null,"size_bytes":24}"#
+        }
+        let store = try workspace.files(for: pane.content, task: nil, query: query)
+        let model = WorkModel(query: query)
+        let context = DesktopActionContext(model: model, workspaces: registry, workspace: workspace, pane: pane)
+        let (edit, _) = try #require(DesktopAction.binding(characters: "e", modifiers: [.command, .control]))
+        store.autosave = false
+        store.selectFileFromInput("Store.swift")
+        await store.loadFile()
+        let document = try #require(store.selectedDocument)
+        await document.reconcile(snapshot("// 😀\r\nstruct NewStore {}", path: document.path))
+        #expect(store.mode == .read)
+        #expect(document.retainedEditor == nil)
+        #expect(document.saveMessage == "Updated from disk")
+        let view = TaskFilesView(store: store, checkoutBase: nil)
+        let reader = try view.inspect().find(TaskCodeReader.self).actualView()
+        let lines = CodeLine.read(reader.text, grammar: Grammar.named(reader.path))
+        #expect(lines.map(\.text) == ["// 😀", "struct NewStore {}"])
+        #expect(lines[1].highlights.contains { $0.ink == .keyword && $0.range == NSRange(location: 0, length: 6) })
+
+        store.page = .changes
+        #expect(!edit.available(context))
+        store.page = .files
+        #expect(edit.available(context))
+        try edit.perform(context)
+        let editor = document.editor
+        editor.insertText("let draft = 1", replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+        editor.setSelectedRange(NSRange(location: 4, length: 5))
+        store.selectFileFromInput("notes.txt")
+        #expect(store.mode == .read)
+        store.selectFileFromInput("Store.swift")
+        #expect(store.mode == .edit)
+        try edit.perform(context)
+        #expect(store.mode == .read)
+        #expect(try view.inspect().find(TaskCodeReader.self).actualView().text == "let draft = 1")
+        try edit.perform(context)
+        #expect(document.editor === editor)
+        #expect(editor.selectedRange() == NSRange(location: 4, length: 5))
+        editor.undoManager?.undo()
+        #expect(document.text == "// 😀\r\nstruct NewStore {}")
+    }
+
+    @Test func aRecoveredDraftStaysReadOnlyWhenTheFileHasDisappeared() async {
+        let document = TaskFileDocument(path: "note.txt")
+        let draft = WorkFileDraft(location: .init(machineID: "local", cwd: "/fixture"), path: document.path,
+                                  baseRevision: "1", baseContent: "saved", text: "mine")
+        document.restore(draft, task: "TEST-1")
+        await document.reconcile(TaskFileSnapshot(recoveries: [], issueIdentifier: "TEST-1", taskId: "task-files",
+            path: document.path, content: nil, data: nil, state: .missing, revision: nil,
+            readOnlyReason: nil, sizeBytes: 0))
+        #expect(document.text == "mine")
+        #expect(document.external?.state == .missing)
+        #expect(document.retainedEditor == nil)
+        #expect(!document.canEdit)
+        #expect(!document.editor.isEditable)
+        #expect(!document.canSave)
     }
 
     @Test func diskWinsOverlapKeepsOtherLocalEditsAndUndoNeverRevertsDisk() async {

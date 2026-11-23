@@ -74,7 +74,7 @@ struct TaskFilesView: View {
                 Menu {
                     ForEach(store.tabs) { tab in
                         Toggle(isOn: Binding(get: { store.selection == tab.path },
-                                             set: { _ in store.selectFileFromInput(tab.path, mode: .read) })) {
+                                             set: { _ in store.selectFileFromInput(tab.path) })) {
                             Text(store.documents[tab.path]?.dirty == true ? "\(tab.path) (unsaved)" : tab.path)
                         }
                     }
@@ -85,13 +85,14 @@ struct TaskFilesView: View {
                 } label: {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                         Text((selection as NSString).lastPathComponent).font(Typography.mono).foregroundStyle(palette.text)
+                            .lineLimit(1).truncationMode(.middle)
                         if store.documents[selection]?.dirty == true { UnsavedDraftMark() }
                         if let place = store.tabPlace {
                             Text(place).font(Typography.meta).foregroundStyle(palette.textSecondary)
                         }
                     }
                 }
-                .menuStyle(.borderlessButton).fixedSize()
+                .menuStyle(.borderlessButton)
                 .padding(.horizontal, Spacing.sm)
                 .help(selection)
                 .accessibilityIdentifier("files-open")
@@ -160,7 +161,7 @@ struct TaskFilesView: View {
     private func dismissNavigator() {
         store.dismissNavigator()
         navigatorFocused = false
-        if let editor = store.selectedDocument?.editor, editor.window != nil {
+        if let editor = store.selectedDocument?.retainedEditor, editor.window != nil {
             editor.window?.makeFirstResponder(editor)
         }
     }
@@ -327,10 +328,11 @@ struct TaskFilesView: View {
             Picker("View", selection: Binding(get: { store.mode }, set: { store.mode = $0; store.noteInteraction() })) {
                 Text("Read").tag(TaskFilesStore.Mode.read)
                 Text("Edit").tag(TaskFilesStore.Mode.edit)
+                    .disabled(store.selectedDocument?.canEdit != true)
                 Text("Diff").tag(TaskFilesStore.Mode.diff)
                     .disabled(store.changesError != nil)
-            }.pickerStyle(.menu).labelsHidden()
-                .accessibilityLabel("View").frame(width: 70).fixedSize()
+            }.pickerStyle(.segmented).labelsHidden()
+                .accessibilityLabel("View").fixedSize()
         }
         .font(Typography.meta).padding(.horizontal, Spacing.sm)
         .frame(height: TaskFileChrome.headerHeight)
@@ -398,7 +400,7 @@ struct TaskFilesView: View {
     /// Open a file the navigator offers; a dropdown has done its job.
     private func read(_ path: String) {
         let wasDropdown = store.navigator == .dropdown
-        store.selectFileFromInput(path, mode: .read)
+        store.selectFileFromInput(path)
         if wasDropdown { dismissNavigator() }
     }
 
@@ -423,8 +425,9 @@ struct TaskFilesView: View {
         if store.selection == nil {
             EmptyState(title: "Select a file")
         } else if store.mode == .diff {
-            if let review = store.fileReview {
+            if let review = store.fileReview, review.path == store.selection {
                 TaskFileDiffView(store: store, review: review, isFocused: isFocused, addToConversation: addToConversation)
+                    .onChange(of: review.path, initial: true) { reportVisible(review.path) }
             } else if let reason = store.changesError {
                 EmptyState(title: "Comparison unavailable", machine: reason) {
                     Button("Retry") { Task { await store.refreshChanges() } }
@@ -432,33 +435,42 @@ struct TaskFilesView: View {
                 }
             } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
         } else if let document = store.selectedDocument, let snapshot = document.snapshot {
-            if snapshot.state == .text, store.rendersSelection {
+            if snapshot.state == .text, store.mode == .read {
                 TaskFileReadingView(document: document, baseURL: store.query.remoteMachine == nil
                     ? URL(fileURLWithPath: store.cwd).appendingPathComponent(document.path) : nil,
-                    interacted: store.noteInteraction)
+                    interacted: store.noteInteraction, ready: { reportVisible(document.path) })
+                    .id(document.path)
             } else if snapshot.state == .text {
-                TaskDocumentView(document: document)
+                TaskDocumentView(document: document, isFocused: isFocused, ready: { reportVisible(document.path) })
             } else if let data = snapshot.data, NSImage(data: data) != nil {
                 ScrollView { TaskImage(file: snapshot).padding(Spacing.lg) }
+                    .onAppear { reportVisible(snapshot.path) }
             } else {
                 EmptyState(title: snapshot.state.title)
             }
         } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
     }
+
+    private func reportVisible(_ path: String) {
+        guard page == .files, store.selection == path else { return }
+        Perf.stateObserved(.openFile, id: path, owner: store.performanceOwner)
+    }
 }
 
-/// A document as you read it: Markdown through `MarkdownBlocks`, HTML as a live page.
+/// Render the working document, including any local edits.
 struct TaskFileReadingView: View {
     let document: TaskFileDocument
     /// Where relative references resolve; `nil` for a peer's checkout.
     let baseURL: URL?
     var interacted: () -> Void = {}
+    var ready: () -> Void = {}
 
     var body: some View {
-        if (document.path as NSString).pathExtension.lowercased() == "html" {
-            TaskHTMLView(html: document.text, baseURL: baseURL, interacted: interacted)
+        switch (document.path as NSString).pathExtension.lowercased() {
+        case "html":
+            TaskHTMLView(html: document.text, baseURL: baseURL, interacted: interacted, ready: ready)
                 .accessibilityIdentifier("files-rendered-html")
-        } else {
+        case "md":
             ScrollView {
                 MarkdownBlocks(source: document.text).equatable()
                     .frame(maxWidth: 720, alignment: .leading)
@@ -467,6 +479,10 @@ struct TaskFileReadingView: View {
             }
             .onScrollPhaseChange { _, phase in if phase == .interacting { interacted() } }
             .accessibilityIdentifier("files-rendered-markdown")
+            .onAppear(perform: ready)
+        default:
+            TaskCodeReader(path: document.path, text: document.text, ready: ready)
+                .onScrollPhaseChange { _, phase in if phase == .interacting { interacted() } }
         }
     }
 }
@@ -477,6 +493,7 @@ struct TaskHTMLView: View {
     let html: String
     let baseURL: URL?
     let interacted: () -> Void
+    var ready: () -> Void = {}
 
     @State private var page: WebPage?
     @State private var position = ScrollPosition()
@@ -519,6 +536,7 @@ struct TaskHTMLView: View {
         defer { loading = false }
         guard await Self.load(page, html: html, baseURL: baseURL), !Task.isCancelled else { return }
         position.scrollTo(point: restore)
+        ready()
     }
 
     /// Whether the page finished loading; a superseded or failed load reports false.
@@ -564,6 +582,8 @@ private enum TaskHTMLRules {
 
 private struct TaskDocumentView: NSViewRepresentable {
     let document: TaskFileDocument
+    let isFocused: Bool
+    let ready: () -> Void
     @Environment(\.palette) private var palette
     @Environment(\.theme) private var theme
     func makeNSView(context: Context) -> NSView { NSView() }
@@ -573,10 +593,11 @@ private struct TaskDocumentView: NSViewRepresentable {
             document.scroll.removeFromSuperview()
             document.scroll.frame = host.bounds
             document.scroll.autoresizingMask = [.width, .height]
+            document.editor.focusOnMount = isFocused
             host.addSubview(document.scroll)
         }
         document.applyTheme(theme)
-        document.editor.recordReadiness()
+        ready()
         document.scroll.backgroundColor = NSColor(palette.background)
     }
 }

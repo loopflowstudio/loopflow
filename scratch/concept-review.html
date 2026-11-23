@@ -49,10 +49,10 @@
   h3 { font-size: 1.05rem; }
   .overline { color: var(--blue); font-weight: 650; font-size: .88rem; letter-spacing: .02em; margin-bottom: .35rem; }
   .tag { display: inline-block; font-size: .78rem; font-weight: 700; padding: .1rem .45rem; border-radius: .35rem; vertical-align: middle; }
-  .tag-existing { background: var(--red-bg); color: var(--red); }
-  .tag-proposed { background: var(--green-bg); color: var(--green); }
+  .tag-before { background: var(--red-bg); color: var(--red); }
+  .tag-built { background: var(--green-bg); color: var(--green); }
   .tag-choice { background: var(--amber-bg); color: var(--amber); }
-  .lede { font-size: 1.1rem; max-width: 70ch; margin-top: .85rem; }
+  .lede { font-size: 1.1rem; max-width: 72ch; margin-top: .85rem; }
   .note, figcaption { color: var(--muted); font-size: .92rem; }
   section { margin-top: 2.5rem; }
   .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
@@ -104,32 +104,32 @@
 <body>
 <main>
   <header>
-    <p class="overline">LOO-1066 · Post-build concept review · macOS Settings &amp; Configuration Scope</p>
+    <p class="overline">LOO-1066 · Post-build concept review (pass 2) · macOS Settings &amp; Configuration Scope</p>
     <h1>Do the product’s concepts and the built code’s concepts line up?</h1>
     <p class="lede">
-      The pre-build split between <strong>Applies to</strong> (inspected work) and <strong>Save in</strong> (declaration owner) landed cleanly in Rust’s <code>config.scope</code> and <code>config::files::edit</code>.
-      Reviewing the built branch against base reveals <strong>one central remaining mismatch</strong>: Settings treats the raw 47-key <code>config.catalog</code> and a single window-wide destination/error state as its UI model. That leaks internal/inactive keys, hijacks <code>Save in</code> into ghost destinations, breaks nullable controls, and lets one edit error or 1-second cache lag freeze the entire window.
+      <strong>Yes.</strong> Reviewed across the full macOS Settings &amp; Configuration Scope area against base <code>5d5bf92c</code> through <code>7a7d474c</code>.
+      The pass-1 mismatch — treating the raw 47-key catalog and a single window-wide destination/error state as the UI model — has been resolved end to end across Rust (<code>observe</code>, <code>config::files::edit</code>, <code>engine::config::{scope, promotion}</code>) and Swift (<code>ScopedSettingsModel</code>, <code>ScopedSettings</code>, <code>ScopedSettingRow</code>, <code>SettingsSearch</code>, <code>MachineConnections</code>, <code>ThemeChooser</code>). No remaining conceptual mismatch requires another plan/build pass.
     </p>
   </header>
 
   <section aria-labelledby="sim-heading">
-    <h2 id="sim-heading">Walk the mismatches: Built vs Proposed</h2>
-    <p class="note">Switch scenarios to walk the exact interaction paths in the built branch (<code>fff2a763</code>) beside the proposed model.</p>
+    <h2 id="sim-heading">Biggest pass-1 mismatches: Before vs Built now</h2>
+    <p class="note">Walk the four interactions pass 1 flagged, comparing the earlier pass (<code>fff2a763</code>) against what is built on <code>7a7d474c</code>.</p>
 
     <div class="tabs" role="tablist" aria-label="Walkthrough scenarios">
-      <button type="button" role="tab" class="active" data-scenario="machines" aria-selected="true">1 · Machines &amp; Save in hijack</button>
-      <button type="button" role="tab" data-scenario="error" aria-selected="false">2 · Typo or rapid toggle</button>
-      <button type="button" role="tab" data-scenario="controls" aria-selected="false">3 · Catalog rows &amp; null values</button>
+      <button type="button" role="tab" class="active" data-scenario="machines" aria-selected="true">1 · Machines &amp; Save in</button>
+      <button type="button" role="tab" data-scenario="error" aria-selected="false">2 · Row errors &amp; rapid edits</button>
+      <button type="button" role="tab" data-scenario="controls" aria-selected="false">3 · Grouped forms &amp; explicit null</button>
       <button type="button" role="tab" data-scenario="move" aria-selected="false">4 · Diverged interrupted move</button>
     </div>
 
-    <!-- Scenario 1: Machines & Save in hijack -->
+    <!-- Scenario 1 -->
     <div id="sc-machines" class="compare">
       <article class="card">
-        <p class="overline"><span class="tag tag-existing">Existing built code</span> · <code>ScopedSettings.swift</code></p>
-        <h3>Clicking “Edit in My global preferences” hijacks Save in</h3>
-        <div class="status-bar" id="b1-bar">
-          <span><strong>Applies to:</strong> <code>/Users/jack/src/loopflow</code></span>
+        <p class="overline"><span class="tag tag-before">Before (pass 1 · fff2a763)</span> · Ghost destination hijack</p>
+        <h3>Clicking “Edit in My global preferences” hijacked Save in</h3>
+        <div class="status-bar">
+          <span><strong>Applies to:</strong> <code>loopflow</code></span>
           <span><strong>Save in:</strong> <span id="b1-savein">My repository settings</span></span>
           <span>Override dot: <span id="b1-dot" class="dot on" title="Override dot"></span></span>
         </div>
@@ -139,23 +139,22 @@
             <button type="button" id="b1-edit-hub">Edit in My global preferences</button>
           </div>
           <div class="row">
-            <div><strong>Pools, Forward, Machines, Connections…</strong><br><span class="note">6 more global-only rows repeat the same button</span></div>
+            <div><strong>Pools, Forward, Machines, Connections…</strong></div>
             <span class="pill pill-bad" id="b1-other-pill">7 of 8 read-only</span>
           </div>
         </div>
         <div class="box" id="b1-after" hidden>
-          <p><strong>Now switch to Context and toggle Diff:</strong></p>
-          <p class="note"><code>model.destination</code> is stuck on <code>.personalGlobal</code> (a ghost option in <code>Save in</code>). Toggling <strong>Diff</strong> silently writes <code>~/.lf/config.yaml</code> while the header says <code>Applies to: loopflow</code>, and sidebar override dots vanish.</p>
+          <p><code>model.destination</code> stayed on <code>.personalGlobal</code> (a ghost option). Switching to Context silently wrote <code>~/.lf/config.yaml</code> and cleared sidebar override dots.</p>
         </div>
         <div class="row" style="margin-top:.65rem; border:0;">
           <button type="button" id="b1-reset">Reset</button>
-          <span class="note">Also affects all 7 rows in Git &amp; Release at Wave scope.</span>
+          <span class="note">Git &amp; Release at Wave scope also showed 7 read-only rows.</span>
         </div>
       </article>
 
       <article class="card">
-        <p class="overline"><span class="tag tag-proposed">Proposed</span> · Applicability belongs to the section, not Save in</p>
-        <h3>Global machine settings edit directly; Save in stays honest</h3>
+        <p class="overline"><span class="tag tag-built">Existing built code (7a7d474c)</span> · <code>editableFile(for:)</code> + <code>SettingsSection</code></p>
+        <h3>This Machine (Global) edits directly; Save in stays honest</h3>
         <div class="status-bar">
           <span><strong>Applies to:</strong> loopflow</span>
           <span><strong>Save in:</strong> My repository settings</span>
@@ -164,61 +163,61 @@
         <div class="box">
           <p class="overline" style="margin-bottom:.25rem;">Placement (scoped to loopflow · My repository settings)</p>
           <div class="row">
-            <div><strong>Machine placement</strong><br><span class="note">Personal-only · inherits Global</span></div>
+            <div><strong>Machine</strong><br><span class="note">Personal-scoped · offers “Switch Save in to My…” when Shared is selected</span></div>
             <span class="pill pill-good">Editable here</span>
           </div>
         </div>
         <div class="box">
-          <p class="overline" style="margin-bottom:.25rem;">This Machine · ~/.lf/config.yaml (Global)</p>
+          <p class="overline" style="margin-bottom:.25rem;">This Machine (Global) · ~/.lf/config.yaml</p>
           <div class="row">
             <div><strong>Hub</strong><br><span class="note" id="p1-hub-state">None · edits ~/.lf/config.yaml directly</span></div>
             <button type="button" class="primary" id="p1-edit-hub">Set Hub to builder</button>
           </div>
           <div class="row">
-            <div><strong>Pools, Forward, Machines, Connections, On-demand</strong></div>
+            <div><strong>Machines, Connections, Pools, Ondemands, Forward</strong></div>
             <span class="pill pill-good">All editable</span>
           </div>
         </div>
         <div class="box box-ok" id="p1-after" hidden>
-          <p><strong>Saved <code>hub</code> in My global preferences.</strong> <code>Save in</code> is still <strong>My repository settings</strong>. Switching to Context edits the checkout’s private file and keeps override dots intact.</p>
+          <p><strong>Saved <code>hub</code> in My global preferences.</strong> <code>Save in</code> stays <strong>My repository settings</strong>. Switching to Context edits <code>.lf/config.local.yaml</code> and keeps override dots intact.</p>
         </div>
         <div class="row" style="margin-top:.65rem; border:0;">
           <button type="button" id="p1-reset">Reset</button>
-          <span class="note">Git &amp; Release at Wave scope shows one banner + “Inspect loopflow”.</span>
+          <span class="note">Git &amp; Release at Wave scope shows one banner + “Inspect repository settings”.</span>
         </div>
       </article>
     </div>
 
-    <!-- Scenario 2: Typo or rapid toggle -->
+    <!-- Scenario 2 -->
     <div id="sc-error" class="compare" hidden>
       <article class="card">
-        <p class="overline"><span class="tag tag-existing">Existing built code</span> · <code>ScopedSettingsModel</code> + <code>observe.rs</code></p>
-        <h3>One error freezes every pane; writes lag 1s behind cache</h3>
+        <p class="overline"><span class="tag tag-before">Before (pass 1 · fff2a763)</span> · Window-wide lock + 1s cache lag</p>
+        <h3>One error froze every pane; rapid toggles self-conflicted</h3>
         <div class="box box-danger" id="b2-banner" hidden>
           <strong id="b2-err-text"></strong>
           <div style="margin-top:.4rem;"><button type="button" id="b2-refresh">Refresh</button></div>
         </div>
         <div class="box">
           <div class="row">
-            <div><strong>Wave graph</strong><br><span class="note">Type an unknown graph name and submit</span></div>
+            <div><strong>Wave graph</strong><br><span class="note">Submit an unknown graph name</span></div>
             <div>
               <input type="text" id="b2-input" value="typo-graph" size="12">
               <button type="button" id="b2-submit">Submit</button>
             </div>
           </div>
           <div class="row">
-            <div><strong>Include diff in agent context</strong> (Context pane)<br><span class="note" id="b2-toggle-note">Unrelated setting on another pane</span></div>
+            <div><strong>Include diff in agent context</strong> (Context pane)</div>
             <button type="button" id="b2-toggle">Toggle Diff</button>
           </div>
         </div>
         <p class="note" style="margin-top:.6rem;">
-          In <code>ScopedSettingsModel.swift</code>, <code>editsDisabled</code> checks <code>editError != nil</code>. A typo disables the very text field where you need to fix it—and every other control across all 5 panes—until you click Refresh. Meanwhile, <code>atomic_write</code> never invalidates <code>observe::Cache</code>, so a second toggle within 1s trips a stale-slot conflict and locks the window the same way.
+          <code>editError != nil</code> disabled every control across all 5 panes, and <code>atomic_write</code> did not invalidate <code>observe::Cache</code>.
         </p>
       </article>
 
       <article class="card">
-        <p class="overline"><span class="tag tag-proposed">Proposed</span> · Cache invalidation on write + row-scoped errors</p>
-        <h3>Errors stay on their row; writes update subscriptions at once</h3>
+        <p class="overline"><span class="tag tag-built">Existing built code (7a7d474c)</span> · <code>errors[RowAddress]</code> + <code>observe::invalidate_path</code></p>
+        <h3>Errors stay on their row; writes publish synchronously</h3>
         <div class="box">
           <div class="row">
             <div>
@@ -232,73 +231,71 @@
             </div>
           </div>
           <div class="row">
-            <div><strong>Include diff in agent context</strong> (Context pane)<br><span class="note" id="p2-toggle-note">Stays enabled; server cache invalidates synchronously</span></div>
+            <div><strong>Include diff in agent context</strong> (Context pane)<br><span class="note">Unrelated controls stay live; rapid edits settle without conflict</span></div>
             <button type="button" id="p2-toggle">Toggle Diff (<span id="p2-toggle-val">Off</span>)</button>
           </div>
         </div>
         <p class="note" style="margin-top:.6rem;">
-          Only a <strong>read failure</strong> (<code>reading.failure</code>: broken YAML or unreachable server) marks the window stale and disables writes. A row validation error keeps its text field editable; a single-row conflict offers inline Refresh on that row. <code>observe::invalidate_path</code> fires in <code>atomic_write</code> so rapid toggles never race a 1-second poll.
+          <code>editsDisabled</code> checks only <code>saving || reading.failure != nil</code>. <code>atomic_write</code> calls <code>observe::invalidate_path</code> and wakes file readers; <code>confirmReading()</code> synchronizes back-to-back clicks.
         </p>
       </article>
     </div>
 
-    <!-- Scenario 3: Catalog rows & null values -->
+    <!-- Scenario 3 -->
     <div id="sc-controls" class="compare" hidden>
       <article class="card">
-        <p class="overline"><span class="tag tag-existing">Existing built code</span> · <code>ScopedSettingRow.swift</code></p>
-        <h3>47 raw catalog keys, broken nullables, split Agent Policy</h3>
+        <p class="overline"><span class="tag tag-before">Before (pass 1 · fff2a763)</span> · Raw 47-key dump</p>
+        <h3>Raw schema leaked as UI; absent collapsed with null</h3>
         <div class="box">
-          <div class="row"><span><strong>Agents · Isolate</strong> <span class="pill pill-bad">Inactive</span></span><span class="note">Live switch (ignored at runtime)</span></div>
-          <div class="row"><span><strong>Agents · Auth Browsers</strong> <span class="pill pill-bad">Accounts</span></span><span class="note">Fell into Agents fallback branch</span></div>
-          <div class="row"><span><strong>General · Portfolio</strong> <span class="pill pill-bad">Internal state</span></span><span class="note">Raw YAML TextEditor</span></div>
-          <div class="row"><span><strong>General · User / Logs</strong></span><span class="note">Raw JSON/YAML disclosures + “Inherited” bar</span></div>
-          <div class="row"><span><strong>Agents · Chrome</strong> (<code>Option&lt;bool&gt;</code>)</span><span class="note">2-state Toggle (cannot clear to <code>null</code>)</span></div>
-          <div class="row"><span><strong>Agents · Starting preference</strong> (<code>agent: null</code>)</span><span class="note">Shows literal <code>"None"</code> in TextField; “In effect” prints whole array</span></div>
-          <div class="row"><span><strong>Git · Merge method</strong> (<code>merge_method: null</code>)</span><span class="note">Picker conflates explicit <code>null</code> with <code>Inherited</code></span></div>
+          <div class="row"><span><strong>Agents · Isolate</strong> <span class="pill pill-bad">Inactive</span></span><span class="note">Live switch in main form</span></div>
+          <div class="row"><span><strong>Agents · Auth Browsers</strong> <span class="pill pill-bad">Accounts</span></span><span class="note">Fell into Agents fallback</span></div>
+          <div class="row"><span><strong>General · Portfolio / User / Logs</strong></span><span class="note">Raw YAML TextEditors</span></div>
+          <div class="row"><span><strong>Agents · Chrome</strong> (<code>Option&lt;bool&gt;</code>)</span><span class="note">2-state Toggle (no <code>null</code>)</span></div>
+          <div class="row"><span><strong>Agents · Starting preference</strong> (<code>null</code>)</span><span class="note">Literal <code>"None"</code> in TextField; whole array in “In effect”</span></div>
         </div>
       </article>
 
       <article class="card">
-        <p class="overline"><span class="tag tag-proposed">Proposed</span> · Curated sections + explicit <code>Authored</code></p>
-        <h3>Grouped Apple Settings cards; <code>Absent</code> ≠ <code>null</code></h3>
+        <p class="overline"><span class="tag tag-built">Existing built code (7a7d474c)</span> · <code>SettingsSection</code> + <code>Authored</code></p>
+        <h3>Curated Apple Settings sections; Absent ≠ Explicit null</h3>
         <div class="box">
-          <p class="overline" style="margin-bottom:.25rem;">Agents · Agent Policy (one grouped Section)</p>
-          <div class="row"><span><strong>Pin</strong> (<code>agent</code>)</span><span class="note">Cleared (<code>null</code>) · not literal “None”</span></div>
-          <div class="row"><span><strong>Starting preference</strong> (<code>default_agent</code>)</span><span class="note"><code>codex</code></span></div>
-          <div class="row"><span><strong>Fallback order</strong> (<code>agents</code>)</span><span class="note"><code>claude, codex</code></span></div>
-          <div class="row"><span><strong>Effective order</strong></span><span class="pill pill-good">codex → claude · My repo</span></div>
+          <p class="overline" style="margin-bottom:.25rem;">Agents · Agent Policy (one Section)</p>
+          <div class="row"><span><strong>Pin</strong> (<code>agent</code>)</span><span class="note">Prompt: <code>Explicit null</code> when null, <code>Inherited</code> when absent</span></div>
+          <div class="row"><span><strong>Starting preference</strong> (<code>default_agent</code>)</span><span class="note">Single declaration row</span></div>
+          <div class="row"><span><strong>Fallback order</strong> (<code>agents</code>)</span><span class="note">Ordered list editor</span></div>
+          <div class="row"><span><strong>Effective agent order</strong></span><span class="pill pill-good">Shared provenance row</span></div>
         </div>
         <div class="box">
-          <div class="row"><span><strong>Chrome</strong> (<code>Option&lt;bool&gt;</code>)</span><span class="note">Picker: Inherited · Claude default · On · Off</span></div>
-          <div class="row"><span><strong>General</strong></span><span class="note">Native Display name + Log Linear requests; no provenance chrome</span></div>
-          <div class="row"><span><strong>Inactive / internal keys</strong></span><span class="note">Hidden from main forms; reachable via Advanced / search</span></div>
+          <div class="row"><span><strong>Chrome</strong> (<code>Option&lt;bool&gt;</code>)</span><span class="note">Picker: Inherited · Explicit null · On · Off</span></div>
+          <div class="row"><span><strong>General</strong></span><span class="note">Native Display name + Log Linear requests; no provenance bar</span></div>
+          <div class="row"><span><strong>Inactive / internal keys</strong></span><span class="note">Collapsed Advanced sections; searchable with <code>Inactive</code> tag</span></div>
         </div>
       </article>
     </div>
 
-    <!-- Scenario 4: Diverged interrupted move -->
+    <!-- Scenario 4 -->
     <div id="sc-move" class="compare" hidden>
       <article class="card">
-        <p class="overline"><span class="tag tag-existing">Existing built code</span> · <code>promotion.rs</code></p>
-        <h3>Interrupted move whose file diverged is permanently stuck</h3>
+        <p class="overline"><span class="tag tag-before">Before (pass 1 · fff2a763)</span> · No recovery exit</p>
+        <h3>Diverged interrupted move was stuck forever</h3>
         <div class="box">
-          <p class="note">1. Move <code>context.diff: false</code> from My repo → Shared repo.<br>2. Process stops after writing Shared; journal remains in <code>~/.lf/settings-moves/&lt;sha256&gt;.json</code>.<br>3. Someone edits Shared to <code>true</code>.</p>
+          <p class="note">1. Crash after writing receiving file; journal stays in <code>~/.lf/settings-moves/</code>.<br>2. Someone hand-edits the receiving file.</p>
           <div class="row" style="margin-top:.5rem;">
             <button type="button" id="b4-resume">Finish interrupted move…</button>
-            <span class="pill pill-bad" id="b4-status">Pending journal exists</span>
+            <span class="pill pill-bad">Pending journal exists</span>
           </div>
           <div class="box box-danger" id="b4-err" hidden style="margin-top:.5rem;">
             <code>context.diff changed in .lf/config.yaml; review that file before continuing the move</code>
-            <p class="note" style="margin-top:.3rem;">No <code>Action::Dismiss</code> exists. <code>Resume</code> always errors, <code>Preview</code> returns <code>Pending</code>, and the journal can never be cleared from Settings.</p>
+            <p class="note" style="margin-top:.3rem;">No <code>Action::Dismiss</code> existed; the journal could never be cleared from Settings.</p>
           </div>
         </div>
       </article>
 
       <article class="card">
-        <p class="overline"><span class="tag tag-proposed">Proposed</span> · Add <code>Action::Dismiss</code> + visible row notice</p>
-        <h3>Keep both files safe; let the person dismiss once reviewed</h3>
+        <p class="overline"><span class="tag tag-built">Existing built code (7a7d474c)</span> · <code>Action::Dismiss</code> + row notice</p>
+        <h3>Keep both files safe; explicit idempotent Dismiss</h3>
         <div class="box">
-          <p class="note">Interrupted move is surfaced directly on the row (not buried inside a collapsed disclosure). If a file diverged, both files stay untouched and Settings offers <strong>Dismiss pending move</strong>.</p>
+          <p class="note">Interrupted move appears directly on the row. If a file diverged, <code>Resume</code> returns <code>ErrorCode::Conflict</code> and reveals <strong>Dismiss pending move</strong> while keeping both YAML files intact.</p>
           <div class="row" style="margin-top:.5rem;">
             <div>
               <button type="button" id="p4-resume">Finish interrupted move…</button>
@@ -307,10 +304,10 @@
             <span class="pill" id="p4-status">Pending journal exists</span>
           </div>
           <div class="box box-warn" id="p4-warn" hidden style="margin-top:.5rem;">
-            <code>context.diff changed in .lf/config.yaml.</code> Both files were kept. Review them, then dismiss the pending move to resume normal editing.
+            <code>context.diff changed in .lf/config.yaml; review that file before continuing the move.</code> Dismiss keeps both files as they are.
           </div>
           <div class="box box-ok" id="p4-done" hidden style="margin-top:.5rem;">
-            Journal removed under file locks. Both files kept; normal editing and promotion restored.
+            Journal removed under file locks (idempotent on repeat). Both files untouched; normal editing and promotion restored.
           </div>
         </div>
       </article>
@@ -323,18 +320,18 @@
       <article class="card mapping">
         <h3>Inspect work vs choose file</h3>
         <ul>
-          <li><span class="yes">Yes</span> · Rust’s <code>config.scope</code> (<code>Scope { settings, files }</code> + <code>ScopeTarget</code> + <code>Destination</code>) cleanly separates inspected work from editable declarations.</li>
-          <li><span class="no">No</span> · <strong>One name for two ideas in Swift:</strong> <code>ScopedSettingsModel.destination</code> holds both the user’s <code>Save in</code> choice (My/Shared) and an escape hatch for non-applicable rows (<code>Edit in My global preferences</code>), creating a ghost <code>Save in</code> item that silently redirects edits on other panes and breaks sidebar override dots.</li>
-          <li><span class="no">No</span> · <strong>Hidden state:</strong> When a Skill or Graph step is selected in <code>SettingsTargetPicker</code>, <code>Applies to</code> omits <code>model.target</code> once <code>Advanced</code> is collapsed, so edits look like repository-wide writes. Unnamed Graph steps hide provenance and give no read-only reason.</li>
+          <li><span class="yes">Yes</span> · Rust <code>config.scope</code> (<code>Scope { settings, files }</code>, <code>ScopeTarget</code>, <code>Destination</code>) separates inspected work from editable declarations.</li>
+          <li><span class="yes">Yes</span> · Swift <code>ScopedSettingsModel</code> separates <code>checkout</code>/<code>wave</code>/<code>target</code> from <code>destination</code>; <code>Save in</code> only offers My/Shared at the active scope; <code>editableFile(for:)</code> routes <code>applicability == "personal"</code> directly to <code>.personalGlobal</code> without mutating <code>destination</code>.</li>
+          <li><span class="yes">Yes</span> · <code>scopeTitle</code> names the active Skill or Graph step with an “Inspect general work” reset button; unnamed Graph steps show an explicit read-only banner; Git &amp; Release at Wave scope shows one repository banner.</li>
         </ul>
       </article>
 
       <article class="card mapping">
         <h3>Browse &amp; edit settings</h3>
         <ul>
-          <li><span class="no">No</span> · <strong>Raw schema leaked as UI:</strong> <code>ScopedSettings</code> renders every non-container key in <code>config.catalog</code> as its own <code>Section</code> card with a provenance disclosure—putting internal state (<code>portfolio</code>), inactive compatibility keys (<code>isolate</code>, <code>summaries</code>, <code>summary_tokens</code>), and <code>Accounts</code> (<code>auth_browsers</code>) into live main forms, and leaving <code>user</code>/<code>logs</code> as raw YAML while hardcoding <code>automation</code>.</li>
-          <li><span class="no">No</span> · <strong>Absent vs explicit <code>null</code> collapsed:</strong> Rust’s <code>Authored::{Absent, Present}</code> is flattened to <code>JSONValue?</code> in Swift (<code>Slot.value</code>), breaking 3-state <code>chrome: Option&lt;bool&gt;</code>, conflating <code>null</code> with <code>Inherited</code> in enum <code>Picker</code>s, and turning <code>null</code> strings into literal <code>"None"</code> in <code>TextField</code>s.</li>
-          <li><span class="no">No</span> · <strong>Coupled policy split:</strong> <code>agent</code>, <code>default_agent</code>, and <code>agents</code> appear as three unrelated cards where <code>Starting preference</code> displays the whole fallback array as “In effect”.</li>
+          <li><span class="yes">Yes</span> · <code>SettingsSection</code> organizes native grouped forms per pane; <code>Agent Policy</code> groups <code>agent</code>, <code>default_agent</code>, and <code>agents</code> with one shared <code>Effective agent order</code> provenance disclosure.</li>
+          <li><span class="yes">Yes</span> · <code>ConfigurationScope.Authored</code> (<code>absent</code> vs <code>present(JSONValue)</code>) and strict JSON null validation in <code>settings::validate_value</code> preserve absent, explicit <code>null</code>, and authored values across Pickers (<code>chrome</code>, <code>merge_method</code>, <code>codex.service_tier</code>, <code>auto</code>) and TextFields.</li>
+          <li><span class="yes">Yes</span> · <code>LandMethod</code> is a typed enum; <code>user.name</code>, <code>logs.linear_requests</code>, and <code>automation.retries</code> use native controls; inactive compatibility keys (<code>isolate</code>, <code>summaries</code>, <code>summary_tokens</code>) and internal/account keys (<code>portfolio</code>, <code>auth_browsers</code>) sit in collapsed <code>Advanced</code> sections and stay searchable.</li>
         </ul>
       </article>
 
@@ -342,88 +339,90 @@
         <h3>Save, preview &amp; undo</h3>
         <ul>
           <li><span class="yes">Yes</span> · <code>config::files::edit</code> (<code>Entry</code>, <code>Change::{Set, Reset, Restore}</code>, <code>Applied</code>) owns checked edits, comment preservation, alias normalization, and Undo receipts.</li>
-          <li><span class="no">No</span> · <strong>Write and cache have no handoff:</strong> <code>atomic_write</code> never invalidates <code>observe::Cache</code> (1s poll). Right after a save, <code>config.scope</code> serves the pre-write file; rapid edits hit self-inflicted conflicts, and <code>AppearanceStore</code> kept a parallel <code>config.theme</code> + 1s timer because <code>config.scope</code> lagged behind writes.</li>
-          <li><span class="no">No</span> · <strong>Wrong error scope:</strong> <code>ScopedSettingsModel.editError</code> sets <code>editsDisabled</code> window-wide—disabling the text field where you need to fix a typo and locking all 5 panes until manual Refresh.</li>
+          <li><span class="yes">Yes</span> · <code>observe::invalidate_path</code> fires synchronously inside <code>config::files::atomic_write</code> and <code>promotion::remove_journal</code> (with a stale-poll check in <code>Cache::refresh</code>) and wakes <code>read_stream::wake_file_readers()</code>; <code>confirmReading()</code> coordinates rapid consecutive edits.</li>
+          <li><span class="yes">Yes</span> · <code>ScopedSettingsModel.errors</code> is keyed by <code>RowAddress(file, key)</code> with targeted recovery (<code>refresh</code> / <code>dismissMove</code>); <code>editsDisabled</code> gates only on <code>saving || reading.failure != nil</code>.</li>
         </ul>
       </article>
 
       <article class="card mapping">
         <h3>Move (Promote) a declaration</h3>
         <ul>
-          <li><span class="yes">Yes</span> · <code>engine::config::promotion</code> locks files in path order, validates both slots, previews patches and projected effective values via <code>observe::preview_files</code>, and supports inverse-move Undo.</li>
-          <li><span class="no">No</span> · <strong>Unrecoverable failure state:</strong> If a 2-file move stops after writing the receiving file and someone edits that file before resuming, there is no <code>Action::Dismiss</code>—the journal in <code>~/.lf/settings-moves/</code> stays stuck permanently.</li>
-          <li><span class="no">No</span> · <strong>Silent preview refresh &amp; missing audience:</strong> Confirming a move whose effective result changed silently swaps <code>moveReview</code> with no message, and the preview doesn’t name who gains the setting.</li>
+          <li><span class="yes">Yes</span> · <code>engine::config::promotion</code> locks files in path order, previews patches and projected effective values via <code>observe::preview_files</code>, names the new audience, flags a refreshed preview before confirming, and supports inverse-move Undo.</li>
+          <li><span class="yes">Yes</span> · Pending moves appear directly on the row; <code>Action::Resume</code> finishes matching partial moves, while diverged conflicts offer idempotent <code>Action::Dismiss</code> under file locks without modifying either YAML file.</li>
         </ul>
       </article>
 
       <article class="card mapping">
         <h3>Search &amp; jump to a row</h3>
         <ul>
-          <li><span class="yes">Yes</span> · <code>SettingsMatch</code> indexes panes, App controls, and <code>config.catalog</code> keys/shorthands/descriptions, and boolean search switches share <code>ScopedBooleanToggle</code> and Undo.</li>
-          <li><span class="no">No</span> · <strong>Broken scroll owner:</strong> <code>ScrollViewReader</code> sits outside <code>Form</code> while <code>ScopedSettingRow</code> wraps <code>Section { control.id(key) }</code> in <code>.id(RowAddress(...))</code>, so selecting a search result never scrolled the grouped <code>Form</code> in QA.</li>
+          <li><span class="yes">Yes</span> · <code>SettingsMatch</code> indexes panes, App controls, and all non-container catalog keys/shorthands/descriptions (with exact key/title matches ranked first and <code>Inactive</code> tags shown); boolean search rows share <code>ScopedBooleanToggle</code>, Undo, and inline row errors.</li>
+          <li><span class="yes">Yes</span> · <code>settingsForm(highlighted:)</code> mounts <code>ScrollViewReader</code> inside each pane’s <code>Form</code>, waits until <code>scrollTarget</code> is present in the reading, auto-expands <code>Advanced</code> when needed, scrolls to <code>.settingsRow(key)</code>, and keeps <code>ScopedSettingRow</code>’s draft keyed by <code>RowAddress(file, key)</code>.</li>
         </ul>
       </article>
 
       <article class="card mapping">
         <h3>Appearance, Shortcuts, Mobile &amp; Machines</h3>
         <ul>
-          <li><span class="yes">Yes</span> · <code>AutosaveToggle</code>, shared <code>KeyboardShortcutsView</code>, lifted <code>MobileSetup</code> (sidebar dot + QR agree), and <code>ThemeChooser</code> / <code>ThemeEditor</code> draft separation match user expectations.</li>
-          <li><span class="no">No</span> · <strong>Duplicate read &amp; status wipe:</strong> <code>MachineConnections</code> re-fetches <code>machines</code> via <code>config.get</code> instead of reading <code>config.scope</code>, and resets <code>health = [:]</code> every 30s—flashing every reachable Machine back to “Checking…”.</li>
-          <li><span class="no">No</span> · <strong>Loose controls in grouped Form:</strong> <code>ThemeChooser</code> places its mode picker, Customize button, and error text outside <code>Section</code>s, with errors at the bottom where they can scroll off-screen.</li>
+          <li><span class="yes">Yes</span> · <code>AutosaveToggle</code>, shared <code>KeyboardShortcutsView</code>, lifted <code>MobileSetup</code> (one live status for sidebar dot and QR), <code>ThemeChooser</code> (all controls and top-mounted errors inside <code>Section</code>s), and <code>ThemeEditor</code> drafts line up with native macOS Settings.</li>
+          <li><span class="yes">Yes</span> · <code>MachineConnections</code> reads <code>machines</code> directly from <code>config.scope</code>, preserves prior reachability across 30s probes, and provides <code>Refresh connections</code>.</li>
+          <li><span class="yes">Yes</span> · <em>Intentional boundary:</em> <code>AppearanceStore</code> writes <code>theme</code> through checked <code>config.edit</code> with Undo, while keeping <code>config.theme</code> + local file-stat watching for app-wide theme updates (when Settings is closed), local Ghostty theme files, iPhone parity, and older server reads.</li>
         </ul>
       </article>
     </div>
     <p class="note" style="margin-top:.85rem;">
-      Audited against base <code>3578f78f</code> through <code>fff2a763</code>:
+      Audited against base <code>5d5bf92c</code> through <code>7a7d474c</code>:
       <a href="../rust/loopflow-execution/src/observe.rs">observe.rs</a> ·
       <a href="../rust/loopflow-execution/src/config/files.rs">files.rs</a> ·
+      <a href="../rust/loopflow-execution/src/config/files/edit.rs">edit.rs</a> ·
       <a href="../rust/loopflow-execution/src/engine/config/scope.rs">scope.rs</a> ·
       <a href="../rust/loopflow-execution/src/engine/config/promotion.rs">promotion.rs</a> ·
       <a href="../swift/LoopflowMac/Services/ScopedSettingsModel.swift">ScopedSettingsModel.swift</a> ·
       <a href="../swift/LoopflowMac/Views/ScopedSettings.swift">ScopedSettings.swift</a> ·
       <a href="../swift/LoopflowMac/Views/ScopedSettingRow.swift">ScopedSettingRow.swift</a> ·
       <a href="../swift/LoopflowMac/Views/SettingsWindow.swift">SettingsWindow.swift</a> ·
-      <a href="../swift/LoopflowMac/Views/MachineConnections.swift">MachineConnections.swift</a>
+      <a href="../swift/LoopflowMac/Views/SettingsSearch.swift">SettingsSearch.swift</a> ·
+      <a href="../swift/LoopflowMac/Views/MachineConnections.swift">MachineConnections.swift</a> ·
+      <a href="../swift/LoopflowMac/Views/ThemeChooser.swift">ThemeChooser.swift</a>
     </p>
   </section>
 
   <section aria-labelledby="survival-heading">
-    <h2 id="survival-heading">Failure, recovery &amp; counterexamples tested</h2>
+    <h2 id="survival-heading">Failure, recovery &amp; counterexamples verified</h2>
     <div class="cases">
       <article class="card">
         <h3>Normal &amp; rapid edits</h3>
-        <p>Toggle Diff Off, then On 100ms later. With <code>observe::invalidate_path</code> inside <code>atomic_write</code>, the server pushes the updated <code>Scope</code> before the next click lands; both writes preserve comments and register distinct Undos.</p>
+        <p>Three back-to-back checked <code>config.edit</code> writes on <code>context.diff</code> succeeded within 117 ms with zero stale-slot conflicts (<a href="qa.html">qa.html</a>), preserving comments and registering distinct Undos.</p>
       </article>
       <article class="card">
         <h3>Typo vs broken file</h3>
-        <p>Submit an unknown graph name in <code>wave.graph</code>: the error stays on that row, the field stays editable, and Context/Agents remain unlocked. Corrupt <code>.lf/config.yaml</code> externally: <code>reading.failure</code> leads the form, keeps last values visible, and disables writes until repaired or refreshed.</p>
+        <p>Submitting <code>bogus::x</code> in <code>agent</code> kept the error on that row while <code>yolo</code> toggled freely; entering <code>codex</code> cleared the row error. Corrupting <code>.lf/config.yaml</code> surfaced <code>reading.failure</code>, kept last values visible, and locked writes until repaired and refreshed.</p>
       </article>
       <article class="card">
         <h3>Interrupted move diverges</h3>
-        <p>Stop after writing Shared, then hand-edit Shared. Both files are kept untouched. The row displays the pending move; <code>Resume</code> reports the changed file and offers <code>Dismiss pending move</code>, which clears the journal under locks without touching either YAML file.</p>
+        <p>Hand-editing the receiving file caused <code>Action::Resume</code> to refuse with <code>Conflict</code>; <code>Action::Dismiss</code> cleared the journal idempotently under locks and left both YAML files byte-identical.</p>
       </article>
     </div>
   </section>
 
   <section aria-labelledby="choices-heading">
-    <h2 id="choices-heading">Choices made for review</h2>
-    <p class="note">All choices below are reversible and written into <a href="plan.md">scratch/plan.md</a> and <a href="questions.md">scratch/questions.md</a> for the next build pass. Reply with e.g. <code>1b</code> or <code>2b</code> to steer.</p>
+    <h2 id="choices-heading">Choices built for review</h2>
+    <p class="note">All choices below are reversible, implemented on the branch, and recorded in <a href="questions.md">scratch/questions.md</a>. Reply with e.g. <code>1b</code> or <code>2b</code> to steer.</p>
     <ol class="choices">
-      <li><strong>How should Global-only Machine settings (<code>hub</code>, <code>pools</code>, <code>machines</code>, <code>connections</code>, <code>forward.*</code>) behave when <em>Applies to</em> is a checkout or Wave?</strong>
+      <li><strong>How Global-only Machine settings (<code>hub</code>, <code>pools</code>, <code>machines</code>, <code>connections</code>, <code>forward.*</code>) behave when <em>Applies to</em> is a checkout or Wave</strong>
         <ul>
-          <li><span class="tag tag-choice">1a · In plan</span> Show them in a clearly labeled <strong>This Machine (Global)</strong> section that edits <code>~/.lf/config.yaml</code> directly, without changing <code>Save in</code> for scoped settings.</li>
+          <li><span class="tag tag-choice">1a · Built</span> Show them in a clearly labeled <strong>This Machine (Global)</strong> section that edits <code>~/.lf/config.yaml</code> directly without changing <code>Save in</code> for scoped settings.</li>
           <li><strong>1b.</strong> Keep them read-only in checkout/Wave views with a button that switches <em>Applies to</em> to Global.</li>
         </ul>
       </li>
-      <li><strong>Where should inactive compatibility keys (<code>isolate</code>, <code>summaries</code>, <code>summary_tokens</code>) and internal Desktop state (<code>portfolio</code>) live?</strong>
+      <li><strong>Where inactive compatibility keys (<code>isolate</code>, <code>summaries</code>, <code>summary_tokens</code>) and internal/account keys (<code>portfolio</code>, <code>auth_browsers</code>) live</strong>
         <ul>
-          <li><span class="tag tag-choice">2a · In plan</span> Hide them from primary forms; expose authored or advanced catalog entries under a collapsed <strong>Advanced</strong> disclosure (and searchable with an <code>Inactive</code> label).</li>
-          <li><strong>2b.</strong> Keep all 47 catalog keys visible at top level in the main forms.</li>
+          <li><span class="tag tag-choice">2a · Built</span> Hide them from primary forms; keep them in collapsed <strong>Advanced</strong> disclosures and searchable (with an <code>Inactive</code> label where applicable).</li>
+          <li><strong>2b.</strong> Keep all catalog keys visible at top level in the main forms.</li>
         </ul>
       </li>
-      <li><strong>When an interrupted 2-file move diverges because a file was hand-edited, how should the pending journal clear?</strong>
+      <li><strong>How a diverged interrupted 2-file move journal clears</strong>
         <ul>
-          <li><span class="tag tag-choice">3a · In plan</span> Keep both files intact and require an explicit <strong>Dismiss pending move</strong> action (<code>Action::Dismiss</code>) so the person confirms they reconciled both files.</li>
+          <li><span class="tag tag-choice">3a · Built</span> Keep both files intact and require an explicit <strong>Dismiss pending move</strong> action (<code>Action::Dismiss</code>) once reviewed.</li>
           <li><strong>3b.</strong> Auto-delete the journal on the next read when slots no longer match.</li>
         </ul>
       </li>
@@ -431,7 +430,6 @@
   </section>
 </main>
 <script>
-  // Scenario tabs
   const tabs = [...document.querySelectorAll('[role="tab"]')];
   const panels = {
     machines: document.getElementById('sc-machines'),
@@ -449,7 +447,6 @@
     Object.entries(panels).forEach(([k, el]) => { el.hidden = k !== key; });
   }));
 
-  // Scenario 1: Machines Save in hijack
   const b1SaveIn = document.getElementById('b1-savein');
   const b1Dot = document.getElementById('b1-dot');
   const b1Hub = document.getElementById('b1-hub-state');
@@ -458,7 +455,7 @@
   document.getElementById('b1-edit-hub').addEventListener('click', () => {
     b1SaveIn.textContent = 'My global preferences (ghost)';
     b1Dot.classList.remove('on');
-    b1Hub.textContent = 'Editable now — but Save in silently changed globally';
+    b1Hub.textContent = 'Editable now — Save in silently changed globally';
     b1Other.textContent = 'Now editing ~/.lf/config.yaml';
     b1After.hidden = false;
   });
@@ -481,7 +478,6 @@
     p1After.hidden = true;
   });
 
-  // Scenario 2: Typo or rapid toggle
   const b2Banner = document.getElementById('b2-banner');
   const b2ErrText = document.getElementById('b2-err-text');
   const b2Input = document.getElementById('b2-input');
@@ -497,11 +493,11 @@
   }
   b2Submit.addEventListener('click', () => {
     if (b2Input.value.trim() !== 'code') {
-      setB2Locked(`Graph "${b2Input.value.trim()}" not found — ALL controls across Settings are now disabled.`);
+      setB2Locked(`Graph "${b2Input.value.trim()}" not found — ALL controls across Settings disabled.`);
     }
   });
   b2Toggle.addEventListener('click', () => {
-    setB2Locked('context.diff changed in .lf/config.local.yaml; refresh before editing (1s cache lag locked the window).');
+    setB2Locked('context.diff changed in .lf/config.local.yaml; refresh before editing (1s cache lag).');
   });
   document.getElementById('b2-refresh').addEventListener('click', () => setB2Locked(null));
 
@@ -527,7 +523,6 @@
     p2ToggleVal.textContent = p2Diff ? 'On' : 'Off';
   });
 
-  // Scenario 4: Diverged interrupted move
   document.getElementById('b4-resume').addEventListener('click', () => {
     document.getElementById('b4-err').hidden = false;
   });

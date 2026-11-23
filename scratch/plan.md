@@ -45,35 +45,18 @@ visible with a Notice. A fresh read can then show current membership and order.
   refusal clears that preview and reports the error. A committed write is
   reflected by a sufficiently recent Machine reading.
 
-## Build the shared order first
+## Shared order
 
-Remove the waiting term and the `states` argument from `TaskOrder::key` in
-`rust/loopflow-storage/src/sqlite/selections.rs`. Keep the same key at
-`work_in` and `waves.rs::snapshot_tasks`: saved position, rank, canonical ID.
-`task_selection_states` and `sqlite/sessions.rs::available_sql` still provide
-activity facts. The order needs no extra read or persisted value.
+The shared sort key is saved drag position, planning rank and canonical ID.
+Repository and Wave plans, the phone list and the roadmap all use it. Activity
+still drives status, attention and filters. Authored queries and saved Dashboard
+arrangements retain their own composition rules.
 
-Built-in repository and Wave plans and simple activity selections keep this
-relative Task order through `desktop.view.get` and the all-repository phone read.
-Roadmap consumers, including `lf task list`, `lf wave show` and Desktop's Wave
-picker, share the key. Authored query clauses determine their own composition
-order. Automatic Dashboards follow the resulting sequence and touched
-Dashboards follow their saved arrangement. Swift's `taskRows` and the iPhone's
-feed use the sequence they receive. A failed read keeps the last good result
-where available. A successful empty result clears the list.
+The regression follows the rank-2 Task through Idle → Working → Idle before the
+first drag, then reads the saved order after dragging it above rank 1. Desktop
+replays the activity frames in one selected workspace.
 
-Extend `task_concepts_share_lifecycle_activity_membership_and_order` in
-`waves.rs` before its first drag. Start with two Working Tasks at ranks 1 and 2.
-Report Idle → Working → Idle from the rank-2 Task's live interactive Session.
-Assert `[1, 2]` throughout in repository and Wave view-plan members, the
-all-repository phone projection, and the roadmap's Working rows. Assert
-Available → Busy → Available in the corresponding simple queries. The first
-Idle observation should fail on the current sort, which promotes rank 2 to the
-top. Then drag rank 2 above rank 1 and verify `[2, 1]` on a fresh read.
-Keep the existing shared fixture's unassign, mixed activity and planning-label
-cases and the execution test for arrivals and rejected drops.
-
-## Show and recover a drop
+## Next slice · Show and recover a drop
 
 Keep immediate feedback in the repository sidebar and Working Tasks grid.
 Replace `moveRepositoryMember`'s rewrite of `selectionPlans` and
@@ -91,20 +74,29 @@ refusal reveals that reading. It never restores an old copied frame. Scope the
 preview to the repository and Machine of the drop. Keep `desktop move` and the
 current `task_orders` write as the saved order's owner.
 
-In `TaskConceptTests`, apply the paired Rust observations to one model, select
-the second Task, then apply Busy and hand-back frames. Check sidebar IDs,
-selection, shortcut slots, Wave picker and both filter subsets. In
-`WorkNavigationTests`, hold a drop to check immediate feedback, then reject it
+In `WorkNavigationTests`, hold a drop to check immediate feedback, then reject it
 and fail the follow-up read. Check the last confirmed order in both displays,
 the Notice, and a later successful reading. Include a confirmed frame arriving
-before the write answer to catch a double-applied move. Update the sidebar docs
-with the default, filter behavior and repository drag.
+before the write answer to catch a double-applied move. The sidebar docs
+already describe this behavior.
 
 ## Docs
 
 - `docs/surfaces.md`
 - `docs/work.md`
 - `swift/README.md`
+
+## Checks
+
+- `cargo test -p loopflow --lib task_concepts_share_lifecycle_activity_membership_and_order`:
+  the old sort returned FIX-2, FIX-1 on the first Idle report. The new sort
+  passed the turn and drag checks with the committed fixture.
+- Branch `lf desktop view show` on a private Machine: repository and Product
+  Wave returned FIX-1, FIX-2 for all three reports. Available and Busy queries
+  switched FIX-2 at each transition.
+- `scripts/test_desktop.sh --filter TaskConceptTests` passed all seven tests,
+  including the selected conversation, both sidebar filters and keyboard slots.
+- `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
 
 ## Gate
 

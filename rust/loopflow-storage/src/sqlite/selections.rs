@@ -127,7 +127,7 @@ fn work_in(
             .activity
             .get(&task.id)
             .is_none_or(|activity| activity.known);
-        let order = reading.order.key(task.id.as_str(), task.rank, &states);
+        let order = reading.order.key(task.id.as_str(), task.rank);
         task_work.push((
             order,
             SelectionWork {
@@ -167,17 +167,9 @@ pub struct TaskSelectionReading {
 pub struct TaskOrder(HashMap<String, usize>);
 
 impl TaskOrder {
-    pub fn key(
-        &self,
-        id: &str,
-        rank: u32,
-        states: &BTreeSet<SelectionState>,
-    ) -> (usize, bool, u32, String) {
-        let waiting = states.contains(&SelectionState::Available)
-            || states.contains(&SelectionState::Blocked);
+    pub fn key(&self, id: &str, rank: u32) -> (usize, u32, String) {
         (
             self.0.get(id).copied().unwrap_or(usize::MAX),
-            !waiting,
             rank,
             id.to_owned(),
         )

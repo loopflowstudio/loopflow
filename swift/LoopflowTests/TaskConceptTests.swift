@@ -77,6 +77,54 @@ struct TaskConceptTests {
         }
     }
 
+    private func applyTaskList(_ phase: Phase, to model: WorkModel) throws {
+        let repository = try #require(phase.tasks.first?.task.repositoryId)
+        let members = phase.tasks.map { task in
+            WorkViewPlan.Content(
+                work: .init(repository: repository, kind: .task, id: task.id), title: task.task.name,
+                states: Array(task.selectionStates), identifier: task.task.identifier, primarySession: nil,
+                location: nil, argv: nil, unavailable: [])
+        }
+        model.applyTaskList(fixtureViewPlan(owner: .init(repository: repository, kind: .repository, id: repository),
+                                            members: members), wave: nil, reason: "")
+    }
+
+    @Test func selectedTaskKeepsItsSlotAcrossAConversationTurn() throws {
+        let readings = try phases()
+        let available = try #require(readings.first { $0.name == "owned_available" })
+        let busy = try #require(readings.first { $0.name == "owned_working" })
+        let first = try #require(available.tasks.first { $0.task.identifier == "FIX-1" }).id
+        let second = try #require(available.tasks.first { $0.task.identifier == "FIX-2" }).id
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
+
+        for (index, phase) in [available, busy, available].enumerated() {
+            let roadmap = try roadmap(phase)
+            model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])
+            try applyTaskList(phase, to: model)
+            if index == 0 {
+                model.selectSidebarTask(slot: 1)
+                model.navigation.selectedSessionId = "bound"
+            }
+            #expect(model.selection == .task(id: second))
+            model.navigation.sidebarFilter = .working
+            #expect(model.sidebarTaskIDs == [first, second])
+            let wave = try #require(roadmap.waves.first)
+            let picker = model.jumpRows(.wave(wave.wave.id), filter: "").map(\.id)
+            #expect(picker.filter { $0 == .task(first) || $0 == .task(second) } == [.task(first), .task(second)])
+            model.navigation.sidebarFilter = .busy
+            #expect(model.sidebarTaskIDs == (phase.name == busy.name ? [second] : []))
+            model.navigation.sidebarFilter = .available
+            #expect(model.sidebarTaskIDs == (phase.name == busy.name ? [] : [second]))
+            #expect(model.selection == .task(id: second))
+            #expect(model.navigation.selectedSessionId == "bound")
+        }
+        model.navigation.sidebarFilter = .working
+        model.cycleSidebarTask(1)
+        #expect(model.selection == .task(id: first))
+        model.selectSidebarTask(slot: 1)
+        #expect(model.selection == .task(id: second))
+    }
+
     @Test func boardPickerAndProjectionKeepServerOrderAndMembership() async throws {
         for phase in try phases() {
             let roadmap = try roadmap(phase)
@@ -90,15 +138,7 @@ struct TaskConceptTests {
             let model = WorkModel(query: query, repoPath: "/repo")
             model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])
             await model.refreshSessions()
-            let members = phase.tasks.map { task in
-                WorkViewPlan.Content(
-                    work: .init(repository: task.task.repositoryId, kind: .task, id: task.id), title: task.task.name,
-                    states: Array(task.selectionStates), identifier: task.task.identifier, primarySession: nil,
-                    location: nil, argv: nil, unavailable: [])
-            }
-            let repository = try #require(phase.tasks.first?.task.repositoryId)
-            model.applyTaskList(fixtureViewPlan(owner: .init(repository: repository, kind: .repository, id: repository),
-                                               members: members), wave: nil, reason: "")
+            try applyTaskList(phase, to: model)
             for filter in WorkNavigation.SidebarFilter.allCases {
                 model.navigation.sidebarFilter = filter
                 let expected = phase.tasks.filter { task in

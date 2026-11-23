@@ -82,4 +82,4 @@ and duplicate environment constants. Status reports only the configured
 next-start timeout. Registration-triggered stop replaces idle-wait registration and its
 checkout instructions. Keep the isolated natural-idle probe and fail-soft checkout.
 The passive `refresh` command and launcher call are gone. Installation,
-registration and the private probes still share the atomic inventory writer.
+registration and the private probes share `write_inventory`.

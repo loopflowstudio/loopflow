@@ -24,10 +24,11 @@ CACHE_ENV = {
 VERBATIM_ENV_DEPS = "CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH,LOOPFLOW_BUILD_SOURCE_ROOT"
 
 
-def worktree_roots(repo: Path) -> set[str]:
+def worktree_roots(repo: Path, *, env: dict[str, str] | None = None) -> set[str]:
     result = subprocess.run(
         ["git", "worktree", "list", "--porcelain", "-z"],
         cwd=repo,
+        env=env,
         check=True,
         capture_output=True,
     )
@@ -51,11 +52,17 @@ def refresh(repo: Path, config: Path, settings: dict | None = None) -> None:
             raise ValueError("cache configuration must be an object with a basedirs list")
         # Keep other repositories using the same Machine cache. Refresh each
         # repository's complete inventory so removed worktrees do not accumulate.
+        # Git hooks can export the current repository even when cwd points elsewhere.
+        other_env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE")
+        }
         for old in saved.get("basedirs", []):
             path = Path(old)
             if path.exists() and old not in roots:
                 try:
-                    roots.update(worktree_roots(path))
+                    roots.update(worktree_roots(path, env=other_env))
                 except subprocess.CalledProcessError:
                     continue
         selected = dict(saved if settings is None else settings)
@@ -368,33 +375,33 @@ def main() -> None:
                     if daemon
                     else f"daemon   not running; next build loads the list; idle timeout {idle}"
                 )
-                loaded = set(result["loaded_roots"]).intersection(result["listed_roots"])
-                print(
-                    f"roots    {len(loaded)} "
-                    f"of {len(result['listed_roots'])} loaded; "
-                    + (
-                        "this checkout loaded"
-                        if daemon and result["exit_code"] == 0
-                        else "socket served by another executable"
-                        if daemon and result["exit_code"] == 1
-                        else "this checkout is unloaded; run register"
-                        if daemon
-                        else "this checkout listed"
-                        if result["exit_code"] == 0
+                listed = set(result["listed_roots"])
+                loaded = listed.intersection(result["loaded_roots"])
+                if not daemon:
+                    note = (
+                        "this checkout listed"
+                        if result["root"] in listed
                         else "checkout not listed"
                     )
-                )
-                counts = stats["stats"] if stats else {}
-                print(
-                    f"Rust     "
-                    f"{counts.get('cache_hits', {}).get('counts', {}).get('Rust', 0)} hits, "
-                    f"{counts.get('cache_misses', {}).get('counts', {}).get('Rust', 0)} misses"
-                )
+                elif stats is None:
+                    note = "socket served by another executable"
+                elif result["root"] in loaded:
+                    note = "this checkout loaded"
+                else:
+                    note = "this checkout is unloaded; run register"
+                print(f"roots    {len(loaded)} of {len(listed)} loaded; {note}")
+                if stats:
+                    counts = stats["stats"]
+                    hits = counts.get("cache_hits", {}).get("counts", {}).get("Rust", 0)
+                    misses = counts.get("cache_misses", {}).get("counts", {}).get("Rust", 0)
+                    print(f"Rust     {hits} hits, {misses} misses")
+                else:
+                    print("Rust     unmeasured")
                 print(
                     f"cache    {stats['cache_size'] / 1024**3:.1f} GiB "
                     f"of {stats['max_cache_size'] / 1024**3:.1f} GiB"
                     if stats
-                    else "cache    unmeasured (daemon not running)"
+                    else "cache    unmeasured"
                 )
             raise SystemExit(result["exit_code"])
     except (OSError, ValueError, subprocess.SubprocessError) as error:

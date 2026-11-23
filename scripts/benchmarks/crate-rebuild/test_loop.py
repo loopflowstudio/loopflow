@@ -255,6 +255,7 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
     env.update(
         SCCACHE_DIR=str(root / "cache"),
         SCCACHE_SERVER_UDS=str(socket),
+        SCCACHE_IDLE_TIMEOUT="0",
         SCCACHE_CONF=str(root / "roots.json"),
     )
     receipts = json.loads(receipts_path.read_text()) if receipts_path.exists() else []
@@ -354,6 +355,7 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
             selected_env = {
                 **env,
                 "LOOPFLOW_REBUILD_RECEIPTS": str(compiler_log),
+                "CARGO_TARGET_DIR": str(tree / "target"),
                 "CARGO_INCREMENTAL": "1" if mode == "incremental" else "0",
             }
             _require_disk(root, reserve)

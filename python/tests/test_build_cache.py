@@ -17,7 +17,7 @@ def _git(directory: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(directory), *args], check=True, capture_output=True)
 
 
-def test_roots_follow_creation_removal_and_multiple_repositories(tmp_path):
+def test_roots_follow_creation_removal_and_multiple_repositories(tmp_path, monkeypatch):
     repo = tmp_path / "first repo"
     repo.mkdir()
     _git(repo, "init", "-q")
@@ -47,7 +47,9 @@ def test_roots_follow_creation_removal_and_multiple_repositories(tmp_path):
     _git(other, "init", "-q")
     refresh(other, config)
     _git(repo, "worktree", "remove", str(worktree))
-    refresh(repo, config)
+    with monkeypatch.context() as hook:
+        hook.setenv("GIT_DIR", str(repo / ".git"))
+        refresh(repo, config)
     assert set(json.loads(config.read_text())["basedirs"]) == {
         str(repo.resolve()),
         str(other.resolve()),

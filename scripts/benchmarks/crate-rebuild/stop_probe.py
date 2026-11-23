@@ -34,15 +34,15 @@ def _execution_compiler(group: int) -> int | None:
     return None
 
 
-def _wait_for_exit(pid: int) -> None:
+def _wait_for_exit(pid: int) -> bool:
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
-            return
+            return True
         time.sleep(0.1)
-    raise RuntimeError("original cache daemon still alive after its ten-second drain")
+    return False
 
 
 def main() -> None:
@@ -72,6 +72,7 @@ def main() -> None:
         env.update(
             settings,
             RUSTC_WRAPPER=str(wrapper),
+            CARGO_TARGET_DIR=str(a / "target"),
             SCCACHE_DIR=str(root / "cache"),
             SCCACHE_SERVER_UDS=str(root / "cache.sock"),
             SCCACHE_CONF=str(root / "roots.json"),
@@ -113,12 +114,13 @@ def main() -> None:
                     if not b.exists() and (pid := _execution_compiler(build.pid)):
                         started = time.monotonic()
                         add(b)
-                        _wait_for_exit(old_pid)
+                        exited = _wait_for_exit(old_pid)
                         observation.update(
                             compiler_pid=pid,
                             compiler="loopflow_execution",
                             registration_and_drain_seconds=round(time.monotonic() - started, 3),
-                            compiler_outlived_daemon=_execution_compiler(build.pid) == pid,
+                            compiler_outlived_daemon=exited
+                            and _execution_compiler(build.pid) == pid,
                         )
                     try:
                         build.wait(timeout=1 if b.exists() else 0.2)

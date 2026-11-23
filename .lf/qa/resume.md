@@ -49,5 +49,5 @@ find its label in `launchctl list`, and
 run` and the providers it holds (a held `claude` outlives its view). Delete
 the scratch repositories and their `~/.claude/projects` folders.
 
-A headless turn (`lf -b session resume <id> --message …`) does not take this
+A headless turn (`lf -b steer <id> …`) does not take this
 path: it resumes the recorded thread whether or not a transcript exists.

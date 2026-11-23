@@ -265,10 +265,9 @@ pub(super) fn run_with_io(
     // Only a person at a terminal views the remote Session; scripts and pipes
     // keep the plain SSH command, whose stdin reaches the provider directly.
     let attended = !cli.batch && std::io::stdin().is_terminal();
-    if let Some(connection) = connection.filter(|connection| {
-        connection.prepare
-            || ((connection.json || cli.json) && attended && connection.message.is_none())
-    }) {
+    if let Some(connection) = connection
+        .filter(|connection| connection.prepare || ((connection.json || cli.json) && attended))
+    {
         if !connection.prepare {
             cmd.push("--prepare".into());
         }
@@ -314,8 +313,7 @@ pub(super) fn run_with_io(
         }
         return Ok(());
     }
-    let viewer = connection
-        .is_some_and(|connection| !connection.prepare && connection.message.is_none() && attended)
+    let viewer = connection.is_some_and(|connection| !connection.prepare && attended)
         || (!preview
             && matches!(
                 &cli.command,

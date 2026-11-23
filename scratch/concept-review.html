@@ -104,6 +104,11 @@
     .path li { background: var(--surface); border: 1px solid var(--rule); border-radius: .55rem; padding: .85rem; }
     .path p { margin-top: .45rem; font-size: .92rem; }
     .path .clear { color: var(--accent); background: var(--accent-bg); padding: .35rem .55rem; border-radius: .25rem; }
+    .opening { display: flex; align-items: baseline; gap: .5rem; }
+    .spinner { flex: none; align-self: center; width: .85rem; height: .85rem; border: 2px solid var(--rule); border-top-color: var(--accent); border-radius: 50%; }
+    .recovery { display: flex; align-items: center; gap: .5rem; }
+    .recovery span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .recovery b { flex: none; padding: .15rem .35rem; border: 1px solid currentColor; border-radius: .25rem; }
     table { width: 100%; border-collapse: collapse; margin-top: .8rem; font-size: .92rem; }
     th, td { text-align: left; vertical-align: top; padding: .6rem .7rem; border-bottom: 1px solid var(--rule); }
     th { background: var(--surface); }
@@ -129,10 +134,10 @@
 
     <section aria-labelledby="mismatch">
       <h2 id="mismatch">A past resume looks like a live connection state</h2>
-      <p>After a provider resumes its saved thread, the pane prints the same event twice. The strip already names the provider and reports its activity. The terminal can take input, yet one message uses a row and the second covers the first terminal line.</p>
+      <p>Before LOO-1064, a provider resume could appear twice after the pane was ready for input. One copy took up a row and the other covered the first terminal line. The strip already named the provider and reported its activity.</p>
       <div class="comparison">
         <figure class="before">
-          <figcaption><strong>Existing</strong> · resumed and ready</figcaption>
+          <figcaption><strong>Base</strong> · resumed and ready</figcaption>
           <div class="pane" role="img" aria-label="The Claude strip is followed by a transition row and a second copy of the same message covering the first terminal line.">
             <div class="strip"><b>Claude</b><span>Available</span></div>
             <div class="transition">Resumed in a new process</div>
@@ -140,14 +145,14 @@
           </div>
         </figure>
         <figure>
-          <figcaption><strong>Proposed</strong> · resumed and ready</figcaption>
+          <figcaption><strong>Built</strong> · resumed and ready</figcaption>
           <div class="pane" role="img" aria-label="The Claude strip is followed by the visible terminal output and prompt.">
             <div class="strip"><b>Claude</b><span>Available</span></div>
             <div class="screen">The tests are ready.<br><span>❯</span></div>
           </div>
         </figure>
       </div>
-      <p>On a later reconnect, the stored event can still say “Resumed in a new process” while the relay says “Same process.” The first describes what the provider did earlier. The second describes what the viewer just reattached to. Put provider changes in <code>lf session history &lt;session&gt;</code>. Use the pane’s message to explain why input is paused and what can bring it back.</p>
+      <p>On a later reconnect, the stored event can still say “Resumed in a new process” while the relay says “Same process.” The stored event describes when the provider changed. The relay describes what this viewer reattached to. The branch leaves provider changes in <code>lf session history &lt;session&gt;</code> and uses the pane’s connection bar for interruptions and ended viewers.</p>
       <p class="notes"><a href="../swift/LoopflowMac/Views/WorkspacePanesView.swift">Session pane</a> · <a href="../swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift">Terminal mount</a> · <a href="../rust/loopflow-execution/src/transport/connection.rs">Relay status</a></p>
     </section>
 
@@ -156,43 +161,52 @@
       <ol class="path">
         <li>
           <h3>1. Resume the saved thread</h3>
-          <p class="banner">Opening… Input paused.</p>
-          <p>Desktop prepares the conversation with <code>lf resume --prepare</code>. A retained screen can appear before native readiness. A connected relay still shows Opening during that gap.</p>
+          <p class="clear opening"><span class="spinner" role="img" aria-label="Opening session"></span><code>Last terminal line</code></p>
+          <p>Desktop asks the Session resume API to prepare the existing Session. Before the terminal mounts, the placeholder can show saved output under a quiet spinner. VoiceOver labels it “Opening session.” After mount, the terminal draws in place while the relay waits for native readiness.</p>
         </li>
         <li>
           <h3>2. Continue typing</h3>
           <p class="clear">Claude · Available<br><code>The tests are ready.</code></p>
-          <p>Native readiness enables input and restores requested focus. The message clears in place and the terminal keeps its geometry.</p>
+          <p>Connection and native readiness enable input. Ghostty restores requested focus when the pane still owns it. The terminal keeps its geometry throughout opening.</p>
         </li>
         <li>
           <h3>3. The bridge stops answering</h3>
           <p class="banner">Reconnecting… Input paused; last screen may be stale.</p>
-          <p>The pane retains its last screen and pauses input. The relay can reconnect to the held provider, so the draft and buffered output can survive the interruption.</p>
+          <p>The pane keeps its last screen and pauses input. The relay can reattach to the held terminal with the provider’s draft and buffered output. Keys pressed during the interruption are discarded.</p>
         </li>
         <li>
           <h3>4. Retry or refresh if it stays paused</h3>
-          <p class="banner">Session unavailable. Input paused; last screen may be stale.</p>
-          <p><b>Retry connection</b> asks a reachable relay to reconnect. If the status channel is gone, <b>Refresh session</b> opens a replacement viewer for the same Session. Once it can accept input, the message clears. A retired or replaced terminal reports why it ended.</p>
+          <p class="banner recovery"><span>Session unavailable. Last screen is stale. Loopflow server is not running.</span><b>Retry connection</b></p>
+          <p><b>Retry connection</b> starts another attempt through a reachable relay. A long reason truncates beside the button and remains available in its tooltip. If the status channel is gone, <b>Refresh session</b> in the strip opens a replacement viewer for the same Session. A retired or replaced terminal reports why the viewer ended.</p>
         </li>
       </ol>
-      <p>A saved screen and an “Available” program report can both appear before native readiness. Keep input paused until the relay confirms both connection and readiness. If a provider transcript is missing, opening can start from the first request. Keep the existing launch diagnostics, the earlier history and the new thread’s recorded transition. A late disconnect after orderly close must leave the ended reason visible.</p>
+      <p>A saved screen and an “Available” program report can both precede readiness. The mounted terminal can also appear before its first live frame. Connection and native readiness still gate input in all three cases. If the provider transcript is missing, resume can seed a new thread from the request and retain earlier history. A late status disconnect after an orderly close preserves the ended reason.</p>
       <p class="notes"><a href="../swift/LoopflowMac/Views/SessionsView.swift">Open and refresh</a> · <a href="../swift/LoopflowMac/Services/ServerConnection.swift">Status and Retry</a> · <a href="../rust/loopflow-execution/src/ops/human_session.rs">Saved-thread recovery</a></p>
     </section>
 
     <section aria-labelledby="model">
       <h2 id="model">Do the product and code concepts line up?</h2>
       <table aria-labelledby="model">
-        <thead><tr><th scope="col">In the product</th><th scope="col">In the code</th><th scope="col">Today</th></tr></thead>
+        <thead><tr><th scope="col">In the product</th><th scope="col">In the code</th><th scope="col">Base</th><th scope="col">Built</th></tr></thead>
         <tbody>
-          <tr><th scope="row">Open the same conversation</th><td><code>LfSession</code> and <code>lf resume</code> keep the Session identity through attachment and provider recovery.</td><td class="answer">Yes</td></tr>
-          <tr><th scope="row">Resume, fork or start a thread</th><td><code>ProviderTransition</code> records the observed thread and process. The history feed reads the stored events. A viewer reconnect alone leaves that history as it was.</td><td class="answer">Yes</td></tr>
-          <tr><th scope="row">See what the agent is doing</th><td>The pane strip shows the provider and <code>ProgramStatusRecords</code>. The provider may report idle while this pane is reconnecting.</td><td class="answer">Yes</td></tr>
-          <tr><th scope="row">Know when this pane can type</th><td><code>ServerConnectionReading.acceptsInput</code> tracks live readiness. Its title can still show history after readiness. <code>ProviderTransitionRow</code> also shows history independently of the pane.</td><td class="answer no">No</td></tr>
-          <tr><th scope="row">Recover a paused or lost view</th><td><code>ServerConnection.retry()</code> asks the current relay to try again. <code>SessionsStore.refresh</code> replaces the viewer through the normal opening path.</td><td class="answer">Yes</td></tr>
+          <tr><th scope="row">Open the same Session</th><td><code>LfSession</code> and the resume API keep the Session identity through attachment and provider recovery. <code>SessionsStore</code> owns local preparation and viewer lifetime.</td><td class="answer">Yes</td><td class="answer">Yes</td></tr>
+          <tr><th scope="row">See how a thread began</th><td><code>ProviderTransition</code> records the observed thread and process. The history feed reads stored events. A viewer reconnect alone leaves that history as it was.</td><td class="answer">Yes</td><td class="answer">Yes</td></tr>
+          <tr><th scope="row">See what the agent is doing</th><td>The strip shows the provider and its program status. The provider may report idle while this pane is reconnecting.</td><td class="answer">Yes</td><td class="answer">Yes</td></tr>
+          <tr><th scope="row">See that the pane is opening</th><td>The base gave preparation and the mounted terminal their own opening headers. <code>SessionOpeningView</code> now shows a spinner while preparing. The mounted terminal draws below the strip.</td><td class="answer no">No</td><td class="answer">Yes</td></tr>
+          <tr><th scope="row">Continue typing</th><td>On the base, both <code>ProviderTransitionRow</code> and the live connection bar could show thread history when input was already enabled. The branch uses live attachment to gate input. The connection bar only shows reconnecting, unavailable and ended states.</td><td class="answer no">No</td><td class="answer">Yes</td></tr>
+          <tr><th scope="row">Recover a paused or lost view</th><td><code>ServerConnection.retry()</code> contacts the current relay. Its button could overflow in the base when the relay supplied a long reason. The branch reserves button space before drawing the message. <code>SessionsStore.refresh</code> replaces the viewer through the same opening path.</td><td class="answer no">No</td><td class="answer">Yes</td></tr>
         </tbody>
       </table>
-      <p><strong>Proposed.</strong> The opening placeholder hands off to the terminal’s status overlay. On the connected path, the existing input predicate also clears the message. Delete the standalone history row, its formatter and the Desktop connection reader’s unused transition property. Keep the relay publisher and Session DTO shape for older clients. Storage still records each observed provider change.</p>
-      <p class="notes"><a href="../rust/loopflow-storage/src/sqlite/provider_transitions.rs">Provider transition storage</a> · <a href="../rust/loopflow/src/lf/commands/session.rs">Session history feed</a> · <a href="plan.md">Build plan</a></p>
+      <p>One Session can outlive both its provider process and its Desktop viewer. The store keeps provider changes with the Session. The relay publishes transient attachment readings on the viewer’s status socket. Desktop ignores the legacy transition field on that socket. Older clients can still receive it, and the Session record carries the stored transition.</p>
+      <p class="notes"><a href="../rust/loopflow-storage/src/sqlite/provider_transitions.rs">Provider transition storage</a> · <a href="../rust/loopflow/src/lf/commands/session_history.rs">Session history feed</a> · <a href="plan.md">Build plan</a></p>
+    </section>
+
+    <section aria-labelledby="checks">
+      <h2 id="checks">What happened in use</h2>
+      <p>Dev QA opened a fresh Task, resumed it after the provider exited, and sent input after readiness. History showed the start and resume while the pane kept its terminal area. During a server outage, the full relay reason pushed Retry out of view. The rebuilt pane kept Retry visible and became usable again after the server restarted. The run could not distinguish a click from relay recovery.</p>
+      <p>Fourteen focused headless tests passed during review. They cover the spinner and its accessibility label, history payload compatibility, input readiness, status loss, Retry delivery, ended reasons, and recovery bar layout. Foreground focus restoration, Refresh in a live pane, and a forked pane were outside the Dev QA run. Gate checks remain in the plan.</p>
+      <p>Dev QA also observed a stale rendered frame while the window was in the background. Diagnosing that behavior would require a separate Ghostty repaint reproduction across foreground and background windows after reattachment.</p>
+      <p class="notes"><a href="qa.html">Dev QA report and screenshots</a> · <a href="../swift/LoopflowTests/ServerConnectionTests.swift">Status socket tests</a> · <a href="../swift/LoopflowTests/TerminalPolishTests.swift">Recovery bar tests</a></p>
     </section>
 
     <section aria-labelledby="questions">
@@ -200,14 +214,14 @@
       <ol class="questions">
         <li>Where should a successful provider resume appear?
           <ol type="a">
-            <li><strong>Chosen.</strong> In Session history. A usable pane gives the terminal its full text area.</li>
+            <li><strong>Built.</strong> In Session history. A usable pane gives the terminal its full text area.</li>
             <li>In a brief confirmation inside the pane after readiness.</li>
           </ol>
         </li>
-        <li>When should the relay stop publishing the transition field?
+        <li>Where should preparation show progress?
           <ol type="a">
-            <li><strong>Chosen.</strong> In a separate compatibility change. This Desktop already has the data it needs to show live status.</li>
-            <li>In this release. An older Desktop would lose its relay’s transition notice.</li>
+            <li><strong>Built.</strong> A spinner over any saved screen before the terminal mounts. The terminal then draws in place while input waits for readiness.</li>
+            <li>Keep a spinner over the mounted terminal until it can take input.</li>
           </ol>
         </li>
       </ol>

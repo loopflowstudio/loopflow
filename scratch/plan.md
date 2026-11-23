@@ -5,19 +5,23 @@
 ## Done when
 
 The terminal opens directly below the provider and status strip for fresh,
-resumed, forked and reattached Sessions. A quiet spinner with the VoiceOver
-label “Opening session” appears over any retained output during preparation.
-Input and focus restoration wait for attachment and native readiness.
+resumed, forked and reattached Sessions. Before the terminal mounts, the
+opening placeholder shows a quiet spinner over any retained output. VoiceOver
+labels it “Opening session.” The mounted terminal draws in place while input
+and focus restoration wait for attachment and native readiness.
 
 Only reconnecting, unavailable and ended Sessions show a connection bar.
 **Retry connection** asks a reachable relay to reconnect. **Refresh session**
-reopens the viewer after status loss. Desktop ignores the relay’s transition
-field. Older clients still receive it, and recorded transitions remain in
-`lf session history <session>`. [Original concept review](concept-review.html)
+reopens the viewer after status loss. A long relay reason truncates beside
+Retry and remains available in its tooltip. Desktop ignores the relay’s
+transition field. Older clients still receive it, and recorded transitions
+remain in `lf session history <session>`. [Concept review](concept-review.html)
 
 ## Checks
 
 `scripts/test_desktop.sh --skip-build --filter 'ServerConnectionTests|providerTransitionRoundTrips|openingSessionShowsProgressOverItsRetainedScreen|sessionStripShowsProviderWithoutTransitionHeader|queuedWorkingTaskShowsOpening|visibleTilesOpenWithoutSavedVisits|primaryPaneNeverOffersAnOpenGate'` passed all 12 tests headlessly after `swift build --build-tests --package-path swift`.
+
+`scripts/test_desktop.sh --skip-build --filter 'ServerConnectionTests|TerminalPolishTests|providerTransitionRoundTrips|openingSessionShowsProgressOverItsRetainedScreen|sessionStripShowsProviderWithoutTransitionHeader'` passed all 14 tests in the concept review. [Dev QA](qa.html) exercised fresh and resumed panes, recovery after a server outage, and Retry layout. Foreground focus, live Refresh after status loss and the forked pane remain unverified in Dev.
 
 **Gate.** Run `scripts/test_desktop.sh --filter 'WorkspacePanesTests|CreationSubmissionTests|ServerConnectionTests|DTOFixtureTests|WorkCacheTests' </dev/null` and the `documented_commands::` check.
 

@@ -1486,9 +1486,8 @@ pub(super) fn tracker_states_in(
         .collect();
     let mut statement = conn.prepare(
             "SELECT t.id,i.observed_at,
-         COALESCE(i.needs_refresh,0) OR COALESCE(observed.membership_unresolved,0)
-         OR COALESCE(observed.archived,0)
-         OR COALESCE(parent.membership_unresolved,0) OR COALESCE(parent.archived,0)
+         COALESCE(i.needs_refresh,0) OR COALESCE(observed.archived,0)
+         OR COALESCE(parent.archived,0)
          OR CASE WHEN i.id IS NULL THEN 0 ELSE
              -- A pending membership move is sent last, so it wins over the
              -- observed Project and its team until delivery.

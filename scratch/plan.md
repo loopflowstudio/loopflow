@@ -129,6 +129,11 @@ timed out under the parallel run and passes alone (15 s). clippy
   (pass); `cargo clippy -p loopflow-storage --all-targets` clean. The CLI
   run (`lf wave rename` then `lf wave status`) was not done here; it goes to gate/QA.
 
+Compress (2026-11-23): Task tracker state no longer reads the leaving
+`tracker_projects.membership_unresolved` (nothing writes it; a released `1`
+held Tasks Invalid forever). `linear::` and storage `tracker` tests pass
+apart from the `oauth_tests` contention failure below; clippy clean.
+
 Then gate: Swift DTO suite for `WaveRemoval`/`WaveRenamed`, the full matrix
 in CI, and the `oauth_tests` contention failure checked on the base.
 Initiative names left in `rust/` are released-schema readers

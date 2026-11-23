@@ -163,7 +163,8 @@ mod tests {
         let cases = [
             ("", PlanningState::Available),
             ("UPDATE pm_items SET needs_refresh=1 WHERE id='issue'", PlanningState::Invalid),
-            ("UPDATE pm_projects SET membership_unresolved=1 WHERE id='project'", PlanningState::Invalid),
+            // Initiative membership no longer decides a Task's Project.
+            ("UPDATE pm_projects SET membership_unresolved=1 WHERE id='project'", PlanningState::Available),
             ("UPDATE pm_projects SET archived=1 WHERE id='project'", PlanningState::Invalid),
             ("UPDATE pm_items SET project_id='unmapped' WHERE id='issue'", PlanningState::Invalid),
             ("UPDATE pm_items SET body=json_set(body,'$.project_id','unmapped') WHERE id='issue'", PlanningState::Invalid),
@@ -173,7 +174,6 @@ mod tests {
             ("UPDATE pm_projects SET body=json_set(body,'$.team_ids',json('[\"foreign\"]')) WHERE id='project'", PlanningState::Invalid),
             ("INSERT INTO pm_issue_changes(issue_id,removed) VALUES('issue',1)", PlanningState::Removed),
             ("DELETE FROM pm_items WHERE id='issue'", PlanningState::Unavailable),
-            ("DELETE FROM pm_items WHERE id='issue'; UPDATE pm_projects SET membership_unresolved=1 WHERE id='project'", PlanningState::Invalid),
             ("DELETE FROM pm_items WHERE id='issue'; UPDATE pm_projects SET archived=1 WHERE id='project'", PlanningState::Invalid),
             ("DELETE FROM pm_items WHERE id='issue'; INSERT INTO pm_issue_changes(issue_id,removed) VALUES('issue',0)", PlanningState::Invalid),
             ("DELETE FROM pm_items WHERE id='issue'; INSERT INTO pm_issue_changes(issue_id,removed) VALUES('issue',1)", PlanningState::Removed),

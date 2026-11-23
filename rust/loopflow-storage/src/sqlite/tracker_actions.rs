@@ -1703,7 +1703,7 @@ mod upgrade_tests {
             ),
             [
                 "project-new create - sent linear",
-                "project-new link initiative queued linear",
+                "project-new link initiative retired linear",
                 "task-new create - sent linear",
                 "task-bound field task_title sent linear",
                 "task-bound field task_title queued linear",

@@ -9,6 +9,7 @@ use std::str::FromStr;
 
 use anyhow::{ensure, Context, Result};
 use serde_yaml_ng::Value;
+use sha2::Digest;
 use yaml_edit::{Mapping, YamlFile};
 
 use super::{settings::SettingScope, ConfigSource};
@@ -348,14 +349,22 @@ pub(crate) fn protect_private_file(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Serialize LF writers of one configuration file. The lock file lives under the
+/// Machine's home, keyed by the file's real path, so a checkout gains no untracked file.
 pub fn lock(path: &Path) -> Result<File> {
-    fs::create_dir_all(path.parent().context("configuration has a parent")?)?;
+    let parent = path.parent().context("configuration has a parent")?;
+    fs::create_dir_all(parent)?;
+    let file =
+        fs::canonicalize(parent)?.join(path.file_name().context("configuration has a name")?);
+    let locks = crate::store::lf_home_dir().join("locks/config");
+    fs::create_dir_all(&locks)?;
+    let digest = hex::encode(sha2::Sha256::digest(file.as_os_str().as_encoded_bytes()));
     let lock = OpenOptions::new()
         .create(true)
         .truncate(false)
         .read(true)
         .write(true)
-        .open(path.with_extension("yaml.lock"))?;
+        .open(locks.join(format!("{digest}.lock")))?;
     fs2::FileExt::lock_exclusive(&lock)?;
     Ok(lock)
 }
@@ -877,6 +886,32 @@ mod tests {
                 "{calls}"
             );
         }
+    }
+
+    #[test]
+    fn a_settings_write_leaves_only_the_settings_file_in_the_checkout() {
+        use crate::config::environment::EnvVarGuard;
+
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = loopflow_test_support::TestRepo::new();
+        let shared = repo.path().join(".lf/config.yaml");
+        update(&shared, |document| {
+            *document = serde_yaml_ng::from_str("merge_method: squash").unwrap();
+            Ok(())
+        })
+        .unwrap();
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["status", "--porcelain", "--untracked-files=all"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(status.stdout).unwrap(),
+            "?? .lf/config.yaml\n"
+        );
     }
 
     #[test]

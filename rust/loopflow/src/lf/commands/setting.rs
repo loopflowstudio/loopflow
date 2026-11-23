@@ -74,14 +74,19 @@ pub fn explain(destination: &Destination, key: &str) -> anyhow::Result<()> {
 
 #[derive(clap::Args, Debug)]
 pub struct ScopeArgs {
+    /// Read only your global preferences, outside any checkout
     #[arg(long)]
     global: bool,
+    /// Resolve the settings a launch of this Skill gets
     #[arg(long, conflicts_with = "graph")]
     skill: Option<String>,
+    /// Resolve the settings this Graph's --step gets
     #[arg(long, requires = "step")]
     graph: Option<String>,
+    /// The Graph step to resolve
     #[arg(long, requires = "graph")]
     step: Option<String>,
+    /// Print JSON (the only format; required by --subscribe)
     #[arg(long)]
     json: bool,
     /// Print a reading whenever a settings file changes, until stdin closes

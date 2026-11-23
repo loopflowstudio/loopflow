@@ -400,6 +400,15 @@ as text instead.
 - The Undo notice and the Refresh button are missing from `tree`, and the
   window's `undoManager` is not the one SwiftUI registers with. Click Refresh
   by position (the first click after a change is often swallowed).
+  `frame` does draw the notice (bottom centre, "Reset <title> · Undo", gone
+  after six seconds), but hook clicks on its Undo do nothing and `menu Undo`
+  answers `refused` (the window is never key). `ContextSettingsWorkflowTests`
+  performs that Undo.
+- `field <placeholder>|` with nothing after the bar empties a field; Return
+  then resets that declaration (a number row included).
+- After the private server restarts, an open Settings window shows "Loopflow
+  server unavailable or owned by another account" and its edits fail.
+  `close 1` then `menu Settings…` reconnects and keeps the scroll position.
 - Personal config edits are in `$LF_HOME/config.yaml`. Project & Wave Config
   writes to the selected destination. Hand edits and a broken
   file reach the open pane within a few seconds. Kill the private server to

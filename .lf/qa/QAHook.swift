@@ -72,8 +72,8 @@ enum QAHook {
             dump(root, 0)
             return lines.joined(separator: "\n")
         case "field":
-            // field <placeholder>|<text>: replaces the text of the field with that placeholder.
-            let pieces = arg.split(separator: "|", maxSplits: 1).map(String.init)
+            // field <placeholder>|<text>: replaces the text of the field with that placeholder; an empty <text> clears it.
+            let pieces = arg.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
             guard pieces.count == 2 else { return "usage: field placeholder|text" }
             func search(_ view: NSView) -> NSTextField? {
                 if let field = view as? NSTextField, field.placeholderString == pieces[0] { return field }

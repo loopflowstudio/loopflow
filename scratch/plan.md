@@ -23,7 +23,8 @@ configuration path directly. Identical search errors share one refresh action.
 - `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|ContextSettingsWorkflowTests|ThemeWorkflowTests|DesignDisciplineTests'` covered 24 headless tests. The checkout workflow observed a saved value before the preceding edit finished. It passed by name after waiting for the control to become editable. One compact-window diagnostic requires a display.
 - `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed.
 - After simplification, `scripts/test_desktop.sh --skip-build --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|ServerProtocolTests.*configuration'` passed 16 tests after a Desktop build. The compact-window check awaits a display. The built CLI returned the selected settings for checkout, Skill and global reads and answered a subscription checkpoint.
-- At visual review, check sidebar chrome and the scoped form in a live Settings window.
+- QA round 4 ([qa.html](qa.html)) drove the branch app on a locked screen. Config locks moved from beside each file to `$LF_HOME/locks/config/`, so Settings writes leave no untracked `.lock` in the checkout. `config::` then passed 114 tests.
+- At visual review, check sidebar chrome and the scoped form in a live Settings window. Settings keeps a dead subscription after a server restart until it is reopened.
 
 ## Already built on this branch (keep intact)
 

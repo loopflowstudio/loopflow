@@ -1,37 +1,39 @@
-<!doctype html><meta charset="utf-8"><title>LOO-1066 QA round 3: Settings</title>
-<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em}img{max-width:100%;border:1px solid #ccc;border-radius:8px}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:6px 10px;vertical-align:top}figure{margin:1.5em 0}</style>
-<h1>Settings redesign: QA round 3 (Policy B, live pixels)</h1>
-<p>Branch build of 960172a56e plus the fixes below. Private Machine <code>/tmp/lfq66</code> (own HOME, LF_HOME, branch <code>lf server run</code>), disposable repository <code>qarepo</code> with a shared <code>merge_method: squash</code> and <code>agents: [codex, claude]</code>, and global <code>default_agent: claude</code>, <code>claude.model: sonnet</code>. Isolated bundle <code>com.loopflow.mac.qa1066r3.dev</code> with <code>.lf/qa/QAHook.swift</code>, opened behind other windows on an <b>unlocked</b> display; windows captured with <code>screencapture -l</code>. Rounds 1–2 (locked display, protocol checks) are in git history.</p>
+<!doctype html><meta charset="utf-8"><title>LOO-1066 QA round 4: Settings</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em}img{max-width:100%;border:1px solid #ccc;border-radius:8px}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:6px 10px;vertical-align:top}code{font-size:13px}</style>
+<h1>Settings redesign: QA round 4 (fallbacks, immediate Reset, one scope value)</h1>
+<p>Branch build of f58683f6e7 plus the fixes below. Private Machine <code>/tmp/lfq67</code> (own HOME, LF_HOME, branch <code>lf server run</code>), disposable repository <code>qarepo</code> with a shared <code>merge_method: squash</code> and <code>agents: [codex, claude]</code>, and global <code>default_agent: claude</code>, <code>claude.model: sonnet</code>. Isolated bundle <code>com.loopflow.mac.qa1066r4.dev</code> with <code>.lf/qa/QAHook.swift</code>. The screen was <b>locked</b>, so Forms were read as text (<code>views</code>) and the notice from <code>frame</code>. Rounds 1–3 are in git history.</p>
+
 <h2>Scenarios</h2>
-<table><tr><th>Scenario</th><th>What I saw</th><th>Result</th></tr>
-<tr><td>Open ⌘, Settings, General (Light)</td><td>Display name, Repositories folder and Release channel read <b>None (Default)</b>.</td><td>Fixed: they read <i>Git's user.name</i>, <i>~/src</i> and <i>stable</i> (Default).</td></tr>
-<tr><td>Agents pane</td><td>Auto-ship and Codex service tier read <b>None (Default)</b>.</td><td>Fixed: <i>Off (Default)</i>, <i>Codex's own setting (Default)</i>, Chrome reads <i>Claude's own setting (Default)</i>.</td></tr>
-<tr><td>Project &amp; Wave Config</td><td><b>Applies to</b> showed only a chevron, with no checkout name. Selecting the pane highlighted the divider above it.</td><td>Fixed: <i>Applies to · qarepo</i> is a right-aligned menu like Save in. Each divider is now its own unselectable row.</td></tr>
-<tr><td>Values in effect</td><td>Fallback order: <i>codex, claude (from Shared repository settings)</i>. Primary agent: <i>claude (from My global preferences)</i>. Run without asking: <i>On · Default</i>.</td><td>Works</td></tr>
-<tr><td>Dark mode via Appearance segment</td><td>Wrote <code>theme: Loopflow Dark</code>, the window turned dark at once and showed <i>Theme saved · Undo</i>.</td><td>Works</td></tr>
-<tr><td>Compact (min ≈760 pt) and wide (1400×900)</td><td>Compact long values fit without clipping. Wide caps the form width and centers it.</td><td>Works</td></tr>
-<tr><td>Edit Repositories folder from its new prompt</td><td>Typed <code>~/code</code> and pressed Return. <code>repo_root: ~/code</code> was written and the row showed a value plus Reset.</td><td>Works</td></tr>
-<tr><td>Checks</td><td><code>scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|ContextSettingsWorkflowTests|ThemeWorkflowTests|DesignDisciplineTests'</code>: 25 passed. <code>cargo test -p loopflow-execution --lib config::</code>: 113 passed. Clippy <code>-D warnings</code> was clean. The catalogue and server-schema fixture tests passed.</td><td>Pass</td></tr>
+<table><tr><th>Scenario</th><th>What I did and saw</th><th>Result</th></tr>
+<tr><td><code>lf config scope</code> after the ScopeArgs merge</td><td>Checkout, <code>--global</code>, <code>--skill implement</code> all answer. <code>--skill nosuch</code> → <code>skill not found: nosuch</code>; <code>--step</code> without <code>--graph</code> → Clap names the missing flag; <code>--global --skill</code> → <code>select a checkout for the target</code>. <code>--help</code> listed five flags with no description.</td><td>Fixed: each flag has help text.</td></tr>
+<tr><td>Search <code>default_agent</code>, Return</td><td>Opened <b>Agents</b> (personal default first). Rows read <code>Use starting preference (Default)</code>, <code>claude (from My global preferences)</code>, <code>Empty list (Default)</code>, <code>1 (Default)</code>, <code>sonnet (from My global preferences)</code>.</td><td>Works</td></tr>
+<tr><td>Number field set, then emptied</td><td>Typed 3 in Automatic retries → <code>automation: {retries: 3}</code>. Emptied it and pressed Return → the key and its now-empty block were removed at once; notice <b>Reset Automatic retries · Undo</b>. Emptying an undeclared field writes nothing and posts no notice.</td><td>Works</td></tr>
+<tr><td>Undo from the notice</td><td>Hook clicks on Undo don't reach the button and <code>menu Undo</code> is refused (window never key). <code>ContextSettingsWorkflowTests</code> performs the same action after a Reset.</td><td>Not reachable locked</td></tr>
+<tr><td>Wrong input</td><td><code>abc</code> in Automatic retries → error under the field, nothing written; emptying the field clears the error.</td><td>Works (wording below)</td></tr>
+<tr><td>Broken file while open</td><td>Wrote invalid YAML to <code>config.yaml</code>: the pane led with <code>Read …/config.yaml: did not find expected ',' or ']'</code>. Restoring the file cleared it within 4 s.</td><td>Works</td></tr>
+<tr><td>Search <code>merge_method</code></td><td>Opened <b>Project &amp; Wave Config</b> scrolled to the row. <code>In effect</code> appears only where a non-builtin layer participates (<code>Squash · Shared repository settings</code>, <code>sonnet · My global preferences</code>); the selected file path <code>…/qarepo/.lf/config.local.yaml</code> appears once, at the foot.</td><td>Works</td></tr>
+<tr><td>First private edit from the pane</td><td><code>claude.model</code> → <code>opus</code> created <code>.lf/config.local.yaml</code> and added <code>/.lf/config.local.yaml</code> to <code>.git/info/exclude</code>. But <code>git status</code> showed <code>?? .lf/config.local.yaml.lock</code>, and a shared edit left <code>?? .lf/config.yaml.lock</code>. The installed <code>lf set</code> does the same; Settings makes every click a write, so <code>git add -A</code> would commit them.</td><td>Fixed: config locks live in <code>$LF_HOME/locks/config/&lt;sha256 of the real path&gt;.lock</code>. After the fix, edit + reset left <code>git status</code> empty.</td></tr>
+<tr><td>Reset in Project &amp; Wave Config</td><td>Emptied <code>haiku (from My repository settings)</code>: the declaration went, the row fell back to <code>sonnet (from My global preferences)</code>.</td><td>Works</td></tr>
+<tr><td>Appearance, General</td><td>Appearance shows <code>/private/tmp/lfq67/lfhome/config.yaml</code> directly. General reads <code>Git's user.name</code>, <code>~/src</code>, <code>stable</code> (Default).</td><td>Works</td></tr>
+<tr><td>Server restart under an open window</td><td>Settings showed <code>Loopflow server unavailable or owned by another account</code> and an edit silently didn't land. Closing and reopening Settings reconnected.</td><td>Still wrong (below)</td></tr>
 </table>
-<h2>Fixed in this run</h2><ul>
-<li><code>catalog.rs</code>: optional <code>unset</code> phrase per definition, carried on the wire (fixtures updated); Swift decodes it as a required nullable key and shows it for a null default.</li>
-<li><code>ScopedSettings.swift</code>: Applies to shows its checkout.</li>
-<li><code>SettingsWindow.swift</code>: sidebar dividers are separate, unselectable rows.</li>
-<li><code>ScopedSettingRow.swift</code>: “Reset layer…” → “Reset…”; In effect uses the same text as the row.</li></ul>
-<h2>Screens</h2>
-<figure><img src="qa-r3/gen-light.png"><figcaption>Before: General with None (Default)</figcaption></figure>
-<figure><img src="qa-r3/p-ProjectWaveConfig-light.png"><figcaption>Before: empty Applies to, divider inside the selection</figcaption></figure>
-<figure><img src="qa-r3/r-general.png"><figcaption>After: General</figcaption></figure>
-<figure><img src="qa-r3/r-project.png"><figcaption>After: Project &amp; Wave Config</figcaption></figure>
-<figure><img src="qa-r3/r-agents.png"><figcaption>After: Agents</figcaption></figure>
-<figure><img src="qa-r3/r-app-dark.png"><figcaption>Dark via Appearance, Undo notice</figcaption></figure>
-<figure><img src="qa-r3/d-project-compact.png"><figcaption>Dark, compact</figcaption></figure>
-<figure><img src="qa-r3/d-agents-wide.png"><figcaption>Dark, wide (built before the Reset… rename)</figcaption></figure>
-<figure><img src="qa-r3/d-general-edited.png"><figcaption>After an edit</figcaption></figure>
+
+<figure><img src="qa-r4/reset-notice.png" alt="Reset Automatic retries, Undo"><figcaption>Notice after emptying the number field.</figcaption></figure>
+
+<h2>Checks</h2><ul>
+<li><code>cargo test -p loopflow-execution --lib config::</code>: 114 passed, including the new <code>a_settings_write_leaves_only_the_settings_file_in_the_checkout</code>. (Me, this run.)</li>
+<li><code>cargo test -p loopflow --test integration documented_commands::</code>: 4 passed. (Me.)</li>
+<li><code>cargo fmt</code>; <code>cargo clippy --all-targets -p loopflow-execution -p loopflow -- -D warnings</code>: clean. (Me.) Full matrix: CI.</li>
+</ul>
+
 <h2>Couldn't reach</h2><ul>
-<li>Menus (Applies to, Save in) and Promote: they don't open through the hook. The Swift suites drive them.</li>
-<li>Key-window styling: the window was never key, so sidebar labels draw in their inactive grey.</li></ul>
+<li>Undo click, Applies to / Save in / Skill or Graph step menus, Promote: hook clicks don't reach them on a locked screen. The Swift workflow suites drive them.</li>
+<li>Pixels of Forms, compact and wide layouts: Forms draw white while locked. Round 3 captured them on an unlocked display.</li>
+</ul>
+
 <h2>Still wrong, worst first</h2><ul>
-<li>Starting preference unset still reads <i>None (Default)</i>. Its catalogue default is null, and unset means no starting preference, so this is accurate but bare.</li>
-<li>The Undo notice names the raw key (“Saved repo_root in My global preferences”), not the row title.</li>
-<li>The large empty band under the title bar on every pane comes from the system toolbar area of <code>NavigationSplitView</code>.</li></ul>
+<li>After the server restarts, an open Settings window keeps a dead subscription until it is closed and reopened; an edit typed meanwhile is dropped with only the top-of-pane error to explain it.</li>
+<li>A rejected number in the Agents pane reads <code>automation: invalid type: string "abc", expected u32</code>: serde wording, and it names the block because Desktop writes the whole <code>automation</code> block (the CLI names <code>automation.retries</code>).</li>
+<li>Resetting the last key of a file leaves <code>{}</code> in it (same in the installed <code>lf unset</code>).</li>
+<li><code>Empty list (Default)</code> for Fallback order is accurate but bare; <code>agents</code> has no <code>unset</code> phrase.</li>
+</ul>

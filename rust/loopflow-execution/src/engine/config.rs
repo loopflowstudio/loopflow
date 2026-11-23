@@ -368,17 +368,34 @@ pub fn explain(destination: &Destination, key: &str) -> Result<Explanation> {
     })
 }
 
-/// `config.theme`: the Machine's `theme:` in `~/.lf/config.yaml`, set to
-/// `value` when one is given, read otherwise.
-pub fn theme(value: Option<&str>) -> Result<Declaration> {
-    file_value(
-        &crate::config::global_config_path(),
-        &["theme"],
-        "theme",
-        value,
-        false,
-        crate::config::keys::Root::General,
-    )
+/// The same theme declaration read by the phone, with its exact slot for Desktop edits.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct ThemeDeclaration {
+    #[serde(flatten)]
+    pub declaration: Declaration,
+    pub entries: Vec<edit::Entry>,
+}
+
+/// `config.theme`: read or set the personal global theme.
+pub fn theme(value: Option<&str>) -> Result<ThemeDeclaration> {
+    let address = Destination::PersonalGlobal {}.resolve()?;
+    if let Some(value) = value {
+        let parsed = crate::config::settings::parse_value("theme", value)?;
+        crate::config::files::edit(&address.path, &["theme"], Some(parsed), address.root())?;
+    }
+    let raw = crate::config::files::read(&address.path)?;
+    let entries = edit::Setting::catalogued(&address, "theme").entries(&raw)?;
+    Ok(ThemeDeclaration {
+        declaration: Declaration {
+            key: "theme".into(),
+            value: raw.get("theme").cloned().unwrap_or(Value::Null),
+            path: address.path,
+            lifecycle: crate::config::catalog::definition("theme")
+                .expect("theme is catalogued")
+                .lifecycle,
+        },
+        entries,
+    })
 }
 
 /// `config.settings`: the effective settings at `directory` for a Wave, a

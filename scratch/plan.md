@@ -69,10 +69,19 @@ and repository settings can share a single file. Across two files, an
 interrupted move leaves the receiving declaration in place until recovery
 checks both slots. The old Configuration pane and Diff-only writer are gone.
 
+Appearance now writes each card or mode selection through the checked writer.
+The direct `config.theme` reply supplies the authored entries. A private server
+probe saw `theme: Loopflow Dark` immediately after a write while `config.scope`
+still reported an absent slot. The chooser uses the direct read for edits and
+the receipt for Undo. Only the single theme file open in the editor has a draft.
+
+Mobile shares one readiness reading and QR code across Settings. Machines reads
+registered names from global configuration and checks the corresponding identities
+with the CLI probe, four at a time, independently of the editable settings.
+
 ## Remaining slices
 
-1. **App panes and health.** Apply theme selection instantly with Undo, retain the staged ThemeEditor, and wire the shared Mobile observation and Machine statuses. Remove the old chooser transaction.
-2. **Search across panes.** Wire keyboard selection, row highlighting and in-place edits to the same address and edit state. Verify no-results, a stale reading, error recovery, accessibility, window resizing and light/dark.
+1. **Search across panes.** Wire keyboard selection, row highlighting and in-place edits to the same address and edit state. Verify no-results, a stale reading, error recovery, accessibility, window resizing and light/dark.
 
 ## Sidebar checks
 
@@ -92,6 +101,14 @@ checks both slots. The old Configuration pane and Diff-only writer are gone.
 - Six focused nextest cases passed for authored presence, legacy spellings, stale and interrupted moves, the Desktop wire fixture and the checked-in server schema. `cargo clippy --all-targets -- -D warnings` passed.
 - `scripts/test_desktop.sh --filter 'ContextSettingsWorkflowTests|ConfigurationSettingsTests|SettingsWorkflowTests|DesignDisciplineTests'` passed 12 tests in 40.1 seconds against the branch CLI. The fixture observed the provider launch, absent and empty docs, a pin and fallback, Task Diff exclusions, tracker and placement changes, Skill and Graph-step addresses, Promote and Undo, and the same Wave file after renaming it and reusing the old name.
 - A private server returned all 47 settings in 31 warm checkout readings over one Unix socket. Median 16.4 ms, p95 125.6 ms against the 150 ms target. Gate retains the documented-command and served-read checks.
+
+## App panes and health checks
+
+- `scripts/test_desktop.sh --filter 'ThemeWorkflowTests|MobilePairingTests|SettingsWorkflowTests|DesignDisciplineTests|ThemeTests|AppAppearanceTests|WorkPaletteTests'` passed 48 headless tests across nine suites. A failed Mobile status read removed the QR code and sidebar dot together. A private Machine with a stand-in SSH host showed a changed identity and an ended rental.
+- Two consecutive selections and two checked Undos over one private server connection restored the absent `theme:` key. The editor test changed the declaration by hand after import, saw the committed theme file on the failed Apply, then saved the retained draft.
+- The focused Rust nextest run passed all eight tests covering Machine status at the CLI, the Desktop and theme wire fixtures, the server schema and documented commands.
+- `cargo clippy --all-targets -- -D warnings` passed.
+- Gate covers the shared iOS protocol and the visual demo.
 
 ## Gate and demo
 

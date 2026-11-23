@@ -126,7 +126,7 @@ struct LoopflowApp: App {
         .windowToolbarStyle(.unifiedCompact(showsTitle: false))
         .defaultSize(width: 1280, height: 800)
         .commands {
-            ConsoleCommands()
+            ConsoleCommands(appearance: appearance)
             CommandGroup(replacing: .appInfo) {
                 Button("About Loopflow") { openWindow(id: "about-loopflow") }
             }
@@ -339,7 +339,7 @@ struct AppAppearance: ViewModifier {
             .foregroundStyle(theme.palette.text)
             .background(theme.palette.background)
             .safeAreaInset(edge: .top) {
-                if !appearance.chooserOpen, let notice = appearance.readFailure ?? appearance.notice {
+                if !appearance.editing, let notice = appearance.readFailure ?? appearance.notice {
                     HStack {
                         Text(notice).font(Typography.meta)
                         // After a failed read, choosing again would send the request that just failed.

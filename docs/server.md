@@ -88,7 +88,8 @@ lf server mobile --off      # disable remote access; local Sessions keep running
 
 A phone signed into the same Tailscale user can attach to running Sessions on
 this Machine. You can also toggle phone access, check live readiness, and scan
-the pairing QR code in Desktop under **Settings → Mobile** (**⌘,**). Enabling
+the pairing QR code in Desktop under **Settings → Mobile** (**⌘,**). The green
+sidebar dot and pairing code follow the same status while Settings is open. Enabling
 local server access or adding SSH Machines does not enable phone access. For
 local-only use, no network port is opened; keep the local Unix socket private.
 

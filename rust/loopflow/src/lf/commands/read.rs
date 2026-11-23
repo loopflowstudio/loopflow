@@ -295,6 +295,12 @@ pub enum Read {
     #[serde(rename = "machine.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::machine::MachineListing>>()))]
     MachineList,
+    /// Check one registered connection by its durable identity.
+    #[serde(rename = "machine.status")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<super::machine::MachineStatus>>()))]
+    MachineStatus {
+        machine: loopflow_model::durable::MachineId,
+    },
     /// `lf session history`: what Sessions did, by Work.
     #[serde(rename = "session.history")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::activity::WorkActivitySnapshot>()))]
@@ -583,6 +589,9 @@ impl Read {
                 );
                 argv.extend(optional("--after", after.as_ref()));
                 argv
+            }
+            Self::MachineStatus { machine } => {
+                words(&["machine", "status", machine.as_str(), "--json"])
             }
             Self::MachineList => words(&["machine", "list", "--json"]),
             Self::SessionHistory(window) => {
@@ -892,6 +901,9 @@ impl Read {
                 wave,
                 after.as_deref(),
             )?),
+            Self::MachineStatus { machine } => {
+                value(&block_on(super::machine::status_by_id(machine))??)
+            }
             Self::MachineList => value(&block_on(machines())??),
             Self::SessionHistory(window) => value(&super::activity::snapshot(window)?),
             Self::PlanList {
@@ -1015,6 +1027,7 @@ impl Read {
             | Self::SessionUsage { .. }
             | Self::TaskContext { .. }
             | Self::MachineList
+            | Self::MachineStatus { .. }
             | Self::SessionHistory(_)
             | Self::RepoPath { .. }
             | Self::SessionRetention
@@ -1163,6 +1176,21 @@ fn value(value: &impl Serialize) -> anyhow::Result<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::Read;
+
+    #[test]
+    fn machine_status_shares_the_desktop_wire_shape() {
+        use super::super::machine::MachineStatus;
+        use serde_json::{from_value, to_value, Value};
+
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/machine_status.json"
+        ))
+        .unwrap();
+        let read: Read = from_value(fixture["read"].clone()).unwrap();
+        assert_eq!(to_value(read).unwrap(), fixture["read"]);
+        let status: Vec<MachineStatus> = from_value(fixture["status"].clone()).unwrap();
+        assert_eq!(to_value(status).unwrap(), fixture["status"]);
+    }
 
     #[test]
     fn checkout_scope_and_checked_edit_share_the_desktop_wire_shape() {

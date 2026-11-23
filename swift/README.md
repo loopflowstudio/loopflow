@@ -348,8 +348,10 @@ Families sort by name after Loopflow, so a family's light and dark halves sit in
 the same column. Clicking a card or changing **System** / **Light** / **Dark**
 applies immediately across every window and registers **Undo** (**⌘Z** or the
 Undo notice) to restore the previous `theme:` declaration, including absence.
-The chosen card is ringed in the window's focus color. A theme with unreadable
-roles shows why under the cards and is not applied.
+In System mode, picking the other side changes what macOS will use on that side.
+**Customize** follows the card you picked. **View → Appearance** uses the same
+mode setting. The chosen card is ringed in the system accent color. A theme
+with unreadable roles shows why under the cards and is not applied.
 
 Check font weight in an open shell or Session pane. Previewing, applying or
 cancelling a theme changes only its colors.
@@ -376,7 +378,8 @@ A file named like a built-in overrides it. **Customize <name>** opens the theme
 editor for the card chosen last: on a built-in it edits your copy; on yours it
 edits in place. Custom color, import, and asset changes stay staged in the
 editor until **Apply**; **Cancel** or closing the editor discards the draft.
-**Delete <name>** removes yours (**Revert <name> to built-in** for an override).
+In the editor, **Delete <name>** stages removal of your file.
+**Revert <name> to built-in** stages removal of a built-in theme’s override.
 **Import file…** copies a theme into Yours on the side its colors say; in Light or
 Dark mode the selection switches to that side.
 

@@ -85,6 +85,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case wavePlan(directory: String, wave: String)
     case taskList(directory: String, wave: String, after: String?)
     case machineList
+    case machineStatus(machine: String)
     case sessionHistory(since: String, limit: Int, wave: String?, project: String?, task: String?)
     case planList(directory: String, wave: String?, task: String?, all: Bool)
     case repoTracker(directory: String)
@@ -176,6 +177,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["wave", "plan", wave, "--json"]
         case .taskList(_, let wave, let after):
             return ["task", "list", "--closed", "--wave", wave, "--json"] + (after.map { ["--after", $0] } ?? [])
+        case .machineStatus(let machine): return ["machine", "status", machine, "--json"]
         case .machineList:
             return ["machine", "list", "--json"]
         case .sessionHistory(let since, let limit, let wave, let project, let task):
@@ -272,6 +274,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("wave.plan", ["directory": directory, "wave": wave])
         case .taskList(let directory, let wave, let after):
             TaggedFields("task.list", ["directory": directory, "wave": wave, "after": after, "closed": true])
+        case .machineStatus(let machine): TaggedFields("machine.status", ["machine": machine])
         case .machineList: TaggedFields("machine.list")
         case .sessionHistory(let since, let limit, let wave, let project, let task):
             TaggedFields("session.history", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])

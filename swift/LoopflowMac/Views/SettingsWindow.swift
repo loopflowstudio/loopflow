@@ -55,6 +55,7 @@ struct SettingsWindow: View {
     let appearance: AppearanceStore
     let checkout: String?
     let portfolio: PortfolioService
+    @State var mobile = MobileSetup()
     @State private var scope = ScopedSettingsModel()
     @State private var waves: [Wave] = []
     @State private var notices = NoticeCenter()
@@ -85,15 +86,16 @@ struct SettingsWindow: View {
                     ScopedSettings(model: scope, pane: navigation.pane,
                         checkouts: Array(Set(portfolio.repos.map(\.path) + [checkout, scope.checkout].compactMap { $0 })).sorted(),
                         waves: waves, notices: notices)
-                case .appearance: ThemeChooser(appearance: appearance)
+                case .appearance: ThemeChooser(appearance: appearance, notices: notices)
                 case .shortcuts: KeyboardShortcutsView()
-                case .mobile: MobileSettings()
+                case .mobile: MobileSettings(setup: mobile)
                 }
             }
             .navigationTitle(navigation.pane.rawValue)
             .overlay(alignment: .bottom) { NoticeView(center: notices) }
         }
         .task(id: scope.observation) { await scope.observe() }
+        .task { await mobile.observe() }
         .task { await portfolio.refresh() }
         .task { waves = (try? await RegistryQueryLocal.shared.allWaves()) ?? [] }
         .frame(minWidth: 760, minHeight: 560)
@@ -110,6 +112,12 @@ struct SettingsWindow: View {
                     Label {
                         HStack {
                             Text(pane.rawValue)
+                            if pane == .mobile && mobile.ready {
+                                Spacer()
+                                Circle().fill(.green).frame(width: 7, height: 7)
+                                    .accessibilityLabel("Ready to connect")
+                                    .accessibilityIdentifier("mobile-ready")
+                            }
                             if let file = scope.file, file.hasOverrides(in: pane, catalog: scope.catalogue) {
                                 Spacer()
                                 Circle().fill(.secondary).frame(width: 7, height: 7)

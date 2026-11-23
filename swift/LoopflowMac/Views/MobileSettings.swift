@@ -4,15 +4,21 @@ import Loopflow
 import SwiftUI
 
 struct MobileSettings: View {
-    @State private var setup = MobileSetup()
+    let setup: MobileSetup
     @Environment(\.palette) private var palette
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                Text("Take your work with you").font(Typography.lede)
-                Text("Open Tasks and continue their Sessions from Loopflow on your iPhone. Sign in to the same Tailscale account on both devices.")
-                    .foregroundStyle(palette.textSecondary)
+        Form {
+            Section {
+                Toggle("Mobile access", isOn: Binding(get: { setup.configuration?.enabled == true }, set: { enabled in
+                    Task { await setup.change(enabled: enabled) }
+                }))
+                .toggleStyle(.switch)
+                .disabled(setup.busy)
+                Text("Sign in to the same Tailscale account on this Machine and your iPhone.")
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 if let configuration = setup.configuration, configuration.enabled {
                     Label(setup.ready ? "Ready to connect" : "Mobile connection unavailable",
                           systemImage: setup.ready ? "network" : "network.slash")
@@ -26,7 +32,7 @@ struct MobileSettings: View {
                     } else {
                         Text("Your Machine address is saved. Restore the connection, then refresh to show its QR code.")
                             .foregroundStyle(palette.textSecondary)
-                        Button("Set up again") { setup.enable() }.disabled(setup.busy)
+                        Button("Set up again") { Task { await setup.change(enabled: true) } }.disabled(setup.busy)
                         Text("Uses this Machine’s signed-in Tailscale account.")
                             .font(Typography.meta).foregroundStyle(palette.textSecondary)
                     }
@@ -43,31 +49,15 @@ struct MobileSettings: View {
                     }
                     Text("This code contains only the address. Access requires your Tailscale account.")
                         .font(Typography.meta).foregroundStyle(palette.textSecondary)
-                    Divider()
-                    Button("Turn off mobile access") { setup.disable() }.disabled(setup.busy)
-                    Text("Disconnects phones. Tasks and Sessions keep running. Manage individual devices in Tailscale.")
-                        .font(Typography.meta).foregroundStyle(palette.textSecondary)
-                } else {
-                    Button("Enable mobile access") { setup.enable() }
-                        .buttonStyle(LoopflowButtonStyle(.accent))
-                        .disabled(setup.busy)
-                        .accessibilityIdentifier("mobile-enable")
-                    Text("Loopflow detects Tailscale and prepares a private connection automatically.")
-                        .font(Typography.meta).foregroundStyle(palette.textSecondary)
                 }
                 if let activity = setup.activity { ProgressView(activity).controlSize(.small) }
                 if let error = setup.error ?? setup.status?.error {
                     Text(error).foregroundStyle(palette.failure).textSelection(.enabled)
                 }
-                Button("Refresh", systemImage: "arrow.clockwise") { setup.refresh() }.disabled(setup.busy)
+                Button("Refresh", systemImage: "arrow.clockwise") { Task { await setup.refresh() } }.disabled(setup.busy)
             }
-            .buttonStyle(LoopflowButtonStyle())
-            .padding(Spacing.xxl)
         }
-        .frame(minWidth: 560, idealWidth: 620, minHeight: 500)
-        .foregroundStyle(palette.text).background(palette.background)
-        .onAppear { setup.refresh() }
-        .onDisappear { setup.close() }
+        .formStyle(.grouped)
     }
 }
 
@@ -75,27 +65,38 @@ struct MobileSettings: View {
 final class MobileSetup {
     typealias Configuration = MachineMobileConfiguration
 
-    var status: MachineMobileStatus?
+    private(set) var status: MachineMobileStatus?
     var configuration: Configuration? { status?.configuration }
-    var image: NSImage?
-    private var statusIsCurrent = false
-    var ready: Bool { statusIsCurrent && status?.ready == true }
-    var activity: String?
+    private(set) var image: NSImage?
+    var ready: Bool { image != nil }
+    private(set) var activity: String?
     var busy: Bool { activity != nil }
-    var error: String?
-    private var operation: Task<Void, Never>?
+    private(set) var error: String?
+    private let command: ([String]) async throws -> String
 
-    func refresh() { perform("Checking mobile access…") { try await self.read() } }
+    init(command: @escaping ([String]) async throws -> String = { arguments in
+        try await LocalWaveAgentLauncher.queryLf(["server"] + arguments, cwd: "/")
+    }) {
+        self.command = command
+    }
 
-    func enable() { change(enabled: true) }
+    func observe() async {
+        image = nil
+        while !Task.isCancelled {
+            await refresh()
+            do { try await Task.sleep(for: .seconds(30)) } catch { return }
+        }
+    }
 
-    func disable() { change(enabled: false) }
+    func refresh() async {
+        await perform("Checking mobile access…") { try await self.read() }
+    }
 
-    func close() { operation?.cancel() }
-
-    private func change(enabled: Bool) {
-        perform(enabled ? "Preparing mobile access…" : "Turning off mobile access…") {
-            do { _ = try await Self.command(enabled ? ["mobile"] : ["mobile", "--off"]) }
+    func change(enabled: Bool) async {
+        guard !busy else { return }
+        image = nil
+        await perform(enabled ? "Preparing mobile access…" : "Turning off mobile access…") {
+            do { _ = try await self.command(enabled ? ["mobile"] : ["mobile", "--off"]) }
             catch {
                 try Task.checkCancellation()
                 let failure = error
@@ -115,39 +116,31 @@ final class MobileSetup {
 
     private func read() async throws {
         do {
-            let data = try await Self.command(["mobile", "--status"])
+            let data = try await self.command(["mobile", "--status"])
             let value = try JSONDecoder().decode(MachineMobileStatus.self, from: Data(data.utf8))
             let code: NSImage?
-            if value.ready, let configuration = value.configuration {
+            if value.ready, let configuration = value.configuration, configuration.enabled {
                 let address = try MachineAddress.decode(configuration.endpoint)
                 code = try Self.qrCode(Data(address.absoluteString.utf8))
             } else { code = nil }
             try Task.checkCancellation()
             status = value
-            statusIsCurrent = true
             image = code
         } catch {
-            statusIsCurrent = false
             image = nil
             throw error
         }
     }
 
-    private static func command(_ arguments: [String]) async throws -> String {
-        try await LocalWaveAgentLauncher.queryLf(["server"] + arguments, cwd: "/")
-    }
-
-    private func perform(_ activity: String, _ body: @escaping @MainActor () async throws -> Void) {
+    private func perform(_ activity: String, _ body: () async throws -> Void) async {
         guard !busy else { return }
         self.activity = activity
         error = nil
-        operation = Task {
-            defer { self.activity = nil; operation = nil }
-            do { try await body() }
-            catch is CancellationError { }
-            catch let failure as RegistryQueryError { error = failure.message }
-            catch { self.error = error.localizedDescription }
-        }
+        defer { self.activity = nil }
+        do { try await body() }
+        catch is CancellationError { }
+        catch let failure as RegistryQueryError { error = failure.message }
+        catch { self.error = error.localizedDescription }
     }
 
     static func qrCode(_ data: Data) throws -> NSImage {

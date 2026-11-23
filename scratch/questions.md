@@ -9,3 +9,4 @@
 - Confirm Promote with a named move and YAML preview. A move changes ownership or audience and can change the result for the selected work.
 - Open the full scoped panes on Global. Keep the current checkout in the Applies to menu alongside portfolio checkouts.
 - Edit the tagged tracker and Machine placement as whole YAML declarations. Their Rust codecs interpret the tag and the mutually exclusive placement fields together.
+- Refresh Mobile while Settings is open and remote connections while Machines is visible, 30 seconds after the last check finishes. Each SSH probe keeps its existing 20-second deadline.

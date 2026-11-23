@@ -56,6 +56,8 @@ struct ScopedSettings: View {
                     }
                 }
             }
+            if pane == .machines { MachineConnections(location: model.location) }
+
             if let scope = model.reading.value, let file = pane == .general ? scope.files.first(where: { $0.owner == .personalGlobal }) : model.file {
                 let definitions = model.catalogue.filter { $0.pane == pane && !$0.isContainer }
                 ForEach(definitions, id: \.key) { definition in

@@ -379,6 +379,8 @@ comments intact ([Configuration](config.md)).
   code ([Phone access](server.md#phone-access)).
 - **Machines.** Separates live connection checks (checking, reachable, error,
   ended rental) from Machine placement, connections, and forwarding preferences.
+  While the pane is open, each round checks up to four connections at once.
+  A host has 20 seconds to answer with its registered Machine identity.
 
 ## Script Desktop
 

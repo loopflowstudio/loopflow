@@ -427,6 +427,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `graph.run` | `lf graph <name>` (`lf -b`, detached; `task.run` keeps the Task spelling) | write; `engine::graph::run` (the Process carrying the Graph) |
 | `graph.run.get` | `lf graph show <id>` | read |
 | `session.history.get` | `lf session history show <session-id>` | read; rendered history |
+| `machine.status` | `lf machine status <id> --json` | live identity-checked connection or ended rental, up to four concurrent probes |
 | `machine.self`, `.list`, `.doctor` | `lf machine self`, `lf machine list`, `lf machine doctor` (`lf doctor`) | read |
 | `work.resolve` | `lf open <url> --link`; a `work` noun would shadow the builtin `work` skill | read |
 | `config.catalog`, `.settings`, `.get`, `.explain` | `lf config catalog`, `lf config settings`, `lf config get`, `lf config explain` | `engine::config` |
@@ -471,8 +472,9 @@ the phone's `view.select` Task list and its creation destinations all read it.
   {value}`, `config.unset` and `config.explain` take `{destination, key}`, where
   a destination names an owner (`personal_global`, `shared_repo {repo}`,
   …), never a file plus a scope. `config.theme {value}` reads or sets the
-  serving Machine's `theme:`. `config.scope {directory, wave, target}` reads or
-  subscribes to effective values and the authored slots in applicable files.
+  serving Machine's `theme:`. The reply includes the entries for a checked
+  edit and Undo. `config.scope {directory, wave, target}` reads or subscribes
+  to effective values and the authored slots in applicable files.
   A null directory selects Global. A target selects general work, a Skill or
   an authored Graph step. Each editable slot names its key and includes the
   YAML path components and values to pass as `expected` to `config.preview`

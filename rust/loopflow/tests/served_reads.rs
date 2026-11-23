@@ -928,6 +928,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::WavePlan { .. }
         | Read::TaskList { .. }
         | Read::MachineList
+        | Read::MachineStatus { .. }
         | Read::SessionHistory(_)
         | Read::PlanList { .. }
         | Read::RepoTracker { .. }

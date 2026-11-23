@@ -1101,7 +1101,7 @@ writes! {
     #[serde(rename = "config.theme")]
     ConfigTheme {
         value: Option<String>,
-    } => loopflow_execution::engine::config::Declaration;
+    } => loopflow_execution::engine::config::ThemeDeclaration;
     { value: theme } => loopflow_execution::engine::config::theme(theme.as_deref())?,
 }
 
@@ -1512,9 +1512,14 @@ mod tests {
         let super::WriteResult::ConfigTheme(declaration) = &result else {
             panic!("theme writes return their declaration");
         };
-        assert_eq!(declaration.path, path);
+        assert_eq!(declaration.declaration.path, path);
         let actual = serde_json::to_value(result).unwrap();
-        assert_eq!(actual["value"], "dark");
+        let mut expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/theme_declaration.json"
+        ))
+        .unwrap();
+        expected["path"] = serde_json::json!(path);
+        assert_eq!(actual, expected);
         assert_result_schema("config.theme", &actual);
         assert!(std::fs::read_to_string(path).unwrap().contains("dark"));
     }

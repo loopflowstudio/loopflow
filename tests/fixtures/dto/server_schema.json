@@ -1782,6 +1782,14 @@
       ],
       "type": "object"
     },
+    "ConnectionState": {
+      "enum": [
+        "reachable",
+        "error",
+        "ended_rental"
+      ],
+      "type": "string"
+    },
     "ContextReport": {
       "properties": {
         "steps": {
@@ -4325,6 +4333,43 @@
           "type": "string"
         }
       ]
+    },
+    "MachineStatus": {
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "local_version": {
+          "type": "string"
+        },
+        "machine": {
+          "$ref": "#/$defs/Machine"
+        },
+        "remote_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/ConnectionState"
+        },
+        "update_command": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "machine",
+        "local_version",
+        "remote_version",
+        "error",
+        "update_command"
+      ],
+      "type": "object"
     },
     "MeasuredOperation": {
       "description": "The ordinary operation and its per-request work receipt in one response.",
@@ -7762,6 +7807,30 @@
           "x-result": {
             "items": {
               "$ref": "#/$defs/MachineListing"
+            },
+            "type": "array"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Check one registered connection by its durable identity.",
+          "properties": {
+            "kind": {
+              "const": "machine.status",
+              "type": "string"
+            },
+            "machine": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "machine"
+          ],
+          "type": "object",
+          "x-result": {
+            "items": {
+              "$ref": "#/$defs/MachineStatus"
             },
             "type": "array"
           }
@@ -15080,6 +15149,37 @@
     "TerminalId": {
       "type": "string"
     },
+    "ThemeDeclaration": {
+      "description": "The same theme declaration read by the phone, with its exact slot for Desktop edits.",
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/Entry"
+          },
+          "type": "array"
+        },
+        "key": {
+          "type": "string"
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle"
+        },
+        "path": {
+          "type": "string"
+        },
+        "value": {
+          "description": "The YAML declaration, as JSON."
+        }
+      },
+      "required": [
+        "path",
+        "key",
+        "value",
+        "lifecycle",
+        "entries"
+      ],
+      "type": "object"
+    },
     "Threshold": {
       "oneOf": [
         {
@@ -19239,7 +19339,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/Declaration"
+            "$ref": "#/$defs/ThemeDeclaration"
           }
         }
       ]

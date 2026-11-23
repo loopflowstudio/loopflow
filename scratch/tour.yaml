@@ -1,50 +1,58 @@
-at: 35cd3a22755294f34b3a8d5b7914527fdb915b1e
+at: cd28c4baadc24703ee886370a1d2626fb858a5e0
 first:
-  - path: docs/workspaces.md
-    why: Checkout search from the command line
   - path: swift/README.md
-    why: Files walkthrough and keyboard controls
+    why: Files walkthrough, rail, shortcuts and presentation
+  - path: docs/surfaces.md
+    why: Present a file or line range beside a terminal
+  - path: docs/workspaces.md
+    why: Search a checkout from the command line
+  - path: swift/LoopflowMac/TaskFilesStore.swift
+    why: Working tree, scratch inventory and file observation
+  - path: swift/LoopflowMac/FilesBrowserState.swift
+    why: Open files, drafts, history and pending presentations
+  - path: swift/LoopflowMac/ComparisonReading.swift
+    why: Snapshot and file sides for one comparison
+  - path: swift/LoopflowMac/DiffReviewState.swift
+    why: Review state for a Task, step or file
+  - path: swift/LoopflowMac/CheckoutTree.swift
+    why: Directory paging, compaction and keyboard navigation
   - path: tests/fixtures/dto/task_files.json
-    why: Declarations, enclosing names and search coordinates
-  - path: rust/loopflow-execution/src/ops/task/symbols.rs
-    why: Checkout declaration lookup and container tracking
-  - path: rust/loopflow-execution/src/ops/task/grep.rs
-    why: Literal matches, source coordinates and bounded checkout scans
-  - path: rust/loopflow-execution/src/ops/task/checkout_file.rs
-    why: Pinned directory reads shared by grep and save
+    why: File counts, declarations and search coordinates
+  - path: rust/loopflow-execution/src/ops/task/workspace.rs
+    why: Peer notifications distinguish scratch writes from comparison changes
+  - path: rust/loopflow-execution/src/ops/task/snapshot.rs
+    why: Line totals from the Task patch
   - path: rust/loopflow-execution/src/ops/task/find.rs
     why: Git membership, scratch inventory and fuzzy ranking
-  - path: rust/loopflow-execution/src/observe.rs
-    why: Inventory lifetime and refresh on the owning Machine
-  - path: rust/loopflow/src/lf/commands/read.rs
-    why: Typed checkout read and its command line
-  - path: swift/Loopflow/Services/RegistryQuery.swift
-    why: How Desktop searches the owning Machine
+  - path: rust/loopflow-execution/src/ops/task/grep.rs
+    why: Literal matches and bounded checkout scans
+  - path: rust/loopflow-execution/src/ops/task/symbols.rs
+    why: Checkout declarations and enclosing names
+  - path: rust/loopflow/src/lf/commands/desktop.rs
+    why: Address a path and lines from a terminal
+  - path: swift/LoopflowMac/DesktopActions.swift
+    why: Present files beside the caller and retain focus
+  - path: swift/LoopflowMac/Views/TaskFilesView.swift
+    why: Breadcrumb, responsive rail, update bar and HTML settling
+  - path: swift/LoopflowMac/Views/TaskFilePicker.swift
+    why: Preview checkout files, grep matches and Task changes
   - path: swift/LoopflowMac/FileOutline.swift
     why: Live declarations from the reader’s syntax tree
   - path: swift/LoopflowMac/FileJumps.swift
     why: Definition choices and return locations
-  - path: swift/LoopflowMac/DesktopActions.swift
-    why: File history yields to window navigation
-  - path: swift/LoopflowMac/Views/TaskFilePicker.swift
-    why: Files and Grep share selection and previews
-  - path: swift/LoopflowMac/Views/TaskFilesView.swift
-    why: Picker and sidebar beside the selected document
-  - path: swift/LoopflowMac/TaskFileDocument.swift
-    why: Read, Edit and draft lifetime across file switches
-  - path: swift/LoopflowMac/Views/TaskCodeReader.swift
-    why: The numbered source reader shared with previews
   - path: swift/LoopflowTests/TaskFilesTests.swift
-    why: Peer jumps, live drafts and exact return lines
+    why: File choices, peer reads and draft lifetime
+  - path: swift/LoopflowTests/DesktopPaneControlTests.swift
+    why: Route a presentation during editing or review
   - path: rust/loopflow/tests/machine_commands.rs
-    why: Search on a peer-only checkout
-  - path: rust/loopflow/tests/served_reads.rs
-    why: Finding paths beyond the first two thousand
+    why: Watch and search a peer-only checkout
   - path: scratch/plan.md
-    why: Remaining navigation, presentation and review work
+    why: Remaining Find, line comments and display checks
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Generated from the Rust protocol types
+  - path: tests/goldens/
+    why: Recorded prompts include the new presentation command
   - path: Cargo.lock
     why: Resolved grep dependencies
   - path: swift/LoopflowMac/ThirdPartyNotices/

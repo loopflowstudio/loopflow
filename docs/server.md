@@ -87,8 +87,9 @@ lf server mobile --off      # disable remote access; local Sessions keep running
 ```
 
 A phone signed into the same Tailscale user can attach to running Sessions on
-this Machine. Enabling local server access or adding SSH Machines does not
-enable phone access. For local-only use, no network port is opened; keep the
-local Unix socket private.
+this Machine. You can also toggle phone access, check live readiness, and scan
+the pairing QR code in Desktop under **Settings → Mobile** (**⌘,**). Enabling
+local server access or adding SSH Machines does not enable phone access. For
+local-only use, no network port is opened; keep the local Unix socket private.
 
 Next: [Surfaces](surfaces.md) · [Connection troubleshooting](troubleshooting.md#desktop-cannot-connect).

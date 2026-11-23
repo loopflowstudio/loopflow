@@ -149,8 +149,9 @@ lf context --json                              # context budgets and current usa
 ```
 
 `lf set` validates keys and types strictly and preserves comments in YAML
-files. Desktop's **Configuration** panel reads and writes the same files with
-the same Explain and Unset controls.
+files. Desktop's [Settings](surfaces.md#settings) window (`⌘,`) reads and
+writes the same files, with **Applies to** / **Save in** selectors, a
+precedence ladder, YAML previews for Reset and Move, and Undo.
 
 ## Where settings live
 

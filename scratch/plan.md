@@ -2,7 +2,7 @@
 
 > Visual redesign of the settings pane. make it more like a standard Apple Settings pane, sort of like Rex
 
-Jack Heart chose “vision c” at explore. [Vision C](design.md) and its [prototype](explore.html#vision-c) record the direction. The [concept review](concept-review.html) shows the interaction to build. [Choices for review](questions.md) records its defaults.
+Jack Heart chose “vision c” at explore. [Vision C](design.md) and its [prototype](explore.html#vision-c) record the direction. The [concept review](concept-review.html) shows the interaction to build. [Choices for review](questions.md) records its defaults. User docs: [Surfaces](../docs/surfaces.md#settings), [Configuration](../docs/config.md#inspect-effective-settings), [Connect clients](../docs/server.md#phone-access), and [Loopflow for macOS](../swift/README.md).
 
 ## Done when
 

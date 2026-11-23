@@ -38,12 +38,32 @@ A toggle or picker commits immediately. Text commits on Return or focus loss and
 - Machines separates connection health from placement and other preferences. Reuse the identity-checked status probe and ended-rental handling from `lf machine status` in the served path. Use up to four in flight, the existing 20-second probe deadline, and refresh while the pane is visible. Distinguish checking, reachable, error and ended rental. [CLI status](../rust/loopflow/src/lf/commands/machine.rs), [connection probe](../rust/loopflow-execution/src/machine/connection.rs).
 - Delete the five-tab shell and `ConfigurationSettingsView` with its path text fields, raw explanation formatter and key-by-key loading. Move DTOs still used by `TaskChangesView` to their shared owner. Retain CLI, launch and iPhone behavior through their current owners. New wire request/results use required fields and Rust/Swift fixtures. Update the Desktop and server operation docs as the interfaces change.
 
-## Build in four slices
+## Implementation order
 
-1. **One row from Settings to launch.** Build the real split Settings scene and the Context row for `context.diff`. Fix Applies to at a single fixture checkout and switch Save in between My and Shared. Begin with Shared On and My absent. Save My Off and see the next ordinary launch omit the diff. Switch Save in to Shared, save Off then On, and see the launch remain Off with the private source named. Reset My to expose Shared On, then Undo to restore My Off. Stage a reset from a stale reading, edit the private file externally, and verify that the new value survives and the row can refresh and retry. Check the actual CLI reads, YAML patch and launch from the same fixture. Repeat from a linked checkout with a different shared value to verify checkout-specific shared files and a common private file.
+The first CLI probe found a counterexample in a released configuration shape. With
+`diff: true` and `context: [README.md]`, `config get context.diff` returned null
+while `config explain context.diff` returned true. Setting it to false replaced
+the documents list. Unsetting it left `diff: true` active. Before building the
+Context toggle, give the file owner a lossless edit for both spellings. Its
+preview and inverse must cover the original document list and any flat key it
+moves. Exercise that fixture alongside the ordinary and linked checkout cases.
+
+The split window now opens on General, with pane-name search, the autosave
+switch and Undo, a grouped Shortcuts reference shared with the separate window,
+and a direct route from Choose Theme to Appearance. Configuration remains under
+Workflow until the scoped panes replace it.
+
+## Remaining slices
+
+1. **One row from Settings to launch.** Add the Context row for `context.diff` to the split Settings scene after the legacy file edit is lossless. Fix Applies to at a single fixture checkout and switch Save in between My and Shared. Begin with Shared On and My absent. Save My Off and see the next ordinary launch omit the diff. Switch Save in to Shared, save Off then On, and see the launch remain Off with the private source named. Reset My to expose Shared On, then Undo to restore My Off. Stage a reset from a stale reading, edit the private file externally, and verify that the new value survives and the row can refresh and retry. Check the actual CLI reads, YAML patch and launch from the same fixture. Repeat from a linked checkout with a different shared value to verify checkout-specific shared files and a common private file.
 2. **All scoped rows and actions.** Fill native controls and YAML disclosures, connect checkout/Wave and Advanced selectors, add the Promote preview/recovery/Undo path, and remove the old Configuration view. Exercise explicit empty versus absent docs, pin versus fallback, tagged tracker, coupled Machine keys, Wave rename and reuse, and Task Diff from the existing Rust owners.
-3. **App panes and health.** Move General and Shortcuts, apply theme selection instantly with Undo, retain the staged ThemeEditor, and wire the shared Mobile observation and Machine statuses. Remove the old chooser transaction and tab presentation.
+3. **App panes and health.** Add the global catalog rows to General, apply theme selection instantly with Undo, retain the staged ThemeEditor, and wire the shared Mobile observation and Machine statuses. Remove the old chooser transaction.
 4. **Search across panes.** Wire keyboard selection, row highlighting and in-place edits to the same address and edit state. Verify no-results, a stale reading, error recovery, accessibility, window resizing and light/dark.
+
+## Sidebar checks
+
+- `swift build --package-path swift --build-tests` and `scripts/test_desktop.sh --skip-build --filter 'SettingsWorkflowTests|DesignDisciplineTests'` passed locally. Seven tests covered both suites. Gate runs the Desktop checks again.
+- Native window renders at 960 × 620 showed the full Configuration label and search field in General (light) and Shortcuts (dark) after widening the sidebar. The final demo covers the remaining panes and window sizes.
 
 ## Gate and demo
 

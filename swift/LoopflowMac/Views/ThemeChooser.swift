@@ -218,26 +218,3 @@ struct ThemeCard: View {
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
     }
 }
-
-struct KeyboardShortcutsView: View {
-    @Environment(\.palette) private var palette
-    /// Window chrome, then every registry action with a default key.
-    private var shortcuts: [(String, String)] {
-        [("Navigate", "⌘K"), ("Toggle sidebar", "⌘\\"), ("Task actions", "⌘/")]
-            + DesktopAction.all.filter { !$0.keys.isEmpty }.map { action in
-                let keys = action.keys.map(\.display)
-                let display = keys.count > 2 ? "\(keys[0])…\(keys[keys.count - 1])" : keys.joined(separator: " / ")
-                return (action.title, display)
-            }
-            + [("Choose Task file", "⌘P"), ("Save Task file", "⌘S"), ("Open repository", "⇧⌘O"), ("Settings", "⌘,")]
-    }
-    var body: some View {
-        ScrollView {
-            Grid(alignment: .leading, horizontalSpacing: Spacing.xxxl, verticalSpacing: Spacing.md) {
-                ForEach(shortcuts, id: \.0) { item in
-                    GridRow { Text(item.0); Text(item.1).foregroundStyle(palette.textSecondary) }
-                }
-            }.padding(Spacing.xxl)
-        }.frame(minWidth: 500, minHeight: 440)
-    }
-}

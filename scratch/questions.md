@@ -7,3 +7,4 @@
 - Keep Applies to and Save in independent. Use Global when the window first opens and My settings by default for the selected checkout or Wave. A single combined picker obscures a successful Shared edit when a private declaration still applies.
 - Bind edits to the selected file’s declaration. Show the combined or winning value separately where it differs. A copied effective list can duplicate inherited documents, and a losing toggle must still show what was saved.
 - Confirm Promote with a named move and YAML preview. A move changes ownership or audience and can change the result for the selected work.
+- Show the existing Configuration editor under Workflow until its scoped panes are ready. Pane search lists only destinations that can be opened.

@@ -54,7 +54,7 @@ struct LoopflowApp: App {
     @State private var showSnapshotError = false
     @State private var openingError: String?
     @State private var didOpenCaptureView = false
-    @AppStorage("taskFilesAutosave") private var taskFilesAutosave = true
+    @State private var settings = SettingsNavigation()
     @State private var appearance: AppearanceStore
     /// `lf desktop`'s socket, held for the app's lifetime.
     @State private var desktopServer: DesktopServer?
@@ -117,7 +117,7 @@ struct LoopflowApp: App {
                     }
                 }
             }
-            .modifier(AppAppearance(appearance: appearance))
+            .modifier(appAppearance)
             .onOpenURL { handleDeepLink($0) }
             .uiTestWindowWidth()
             .uiTestSnapshot()
@@ -189,37 +189,35 @@ struct LoopflowApp: App {
             WavesView(portfolioService: portfolioService, openTask: { path, id in
                 requestRepository(path, .task(TaskLink(issue: id, repo: path)))
             })
-                .modifier(AppAppearance(appearance: appearance))
+                .modifier(appAppearance)
                 .onOpenURL { handleDeepLink($0) }
         }
         .defaultSize(width: 1080, height: 760)
 
         Window("Open Work", id: "open-work") {
             WorkspaceOpeningFeedback(error: $openingError)
-                .modifier(AppAppearance(appearance: appearance))
+                .modifier(appAppearance)
         }
         .defaultSize(width: 480, height: 240)
 
         Settings {
-            TabView {
-                ThemeChooser(appearance: appearance).tabItem { Label("Appearance", systemImage: "paintpalette") }
-                Form { Toggle("Autosave Task Files", isOn: $taskFilesAutosave) }
-                    .padding(Spacing.xxl).tabItem { Label("Editing", systemImage: "pencil") }
-                ConfigurationSettingsView().tabItem { Label("Configuration", systemImage: "slider.horizontal.3") }
-                KeyboardShortcutsView().tabItem { Label("Keyboard Shortcuts", systemImage: "keyboard") }
-                MobileSettings().tabItem { Label("Mobile", systemImage: "iphone") }
-            }.modifier(AppAppearance(appearance: appearance))
+            SettingsWindow(navigation: $settings, appearance: appearance)
         }
+        .defaultSize(width: 960, height: 620)
         Window("Keyboard Shortcuts", id: "keyboard-shortcuts") { KeyboardShortcutsView() }
             .defaultSize(width: 540, height: 480)
 
         Window("Telemetry", id: "telemetry") {
             TelemetryDashboardView()
-                .modifier(AppAppearance(appearance: appearance))
+                .modifier(appAppearance)
                 .onOpenURL { handleDeepLink($0) }
         }
         .defaultSize(width: 1180, height: 860)
 
+    }
+
+    private var appAppearance: AppAppearance {
+        AppAppearance(appearance: appearance) { settings.open(.appearance) }
     }
 
     @MainActor
@@ -326,6 +324,7 @@ struct LoopflowApp: App {
 /// Resolve every window from the app-owned theme, including native controls.
 struct AppAppearance: ViewModifier {
     let appearance: AppearanceStore
+    var selectAppearance: () -> Void = {}
     @Environment(\.openSettings) private var openSettings
 
     func body(content: Content) -> some View {
@@ -345,7 +344,7 @@ struct AppAppearance: ViewModifier {
                         // After a failed read, choosing again would send the request that just failed.
                         if appearance.readFailure == nil {
                             Button("Choose Theme…") {
-                                appearance.beginPreview()
+                                selectAppearance()
                                 openSettings()
                             }
                         }

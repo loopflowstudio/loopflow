@@ -39,6 +39,30 @@ enum GhosttyTerminalShortcut: String {
         let held = modifiers.intersection([.command, .control, .option, .shift])
         return (held == .command && characters == "`") || (held == [.command, .shift] && characters == "~")
     }
+
+    /// AppKit fires a menu item that requires Shift for the same chord without it:
+    /// ⇧⌘↩ Zoom Pane answers ⌘↩ and ⇧⌘E Toggle Browser answers ⌘E. A chord that
+    /// no menu item names exactly belongs to the terminal.
+    static func shadowedByShiftedMenuItem(characters: String?, modifiers: NSEvent.ModifierFlags, in menu: NSMenu?) -> Bool {
+        let keys: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+        let held = modifiers.intersection(keys)
+        guard !held.contains(.shift), let key = characters?.lowercased(), !key.isEmpty, let menu else { return false }
+        var shifted = false
+        func visit(_ menu: NSMenu) -> Bool {
+            for item in menu.items {
+                var required = item.keyEquivalentModifierMask.intersection(keys)
+                // An uppercase equivalent implies Shift.
+                if item.keyEquivalent != item.keyEquivalent.lowercased() { required.insert(.shift) }
+                if item.keyEquivalent.lowercased() == key {
+                    if required == held { return true }
+                    if required == held.union(.shift) { shifted = true }
+                }
+                if let submenu = item.submenu, visit(submenu) { return true }
+            }
+            return false
+        }
+        return !visit(menu) && shifted
+    }
 }
 
 struct GhosttyTerminalView: View {
@@ -1253,7 +1277,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             key.text = $0
             return ghostty_surface_key_is_binding(surface, key, nil)
         }
-        guard controlReturn || bound else { return false }
+        guard controlReturn || bound || GhosttyTerminalShortcut.shadowedByShiftedMenuItem(
+            characters: event.charactersIgnoringModifiers, modifiers: mods, in: NSApp.mainMenu) else { return false }
         keyDown(with: event)
         return true
     }

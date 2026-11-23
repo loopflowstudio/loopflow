@@ -72,6 +72,26 @@ struct GhosttyModifierInputTests {
         }
     }
 
+    @Test("Menu items that require Shift leave the unshifted chord to the terminal")
+    func shiftedMenuItems() {
+        let menu = NSMenu()
+        for (key, mask): (String, NSEvent.ModifierFlags) in [("\r", [.command, .shift]), ("e", [.command, .shift]),
+                                                             ("O", .command), ("k", .command), ("k", [.command, .shift])] {
+            let item = NSMenuItem(title: key, action: nil, keyEquivalent: key)
+            item.keyEquivalentModifierMask = mask
+            menu.addItem(item)
+        }
+        func shadowed(_ key: String, _ flags: NSEvent.ModifierFlags) -> Bool {
+            GhosttyTerminalShortcut.shadowedByShiftedMenuItem(characters: key, modifiers: flags, in: menu)
+        }
+        #expect(shadowed("\r", .command))
+        #expect(shadowed("e", .command))
+        #expect(shadowed("o", .command))
+        #expect(!shadowed("\r", [.command, .shift]))
+        #expect(!shadowed("k", .command))
+        #expect(!shadowed("d", .command))
+    }
+
     @Test("Committing marked text writes it once and canceling writes nothing")
     func composition() async throws {
         try await expectInput("日本", after: "\u{1b}[>11u") { view in

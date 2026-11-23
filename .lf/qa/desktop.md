@@ -287,9 +287,35 @@ them. Nothing here needs WindowServer focus.
   a lazy grid's cards appear there only once drawn.
 - Not reachable: hover, drag, the jump menu (its shortcut needs
   a key window, and setting `navigation.palette = .search` draws nothing),
-  popovers and sheets opened from a "+" (New Wave never appeared), file panels
-  and Ghostty faces. The in-process accessibility tree is empty, so there is no
-  finding a control by name.
+  popovers and sheets opened from a "+" (New Wave never appeared) and file
+  panels. The in-process accessibility tree is empty, so there is no finding a
+  control by name.
+
+## Typing into a Session pane with the screen locked
+
+In production mode a Session pane does get a Ghostty surface while locked.
+Prepare a Session for a disposable Task (`lf resume --task <id> --prepare
+--json`) with a stand-in `claude` that sets `/dev/tty` raw and prints each
+`x`-terminated batch as hex. Select the Task by link, then `lf --task <id>
+desktop focus -p session`; `desktop capture -p session` reads the provider.
+
+- `terminal` (hook) makes the pane first responder and prints its screen.
+- `key post <keyCode> <flags> <chars> [unmodified]` posts a keyDown/keyUp
+  pair through the app's event queue; `key send …` hands it to the window
+  instead. Flags are letters `s c o m`, plus raw device bits
+  (`o+0x20` left Option, `o+0x40` right). Write `\r` and `\t` literally,
+  with `printf '%s\n'`: zsh's `echo` turns `\r` into a carriage return,
+  which the hook trims away.
+- Locked, the window is never key, so AppKit skips `performKeyEquivalent`
+  on the view and offers ⌘ chords straight to the main menu; Desktop's key
+  monitor (which checks `isKeyWindow`) does not act either. `claims` asks the
+  window first, as AppKit does for a key window, then names the menu that
+  takes ⌘↩. `equivalents` lists every menu key equivalent with its mask.
+- A Settings window opened under lock stalls the main thread for several
+  seconds in AppKit's window snapshotter; hook answers then arrive late and
+  out of order. Close it and send the next command once the last answer is in.
+- Quitting and relaunching the app keeps the held provider: reopening the
+  Task and focusing the pane again reattaches to the same process.
 - A private Machine can be kept for the next run: `rm` its `lf` copy, copy
   the new build in and start `lf server run` again. A Task whose held step
   was running when the old server stopped comes back blocked ("process left

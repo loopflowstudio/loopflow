@@ -1,0 +1,69 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-1069 QA · Modifier keys in Desktop Sessions</title>
+<style>
+body{font:15px/1.5 -apple-system,sans-serif;max-width:980px;margin:2rem auto;padding:0 1rem;color:#222}
+code,pre{font:13px ui-monospace,monospace}pre{background:#f4f4f4;padding:.6rem;overflow:auto}
+table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.3rem .5rem;text-align:left;vertical-align:top}
+img{max-width:100%;border:1px solid #ccc}.bad{color:#a00}.ok{color:#070}
+</style>
+<h1>LOO-1069 QA: modifier keys in Desktop Sessions</h1>
+
+<p>The branch Desktop app (an isolated Dev bundle with the file-driven QA hook) ran on a private Machine
+(<code>/tmp/lf-qa-1069</code>) against the branch <code>lf</code> server. A disposable Task had a prepared
+Session whose stand-in provider set the tty raw and printed each <code>x</code>-terminated batch of input bytes as hex.
+The screen was locked the whole run, so keys were posted as <code>NSEvent</code>s into the app's own event
+queue. Local monitors, menus and the terminal responder all saw them. No physical keyboard was used.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>#</th><th>What I did</th><th>What the provider received</th><th></th></tr>
+<tr><td>1</td><td>Legacy mode: Return, Shift-Return, Control-Return</td><td><code>0d · 1b5b32373b323b31337e · 1b5b32373b353b31337e</code> (CR, <code>CSI 27;2;13~</code>, <code>CSI 27;5;13~</code>), once each</td><td class=ok>ok</td></tr>
+<tr><td>2</td><td>Left and right Option-B (no Ghostty config, US layout)</td><td><code>1b62 1b62</code> (Alt on both sides, Ghostty's default)</td><td class=ok>ok</td></tr>
+<tr><td>3</td><td>b, Shift-B, Shift-Tab</td><td><code>62 42 1b5b5a</code></td><td class=ok>ok</td></tr>
+<tr><td>4</td><td>Provider pushes Kitty disambiguation; Return, Shift/Control/Option-Return, Shift-Tab, Option-B</td><td><code>0d · CSI 13;2u · CSI 13;5u · CSI 13;3u · CSI 9;2u · CSI 98;3u</code></td><td class=ok>ok</td></tr>
+<tr><td>5</td><td>⌘, over the focused Kitty-mode pane</td><td>Settings opened; nothing reached the provider</td><td class=ok>ok</td></tr>
+<tr><td>6</td><td>⌘K over the pane</td><td>Nothing reached the provider. The palette did not draw: its shortcut needs a key window, which a locked screen never has</td><td>partial</td></tr>
+<tr><td>7</td><td>⌘D, ⌘T (unbound Ghostty standalone defaults)</td><td><code>CSI 100;9u · CSI 116;9u</code></td><td class=ok>ok</td></tr>
+<tr><td>8</td><td>⌘⇧↩ (Zoom Pane)</td><td>Nothing reached the provider: Desktop owns it</td><td class=ok>ok</td></tr>
+<tr><td>9</td><td><b>⌘↩</b></td><td class=bad>Nothing. The View menu's Zoom Pane (⇧⌘↩) took it</td><td class=bad>bug → fixed</td></tr>
+<tr><td>10</td><td><b>⌘E</b></td><td class=bad>Nothing. Toggle Browser (⇧⌘E) switched the Session pane to the browser (screenshot below)</td><td class=bad>bug → fixed</td></tr>
+<tr><td>11</td><td>Quit the app, relaunch, open the Task, focus the pane</td><td>Same provider process (batch numbers continued from b15). Kitty mode came back: Shift/Control-Return gave <code>CSI 13;2u · CSI 13;5u</code></td><td class=ok>ok</td></tr>
+<tr><td>12</td><td>After the fix: ⌘↩ with the window asked first, as AppKit does for a key window</td><td><code>CSI 13;9u</code></td><td class=ok>ok</td></tr>
+<tr><td>13</td><td>After the fix: ⌘, opens Settings; close it; Shift-Return and Option-B in Kitty mode</td><td>Settings opened; then <code>CSI 13;2u · CSI 98;3u</code></td><td class=ok>ok</td></tr>
+</table>
+
+<h2>What I fixed</h2>
+<p>AppKit fires a menu item that requires Shift for the same chord without Shift. A standalone probe showed this
+with a bare <code>NSMenu</code>: a ⇧⌘↩ item fires on ⌘↩, and a ⇧⌘E item fires on ⌘E. The branch had freed
+<code>super+enter</code> from Ghostty so that ⌘↩ would reach the program, but Zoom Pane took it, and ⌘E took the
+Session pane away. <code>GhosttyMetalView.performKeyEquivalent</code> now keeps any chord that no menu item names
+exactly, when only a Shift item would take it (<code>GhosttyTerminalShortcut.shadowedByShiftedMenuItem</code>).
+Exact menu chords (⌘, ⌘Q ⇧⌘↩ ⇧⌘E) still go to the menu. A headless test covers the rule.</p>
+
+<h2>Screens</h2>
+<p>The Session pane after scenarios 1–11 (each line is one batch as hex):</p>
+<img src="qa/session-bytes.png" alt="Session pane showing hex byte reports">
+<p>⌘E before the fix: the Session pane became an empty browser.</p>
+<img src="qa/cmd-e-browser.png" alt="Session pane replaced by browser">
+<p>⌘, over the focused pane opens Settings:</p>
+<img src="qa/settings.png" alt="Settings window">
+
+<h2>Checks</h2>
+<pre>scripts/test_desktop.sh --filter 'GhosttyModifierInputTests|SessionModifierInputTests'   # 11 tests passed headless, including the new Shift-menu test; CI repeats</pre>
+
+<h2>Where it stands</h2>
+<p><b>Works now:</b> modified Return, Tab and Option keys reach a held Session with modifiers intact in legacy and
+Kitty modes, once each, through the app's real event dispatch, and again after the app quits and reopens.
+Desktop menu shortcuts still win over the focused pane. ⌘↩ and ⌘E reach the program.</p>
+<p><b>Not reached:</b></p>
+<ul>
+<li>A physical keyboard, input-source switching and real IME typing. The screen was locked, and these need a person at the Mac.</li>
+<li>Key-window dispatch. Locked, AppKit sends ⌘ chords straight to the main menu and skips the view. For scenario 12 I asked the window first, as AppKit does for a key window, but I didn't see that order live. Ghostty's AppKit view, and the branch's Control-Return routing, depend on the same order.</li>
+<li>The ⌘K palette and the Desktop action monitor. Both need a key window.</li>
+<li>A real Claude Code provider. The stand-in reports raw bytes, which is what Claude Code would read.</li>
+</ul>
+<p><b>Still wrong, worst first:</b></p>
+<ul>
+<li>Under a locked screen, a Settings window opened with ⌘, stalls the main thread for several seconds in AppKit's window snapshotter. This was seen only while locked and is unrelated to keyboard input.</li>
+</ul>

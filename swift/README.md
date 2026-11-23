@@ -823,7 +823,8 @@ custom postprocessing are outside the opaque-text contrast guarantee.
 In a focused Session or Shell, programs that distinguish **Shift-Return** and
 **Control-Return** receive those chords even after you reopen the pane.
 Desktop shortcuts, app menus and terminal bindings such as **⌘↑** to jump to
-the previous prompt still work. While you compose text with an input method or
+the previous prompt still work. A chord that only a Shift menu shortcut
+uses, such as **⌘↩** beside Zoom Pane's **⇧⌘↩**, goes to the program. While you compose text with an input method or
 dead key, Desktop shortcuts wait. Canceling the composition sends no text.
 
 Option follows Ghostty’s default for your active keyboard layout. To use

@@ -522,6 +522,51 @@ mod tests {
         messages
     }
 
+    /// A Codex app-server that answers one client's `turn/start`: the request
+    /// it took.
+    fn codex_app_server(endpoint: &Path) -> std::thread::JoinHandle<serde_json::Value> {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let listener = UnixListener::bind(endpoint).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async move {
+                    let listener = tokio::net::UnixListener::from_std(listener).unwrap();
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+                    async fn receive(
+                        socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::UnixStream>,
+                    ) -> serde_json::Value {
+                        loop {
+                            if let Message::Text(text) = socket.next().await.unwrap().unwrap() {
+                                return serde_json::from_str(&text).unwrap();
+                            }
+                        }
+                    }
+                    let initialize = receive(&mut socket).await;
+                    let answer = serde_json::json!({"id":initialize["id"],"result":{}});
+                    socket
+                        .send(Message::Text(answer.to_string().into()))
+                        .await
+                        .unwrap();
+                    assert_eq!(receive(&mut socket).await["method"], "initialized");
+                    let start = receive(&mut socket).await;
+                    let answer =
+                        serde_json::json!({"id":start["id"],"result":{"turn":{"id":"woken"}}});
+                    socket
+                        .send(Message::Text(answer.to_string().into()))
+                        .await
+                        .unwrap();
+                    let _ = socket.next().await;
+                    start
+                })
+        })
+    }
+
     #[test]
     fn an_idle_opencode_or_pi_work_session_starts_a_turn_on_its_direction_once() {
         for (provider, thread) in [("opencode", "native"), ("pi", "/pi/session.jsonl")] {
@@ -561,8 +606,6 @@ mod tests {
     /// a turn on its app-server before anyone types.
     #[test]
     fn a_reopened_codex_work_session_starts_a_turn_on_its_waiting_steer() {
-        use futures_util::{SinkExt, StreamExt};
-        use tokio_tungstenite::tungstenite::Message;
         let session = "wake-codex";
         let fixture = fixture(session);
         let endpoint = fixture.home.path().join("codex.sock");
@@ -598,44 +641,7 @@ mod tests {
             .store
             .save_session_steer(session, "Fixture author", "use the other table")
             .unwrap();
-        let listener = std::os::unix::net::UnixListener::bind(&endpoint).unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let provider = std::thread::spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(async move {
-                    let listener = tokio::net::UnixListener::from_std(listener).unwrap();
-                    let (stream, _) = listener.accept().await.unwrap();
-                    let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
-                    async fn receive(
-                        socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::UnixStream>,
-                    ) -> serde_json::Value {
-                        loop {
-                            if let Message::Text(text) = socket.next().await.unwrap().unwrap() {
-                                return serde_json::from_str(&text).unwrap();
-                            }
-                        }
-                    }
-                    let initialize = receive(&mut socket).await;
-                    let answer = serde_json::json!({"id":initialize["id"],"result":{}});
-                    socket
-                        .send(Message::Text(answer.to_string().into()))
-                        .await
-                        .unwrap();
-                    assert_eq!(receive(&mut socket).await["method"], "initialized");
-                    let start = receive(&mut socket).await;
-                    let answer =
-                        serde_json::json!({"id":start["id"],"result":{"turn":{"id":"woken"}}});
-                    socket
-                        .send(Message::Text(answer.to_string().into()))
-                        .await
-                        .unwrap();
-                    let _ = socket.next().await;
-                    start
-                })
-        });
+        let provider = codex_app_server(&endpoint);
         let Some(super::super::boundary::After::Reachable(woken)) =
             report(BoundaryMoment::Start, "SessionStart")
         else {

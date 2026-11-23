@@ -107,7 +107,7 @@ prompt once and hears the steer once.
   - a first boundary that is a prompt leaves it working; the wake sends
     nothing.
   - a Codex launch's start report wakes an idle reopened Session through its
-    endpoint (stand-in app-server already in `wake::tests`).
+    endpoint (`wake::tests::codex_app_server` stand-in).
 - `context.rs` unit: an answered Start on an interactive Session claims no
   steer; a chat's Start claims it.
 - `tests/e2e/idle_wake.py` by hand on OpenCode and Pi (reopen leg), plus the

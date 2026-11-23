@@ -1253,15 +1253,16 @@ fn report_first_boundary(
     opening: bool,
 ) {
     use crate::machine::wire::{BoundaryMoment, ServerOperation, SessionBoundary};
-    let (moment, callback) = match opening {
-        true => (
+    let (moment, callback) = if opening {
+        (
             BoundaryMoment::Tool,
             json!({"hook_event_name":"UserPromptSubmit","session_id":thread.as_str()}),
-        ),
-        false => (
+        )
+    } else {
+        (
             BoundaryMoment::Start,
             json!({"hook_event_name":"SessionStart","session_id":thread.as_str(),"source":"resume"}),
-        ),
+        )
     };
     let operation = ServerOperation::SessionBoundary(SessionBoundary {
         moment,

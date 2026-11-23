@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Session panes · LOO-1064 concept review</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --paper: #f5f4f0;
+      --ink: #242622;
+      --muted: #535851;
+      --rule: #c9cec5;
+      --surface: #fffefa;
+      --accent: #245c46;
+      --accent-bg: #e3f0e7;
+      --warning: #8b3b21;
+      --warning-bg: #f6e6dd;
+      --terminal: #1b221e;
+      --terminal-ink: #e6ece5;
+      --terminal-muted: #a8bbad;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --paper: #171b18;
+        --ink: #e9ece6;
+        --muted: #b8c1b7;
+        --rule: #414e46;
+        --surface: #212823;
+        --accent: #a8e1be;
+        --accent-bg: #243b2e;
+        --warning: #ffb493;
+        --warning-bg: #432d25;
+        --terminal: #121714;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font: 16px/1.55 system-ui, sans-serif;
+    }
+    main { max-width: 66rem; padding: 3.25rem clamp(1rem, 5vw, 3.5rem); margin: auto; }
+    h1, h2, h3, p, figure { margin: 0; }
+    h1, h2 { font-family: ui-serif, Georgia, serif; font-weight: 600; line-height: 1.12; }
+    h1 { font-size: clamp(2rem, 5vw, 3.8rem); letter-spacing: -.04em; max-width: 48rem; text-wrap: balance; }
+    h2 { font-size: clamp(1.5rem, 3vw, 2.1rem); letter-spacing: -.02em; }
+    h3 { font-size: 1rem; }
+    header p { max-width: 49rem; margin-top: .85rem; color: var(--muted); }
+    section { margin-top: 2.5rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); }
+    section > p { margin-top: .7rem; max-width: 50rem; }
+    a { color: var(--accent); text-underline-offset: .18em; }
+    code, .screen, .banner, .transition { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    code { overflow-wrap: anywhere; font-size: .9em; }
+    .comparison, .path {
+      display: grid;
+      gap: .85rem;
+      margin-top: 1.1rem;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+    }
+    figcaption { margin-bottom: .45rem; }
+    figcaption strong, .answer { color: var(--accent); }
+    .before strong, .answer.no { color: var(--warning); }
+    .pane {
+      overflow: hidden;
+      border: 1px solid var(--rule);
+      border-radius: .65rem;
+      background: var(--terminal);
+      color: var(--terminal-ink);
+    }
+    .strip {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      padding: .45rem .75rem;
+      background: var(--surface);
+      color: var(--ink);
+      font-size: .85rem;
+      border-bottom: 1px solid var(--rule);
+    }
+    .strip span { color: var(--accent); }
+    .screen {
+      position: relative;
+      min-height: 6rem;
+      margin: 0;
+      padding: .65rem .75rem;
+      font-size: .83rem;
+      overflow-wrap: anywhere;
+    }
+    .before .screen { min-height: 4rem; }
+    .screen span { color: var(--terminal-muted); }
+    .transition, .banner {
+      background: var(--warning-bg);
+      color: var(--warning);
+      font-size: .8rem;
+      padding: .35rem .55rem;
+    }
+    .transition { padding-inline: .75rem; }
+    .banner { border-radius: .25rem; }
+    .overlay { position: absolute; inset: .25rem .4rem auto; }
+    .path { list-style: none; padding: 0; }
+    .path li { background: var(--surface); border: 1px solid var(--rule); border-radius: .55rem; padding: .85rem; }
+    .path p { margin-top: .45rem; font-size: .92rem; }
+    .path .clear { color: var(--accent); background: var(--accent-bg); padding: .35rem .55rem; border-radius: .25rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: .8rem; font-size: .92rem; }
+    th, td { text-align: left; vertical-align: top; padding: .6rem .7rem; border-bottom: 1px solid var(--rule); }
+    th { background: var(--surface); }
+    tbody th { width: 24%; }
+    .answer { font-weight: 650; white-space: nowrap; }
+    .notes { color: var(--muted); font-size: .9rem; }
+    .questions { padding-left: 1.3rem; }
+    .questions > li + li { margin-top: .8rem; }
+    .questions ol { padding-left: 1.5rem; margin-top: .2rem; }
+    @media (max-width: 35rem) {
+      main { padding-top: 2rem; }
+      th, td { padding: .45rem .3rem; }
+      table { font-size: .84rem; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Does the pane tell you when you can continue?</h1>
+      <p>LOO-1064 reviews Desktop Session opening, resuming and recovery. A Session keeps the conversation. A provider thread can run in a new process. A pane can reconnect to the held terminal while the provider keeps running.</p>
+    </header>
+
+    <section aria-labelledby="mismatch">
+      <h2 id="mismatch">A past resume looks like a live connection state</h2>
+      <p>After a provider resumes its saved thread, the pane prints the same event twice. The strip already names the provider and reports its activity. The terminal can take input, yet one message uses a row and the second covers the first terminal line.</p>
+      <div class="comparison">
+        <figure class="before">
+          <figcaption><strong>Existing</strong> · resumed and ready</figcaption>
+          <div class="pane" role="img" aria-label="The Claude strip is followed by a transition row and a second copy of the same message covering the first terminal line.">
+            <div class="strip"><b>Claude</b><span>Available</span></div>
+            <div class="transition">Resumed in a new process</div>
+            <div class="screen">The tests are ready.<br><span>❯</span><div class="banner overlay">Resumed in a new process</div></div>
+          </div>
+        </figure>
+        <figure>
+          <figcaption><strong>Proposed</strong> · resumed and ready</figcaption>
+          <div class="pane" role="img" aria-label="The Claude strip is followed by the visible terminal output and prompt.">
+            <div class="strip"><b>Claude</b><span>Available</span></div>
+            <div class="screen">The tests are ready.<br><span>❯</span></div>
+          </div>
+        </figure>
+      </div>
+      <p>On a later reconnect, the stored event can still say “Resumed in a new process” while the relay says “Same process.” The first describes what the provider did earlier. The second describes what the viewer just reattached to. Put provider changes in <code>lf session history &lt;session&gt;</code>. Use the pane’s message to explain why input is paused and what can bring it back.</p>
+      <p class="notes"><a href="../swift/LoopflowMac/Views/WorkspacePanesView.swift">Session pane</a> · <a href="../swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift">Terminal mount</a> · <a href="../rust/loopflow-execution/src/transport/connection.rs">Relay status</a></p>
+    </section>
+
+    <section aria-labelledby="walk">
+      <h2 id="walk">Open the Task, lose the connection, rejoin</h2>
+      <ol class="path">
+        <li>
+          <h3>1. Resume the saved thread</h3>
+          <p class="banner">Opening… Input paused.</p>
+          <p>Desktop prepares the conversation with <code>lf resume --prepare</code>. A retained screen can appear before native readiness. A connected relay still shows Opening during that gap.</p>
+        </li>
+        <li>
+          <h3>2. Continue typing</h3>
+          <p class="clear">Claude · Available<br><code>The tests are ready.</code></p>
+          <p>Native readiness enables input and restores requested focus. The message clears in place and the terminal keeps its geometry.</p>
+        </li>
+        <li>
+          <h3>3. The bridge stops answering</h3>
+          <p class="banner">Reconnecting… Input paused; last screen may be stale.</p>
+          <p>The pane retains its last screen and pauses input. The relay can reconnect to the held provider, so the draft and buffered output can survive the interruption.</p>
+        </li>
+        <li>
+          <h3>4. Retry or refresh if it stays paused</h3>
+          <p class="banner">Session unavailable. Input paused; last screen may be stale.</p>
+          <p><b>Retry connection</b> asks a reachable relay to reconnect. If the status channel is gone, <b>Refresh session</b> opens a replacement viewer for the same Session. Once it can accept input, the message clears. A retired or replaced terminal reports why it ended.</p>
+        </li>
+      </ol>
+      <p>A saved screen and an “Available” program report can both appear before native readiness. Keep input paused until the relay confirms both connection and readiness. If a provider transcript is missing, opening can start from the first request. Keep the existing launch diagnostics, the earlier history and the new thread’s recorded transition. A late disconnect after orderly close must leave the ended reason visible.</p>
+      <p class="notes"><a href="../swift/LoopflowMac/Views/SessionsView.swift">Open and refresh</a> · <a href="../swift/LoopflowMac/Services/ServerConnection.swift">Status and Retry</a> · <a href="../rust/loopflow-execution/src/ops/human_session.rs">Saved-thread recovery</a></p>
+    </section>
+
+    <section aria-labelledby="model">
+      <h2 id="model">Do the product and code concepts line up?</h2>
+      <table aria-labelledby="model">
+        <thead><tr><th scope="col">In the product</th><th scope="col">In the code</th><th scope="col">Today</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Open the same conversation</th><td><code>LfSession</code> and <code>lf resume</code> keep the Session identity through attachment and provider recovery.</td><td class="answer">Yes</td></tr>
+          <tr><th scope="row">Resume, fork or start a thread</th><td><code>ProviderTransition</code> records the observed thread and process. The history feed reads the stored events. A viewer reconnect alone leaves that history as it was.</td><td class="answer">Yes</td></tr>
+          <tr><th scope="row">See what the agent is doing</th><td>The pane strip shows the provider and <code>ProgramStatusRecords</code>. The provider may report idle while this pane is reconnecting.</td><td class="answer">Yes</td></tr>
+          <tr><th scope="row">Know when this pane can type</th><td><code>ServerConnectionReading.acceptsInput</code> tracks live readiness. Its title can still show history after readiness. <code>ProviderTransitionRow</code> also shows history independently of the pane.</td><td class="answer no">No</td></tr>
+          <tr><th scope="row">Recover a paused or lost view</th><td><code>ServerConnection.retry()</code> asks the current relay to try again. <code>SessionsStore.refresh</code> replaces the viewer through the normal opening path.</td><td class="answer">Yes</td></tr>
+        </tbody>
+      </table>
+      <p><strong>Proposed.</strong> The opening placeholder hands off to the terminal’s status overlay. On the connected path, the existing input predicate also clears the message. Delete the standalone history row, its formatter and the Desktop connection reader’s unused transition property. Keep the relay publisher and Session DTO shape for older clients. Storage still records each observed provider change.</p>
+      <p class="notes"><a href="../rust/loopflow-storage/src/sqlite/provider_transitions.rs">Provider transition storage</a> · <a href="../rust/loopflow/src/lf/commands/session.rs">Session history feed</a> · <a href="plan.md">Build plan</a></p>
+    </section>
+
+    <section aria-labelledby="questions">
+      <h2 id="questions">Review questions</h2>
+      <ol class="questions">
+        <li>Where should a successful provider resume appear?
+          <ol type="a">
+            <li><strong>Chosen.</strong> In Session history. A usable pane gives the terminal its full text area.</li>
+            <li>In a brief confirmation inside the pane after readiness.</li>
+          </ol>
+        </li>
+        <li>When should the relay stop publishing the transition field?
+          <ol type="a">
+            <li><strong>Chosen.</strong> In a separate compatibility change. This Desktop already has the data it needs to show live status.</li>
+            <li>In this release. An older Desktop would lose its relay’s transition notice.</li>
+          </ol>
+        </li>
+      </ol>
+    </section>
+  </main>
+</body>
+</html>

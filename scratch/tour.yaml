@@ -1,13 +1,13 @@
-at: 51a9c32e0de7eff436925e4e420dbed4f68aceba
+at: 9892821b5062556ee55b57eb0a0adec6da165a2b
 first:
   - path: docs/surfaces.md
     why: Follow a setting from search through Undo
   - path: docs/config.md
-    why: Distinguish effective values from declarations
+    why: Read how defaults, explicit null and Reset work
   - path: scratch/plan.md
     why: Design choices and remaining visual checks
-  - path: swift/LoopflowMac/Views/SettingsWindow.swift
-    why: The sidebar and its personal and project destinations
+  - path: rust/loopflow-execution/src/config/catalog.rs
+    why: Agent preferences name their own defaults
   - path: rust/loopflow-execution/src/engine/config/scope.rs
     why: Effective values and editable declarations from one reading
   - path: swift/LoopflowMac/Services/ConfigurationScope.swift
@@ -17,9 +17,11 @@ first:
   - path: swift/LoopflowMac/Services/ScopedSettingsModel.swift
     why: Observe the selected work and save checked edits
   - path: swift/LoopflowMac/Views/ScopedSettings.swift
-    why: Place controls in personal and project panes
+    why: Select applicable rows for each pane and target
   - path: swift/LoopflowMac/Views/ScopedSettingRow.swift
-    why: Bind each editor to its original declaration
+    why: Read fallbacks, inspect sources and reset a declaration
+  - path: swift/LoopflowMac/Views/SettingsWindow.swift
+    why: Search opens the applicable pane and target
   - path: swift/LoopflowMac/Views/SettingsSearch.swift
     why: Find the same controls from search
   - path: rust/loopflow-execution/src/engine/config.rs

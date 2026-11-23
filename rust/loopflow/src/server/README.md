@@ -127,12 +127,27 @@ and its directory are private; remote proxies must never forward this endpoint.
 The remote carrier (`remote.rs`, `lf server mobile`) speaks the same protocol
 over WebSocket on the host's Tailscale address: one text frame per message on
 `/v1/machine`, ticketed connections on `/v1/ticket`, binary frames for terminal
-bytes. It admits another untagged node of the approved owner through
-`tailscale whois`. The Machine's own node is refused unless
-`mobile-same-device` exists in the lf home, which is how an iOS Simulator on the
-same Mac connects; create it only on a Mac with one account. Setup saves the endpoint, owner and enabled choice in
-Machine-local `mobile.yaml`, using the shared atomic file writer. It does not
-add service state to `config.yaml` or the preferences catalogue.
+bytes. `mobile.rs` talks directly to Tailscale's LocalAPI over HTTP with zero
+subprocesses: same-UID `IPNExtension` open vnode proof files via `libproc` on
+macOS App Store builds, `/Library/Tailscale/ipnport` and its proof file on macOS
+Standalone, and `tailscaled` Unix sockets (`TS_SOCKET`,
+`/var/run/tailscaled.socket` on macOS, `/var/run/tailscale/tailscaled.sock` on
+Linux). At bind it reads `/localapi/v0/status` once to verify the untagged
+owner, `.ts.net` MagicDNS name and tailnet addresses, and loads TLS credentials
+in memory from `/localapi/v0/cert/<dns>?type=pair&min_validity=24h`. While
+listening it polls `/localapi/v0/status?peers=false` every 5 seconds and renews
+the certificate every 6 hours, stopping the listener and closing active remote
+connections if ownership, login, DNS, certificate or the daemon is lost. Each
+accepted TCP socket admits another untagged node of the approved owner through
+`/localapi/v0/whois?addr=<ip:port>&proto=tcp`. The Machine's own node is refused
+unless `mobile-same-device` exists in the lf home, which is how an iOS Simulator
+on the same Mac connects; create it only on a Mac with one account. Restoration
+runs as a cancellable async task off the control loop with a `5 → 10 → 20 → 30 s`
+backoff from completion, so `mobile.status` answers immediately and `--off`
+aborts any in-flight bind or listener. Setup saves the endpoint, owner and
+enabled choice in Machine-local `mobile.yaml`, using the shared atomic file
+writer. It does not add service state to `config.yaml` or the preferences
+catalogue.
 
 Another Machine reaches this server over SSH: `lf server connect` checks
 `LF_EXPECTED_MACHINE_ID`, starts the server when none is running

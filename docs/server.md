@@ -83,14 +83,35 @@ setting and never re-register it behind your back.
 ## Phone access
 
 ```bash
-lf server mobile            # enable private remote access over this host's Tailscale
-lf server mobile --status   # check approval and live readiness
-lf server mobile --off      # disable remote access; local Sessions keep running
+lf server mobile
+# {"enabled":true,"endpoint":"https://mac.tailnet.ts.net:51842","owner":{"node":"…","user":12345}}
+
+lf server mobile --status
+# {"configuration":{"enabled":true,"endpoint":"https://mac.tailnet.ts.net:51842","owner":{…}},"ready":true,"error":null}
+
+lf server mobile --off
+# Mobile access is off
 ```
 
 A phone signed into the same Tailscale user can attach to running Sessions on
-this Machine. Enabling local server access or adding SSH Machines does not
-enable phone access. For local-only use, no network port is opened; keep the
-local Unix socket private.
+this Machine. Setup requires a signed-in, user-owned Tailscale node (not a
+tagged device) with MagicDNS and HTTPS certificates enabled on the tailnet.
+
+`lf server` talks directly to Tailscale's LocalAPI without launching the
+`tailscale` app or CLI. It discovers the macOS App Store app, Standalone macOS
+Tailscale, or `tailscaled` over its Unix socket (`/var/run/tailscaled.socket` on
+macOS, `/var/run/tailscale/tailscaled.sock` on Linux, or `TS_SOCKET` when set in
+the server's environment).
+
+If Tailscale stops, signs out, or changes owner, the server closes active phone
+connections and marks mobile access unavailable while local Sessions keep
+running. Once Tailscale returns on the approved account, the saved endpoint and
+QR address come back automatically (retrying at 5, 10, 20, then every 30
+seconds); `lf server mobile --status` answers immediately from the last state
+without waiting on reconnection.
+
+Enabling local server access or adding SSH Machines does not enable phone
+access. For local-only use, no network port is opened; keep the local Unix
+socket private.
 
 Next: [Surfaces](surfaces.md) · [Connection troubleshooting](troubleshooting.md#desktop-cannot-connect).

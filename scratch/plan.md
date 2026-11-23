@@ -113,9 +113,15 @@ touch that path, unverified on the base) and
 timed out under the parallel run and passes alone (15 s). clippy
 `--all-targets -D warnings` clean.
 
-Next: gate. Swift DTO suite for `WaveRemoval`/`WaveRenamed`; full matrix in CI.
+## Remaining
 
-## Trackers
+Nothing to implement. Gate: Swift DTO suite for `WaveRemoval`/`WaveRenamed`,
+the full matrix in CI, and the `oauth_tests` contention failure checked on the
+base. Initiative names left in `rust/` are released-schema readers
+(`ProjectInitiatives`, `planning_initiatives`, `tracker_wave_sync.initiative`
+written empty, the ignored Wave `linear:` key) and fixtures that test them.
+
+## Tracker decisions (built in slice 2)
 
 - `lf wave plan connect <wave> <linear project>` links the Wave's Project to
   an existing Linear Project; `lf wave plan connect <wave>` with no Project
@@ -140,7 +146,7 @@ Next: gate. Swift DTO suite for `WaveRemoval`/`WaveRenamed`; full matrix in CI.
 - A Task with no Wave is an issue in no Project (a Linear team issue), as
   slice 2 built; `Task::goes_to_tracker` stays gone.
 
-## Migration (`remove_chapters.sql`, edited in place)
+## Migration decisions (`remove_chapters.sql`, built in slice 1)
 
 - A live Wave with no Project gets one, named for the Wave, local until
   connected (36 such Waves in the real store, 2026-11-22).

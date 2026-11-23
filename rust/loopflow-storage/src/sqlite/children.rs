@@ -36,9 +36,8 @@ const BRANCH_TASK_IDS: &str = "SELECT task_id FROM task_checkouts WHERE branch=?
     UNION SELECT task_id FROM task_prs WHERE branch=?1";
 
 /// Record the checkout this Machine has for a Task, or that it has none.
-/// Open Sessions in an adopted checkout that name no Task become the Task's,
-/// as if they had started there: a Session records its Task once, and nothing
-/// matches paths later.
+/// Work already running in the checkout keeps the Task it started with: a
+/// Session joins a Task when it starts there or by `lf session bind`.
 fn write_task_checkout_in(conn: &Connection, task: &Task) -> StoreResult<()> {
     let Some(root) = task
         .worktree
@@ -63,16 +62,6 @@ fn write_task_checkout_in(conn: &Connection, task: &Task) -> StoreResult<()> {
             task.base_commit,
             task.parent_pr_id.as_ref().map(TaskPrId::as_str)
         ],
-    )?;
-    conn.execute(
-        &format!(
-            "UPDATE agent_sessions SET task_id=?1,work_source=coalesce(work_source,'checkout'),
-                wave_id=(SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1)
-             WHERE id IN (SELECT id FROM agent_sessions INDEXED BY open_sessions WHERE completed_at IS NULL)
-             AND task_id IS NULL AND wave_id IS NULL AND primary_scope IS NULL AND {}",
-            super::task_work::within("cwd", "?2")
-        ),
-        params![task.id.as_str(), root],
     )?;
     Ok(())
 }

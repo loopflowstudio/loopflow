@@ -10,3 +10,6 @@
   Working order. Carry the activity-independence regression across it.
 - Take the drop side from the list being dragged. The sidebar and grid can
   receive different revisions, and the sidebar already shows the landing line.
+- Send that side to the Machine as part of the drop. When its reading is
+  newer, use the same side against that order. A destination-only command
+  still moves into the target's current slot.

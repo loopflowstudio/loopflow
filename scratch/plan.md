@@ -11,9 +11,11 @@ list. ⌘1–9 and ⌃Tab follow the visible rows. The Wave view shows the same 
 order.
 
 Drag the second row above the first from the repository sidebar or Working Tasks
-grid. The move shows at once and a successful drag survives refresh. If the
-Machine refuses a drag and the next read fails, the last confirmed order is
-visible with a Notice. A fresh read can then show current membership and order.
+grid. The move shows at once and a successful drag survives refresh. If another
+window changed the order since the drag surface read it, the Machine still
+places the row on the chosen side of the target. If the Machine refuses a drag
+and the next read fails, the last confirmed order is visible with a Notice. A
+fresh read can then show current membership and order.
 
 ## Model
 
@@ -38,12 +40,12 @@ visible with a Notice. A fresh read can then show current membership and order.
 - **Selection** names the open Task by ID. Filters and shortcuts use the visible
   sequence. The selected workspace and its conversation survive a status change
   while the row can leave a filtered list.
-- **A drop** is one edit to the repository's Working order, by Task ID and
-  destination Task ID. The Machine resolves current Working membership and
-  writes `task_orders` atomically against the saved sequence it read.
-  The drag preview is temporary and uses the last reading underneath it. A
-  refusal clears that preview and reports the error. A committed write is
-  reflected by a sufficiently recent Machine reading.
+- **A drop** names a Task, a target Task and a placement before or after it.
+  The drag surface determines the side from the order it showed. The same
+  placement drives the preview and the write. The Machine resolves both IDs
+  against its current Working reading and writes `task_orders` atomically
+  against the saved sequence it read. A retry uses the same side against the
+  newer sequence. If either Task is absent, the Machine refuses the drop.
 
 ## Shared order
 
@@ -56,15 +58,32 @@ The regression follows the rank-2 Task through Idle → Working → Idle before 
 first drag, then reads the saved order after dragging it above rank 1. Desktop
 replays the activity frames in one selected workspace.
 
-## Drop feedback
+## Remaining build slice
 
-The sidebar and Working Tasks grid preview a drop against their own confirmed
-readings. A pending write names the Machine, repository, dragged Task, target
-and side. Each subscription retires its preview when its reading covers the
-write receipt. A refusal reveals the latest membership and order immediately.
-The follow-up read keeps the refusal Notice visible if either list fails.
+Start with a served-write regression. The sidebar shows A, B, C and drops B
+before A. Another window has already moved A after C, so the Machine reads
+B, C, A. Today's target-index write saves C, A, B. The same request with an
+explicit side should save C, B, A, matching the preview against that reading.
+Exercise the opposite side as well. Assert on the committed sequence and a
+fresh Working read so a client fixture cannot supply the expected result for
+the Machine. Use `rust/loopflow/tests/served_reads.rs` and the existing order
+fixtures in `rust/loopflow-execution/src/store/selections/tests.rs`.
 
-The remaining product check is the Loopflow Dev walkthrough at gate.
+Carry a single before/after value from the sidebar or grid through
+`WorkModel.reorderWorkingTask`, `PendingCommand` and `ServedWrite` into
+`desktop.dashboard.move` and the one-shot `lf desktop dashboard move` path.
+Have `selections::reorder_task` place the source on that side of the target in
+the current sequence after removing the source. Keep the existing
+destination-only behavior when no side was chosen, including existing CLI
+callers, saved Dashboard moves and a grid drop from a Task absent in its reading.
+Reuse the existing `task_orders` record and compare-and-commit path.
+
+Keep the preview over each list's confirmed reading. Each subscription retires
+its preview when its reading covers the write receipt. A refusal reveals its
+last confirmed membership and order immediately. The follow-up read keeps the
+refusal Notice visible if either list fails. Test both encodings of the move in
+the Swift and served command tests. Keep the receipt and refusal cases in
+`swift/LoopflowTests/WorkNavigationTests.swift`. [Concept review](concept-review.html)
 
 ## Docs
 
@@ -93,6 +112,13 @@ The remaining product check is the Loopflow Dev walkthrough at gate.
   both kept `c, b, a` after the reread failed. The focused Desktop run now
   shows the confirmed `c, a, b` for refusals with and without that revision.
   All 28 selected tests passed.
+- The private Machine walkthrough recorded in [QA](qa.html) observed the
+  sidebar through a turn, drag, arrival, relaunch, failed drop and recovery.
+  The grid displayed the saved order. The live grid drag, keyboard shortcuts
+  and key-window filter still need an unlocked walkthrough.
+- The built Machine's `move_into_place` on B, C, A moves B onto A's index and
+  returns C, A, B. The branch's receipt test gets its resulting order from a
+  stand-in.
 
 ## Gate
 
@@ -108,7 +134,8 @@ uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/TaskFeedTests
 In Loopflow Dev, select the lower of two Working rows while its conversation
 is Available and send a prompt. Watch the status change and hand back in place.
 Switch to the Wave and compare relative order. Return to the repository, drag
-the lower row up, and refresh.
+the lower row up, and refresh. In an unlocked window, exercise a grid drop and
+⌘1–9, ⌃Tab and the ⌘K sidebar filters.
 
 The earlier drag feedback and shared-order repairs were LOO-673 (#1791) and
 LOO-696 (#1947). LOO-937 changes Working drags into Project rank edits

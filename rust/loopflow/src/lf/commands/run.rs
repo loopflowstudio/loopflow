@@ -1,14 +1,12 @@
 use crate::lf::commands::context::preview::PromptPreview;
 use crate::lf::Cli;
 use anyhow::{anyhow, bail, Result};
-use loopflow_execution::agent::check_cli_available;
-use loopflow_execution::agent::missing_agent_message;
 use loopflow_execution::agent::run_agent;
 use loopflow_execution::agent::AgentConfig;
 use loopflow_execution::agent::ProcessConfig;
-use loopflow_execution::config::parse_agent;
 use loopflow_execution::graph::Skill;
-use loopflow_execution::harness::native_session::{launch_session, SessionCommandOutcome};
+use loopflow_execution::harness::native_session::{launch_session, NativeOutcome};
+use loopflow_execution::harness::{LaunchKind, Mode};
 use loopflow_execution::output::{format_context_header, format_reproducible_command, Colors};
 use loopflow_execution::process::LfProcessRuntime;
 use loopflow_execution::prompt::attribution::attributed_context;
@@ -20,7 +18,6 @@ use loopflow_execution::prompt::Surface;
 use loopflow_execution::session_record::{
     AgentProcessRequest, SessionCaptureSpec, SubjectAttribution,
 };
-use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tracing::{debug, info, instrument, trace};
@@ -34,11 +31,17 @@ use tracing::{debug, info, instrument, trace};
 /// | Some    | Some    | Run skill with message as extra context |
 /// | None    | None    | Interactive chat                      |
 #[instrument(skip(cli, message), fields(skill = ?skill, has_message = message.is_some()))]
-pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
+pub fn run(
+    kind: LaunchKind,
+    repo_root: &Path,
+    skill: Option<&str>,
+    message: Option<&str>,
+    cli: &Cli,
+) -> Result<()> {
     if let Some(binding) = implicit_binding(cli)? {
-        return run_bound_prompt(skill, message, cli, &binding).map(|_| ());
+        return run_bound_prompt(kind, skill, message, cli, &binding).map(|_| ());
     }
-    let mut built = build_prompt(repo_root, skill, message, cli)?;
+    let mut built = build_prompt(kind.mode(), repo_root, skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
     // `--wave` resolved its Wave once for this process.
     built.work = cli.wave.as_ref().and_then(|_| {
@@ -49,15 +52,9 @@ pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &C
             source: loopflow_execution::session::WorkSource::Declared,
         })
     });
-    built.agent_config.holder = loopflow_execution::session::Holder::of(
-        built
-            .work
-            .as_ref()
-            .is_some_and(|work| work.source.is_managed()),
-    );
 
     print_context_header(&built, cli);
-    run_prompt(&built, cli).map(|_| ())
+    run_prompt(built, cli, kind).map(|_| ())
 }
 
 pub(crate) fn preview_prompt(
@@ -72,17 +69,15 @@ pub(crate) fn preview_prompt(
         operator_scope(skill, cli, cwd, binding)?.is_none(),
         "context unavailable before the operator's scope checkout is prepared; preview from its existing checkout"
     );
+    let mode = loopflow_execution::transport::LaunchInput {
+        batch: cli.batch,
+        interactive: cli.interactive,
+        has_prompt: skill.is_some() || message.is_some(),
+    }
+    .mode();
     let built = match binding {
-        Some(binding) => build_bound_prompt(skill, message, cli, binding)?,
-        None => build_prompt_at(
-            skill,
-            message,
-            message.unwrap_or_default(),
-            cli,
-            cwd.to_path_buf(),
-            None,
-            captured,
-        )?,
+        Some(binding) => build_bound_prompt(mode, skill, message, cli, binding)?,
+        None => build_prompt_at(mode, skill, message, cli, cwd.to_path_buf(), None, captured)?,
     };
     Ok(PromptPreview {
         checkout: built.repo_root,
@@ -109,11 +104,7 @@ pub(crate) fn preview_prompt(
 
 /// `lf -b resume ID --message TEXT`: one more headless turn of a conversation,
 /// using `message` and the provider's own history without re-executing its skill.
-/// `named_work` when the resume command named a Task or Wave.
-pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()> {
-    if loopflow_execution::transport::delegate_current(true, named_work)? {
-        return Ok(());
-    }
+pub fn resume(id: &str, message: &str, cli: &Cli, kind: LaunchKind) -> Result<()> {
     let store = loopflow_execution::store::open_sqlite(
         &loopflow_execution::store::database_path_from_env()?,
     )?;
@@ -122,11 +113,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
         .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
     // A Graph corrects its own step's answer in that step's Run; nobody else
     // continues a Run.
-    let caller_graph = loopflow_execution::journal::current_lf_process_id()
-        .map(|process| store.lf_process(&process))
-        .transpose()?
-        .flatten()
-        .and_then(|process| process.parent_lf_process_id);
+    let caller_graph = loopflow_execution::journal::current_parent_lf_process_id();
     let own_step = caller_graph
         .is_some_and(|graph| session.graph_lf_process_id.as_deref() == Some(graph.as_str()));
     if !own_step {
@@ -140,17 +127,12 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
         &session,
         cli.setting_values()?,
         cli.output_schema.as_ref(),
-        cli.batch,
     )?;
     let mut turn = cli.process_options();
-    turn.agent = resolved.agent.clone();
+    turn.agent = Some(resolved.agent.to_string());
     let message = if session.captured.is_some()
-        && session.provider.as_deref()
-            != Some(
-                loopflow_execution::config::parse_agent(resolved.agent()?)
-                    .0
-                    .as_str(),
-            ) {
+        && session.provider.as_deref() != Some(resolved.agent.harness.as_str())
+    {
         let request = loopflow_execution::ops::human_session::conversation_log::continuation(
             &store, &session,
         )?;
@@ -172,9 +154,9 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
     // Continuation belongs to the saved conversation, even when invoked from
     // another Task's checkout. Do not rediscover Work from the caller's cwd.
     let mut built = build_prompt_at(
+        Mode::Headless,
         None,
         Some(&message),
-        &message,
         &turn,
         session.cwd.clone(),
         None,
@@ -202,39 +184,43 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
         task_prompt: prepared.task_prompt,
         structured_replies: prepared.structured_replies,
         env: prepared.env,
-        holder: loopflow_execution::session::Holder::of(named_work),
         ..resolved
     };
-    (built.harness, built.model) = parse_agent(&built.agent_config.resolved_agent()?);
     print_context_header(&built, &turn);
-    run_prompt(&built, &turn).map(|_| ())
+    run_prompt(built, &turn, kind).map(|_| ())
 }
 
 #[doc(hidden)]
 pub fn run_bound(
+    kind: LaunchKind,
     skill: Option<&str>,
     message: Option<&str>,
     cli: &Cli,
     binding: &loopflow_execution::ops::WorkBinding,
 ) -> Result<()> {
-    run_bound_prompt(skill, message, cli, binding).map(|_| ())
+    run_bound_prompt(kind, skill, message, cli, binding).map(|_| ())
 }
 
-/// Run a channel request through the ordinary attributed launch and settlement path.
+/// Run a channel request through the ordinary attributed launch and settlement
+/// path, and read its answer from the provider's transcript.
 pub(crate) fn answer_bound(
     message: &str,
     cli: &Cli,
     binding: &loopflow_execution::ops::WorkBinding,
 ) -> Result<Option<String>> {
-    run_bound_prompt(None, Some(message), cli, binding)
+    match run_bound_prompt(LaunchKind::Worker, None, Some(message), cli, binding)? {
+        Some(dir) => loopflow_execution::session_record::final_answer(&dir),
+        None => Ok(None),
+    }
 }
 
 fn run_bound_prompt(
+    kind: LaunchKind,
     skill: Option<&str>,
     message: Option<&str>,
     cli: &Cli,
     binding: &loopflow_execution::ops::WorkBinding,
-) -> Result<Option<String>> {
+) -> Result<Option<std::path::PathBuf>> {
     let mut scoped;
     let binding = if let Some(scope) = operator_scope(skill, cli, &binding.cwd, Some(binding))? {
         scoped = binding.clone();
@@ -245,13 +231,14 @@ fn run_bound_prompt(
     } else {
         binding
     };
-    let built = build_bound_prompt(skill, message, cli, binding)?;
+    let built = build_bound_prompt(kind.mode(), skill, message, cli, binding)?;
     print_context_header(&built, cli);
-    run_prompt(&built, cli)
+    run_prompt(built, cli, kind)
 }
 
 /// Preview and launch enrich the same selected Work; only launch prepares a checkout.
 fn build_bound_prompt(
+    mode: Mode,
     skill: Option<&str>,
     message: Option<&str>,
     cli: &Cli,
@@ -267,7 +254,7 @@ fn build_bound_prompt(
         bound_message(binding, message)
     };
     let cli = &launch;
-    let mut built = build_bound_prompt_at(skill, &message, arguments, cli, &binding.cwd)?;
+    let mut built = build_bound_prompt_at(mode, skill, &message, arguments, cli, &binding.cwd)?;
     built.agent_config.cwd = Some(binding.cwd.clone());
     if let Some(wave) = &binding.wave_id {
         built.agent_config.env.insert(
@@ -281,8 +268,6 @@ fn build_bound_prompt(
             .remove(loopflow_execution::work::wave::context::WAVE_ID_ENV);
     }
     built.subjects = binding.subjects.clone();
-    built.agent_config.holder =
-        loopflow_execution::session::Holder::of(binding.source.is_managed());
     built.work = Some(loopflow_execution::session::SessionWork {
         task_id: match &binding.work {
             loopflow_model::durable::WorkRef::Task(id) => Some(id.clone()),
@@ -339,15 +324,16 @@ struct PromptBuild {
     process: ProcessConfig,
     components: PromptComponents,
     context: loopflow_execution::trace::PreparedTurnContext,
-    harness: String,
-    model: Option<String>,
     skill_name: Option<String>,
+    /// SHA-256 of the resolved skill text, recorded on the run.
+    skill_version: Option<String>,
     log_name: String,
     subjects: Vec<String>,
     work: Option<loopflow_execution::session::SessionWork>,
 }
 
 fn build_prompt(
+    mode: Mode,
     repo_root: &Path,
     skill: Option<&str>,
     message: Option<&str>,
@@ -362,9 +348,9 @@ fn build_prompt(
     };
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
     build_prompt_at(
+        mode,
         skill,
         message,
-        message.unwrap_or_default(),
         cli,
         repo_root,
         None,
@@ -414,6 +400,7 @@ fn resolve_skill(name: Option<&str>, cli: &Cli, repo: &Path) -> Result<Option<Sk
 }
 
 fn build_bound_prompt_at(
+    mode: Mode,
     skill: Option<&str>,
     message: &str,
     arguments: &str,
@@ -421,9 +408,9 @@ fn build_bound_prompt_at(
     repo_root: &Path,
 ) -> Result<PromptBuild> {
     let mut built = build_prompt_at(
+        mode,
         skill,
         Some(arguments),
-        arguments,
         cli,
         repo_root.to_path_buf(),
         Some((
@@ -454,13 +441,6 @@ fn build_bound_prompt_at(
             });
     }
     Ok(built)
-}
-
-// Keep the existing unattended Task confinement while applying it equally to
-// direct skills and Graphs. The broader checkout-only versus unattended-only
-// policy remains Jack's choice; neither is selected by this intersection.
-fn confine_checkout_agent(task_checkout: bool, interactive: bool) -> bool {
-    task_checkout && !interactive
 }
 
 fn prepare_task_input(
@@ -504,9 +484,9 @@ fn prepare_task_input(
 }
 
 fn build_prompt_at(
+    mode: Mode,
     skill: Option<&str>,
     message: Option<&str>,
-    arguments: &str,
     cli: &Cli,
     repo_root: PathBuf,
     message_context: Option<(
@@ -516,17 +496,10 @@ fn build_prompt_at(
     captured: bool,
 ) -> Result<PromptBuild> {
     let _settings = loopflow_execution::config::settings::select_invocation(cli.setting_values()?);
-    let is_interactive = is_interactive_run(cli, skill, message);
+    let is_interactive = mode == Mode::Interactive;
     let subject = cli.task.as_deref().unwrap_or_default();
     loopflow_execution::agent_input_timing::record("prompt_begin", subject);
     let task_input = prepare_task_input(cli)?;
-    let task_checkout = match &task_input {
-        Some((_, seed)) => {
-            std::fs::canonicalize(seed.task.worktree()?)? == std::fs::canonicalize(&repo_root)?
-        }
-        None => false,
-    };
-    let confine = confine_checkout_agent(task_checkout, is_interactive);
     let task_message = task_input.as_ref().map(|(_, seed)| seed.message.clone());
     let wave = cli.wave.clone().or_else(|| {
         cli.resume
@@ -550,7 +523,9 @@ fn build_prompt_at(
     let discover_start = Instant::now();
     let invocation = cli.resolved_invocation.as_ref();
     let discovered_skill = resolve_skill(skill, cli, &repo_root)?;
-    let arguments = invocation.map_or(arguments, |invocation| invocation.arguments.as_str());
+    let arguments = invocation.map_or(message.unwrap_or_default(), |invocation| {
+        invocation.arguments.as_str()
+    });
     debug!(
         elapsed_ms = discover_start.elapsed().as_millis(),
         "discovered skill"
@@ -604,10 +579,6 @@ fn build_prompt_at(
             message: message.map(|value| value.to_string()),
             skill_arguments: arguments.to_string(),
             no_loopflow: standalone_native,
-            work: cli
-                .task
-                .clone()
-                .map(loopflow_execution::prompt::WorkContext::Task),
             source_overrides: ContextSourceOverrides::default(),
             summary: None,
             references: task_message
@@ -623,9 +594,6 @@ fn build_prompt_at(
         "prepared launch prompt"
     );
     loopflow_execution::agent_input_timing::record("prompt_end", subject);
-    let agent = prepared.config.resolved_agent()?;
-    let (harness, model) = parse_agent(&agent);
-
     let skill_name = discovered_skill
         .as_ref()
         .map(|skill| skill.name.clone())
@@ -637,22 +605,12 @@ fn build_prompt_at(
     let process = ProcessConfig {
         task_input: task_input
             .map(|(store, seed)| loopflow_execution::ops::task_input::TaskInput::new(store, seed)),
-        auto: !is_interactive,
         stream: !is_interactive,
         wait_for_capacity: !is_interactive && loopflow_execution::ops::graph_process::in_graph(),
         ..Default::default()
     };
     let mut agent_config = prepared.config;
     agent_config.output_schema = cli.output_schema.clone();
-    if confine && !cli.context {
-        agent_config.write_scope = loopflow_execution::agent::AgentWriteScope::Worktree;
-        agent_config.execution_boundary =
-            Some(loopflow_execution::agent::checkout_execution_boundary(
-                &repo_root,
-                agent_config.agent()?,
-            )?);
-        agent_config.skip_permissions = true;
-    }
 
     let mut components = prepared.components;
     components.message_context = message_context.or_else(|| {
@@ -679,34 +637,14 @@ fn build_prompt_at(
         process,
         components,
         context,
-        harness,
-        model,
         skill_name,
+        skill_version: discovered_skill
+            .as_ref()
+            .map(loopflow_execution::graph::Skill::version),
         log_name,
         subjects: Vec::new(),
         work: None,
     })
-}
-
-pub(crate) fn is_interactive_run(cli: &Cli, skill: Option<&str>, message: Option<&str>) -> bool {
-    is_interactive_run_with_tty(
-        cli,
-        skill,
-        message,
-        std::io::stdin().is_terminal() || std::io::stdout().is_terminal(),
-    )
-}
-
-fn is_interactive_run_with_tty(
-    cli: &Cli,
-    skill: Option<&str>,
-    message: Option<&str>,
-    attached_tty: bool,
-) -> bool {
-    if cli.batch {
-        return false;
-    }
-    cli.interactive || attached_tty || (skill.is_none() && message.is_none())
 }
 
 fn print_context_header(built: &PromptBuild, cli: &Cli) {
@@ -720,7 +658,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
         built.components.wave.as_deref(),
         &cli.docs,
         cli.clipboard,
-        built.agent_config.agent.as_deref(),
+        Some(&built.agent_config.agent.to_string()),
     );
     eprintln!(
         "{dim}{header}\n\n  {command}{reset}",
@@ -731,66 +669,45 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     );
 }
 
-fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
-    if !built.process.auto {
+/// Run the prompt; a headless run returns where its input was recorded.
+fn run_prompt(
+    mut built: PromptBuild,
+    cli: &Cli,
+    kind: LaunchKind,
+) -> Result<Option<std::path::PathBuf>> {
+    if kind.mode() == Mode::Interactive {
         info!("launching interactive vendor session");
-        let runtime = begin_process_runtime(built, "tui", &built.agent_config, None)?;
-        // Claude and a bare Pi take the thread id lf gives them; a held Pi
-        // reports its file through its extension.
-        let names_thread = built.harness == "claude"
-            || (built.harness == "pi"
-                && built.agent_config.holder == loopflow_execution::session::Holder::Caller);
-        let agent_session: Option<loopflow_model::id::AgentSessionId> = if names_thread {
-            let artifact_key = runtime.artifact_key();
-            let raw_id = artifact_key
-                .as_str()
-                .strip_prefix("run_")
-                .unwrap_or(&artifact_key);
-            Some(
-                uuid::Uuid::parse_str(raw_id)
-                    .expect("capture keys always carry a UUID")
-                    .to_string()
-                    .into(),
-            )
-        } else {
-            None
-        };
+        let runtime = begin_process_runtime(&built, "tui", None, cli.prepared_capture.as_deref())?;
         let mut environment = built.agent_config.env.clone();
         environment.extend(runtime.environment());
         let result = (|| {
             let mut config = built.agent_config.clone();
             config.env = environment.clone();
+            config.launch_lock = cli.launch_lock.clone();
             let context_file =
                 loopflow_execution::agent::write_system_prompt_file(&config, &built.log_name)?;
-            config.session_attachment = runtime.session_attachment();
-            launch_session(
-                &config,
-                agent_session.as_ref(),
-                context_file.as_deref(),
-                Some(&runtime),
-            )
+            launch_session(&config, kind, context_file.as_deref(), Some(&runtime))
         })();
         if let Some(provider_session) =
             loopflow_execution::session_record::read_provider_session(&runtime.artifact_dir())
                 .map_err(|error| anyhow!("failed to read provider session: {error}"))?
         {
-            runtime.observe_provider(
-                Some(provider_session.agent_session),
-                provider_session.account_id,
-            );
+            runtime.observe_provider(Some(provider_session.agent_session));
         }
         runtime.finish(
             result
                 .as_ref()
-                .map_or("failed", SessionCommandOutcome::capture_outcome),
+                .map_or("failed", NativeOutcome::capture_outcome),
         )?;
         return result
             .and_then(|outcome| {
-                outcome.result(
-                    &built.harness,
-                    agent_session.is_some(),
-                    built.agent_config.holder,
-                )
+                let harness = built.agent_config.agent.harness;
+                let assigned = loopflow_execution::harness::launcher(harness)
+                    .capabilities()
+                    .thread
+                    .for_kind(kind)
+                    == loopflow_execution::harness::ThreadName::Assigned;
+                outcome.result(harness, assigned, kind)
             })
             .map(|()| None);
     }
@@ -803,18 +720,16 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
         None,
     );
     let cli_check_start = Instant::now();
-    if !check_cli_available(&built.harness) {
-        return Err(anyhow!(missing_agent_message(&built.harness)));
-    }
+    loopflow_execution::agent::start_on_installed_agent(&mut built.agent_config, &built.process)
+        .map_err(|missing| anyhow!(missing))?;
     debug!(
         elapsed_ms = cli_check_start.elapsed().as_millis(),
         "checked cli availability"
     );
 
-    let agent_config = built.agent_config.clone();
-    let runtime = begin_process_runtime(built, "headless", &agent_config, cli.resume.as_deref())?;
+    let runtime = begin_process_runtime(&built, "headless", cli.resume.as_deref(), None)?;
 
-    let result = run_headless_prompt(built, &runtime, &agent_config);
+    let result = run_headless_prompt(&built, &runtime, kind);
     // Explicit native resume can retire this provider while its executor waits.
     // Settle our capture as interrupted; a failed Graph step would replay it.
     if runtime.attachment_replaced()? {
@@ -833,18 +748,18 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
         ))),
         (Err(error), Ok(())) => Err(error),
         (Ok(()), Err(error)) => Err(anyhow!("Session completed but did not settle: {error}")),
-        (Ok(()), Ok(())) => Ok(runtime.final_answer()?),
+        (Ok(()), Ok(())) => Ok(Some(runtime.artifact_dir())),
     }
 }
 
 fn run_headless_prompt(
     built: &PromptBuild,
     runtime: &LfProcessRuntime,
-    prepared_config: &AgentConfig,
+    kind: LaunchKind,
 ) -> Result<()> {
     let context_file_start = Instant::now();
     let context_file =
-        loopflow_execution::agent::write_system_prompt_file(prepared_config, &built.log_name)?;
+        loopflow_execution::agent::write_system_prompt_file(&built.agent_config, &built.log_name)?;
     debug!(
         elapsed_ms = context_file_start.elapsed().as_millis(),
         "wrote context log"
@@ -857,7 +772,7 @@ fn run_headless_prompt(
     // Set up directive relay so agent skills can issue shell directives
     // (e.g. `cd` after `lf wt switch`).
     let directive_file = std::env::var("LOOPFLOW_DIRECTIVE_FILE").ok();
-    let mut agent_config = prepared_config.clone();
+    let mut agent_config = built.agent_config.clone();
     let relay_path = directive_file.as_ref().and_then(|_| {
         tempfile::NamedTempFile::new()
             .ok()
@@ -867,9 +782,12 @@ fn run_headless_prompt(
         agent_config.directive_relay = Some(path.clone());
     }
 
-    info!(harness = built.harness, "launching agent");
+    info!(
+        harness = built.agent_config.agent.harness.as_str(),
+        "launching agent"
+    );
     let process_start = Instant::now();
-    let result = run_agent(&agent_config, &process);
+    let result = run_agent(&agent_config, &process, kind);
 
     // Relay safe directives from the agent back to the invoking shell.
     if let (Some(relay), Some(ref target)) = (relay_path, directive_file) {
@@ -884,25 +802,24 @@ fn run_headless_prompt(
     debug!(exit_code = result.exit_code, "agent completed");
     if result.exit_code == 0 {
         Ok(())
-    } else if !process.auto && agent_config.holder == loopflow_execution::session::Holder::Caller {
-        // A bare terminal launch exits as its provider did; lf already said
-        // whether the provider failed.
-        Err(
-            loopflow_execution::process::CommandExit(u8::try_from(result.exit_code).unwrap_or(1))
-                .into(),
-        )
     } else if result.exit_code == 130 {
         eprintln!("The agent's turn was interrupted.");
         Err(loopflow_execution::process::CommandExit(130).into())
     } else if let Some(failure) = &result.failure {
+        let reason = result.stderr.trim();
+        let reason = if reason.is_empty() {
+            String::new()
+        } else {
+            format!("\n{reason}")
+        };
         Err(anyhow!(
-            "agent stopped after {failure}. Check {} for details.",
+            "agent stopped after {failure}.{reason}\nCheck {} for details.",
             runtime.artifact_dir().display()
         ))
     } else {
         let reason = loopflow_execution::os_process::exit_reason(&result.stderr);
         Err(anyhow!(
-            "agent exited with code {}{reason}. Check {} for details.",
+            "agent exited with code {}{reason}\nCheck {} for details.",
             result.exit_code,
             runtime.artifact_dir().display()
         ))
@@ -912,8 +829,8 @@ fn run_headless_prompt(
 fn begin_process_runtime(
     built: &PromptBuild,
     surface: &str,
-    prepared_config: &AgentConfig,
     resume: Option<&str>,
+    prepared_capture: Option<&str>,
 ) -> Result<LfProcessRuntime> {
     let started = Instant::now();
     let cwd = built
@@ -928,8 +845,8 @@ fn begin_process_runtime(
         .map(SubjectAttribution::declared)
         .collect::<Vec<_>>();
     let spec = SessionCaptureSpec {
-        harness: built.harness.clone(),
-        model: built.model.clone(),
+        harness: built.agent_config.agent.harness.as_str().to_owned(),
+        model: built.agent_config.agent.model.clone(),
         surface: surface.to_string(),
         cwd,
         repo: Some(built.repo_root.clone()),
@@ -944,19 +861,19 @@ fn begin_process_runtime(
             session,
             spec,
             &built.context,
-            AgentProcessRequest::from_prepared(prepared_config)?,
+            AgentProcessRequest::from_prepared(&built.agent_config)?,
         )
-    } else if let Some(id) = loopflow_execution::ops::human_session::prepared_artifact_key()? {
+    } else if let Some(id) = prepared_capture {
         loopflow_execution::session_record::SessionRecorder::start_prepared(
             &loopflow_execution::store::lf_home_dir(),
-            &id,
+            id,
             spec,
             &built.context,
-            Some(AgentProcessRequest::from_prepared(prepared_config)?),
+            Some(AgentProcessRequest::from_prepared(&built.agent_config)?),
         )
         .map(loopflow_execution::process::LfProcessRuntime::new)
     } else {
-        let launch = Some(AgentProcessRequest::from_prepared(prepared_config)?);
+        let launch = Some(AgentProcessRequest::from_prepared(&built.agent_config)?);
         loopflow_execution::session_record::SessionRecorder::begin_with_context(
             spec,
             &built.context,
@@ -968,6 +885,9 @@ fn begin_process_runtime(
         anyhow!("failed to publish Session capture manifest before agent launch: {error}")
     })?;
     runtime.claim_session_attachment()?;
+    if let Some(version) = &built.skill_version {
+        runtime.record_skill_version(version);
+    }
     debug!(
         elapsed_ms = started.elapsed().as_millis(),
         "published Session capture"
@@ -1009,14 +929,14 @@ fn relay_directives(relay: &std::path::Path, target: &str) {
 mod tests {
     use super::{
         attributed_context, begin_process_runtime, build_bound_prompt_at, build_prompt,
-        build_prompt_at, is_interactive_run, is_interactive_run_with_tty, run_headless_prompt,
-        run_prompt, PromptBuild,
+        build_prompt_at, run_headless_prompt, run_prompt, PromptBuild,
     };
 
     use crate::lf::Cli;
     use crate::test_ambient::EnvGuard;
     use clap::Parser;
     use loopflow_execution::agent::{run_agent, AgentConfig, ProcessConfig};
+    use loopflow_execution::harness::{LaunchKind, Mode};
     use loopflow_execution::prompt::PromptComponents;
     use loopflow_execution::skills::catalog::SkillCatalog;
     use loopflow_execution::trace::ContextAssetKind;
@@ -1058,9 +978,15 @@ mod tests {
                         args.extend(["--chrome", browser]);
                     }
                     let cli = Cli::parse_from(args);
-                    let built =
-                        build_bound_prompt_at(None, "inspect changes", "", &cli, repo.path())
-                            .unwrap();
+                    let built = build_bound_prompt_at(
+                        Mode::Headless,
+                        None,
+                        "inspect changes",
+                        "",
+                        &cli,
+                        repo.path(),
+                    )
+                    .unwrap();
                     assert_eq!(
                         built
                             .components
@@ -1116,9 +1042,15 @@ mod tests {
             .unwrap();
             // Each assembly reloads personal config, including the correction.
             for _ in 0..2 {
-                let built =
-                    build_bound_prompt_at(None, "choose the prototype path", "", &cli, repo.path())
-                        .unwrap();
+                let built = build_bound_prompt_at(
+                    Mode::Headless,
+                    None,
+                    "choose the prototype path",
+                    "",
+                    &cli,
+                    repo.path(),
+                )
+                .unwrap();
                 assert_eq!(
                     built.components.user_name.as_deref(),
                     if name.trim().is_empty() {
@@ -1144,7 +1076,8 @@ mod tests {
             }
         }
         std::fs::remove_file(home.path().join("config.yaml")).unwrap();
-        let built = build_bound_prompt_at(None, "continue", "", &cli, repo.path()).unwrap();
+        let built =
+            build_bound_prompt_at(Mode::Headless, None, "continue", "", &cli, repo.path()).unwrap();
         assert_eq!(built.components.user_name.as_deref(), Some("Git User"));
     }
 
@@ -1167,7 +1100,9 @@ mod tests {
         let cli = Cli::parse_from(["lf", "--batch", "-a", "claude"]);
         for (caller, expected) in [("Jack", "Jack"), ("", "Host Owner")] {
             std::env::set_var("LF_USER_NAME", caller);
-            let built = build_bound_prompt_at(None, "continue", "", &cli, repo.path()).unwrap();
+            let built =
+                build_bound_prompt_at(Mode::Headless, None, "continue", "", &cli, repo.path())
+                    .unwrap();
             assert_eq!(built.components.user_name.as_deref(), Some(expected));
             assert!(built.agent_config.system_prompt.contains(expected));
             assert_eq!(built.agent_config.env["LF_USER_NAME"], expected);
@@ -1247,21 +1182,16 @@ for line in sys.stdin:
             repo_root: home.path().to_path_buf(),
             agent_config: AgentConfig {
                 task_prompt: task.to_string(),
-                agent: Some("claude".to_string()),
                 cwd: Some(home.path().to_path_buf()),
-                skip_permissions: true,
+                yolo: true,
                 env,
-                ..AgentConfig::default()
+                ..AgentConfig::new(loopflow_execution::config::Agent::parse("claude").unwrap())
             },
-            process: ProcessConfig {
-                auto: true,
-                ..ProcessConfig::default()
-            },
+            process: ProcessConfig::default(),
             components: PromptComponents::default(),
             context,
-            harness: "claude".to_string(),
-            model: None,
             skill_name: Some("implement".to_string()),
+            skill_version: None,
             log_name: "generic-run-proof".to_string(),
             subjects: vec!["task:LOO-265".to_string()],
             work: None,
@@ -1270,7 +1200,7 @@ for line in sys.stdin:
         let command = vec!["lf".to_string(), "implement".to_string()];
         let admitted = || {
             loopflow_execution::journal::with_runtime(home.path(), &command, || {
-                let runtime = begin_process_runtime(&built, "headless", &built.agent_config, None)?;
+                let runtime = begin_process_runtime(&built, "headless", None, None)?;
                 let artifact_key = runtime.artifact_key();
                 let run_dir = runtime.artifact_dir();
 
@@ -1278,7 +1208,7 @@ for line in sys.stdin:
                 let manifest = std::fs::read_to_string(run_dir.join("manifest.json"))?;
                 assert!(manifest.contains("task:LOO-265"));
                 assert!(!run_dir.join("terminal.json").exists());
-                let result = run_headless_prompt(&built, &runtime, &built.agent_config);
+                let result = run_headless_prompt(&built, &runtime, LaunchKind::Batch);
                 runtime.finish(if result.is_ok() {
                     "completed"
                 } else {
@@ -1310,7 +1240,7 @@ for line in sys.stdin:
             home.path().join("implicit-attempt").display().to_string(),
         );
         let result = loopflow_execution::journal::with_test_ledger(registry.clone(), || {
-            run_agent(&implicit_launch, &built.process)
+            run_agent(&implicit_launch, &built.process, LaunchKind::Batch)
         })
         .unwrap();
         assert_eq!(result.exit_code, 0);
@@ -1370,21 +1300,16 @@ for line in sys.stdin:
                 repo_root: repo.to_path_buf(),
                 agent_config: AgentConfig {
                     task_prompt: task.to_string(),
-                    agent: Some("claude".to_string()),
                     cwd: Some(repo.to_path_buf()),
-                    skip_permissions: true,
+                    yolo: true,
                     env,
-                    ..AgentConfig::default()
+                    ..AgentConfig::new(loopflow_execution::config::Agent::parse("claude").unwrap())
                 },
-                process: ProcessConfig {
-                    auto: true,
-                    ..ProcessConfig::default()
-                },
+                process: ProcessConfig::default(),
                 components: PromptComponents::default(),
                 context: loopflow_execution::trace::PreparedTurnContext::from_prompts("", task),
-                harness: "claude".to_string(),
-                model: None,
                 skill_name: Some("research".to_string()),
+                skill_version: Some("research-text".to_string()),
                 log_name: log_name.to_string(),
                 subjects: vec!["task:LOO-267".to_string()],
                 work: None,
@@ -1467,20 +1392,30 @@ for line in sys.stdin:
         // Each run is its own recorded lf invocation, as from the CLI.
         let command = vec!["lf".to_string(), "research".to_string()];
         let ledger = loopflow_execution::store::database_path_from_env().unwrap();
-        let admitted = |built: &PromptBuild| {
+        let admitted = |built: PromptBuild| {
             loopflow_execution::journal::with_test_ledger(ledger.clone(), || {
                 loopflow_execution::journal::with_runtime(repo.path(), &command, || {
-                    run_prompt(built, &cli)
+                    run_prompt(built, &cli, LaunchKind::Batch)
                 })
             })
         };
         std::thread::scope(|scope| {
-            let first = scope.spawn(|| admitted(&first));
-            let second = scope.spawn(|| admitted(&second));
+            let first = scope.spawn(|| admitted(first));
+            let second = scope.spawn(|| admitted(second));
             first.join().unwrap().unwrap();
             second.join().unwrap().unwrap();
         });
 
+        // Each run recorded the skill text it launched with.
+        let versions: Vec<Option<String>> = rusqlite::Connection::open(&ledger)
+            .unwrap()
+            .prepare("SELECT skill_version FROM agent_sessions")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(versions, vec![Some("research-text".to_string()); 2]);
         assert_eq!(
             std::fs::read_to_string(&runtime).unwrap(),
             "runtime evidence bytes\n"
@@ -1500,8 +1435,15 @@ for line in sys.stdin:
             .unwrap()
             .success());
 
-        let built =
-            build_bound_prompt_at(Some("proof"), "reconcile", "", &cli, repo.path()).unwrap();
+        let built = build_bound_prompt_at(
+            Mode::Headless,
+            Some("proof"),
+            "reconcile",
+            "",
+            &cli,
+            repo.path(),
+        )
+        .unwrap();
         let context = built
             .agent_config
             .conversation_context
@@ -1542,8 +1484,15 @@ for line in sys.stdin:
             wave: Some("ship".to_string()),
             ..Cli::default()
         };
-        let built =
-            build_bound_prompt_at(Some("proof"), "continue", "", &cli, repo.path()).unwrap();
+        let built = build_bound_prompt_at(
+            Mode::Headless,
+            Some("proof"),
+            "continue",
+            "",
+            &cli,
+            repo.path(),
+        )
+        .unwrap();
 
         let context = built
             .agent_config
@@ -1592,7 +1541,7 @@ for line in sys.stdin:
             resolved_invocation: Some(invocation.clone()),
             ..Cli::default()
         };
-        let missing = build_prompt(repo.path(), Some("audit"), None, &cli).unwrap();
+        let missing = build_prompt(Mode::Headless, repo.path(), Some("audit"), None, &cli).unwrap();
         assert_eq!(
             missing.agent_config.skill_invocation,
             Some(invocation.clone())
@@ -1602,6 +1551,7 @@ for line in sys.stdin:
         std::fs::create_dir_all(replacement.parent().unwrap()).unwrap();
         std::fs::write(replacement, "---\nagent: [\n---\nReplacement instructions").unwrap();
         let built = build_prompt(
+            Mode::Headless,
             repo.path(),
             Some("audit"),
             Some("Retain this Work direction"),
@@ -1649,6 +1599,7 @@ for line in sys.stdin:
         };
 
         let built = build_bound_prompt_at(
+            Mode::Interactive,
             Some("proof"),
             "<lf:work kind=\"task\" id=\"task_test\">Task seed</lf:work>",
             "",
@@ -1680,36 +1631,6 @@ for line in sys.stdin:
     }
 
     #[test]
-    fn explicit_interactive_runs_without_a_tty() {
-        let cli = Cli::parse_from(["lf", "-i", "gate"]);
-
-        assert!(is_interactive_run_with_tty(&cli, Some("gate"), None, false));
-    }
-
-    #[test]
-    fn batch_named_skill_is_headless() {
-        let cli = Cli::parse_from(["lf", "--batch", "design"]);
-        assert!(!is_interactive_run(&cli, Some("design"), None));
-    }
-
-    #[test]
-    fn direct_tty_is_human_present_but_detached_named_launch_is_headless() {
-        let cli = Cli::parse_from(["lf", "design"]);
-        assert!(is_interactive_run_with_tty(
-            &cli,
-            Some("design"),
-            None,
-            true
-        ));
-        assert!(!is_interactive_run_with_tty(
-            &cli,
-            Some("design"),
-            None,
-            false
-        ));
-    }
-
-    #[test]
     fn explicit_interactive_skill_launch_uses_the_assembled_prompt() {
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(
@@ -1719,9 +1640,9 @@ for line in sys.stdin:
         let cli = Cli::parse_from(["lf", "-i", "-a", "claude", "proof"]);
 
         let built = build_prompt_at(
+            Mode::Interactive,
             Some("proof"),
             Some("verify the result"),
-            "",
             &cli,
             repo.path().to_path_buf(),
             None,
@@ -1770,9 +1691,9 @@ for line in sys.stdin:
         .unwrap();
         let cli = Cli::parse_from(["lf", "-i", "-a", "claude", "--wave", "release", "design"]);
         let built = build_prompt_at(
+            Mode::Interactive,
             Some("design"),
             Some("plan the release"),
-            "",
             &cli,
             repo.path().to_path_buf(),
             None,
@@ -1784,13 +1705,10 @@ for line in sys.stdin:
             built
                 .agent_config
                 .system_prompt
-                .matches("<lf:work-guidance>")
+                .matches("<lf:loopflow>")
                 .count(),
             1
         );
-        assert!(built.context.decisions.iter().any(|decision| {
-            decision.label == "work" && decision.reason == "Wave association: release"
-        }));
         assert!(!built.agent_config.system_prompt.contains(goal));
         let context = built
             .agent_config

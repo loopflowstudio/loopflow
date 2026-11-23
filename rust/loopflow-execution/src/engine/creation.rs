@@ -2,6 +2,7 @@
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
@@ -71,44 +72,137 @@ pub fn lookup(id: &str) -> Result<Option<CreationReceipt>> {
     Ok(store.sqlite.creation_receipt(id)?)
 }
 
-pub fn create(id: &str, mut input: TaskCreation) -> Result<TaskCreateReceipt> {
+/// Bounded creation stages are visible under the served request's trace. Never
+/// record the request text, title, generated prompt or provider output.
+pub fn step<T>(name: &'static str, run: impl FnOnce() -> T) -> T {
+    tracing::info_span!(target: crate::journal::START_TIMING_TARGET, "creation_step", step = name)
+        .in_scope(|| {
+            let started = Instant::now();
+            let result = run();
+            tracing::info!(
+                target: crate::journal::START_TIMING_TARGET,
+                elapsed_ms = started.elapsed().as_secs_f64() * 1000.0,
+                "Creation step finished"
+            );
+            result
+        })
+}
+
+/// A created Task's receipt and, for a conversation-admitting `run`, its
+/// primary conversation's record read when answering, and the planning
+/// exchange its caller runs after answering. The application adds the Task's
+/// row to make `task.create`'s answer.
+#[derive(Debug)]
+pub struct Created {
+    pub receipt: TaskCreateReceipt,
+    pub session: Option<crate::ops::human_session::SessionRecord>,
+    pub after: Option<After>,
+}
+
+fn answered(
+    store: &crate::store::SharedStore,
+    runtime: &tokio::runtime::Runtime,
+    receipt: TaskCreateReceipt,
+) -> Result<Created> {
+    let session = step("read_session", || {
+        receipt
+            .session_id
+            .as_ref()
+            .map(|id| {
+                runtime.block_on(crate::ops::human_session::primary::admitted_record(
+                    store,
+                    id.as_str(),
+                ))
+            })
+            .transpose()
+    })?;
+    Ok(Created {
+        receipt,
+        session,
+        after: None,
+    })
+}
+
+/// Planning exchange and the assignee check following an answer, under the
+/// creation request's attribution. A served answer hands it to the server,
+/// which starts it once the answer is written; a CLI caller runs it after
+/// printing.
+pub struct After(Box<dyn FnOnce() + Send>);
+
+impl After {
+    pub fn run(self) {
+        (self.0)()
+    }
+}
+
+impl std::fmt::Debug for After {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("After")
+    }
+}
+
+pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
+    let _creation = tracing::info_span!(target: crate::journal::START_TIMING_TARGET, "task_creation", request_id = id).entered();
     // CLI and served callers may spell the same checkout through different paths.
-    input.directory = crate::repo::require_repo_root(&input.directory, "task create")?;
+    input.directory = step("resolve_repository", || {
+        crate::repo::require_repo_root(&input.directory, "task create")
+    })?;
     let identity = identity("task.create", id, &input, input.run)?;
-    let _lock = lock(id)?;
-    let store = Arc::new(
-        tokio::runtime::Runtime::new()?.block_on(open_store(&storage_config_from_env()?))?,
-    );
-    store
-        .sqlite
-        .check_creation(&identity)
-        .map_err(|error| match error {
+    let _lock = step("creation_lock", || lock(id))?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    let store = step("open_store", || -> Result<_> {
+        Ok(Arc::new(
+            runtime.block_on(open_store(&storage_config_from_env()?))?,
+        ))
+    })?;
+    step("check_receipt", || store.sqlite.check_creation(&identity)).map_err(
+        |error| match error {
             crate::store::StoreError::Stale(message) => anyhow::Error::from(
                 Error::new(ErrorCode::Conflict, message).with(serde_json::json!({"request_id":id})),
             ),
             other => other.into(),
-        })?;
-    let recorded = match store.sqlite.creation_receipt(id)? {
-        Some(receipt) => receipt,
+        },
+    )?;
+    // A started Task with a conversation commits Task, Graph, claim and
+    // conversation together and answers before any network or checkout.
+    let admits = input.run && !input.approve;
+    let (recorded, filed) = match store.sqlite.creation_receipt(id)? {
+        Some(receipt) => (receipt, false),
         None => {
             if let Some(graph) = input.graph.as_deref() {
                 crate::ops::task::load_graph(graph, "", &input.directory)?;
             }
-            crate::ops::task::task_create(
-                &input.directory,
-                input.wave.as_deref(),
-                input.title.clone(),
-                input.request.clone(),
-                crate::ops::task::TaskAdoptionOptions {
-                    session: input.session.clone(),
-                    worktree: input.worktree.clone(),
-                },
-                Some(identity),
-            )?;
-            store
+            let adoption = crate::ops::task::TaskAdoptionOptions {
+                session: input.session.clone(),
+                worktree: input.worktree.clone(),
+            };
+            step("file_task", || {
+                if admits {
+                    crate::ops::task::admit_task(
+                        &input.directory,
+                        input.wave.as_deref(),
+                        input.title.clone(),
+                        input.request.clone(),
+                        adoption,
+                        input.graph.as_deref(),
+                        identity,
+                    )
+                } else {
+                    crate::ops::task::task_create(
+                        &input.directory,
+                        input.wave.as_deref(),
+                        input.title.clone(),
+                        input.request.clone(),
+                        adoption,
+                        Some(identity),
+                    )
+                }
+            })?;
+            let receipt = store
                 .sqlite
                 .creation_receipt(id)?
-                .context("creation receipt is missing")?
+                .context("creation receipt is missing")?;
+            (receipt, true)
         }
     };
     let mut receipt: TaskCreateReceipt = serde_json::from_value(
@@ -119,41 +213,26 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<TaskCreateReceipt> {
     )?;
     match recorded.disposition {
         RecoveryDisposition::Inspect => return Err(unknown(&recorded).into()),
-        RecoveryDisposition::Complete => return Ok(receipt),
-        RecoveryDisposition::Continue => {}
+        RecoveryDisposition::Complete if filed && admits => {
+            return start_conversation(id, &input, &store, &runtime, receipt)
+        }
+        RecoveryDisposition::Complete => return answered(&store, &runtime, receipt),
+        RecoveryDisposition::Continue if !admits => {}
         _ => return Err(unknown(&recorded).into()),
     }
-    // Save the first turn before task run can start the conversation beside its Graph.
-    let session_id = if input.approve {
-        None
-    } else {
-        Some(
-            tokio::runtime::Runtime::new()?
-                .block_on(crate::ops::human_session::primary::ensure_task(
-                    &store,
-                    &input.directory,
-                    &receipt.task.identifier,
-                    input.request.clone(),
-                ))?
-                .0
-                .id,
-        )
-    };
-    // The projection permits either the first launch or finishing its result.
+    // `-b` runs without a conversation; its carrier reports the launch.
     if recorded.milestone == "filed" {
         store.sqlite.advance_creation(id, "run_requested", None)?;
-        let mut args = Vec::new();
-        if input.approve {
-            args.push("--batch".into());
-        }
+        let mut args = vec!["--batch".to_string()];
         if let Some(agent) = &input.agent {
             args.extend(["--agent".into(), agent.clone()]);
         }
         args.extend(["task".into(), "run".into(), receipt.task.identifier.clone()]);
         args.extend(input.graph.iter().cloned());
         args.push("--json".into());
-        let launched: super::task::TaskRun =
-            super::launch::start_creation(&input.directory, &args, id)?;
+        let launched: super::task::TaskRun = step("launch_graph", || {
+            super::launch::start_creation(&input.directory, &args, id)
+        })?;
         store
             .sqlite
             .record_creation_launch(id, &serde_json::to_value(launched)?)?;
@@ -162,14 +241,61 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<TaskCreateReceipt> {
         .context("the run did not take up a Graph")?
         .name;
     receipt.graph = Some(graph);
-    receipt.session_id = session_id;
-    receipt.milestone = if input.approve { "started" } else { "admitted" }.into();
-    store.sqlite.advance_creation(
-        id,
-        &receipt.milestone,
-        Some(&serde_json::to_value(&receipt)?),
-    )?;
-    Ok(receipt)
+    receipt.milestone = "started".into();
+    step("admit_receipt", || -> Result<()> {
+        store
+            .sqlite
+            .advance_creation(id, &receipt.milestone, Some(&receipt.stored_result()?))?;
+        Ok(())
+    })?;
+    answered(&store, &runtime, receipt)
+}
+
+/// Start the admitted conversation held and answer. The conversation makes
+/// the checkout and starts the Graph; planning exchange follows the answer.
+fn start_conversation(
+    id: &str,
+    input: &TaskCreation,
+    store: &crate::store::SharedStore,
+    runtime: &tokio::runtime::Runtime,
+    receipt: TaskCreateReceipt,
+) -> Result<Created> {
+    let task = receipt.task.clone();
+    let session = receipt
+        .session_id
+        .as_ref()
+        .context("admitted creation has no conversation")?;
+    let session = store
+        .sqlite
+        .session(session.as_str())?
+        .context("admitted conversation is missing")?;
+    // A conversation that does not start here starts, and sets up, when opened.
+    step("hold_conversation", || {
+        match runtime.block_on(crate::ops::human_session::primary::hold_task_conversation(
+            store,
+            &task,
+            &session,
+            input.agent.as_deref(),
+            id,
+        )) {
+            Ok(true) => {}
+            Ok(false) => tracing::info!("new Task conversation waits for its first open"),
+            Err(error) => {
+                tracing::warn!(error = %format!("{error:#}"), "new Task conversation did not start")
+            }
+        }
+    });
+    let mut created = answered(store, runtime, receipt)?;
+    let main = crate::git::worktrees::main_repo_root(&input.directory)?;
+    let span = tracing::Span::current();
+    let sync = move || {
+        let _creation = span.enter();
+        step("sync_planning", || {
+            crate::ops::task::sync_admitted(&main, &task.id)
+        })
+    };
+    created.after = crate::journal::request::after_reply(sync).map(|sync| After(Box::new(sync)));
+    Ok(created)
 }
 
 pub fn unknown(receipt: &CreationReceipt) -> Error {

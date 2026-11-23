@@ -1,4 +1,4 @@
-//! Carrier-independent server protocol, revision 5: one connection per client,
+//! Carrier-independent server protocol, revision 9: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
 //! same-user only; the remote carrier admits the Machine owner's other
 //! Tailscale devices. Each carrier delimits messages its own way: the Unix
@@ -6,13 +6,18 @@
 use super::schema::Untyped;
 use crate::engine::{Error, ErrorCode};
 use crate::read_stream::SubscriptionFrame;
+pub use loopflow_storage::sqlite::Revisions;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 5;
-/// The oldest revision this build speaks.
-pub const MIN_REVISION: u32 = 5;
+pub const REVISION: u32 = 9;
+/// The first revision that holds a plan for other Machines (`plan.apply`,
+/// `plan.changes`).
+pub const PLAN_REVISION: u32 = 9;
+/// The oldest revision this build speaks. Revision 8 requires `sender` on
+/// `request` and `subscribe`; it keeps 7's write revisions and request IDs.
+pub const MIN_REVISION: u32 = 8;
 /// The largest message a control connection carries, so a reading never waits
 /// behind a large body. Larger messages travel on a ticketed connection.
 pub const MAX_MESSAGE: usize = 1024 * 1024;
@@ -45,6 +50,16 @@ pub enum ClientMessage<O = serde_json::Value, R = serde_json::Value> {
         id: String,
         operation: O,
         select: Option<Vec<String>>,
+        /// What the Machine that sent the request runs with; null from a
+        /// client on this Machine.
+        #[serde(deserialize_with = "Option::deserialize")]
+        sender: Option<Sender>,
+        /// Names one write across connections and restarts: for a day, a
+        /// repeat under the same ID gets the first answer and runs nothing; a
+        /// different operation under it is `invalid`. Null for reads and for
+        /// writes the client never repeats.
+        #[serde(deserialize_with = "Option::deserialize")]
+        request_id: Option<String>,
     },
     /// A read with a subscription; answers a null `response`, then `reading` messages
     /// until cancelled. The id follows the same rules as a request's. `select`
@@ -55,6 +70,9 @@ pub enum ClientMessage<O = serde_json::Value, R = serde_json::Value> {
         select: Option<Vec<String>>,
         /// The last applied reading's opaque checkpoint; null starts fresh.
         resume: Option<String>,
+        /// As for a request.
+        #[serde(deserialize_with = "Option::deserialize")]
+        sender: Option<Sender>,
     },
     /// Ask the live subscription `id` for a reading now; the next reading's
     /// `answers` carries `checkpoint`, changed or not.
@@ -71,7 +89,8 @@ pub struct Hello {
     pub client: ClientIdentity,
 }
 
-/// Who connected, for diagnostics; it grants nothing.
+/// Who connected; it grants nothing. A `kind` of [`MACHINE_CLIENT`] is
+/// another Machine: every operation it sends runs here and is never sent on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ClientIdentity {
@@ -79,6 +98,91 @@ pub struct ClientIdentity {
     pub platform: String,
     pub name: String,
     pub version: String,
+}
+
+/// The [`ClientIdentity::kind`] of another Machine's `lf`.
+pub const MACHINE_CLIENT: &str = "machine";
+
+/// What the Machine that sent a request runs with. An operation names the
+/// sender's own directory; it runs in this Machine's checkout of `repository`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Sender {
+    pub repository: loopflow_model::durable::RepositoryId,
+    pub selection: Selection,
+    pub secrets: Secrets,
+}
+
+/// Who asks, and how: what a launch the request starts runs with.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Selection {
+    /// The sender's personal settings and definitions.
+    #[schemars(with = "Untyped")]
+    pub profile: crate::config::remote::Profile,
+    /// The name its person's Task claims carry.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub participant: Option<String>,
+    /// `--agent` as the sender selected it.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub agent: Option<String>,
+    /// Command-line settings (`LF_SETTINGS`), as YAML.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub settings: Option<String>,
+    /// A shipped Task's branch and Linear mapping, which resolve here.
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[schemars(with = "Option<Untyped>")]
+    pub source: Option<crate::ops::task::remote::TaskSource>,
+}
+
+/// The values `forward.env` names, by name, for the launch a request starts.
+/// Nothing prints them: `Debug` shows names, and only the wire carries values.
+#[derive(Clone, Default)]
+pub struct Secrets(pub Vec<(String, secrecy::SecretString)>);
+
+impl std::fmt::Debug for Secrets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Secrets")
+            .field(&self.0.iter().map(|(name, _)| name).collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+impl Serialize for Secrets {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use secrecy::ExposeSecret;
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (name, value) in &self.0 {
+            map.serialize_entry(name, value.expose_secret())?;
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Secrets {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let values = std::collections::BTreeMap::<String, String>::deserialize(deserializer)?;
+        Ok(Self(
+            values
+                .into_iter()
+                .map(|(name, value)| (name, secrecy::SecretString::new(value)))
+                .collect(),
+        ))
+    }
+}
+
+impl JsonSchema for Secrets {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Secrets".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "Values by environment variable name; never logged.",
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+        })
+    }
 }
 
 /// Operations the server owns rather than a shared read or write.
@@ -156,6 +260,49 @@ pub enum ServerOperation {
     #[serde(rename = "session.boundary")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionBoundaryAnswer>()))]
     SessionBoundary(SessionBoundary),
+    /// The hub's side of a plan exchange: take in another Machine's stamped
+    /// records of `repository`'s plan, in one transaction. Each field is
+    /// written only when its stamp is newer than the one held here, so
+    /// repeating it changes nothing.
+    #[serde(rename = "plan.apply")]
+    #[schemars(extend("x-result" = generator.subschema_for::<PlanApplied>()))]
+    PlanApply {
+        repository: loopflow_model::durable::RepositoryId,
+        #[schemars(with = "Vec<Untyped>")]
+        records: Vec<loopflow_storage::work::edit::StampedRecord>,
+    },
+    /// Each Wave, Project, Task and comment of `repository`'s plan here that
+    /// changed after the watermark `since`, whole, every field with its stamp;
+    /// null reads the whole plan.
+    #[serde(rename = "plan.changes")]
+    #[schemars(extend("x-result" = generator.subschema_for::<PlanChanges>()))]
+    PlanChanges {
+        repository: loopflow_model::durable::RepositoryId,
+        #[serde(deserialize_with = "Option::deserialize")]
+        since: Option<i64>,
+    },
+}
+
+/// What `plan.apply` answers.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlanApplied {
+    /// How many of the records could not be written here (a Wave whose name
+    /// a Wave here holds, and what hangs from it). The sender keeps them
+    /// unsent and sends them again.
+    pub not_taken: usize,
+}
+
+/// What `plan.changes` answers.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlanChanges {
+    #[schemars(with = "Vec<Untyped>")]
+    pub records: Vec<loopflow_storage::work::edit::StampedRecord>,
+    /// The watermark to read from next.
+    pub seq: i64,
+    /// More changes follow `seq`; read again from it.
+    pub more: bool,
 }
 
 /// What a hook says at a turn or tool boundary.
@@ -261,6 +408,11 @@ pub enum ServerMessage {
         id: String,
         trace_id: loopflow_model::id::TraceId,
         result: serde_json::Value,
+        /// For a write, each store domain it advanced, at its value after the
+        /// commit: a reading at or past every one shows the write. Null for
+        /// reads and server operations.
+        #[serde(deserialize_with = "Option::deserialize")]
+        revisions: Option<Revisions>,
     },
     /// The answer to `attach`: the connection now speaks the viewer protocol
     /// with this held terminal, and nothing more arrives from the server.
@@ -302,6 +454,10 @@ pub enum ServerMessage {
         message: String,
         /// Structured detail a client can act on, such as the missing resource.
         data: Option<serde_json::Value>,
+        /// The domains that advanced while a failed write ran, by it or by
+        /// another write; null when none did.
+        #[serde(deserialize_with = "Option::deserialize")]
+        revisions: Option<Revisions>,
     },
 }
 
@@ -361,11 +517,17 @@ pub struct Limits {
 impl ServerMessage {
     /// The `error` message that answers request `id` (null: the connection) with `error`.
     pub fn error(id: Option<String>, error: Error) -> Self {
+        Self::written_error(id, error, None)
+    }
+
+    /// The `error` that answers a write during which `revisions` advanced.
+    pub fn written_error(id: Option<String>, error: Error, revisions: Option<Revisions>) -> Self {
         Self::Error {
             id,
             code: error.code,
             message: error.message,
             data: error.data,
+            revisions,
         }
     }
 }
@@ -395,6 +557,7 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/event_steer.json"),
             include_str!("../../tests/fixtures/dto/server/event_step_finished.json"),
             include_str!("../../tests/fixtures/dto/server/error.json"),
+            include_str!("../../tests/fixtures/dto/server/error_written.json"),
             include_str!("../../tests/fixtures/dto/server/not_found.json"),
             include_str!("../../tests/fixtures/dto/server/remote.json"),
             include_str!("../../tests/fixtures/dto/server/mobile_status.json"),
@@ -402,8 +565,8 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/bulk.json"),
             include_str!("../../tests/fixtures/dto/server/admitted.json"),
             include_str!("../../tests/fixtures/dto/server/task_running.json"),
-            include_str!("../../tests/fixtures/dto/server/task_shipping.json"),
-            include_str!("../../tests/fixtures/dto/server/task_held.json"),
+            include_str!("../../tests/fixtures/dto/server/task_auto_on_answer.json"),
+            include_str!("../../tests/fixtures/dto/server/task_auto_off_answer.json"),
             include_str!("../../tests/fixtures/dto/server/session_steered.json"),
             include_str!("../../tests/fixtures/dto/server/session_boundary_answer.json"),
             include_str!("../../tests/fixtures/dto/server/wave_plan_connected.json"),
@@ -415,9 +578,7 @@ mod tests {
             include_str!("../../tests/fixtures/dto/server/checkout_syncing.json"),
             include_str!("../../tests/fixtures/dto/server/checkout_created.json"),
             include_str!("../../tests/fixtures/dto/server/account_report.json"),
-            include_str!("../../tests/fixtures/dto/server/account_next.json"),
             include_str!("../../tests/fixtures/dto/server/account.json"),
-            include_str!("../../tests/fixtures/dto/server/account_redeemed.json"),
             include_str!("../../tests/fixtures/dto/server/skill_entries.json"),
             include_str!("../../tests/fixtures/dto/server/pr_published.json"),
             include_str!("../../tests/fixtures/dto/server/pr_prepared.json"),

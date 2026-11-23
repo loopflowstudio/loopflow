@@ -8,6 +8,7 @@
   "task_identifier": "W2-1",
   "wave_name": null,
   "skill": "implement",
+  "skill_version": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
   "first_provider_attempt_at": 11,
   "usage": {
     "input_tokens": null,

@@ -11,7 +11,7 @@ pub struct TaskComment {
     pub created_at: Option<String>,
 }
 
-/// Who wrote a comment. Person attribution survives local saves and provider acquisition;
+/// Who wrote a comment. Person attribution survives local saves and tracker fetches;
 /// integrations are distinct from participant direction. An agent's direction
 /// is the Session's, written for its requester.
 #[derive(

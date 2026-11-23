@@ -36,7 +36,7 @@ HISTORY_BYTES = 4 * 1024 * 1024
 RETENTIONS = {"keep_forever", "emergency_reducible", "mixed", "unclassified", "project_owned"}
 CONTENT_TYPES = {"code/development", "media", "entertainment", "desktop apps", "system/other"}
 EVIDENCE_CATEGORIES = {"pytest", "coding-temp", "demo", "test-evidence"}
-TEMP_PREFIXES = ("lf-worlds-", "ghostty-shaders-", "swift-test-")
+TEMP_PREFIXES = ("ghostty-shaders-", "swift-test-")
 BUILDERS = re.compile(
     r"^(cargo|rustc|rustdoc|swift|xcodebuild|clang|gcc|cc$|c\+\+$|ld$|"
     r"ninja|make|cmake|node|npm|npx|yarn|pnpm|uv$|python|go$|java|gradle|bazel)",

@@ -13,8 +13,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Where ops telemetry is recorded: `.lf/tmp/metrics/ops.jsonl` under the
-/// worktree. `.lf/tmp/` is git-ignored, so recording a metric never touches a
-/// tracked file. One source of truth for the path.
+/// worktree. `.lf/tmp/` is excluded from Git, so recording a metric never
+/// touches a tracked file. One source of truth for the path.
 pub(crate) fn ops_metrics_path(repo: &Path) -> PathBuf {
     repo.join(".lf")
         .join("tmp")
@@ -34,6 +34,10 @@ pub fn record_ops_metric(repo: &Path, mut event: serde_json::Value) {
         serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
     );
     let path = ops_metrics_path(repo);
+    // A repository that doesn't ignore `.lf/tmp/` must not commit metrics.
+    if crate::git::exclude(repo, ".lf/tmp/").is_err() {
+        return;
+    }
     let Some(parent) = path.parent() else {
         return;
     };
@@ -93,8 +97,8 @@ mod tests {
         git(repo, &["init", "-q"]);
         git(repo, &["config", "user.email", "test@example.com"]);
         git(repo, &["config", "user.name", "Test"]);
-        // The ignored-path contract: `.lf/tmp/` is never committed.
-        std::fs::write(repo.join(".gitignore"), ".lf/tmp/\n").expect("write .gitignore");
+        // No `.gitignore` lists `.lf/tmp/`: telemetry keeps itself out of Git.
+        std::fs::write(repo.join("README.md"), "fixture\n").expect("write README");
         git(repo, &["add", "."]);
         git(repo, &["commit", "-qm", "init"]);
         assert_eq!(porcelain(repo), "", "fixture should start clean");

@@ -364,6 +364,7 @@ mod tests {
                         id: "large".into(),
                         trace_id: loopflow_model::id::TraceId::default(),
                         result: serde_json::Value::String("x".repeat(MAX_BULK / 2)),
+                        revisions: None,
                     },
                     reservation,
                 )

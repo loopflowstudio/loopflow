@@ -96,7 +96,6 @@ impl ContextSource {
     fn budget(self) -> Option<BudgetKey> {
         match self {
             Self::Memory => Some(BudgetKey::MemoryTokens),
-            Self::Scratch => Some(BudgetKey::ScratchTokens),
             _ => None,
         }
     }

@@ -58,11 +58,19 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
     // A clone's authored Waves join the store with the first explicit write here.
     crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, &main.to_string_lossy())
         .map_err(lifecycle_error)?;
-    let created = store
-        .get_wave_at(&locator)
-        .await
-        .map_err(lifecycle_error)?
-        .is_none();
+    let held = || async {
+        store
+            .get_wave_at(&locator)
+            .await
+            .map(|wave| wave.is_some())
+            .map_err(lifecycle_error)
+    };
+    // Another Machine may have made a Wave of this name: read the plan first,
+    // so this command joins that Wave and does not make a second.
+    let created = !held().await? && {
+        super::plan_carriers::look_first(&store, &main).await;
+        !held().await?
+    };
     let wave = crate::work::wave::ensure_wave_row(&store, &main, locator.slug())
         .await
         .map_err(lifecycle_error)?;
@@ -77,6 +85,12 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
         &[authored_path(wave.slug())],
         &format!("lf wave add: {}", wave.slug()),
     );
+    super::planning_sync::sync_after_save(
+        &store,
+        &main.to_string_lossy(),
+        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(wave.id().clone()),
+    )
+    .await;
     let mut added = WaveAdded {
         id: wave.id().clone(),
         name: wave.slug().to_string(),
@@ -122,12 +136,19 @@ pub fn render_added(added: &WaveAdded) -> String {
 }
 
 async fn ensure_first_project(store: &Store, wave: &crate::work::wave::Wave) -> OpsResult<Project> {
-    store
-        .sqlite
-        .record_project_activation(wave.id(), crate::journal::current_lf_process_id().as_ref())
-        .map_err(lifecycle_error)?;
-    let acquisition = super::planning_sync::lock_wave_planning(wave).await?;
-    super::project::import_binding(store, wave, &acquisition)?;
+    if let (Some(process), Some(start)) = (
+        crate::journal::current_lf_process_id(),
+        crate::journal::current_execution_start(),
+    ) {
+        store
+            .sqlite
+            .record_project_activation(wave.id(), &process, &start)
+            .map_err(lifecycle_error)?;
+        crate::journal::mark_run_owner(
+            loopflow_storage::graph_process::RunOwner::ProjectActivation,
+        );
+    }
+    let _acquisition = super::planning_sync::lock_wave_planning(wave).await?;
     let id = store
         .sqlite
         .ensure_project(wave.id(), wave.slug())
@@ -266,7 +287,7 @@ pub struct WaveRemoval {
     pub moved: Vec<RemovalTask>,
     pub deleted: Vec<RemovalTask>,
     pub completed_tasks: usize,
-    pub chapters: usize,
+    pub projects: usize,
     pub sessions: usize,
     pub initiatives: Vec<InitiativeArchive>,
     pub has_files: bool,
@@ -362,9 +383,9 @@ pub fn remove(
     let mut moved = Vec::new();
     let mut deleted = Vec::new();
     let mut completed_tasks = 0;
-    let mut chapters = 0;
+    let mut projects = 0;
     for id in &ids {
-        chapters += store
+        projects += store
             .sqlite
             .list_projects(Some(id))
             .map_err(lifecycle_error)?
@@ -441,7 +462,7 @@ pub fn remove(
         moved,
         deleted,
         completed_tasks,
-        chapters,
+        projects,
         sessions,
         initiatives,
         has_files,
@@ -523,7 +544,11 @@ pub fn remove(
             .sqlite
             .retire_waves(&ids, "removed")
             .map_err(lifecycle_error)?;
-        runtime.block_on(super::planning_sync::sync_after_save(&store, &repo_key));
+        runtime.block_on(super::planning_sync::sync_after_save(
+            &store,
+            &repo_key,
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(ids[0].clone()),
+        ));
     }
 
     operation.planning_done = true;
@@ -798,11 +823,11 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
             "completed Tasks",
         ));
     }
-    if removal.chapters > 0 {
-        kept.push(count(removal.chapters, "chapter", "chapters"));
+    if removal.projects > 0 {
+        kept.push(count(removal.projects, "Project", "Projects"));
     }
     if !kept.is_empty() {
-        let verb = if removal.completed_tasks + removal.chapters == 1 {
+        let verb = if removal.completed_tasks + removal.projects == 1 {
             "stays"
         } else {
             "stay"
@@ -1067,6 +1092,14 @@ pub async fn rename(
         }
         operation.planning_done = true;
         recovery::save(&operation, &store)?;
+        super::planning_sync::sync_after_save(
+            &store,
+            &operation.target_repo,
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(
+                operation.waves[0].id.clone(),
+            ),
+        )
+        .await;
     }
     let files = recovery::finish_files(&mut operation, &store, &main);
     let initiative = if let Some(provider) = operation.providers.first() {

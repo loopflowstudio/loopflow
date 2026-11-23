@@ -16,61 +16,71 @@ use loopflow_execution::context_block::ContextMoment;
 use loopflow_execution::definition::DefinitionKind;
 use loopflow_execution::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
 
-use loopflow_execution::ops::project::update_plan;
+use loopflow_execution::ops::project::update_project;
+use loopflow_execution::store::planning_sync::LostAnswer;
 
-#[derive(Clone, Default)]
-struct FlagTables {
-    /// Flags that take a value (the next arg belongs to them).
-    value: HashSet<String>,
-    /// Boolean flags (no value).
-    boolean: HashSet<String>,
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum FlagValue {
+    None,
+    Optional,
+    Required,
 }
 
-impl FlagTables {
-    fn insert(&mut self, arg: &clap::Arg) {
-        let flags = if arg.get_action().takes_values() {
-            &mut self.value
+#[derive(PartialEq, Eq)]
+enum SeparateValue {
+    None,
+    Next,
+    Missing,
+}
+
+impl FlagValue {
+    fn separate_value(self, args: &[String], index: usize) -> SeparateValue {
+        if self == Self::None || args[index].contains('=') {
+            SeparateValue::None
+        } else if args
+            .get(index + 1)
+            .is_some_and(|next| next == "-" || !next.starts_with('-'))
+        {
+            SeparateValue::Next
+        } else if self == Self::Required {
+            SeparateValue::Missing
         } else {
-            &mut self.boolean
-        };
-        if let Some(short) = arg.get_short() {
-            flags.insert(format!("-{short}"));
+            SeparateValue::None
         }
-        if let Some(long) = arg.get_long() {
-            flags.insert(format!("--{long}"));
-        }
-    }
-
-    fn contains(&self, arg: &str) -> bool {
-        self.boolean.contains(flag_name(arg)) || self.takes_value(arg)
-    }
-
-    fn takes_value(&self, arg: &str) -> bool {
-        self.value.contains(flag_name(arg))
-    }
-
-    fn extend(&mut self, other: &Self) {
-        self.value.extend(other.value.iter().cloned());
-        self.boolean.extend(other.boolean.iter().cloned());
     }
 }
 
 struct CommandArgTables {
     /// Flags owned directly by this command.
-    direct: FlagTables,
+    direct: HashMap<String, FlagValue>,
     /// Flags owned here or by any descendant, used only to find the command path.
-    recursive: FlagTables,
+    recursive: HashMap<String, FlagValue>,
     /// Direct subcommands, indexed by canonical name.
     subcommands: HashMap<String, CommandArgTables>,
 }
 
 fn command_arg_tables(command: &clap::Command, inherited: &HashSet<clap::Id>) -> CommandArgTables {
-    let mut direct = FlagTables::default();
+    let mut direct = HashMap::new();
     for arg in command
         .get_arguments()
         .filter(|arg| !inherited.contains(arg.get_id()))
     {
-        direct.insert(arg);
+        let takes = if !arg.get_action().takes_values() {
+            FlagValue::None
+        } else if arg
+            .get_num_args()
+            .is_some_and(|range| range.min_values() == 0)
+        {
+            FlagValue::Optional
+        } else {
+            FlagValue::Required
+        };
+        if let Some(short) = arg.get_short() {
+            direct.insert(format!("-{short}"), takes);
+        }
+        if let Some(long) = arg.get_long() {
+            direct.insert(format!("--{long}"), takes);
+        }
     }
 
     let mut recursive = direct.clone();
@@ -84,7 +94,11 @@ fn command_arg_tables(command: &clap::Command, inherited: &HashSet<clap::Id>) ->
     );
     for subcommand in command.get_subcommands() {
         let child = command_arg_tables(subcommand, &inherited);
-        recursive.extend(&child.recursive);
+        // During path discovery a spelling may still belong to several descendants.
+        for (flag, &takes) in &child.recursive {
+            let entry = recursive.entry(flag.clone()).or_insert(takes);
+            *entry = (*entry).max(takes);
+        }
         subcommands.insert(subcommand.get_name().to_string(), child);
     }
 
@@ -107,28 +121,8 @@ fn flag_name(arg: &str) -> &str {
     arg.split_once('=').map_or(arg, |(name, _)| name)
 }
 
-fn has_inline_value(arg: &str) -> bool {
-    arg.starts_with('-') && arg.contains('=')
-}
-
-fn is_value_flag(arg: &str) -> bool {
-    arg_tables().direct.takes_value(arg)
-}
-
-fn is_known_flag(arg: &str) -> bool {
-    arg_tables().direct.contains(arg)
-}
-
-fn push_flag(args: &[String], output: &mut Vec<String>, index: &mut usize, takes_value: bool) {
-    output.push(args[*index].clone());
-    if takes_value && !has_inline_value(&args[*index]) && *index + 1 < args.len() {
-        *index += 1;
-        output.push(args[*index].clone());
-    }
-}
-
 fn first_target_index(args: &[String]) -> Option<usize> {
-    let mut index = 0;
+    let mut index = 1;
     while index < args.len() {
         let arg = &args[index];
         if arg == "--" {
@@ -137,7 +131,11 @@ fn first_target_index(args: &[String]) -> Option<usize> {
         if !arg.starts_with('-') {
             return Some(index);
         }
-        if is_value_flag(arg) && !has_inline_value(arg) {
+        if arg_tables()
+            .direct
+            .get(flag_name(arg))
+            .is_some_and(|takes| takes.separate_value(args, index) == SeparateValue::Next)
+        {
             index += 1;
         }
         index += 1;
@@ -145,34 +143,30 @@ fn first_target_index(args: &[String]) -> Option<usize> {
     None
 }
 
-#[derive(Clone, Copy)]
-struct SelectedCommand<'a> {
+struct SelectedCommand {
     index: usize,
-    args: &'a CommandArgTables,
+    args: &'static CommandArgTables,
 }
 
-fn selected_command_path<'a>(
-    rest: &[String],
-    command_index: usize,
-    command: &'a CommandArgTables,
-) -> Vec<SelectedCommand<'a>> {
+fn selected_command_path(args: &[String], target: usize) -> Vec<SelectedCommand> {
+    // Insert moved root flags after any leading options, just before the target.
+    let root = arg_tables();
     let mut path = vec![SelectedCommand {
-        index: command_index,
-        args: command,
+        index: target - 1,
+        args: root,
     }];
-    let mut index = command_index + 1;
-
-    while index < rest.len() {
-        let arg = &rest[index];
+    let mut current = root;
+    let mut index = target;
+    while index < args.len() {
+        let arg = &args[index];
         if arg == "--" {
             break;
         }
 
-        let current = path.last().expect("command path is never empty").args;
         if arg.starts_with('-') {
-            let recognized = current.recursive.contains(arg) || is_known_flag(arg);
-            let takes_value = current.recursive.takes_value(arg) || is_value_flag(arg);
-            if recognized && takes_value && !has_inline_value(arg) && index + 1 < rest.len() {
+            let name = flag_name(arg);
+            let takes = current.recursive.get(name).max(root.direct.get(name));
+            if takes.is_some_and(|takes| takes.separate_value(args, index) == SeparateValue::Next) {
                 index += 1;
             }
             index += 1;
@@ -182,6 +176,7 @@ fn selected_command_path<'a>(
         let Some(child) = current.subcommands.get(arg) else {
             break;
         };
+        current = child;
         path.push(SelectedCommand { index, args: child });
         index += 1;
     }
@@ -189,120 +184,75 @@ fn selected_command_path<'a>(
     path
 }
 
-fn deepest_command_before(path: &[SelectedCommand<'_>], index: usize) -> usize {
-    path.iter()
-        .rposition(|command| command.index < index)
-        .expect("the top-level command precedes its arguments")
-}
-
-fn local_flag_owner(path: &[SelectedCommand<'_>], arg: &str, current: usize) -> Option<usize> {
-    if path[current].args.direct.contains(arg) {
-        return Some(current);
-    }
-    path.iter()
-        .rposition(|command| command.args.direct.contains(arg))
-}
-
-fn reorder_command_args(
-    program: String,
-    rest: &[String],
-    command_index: usize,
-    command: &CommandArgTables,
-) -> Vec<String> {
-    let path = selected_command_path(rest, command_index, command);
-    let mut moved_globals = Vec::new();
-    let mut moved_locals: HashMap<usize, Vec<String>> = HashMap::new();
-    let mut retained = vec![true; rest.len()];
-    let mut index = command_index + 1;
-
-    while index < rest.len() {
-        let arg = &rest[index];
-        if arg == "--" {
-            break;
-        }
-
-        let current = deepest_command_before(&path, index);
-        let local_owner = local_flag_owner(&path, arg, current);
-        let destination = if let Some(owner) = local_owner {
-            (owner != current).then_some(Some(owner))
-        } else if is_known_flag(arg) {
-            Some(None)
-        } else {
-            None
-        };
-
-        let Some(destination) = destination else {
-            index += 1;
-            continue;
-        };
-
-        let takes_value = destination.map_or_else(
-            || is_value_flag(arg),
-            |owner| path[owner].args.direct.takes_value(arg),
-        );
-        let mut moved = Vec::new();
-        push_flag(rest, &mut moved, &mut index, takes_value);
-        let moved_start = index + 1 - moved.len();
-        retained[moved_start..=index].fill(false);
-        if let Some(owner) = destination {
-            moved_locals.entry(owner).or_default().extend(moved);
-        } else {
-            moved_globals.extend(moved);
-        }
-        index += 1;
-    }
-
-    let mut result = vec![program];
-    result.extend_from_slice(&rest[..command_index]);
-    result.extend(moved_globals);
-    for (index, arg) in rest.iter().enumerate().skip(command_index) {
-        if retained[index] {
-            result.push(arg.clone());
-        }
-        if let Some(owner) = path.iter().position(|command| command.index == index) {
-            if let Some(flags) = moved_locals.remove(&owner) {
-                result.extend(flags);
-            }
-        }
-    }
-    result
-}
-
 /// Accept top-level flags on either side of a target when their meaning is
 /// unambiguous. Local command flags win collisions, and `--` ends reordering.
 fn reorder_args(args: Vec<String>) -> Vec<String> {
-    if args.len() <= 1 {
-        return args;
-    }
-
-    let program = args[0].clone();
-    let rest = &args[1..];
-
-    let Some(target_index) = first_target_index(rest) else {
+    let Some(target) = first_target_index(&args) else {
         return args;
     };
-    if let Some(command) = arg_tables().subcommands.get(rest[target_index].as_str()) {
-        return reorder_command_args(program, rest, target_index, command);
-    }
-
-    let mut result = vec![program];
-    result.extend_from_slice(&rest[..target_index]);
-    let mut skill_and_args = vec![rest[target_index].clone()];
-    let mut index = target_index + 1;
-    while index < rest.len() {
-        let arg = &rest[index];
+    let path = selected_command_path(&args, target);
+    let mut moved: HashMap<usize, Vec<String>> = HashMap::new();
+    let mut retained = vec![true; args.len()];
+    let mut index = target + 1;
+    while index < args.len() {
+        let arg = &args[index];
         if arg == "--" {
-            skill_and_args.extend_from_slice(&rest[index..]);
             break;
         }
-        if is_known_flag(arg) {
-            push_flag(rest, &mut result, &mut index, is_value_flag(arg));
-        } else {
-            skill_and_args.push(arg.clone());
+        let name = flag_name(arg);
+        if path[1..]
+            .iter()
+            .rfind(|command| command.index < index)
+            .is_some_and(|command| command.args.direct.contains_key(name))
+        {
+            index += 1;
+            continue;
         }
+        let Some(depth) = path
+            .iter()
+            .rposition(|command| command.args.direct.contains_key(name))
+        else {
+            index += 1;
+            continue;
+        };
+        let owner = &path[depth];
+        let takes = owner.args.direct[name];
+        let start = index;
+        match takes.separate_value(&args, index) {
+            SeparateValue::Missing => {
+                // End at the flag so Clap cannot consume a command name as its value.
+                let mut result = vec![args[0].clone()];
+                result.extend(
+                    path[1..=depth]
+                        .iter()
+                        .map(|command| args[command.index].clone()),
+                );
+                result.push(arg.clone());
+                return result;
+            }
+            SeparateValue::Next => index += 1,
+            SeparateValue::None => {}
+        }
+        retained[start..=index].fill(false);
+        moved
+            .entry(owner.index)
+            .or_default()
+            .extend_from_slice(&args[start..=index]);
         index += 1;
     }
-    result.extend(skill_and_args);
+
+    if moved.is_empty() {
+        return args;
+    }
+    let mut result = Vec::with_capacity(args.len());
+    for (index, arg) in args.into_iter().enumerate() {
+        if retained[index] {
+            result.push(arg);
+        }
+        if let Some(flags) = moved.remove(&index) {
+            result.extend(flags);
+        }
+    }
     result
 }
 
@@ -330,7 +280,11 @@ fn in_directory_runtime<T>(
     with_runtime(&directory, command, || run(&directory))
 }
 
-fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
+fn run_default_agent(
+    kind: loopflow_execution::harness::LaunchKind,
+    cli: &Cli,
+    command: &[String],
+) -> anyhow::Result<()> {
     let repo_root = loopflow_execution::repo::find_repo_root()?;
     let moved = loopflow_execution::git::worktrees::move_default_agent_to_worktree(&repo_root)?;
     match moved {
@@ -338,11 +292,11 @@ fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
             eprintln!("moved to `{}`", worktree.path.display());
             let _cwd = CwdGuard::enter(&worktree.path)?;
             with_runtime(&worktree.path, command, || {
-                loopflow::lf::commands::run::run(&worktree.path, Some("default"), None, cli)
+                loopflow::lf::commands::run::run(kind, &worktree.path, Some("default"), None, cli)
             })
         }
         None => with_runtime(&repo_root, command, || {
-            loopflow::lf::commands::run::run(&repo_root, Some("default"), None, cli)
+            loopflow::lf::commands::run::run(kind, &repo_root, Some("default"), None, cli)
         }),
     }
 }
@@ -451,6 +405,7 @@ fn resolve_cli_target(
 }
 
 fn execute_target(
+    kind: loopflow_execution::harness::LaunchKind,
     target: loopflow_execution::definition::Target,
     message: Option<&str>,
     cli: &Cli,
@@ -478,31 +433,29 @@ fn execute_target(
                         || loopflow::lf::commands::run::implicit_binding(cli)?.is_some();
                     match binding {
                         Some(binding) => loopflow::lf::commands::run::run_bound(
+                            kind,
                             Some(name),
                             message,
                             cli,
                             binding,
                         )?,
-                        None => {
-                            loopflow::lf::commands::run::run(&repo_root, Some(name), message, cli)?
-                        }
+                        None => loopflow::lf::commands::run::run(
+                            kind,
+                            &repo_root,
+                            Some(name),
+                            message,
+                            cli,
+                        )?,
                     }
                     // Shared contributions leave checkpoint composition to the caller.
                     if !shared
                         && !loopflow_execution::journal::has_caller()
                         && loopflow_execution::repo::discover_repo_root(&repo_root)?.is_some()
                     {
-                        let options = loopflow_execution::ops::CommitOptions {
-                            add: true,
-                            message: Some(format!("lf commit: {name}")),
-                            ..loopflow_execution::ops::CommitOptions::for_task(name)
-                        };
-                        loopflow_execution::ops::commit_workflow(
-                            &repo_root,
-                            &options,
-                            &loopflow_execution::ops::NullProgress,
-                            &|_| {},
-                        )?;
+                        // Best-effort: the skill ran whether or not its edits commit.
+                        if loopflow_execution::ops::step_commit_pending(&repo_root) {
+                            commit_skill_step(&repo_root, name, cli.agent.as_deref());
+                        }
                     }
                     Ok(())
                 })
@@ -517,6 +470,91 @@ fn execute_target(
             })
         }
     }
+}
+
+/// A child `lf commit --step`, as a Graph runs after each skill step, so the
+/// message-writing agent is a Process of its own. The run's `-a` writes the
+/// message only when `commit-message` has no agent of its own.
+fn commit_skill_step(repo_root: &Path, skill: &str, agent: Option<&str>) {
+    let committed = loopflow_execution::os_process::resolve_lf_binary()
+        .map_err(|error| error.to_string())
+        .and_then(|lf| {
+            std::process::Command::new(lf)
+                .args(["commit", "--step", skill])
+                .args(agent.map(|agent| ["--agent", agent]).into_iter().flatten())
+                .current_dir(repo_root)
+                .stdin(std::process::Stdio::null())
+                .status()
+                .map_err(|error| error.to_string())
+        });
+    match committed {
+        Ok(status) if status.success() => {}
+        Ok(status) => tracing::warn!(skill, %status, "could not commit the skill's edits"),
+        Err(error) => tracing::warn!(skill, %error, "could not commit the skill's edits"),
+    }
+}
+
+/// Start a conversation's prepared input in this `lf session resume`, as `lf -i`
+/// would in the conversation's directory with its agent and Work. This process
+/// stays the provider's launcher and its one LfProcess.
+fn launch_conversation(
+    launch: loopflow_execution::ops::human_session::ConversationLaunch,
+    args: &[String],
+) -> anyhow::Result<()> {
+    use loopflow_execution::durable::WorkRef;
+    let loopflow_execution::ops::human_session::ConversationLaunch {
+        agent,
+        cwd,
+        work,
+        skill,
+        first_turn,
+        prepared_capture,
+        lock,
+        kind,
+        ..
+    } = launch;
+    let mut cli = Cli {
+        interactive: true,
+        agent: Some(agent),
+        prepared_capture,
+        launch_lock: Some(lock),
+        command: Some(match skill {
+            Some(skill) => Commands::Skill {
+                cmd: loopflow::lf::SkillCommand::External(vec![skill, first_turn]),
+            },
+            None => Commands::Inline {
+                prompt: vec![first_turn],
+            },
+        }),
+        ..Cli::default()
+    };
+    // The provider starts on this thread, so its agent is selected here.
+    let _settings = loopflow_execution::config::settings::select_invocation(cli.setting_values()?);
+    let _cwd = CwdGuard::enter(&cwd)?;
+    // Work reaches the provider's environment as `lf --task X -i` hands it.
+    let (_work_env, binding) = match work {
+        Some(mut binding) if matches!(binding.work, WorkRef::Task(_)) => {
+            let declaration = EnvGuard::set(
+                loopflow_execution::ops::WORK_DECLARATION_ENV,
+                format!("task:{}", binding.work.id()),
+            );
+            cli.wave = binding.wave_name.clone();
+            binding.cwd = cwd;
+            (Some(declaration), Some(binding))
+        }
+        Some(binding) => {
+            cli.wave = binding.wave_name;
+            let wave = binding.wave_id.map(|wave| {
+                EnvGuard::set(
+                    loopflow_execution::work::wave::context::WAVE_ID_ENV,
+                    wave.to_string(),
+                )
+            });
+            (wave, None)
+        }
+        None => (None, None),
+    };
+    finish_command(dispatch_launch(kind, &mut cli, args, binding.as_ref()))
 }
 
 fn prepare_work_binding(
@@ -581,16 +619,26 @@ impl Drop for EnvGuard {
 
 /// One PR's line in `lf task status`. A degraded Linear linkage is named here
 /// because this reading is where an operator already looks for writeback health —
-/// the Task's `PM writeback` line sits directly above. Silence means linked.
-fn format_task_pr_line(pr: &loopflow_execution::work::task::TaskPr) -> String {
+/// the Task's `tracker writeback` line sits directly above. Silence means linked.
+fn format_task_pr_line(
+    pr: &loopflow_execution::work::task::TaskPr,
+    stack_parent: Option<&loopflow_execution::ops::task::TaskStackParent>,
+) -> String {
     let provider = pr
         .github()
         .map(|github| format!("GitHub #{}", github.number))
         .unwrap_or_else(|| "not opened on GitHub".to_string());
-    let placement = pr
-        .parent_pr_id
-        .as_ref()
-        .map(|parent| format!("  stacked on {parent}"))
+    let placement = stack_parent
+        .map(|parent| {
+            let number = parent
+                .pr_number
+                .map(|number| format!("#{number}, "))
+                .unwrap_or_default();
+            format!(
+                "  stacked on {} ({number}{})",
+                parent.identifier, parent.branch
+            )
+        })
         .unwrap_or_default();
     let linkage = pr
         .linear_link_error
@@ -619,7 +667,7 @@ fn print_task_snapshot(
     if json {
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
-        let pm_writeback = match &snapshot.pm_writeback {
+        let tracker_writeback = match &snapshot.tracker_writeback {
             loopflow_execution::work::task::LinearWritebackState::Current => "current".to_string(),
             loopflow_execution::work::task::LinearWritebackState::Pending { error, .. } => {
                 format!("pending: {error}")
@@ -630,42 +678,23 @@ fn print_task_snapshot(
             "provider {}",
             snapshot.provider.as_deref().unwrap_or("not selected")
         );
+        let auto = snapshot
+            .auto
+            .as_ref()
+            .map(loopflow::lf::commands::task_row::auto_phrase)
+            .unwrap_or_default();
         println!(
-            "{}  {}\n  task: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}",
+            "{}  {}{auto}\n  task: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  tracker writeback: {}",
             snapshot.issue_identifier,
             snapshot.status,
             snapshot.task_id,
             body,
             snapshot.worktree.as_deref().unwrap_or("unplaced"),
             branch,
-            pm_writeback,
+            tracker_writeback,
         );
         if let Some(graph) = &snapshot.work.graph {
-            println!("  {}", graph.summary());
-        }
-        let when = |at: i64| {
-            time::OffsetDateTime::from_unix_timestamp(at)
-                .ok()
-                .and_then(|at| {
-                    at.format(&time::format_description::well_known::Rfc3339)
-                        .ok()
-                })
-                .unwrap_or_else(|| at.to_string())
-        };
-        if let Some(approval) = &snapshot.ship_approval {
-            println!(
-                "  Auto-Ship approved by {} {}",
-                approval.by,
-                when(approval.at)
-            );
-        }
-        if let Some(stop) = &snapshot.ship_stop {
-            println!(
-                "  Not shipping: {} stopped it {} · `lf ship {}` approves it again",
-                stop.by,
-                when(stop.at),
-                snapshot.issue_identifier
-            );
+            println!("  Graph {}: {}", graph.name, graph.sentence);
         }
         if let Some(conflict) = &snapshot.completion_pending {
             println!("  error: {conflict}");
@@ -692,7 +721,7 @@ fn print_task_snapshot(
                 },
             );
         }
-        // A run that let its launcher go named this log after its Graph or skill Process.
+        // A run that let its launcher go named this log after its Graph run.
         let log = |id: &str| {
             let path = loopflow_execution::process::launch_log::graph_log_path(id);
             if path.exists() {
@@ -710,20 +739,14 @@ fn print_task_snapshot(
                 log(&graph.summary.id),
             );
         }
-        for process in &snapshot.work.processes {
-            println!(
-                "  Process: {}  {}  {}{}",
-                process.id(),
-                process.command().unwrap_or("unknown command"),
-                process.outcome().unwrap_or("unknown"),
-                log(process.id()),
-            );
-        }
         if let Some(project) = &snapshot.project_id {
             println!("  project: {project}");
         }
         if let Some(pr) = &snapshot.pr {
-            println!("{}", format_task_pr_line(pr));
+            println!(
+                "{}",
+                format_task_pr_line(pr, snapshot.stack_parent.as_ref())
+            );
         }
         match &snapshot.observation {
             loopflow_execution::work::task::Observation::Cached { observed_at } => {
@@ -780,13 +803,13 @@ fn print_task_control(
 fn dispatch_repository(cmd: &loopflow::lf::RepoCommand, args: &[String]) -> anyhow::Result<()> {
     use loopflow::lf::RepoCommand;
     match cmd {
-        RepoCommand::Plan {
+        RepoCommand::Tracker {
             cmd,
             json,
             subscribe,
             ..
         } => in_directory_runtime(args, |_| {
-            loopflow::lf::commands::plan::run(cmd.as_ref(), *json, *subscribe)
+            loopflow::lf::commands::tracker::run(cmd.as_ref(), *json, *subscribe)
         }),
         RepoCommand::Path => in_directory_runtime(args, |_| {
             loopflow::lf::commands::work_route::identity(None, None, true, false)
@@ -809,7 +832,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     use loopflow_execution::ops::project;
 
     match command {
-        WaveCommand::EditPlan {
+        WaveCommand::EditProject {
             target,
             name,
             summary,
@@ -817,7 +840,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         } => {
             let saved = tokio::runtime::Runtime::new()?.block_on(project::edit(
                 repo,
-                target.as_plan_target(),
+                target.as_project_target(),
                 name.as_deref(),
                 summary.as_deref(),
                 description.as_deref(),
@@ -948,15 +971,15 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        WaveCommand::UpdatePlan { wave, plan } => {
+        WaveCommand::UpdateProject { wave, file } => {
             #[derive(serde::Deserialize)]
             #[serde(deny_unknown_fields)]
             struct Input {
                 krs: Vec<loopflow_execution::work::project::ProjectKR>,
                 metric_targets: Vec<loopflow_execution::work::wave::metrics::MetricTarget>,
             }
-            let input: Input = serde_json::from_slice(&std::fs::read(plan)?)?;
-            let (_, sync) = tokio::runtime::Runtime::new()?.block_on(update_plan(
+            let input: Input = serde_json::from_slice(&std::fs::read(file)?)?;
+            let (_, sync) = tokio::runtime::Runtime::new()?.block_on(update_project(
                 repo,
                 wave.as_deref(),
                 &input.krs,
@@ -985,11 +1008,17 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
         TaskCommand::Sync {
             issue,
-            retry_updates,
+            keep_theirs,
+            use_mine,
         } => {
+            let answer = match (keep_theirs, use_mine) {
+                (true, _) => Some(LostAnswer::KeepTheirs),
+                (_, true) => Some(LostAnswer::UseMine),
+                _ => None,
+            };
             println!(
                 "{}",
-                loopflow_execution::ops::task::task_sync(issue, *retry_updates)?
+                loopflow_execution::ops::task::task_sync(repo, issue, answer)?
             );
             Ok(())
         }
@@ -1031,7 +1060,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
-        TaskCommand::Hold { .. } => unreachable!("shared mutation dispatch precedes this command"),
+        TaskCommand::Auto { .. } => {
+            unreachable!("auto on and shared mutation dispatch precede this command")
+        }
         TaskCommand::Detail { issue, .. } => {
             loopflow::lf::commands::screens::print(loopflow::lf::commands::read::Read::TaskDetail {
                 directory: repo.to_owned(),
@@ -1046,7 +1077,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         }
         TaskCommand::Runs { issue, after, json } => loopflow::lf::commands::graph_inventory::list(
             &loopflow::lf::commands::graph_inventory::GraphProcessInventoryArgs {
-                processes: true,
+                runs: true,
                 for_task: Some(issue.clone()),
                 after: after.clone(),
                 ..Default::default()
@@ -1076,9 +1107,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             )?;
             Ok(())
         }
-        TaskCommand::View { issue, once } => {
-            loopflow::lf::commands::task_view::run(repo, issue.as_deref(), *once)
-        }
         TaskCommand::Status {
             issue,
             json,
@@ -1086,6 +1114,17 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             ..
         } => {
             let status = loopflow_execution::ops::task::task_status(repo, issue.as_deref())?;
+            // A Task another Machine runs is read where it runs.
+            if let Some(task) = &status.task {
+                if loopflow::lf::commands::waves::print_remote_task_status(
+                    repo,
+                    &task.identifier,
+                    *json,
+                    *subscribe,
+                )? {
+                    return Ok(());
+                }
+            }
             if *subscribe {
                 let task = status
                     .task
@@ -1101,8 +1140,8 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 loopflow::lf::commands::waves::print_task_detail(status)?;
             } else {
                 println!(
-                    "Planning evidence: {}",
-                    serde_json::to_value(status.planning_state)?
+                    "Tracker state: {}",
+                    serde_json::to_value(status.tracker_state.state)?
                         .as_str()
                         .expect("planning state is a string")
                 );
@@ -1126,6 +1165,11 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                             loopflow_execution::ops::task_ownership::render(ownership)
                         );
                     }
+                    if let Some(line) =
+                        loopflow::lf::commands::waves::task_conversation_line(&task.id)?
+                    {
+                        println!("Conversation: {line}");
+                    }
                     for session in loopflow_execution::ops::task::task_copied_sessions(&task.id)? {
                         println!(
                             "Session {} from {}: {}",
@@ -1135,10 +1179,10 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                         );
                     }
                 } else {
-                    println!("No saved Task; retained observations are not Work.");
+                    println!("No saved Task; retained tracker events are not Work.");
                 }
-                if let Some(at) = status.observed_at {
-                    println!("Observed at: {at}");
+                if let Some(at) = status.tracker_state.synced_at {
+                    println!("Synced at: {at}");
                 }
                 if let Some(sync) = &status.sync {
                     for line in sync.lines() {
@@ -1179,14 +1223,21 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 }
                 match status.task.as_ref().filter(|task| task.worktree.is_none()) {
                     // Under the line naming where it runs, indented; alone, by name.
+                    // A Task holds its auto setting before it has a checkout.
                     Some(task) => println!(
-                        "{}  {}",
+                        "{}  {}{}",
                         if elsewhere.is_some() {
                             ""
                         } else {
                             task.identifier.as_str()
                         },
-                        loopflow_execution::ops::task_ownership::not_checked_out_here()
+                        loopflow_execution::ops::task_ownership::not_checked_out_here(),
+                        status
+                            .execution
+                            .as_ref()
+                            .and_then(|execution| execution.auto.as_ref())
+                            .map(loopflow::lf::commands::task_row::auto_phrase)
+                            .unwrap_or_default()
                     ),
                     None if elsewhere.is_none() => match &status.execution {
                         Some(execution) => print_task_snapshot(execution, false)?,
@@ -1277,10 +1328,12 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::File {
             issue,
             path,
+            at,
             recoveries,
             json,
         } => {
-            let snapshot = loopflow_execution::ops::task::task_file(issue, path, *recoveries)?;
+            let snapshot =
+                loopflow_execution::ops::task::task_file(issue, path, at.as_deref(), *recoveries)?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             } else if snapshot.state != loopflow_execution::ops::task::TaskFileState::Text {
@@ -1293,37 +1346,13 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Save { .. } | TaskCommand::Abandon { .. } => {
             unreachable!("shared mutation dispatch precedes this command")
         }
-        TaskCommand::Sweep { apply, json } => {
-            let entries = loopflow_execution::ops::task::task_sweep(repo, *apply)?;
-            let incomplete = entries
-                .iter()
-                .any(|entry| entry.outcome.starts_with("incomplete:"));
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&entries)?);
-            } else {
-                for entry in entries {
-                    println!(
-                        "{} / {}: {} — {}",
-                        entry.wave,
-                        entry.project,
-                        entry.issue.as_deref().unwrap_or("Project"),
-                        entry.outcome
-                    );
-                }
-            }
-            if incomplete {
-                anyhow::bail!(
-                    "chapter sweep has incomplete cancellations; see the reported retry commands"
-                );
-            }
-            Ok(())
-        }
         TaskCommand::Delete { issue } => {
-            let identifier = loopflow_execution::ops::task::task_delete(repo, issue)?;
+            let (identifier, pending) = loopflow_execution::ops::task::task_delete(repo, issue)?;
             println!("{identifier}: removed locally; execution history retained");
             if let Some(provider) = loopflow_execution::config::load_config_or_default(Some(repo))
                 .planning_transport()
-                .remote_name()
+                .map(|tracker| tracker.name())
+                .filter(|_| pending)
             {
                 println!("Pending {provider} sync");
             }
@@ -1404,9 +1433,11 @@ fn print_thread(result: &loopflow_model::comment::TaskComments, json: bool) -> a
 }
 
 fn main() -> std::process::ExitCode {
+    // Before any thread exists: everything lf starts inherits this `PATH`.
+    loopflow_execution::os_process::repair_path();
     loopflow::build_info::initialize();
     loopflow_execution::transport::initialize();
-    // The holder outlives servers and installs. It records no Process itself
+    // The holder outlives servers and installs. It writes no journal trace
     // and opens no store, so it runs before any of that is set up.
     if std::env::args().skip(1).eq(["holder", "run"]) {
         return match loopflow_execution::terminal_holder::run() {
@@ -1423,6 +1454,7 @@ fn main() -> std::process::ExitCode {
         if let Err(error) = &result {
             loopflow_execution::engine::launch::report::<()>(Err(error));
         }
+        loopflow_execution::transport::end_open(&result);
         loopflow_execution::transport::report_exit(journal::command_exit_code(&result));
         result
     });
@@ -1451,8 +1483,12 @@ fn init_tracing(verbose: bool) {
             .init();
         return;
     }
+    // Creation and conversation setup steps are timings a Start's report reads.
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new("warn,loopflow::server=info"))
+        .with_env_filter(EnvFilter::new(format!(
+            "warn,loopflow::server=info,{}=info",
+            loopflow_execution::journal::START_TIMING_TARGET
+        )))
         .with_ansi(false)
         .with_writer(|| loopflow_execution::diagnostic_log::DiagnosticLog)
         .event_format(loopflow_execution::diagnostic_log::IdentifiedLines)
@@ -1493,8 +1529,7 @@ fn configuration_directory(cli: &Cli) -> anyhow::Result<std::path::PathBuf> {
 fn checkout_task(directory: &Path, wave: Option<&str>) -> anyhow::Result<Option<String>> {
     use loopflow_execution::ops::context::ContextFact;
 
-    let resolution =
-        loopflow::lf::commands::context::explain_in(directory, wave, None, None, None)?;
+    let resolution = loopflow::lf::commands::context::explain_in(directory, wave, None, None)?;
     match resolution.task {
         ContextFact::Bound { value, .. } => Ok(Some(value)),
         ContextFact::Unbound => Ok(None),
@@ -1504,41 +1539,33 @@ fn checkout_task(directory: &Path, wave: Option<&str>) -> anyhow::Result<Option<
 
 fn run() -> anyhow::Result<()> {
     // A terminal relay is exec'd by the process that resolved its connection.
-    // The relay avoids the command tree. A passive reveal records its terminal
-    // association only after the held terminal acknowledges input control.
+    // The relay avoids the command tree.
     let mut raw_args: Vec<String> = std::env::args().collect();
     if raw_args
-        .get(1..4)
-        .is_some_and(|args| args == ["session", "attach", "--"])
+        .get(1..3)
+        .is_some_and(|args| args == ["session", "attach"])
     {
+        let args = &raw_args[3..];
         journal::mark_effect_free_read();
         ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
-        let replace = std::env::var_os("LF_RELAY_IF_FREE").is_none();
-        std::env::remove_var("LF_RELAY_IF_FREE");
-        return loopflow_execution::transport::relay_over(&raw_args[4..], replace);
-    }
-    if let Some(relay) = loopflow_execution::transport::relay_args(&raw_args) {
-        journal::mark_effect_free_read();
+        if args.first().is_some_and(|arg| arg == "--") {
+            return loopflow_execution::transport::relay_over(&args[1..], false);
+        }
+        let relay = loopflow_execution::transport::relay_args(args).ok_or_else(|| {
+            anyhow::anyhow!("lf session attach names `--terminal TERMINAL_ID`; got {args:?}")
+        })?;
         journal::continue_after_exec()?;
-        ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
-            .expect("failed to set Ctrl+C handler");
-        loopflow_execution::transport::relay(&relay.terminal, relay.session.as_ref(), relay.moved)?;
+        loopflow_execution::transport::relay(
+            &relay.terminal,
+            relay.session.as_ref(),
+            relay.json_session.is_some(),
+        )?;
         // JSON return opens the ordinary projection after relaying ends.
         if let Some(session) = relay.json_session {
             loopflow::lf::commands::session::print_returned(&session)?;
         }
         return Ok(());
-    }
-    // Clap has no `session attach`: a relay that names no valid host stops here.
-    if raw_args
-        .get(1..3)
-        .is_some_and(|args| args == ["session", "attach"])
-    {
-        anyhow::bail!(
-            "lf session attach names `--terminal TERMINAL_ID`; got {:?}",
-            &raw_args[3..]
-        );
     }
     if !raw_args
         .iter()
@@ -1766,8 +1793,8 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow_execution::process::CommandExit(code).into());
         }
     };
-    // Only a command that changes Work records a Process, and a Graph step
-    // always does: the Graph reads its result from it.
+    // Only a command that changes Work writes a journal trace, and a Graph
+    // step always does.
     if !journal::take_graph_step() && !cli.command.as_ref().is_none_or(Commands::changes_work) {
         journal::mark_read();
     }
@@ -1793,11 +1820,6 @@ fn run() -> anyhow::Result<()> {
                 Commands::Config {
                     cmd: loopflow::lf::ConfigCommand::Settings { .. }
                 } | Commands::Open(_)
-                    | Commands::Workspace(_)
-                    | Commands::Account {
-                        cmd: Some(loopflow::lf::AccountCommand::Next { .. }),
-                        ..
-                    }
             )
         )
     {
@@ -1823,8 +1845,8 @@ fn run() -> anyhow::Result<()> {
     );
     let desktop_read = desktop_intent_read(&cli);
     init_tracing(cli.verbose);
-    // A turn or tool boundary binds no Work. A held launch's asks the Machine
-    // server and opens no store; a bare launch's steer check opens it itself.
+    // A turn or tool boundary binds no Work. A managed launch reports to
+    // the Machine server. Steer checks open the store locally.
     if let Some(Commands::ContextBlock {
         delivery,
         moment:
@@ -1833,10 +1855,10 @@ fn run() -> anyhow::Result<()> {
             | ContextMoment::Tool
             | ContextMoment::Steer
             | ContextMoment::Stop),
-        ..
+        harness,
     }) = &cli.command
     {
-        return loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment);
+        return loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment, *harness);
     }
     validate_desktop_platform(&cli)?;
     let _selected_repo_cwd = cli
@@ -1863,13 +1885,12 @@ fn run() -> anyhow::Result<()> {
             cli.command,
             Some(
                 Commands::Task { .. }
-                    | Commands::Ship { .. }
                     | Commands::Wave { .. }
                     | Commands::Repo {
                         cmd: Some(
                             loopflow::lf::RepoCommand::Release { .. }
                                 | loopflow::lf::RepoCommand::Ci { .. }
-                                | loopflow::lf::RepoCommand::Plan { .. }
+                                | loopflow::lf::RepoCommand::Tracker { .. }
                         ),
                         ..
                     }
@@ -1955,7 +1976,6 @@ fn run() -> anyhow::Result<()> {
                 cli.wave.as_deref(),
                 cli.task.as_deref(),
                 None,
-                None,
             )?;
             match context.wave {
                 loopflow_execution::ops::context::ContextFact::Bound { value, .. } => Some(
@@ -1989,7 +2009,6 @@ fn run() -> anyhow::Result<()> {
             },
     }) = &cli.command
     {
-        journal::observe_process(&args);
         return loopflow::lf::commands::doctor::run(*json);
     }
 
@@ -2071,24 +2090,10 @@ fn run() -> anyhow::Result<()> {
                 candidate,
             }) => loopflow::lf::commands::install::rollback(cli_target, candidate),
         };
-        journal::observe_process(&args);
         return result;
     }
 
     {
-        let account_selection =
-            loopflow_execution::provider_account::selection::AccountSelection::from_flags(
-                &cli.account,
-                &cli.only_account,
-            )?;
-        let _account_selection = if !account_selection.is_default() {
-            Some(EnvGuard::set(
-                loopflow_execution::provider_account::selection::ACCOUNT_SELECTION_ENV,
-                account_selection.env_value()?,
-            ))
-        } else {
-            None
-        };
         debug!(batch = cli.batch, "parsed CLI arguments");
 
         dispatch(cli, &args)
@@ -2150,9 +2155,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     if let Some(Commands::Open(args)) = &cli.command {
         return loopflow::lf::commands::open::explain(cli, args, json);
     }
-    if let Some(Commands::Workspace(args)) = &cli.command {
-        return loopflow::lf::commands::open::explain_workspace(cli, args, json);
-    }
     if let Some(Commands::Task {
         cmd:
             TaskCommand::Run {
@@ -2177,6 +2179,8 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
                 branch: None,
+                from_last_fetch: false,
+                auto_on: false,
             },
             cli.batch || cli.interactive,
         )?;
@@ -2337,6 +2341,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 id,
                 connection,
                 fork,
+                ..
             },
     }) = &cli.command
     {
@@ -2353,7 +2358,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         return Ok(());
     }
     let wave = cli.wave.as_deref();
-    let mut process = None;
+    let mut session = None;
     match &cli.command {
         Some(Commands::Task { .. } | Commands::Inline { .. }) | None => {}
         Some(Commands::Session {
@@ -2362,7 +2367,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                     cmd: Some(loopflow::lf::commands::history::HistoryCommand::Show { id, .. }),
                     ..
                 },
-        }) => process = Some(id.as_str()),
+        }) => session = Some(id.as_str()),
         _ if invocation.is_some() => {}
         _ => anyhow::bail!(
             "invocation preview is not supported for this command (nothing was executed)"
@@ -2370,7 +2375,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     }
     let explanation = cli
         .explain
-        .then(|| loopflow::lf::commands::context::explain(wave, task, None, process))
+        .then(|| loopflow::lf::commands::context::explain(wave, task, session))
         .transpose()?;
     let input = cli
         .context
@@ -2439,14 +2444,8 @@ fn task_run_open_args(cli: &Cli) -> Option<TaskRunOpen> {
     if let Some(agent) = &cli.agent {
         args.extend(["--agent".into(), agent.clone()]);
     }
-    for (flag, values) in [
-        ("--account", &cli.account),
-        ("--only-account", &cli.only_account),
-        ("--setting", &cli.settings),
-    ] {
-        for value in values {
-            args.extend([flag.to_owned(), value.clone()]);
-        }
+    for value in &cli.settings {
+        args.extend(["--setting".to_owned(), value.clone()]);
     }
     Some(TaskRunOpen {
         args,
@@ -2523,7 +2522,7 @@ fn run_task_and_open(
     run(&open, receipt)
 }
 
-fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
+fn dispatch(cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // Own direct conversations and Graphs. Delivery controllers may launch an
     // independently owned agent, but retain their own cancellation/lifetime.
     let execution = matches!(
@@ -2535,9 +2534,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             | Some(Commands::Graph {
                 cmd: GraphCommand::External(_)
             })
-            | Some(Commands::Task {
-                cmd: TaskCommand::Run { .. }
-            })
             | Some(Commands::Session {
                 cmd: loopflow::lf::SessionCommand::History {
                     cmd: Some(loopflow::lf::commands::history::HistoryCommand::Replay { .. }),
@@ -2545,44 +2541,62 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 },
             })
     );
-    let task_run = matches!(
+    if (matches!(
         cli.command,
         Some(Commands::Task {
             cmd: TaskCommand::Run { .. }
         })
-    );
-    if execution
-        && loopflow_execution::transport::delegate_current(
-            cli.batch,
-            task_run || cli.work_subject_selector().is_some(),
-        )?
+    ) || cli.turns_auto_on())
+        && loopflow_execution::transport::detach_current()?
     {
         return Ok(());
     }
+    if execution {
+        let kind = loopflow_execution::transport::LaunchInput {
+            batch: cli.batch,
+            interactive: cli.interactive,
+            has_prompt: cli.command.is_some() || cli.skill_input.is_some(),
+        }
+        .kind();
+        return dispatch_here(cli, args, |cli, binding| {
+            dispatch_launch(kind, cli, args, binding)
+        });
+    }
+    dispatch_here(cli, args, |cli, binding| {
+        execute_command(cli, args, binding)
+    })
+}
+
+fn dispatch_here(
+    mut cli: Cli,
+    args: &[String],
+    execute: impl FnOnce(&mut Cli, Option<&loopflow_execution::ops::WorkBinding>) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
     // Only the operation a launcher started reports; a held terminal in
     // between passes the handoff on untouched.
-    if matches!(
-        cli.command,
-        Some(Commands::Task {
-            cmd: TaskCommand::Run { .. }
-        }) | Some(Commands::Ship { .. })
-            | Some(Commands::Sync(_))
-            | Some(Commands::Pr {
-                cmd: Some(loopflow::lf::PrCommand::Land { .. })
-            })
-            | Some(Commands::Repo {
-                cmd: Some(loopflow::lf::RepoCommand::Release {
-                    cmd: loopflow::lf::ReleaseCommand::Run { .. }
-                }),
-                ..
-            })
-            | Some(Commands::Skill {
-                cmd: SkillCommand::External(_)
-            })
-            | Some(Commands::Graph {
-                cmd: GraphCommand::External(_)
-            })
-    ) {
+    if cli.turns_auto_on()
+        || matches!(
+            cli.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Run { .. }
+            }) | Some(Commands::Sync(_))
+                | Some(Commands::Pr {
+                    cmd: Some(loopflow::lf::PrCommand::Land { .. })
+                })
+                | Some(Commands::Repo {
+                    cmd: Some(loopflow::lf::RepoCommand::Release {
+                        cmd: loopflow::lf::ReleaseCommand::Run { .. }
+                    }),
+                    ..
+                })
+                | Some(Commands::Skill {
+                    cmd: SkillCommand::External(_)
+                })
+                | Some(Commands::Graph {
+                    cmd: GraphCommand::External(_)
+                })
+        )
+    {
         loopflow_execution::engine::launch::expect();
     }
     if loopflow::lf::commands::mutation::accepts(&cli) {
@@ -2593,7 +2607,9 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         if matches!(
             &cli.command,
             Some(Commands::Task {
-                cmd: TaskCommand::Hold { issue: None, .. }
+                cmd: TaskCommand::Auto {
+                    cmd: loopflow::lf::AutoCommand::Off { issue: None, .. }
+                }
             })
         ) && cli.task.is_none()
         {
@@ -2632,14 +2648,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     if let Some(Commands::Desktop { cmd }) = &cli.command {
         return loopflow::lf::commands::desktop::run(&cli, cmd);
     }
-    if let Some(Commands::Workspace(workspace)) = &cli.command {
-        journal::observe_process(args);
-        return loopflow::lf::commands::open::run_workspace(&cli, workspace);
-    }
     if let Some(Commands::Open(open)) = &cli.command {
-        // Bounded observation records this Process and the calling
-        // conversation, which tells a link to the caller's own Work apart.
-        journal::observe_process(args);
         let _cwd = cli
             .wt
             .as_deref()
@@ -2656,19 +2665,22 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     if cli.command.as_ref().is_none_or(Commands::changes_work) {
         loopflow_execution::config::remote::receive(Some(&std::env::current_dir()?))?;
     }
-    if matches!(
-        &cli.command,
-        Some(Commands::Task {
-            cmd: TaskCommand::Run { issue: None, .. } | TaskCommand::Checkout { issue: None, .. }
-        }) | Some(Commands::Ship { .. })
-    ) && cli.task.is_none()
+    if (cli.turns_auto_on()
+        || matches!(
+            &cli.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Run { issue: None, .. }
+                    | TaskCommand::Checkout { issue: None, .. }
+            })
+        ))
+        && cli.task.is_none()
     {
         cli.task = Some(
             match checkout_task(&std::env::current_dir()?, cli.wave.as_deref())? {
                 Some(task) => task,
-                // Shipping a branch with no Task first gives it one.
-                None if matches!(&cli.command, Some(Commands::Ship { .. })) => {
-                    let task = loopflow_execution::ops::task::ship::ship_branch_task(
+                // Auto on for a branch with no Task first gives it one.
+                None if cli.turns_auto_on() => {
+                    let task = loopflow_execution::ops::task::auto::branch_task(
                         &loopflow_execution::repo::working_directory()?,
                         cli.wave.as_deref(),
                     )?;
@@ -2680,28 +2692,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 }
             },
         );
-    }
-    // Reading this Machine's Tasks or processes recovers them first.
-    if matches!(
-        &cli.command,
-        Some(Commands::Task {
-            cmd: TaskCommand::Status { .. } | TaskCommand::List { .. } | TaskCommand::Show { .. }
-        }) | Some(Commands::Wave {
-            cmd: WaveCommand::Status { .. }
-                | WaveCommand::Sync { .. }
-                | WaveCommand::List { .. }
-                | WaveCommand::Show { .. }
-                | WaveCommand::Plan { cmd: None, .. }
-        }) | Some(Commands::Plan {
-            cmd: loopflow::lf::PlanCommand::List { .. }
-        }) | Some(Commands::Session {
-            cmd: loopflow::lf::SessionCommand::History {
-                cmd: None | Some(loopflow::lf::commands::history::HistoryCommand::List { .. }),
-                ..
-            },
-        }) | Some(Commands::Process { .. })
-    ) {
-        loopflow_execution::ops::recovery::recover();
     }
     // Placement chooses or rents the Machine and hands the Task to it, from
     // the flags or the scope's default capacity; the ordinary dispatch below
@@ -2780,7 +2770,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                     recover_from: recover_from.clone(),
                 },
             )?;
-            loopflow_execution::ops::task::start_conversation_beside(&task);
+            loopflow_execution::ops::task::prepare_conversation_beside(&task);
             print_task(&task, *json)
         });
     }
@@ -2821,33 +2811,58 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
                 branch: None,
+                from_last_fetch: false,
+                auto_on: false,
             },
             *json || cli.json,
         );
     }
-    if let Some(Commands::Ship {
-        graph,
-        reason,
-        json,
-        ..
+    if let Some(Commands::Task {
+        cmd:
+            TaskCommand::Auto {
+                cmd:
+                    loopflow::lf::AutoCommand::On {
+                        graph,
+                        reason,
+                        json,
+                        ..
+                    },
+            },
     }) = &cli.command
     {
         journal::admit_process(&std::env::current_dir()?, args);
         let issue = cli.task.clone().context("No Task selected")?;
         let directory = loopflow_execution::repo::working_directory()?;
         let repo = selected_task_repository(&cli, &directory, Some(&issue))?;
-        return loopflow::lf::commands::ship::run(
+        // The Task's run, asked for auto. It stands in at each interactive
+        // step because auto is on, not because of how it was launched.
+        return loopflow::lf::commands::graph::carry_task_run(
             &cli,
             &repo,
             &issue,
-            graph.as_deref(),
-            reason.as_deref(),
+            loopflow_execution::ops::task::TaskProcessOptions {
+                wave: cli.wave.clone(),
+                graph: graph.clone(),
+                reason: reason.clone(),
+                auto_on: true,
+                ..Default::default()
+            },
             *json,
         );
     }
     if let Some(Commands::Session { cmd }) = &cli.command {
         journal::admit_process(&std::env::current_dir()?, args);
-        return loopflow::lf::commands::session::run(cmd, &cli);
+        return match loopflow::lf::commands::session::run(cmd, &cli)? {
+            Some(launch) => {
+                let session = launch.session_id.clone();
+                launch_conversation(launch, args)?;
+                if loopflow::lf::commands::session::returns_record(cmd, &cli) {
+                    loopflow::lf::commands::session::print_returned(&session)?;
+                }
+                Ok(())
+            }
+            None => Ok(()),
+        };
     }
     if let Some(Commands::Steer {
         target,
@@ -2962,25 +2977,45 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         return finish_command(result);
     }
 
-    let result = resolve_cli_target(&mut cli).and_then(|selected| match selected {
-        Some((target, message)) => execute_target(
-            target,
-            message.as_deref(),
-            &cli,
-            args,
-            direct_binding.as_ref(),
-        ),
-        None if cli.command.is_some() => execute_command(&cli, args, direct_binding.as_ref()),
-        None => {
-            cli.interactive = !cli.batch;
-            match direct_binding.as_ref() {
-                Some(binding) => loopflow::lf::commands::run::run_bound(None, None, &cli, binding),
-                None => run_default_agent(&cli, args),
-            }
-        }
-    });
+    finish_command(execute(&mut cli, direct_binding.as_ref()))
+}
 
-    finish_command(result)
+fn dispatch_launch(
+    kind: loopflow_execution::harness::LaunchKind,
+    cli: &mut Cli,
+    args: &[String],
+    binding: Option<&loopflow_execution::ops::WorkBinding>,
+) -> anyhow::Result<()> {
+    match resolve_cli_target(cli)? {
+        Some((target, message)) => {
+            execute_target(kind, target, message.as_deref(), cli, args, binding)
+        }
+        None => match &cli.command {
+            Some(Commands::Inline { prompt }) => {
+                let text = prompt.join(" ");
+                in_directory_runtime(args, |repo| match binding {
+                    Some(binding) => loopflow::lf::commands::run::run_bound(
+                        kind,
+                        None,
+                        Some(&text),
+                        cli,
+                        binding,
+                    ),
+                    None => loopflow::lf::commands::run::run(kind, repo, None, Some(&text), cli),
+                })
+            }
+            None => {
+                cli.interactive = !cli.batch;
+                match binding {
+                    Some(binding) => {
+                        loopflow::lf::commands::run::run_bound(kind, None, None, cli, binding)
+                    }
+                    None => run_default_agent(kind, cli, args),
+                }
+            }
+            _ => execute_command(cli, args, binding),
+        },
+    }
 }
 
 fn execute_command(
@@ -2989,16 +3024,8 @@ fn execute_command(
     binding: Option<&loopflow_execution::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
     match &cli.command {
-        Some(Commands::Inline { prompt }) => {
-            let text = prompt.join(" ");
-            in_directory_runtime(args, |repo| match binding {
-                Some(binding) => {
-                    loopflow::lf::commands::run::run_bound(None, Some(&text), cli, binding)
-                }
-                None => loopflow::lf::commands::run::run(repo, None, Some(&text), cli),
-            })
-        }
-        Some(Commands::Desktop { .. } | Commands::Open(_) | Commands::Workspace(_)) => {
+        Some(Commands::Inline { .. }) => unreachable!("inline prompts dispatch as launches"),
+        Some(Commands::Desktop { .. } | Commands::Open(_)) => {
             unreachable!("Desktop and opening dispatch precede Work preparation")
         }
         Some(Commands::Config { cmd }) => match cmd {
@@ -3068,49 +3095,27 @@ fn execute_command(
             }),
         },
         Some(Commands::ContextBlock {
-            moment: ContextMoment::Limit,
-            ..
-        }) => {
-            loopflow_execution::provider_account::observe_native_limit();
-            Ok(())
-        }
-        Some(Commands::ContextBlock {
-            moment: ContextMoment::RecordLimit,
-            ..
-        }) => {
-            loopflow_execution::provider_account::record_limit();
-            Ok(())
-        }
-        Some(Commands::ContextBlock {
-            delivery, moment, ..
-        }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
+            delivery,
+            moment,
+            harness,
+        }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment, *harness),
         Some(Commands::Holder { .. }) => unreachable!("the holder dispatches before any store"),
         Some(Commands::Session { .. } | Commands::Steer { .. }) => {
             unreachable!("Session dispatch precedes Work binding")
         }
-        Some(Commands::Ship { .. }) => unreachable!("ship dispatch precedes Work binding"),
         Some(Commands::Machine {
             cmd: loopflow::lf::MachineCommand::Doctor { json, planning },
         }) => {
             if *planning {
                 let repo = loopflow_execution::repo::working_directory()?;
-                loopflow::lf::commands::ops::sync_planning(&repo, None, true, true, *json)
+                loopflow::lf::commands::ops::sync_planning(&repo, None, true, *json)
             } else {
                 loopflow::lf::commands::doctor::run(*json)
             }
         }
-        Some(Commands::Account {
-            cmd,
-            target,
-            cached,
-            json,
-        }) => loopflow::lf::commands::account::run(
-            cmd.as_ref(),
-            target.as_deref(),
-            *cached,
-            *json,
-            cli.agent.as_deref(),
-        ),
+        Some(Commands::Account { cmd, target, json }) => {
+            loopflow::lf::commands::account::run(cmd.as_ref(), target.as_deref(), *json)
+        }
         Some(Commands::Server { cmd }) => loopflow::lf::commands::server::run(cmd),
         Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
         Some(Commands::Pr { cmd }) => in_repo_runtime(args, |_| {
@@ -3120,11 +3125,17 @@ fn execute_command(
             in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_wt(cmd))
         }
         Some(Commands::Commit {
+            step: Some(step), ..
+        }) => in_repo_runtime(args, |_| {
+            loopflow::lf::commands::ops::run_step_commit(step, cli.agent.as_deref())
+        }),
+        Some(Commands::Commit {
             message,
             push,
             no_add,
             paths,
             json,
+            step: None,
         }) => in_repo_runtime(args, |_| {
             loopflow::lf::commands::ops::run_commit(
                 message.as_deref(),
@@ -3320,10 +3331,9 @@ fn execute_command(
         Some(Commands::Context { json, wave, task }) => {
             loopflow::lf::commands::context::run(*json, wave.as_deref(), task.as_deref())
         }
-        Some(Commands::List { .. } | Commands::Help { .. }) => {
+        Some(Commands::List { .. } | Commands::Help { .. } | Commands::Docs { .. }) => {
             unreachable!("inspection returned before execution")
         }
-        Some(Commands::Process { cmd }) => loopflow::lf::commands::process::run(cmd),
         Some(Commands::Discord {
             cmd: loopflow::lf::DiscordCommand::Serve { wave },
         }) => in_repo_runtime(args, |repo| {
@@ -3341,7 +3351,7 @@ fn execute_command(
                     loopflow::lf::commands::graph::run_task_graph(cli, &repo_root, binding)
                 })
             }
-            GraphCommand::List { json, inventory } if inventory.processes => {
+            GraphCommand::List { json, inventory } if inventory.runs => {
                 loopflow::lf::commands::graph_inventory::list(inventory, *json)
             }
             _ => anyhow::bail!("not a Graph inspection command: {cmd:?}"),
@@ -3378,7 +3388,7 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
     result
 }
 
-fn print_planning_sync(sync: &loopflow_execution::store::planning_sync::PlanningSyncStatus) {
+fn print_planning_sync(sync: &loopflow_execution::store::planning_sync::TrackerSync) {
     for line in sync.lines() {
         eprintln!("{line}");
     }
@@ -3404,8 +3414,6 @@ mod tests {
             "/checkout",
             "--agent",
             "claude",
-            "--account",
-            "personal",
             "task",
             "run",
             "LOO-42",
@@ -3428,7 +3436,6 @@ mod tests {
         assert!(opened.wt.is_none());
         assert!(opened.cwd.is_none());
         assert_eq!(opened.agent, cli.agent);
-        assert_eq!(opened.account, cli.account);
     }
 
     #[test]
@@ -3570,22 +3577,42 @@ mod tests {
     /// reading quiet enough that a degraded one stands out.
     #[test]
     fn task_pr_line_is_quiet_when_the_linear_link_is_healthy() {
-        let line = format_task_pr_line(&published_pr());
+        let line = format_task_pr_line(&published_pr(), None);
         assert!(line.contains("GitHub #931"), "{line}");
         assert!(!line.contains("Linear"), "{line}");
     }
 
     /// A degraded Linear writeback is named in the same reading that already
-    /// carries `PM writeback`, so an expired token cannot fail silently forever.
+    /// carries `tracker writeback`, so an expired token cannot fail silently forever.
     #[test]
     fn task_pr_line_names_a_degraded_linear_link() {
         let mut pr = published_pr();
         pr.linear_link_error = Some("linear token expired".to_string());
-        let line = format_task_pr_line(&pr);
+        let line = format_task_pr_line(&pr, None);
         assert!(line.contains("Linear link degraded"), "{line}");
         assert!(line.contains("linear token expired"), "{line}");
         // The publication reading survives alongside the degraded linkage.
         assert!(line.contains("GitHub #931"), "{line}");
+    }
+
+    #[test]
+    fn task_pr_line_names_the_stack_parent_by_task() {
+        let mut parent = loopflow_execution::ops::task::TaskStackParent {
+            identifier: "LOO-953".to_string(),
+            branch: "jack/loo-953-parent".to_string(),
+            pr_number: Some(1974),
+        };
+        let line = format_task_pr_line(&published_pr(), Some(&parent));
+        assert!(
+            line.ends_with("  stacked on LOO-953 (#1974, jack/loo-953-parent)"),
+            "{line}"
+        );
+        parent.pr_number = None;
+        let line = format_task_pr_line(&published_pr(), Some(&parent));
+        assert!(
+            line.ends_with("  stacked on LOO-953 (jack/loo-953-parent)"),
+            "{line}"
+        );
     }
 
     #[test]
@@ -3601,7 +3628,7 @@ mod tests {
         for invocation in [
             vec!["--task", "LOO-438", "skill", "task/session"],
             vec!["--wt", "feature", "skill", "debug"],
-            vec!["-b", "-c", "--account", "fixture", "graph", "ship-api"],
+            vec!["-b", "-c", "--setting", "chrome=false", "graph", "ship-api"],
             vec!["task", "run", "LOO-438", "pursue"],
             vec!["pr", "publish"],
             vec!["pr", "open"],
@@ -3611,7 +3638,7 @@ mod tests {
                 for position in 0..=invocation.len() {
                     // Do not split another option from its value.
                     if position > 0
-                        && matches!(invocation[position - 1], "--task" | "--wt" | "--account")
+                        && matches!(invocation[position - 1], "--task" | "--wt" | "--setting")
                     {
                         continue;
                     }
@@ -3682,13 +3709,6 @@ mod tests {
     }
 
     #[test]
-    fn reorder_args_flag_after_skill() {
-        let args = vec!["lf".to_string(), "debug".to_string(), "-c".to_string()];
-        let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "-c", "debug"]);
-    }
-
-    #[test]
     fn old_serve_surface_is_no_longer_a_builtin_command() {
         let cli = Cli::try_parse_from(["lf", "serve", "goals"]).expect("falls through to external");
         assert!(
@@ -3703,105 +3723,28 @@ mod tests {
         assert!(Cli::try_parse_from(["lf", "--dispatch", "implement", "ship it"]).is_err());
     }
 
-    #[test]
-    fn reorder_args_flag_before_skill() {
-        let args = vec!["lf".to_string(), "-c".to_string(), "debug".to_string()];
-        let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "-c", "debug"]);
+    fn argv(words: &str) -> Vec<String> {
+        std::iter::once("lf")
+            .chain(words.split_whitespace())
+            .map(String::from)
+            .collect()
     }
 
     #[test]
-    fn reorder_args_value_flag_before_skill() {
-        // lf -a codex implement -> should stay the same (already correct order)
-        let args = vec![
-            "lf".to_string(),
-            "-a".to_string(),
-            "codex".to_string(),
-            "implement".to_string(),
-        ];
-        let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "-a", "codex", "implement"]);
-    }
-
-    #[test]
-    fn reorder_args_value_flag_after_skill() {
-        let args = vec![
-            "lf".to_string(),
-            "debug".to_string(),
-            "-a".to_string(),
-            "codex".to_string(),
-        ];
-        let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "-a", "codex", "debug"]);
-    }
-
-    #[test]
-    fn reorder_args_repeatable_account_flags_after_skill() {
-        let args = [
-            "lf",
-            "implement",
-            "--account",
-            "claude=personal",
-            "--account",
-            "codex=reserve",
-        ]
-        .map(String::from)
-        .to_vec();
-
-        assert_eq!(
-            reorder_args(args),
-            vec![
-                "lf",
-                "--account",
-                "claude=personal",
-                "--account",
-                "codex=reserve",
-                "implement"
-            ]
-        );
-    }
-
-    #[test]
-    fn reorder_args_mixed_flags() {
-        let args = vec![
-            "lf".to_string(),
-            "--interactive".to_string(),
-            "implement".to_string(),
-            "-c".to_string(),
-            "-a".to_string(),
-            "claude".to_string(),
-        ];
-        let result = reorder_args(args);
-        assert_eq!(
-            result,
-            vec!["lf", "--interactive", "-c", "-a", "claude", "implement"]
-        );
-    }
-
-    #[test]
-    fn reorder_args_skill_with_args() {
-        let args = vec![
-            "lf".to_string(),
-            "implement:".to_string(),
-            "add".to_string(),
-            "logout".to_string(),
-            "-c".to_string(),
-        ];
-        let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "-c", "implement:", "add", "logout"]);
-    }
-
-    #[test]
-    fn reorder_args_known_command_unchanged() {
-        let args = vec![
-            "lf".to_string(),
-            "commit".to_string(),
-            "-m".to_string(),
-            "msg".to_string(),
-        ];
-        let result = reorder_args(args);
-        // `-m` is local to commit, so the local meaning wins.
-        assert_eq!(result, vec!["lf", "commit", "-m", "msg"]);
+    fn reorder_args_places_global_flags_before_skills() {
+        for (input, expected) in [
+            ("-c debug", "-c debug"),
+            ("debug -c", "-c debug"),
+            ("-a codex implement", "-a codex implement"),
+            ("debug -a codex", "-a codex debug"),
+            (
+                "--interactive implement -c -a claude",
+                "--interactive -c -a claude implement",
+            ),
+            ("implement: add logout -c", "-c implement: add logout"),
+        ] {
+            assert_eq!(reorder_args(argv(input)), argv(expected), "{input}");
+        }
     }
 
     #[test]
@@ -3834,6 +3777,59 @@ mod tests {
             reorder_args(loopflow::lf::navigation::normalize_args(args).unwrap()),
             vec!["lf", "--wave", "goals", "commit", "-m", "ship it"]
         );
+    }
+
+    #[test]
+    fn reorder_args_reports_missing_values_at_the_flag_owner() {
+        for (input, expected) in [
+            ("open --repo", "--repo"),
+            ("-c open --repo", "--repo"),
+            ("open --agent", "--agent"),
+            ("open --task", "--task"),
+            ("task list --repo", "--repo"),
+            ("steer session_1 m --repo", "--repo"),
+            ("implement --repo", "--repo"),
+            ("implement: fix it -a", "-a"),
+            ("open --repo --tab", "--repo"),
+            ("open --repo -c", "--repo"),
+            ("implement --repo --", "--repo"),
+            ("task --wave --title x create", "task create --wave"),
+            ("session history show id --after", "session history --after"),
+        ] {
+            let reordered = reorder_args(argv(input));
+            assert_eq!(reordered, argv(expected), "{input}");
+            assert_eq!(reorder_args(reordered.clone()), reordered);
+            let error = Cli::try_parse_from(reordered).unwrap_err();
+            assert_eq!(error.kind(), clap::error::ErrorKind::InvalidValue);
+            assert_eq!(error.exit_code(), 2);
+            let flag = expected.split_whitespace().last().unwrap();
+            let flag = if flag == "-a" { "--agent" } else { flag };
+            let diagnostic = error.to_string();
+            assert!(
+                diagnostic.contains(&format!("a value is required for '{flag} "))
+                    && diagnostic.contains("but none was supplied"),
+                "{input}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn reorder_args_preserves_supplied_and_optional_values() {
+        for (input, expected) in [
+            ("commit -m msg", "commit -m msg"),
+            ("-c open --repo x", "-c --repo x open"),
+            ("open --repo=x", "--repo=x open"),
+            ("open --repo x", "--repo x open"),
+            ("open --repo -", "--repo - open"),
+            (
+                "session --primary --json list",
+                "session list --primary --json",
+            ),
+        ] {
+            let reordered = reorder_args(argv(input));
+            assert_eq!(reordered, argv(expected), "{input}");
+            Cli::try_parse_from(reordered).unwrap();
+        }
     }
 
     #[test]

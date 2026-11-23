@@ -520,22 +520,6 @@ fn auto_order_follows_the_query_until_touched_then_arrivals_append() {
 }
 
 #[test]
-fn selection_portable_panes_round_trip_all_content_and_recovery() {
-    let fixture = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../tests/fixtures/dto/pane_layout.json"
-    ));
-    let layout: super::selection::WorkPaneLayout = serde_json::from_str(fixture).unwrap();
-    layout.validate().unwrap();
-    assert_eq!(
-        serde_json::to_value(&layout).unwrap(),
-        serde_json::from_str::<serde_json::Value>(fixture).unwrap()
-    );
-    assert_eq!(layout.drafts[0].text, "unsaved edits");
-    assert_ne!(layout.focused, layout.zoomed);
-}
-
-#[test]
 fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries() {
     let wave = WaveId::new();
     let work: Vec<_> = [
@@ -547,11 +531,6 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
             "unstarted",
             SelectionState::Unstarted,
             SelectionState::Backlog,
-        ),
-        (
-            "shipping",
-            SelectionState::Shipping,
-            SelectionState::Autonomous,
         ),
     ]
     .into_iter()
@@ -587,10 +566,8 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
         )),
         ["idle", "active", "moving"]
     );
-    assert_eq!(
-        ids(Selection::parse("state:autonomous", None).unwrap()),
-        ["shipping"]
-    );
+    assert!(Selection::parse("state:autonomous", None).is_err());
+    assert!(Selection::parse("state:shipping", None).is_err());
     assert_eq!(
         ids(Selection::parse("state:backlog", None).unwrap()),
         ["unassigned", "unstarted"]

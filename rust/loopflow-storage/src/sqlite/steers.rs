@@ -54,9 +54,12 @@ impl SqliteStore {
     ) -> StoreResult<T> {
         let _fence = self.lock_session_dispatch(&adapter.session)?;
         // A provider start that changes conversation also moves the resume
-        // reference, on the account it already names.
+        // reference, on the account it already names. A launch whose provider
+        // names the conversation (Antigravity) has published none yet, and a
+        // held terminal leaves no lf process to publish it later: the start
+        // does.
         let resume = match boundary {
-            NativeBoundary::Select { .. } => self.resume_reference(&adapter.session)?,
+            NativeBoundary::Select { .. } => self.resume_input(&adapter.session)?,
             _ => None,
         };
         // A turn in the selected, activated, already observed conversation
@@ -67,9 +70,9 @@ impl SqliteStore {
             let current: Option<bool> = conn
                 .query_row(
                     "SELECT s.provider_thread IS ?4 AND a.activated_at IS NOT NULL FROM steer_adapters a
-                 JOIN processes p ON p.id=a.agent_process_id
-                 JOIN agent_sessions s ON s.agent_process_id=p.id
-                 WHERE s.id=?1 AND p.id=?2 AND a.capability=?3 AND p.completed_at IS NULL",
+                 JOIN agent_sessions s ON s.agent_process_id=a.agent_process_id
+                 WHERE s.id=?1 AND a.agent_process_id=?2 AND a.capability=?3
+                 AND s.agent_ended_at IS NULL",
                     params![
                         adapter.session,
                         adapter.agent_process_id,
@@ -92,9 +95,9 @@ impl SqliteStore {
             let selected: Option<Option<String>> = tx
                 .query_row(
                     "SELECT s.provider_thread FROM steer_adapters a
-                 JOIN processes p ON p.id=a.agent_process_id
-                 JOIN agent_sessions s ON s.agent_process_id=p.id
-                 WHERE s.id=?1 AND p.id=?2 AND a.capability=?3 AND p.completed_at IS NULL",
+                 JOIN agent_sessions s ON s.agent_process_id=a.agent_process_id
+                 WHERE s.id=?1 AND a.agent_process_id=?2 AND a.capability=?3
+                 AND s.agent_ended_at IS NULL",
                     params![
                         adapter.session,
                         adapter.agent_process_id,
@@ -134,33 +137,42 @@ impl SqliteStore {
                 NativeBoundary::Select { source } | NativeBoundary::Activate { source } => source,
                 _ => "observed",
             };
-            super::provider_transitions::observe_in(&tx, &adapter.session, thread, source)?;
-            if let Some((session, input, reference)) =
-                resume.filter(|(_, _, reference)| reference.agent_session.as_str() != thread)
-            {
-                super::sessions::retain_history_in(
+            let mut history = Vec::from_iter(super::provider_transitions::observe_in(
+                &tx,
+                &adapter.session,
+                thread,
+                source,
+            )?);
+            if let Some((session, input, reference)) = resume.filter(|(_, _, reference)| {
+                reference
+                    .as_ref()
+                    .is_none_or(|reference| reference.agent_session.as_str() != thread)
+            }) {
+                history.extend(super::sessions::retain_history_in(
                     &tx,
                     &session,
                     &[crate::session_record::provider_session_observation(
                         &session,
                         &input,
                         &thread.into(),
-                        reference.account_id,
+                        reference.and_then(|reference| reference.account_id),
                     )],
-                )?;
+                )?);
             }
             tx.execute(
                 "UPDATE steer_adapters SET activated_at=COALESCE(activated_at,unixepoch()) WHERE agent_process_id=?1",
                 [&adapter.agent_process_id],
             )?;
             tx.commit()?;
+            drop(conn);
+            self.append_history("provider transition", &history);
         }
         write()
     }
 
     /// Native hooks report turn boundaries and work that outlives a reply.
-    /// A retained provider capability follows attachment handoff, but cannot
-    /// report for a replacement provider or a different native conversation.
+    /// A retained provider capability cannot report for a replacement
+    /// provider or a different native conversation.
     pub fn record_native_turn(
         &self,
         adapter: &SteerAdapter,
@@ -169,15 +181,16 @@ impl SqliteStore {
         open_tools: Option<usize>,
     ) -> StoreResult<()> {
         self.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
-            let (native, previous_work): (bool, i64) =
+            let (native, previous_work, started_since_turn): (bool, i64, bool) =
                 self.conn.lock().expect("store mutex poisoned").query_row(
-                    "SELECT s.interactive, COALESCE(act.open_tools,0)
-                     FROM processes p JOIN agent_sessions s ON s.id=?2
+                    "SELECT s.interactive, COALESCE(act.open_tools,0),
+                            s.starts_since_turn>0 OR s.last_started_at IS NOT NULL
+                     FROM agent_sessions s
                      LEFT JOIN session_activity act
-                       ON act.agent_process_id=p.id AND act.session_id=s.id
-                     WHERE p.id=?1",
+                       ON act.agent_process_id=s.agent_process_id AND act.session_id=s.id
+                     WHERE s.id=?2 AND s.agent_process_id=?1",
                     params![adapter.agent_process_id, adapter.session],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )?;
             // A headless run reports through the stream lf owns. A person's
             // conversation reports here, Codex's included: its AgentProcess is
@@ -188,6 +201,16 @@ impl SqliteStore {
             let attachment = self.session_attachment(&adapter.session)?.ok_or_else(|| {
                 StoreError::InvalidAuthority("Native provider has no attachment".into())
             })?;
+            if yielded && started_since_turn {
+                // A finished turn is a conversation that runs: the recovery
+                // pass counts its starts again from none, and starts the
+                // first death after it at once.
+                self.conn.lock().expect("store mutex poisoned").execute(
+                    "UPDATE agent_sessions SET starts_since_turn=0,last_started_at=NULL
+                     WHERE id=?1 AND (starts_since_turn>0 OR last_started_at IS NOT NULL)",
+                    [&adapter.session],
+                )?;
+            }
             self.record_session_activity(
                 &adapter.session,
                 &attachment,
@@ -208,9 +231,9 @@ impl SqliteStore {
     pub fn record_agent_inbox(&self, adapter: &SteerAdapter, key: &Path) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE processes SET inbox=?3 WHERE id=?2 AND inbox IS NOT ?3 AND EXISTS(
-                SELECT 1 FROM steer_adapters a JOIN agent_sessions s ON s.agent_process_id=a.agent_process_id
-                WHERE s.id=?1 AND a.agent_process_id=?2 AND a.capability=?4)",
+            "UPDATE agent_sessions SET agent_inbox=?3 WHERE id=?1 AND agent_process_id=?2
+                AND agent_inbox IS NOT ?3 AND EXISTS(SELECT 1 FROM steer_adapters a
+                WHERE a.agent_process_id=?2 AND a.capability=?4)",
             params![
                 adapter.session,
                 adapter.agent_process_id,
@@ -230,15 +253,15 @@ impl SqliteStore {
     ) -> StoreResult<Vec<IdleCandidate>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT s.id,p.id,a.capability,s.provider_thread,s.cwd,
-                CASE WHEN p.agent_provider='codex' THEN p.endpoint END,p.inbox,
-                s.work_source,p.pid,p.os_started_at
-             FROM processes p INDEXED BY processes_unfinished
-             JOIN agent_sessions s ON s.agent_process_id=p.id
-             JOIN steer_adapters a ON a.agent_process_id=p.id
-             JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=p.id
-             WHERE act.yielded=1 AND p.completed_at IS NULL AND s.provider_thread IS NOT NULL
-               AND (p.agent_provider='codex' AND p.endpoint IS NOT NULL OR p.inbox IS NOT NULL)
+            "SELECT s.id,s.agent_process_id,a.capability,s.provider_thread,s.cwd,
+                CASE WHEN s.provider='codex' THEN s.agent_endpoint END,s.agent_inbox,
+                s.agent_pid,s.agent_os_started_at
+             FROM agent_sessions s INDEXED BY agent_sessions_unended_agent
+             JOIN steer_adapters a ON a.agent_process_id=s.agent_process_id
+             JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=s.agent_process_id
+             WHERE s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL
+               AND act.yielded=1 AND s.interactive=1 AND s.provider_thread IS NOT NULL
+               AND (s.provider='codex' AND s.agent_endpoint IS NOT NULL OR s.agent_inbox IS NOT NULL)
                AND (?1 IS NULL OR s.id=?1)",
         )?;
         let rows = statement.query_map([session], |row| {
@@ -246,20 +269,9 @@ impl SqliteStore {
                 Some(endpoint) => IdleReach::Codex(endpoint.into()),
                 None => IdleReach::Claude(row.get::<_, String>(6)?.into()),
             };
-            let source: Option<crate::session::WorkSource> = row
-                .get::<_, Option<String>>(7)?
-                .map(|source| serde_json::from_value(serde_json::Value::String(source)))
-                .transpose()
-                .map_err(|error| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        7,
-                        rusqlite::types::Type::Text,
-                        Box::new(error),
-                    )
-                })?;
             let identity = row
-                .get::<_, Option<u32>>(8)?
-                .zip(row.get::<_, Option<i64>>(9)?);
+                .get::<_, Option<u32>>(7)?
+                .zip(row.get::<_, Option<i64>>(8)?);
             let conversation = IdleConversation {
                 adapter: SteerAdapter {
                     session: row.get(0)?,
@@ -270,16 +282,12 @@ impl SqliteStore {
                 cwd: row.get::<_, String>(4)?.into(),
                 reach,
             };
-            Ok(source
-                .filter(|source| source.is_managed())
-                .map(|_| IdleCandidate {
-                    conversation,
-                    identity,
-                }))
+            Ok(IdleCandidate {
+                conversation,
+                identity,
+            })
         })?;
-        Ok(rows
-            .filter_map(Result::transpose)
-            .collect::<Result<_, _>>()?)
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// A woken conversation is in a turn until its next Stop says otherwise.
@@ -293,16 +301,16 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// The Session's published resume reference with the input it belongs to.
-    /// A Session that never published one leaves publication to its launch.
-    fn resume_reference(
+    /// The Session's current input with the resume reference published for
+    /// it, if any.
+    fn resume_input(
         &self,
         session: &str,
     ) -> StoreResult<
         Option<(
             crate::session::LfSession,
             String,
-            crate::session_record::ProviderSessionRef,
+            Option<crate::session_record::ProviderSessionRef>,
         )>,
     > {
         let Some(session) = self.session(session)? else {
@@ -311,9 +319,8 @@ impl SqliteStore {
         let Some(input) = session.artifact_key.clone() else {
             return Ok(None);
         };
-        Ok(self
-            .input_provider_session(&input)?
-            .map(|reference| (session, input, reference)))
+        let reference = self.input_provider_session(&input)?;
+        Ok(Some((session, input, reference)))
     }
 }
 
@@ -690,10 +697,15 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let owns: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM agent_sessions s
-                JOIN processes p ON p.id=s.agent_process_id JOIN steer_adapters a ON a.agent_process_id=p.id
-                WHERE s.id=?1 AND p.id=?2 AND a.capability=?3 AND s.provider_thread=?4
-                AND p.completed_at IS NULL)",
-            params![adapter.session, adapter.agent_process_id, adapter.capability, provider_thread],
+                JOIN steer_adapters a ON a.agent_process_id=s.agent_process_id
+                WHERE s.id=?1 AND s.agent_process_id=?2 AND a.capability=?3 AND s.provider_thread=?4
+                AND s.agent_ended_at IS NULL)",
+            params![
+                adapter.session,
+                adapter.agent_process_id,
+                adapter.capability,
+                provider_thread
+            ],
             |row| row.get(0),
         )?;
         if !owns {

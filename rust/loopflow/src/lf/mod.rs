@@ -92,29 +92,7 @@ pub struct Cli {
     #[arg(skip)]
     pub resolved_invocation: Option<loopflow_execution::skills::invocation::SkillInvocation>,
 
-    /// Prefer this managed provider login before the normal route. Repeat to
-    /// select provider-qualified preferences such as `claude=jack@`.
-    /// Logins spend; a profile is only the Chrome venue accounts log in
-    /// through, so it is never a run-time selector.
-    #[arg(
-        id = "preferred_provider_account",
-        long = "account",
-        value_name = "SELECTOR",
-        conflicts_with = "restricted_provider_account"
-    )]
-    pub account: Vec<String>,
-
-    /// Restrict this invocation and its children to exactly these managed
-    /// provider logins. Providers without a selection are unavailable.
-    #[arg(
-        id = "restricted_provider_account",
-        long = "only-account",
-        value_name = "SELECTOR",
-        conflicts_with = "preferred_provider_account"
-    )]
-    pub only_account: Vec<String>,
-
-    /// Skip permission prompts
+    /// Skip permission prompts in this conversation, over a configured `yolo: false`
     #[arg(long)]
     pub yolo: bool,
 
@@ -173,6 +151,15 @@ pub struct Cli {
     /// The conversation `lf -b resume ID --message TEXT` continues.
     #[arg(skip)]
     pub resume: Option<String>,
+
+    /// The prepared capture a conversation's fresh launch publishes.
+    #[arg(skip)]
+    pub prepared_capture: Option<String>,
+
+    /// The Session launch lock a conversation's fresh launch holds until its
+    /// provider is recorded.
+    #[arg(skip)]
+    pub launch_lock: Option<loopflow_execution::ops::human_session::LaunchLock>,
 }
 
 impl Cli {
@@ -182,6 +169,15 @@ impl Cli {
             let (key, text) = setting
                 .split_once('=')
                 .ok_or_else(|| anyhow::anyhow!("--setting expects KEY=YAML"))?;
+            let parts: Vec<_> = key.split('.').collect();
+            if let Some(fields) = loopflow_execution::config::keys::tracker_path(&parts) {
+                loopflow_execution::config::keys::edit_tracker(
+                    &mut value,
+                    fields,
+                    Some(serde_yaml_ng::from_str(text)?),
+                )?;
+                continue;
+            }
             let parsed = loopflow_execution::config::settings::parse_value(key, text)?;
             let typed = loopflow_execution::config::keys::typed_key(key);
             loopflow_execution::config::settings::insert(
@@ -245,15 +241,34 @@ impl Cli {
         )
     }
 
+    /// `lf task auto on`: the Task's run, asked for auto.
+    pub fn turns_auto_on(&self) -> bool {
+        matches!(
+            &self.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Auto {
+                    cmd: AutoCommand::On { .. }
+                }
+            })
+        )
+    }
+
     pub fn may_launch_agent(&self) -> bool {
         match &self.command {
             None
             | Some(Commands::External(_) | Commands::Inline { .. })
             | Some(Commands::Discord { .. }) => true,
             Some(Commands::Skill { cmd }) => matches!(cmd, SkillCommand::External(_)),
-            Some(Commands::Graph { cmd }) => matches!(cmd, GraphCommand::External(_)),
-            Some(Commands::Task { cmd }) => matches!(cmd, TaskCommand::Run { .. }),
-            Some(Commands::Ship { .. }) => true,
+            Some(Commands::Graph { cmd }) => {
+                matches!(cmd, GraphCommand::Run | GraphCommand::External(_))
+            }
+            Some(Commands::Task { cmd }) => matches!(
+                cmd,
+                TaskCommand::Run { .. }
+                    | TaskCommand::Auto {
+                        cmd: AutoCommand::On { .. }
+                    }
+            ),
             Some(Commands::Session { cmd }) => matches!(
                 cmd,
                 SessionCommand::Resume {
@@ -317,8 +332,14 @@ impl Cli {
                 })?;
             }
         }
-        // `lf ship ISSUE` selects its Task as `--task` does.
-        if let Some(Commands::Ship { issue, .. }) = &mut self.command {
+        // `lf task auto on ISSUE` selects its Task as `--task` does: it runs it.
+        if let Some(Commands::Task {
+            cmd:
+                TaskCommand::Auto {
+                    cmd: AutoCommand::On { issue, .. },
+                },
+        }) = &mut self.command
+        {
             if let Some(issue) = issue.take() {
                 if self.task.as_ref().is_some_and(|task| task != &issue) {
                     return Err(clap::Error::raw(
@@ -348,16 +369,8 @@ impl Cli {
             return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
                 "root --json requires --context or --explain; use the command's own --json when available\n"));
         }
-        if let Some(Commands::Account {
-            cmd,
-            target,
-            cached,
-            json,
-        }) = &self.command
-        {
-            if let Some(misuse) =
-                AccountCommand::misuse(cmd.as_ref(), target.as_deref(), *cached || *json)
-            {
+        if let Some(Commands::Account { cmd, target, json }) = &self.command {
+            if let Some(misuse) = AccountCommand::misuse(cmd.as_ref(), target.as_deref(), *json) {
                 return Err(clap::Error::raw(
                     clap::error::ErrorKind::ArgumentConflict,
                     format!("{misuse}\n"),
@@ -383,12 +396,7 @@ impl Cli {
                 args.push(flag.to_string());
             }
         }
-        for (flag, values) in [
-            ("--setting", &self.settings),
-            ("--docs", &self.docs),
-            ("--account", &self.account),
-            ("--only-account", &self.only_account),
-        ] {
+        for (flag, values) in [("--setting", &self.settings), ("--docs", &self.docs)] {
             for value in values {
                 args.extend([flag.to_string(), value.clone()]);
             }
@@ -435,8 +443,6 @@ impl Cli {
             skill_input: self.skill_input.clone(),
             output_schema: self.output_schema.clone(),
             resolved_invocation: self.resolved_invocation.clone(),
-            account: self.account.clone(),
-            only_account: self.only_account.clone(),
             yolo: self.yolo,
             interactive: self.interactive,
             batch: self.batch,
@@ -452,6 +458,8 @@ impl Cli {
             wt: self.wt.clone(),
             cwd: self.cwd.clone(),
             resume: self.resume.clone(),
+            prepared_capture: self.prepared_capture.clone(),
+            launch_lock: self.launch_lock.clone(),
         }
     }
 
@@ -500,33 +508,13 @@ pub enum Commands {
         #[arg(long = "json", id = "steer_json")]
         json: bool,
     },
-    /// Ship the Task: run every remaining step to merge and completion, standing in at each interactive step
-    ///
-    /// Returns once the Task is shipping and runs on to its end (`-b` waits for
-    /// it); `lf task status` follows it. A second `lf ship` while one runs exits 0.
-    /// With no ISSUE, ships the checkout's Task, or a new one for its branch.
-    /// `lf task hold` withdraws the approval and takes back its merge request.
-    Ship {
-        issue: Option<String>,
-        /// Take up this graph in place of the Task's remaining steps
-        #[arg(long)]
-        graph: Option<String>,
-        /// Why, kept in the Task's history
-        #[arg(long)]
-        reason: Option<String>,
-        /// Print what it set going as JSON, as `task.ship` answers
-        #[arg(long = "json", id = "ship_json")]
-        json: bool,
-    },
     /// Inspect and continue Sessions
     Session {
         #[command(subcommand)]
         cmd: SessionCommand,
     },
-    /// Open one conversation here, in a sibling tab, or focus its existing view
+    /// Open one conversation here, in a sibling tab, or a repository/Wave overview
     Open(commands::open::OpenArgs),
-    /// Open configured Task layouts or a repository/Wave overview
-    Workspace(commands::open::WorkspaceArgs),
     /// Run an inline prompt
     #[command(name = ":")]
     Inline {
@@ -550,11 +538,6 @@ pub enum Commands {
     Desktop {
         #[command(subcommand)]
         cmd: DesktopCommand,
-    },
-    /// Live Loopflow processes: call trees, Graphs that ran and pruning
-    Process {
-        #[command(subcommand)]
-        cmd: commands::process::ProcessCommand,
     },
     /// Plans across Waves: what Desktop shows of each Wave's Projects and Tasks
     Plan {
@@ -581,6 +564,9 @@ pub enum Commands {
         /// Print what the commit left
         #[arg(long)]
         json: bool,
+        /// Commit everything a finished skill step left, titled `lf <SKILL>: …`, and push
+        #[arg(long, value_name = "SKILL", conflicts_with_all = ["message", "no_add", "push", "paths", "json"])]
+        step: Option<String>,
     },
     /// Merge upstream into the current branch (default: main or stack parent)
     Sync(SyncArgs),
@@ -604,29 +590,23 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: MachineCommand,
     },
-    /// Every login, its weekly room and what needs fixing; name a login or
-    /// provider for every window, source and browser choice
+    /// Service authentication; native Claude and Codex logins belong to their clients
     #[command(
-        after_help = "lf account                  # one row per login; stale rows refresh\n\
-                            lf account work@            # every window, its age and source\n\
-                            lf account next             # which login the next launch takes, and why"
+        after_help = "lf account linear --json\nlf account connect linear --chrome-profile Work"
     )]
     Account {
         #[command(subcommand)]
         cmd: Option<AccountCommand>,
-        /// A login (`work@`, `claude=work@`) or a provider
-        #[arg(value_parser = parse_account_target)]
+        /// A service provider
+        #[arg(value_parser = parse_service_provider)]
         target: Option<String>,
-        /// Read cached evidence without contacting providers
-        #[arg(long)]
-        cached: bool,
         /// Emit the accounts as one JSON document
         #[arg(long)]
         json: bool,
     },
 
-    /// This repository: its identity and checkout, where it exchanges planning,
-    /// its releases, CI, people and size
+    /// This repository: its identity and checkout, its tracker, releases, CI,
+    /// people and size
     #[command(args_conflicts_with_subcommands = true)]
     Repo {
         /// Print the identity as JSON
@@ -661,7 +641,14 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Show memory and scratch size targets, their sources, and current usage
+    /// Read embedded Loopflow user documentation offline
+    Docs {
+        /// Topic slug (omit to list all topics)
+        topic: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show Wave memory size targets, their sources, and current usage
     Context {
         #[arg(long)]
         json: bool,
@@ -683,7 +670,7 @@ pub enum Commands {
         cmd: DiscordCommand,
     },
     /// Internal provider turn-boundary hook: context at startup and compaction,
-    /// steers at tool and prompt boundaries, Linear acquisition at turn end.
+    /// steers at tool and prompt boundaries, Linear fetch at turn end.
     // Running providers retain this older Stop spelling across lf upgrades.
     #[command(name = "__context-block", alias = "__planning-check", hide = true)]
     ContextBlock {
@@ -691,22 +678,29 @@ pub enum Commands {
         delivery: Option<std::path::PathBuf>,
         #[arg(long, value_enum, default_value = "stop")]
         moment: loopflow_execution::context_block::ContextMoment,
+        /// The harness whose provider sent the callback, when it is not in
+        /// Claude's shape.
+        #[arg(long, value_parser = parse_hook_harness)]
+        harness: Option<loopflow_harness::HarnessKind>,
     },
     /// External: skill/graph name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
 }
 
+fn parse_hook_harness(name: &str) -> Result<loopflow_harness::HarnessKind, String> {
+    loopflow_harness::HarnessKind::parse(name).ok_or_else(|| format!("unknown harness {name}"))
+}
+
 /// `repository.*`: one repository's planning exchange, releases, CI, people,
 /// size and checkout.
 #[derive(Subcommand, Debug)]
 pub enum RepoCommand {
-    /// Where this repository exchanges planning: selection, retained imports and
-    /// held records, without contacting Git
+    /// Show how the repository's plan travels: its tracker and open and lost actions, or its Git remote and hub
     #[command(args_conflicts_with_subcommands = true)]
-    Plan {
+    Tracker {
         #[command(subcommand)]
-        cmd: Option<RepoPlanCommand>,
+        cmd: Option<RepoTrackerCommand>,
         #[arg(long)]
         json: bool,
         /// Print a JSON line now and each time the status changes, until stdin closes
@@ -784,13 +778,11 @@ pub enum DesktopCommand {
         #[arg(long, global = true, id = "portfolio_json")]
         json: bool,
     },
-    /// Read a Work's pane intent or a Dashboard's slots as JSON, or save a complete pane record from stdin
+    /// Read a saved Dashboard (its arrangement and slots) as JSON; `lf desktop dashboard slots` replaces the slots
     Layout {
-        /// repository, wave:<durable-id>, task:<durable-id> or query:ID
+        /// query:ID
+        #[arg(value_name = "QUERY")]
         work: String,
-        /// Replace the pane record from JSON on stdin instead of reading it
-        #[arg(long)]
-        save: bool,
     },
 
     /// List the window's Tasks by position (as ⌘1–9 select them) and each Task's panes
@@ -869,8 +861,8 @@ pub enum DesktopCommand {
     /// Perform any registry action by name, as `lf desktop actions` lists them
     #[command(
         after_help = "Arguments are KEY=VALUE pairs. `-p` may name a view part \
-(`board`, `session`, `tiles` on a Wave view), which must accept the action:\n  \
-lf desktop do page -p tiles page=2\n  lf desktop do filter -p board days=14"
+(`backlog`, `session`, `tiles` on a Wave view), which must accept the action:\n  \
+lf desktop do page -p tiles page=2\n  lf desktop do zoom -p backlog on=true"
     )]
     Do {
         /// Action name from `lf desktop actions`
@@ -975,7 +967,7 @@ lf desktop do page -p tiles page=2\n  lf desktop do filter -p board days=14"
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
-    /// Show the Task's Graph processes in the browser
+    /// Show the Task's Graph runs in the browser
     GraphLog {
         #[command(flatten)]
         target: DesktopTargetArgs,
@@ -1015,9 +1007,7 @@ impl DesktopCommand {
     pub fn is_read(&self) -> bool {
         matches!(
             self,
-            Self::View { .. }
-                | Self::Portfolio { cmd: None, .. }
-                | Self::Layout { save: false, .. }
+            Self::View { .. } | Self::Portfolio { cmd: None, .. } | Self::Layout { .. }
         )
     }
 }
@@ -1160,13 +1150,13 @@ impl DashboardCommand {
 }
 
 // ── Which commands change state ─────────────────────────────────────────────
-// Only a command that changes state records a Process. A read (status, list,
-// show, diff, file, every `--subscribe` reader) records none, so it never wakes a
+// Only a command that changes state writes a journal trace. A read (status, list,
+// show, diff, file, every `--subscribe` reader) writes none, and it never wakes a
 // Work reader or joins a Task's work. Every match below is exhaustive: a new
 // command chooses here.
 
 impl Commands {
-    /// Whether running this command changes state, and so records a Process.
+    /// Whether running this command changes state, and so writes a journal trace.
     pub fn changes_work(&self) -> bool {
         match self {
             Self::Task { cmd } => cmd.changes_work(),
@@ -1175,21 +1165,20 @@ impl Commands {
             Self::Graph { cmd } => cmd.changes_work(),
             Self::Skill { cmd } => cmd.changes_work(),
             Self::Desktop { cmd } => cmd.changes_work(),
-            Self::Process { cmd } => cmd.changes_work(),
             Self::Plan { cmd } => cmd.changes_work(),
             Self::Pr { cmd } => pr_changes_work(cmd.as_ref()),
             Self::Wt { cmd } => cmd.changes_work(),
             Self::Machine { cmd } => cmd.changes_work(),
-            Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
+            Self::Account { cmd, .. } => cmd.is_some(),
             Self::Server { .. } | Self::Holder { .. } => false,
             Self::Commit { .. } | Self::Sync(_) | Self::Steer { .. } => true,
             Self::Repo { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Config { cmd } => cmd.changes_work(),
             Self::Self_ { cmd } => cmd.changes_work(),
-            Self::List { .. } | Self::Help { .. } | Self::Context { .. } => false,
-            Self::Ship { .. }
-            | Self::Open(_)
-            | Self::Workspace(_)
+            Self::List { .. } | Self::Help { .. } | Self::Docs { .. } | Self::Context { .. } => {
+                false
+            }
+            Self::Open(_)
             | Self::Inline { .. }
             | Self::Scratch { .. }
             | Self::Discord { .. }
@@ -1208,7 +1197,6 @@ impl TaskCommand {
             | Self::Location { .. }
             | Self::WatchFiles { .. }
             | Self::Status { .. }
-            | Self::View { .. }
             | Self::Diff { .. }
             | Self::Changes { .. }
             | Self::Context { .. }
@@ -1218,7 +1206,6 @@ impl TaskCommand {
             | Self::Wait { .. } => false,
             Self::Retire { .. } => true,
             Self::Report { .. } => true,
-            Self::Sweep { apply, .. } => *apply,
             Self::Sync { .. }
             | Self::Checkout { .. }
             | Self::Run { .. }
@@ -1232,7 +1219,7 @@ impl TaskCommand {
             | Self::Delete { .. }
             | Self::Update { .. }
             | Self::Move { .. }
-            | Self::Hold { .. }
+            | Self::Auto { .. }
             | Self::Interrupt { .. } => true,
         }
     }
@@ -1246,11 +1233,11 @@ impl WaveCommand {
             }
             Self::Plan { cmd, .. } => cmd.is_some(),
             Self::Remove { preview, .. } => !preview,
-            Self::EditPlan { .. }
+            Self::EditProject { .. }
             | Self::Create { .. }
             | Self::Sync { .. }
             | Self::Rename { .. }
-            | Self::UpdatePlan { .. } => true,
+            | Self::UpdateProject { .. } => true,
         }
     }
 }
@@ -1359,9 +1346,9 @@ impl DesktopCommand {
 impl RepoCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Plan { cmd, .. } => match cmd {
-                Some(RepoPlanCommand::Key { new, recover }) => *new || recover.is_some(),
-                Some(RepoPlanCommand::Journal { .. }) | None => false,
+            Self::Tracker { cmd, .. } => match cmd {
+                Some(RepoTrackerCommand::Answer { .. }) => true,
+                None => false,
             },
             Self::Release { cmd } => cmd.changes_work(),
             Self::Path | Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => false,
@@ -1383,23 +1370,6 @@ fn pr_changes_work(cmd: Option<&PrCommand>) -> bool {
             | PrCommand::Arm { .. }
             | PrCommand::Land { .. }
             | PrCommand::Abandon { .. },
-        ) => true,
-    }
-}
-
-/// Bare `lf account` refreshes stale readings unless it reads the cache.
-fn account_changes_work(cmd: Option<&AccountCommand>, cached: bool) -> bool {
-    match cmd {
-        None => !cached,
-        Some(AccountCommand::Next { .. }) => false,
-        Some(
-            AccountCommand::Disconnect { .. }
-            | AccountCommand::Connect { .. }
-            | AccountCommand::Set { .. }
-            | AccountCommand::RedeemReset { .. }
-            | AccountCommand::Use { .. }
-            | AccountCommand::Pause { .. }
-            | AccountCommand::Unpause { .. },
         ) => true,
     }
 }
@@ -1445,6 +1415,9 @@ pub enum ServerCommand {
     },
     /// Serve the private socket in the foreground (for the OS supervisor).
     Run,
+    /// Pipe stdin and stdout to this Machine's server, starting it first if
+    /// needed; another Machine runs it over SSH to reach the server.
+    Connect,
     /// Report local readiness without registering or starting anything.
     Status,
     /// Configure private mobile access using this host's signed-in Tailscale installation.
@@ -1472,7 +1445,7 @@ impl MachineCommand {
             }
             Self::Credentials { cmd } => match cmd {
                 MachineCredentialCommand::Inspect { .. } => false,
-                MachineCredentialCommand::Receive | MachineCredentialCommand::Renew => true,
+                MachineCredentialCommand::Receive => true,
             },
             Self::Pool { cmd } => match cmd {
                 PoolCommand::List { .. } => false,
@@ -1488,7 +1461,9 @@ impl MachineCommand {
                 | OndemandCommand::Rent { .. }
                 | OndemandCommand::Remove { .. } => true,
             },
-            Self::Connect { .. }
+            Self::Hub { machine, clear } => machine.is_some() || *clear,
+            Self::Prune { .. }
+            | Self::Connect { .. }
             | Self::Public { .. }
             | Self::Add { .. }
             | Self::Rename { .. }
@@ -1536,13 +1511,13 @@ impl SelfCommand {
 }
 
 /// Which part of the view on screen a command acts on. `-p` is a path: a view part
-/// (`board`, `session`, `tiles` on a Wave view), a pane (`session`, `shell`,
+/// (`backlog`, `session`, `tiles` on a Wave view), a pane (`session`, `shell`,
 /// `browser`, `shell:2`), a Dashboard or Wave view tile (`3`, `LOO-519`), or `TILE/PANE`. `query:ID/TILE` and `working-tasks/TILE` name a
 /// saved record's tile by Work key without Desktop. Root `--task`/`--wave` set the
 /// base view; without either, a command acts on the terminal it runs in (`LF_TERMINAL_ID`).
 #[derive(Args, Debug, Clone, Default)]
 pub struct DesktopTargetArgs {
-    /// Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix
+    /// Pane path: a view part (backlog), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix
     #[arg(short = 'p', long = "pane", value_name = "PATH")]
     pub pane: Option<String>,
     /// Desktop window: ID, position or ID suffix
@@ -1564,36 +1539,41 @@ pub struct DesktopWindowArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum SkillCommand {
-    /// Print the repository file that defines a skill, creating
-    /// it from the builtin when the repository has none
-    Customize { name: String },
+    /// Print the repository file that defines a skill. When the repository
+    /// has none, write one that extends the builtin with its own section
+    Customize {
+        name: String,
+        /// Write the builtin's whole text instead, replacing it here
+        #[arg(long)]
+        full: bool,
+    },
     #[command(external_subcommand)]
     External(Vec<String>),
 }
 
-/// Select a Wave's current chapter, or an exact retained historical Project.
+/// Select a Wave's current Project, or an exact retained historical Project.
 #[derive(Args, Debug)]
-pub struct WavePlanTarget {
+pub struct WaveProjectTarget {
     /// Wave name or ID (default: the ambient Wave)
     #[arg(conflicts_with = "project")]
     pub wave: Option<String>,
-    /// Exact retained Project ID, provider ID or unique name instead of current selection
+    /// Exact retained Project ID, tracker ID or unique name instead of current selection
     #[arg(long)]
     pub project: Option<String>,
 }
 
-impl WavePlanTarget {
-    pub fn as_plan_target(&self) -> loopflow_execution::ops::project::PlanTarget<'_> {
+impl WaveProjectTarget {
+    pub fn as_project_target(&self) -> loopflow_execution::ops::project::ProjectTarget<'_> {
         match self.project.as_deref() {
-            Some(project) => loopflow_execution::ops::project::PlanTarget::Project(project),
-            None => loopflow_execution::ops::project::PlanTarget::Wave(self.wave.as_deref()),
+            Some(project) => loopflow_execution::ops::project::ProjectTarget::Project(project),
+            None => loopflow_execution::ops::project::ProjectTarget::Wave(self.wave.as_deref()),
         }
     }
 }
 
 const SETTING_KEYS: &str = "`lf config catalog` lists every preference and where it applies.
 Values use YAML; false disables and [] clears an additive list.
-The default destination is root lf.config.local.yaml, shared across Task worktrees.
+The default destination is the main checkout's .lf/config.local.yaml, shared across Task worktrees.
 --global edits ~/.lf/config.yaml; --shared explicitly edits committed configuration.
 `lf --wave <name> config set` selects a Wave; unset removes only that declaration.
 `lf config settings --skill <name> --json` explains effective values and sources.";
@@ -1622,7 +1602,7 @@ pub enum GraphCommand {
         #[command(flatten)]
         inventory: commands::graph_inventory::GraphProcessInventoryArgs,
     },
-    /// Inspect an authored graph
+    /// Inspect an authored graph, or a Graph run by its id
     Show {
         name: String,
         #[arg(long)]
@@ -1646,12 +1626,9 @@ pub enum GraphCommand {
 /// Shared selection, preparation and next-turn options for `resume` and `session new`.
 #[derive(Args, Debug)]
 pub struct SessionConnectionArgs {
-    /// Reveal existing history without replacing another terminal or starting a turn
-    #[arg(long, hide = true, conflicts_with = "message")]
-    pub reveal_existing: bool,
-    /// Start or continue without replacing another terminal's input
-    #[arg(long, hide = true, conflicts_with_all = ["message", "reveal_existing"])]
-    pub start_if_free: bool,
+    /// Attach without taking the terminal size until focus or input
+    #[arg(long)]
+    pub unfocused: bool,
     #[arg(long, conflicts_with = "wave")]
     pub task: Option<String>,
     #[arg(long)]
@@ -1667,27 +1644,6 @@ pub struct SessionConnectionArgs {
 }
 
 impl SessionConnectionArgs {
-    pub fn intent(&self) -> loopflow_execution::session::SessionOpenIntent {
-        use loopflow_execution::session::SessionOpenIntent;
-        if self.reveal_existing {
-            SessionOpenIntent::Reveal
-        } else if self.start_if_free {
-            SessionOpenIntent::Start
-        } else {
-            SessionOpenIntent::Resume
-        }
-    }
-
-    /// The Task or Wave this command names, as the flag and value that name
-    /// it. Naming one makes the resume managed, as `--task` or `--wave` does
-    /// for a launch, also beside a Session id.
-    pub fn work_flag<'a>(&'a self, cli: &'a Cli) -> Option<[&'a str; 2]> {
-        let task = self.task.as_deref().or(cli.task.as_deref());
-        let wave = self.wave.as_deref().or(cli.wave.as_deref());
-        task.map(|task| ["--task", task])
-            .or_else(|| wave.map(|wave| ["--wave", wave]))
-    }
-
     pub fn target<'a>(
         &'a self,
         cli: &'a Cli,
@@ -1769,11 +1725,8 @@ pub struct SessionListArgs {
 /// same flags is the preview.
 #[derive(Args, Debug, Clone, Default)]
 pub struct SessionSelectorArgs {
-    /// Sessions whose next message would fail: their login cannot take their model now
-    #[arg(long)]
-    pub blocked: bool,
-    /// Sessions using this login (work@, claude=work@) or on this agent (harness[:model])
-    #[arg(long, value_name = "ACCOUNT|AGENT")]
+    /// Sessions on this harness, optionally narrowed to a model
+    #[arg(long, value_name = "AGENT")]
     pub on: Option<String>,
 }
 
@@ -1784,7 +1737,7 @@ pub enum SessionCommand {
     /// Move the selected open Sessions to another agent (-a harness[:model]);
     /// `lf session list` with the same flags previews them
     #[command(
-        after_help = "Idle Sessions move now; a busy one moves after its turn. Logins are the Machine's: every open Claude follows the active one, which `lf account use <login>` switches; a running Codex keeps its login until `lf --account codex=<login> resume <session>`. Nothing is written to your preferences.\n  lf session list --blocked                    preview\n  lf session move --blocked -a claude:opus     continue them on Opus"
+        after_help = "Idle Sessions move now; a busy one moves after its turn.\n  lf session list --on claude\n  lf session move --on claude -a codex"
     )]
     Move {
         #[command(flatten)]
@@ -1859,7 +1812,7 @@ pub enum SessionCommand {
     },
     /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
-        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. Replacing an idle provider discards unsent input, just as quitting it does. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --blocked -a claude:opus continue blocked Sessions on Opus\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+        after_help = "Opens the conversation in this terminal. With none for this scope, it starts one and says so. A conversation running in an lf terminal gains one more view here, and every view types. An ended or crashed one continues its provider thread from history. One running in a client lf can't share is taken over: that client ends, unsent text there is lost, and resume says so. If attachment fails, resume reports the failure, leaves that work intact and resends no input.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --on claude -a codex      continue Claude Sessions on Codex\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
     Resume {
         /// Session ID, Task identifier, or provider conversation ID; beside
@@ -1870,6 +1823,10 @@ pub enum SessionCommand {
         /// Leave the other client running; continue in a new conversation forked from it
         #[arg(long, conflicts_with = "message")]
         fork: bool,
+        /// The request this start answers: a new Task's setup steps are timed
+        /// under it, and the server's recovery pass names its own starts
+        #[arg(long)]
+        request_id: Option<String>,
     },
     /// Restart this scope's conversation on a fresh provider thread, seeded with
     /// what the last thread knew; `-a` switches harness
@@ -1953,10 +1910,6 @@ pub enum SessionCommand {
         /// Where a Machine without the repository clones it from
         #[arg(long, requires = "task")]
         origin: Option<String>,
-        /// The sending Machine's planning key, adopted by a Machine with none
-        /// so a personal Git plan reads the same journal
-        #[arg(long, requires = "task")]
-        planning_key: Option<String>,
         /// The Machine the Task moves from, which a retry here asks for it
         #[arg(long, requires = "task")]
         from: Option<loopflow_model::durable::MachineId>,
@@ -1971,7 +1924,7 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
-    /// Read chapter plans and Tasks without starting work; an explicit Wave includes history
+    /// Read Projects and Tasks without starting work; an explicit Wave includes history
     Show {
         wave: Option<String>,
         /// Find an exact Task, including historical planning
@@ -1993,21 +1946,21 @@ pub enum WaveCommand {
         #[command(subcommand)]
         cmd: WaveGraphCommand,
     },
-    /// Edit the selected chapter's name or summary
-    EditPlan {
+    /// Edit the selected Project's name or summary
+    EditProject {
         #[command(flatten)]
-        target: WavePlanTarget,
+        target: WaveProjectTarget,
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
         summary: Option<String>,
-        /// Authored chapter prose
+        /// Authored Project prose
         #[arg(long)]
         description: Option<String>,
     },
 
     /// Create a Wave: register it, seed and commit .lf/wave/<name>/ on the main checkout,
-    /// and start its first chapter. Creating an existing Wave changes nothing.
+    /// and start its first Project. Creating an existing Wave changes nothing.
     Create {
         wave: String,
         /// Objective text for the new Wave's GOAL.md
@@ -2017,7 +1970,7 @@ pub enum WaveCommand {
         json: bool,
     },
     /// Remove a Wave and its child Waves. Open Tasks move to the parent Wave, or the
-    /// repository; chapters, completed Tasks and Sessions stay readable in history.
+    /// repository; Projects, completed Tasks and Sessions stay readable in history.
     #[command(after_help = "Run again to finish an interrupted removal.")]
     Remove {
         wave: String,
@@ -2040,7 +1993,7 @@ pub enum WaveCommand {
         #[command(subcommand)]
         cmd: Option<WavePlanCommand>,
     },
-    /// Refresh one Wave's planning from its provider (Git or Linear), then show its status;
+    /// Refresh one Wave's planning from its tracker, then show its status;
     /// a Wave with no Linear Initiative shows its local planning
     Sync {
         /// Wave name (default: the ambient wave)
@@ -2059,7 +2012,7 @@ pub enum WaveCommand {
         #[arg(long)]
         all: bool,
     },
-    /// Show one Wave's current plan, Task details, and execution evidence.
+    /// Show one Wave's current Project, Task details, and execution evidence.
     Status {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,
@@ -2073,7 +2026,7 @@ pub enum WaveCommand {
         selection: crate::lf::Selection,
     },
     /// Rename a Wave, moving .lf/wave/<name>/ on the main checkout; its Tasks,
-    /// chapters and Sessions keep their identity
+    /// Projects and Sessions keep their identity
     Rename {
         wave: String,
         /// The new name; omit to keep it while changing --repo or --title
@@ -2087,13 +2040,13 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Replace the current chapter's KRs and targets
-    UpdatePlan {
+    /// Replace the current Project's KRs and targets
+    UpdateProject {
         #[arg(short = 'w', long)]
         wave: Option<String>,
-        /// The complete plan as JSON
+        /// The Project KRs and metric targets as JSON
         #[arg(long)]
-        plan: std::path::PathBuf,
+        file: std::path::PathBuf,
     },
 }
 
@@ -2150,11 +2103,63 @@ pub struct SyncArgs {
     /// Explicitly claim a raw sync that has no Loopflow owner
     #[arg(long, conflicts_with_all = ["plan", "manual"])]
     pub adopt: bool,
-    /// Branch to sync onto; naming the default branch detaches a stacked Task
+    /// Branch or Task to sync onto; another open Task stacks this one on it, the default branch detaches
     pub onto: Option<String>,
     /// Print the plan, or what the sync did
     #[arg(long)]
     pub json: bool,
+}
+
+/// `lf task auto on|off`.
+#[derive(Subcommand, Debug)]
+pub enum AutoCommand {
+    /// Run the Task with nobody waited for: stand in at each interactive step, and merge
+    #[command(
+        after_help = "Prints what `lf task run` prints and returns once the run registers (`-b` \
+waits for it). A Task waiting at an interactive step is stood in for there; a Task already running \
+carries on and stands in from its next one. With no ISSUE, the checkout's Task, or a new one for \
+its branch."
+    )]
+    On {
+        issue: Option<String>,
+        /// Take up this graph in place of the Task's remaining steps
+        #[arg(long)]
+        graph: Option<String>,
+        /// Direction for the run, published to the Task
+        #[arg(long)]
+        reason: Option<String>,
+        /// Print the run it started, as `task.auto.on` answers
+        #[arg(long)]
+        json: bool,
+    },
+    /// Take the interactive steps and the merge back: the run waits at its next one
+    #[command(
+        after_help = "Nothing is killed: the run waits at its next interactive step, or before a \
+step that merges, and auto-merge Loopflow armed is disarmed. With no ISSUE, the checkout's Task."
+    )]
+    Off {
+        issue: Option<String>,
+        /// Why, saved as a Task comment
+        #[arg(long)]
+        reason: Option<String>,
+        /// Print the Task and whether auto was on
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+impl AutoCommand {
+    fn issue(&self) -> &Option<String> {
+        match self {
+            Self::On { issue, .. } | Self::Off { issue, .. } => issue,
+        }
+    }
+
+    fn issue_mut(&mut self) -> &mut Option<String> {
+        match self {
+            Self::On { issue, .. } | Self::Off { issue, .. } => issue,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -2178,7 +2183,7 @@ pub enum TaskCommand {
         #[arg(long, conflicts_with = "closed")]
         project: Option<String>,
         /// Only Tasks in this state
-        #[arg(long, conflicts_with = "closed", value_parser = ["unstarted", "idle", "active", "moving", "shipping"])]
+        #[arg(long, conflicts_with = "closed", value_parser = ["unstarted", "idle", "active", "moving"])]
         state: Option<String>,
         #[arg(long)]
         json: bool,
@@ -2212,12 +2217,19 @@ pub enum TaskCommand {
         selection: crate::lf::Selection,
     },
 
-    /// Synchronize a Task with its tracker; the change sent last wins
+    /// Exchange a Task with its tracker now: look for what was sent, resend what it lacks
+    #[command(after_help = "A lost line is a value the tracker kept over yours. \
+--keep-theirs closes every one the Task has; --use-mine saves yours again and sends them. \
+`lf repo tracker answer <id>` answers one.")]
+    #[command(group(clap::ArgGroup::new("answer").args(["keep_theirs", "use_mine"])))]
     Sync {
         issue: String,
-        /// Retry uncertain saved field/state updates after observing current Linear values
+        /// Keep the tracker's value for each lost line
         #[arg(long)]
-        retry_updates: bool,
+        keep_theirs: bool,
+        /// Save each lost value again, which sends it
+        #[arg(long)]
+        use_mine: bool,
     },
     /// Ensure tracked Task Work and its worktree without launching a Graph
     Checkout {
@@ -2239,15 +2251,15 @@ pub enum TaskCommand {
         json: bool,
     },
     /// Run the Task's Graph in its worktree until the next interactive step;
-    /// returns once it runs (`-b` runs every step headless to `end`, approving Auto-Ship)
+    /// returns once it runs (`-b` runs every step headless to `end` and waits)
     #[command(
         after_help = "A Task runs the graph it took up: its Wave's default, its repository's \
 `graph:`, or `code`. A run stops before each interactive step, where the Task waits for its \
 conversation; the next `lf task run` continues after it. A run that fails starts again at the \
 step that failed; the steps before it stay done, and --from reruns them. `-i` runs every step \
-with you in this terminal instead. A run that reaches `end`, as `-b` does, approves Auto-Ship like `lf ship`, \
-which may merge the PR, unless someone stopped shipping; then it waits at the landing step \
-until `lf ship`. Add --open to open its primary conversation locally when the launch returns, \
+with you in this terminal instead. A run that reaches a merging step, as `-b` does, may merge the PR \
+unless someone turned auto off; then it waits at the landing step until `lf task auto on`. `-b` turns \
+no auto on: a run carried again after it dies stops at its next interactive step. Add --open to open its primary conversation locally when the launch returns, \
 using lf open's ordinary host selection. Preview and --quote open nothing."
     )]
     Run {
@@ -2304,7 +2316,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     },
     /// Create a Task; with --run, also start its Graph
     #[command(
-        after_help = "Plain creation files new work, regardless of the current checkout or invoking Session. --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and approves no Auto-Ship. Remote calls use sources on the selected Machine."
+        after_help = "Plain creation files new work, regardless of the current checkout or invoking Session. --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and turns no auto on. Remote calls use sources on the selected Machine."
     )]
     Create {
         /// Retry a submitted creation with the same identity and content
@@ -2347,7 +2359,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Unassign the Task: nobody owns it and Linear shows no assignee; nothing
+    /// Unassign the Task: nobody owns it and its tracker shows no assignee; nothing
     /// moves it until someone claims or runs it. History stays intact
     Unassign {
         issue: String,
@@ -2387,13 +2399,6 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         subscribe: bool,
         #[command(flatten)]
         selection: crate::lf::Selection,
-    },
-    /// Browse the Task brief, workflow and recorded runs without starting work
-    View {
-        issue: Option<String>,
-        /// Print once, including when stdout is a terminal
-        #[arg(long)]
-        once: bool,
     },
     /// Show this Task's patch
     Diff {
@@ -2455,6 +2460,9 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     File {
         issue: String,
         path: String,
+        /// Read the file at this commit (parent, head or a resolved SHA) instead of the working tree
+        #[arg(long, conflicts_with = "recoveries")]
+        at: Option<String>,
         /// Inspect retained versions, including late writes; omitted for fast content reads
         #[arg(long)]
         recoveries: bool,
@@ -2470,7 +2478,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Cancel the Task in Linear and locally, close its PRs and delete its branches
+    /// Cancel the Task in its tracker and locally, close its PRs and delete its branches
     Abandon {
         /// Issue ID or branch; defaults to the Task in this checkout
         issue: Option<String>,
@@ -2479,14 +2487,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Preview open issues outside current chapters; apply safe cancellations explicitly
-    Sweep {
-        #[arg(long)]
-        apply: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Cancel unfinished placed work, clean up delivery, then trash the Linear issue
+    /// Cancel unfinished placed work, clean up delivery, then trash the tracker item
     Delete { issue: String },
     /// Update a Task's title or notes, before or after placement
     Update {
@@ -2498,7 +2499,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         /// Zero-based position in the Project's Task order
         #[arg(long)]
         rank: Option<u32>,
-        /// Assignee identity; provider user ID in connected plans
+        /// Assignee identity; tracker user ID in connected plans
         #[arg(long)]
         assignee: Option<String>,
         #[arg(short = 'w', long)]
@@ -2538,18 +2539,10 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Stop Auto-Ship until the next `lf ship`: end the ship process and disarm auto-merge it armed
-    ///
-    /// The stop stands, so no run ships the Task again until `lf ship`. With
-    /// no ISSUE, holds the checkout's Task.
-    Hold {
-        issue: Option<String>,
-        /// Why, kept in the Task's history
-        #[arg(long)]
-        reason: Option<String>,
-        /// Print the Task and whether it was shipping
-        #[arg(long)]
-        json: bool,
+    /// Turn the Task's auto setting on or off: who takes its interactive steps
+    Auto {
+        #[command(subcommand)]
+        cmd: AutoCommand,
     },
     /// Stop the Task's running Graph or Task run and its scheduled automation
     Interrupt {
@@ -2572,14 +2565,13 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
 impl TaskCommand {
     pub fn selector(&self) -> Option<&str> {
         match self {
-            Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
+            Self::List { .. } | Self::Create { .. } => None,
             Self::Retire { issue }
             | Self::Status { issue, .. }
-            | Self::View { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
-            | Self::Hold { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_deref(),
+            Self::Auto { cmd } => cmd.issue().as_deref(),
             Self::Detail { issue, .. }
             | Self::Show { issue, .. }
             | Self::WatchFiles { issue, .. }
@@ -2607,14 +2599,13 @@ impl TaskCommand {
 
     pub fn selector_mut(&mut self) -> Option<&mut String> {
         match self {
-            Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
+            Self::List { .. } | Self::Create { .. } => None,
             Self::Retire { issue }
             | Self::Status { issue, .. }
-            | Self::View { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
-            | Self::Hold { issue, .. }
             | Self::Checkout { issue, .. } => issue.as_mut(),
+            Self::Auto { cmd } => cmd.issue_mut().as_mut(),
             Self::Detail { issue, .. }
             | Self::Show { issue, .. }
             | Self::WatchFiles { issue, .. }
@@ -2655,7 +2646,7 @@ pub enum InstallCommand {
     /// Reconcile the selected installation's local server for a client.
     #[command(hide = true)]
     Server,
-    /// Run `lf install` on your stream on a schedule (launchd, also at login; cron on Linux), and renew rental logins every 2 hours
+    /// Run `lf install` on your stream on a schedule (launchd, also at login; cron on Linux),
     Schedule {
         /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).
         /// Defaults to the installed schedule's, else daily.
@@ -2887,16 +2878,18 @@ pub enum PlanCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum RepoPlanCommand {
-    /// Show, create, or recover the planning user key that names a `personal: true` ref
-    Key {
-        #[arg(long, conflicts_with = "recover")]
-        new: bool,
-        #[arg(long, value_name = "UUID")]
-        recover: Option<String>,
-    },
-    /// Show each destination's retained changes, including losing values, without contacting Git
-    Journal {
+pub enum RepoTrackerCommand {
+    /// Answer a lost line: keep the tracker's value, or save yours again and send it
+    #[command(group(clap::ArgGroup::new("answer").args(["keep_theirs", "use_mine"]).required(true)))]
+    Answer {
+        /// The line's id, as `lf repo tracker` prints it
+        id: String,
+        /// Keep the tracker's value; the line closes
+        #[arg(long)]
+        keep_theirs: bool,
+        /// Save the lost value again, which sends it
+        #[arg(long)]
+        use_mine: bool,
         #[arg(long)]
         json: bool,
     },
@@ -3047,17 +3040,13 @@ pub enum MachineCommand {
     /// Install a separate login on an added machine using this laptop's browser.
     Connect {
         target: String,
-        /// github, claude, codex, opencode or linear
+        /// github, opencode or linear
         provider: loopflow_execution::provider_auth::Provider,
         email: Option<String>,
         #[arg(long)]
         chrome_profile: Option<String>,
-        /// Give a rental its own fresh Claude login, which runs without the
-        /// laptop, in place of the laptop's access token
-        #[arg(long)]
-        owned: bool,
     },
-    /// Inspect, receive or renew machine credentials (credential bytes use stdin only).
+    /// Inspect or receive service credentials (credential bytes use stdin only).
     Credentials {
         #[command(subcommand)]
         cmd: MachineCredentialCommand,
@@ -3065,12 +3054,23 @@ pub enum MachineCommand {
     /// Name this Machine for teammates, or `off` to make it private again.
     /// A private Machine's ownership entries carry only its id.
     Public { name: String },
-    /// Diagnose installation, storage and Process integrity
+    /// Diagnose installation, storage and stray lf processes
     Doctor {
         /// Diagnose repository planning without changing it
         #[arg(long = "plan")]
         planning: bool,
         /// Emit the audit as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Apply store retention: end runs and agents nobody saw exit, expire
+    /// Session history past 90 days and reclaim the space
+    #[command(
+        after_help = "The Machine server runs this every hour. Turns are kept; history an earlier \
+                      lf wrote into loopflow.db moves to history.db."
+    )]
+    Prune {
+        /// Emit the retention report as JSON
         #[arg(long)]
         json: bool,
     },
@@ -3108,6 +3108,14 @@ pub enum MachineCommand {
         label: Option<String>,
         #[arg(long)]
         json: bool,
+    },
+    /// Exchange this Machine's plan with an added machine, live, for every
+    /// repository without Linear or Asana; bare, show which
+    Hub {
+        machine: Option<String>,
+        /// Stop exchanging with the hub; the plan stays on this Machine
+        #[arg(long, conflicts_with = "machine")]
+        clear: bool,
     },
     /// Change a saved machine's label
     Rename { label: String, name: String },
@@ -3209,185 +3217,46 @@ pub enum MachineCredentialCommand {
     Inspect {
         provider: loopflow_execution::provider_auth::Provider,
         login: String,
-        /// Count only a Claude login this Machine refreshes itself
-        #[arg(long)]
-        full: bool,
     },
     /// Receive a fresh login as JSON on stdin; preserve existing accounts.
     Receive,
-    /// Send each live rental its next Claude access token when the one it
-    /// holds is near expiry; nothing when no rental is live. `lf install
-    /// schedule` runs it every 2 hours.
-    Renew,
 }
 
-/// A login is its email or an unambiguous prefix (`work@`); `claude=work@`
-/// names the provider when both have one.
+/// Service credentials. Claude and Codex authenticate in their native clients.
 #[derive(Debug, Subcommand)]
 pub enum AccountCommand {
-    /// Which login each provider's next launch takes, and why. Exits 2 when
-    /// none can launch now, 3 when a login is needed. Use -a claude:<model>
-    /// to check that model; otherwise any scoped hold blocks the login
-    Next {
-        #[arg(long, conflicts_with = "default")]
-        repo: Option<String>,
-        /// Ignore repository and Wave orders
-        #[arg(long)]
-        default: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Switch this Machine to a login and keep launches there until it fills
-    /// up; `auto` hands them back to routing. Exits 2 when the login has no
-    /// room or names nothing stored, 3 when it needs a login
-    #[command(
-        after_help = "lf account use work@          # every launch takes work@ until it is full\n\
-                            lf account use auto           # back to the login with the most to spend\n\
-                            lf account use codex=auto     # one provider"
-    )]
-    Use {
-        #[arg(value_parser = parse_account_target)]
-        login: String,
-    },
-    /// Take a login out of rotation; when it is active, the Machine switches
-    /// off it now. It still launches when named with `--account`
-    Pause {
-        #[arg(value_parser = parse_account_target)]
-        login: String,
-    },
-    /// Put a paused login back in rotation
-    Unpause {
-        #[arg(value_parser = parse_account_target)]
-        login: String,
-    },
-    /// Add or renew a login (`claude=a@example.com`), or a service's local
-    /// credentials (`claude`, `linear`), through a remembered browser
+    /// Connect a service
     Connect {
-        #[arg(value_parser = parse_account_target)]
+        #[arg(value_parser = parse_service_provider)]
         target: String,
-        #[arg(long, conflicts_with_all = ["import", "api_key"])]
+        #[arg(long, conflicts_with = "api_key")]
         chrome_profile: Option<String>,
-        /// Adopt the ambient Claude login as this login
-        #[arg(long = "import", conflicts_with = "api_key")]
-        import: bool,
-        /// Read the provider's API key environment variable
         #[arg(long)]
         api_key: bool,
     },
-    /// Disconnect a login, or a service's local credentials
+    /// Disconnect a service
     Disconnect {
-        #[arg(value_parser = parse_account_target)]
+        #[arg(value_parser = parse_service_provider)]
         target: String,
-    },
-    /// Edit a login's plan, billing and expected email, or the browsers a
-    /// login or service connects through
-    Set {
-        #[arg(value_parser = parse_account_target)]
-        target: String,
-        #[arg(long)]
-        login_email: Option<String>,
-        #[arg(long, conflicts_with = "clear_plan")]
-        plan: Option<String>,
-        #[arg(long)]
-        clear_plan: bool,
-        #[arg(long, conflicts_with = "clear_paid_through")]
-        paid_through: Option<String>,
-        #[arg(long)]
-        clear_paid_through: bool,
-        #[arg(long)]
-        /// Release all recorded account and window holds, retaining usage readings
-        clear_cooldown: bool,
-        /// Replace the ordered browser choices (repeat for fallback profiles)
-        #[arg(long, conflicts_with = "clear_chrome_profiles")]
-        chrome_profile: Vec<String>,
-        #[arg(long)]
-        clear_chrome_profiles: bool,
-    },
-    /// Spend one banked Codex reset for this login
-    RedeemReset {
-        #[arg(value_parser = parse_account_target)]
-        login: String,
-        /// Reuse this key when retrying the same redemption
-        #[arg(long)]
-        idempotency_key: Option<String>,
-        /// Opaque credit ID returned by live status (otherwise the service chooses)
-        #[arg(long)]
-        credit_id: Option<String>,
-        #[arg(long)]
-        json: bool,
     },
 }
-
-/// A provider, a login (`work@`, `a@example.com`, `claude=work@`) or `auto`:
-/// anything else is a mistyped verb, refused before anything runs.
-fn parse_account_target(raw: &str) -> Result<String, String> {
-    let named = raw.contains('@')
-        || raw.contains('=')
-        || raw == "auto"
-        || raw
-            .parse::<loopflow_execution::provider_auth::Provider>()
-            .is_ok();
-    if named {
-        Ok(raw.to_string())
-    } else {
-        Err(format!(
-            "'{raw}' is not a provider or a login; a login is its email or a prefix through @ (`work@`)"
-        ))
+fn parse_service_provider(raw: &str) -> Result<String, String> {
+    match raw.parse::<loopflow_execution::provider_auth::Provider>() {
+        Ok(loopflow_execution::provider_auth::Provider::Claude) => {
+            Err("Claude signs in natively: run `claude`, then /login".to_owned())
+        }
+        Ok(loopflow_execution::provider_auth::Provider::Codex) => {
+            Err("Codex signs in natively: run `codex login`".to_owned())
+        }
+        Ok(_) => Ok(raw.to_owned()),
+        Err(error) => Err(error.to_string()),
     }
 }
-
 impl AccountCommand {
-    /// A login or overview flag before a verb belongs to bare `lf account`;
-    /// `Cli::checked` rejects it. The old `lf account claude use jack@`
-    /// spelling is answered with the current one, `lf account use claude=jack@`.
     fn misuse(cmd: Option<&Self>, target: Option<&str>, overview: bool) -> Option<String> {
-        let cmd = cmd?;
-        if let Some(target) = target {
-            let spelling = match cmd.login() {
-                Some(login)
-                    if !login.contains('=')
-                        && target
-                            .parse::<loopflow_execution::provider_auth::Provider>()
-                            .is_ok() =>
-                {
-                    format!("lf account {} {target}={login}", cmd.verb())
-                }
-                Some(login) => format!("lf account {} {login}", cmd.verb()),
-                None => format!("lf account {}", cmd.verb()),
-            };
-            return Some(format!(
-                "the verb comes first and the provider goes with the login: {spelling}"
-            ));
-        }
-        overview
-            .then(|| "--cached and --json before a verb apply to `lf account` alone".to_string())
-    }
-
-    fn verb(&self) -> &'static str {
-        match self {
-            Self::Next { .. } => "next",
-            Self::Use { .. } => "use",
-            Self::Pause { .. } => "pause",
-            Self::Unpause { .. } => "unpause",
-            Self::Connect { .. } => "connect",
-            Self::Disconnect { .. } => "disconnect",
-            Self::Set { .. } => "set",
-            Self::RedeemReset { .. } => "redeem-reset",
-        }
-    }
-
-    /// The login or provider the verb acts on.
-    fn login(&self) -> Option<&str> {
-        match self {
-            Self::Next { .. } => None,
-            Self::Use { login }
-            | Self::Pause { login }
-            | Self::Unpause { login }
-            | Self::RedeemReset { login, .. } => Some(login),
-            Self::Connect { target, .. }
-            | Self::Disconnect { target }
-            | Self::Set { target, .. } => Some(target),
-        }
+        cmd?;
+        (target.is_some() || overview)
+            .then(|| "put service arguments after the account verb".to_owned())
     }
 }
 
@@ -3564,19 +3433,48 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
-    fn conversation_modes_and_workspace_options_have_separate_commands() {
+    fn native_login_controls_are_absent_and_service_auth_remains() {
+        for args in [
+            vec!["lf", "--account", "claude=old@", "implement"],
+            vec!["lf", "--only-account", "codex=old@", "implement"],
+            vec!["lf", "account", "next"],
+            vec!["lf", "account", "use", "old@"],
+            vec!["lf", "account", "pause", "old@"],
+            vec!["lf", "account", "redeem-reset", "old@"],
+            vec!["lf", "session", "list", "--blocked"],
+            vec!["lf", "machine", "credentials", "renew"],
+        ] {
+            assert!(Cli::try_parse_from(&args).is_err(), "{args:?}");
+        }
+        for (provider, login) in [("claude", "/login"), ("codex", "codex login")] {
+            let error = Cli::try_parse_from(["lf", "account", "connect", provider]).unwrap_err();
+            assert!(error.to_string().contains(login), "{error}");
+        }
+        for service in ["github", "linear", "asana", "doppler", "opencode"] {
+            assert!(Cli::try_parse_from(["lf", "account", "connect", service]).is_ok());
+            assert!(Cli::try_parse_from(["lf", "account", "disconnect", service]).is_ok());
+        }
+        assert!(
+            Cli::try_parse_from(["lf", "session", "move", "--on", "claude", "-a", "codex"]).is_ok()
+        );
+    }
+
+    #[test]
+    fn workspace_options_belong_to_open_and_exclude_one_conversation_modes() {
         for flags in [
             ["--here", "--tab"],
             ["--here", "--focus"],
             ["--tab", "--focus"],
+            ["--workspace", "--here"],
+            ["--workspace", "--tab"],
+            ["--available", "--focus"],
+            ["--available", "--workspace"],
         ] {
             assert!(Cli::try_parse_from(["lf", "open", flags[0], flags[1]]).is_err());
         }
-        for option in ["--available", "--no-focus"] {
-            assert!(Cli::try_parse_from(["lf", "open", option]).is_err());
-            assert!(Cli::try_parse_from(["lf", "workspace", option]).is_ok());
+        for option in ["--workspace", "--available", "--no-focus"] {
+            assert!(Cli::try_parse_from(["lf", "open", option]).is_ok());
         }
-        assert!(Cli::try_parse_from(["lf", "workspace", "--here"]).is_err());
     }
 
     #[test]
@@ -3736,52 +3634,6 @@ mod tests {
     }
 
     #[test]
-    fn account_commands_printed_by_errors_parse() {
-        let sources = [
-            include_str!("commands/account.rs"),
-            include_str!("../../../loopflow-execution/src/provider_account/operations.rs"),
-            include_str!("../../../loopflow-execution/src/provider_account/account_status.rs"),
-            include_str!("commands/account_status.rs"),
-            include_str!("../../../loopflow-execution/src/machine/credentials.rs"),
-            include_str!("../../../loopflow-execution/src/provider_account.rs"),
-            include_str!("../../../loopflow-execution/src/provider_account/activation.rs"),
-            include_str!("../../../loopflow-execution/src/provider_account/identity.rs"),
-        ];
-        let printed =
-            regex::Regex::new(r#"lf account (?:connect|disconnect|set|use) [^`"\n;(),…]+"#)
-                .unwrap();
-        let placeholder = regex::Regex::new(r"\{[^}]*\}|<[^>]*>").unwrap();
-        let commands = sources
-            .iter()
-            .flat_map(|source| printed.find_iter(source))
-            .map(|command| {
-                let command = command.as_str().replace("{provider}{login}", "claude=a@");
-                placeholder
-                    .replace_all(&command, |found: &regex::Captures| {
-                        let end = found.get(0).unwrap().end();
-                        match &found[0] {
-                            _ if command[end..].starts_with('=') => "claude",
-                            "{provider}" | "<provider>" => "claude",
-                            "<profile>" => "Work",
-                            _ => "a@example.com",
-                        }
-                    })
-                    .into_owned()
-            })
-            .collect::<Vec<_>>();
-        let parse = |command: &str| {
-            let args = command.split_whitespace().map(String::from).collect();
-            Cli::try_parse_from(crate::lf::navigation::normalize_args(args)?)
-        };
-        assert!(commands.len() > 10, "{commands:?}");
-        for command in commands {
-            let parsed = parse(&command);
-            assert!(parsed.is_ok(), "{command}: {:?}", parsed.err());
-        }
-        assert!(parse("lf account connect claude a@").is_err());
-    }
-
-    #[test]
     fn consolidated_commands_parse_without_old_namespaces() {
         use clap::CommandFactory;
         let command = Cli::command();
@@ -3815,10 +3667,6 @@ mod tests {
         for removed in ["start", "stop", "pause", "resume", "chat", "reply"] {
             assert!(command.find_subcommand(removed).is_none());
         }
-        assert!(
-            Cli::try_parse_from(["lf", "wave", "new-chapter", "October", "--plan", "p.json"])
-                .is_err()
-        );
         assert!(Cli::try_parse_from(["lf", "steer", "session_1", "m", "--repo"]).is_err());
         assert!(Cli::try_parse_from(["lf", "session", "steer", "session_1", "m"]).is_err());
         assert!(Cli::try_parse_from(["lf", "task", "steer", "LOO-1", "m"]).is_err());
@@ -3840,14 +3688,15 @@ mod tests {
             vec![
                 "lf", "--wave", "product", "config", "set", "machine", "mini",
             ],
-            vec!["lf", "config", "unset", "account.claude", "--global"],
+            vec!["lf", "config", "unset", "agent", "--global"],
             vec!["lf", "discord", "serve", "product"],
             vec!["lf", "machine", "doctor", "--plan", "--json"],
             vec!["lf", "wave", "sync", "product"],
             vec![
                 "lf",
                 "task",
-                "hold",
+                "auto",
+                "off",
                 "LOO-1",
                 "--reason",
                 "waiting on review",
@@ -4052,48 +3901,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn account_preference_and_restriction_are_distinct_repeatable_flags() {
-        let preferred = Cli::try_parse_from([
-            "lf",
-            "--account",
-            "claude=personal",
-            "--account",
-            "codex=reserve",
-            "skill",
-            "implement",
-        ])
-        .expect("parse account preferences");
-        assert_eq!(preferred.account, vec!["claude=personal", "codex=reserve"]);
-        assert!(preferred.only_account.is_empty());
-
-        let restricted = Cli::try_parse_from([
-            "lf",
-            "--only-account",
-            "claude=personal",
-            "--only-account",
-            "codex=reserve",
-            "skill",
-            "implement",
-        ])
-        .expect("parse account restrictions");
-        assert_eq!(
-            restricted.only_account,
-            vec!["claude=personal", "codex=reserve"]
-        );
-
-        assert!(Cli::try_parse_from([
-            "lf",
-            "--account",
-            "reserve",
-            "--only-account",
-            "reserve",
-            "skill",
-            "implement",
-        ])
-        .is_err());
-    }
-
     /// A provider running across an lf upgrade keeps the Stop hook an older lf
     /// declared, so that spelling still reaches the turn-end boundary.
     #[test]
@@ -4104,6 +3911,7 @@ mod tests {
             Some(Commands::ContextBlock {
                 delivery: None,
                 moment: loopflow_execution::context_block::ContextMoment::Stop,
+                harness: None,
             })
         ));
     }
@@ -4136,209 +3944,6 @@ mod tests {
             .map(|arg| arg.get_id().to_string())
             .collect::<Vec<_>>();
         assert!(hidden_flags.is_empty(), "{hidden_flags:?}");
-    }
-
-    #[test]
-    fn account_verbs_come_first_and_a_login_alone_is_its_detail() {
-        let cli = Cli::try_parse_from(["lf", "account", "use", "codex=jack@"]).unwrap();
-        assert!(matches!(cli.command, Some(Commands::Account {
-            cmd: Some(AccountCommand::Use { login }),
-            target: None,
-            ..
-        }) if login == "codex=jack@"));
-        let cli = Cli::try_parse_from(["lf", "account", "jack@"]).unwrap();
-        assert!(matches!(cli.command, Some(Commands::Account {
-            cmd: None,
-            target: Some(target),
-            ..
-        }) if target == "jack@"));
-        for verb in ["next", "pause", "unpause"] {
-            let args: &[&str] = if verb == "next" {
-                &["lf", "account", "next"]
-            } else {
-                &["lf", "account", verb, "jack@"]
-            };
-            assert!(Cli::try_parse_from(args).is_ok(), "{verb}");
-        }
-        let old_spelling = Cli::try_parse_from(["lf", "account", "codex", "use", "jack@"])
-            .and_then(Cli::checked)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            old_spelling.contains("lf account use codex=jack@"),
-            "{old_spelling}"
-        );
-        // A login before the verb is not a provider to fold into the login.
-        let login_first = Cli::try_parse_from(["lf", "account", "alice@", "use", "bob@"])
-            .and_then(Cli::checked)
-            .unwrap_err()
-            .to_string();
-        assert!(login_first.contains("lf account use bob@"), "{login_first}");
-        let flags_first = Cli::try_parse_from(["lf", "account", "--json", "next"])
-            .and_then(Cli::checked)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            flags_first.contains("apply to `lf account` alone"),
-            "{flags_first}"
-        );
-        for old in [
-            vec!["lf", "account", "--details"],
-            vec![
-                "lf",
-                "account",
-                "set",
-                "claude=a@",
-                "--routing",
-                "automatic",
-            ],
-        ] {
-            assert!(Cli::try_parse_from(&old).is_err(), "{old:?}");
-        }
-    }
-
-    #[test]
-    fn session_move_takes_the_selector_and_the_global_agent() {
-        let cli = Cli::try_parse_from(["lf", "session", "move", "--blocked", "-a", "claude:opus"])
-            .unwrap();
-        assert_eq!(cli.agent.as_deref(), Some("claude:opus"));
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Session {
-                cmd: SessionCommand::Move {
-                    selector: SessionSelectorArgs {
-                        blocked: true,
-                        on: None
-                    },
-                    ..
-                }
-            })
-        ));
-        let cli =
-            Cli::try_parse_from(["lf", "session", "list", "--on", "jack@example.com"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Session {
-                cmd: SessionCommand::List(SessionListArgs {
-                    selector: SessionSelectorArgs {
-                        blocked: false,
-                        on: Some(_)
-                    },
-                    ..
-                })
-            })
-        ));
-    }
-
-    #[test]
-    fn auth_set_accepts_ordered_service_profiles() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "account",
-            "set",
-            "linear",
-            "--chrome-profile",
-            "Work",
-            "--chrome-profile",
-            "Personal",
-        ])
-        .unwrap();
-        assert!(matches!(cli.command, Some(Commands::Account {
-            cmd: Some(AccountCommand::Set { target, chrome_profile, .. }), ..
-        }) if target == "linear" && chrome_profile == ["Work", "Personal"]));
-    }
-
-    #[test]
-    fn account_connect_names_a_login_or_a_service() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "account",
-            "connect",
-            "claude=operator@",
-            "--chrome-profile",
-            "Profile 9",
-        ])
-        .expect("parse account connection");
-        assert!(cli.account.is_empty());
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Account {
-                cmd: Some(AccountCommand::Connect {
-                    target,
-                    chrome_profile: Some(chrome_profile),
-                    ..
-                }), ..
-            }) if target == "claude=operator@" && chrome_profile == "Profile 9"
-        ));
-        let cli = Cli::try_parse_from([
-            "lf",
-            "account",
-            "connect",
-            "linear",
-            "--chrome-profile",
-            "Work",
-        ])
-        .unwrap();
-        assert!(matches!(cli.command, Some(Commands::Account {
-            cmd: Some(AccountCommand::Connect { target, chrome_profile: Some(profile), .. }), ..
-        }) if target == "linear" && profile == "Work"));
-        // The old provider-then-login spelling is gone.
-        assert!(
-            Cli::try_parse_from(["lf", "account", "connect", "claude", "a@example.com"]).is_err()
-        );
-        assert!(Cli::try_parse_from([
-            "lf",
-            "account",
-            "connect",
-            "claude=a@example.com",
-            "--import"
-        ])
-        .is_ok());
-        for flags in [
-            vec!["--import", "--api-key"],
-            vec!["--import", "--chrome-profile", "Work"],
-        ] {
-            assert!(Cli::try_parse_from(
-                ["lf", "account", "connect", "claude=a@example.com"]
-                    .into_iter()
-                    .chain(flags)
-            )
-            .is_err());
-        }
-    }
-
-    #[test]
-    fn account_set_takes_a_login_and_its_billing() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "account",
-            "set",
-            "codex=loopflow-eng@",
-            "--login-email",
-            "engineering@example.com",
-            "--plan",
-            "max",
-            "--paid-through",
-            "2026-08-14",
-        ])
-        .expect("parse provider account lifecycle");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Account {
-                cmd: Some(AccountCommand::Set {
-                    target,
-                    login_email: Some(login_email),
-                    plan: Some(plan),
-                    paid_through: Some(paid_through),
-                    clear_plan: false,
-                    clear_paid_through: false,
-                    ..
-                }), ..
-            }) if target == "codex=loopflow-eng@"
-                && login_email == "engineering@example.com"
-                && plan == "max"
-                && paid_through == "2026-08-14"
-        ));
     }
 
     #[test]
@@ -4634,13 +4239,38 @@ mod tests {
                 }
             }
         }
-        // A restarted ship carries its run's agent to the steps it starts.
+        // Auto on, and the Graph run `lf task run -a` starts, carry the
+        // run's agent to the steps they start.
         let checked = |argv: &[&str]| Cli::try_parse_from(argv).unwrap().checked().unwrap();
-        assert!(
-            checked(&["lf", "--agent", "claude:opus", "--task", "LOO-1", "ship"])
-                .may_launch_agent()
-        );
-        assert!(!checked(&["lf", "--task", "LOO-1", "task", "hold"]).may_launch_agent());
+        for tail in [&["task", "auto", "on"][..], &["graph", "run"]] {
+            let argv = [
+                &["lf", "--agent", "claude:opus", "--task", "LOO-1"][..],
+                tail,
+            ]
+            .concat();
+            assert!(checked(&argv).may_launch_agent(), "{argv:?}");
+        }
+        assert!(!checked(&["lf", "--task", "LOO-1", "task", "auto", "off"]).may_launch_agent());
+        // `lf task auto on ISSUE` selects its Task as `--task` does.
+        let on = checked(&[
+            "lf", "task", "auto", "on", "LOO-1", "--graph", "code", "--reason", "go", "--json",
+        ]);
+        assert_eq!(on.task.as_deref(), Some("LOO-1"));
+        assert!(matches!(
+            &on.command,
+            Some(Commands::Task { cmd: TaskCommand::Auto { cmd: AutoCommand::On {
+                issue: None, graph: Some(graph), reason: Some(reason), json: true
+            } } }) if reason == "go" && graph == "code"
+        ));
+        // `lf ship` is no command of its own: it would name a skill.
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "ship", "LOO-1"])
+                .unwrap()
+                .command,
+            Some(Commands::External(_))
+        ));
+        // A graph is taken up as auto goes on; off takes none.
+        assert!(Cli::try_parse_from(["lf", "task", "auto", "off", "--graph", "code"]).is_err());
         // A Session id beside its Work selects the Session; Task and Wave
         // together stay one selection too many.
         for argv in [
@@ -4658,7 +4288,6 @@ mod tests {
                 connection.target(&cli, id.as_deref()).unwrap(),
                 loopflow_execution::ops::human_session::SessionTarget::Session("session-id")
             ));
-            assert!(connection.work_flag(&cli).is_some());
         }
         assert!(Cli::try_parse_from([
             "lf", "--wave", "infra", "session", "resume", "--task", "LOO-1",

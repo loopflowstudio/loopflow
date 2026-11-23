@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::agent::AgentConfig;
-use crate::config::{parse_agent, Config};
+use crate::config::Config;
 use crate::error::CoreError;
 use crate::graph::Skill;
 use crate::prompt::structured_reply::{structured_replies_for_context, ClientContext};
@@ -31,8 +31,6 @@ pub struct ProcessPromptInput {
     /// Exact invocation arguments; captured Work direction stays in `references`.
     pub skill_arguments: String,
     pub no_loopflow: bool,
-    /// Work was selected or resolved from the current checkout/Session.
-    pub work: Option<crate::prompt::WorkContext>,
     pub source_overrides: ContextSourceOverrides,
     pub summary: Option<String>,
     /// Complete captured context, listed separately from the live request.
@@ -81,7 +79,6 @@ fn prepare_prompt(
         message,
         skill_arguments,
         no_loopflow,
-        work,
         source_overrides,
         summary,
         references,
@@ -98,7 +95,7 @@ fn prepare_prompt(
     };
     let effective = crate::config::settings::resolve(config, resolved_skill.as_ref())?;
     let config = &effective.config;
-    let agent = config.agent()?.to_owned();
+    let (agent, fallback_agents) = config.resolve_agents()?;
     let mut docs = config.context.docs.clone();
     docs.extend(requested_docs);
     let diff_files = source_overrides
@@ -117,7 +114,6 @@ fn prepare_prompt(
         skill: None,
         message,
         operate: !no_loopflow,
-        work,
         surface,
         docs,
         files: Vec::new(),
@@ -172,7 +168,10 @@ fn prepare_prompt(
         .skill
         .as_ref()
         .filter(|skill| {
-            matches!(parse_agent(&agent).0.as_str(), "claude" | "codex")
+            crate::harness::launcher(agent.harness)
+                .capabilities()
+                .native_skills
+                .is_some()
                 && skill.source.as_ref().is_some_and(|source| {
                     source.dialect != crate::skills::catalog::SkillDialect::Loopflow
                 })
@@ -198,27 +197,20 @@ fn prepare_prompt(
     let launch = AgentConfig {
         chrome: config.chrome,
         codex_service_tier: config.codex.service_tier,
-        claude_model: config.claude.model.clone(),
-        session_attachment: None,
         system_prompt,
         conversation_context,
-        // The command that names the launch's Work decides this.
-        holder: crate::session::Holder::Caller,
         task_prompt,
         skill_invocation,
         output_schema: None,
-        agent: Some(agent),
-        fallback_agents: config.fallback_agents(),
+        agent,
+        fallback_agents,
         max_turns: None,
         resume_token: None,
-        provider_account_id: None,
-        provider_account_authority_home: None,
         cwd: Some(repo_root),
-        write_scope: crate::agent::AgentWriteScope::Configured,
-        execution_boundary: None,
-        skip_permissions: config.yolo,
+        yolo: config.yolo,
         structured_replies: structured_replies_for_context(&client_context, action_style),
         directive_relay: None,
+        launch_lock: None,
         env: [(
             crate::config::USER_NAME_ENV.to_string(),
             components.user_name.clone().unwrap_or_default(),
@@ -280,100 +272,6 @@ Test skill body.
             .block(crate::context_block::ContextMoment::Start)
             .unwrap()
             .text
-    }
-
-    #[test]
-    fn work_guidance_is_additive_opt_out_and_loadable_as_a_skill() {
-        let _lock = crate::journal::test_env_lock();
-        let home = tempfile::tempdir().unwrap();
-        let _home =
-            crate::config::environment::EnvVarGuard::set("HOME", home.path().to_str().unwrap());
-        let _lf_home = crate::config::environment::EnvVarGuard::set(
-            "LF_HOME",
-            home.path().join(".lf").to_str().unwrap(),
-        );
-        let repo = loopflow_test_support::TestRepo::new();
-        let source = loopflow_definitions::builtins::get_builtin_skill("work").unwrap();
-        let (_, body) = loopflow_definitions::text::split_frontmatter(source).unwrap();
-        for (work, no_loopflow, skill, copies) in [
-            (false, false, None, 0),
-            (true, false, None, 1),
-            (true, true, None, 0),
-            (false, false, Some("work"), 1),
-            (true, false, Some("work"), 1),
-            // Opting out of automatic guidance does not suppress an explicit skill.
-            (true, true, Some("work"), 1),
-        ] {
-            let prepared = prepare_process_prompt(
-                &default_test_config(),
-                ProcessPromptInput {
-                    repo_root: repo.path().to_path_buf(),
-                    work: work.then(|| crate::prompt::WorkContext::Task("TASK-1".into())),
-                    no_loopflow,
-                    skill: skill.map(str::to_owned),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-            let prompt = format!(
-                "{}\n{}",
-                prepared.config.system_prompt, prepared.config.task_prompt
-            );
-            assert_eq!(
-                prompt.matches(body).count(),
-                copies,
-                "work={work}, no_loopflow={no_loopflow}, skill={skill:?}"
-            );
-            assert_eq!(prompt.contains("<lf:loopflow>"), !no_loopflow);
-            assert!(!prompt.contains("You are this Task's operator"));
-            let context = crate::prompt::attribution::attributed_context(
-                &prepared.components,
-                &prepared.config.system_prompt,
-                &prepared.config.task_prompt,
-                &prepared.deduplication_decisions,
-                None,
-            );
-            let work_decision = context
-                .decisions
-                .iter()
-                .find(|decision| {
-                    decision.kind == crate::trace::ContextAssetKind::OperatingInstructions
-                        && decision.label == "work"
-                })
-                .unwrap();
-            let (decision, reason) = if no_loopflow {
-                (
-                    crate::trace::ContextDecisionKind::Excluded,
-                    "automatic guidance disabled for this input",
-                )
-            } else if !work {
-                (
-                    crate::trace::ContextDecisionKind::Excluded,
-                    "no Task or Wave association",
-                )
-            } else if skill == Some("work") {
-                (
-                    crate::trace::ContextDecisionKind::Deduplicated,
-                    "the selected work skill supplies this guidance",
-                )
-            } else {
-                (
-                    crate::trace::ContextDecisionKind::Included,
-                    "Task association: TASK-1",
-                )
-            };
-            assert_eq!(work_decision.decision, decision);
-            assert_eq!(work_decision.reason, reason);
-            if work && !no_loopflow && skill.is_none() {
-                assert!(context
-                    .system
-                    .as_ref()
-                    .unwrap()
-                    .assets
-                    .iter()
-                    .any(|asset| asset.label == "work"));
-            }
-        }
     }
 
     #[test]
@@ -590,10 +488,9 @@ Test skill body.
         .unwrap();
         let submitted = conversation(&prepared);
         assert!(prepared.config.task_prompt.contains("<lf:skill:implement>"));
-        assert!(prepared
-            .config
-            .task_prompt
-            .contains("Turn the design doc into working code."));
+        let source = loopflow_definitions::builtins::get_builtin_skill("implement").unwrap();
+        let (_, body) = loopflow_definitions::text::split_frontmatter(source).unwrap();
+        assert!(prepared.config.task_prompt.contains(body.trim()));
         assert!(!prepared
             .config
             .system_prompt
@@ -620,8 +517,8 @@ Test skill body.
         let _name =
             crate::config::environment::EnvVarGuard::set(crate::config::USER_NAME_ENV, "  Jack  ");
         let tmp = create_repo_fixture();
-        for agent in ["claude", "codex", "opencode", "pi"] {
-            let _selection = select_agent(agent);
+        for agent in loopflow_harness::HarnessKind::ALL {
+            let _selection = select_agent(agent.as_str());
             for surface in [
                 Surface::Cli,
                 Surface::Mac,
@@ -674,7 +571,10 @@ Test skill body.
         )
         .expect("prepare Process prompt");
 
-        assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("codex:o3")
+        );
     }
 
     #[test]
@@ -694,7 +594,10 @@ Test skill body.
         )
         .expect("prepare Process prompt");
 
-        assert_eq!(prepared.config.agent.as_deref(), Some("claude:sonnet"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("claude:sonnet")
+        );
     }
 
     #[test]
@@ -771,7 +674,10 @@ Test skill body.
         )
         .expect("prepare Process prompt");
 
-        assert_eq!(prepared.config.agent.as_deref(), Some("claude:sonnet"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("claude:sonnet")
+        );
     }
 
     #[test]
@@ -797,7 +703,7 @@ Test skill body.
             )
             .expect("prepare Process prompt");
             assert_eq!(
-                prepared.config.agent().unwrap(),
+                prepared.config.agent.to_string(),
                 crate::config::default_agent().unwrap(),
                 "{name}"
             );
@@ -837,7 +743,10 @@ Test skill body.
         )
         .expect("prepare Process prompt");
 
-        assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("codex:o3")
+        );
     }
 
     #[test]
@@ -987,7 +896,10 @@ Test skill body.
                 .map(|skill| skill.name.as_str()),
             Some("team/skill-creator")
         );
-        assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("codex:o3")
+        );
     }
 
     #[test]
@@ -1194,7 +1106,7 @@ Test skill body.
         .expect("supported OpenCode model should pass");
 
         assert_eq!(
-            prepared.config.agent.as_deref(),
+            Some(prepared.config.agent.to_string()).as_deref(),
             Some("opencode:moonshotai/kimi-k2")
         );
     }
@@ -1215,6 +1127,9 @@ Test skill body.
         )
         .expect("bare OpenCode should defer to the user's default");
 
-        assert_eq!(prepared.config.agent.as_deref(), Some("opencode"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("opencode")
+        );
     }
 }

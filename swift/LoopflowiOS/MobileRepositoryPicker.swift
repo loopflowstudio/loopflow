@@ -3,7 +3,7 @@ import SwiftUI
 
 struct MobileRepositoryPicker: View {
     let model: MobileTaskCreation
-    let theme: ThemeDefinition
+    @Environment(\.theme) private var theme
     @State private var search = ""
     @State private var refresh: Task<Void, Never>?
     @Environment(\.dismiss) private var dismiss
@@ -20,7 +20,7 @@ struct MobileRepositoryPicker: View {
         List {
             if let error = model.error {
                 Section {
-                    Text(error).font(Typography.body(14)).foregroundStyle(theme.palette.warning)
+                    Text(error).font(Typography.text).foregroundStyle(theme.palette.warning)
                         .listRowBackground(theme.palette.surface)
                 }
             }
@@ -30,15 +30,15 @@ struct MobileRepositoryPicker: View {
                         model.selectRepository(repository.path)
                         if model.saveDraft() { dismiss() }
                     } label: {
-                        HStack(alignment: .top, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(repository.displayName).font(Typography.strong(17))
+                        HStack(alignment: .top, spacing: Spacing.md) {
+                            VStack(alignment: .leading, spacing: Spacing.xs) {
+                                Text(repository.displayName).font(Typography.textStrong)
                                     .foregroundStyle(theme.palette.text)
-                                Text(repository.path).font(Typography.caption(13))
+                                Text(repository.path).font(Typography.meta)
                                     .foregroundStyle(theme.palette.textSecondary)
                                 if let error = repository.error {
                                     Label(error, systemImage: "exclamationmark.circle")
-                                        .font(Typography.body(14)).foregroundStyle(theme.palette.warning)
+                                        .font(Typography.text).foregroundStyle(theme.palette.warning)
                                 }
                             }
                             .fixedSize(horizontal: false, vertical: true)
@@ -48,17 +48,20 @@ struct MobileRepositoryPicker: View {
                                     .accessibilityHidden(true)
                             }
                         }
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: HitTarget.touch, alignment: .leading)
                         .contentShape(Rectangle())
-                        .padding(.vertical, 4)
+                        .padding(.vertical, Spacing.xs)
                     }
                     .disabled(repository.error != nil || model.busy)
                     .accessibilityAddTraits(repository.path == model.draft.directory ? .isSelected : [])
                     .listRowBackground(theme.palette.background)
                 }
             } header: {
-                Text(model.context?.name ?? "Paired Machine")
-                    .font(Typography.caption(12)).foregroundStyle(theme.palette.textSecondary).textCase(nil)
+                // An empty list is the state's to describe; a header would sit under its title.
+                if !repositories.isEmpty {
+                    Text(model.context?.name ?? "Paired Machine")
+                        .font(Typography.meta).foregroundStyle(theme.palette.textSecondary).textCase(nil)
+                }
             }
         }
         .listStyle(.plain)
@@ -67,14 +70,19 @@ struct MobileRepositoryPicker: View {
         .overlay {
             if repositories.isEmpty && model.error == nil {
                 if model.context?.repositories.isEmpty == true {
-                    ContentUnavailableView("No repositories", systemImage: "folder",
-                        description: Text("Add a repository in Loopflow on this Machine, then refresh this list."))
+                    StateView("No repositories",
+                              sentence: "Add a repository in Loopflow on this Machine, then refresh this list.") {
+                        Button("Refresh") { Task { await model.prepare() } }.buttonStyle(LoopflowButtonStyle(.accent))
+                    }
                 } else {
-                    ContentUnavailableView.search(text: search)
+                    StateView("No results for “\(search)”") {
+                        Button("Clear search") { search = "" }.buttonStyle(LoopflowButtonStyle(.accent))
+                    }
                 }
             }
         }
         .searchable(text: $search, prompt: "Repository name or path")
+        .textInputAutocapitalization(.never)
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await model.prepare() }
         .navigationTitle("Repository")

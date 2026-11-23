@@ -104,13 +104,14 @@ impl SqliteStore {
                         Edit::WaveParent(wave.parent.as_ref().map(ToString::to_string)),
                     ],
                 ),
+                crate::sqlite::planning_write::WriteOrigin::Local,
             )?;
         }
         tx.commit()?;
         Ok(true)
     }
 
-    /// Retire Waves together through the planning writer, so Git planning exchange
+    /// Retire Waves together through the planning writer, so the hub
     /// carries the removal. Rows, Projects, Tasks and Sessions stay readable;
     /// an already retired Wave keeps its original retirement.
     pub fn retire_waves(&self, waves: &[WaveId], reason: &str) -> StoreResult<()> {

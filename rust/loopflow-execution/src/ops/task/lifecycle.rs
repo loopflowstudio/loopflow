@@ -124,9 +124,7 @@ pub(super) async fn cleanup_abandoned(
     task: &Task,
     force: bool,
 ) -> OpsResult<bool> {
-    if let Some(deletion) =
-        prepare_abandon(repo, store, Some(task), &task.identifier, force, false).await?
-    {
+    if let Some(deletion) = prepare_abandon(repo, store, task, force).await? {
         crate::ops::abandon::abandon_prepared(deletion, &NullProgress).await?;
         return Ok(true);
     }
@@ -142,13 +140,16 @@ async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
     crate::ops::planning_sync::sync_after_save(
         store,
         &repository_for_task(store, task)?.to_string_lossy(),
+        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
     )
     .await;
     Ok(())
 }
 
-/// Remove planning immediately, retaining execution and pending provider delivery.
-pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
+/// Remove planning immediately, retaining execution and pending tracker
+/// delivery. Returns the identifier and whether the tracker still has
+/// something to hear about this Task.
+pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<(String, bool)> {
     let repo = task_repository(repo, Some(issue))?;
     block_on_task(async {
         let store = task_store().await?;
@@ -164,44 +165,46 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
         crate::ops::planning_sync::sync_after_save(
             &store,
             &repository_for_task(&store, &task)?.to_string_lossy(),
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
         )
         .await;
-        Ok(task.identifier)
+        let pending = store
+            .sqlite
+            .tracker_actions_for(
+                &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+            )
+            .map_err(task_error)?
+            .iter()
+            .any(|action| {
+                matches!(
+                    action.phase,
+                    loopflow_storage::sqlite::tracker_actions::ActionPhase::Queued
+                        | loopflow_storage::sqlite::tracker_actions::ActionPhase::Sent
+                )
+            });
+        Ok((task.identifier, pending))
     })
 }
 
-// Cleanup preparation is separate from explicit cancellation. A sweep uses
-// it before choosing work, so uncertain or live work is never swept.
 async fn prepare_abandon(
     repo: &Path,
     store: &SharedStore,
-    task: Option<&Task>,
-    issue: &str,
+    task: &Task,
     force: bool,
-    sweep: bool,
 ) -> OpsResult<Option<BranchDeletion>> {
-    let pr = match task {
-        Some(task) => store.active_task_pr(&task.id).await.map_err(task_error)?,
-        None => None,
-    };
-    if let Some(task) = task {
-        if store
-            .work_status(&WorkRef::Task(task.id.clone()))
-            .await
-            .map_err(task_error)?
-            == WorkStatus::Done
-        {
-            return Err(task_error("completed Tasks cannot be abandoned"));
-        }
-        require_idle(store, task)?;
+    let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
+    if store
+        .work_status(&WorkRef::Task(task.id.clone()))
+        .await
+        .map_err(task_error)?
+        == WorkStatus::Done
+    {
+        return Err(task_error("completed Tasks cannot be abandoned"));
     }
-    if sweep || pr.is_some() {
-        let issue = match task {
-            Some(task) => task.linear_id.as_ref().map(|id| id.as_str()),
-            None => Some(issue),
-        };
-        if let Some(issue) = issue {
-            require_known_prs(repo, pr.as_ref(), issue).await?;
+    require_idle(store, task)?;
+    if pr.is_some() {
+        if let Some(issue) = &task.tracker_id {
+            require_known_prs(repo, pr.as_ref(), issue.as_str()).await?;
         }
     }
 
@@ -209,12 +212,6 @@ async fn prepare_abandon(
     if let Some(pr) = pr.filter(|pr| pr.merge_commit.is_none()) {
         let deletion = crate::ops::wt::prepare_delete(repo, &pr.branch, force)?;
         let prs = crate::ops::abandon::branch_prs(repo, &pr.branch)?;
-        if sweep && prs.iter().any(|(_, state)| state == "OPEN") {
-            return Err(task_error(format!(
-                "{} has an open PR; excluded from chapter sweep",
-                pr.branch
-            )));
-        }
         if prs.iter().any(|(_, state)| state == "MERGED") && pr.is_active() {
             return Err(task_error(format!(
                 "{} merged outside Loopflow; reconcile its Task before abandoning",
@@ -227,12 +224,13 @@ async fn prepare_abandon(
 }
 
 async fn require_known_prs(repo: &Path, pr: Option<&TaskPr>, issue: &str) -> OpsResult<()> {
-    for url in crate::ops::linear::issue_client()
+    for attachment in crate::ops::linear::issue_client()
         .await?
-        .item_attachment_urls(issue)
+        .item_attachments(issue)
         .await
         .map_err(task_error)?
     {
+        let url = attachment.url;
         if !url.contains("/pull/")
             || pr
                 .and_then(TaskPr::github)
@@ -281,84 +279,6 @@ async fn require_known_prs(repo: &Path, pr: Option<&TaskPr>, issue: &str) -> Ops
         }
     }
     Ok(())
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct SweepEntry {
-    pub wave: String,
-    pub project: String,
-    pub issue: Option<String>,
-    pub outcome: String,
-}
-
-pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
-    block_on_task(async {
-        let store = task_store().await?;
-        let sweep = crate::ops::linear::chapter_sweep_candidates(repo).await?;
-        let mut entries: Vec<_> = sweep
-            .skipped_projects
-            .into_iter()
-            .map(|(wave, project)| SweepEntry {
-                wave,
-                project: project.name,
-                issue: None,
-                outcome: format!(
-                    "skipped: foreign-Team Project {} belongs to Teams [{}]",
-                    project.id,
-                    project.team_ids.join(", ")
-                ),
-            })
-            .collect();
-        for (wave, project, item) in sweep.candidates {
-            let task = resolve_task(&store, Some(&repo.to_string_lossy()), &item.id).await?;
-            if let Some(task) = &task {
-                if super::task_work_status(&store, task).await? != WorkStatus::Ready {
-                    continue;
-                }
-            }
-            let outcome = match prepare_abandon(repo, &store, task.as_ref(), &item.id, false, true)
-                .await
-            {
-                Err(error) => format!("skipped: {error}"),
-                Ok(_) if !apply => "would cancel Task and remove any retained branches".into(),
-                Ok(deletion) => {
-                    // Read membership after preparation, immediately before effects.
-                    match crate::ops::linear::require_outside_current_chapter(repo, &item.id).await
-                    {
-                        Err(error) => format!("skipped: {error}"),
-                        Ok(task) => match save_abandon(&store, &task).await {
-                            Err(error) => format!(
-                                "incomplete: {error}; retry task abandon {}",
-                                item.identifier
-                            ),
-                            Ok(()) => {
-                                let mut outcome = "canceled".to_string();
-                                if let Some(deletion) = deletion {
-                                    if let Err(error) = crate::ops::abandon::abandon_prepared(
-                                        deletion,
-                                        &NullProgress,
-                                    )
-                                    .await
-                                    {
-                                        outcome =
-                                            format!("canceled; retained checkout/PR: {error}");
-                                    }
-                                }
-                                outcome
-                            }
-                        },
-                    }
-                }
-            };
-            entries.push(SweepEntry {
-                wave,
-                project,
-                issue: Some(item.identifier),
-                outcome,
-            });
-        }
-        Ok(entries)
-    })
 }
 
 /// Resolve placed Task operations through retained Wave ownership, even after

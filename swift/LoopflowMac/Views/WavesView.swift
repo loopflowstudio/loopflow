@@ -74,6 +74,11 @@ struct WavesView: View {
         return allWaves.first { $0.id == selectedWaveId }
     }
 
+    private var capturesCreateSheet: Bool {
+        AppTestMode.current() == .mockWaves &&
+            ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_PRESENT_SHEET"] == "1"
+    }
+
     private var isAnyConnected: Bool {
         repoStates.values.contains { $0.isConnected }
     }
@@ -91,7 +96,9 @@ struct WavesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
-        .safeAreaInset(edge: .bottom) { CreationRecoveryView() }
+        .overlay(alignment: .bottom) { NoticeView(center: model.navigation.notices).zIndex(ZIndex.toast) }
+        .modifier(CreationNotices(notices: model.navigation.notices))
+        .answeringLostLines(model)
         .task { await model.keepWorkCurrent() }
         .task { await model.keepPlanningCurrent() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -138,6 +145,11 @@ struct WavesView: View {
                 onCancel: { isShowingCreate = false }
             )
             .environment(\.palette, palette)
+            .onAppear {
+                if capturesCreateSheet, let wave = selectedWave {
+                    fputs("Create sheet appeared over \(wave.name)\n", stderr)
+                }
+            }
         }
         .task {
             await refreshRepos()
@@ -214,12 +226,12 @@ struct WavesView: View {
                 isShowingCreate = true
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Typography.text).fontWeight(.semibold)
                     .foregroundStyle(repos.isEmpty ? palette.textTertiary : palette.text)
             }
             .buttonStyle(.plain)
             .disabled(repos.isEmpty)
-            .help("New wave")
+            .help("New Wave")
             .accessibilityIdentifier("new-wave-button")
         }
         .padding(.horizontal, Spacing.lg)
@@ -240,11 +252,11 @@ struct WavesView: View {
                 .accessibilityIdentifier("portfolio-mode")
 
                 if selected.mode == .folder {
-                    Text(selected.root).font(.caption).textSelection(.enabled)
+                    Text(selected.root).font(Typography.mono).textSelection(.enabled)
                     Button("Choose Folder…") { choosePortfolioPaths(folder: true) }
                         .accessibilityIdentifier("portfolio-folder")
                     ForEach(selected.repos.filter { $0.error != nil }) { repo in
-                        Text("\(repo.displayName): \(repo.error ?? "")").font(.caption)
+                        Text("\(repo.displayName): \(repo.error ?? "")").font(Typography.meta)
                     }
                 } else {
                     Button("Add Repositories…") { choosePortfolioPaths(folder: false) }
@@ -255,7 +267,7 @@ struct WavesView: View {
                                 HStack {
                                     VStack(alignment: .leading) {
                                         Text(repo.displayName)
-                                        Text(repo.error ?? repo.path).font(.caption).textSelection(.enabled)
+                                        Text(repo.error ?? repo.path).font(Typography.meta).textSelection(.enabled)
                                     }
                                     Spacer()
                                     Button("Remove", systemImage: "minus.circle") {
@@ -275,13 +287,14 @@ struct WavesView: View {
                 }
             }
             if let error = portfolioService.error {
-                Text(error).font(.caption).textSelection(.enabled)
+                Text(error).font(Typography.meta).textSelection(.enabled)
             }
             HStack {
                 Button("Refresh") { Task { await refreshRepos() } }
                 if portfolioService.isPending { ProgressView().controlSize(.small) }
             }
         }
+        .buttonStyle(LoopflowButtonStyle())
         .foregroundStyle(palette.text)
         .padding(.horizontal, Spacing.lg)
         .padding(.bottom, Spacing.md)
@@ -315,12 +328,12 @@ struct WavesView: View {
         } label: {
             HStack(spacing: Spacing.xs) {
                 Text(headerTitle)
-                    .font(Typography.sectionTitle(16))
+                    .font(Typography.lede)
                     .foregroundStyle(palette.text)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(Typography.meta).fontWeight(.semibold)
                     .foregroundStyle(palette.textSecondary)
             }
             .contentShape(Rectangle())
@@ -335,17 +348,15 @@ struct WavesView: View {
     private var emptyWaveState: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(repos.isEmpty ? "No repositories found." : "No waves yet.")
-                .font(Typography.caption())
+                .font(Typography.meta)
                 .foregroundStyle(palette.textSecondary)
             if !repos.isEmpty {
                 Button {
                     isShowingCreate = true
                 } label: {
-                    Label("New wave", systemImage: "plus")
-                        .font(Typography.caption())
+                    Label("New Wave", systemImage: "plus")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .buttonStyle(LoopflowButtonStyle(.accent))
                 .accessibilityIdentifier("wave-empty-create")
             }
         }
@@ -369,9 +380,16 @@ struct WavesView: View {
                 onClose: { selectedWaveId = nil },
                 onOpenTask: { id in
                     openTask(waveRepoPath(for: wave), id)
-                }
+                },
+                onTaskAction: { task, action in model.perform(action, task: task) },
+                onOpenWorktree: model.openWorktree
             )
             .id(wave.id)
+            .task(id: wave.id) {
+                guard capturesCreateSheet else { return }
+                try? await Task.sleep(for: .milliseconds(1500))
+                if !Task.isCancelled { isShowingCreate = true }
+            }
         } else {
             RoadmapView(model: model, onOpenWave: openRoadmapWave, onOpenTask: openTask)
         }
@@ -473,7 +491,6 @@ struct WavesView: View {
                 state.applyConnectedWaves(waves, plans: plans)
             }
             selectRequestedWaveIfNeeded()
-            raiseCaptureSheetIfRequested()
         } catch {
             for state in repoStates.values {
                 state.markRefreshFailed()
@@ -496,20 +513,6 @@ struct WavesView: View {
         if selectedWaveId == nil,
            let selected = state.waves.first(where: { $0.name == MockWaveFixture.selectedWaveName }) {
             selectedWaveId = selected.id
-        }
-    }
-
-    /// Drive the sheet-presentation leg of the AttributeGraph zero-cycle
-    /// matrix headlessly: once a world's populated detail hierarchy has
-    /// settled, raise the create sheet over it — a genuine mid-session
-    /// presentation, not a cold-launch-with-sheet. Gated so ordinary renders
-    /// stay sheet-free. See scripts/check_attributegraph_cycles.sh --sheet.
-    private func raiseCaptureSheetIfRequested() {
-        guard ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_PRESENT_SHEET"] != nil,
-              !isShowingCreate else { return }
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            isShowingCreate = true
         }
     }
 
@@ -574,9 +577,10 @@ struct WavesView: View {
     }
 }
 
-/// Minimal create-wave graph: pick a target repo, name the wave, submit. Adds
-/// the Wave through `lf wave create`. An add with leftovers (its files uncommitted
-/// on main) keeps the sheet open showing the receipt's lines; a clean add closes it.
+/// The one New Wave form: a name, an optional objective, and a repository picker
+/// when there is more than one to choose from. Adds the Wave through
+/// `lf wave create`. An add with leftovers (its files uncommitted on main) keeps
+/// the form's place showing the receipt's lines; a clean add closes it.
 struct CreateWaveSheet: View {
     let repos: [PortfolioRepo]
     let initialRepoPath: String?
@@ -616,78 +620,51 @@ struct CreateWaveSheet: View {
 
     private var form: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            Text("New wave")
-                .font(Typography.sectionTitle(20))
-                .foregroundStyle(palette.text)
+            Text("New Wave")
+                .serif(.title)
+                .foregroundStyle(palette.emphasisInk)
 
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Repository")
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-
-                Picker("Repository", selection: $selectedRepoPath) {
-                    ForEach(repos) { repo in
-                        Text(repo.displayName).tag(repo.path)
+            if repos.count > 1 {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    caption("Repository")
+                    Picker("Repository", selection: $selectedRepoPath) {
+                        ForEach(repos) { repo in
+                            Text(repo.displayName).tag(repo.path)
+                        }
                     }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .font(Typography.text)
+                    .tint(palette.actionInk)
+                    .disabled(isCreating)
+                    .accessibilityIdentifier("new-wave-repository")
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .font(Typography.body())
-                .tint(palette.actionInk)
-                .padding(.horizontal, Spacing.md)
-                .padding(.vertical, Spacing.sm)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(palette.surfaceMuted)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-                .disabled(isCreating)
             }
 
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Wave name")
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-
-                TextField("Wave name", text: $waveName)
-                    .textFieldStyle(.plain)
-                    .font(Typography.body())
-                    .foregroundStyle(palette.text)
-                    .padding(Spacing.md)
-                    .background(palette.surfaceMuted)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-                    .focused($isNameFocused)
-                    .onSubmit(submit)
-                    .disabled(isCreating)
-            }
+            field("Wave name", text: $waveName)
+                .focused($isNameFocused)
+                .accessibilityIdentifier("new-wave-name")
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Objective (optional)")
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-
-                TextField("What this Wave is for", text: $objective)
+                caption("Objective (optional)")
+                field("What this Wave is for", text: $objective)
                     .accessibilityIdentifier("new-wave-objective")
-                    .textFieldStyle(.plain)
-                    .font(Typography.body())
-                    .foregroundStyle(palette.text)
-                    .padding(Spacing.md)
-                    .background(palette.surfaceMuted)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-                    .onSubmit(submit)
-                    .disabled(isCreating)
             }
 
             if let errorMessage {
                 Text(errorMessage)
-                    .font(Typography.caption())
+                    .font(Typography.meta)
                     .foregroundStyle(palette.failure)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("new-wave-error")
             }
 
-            HStack(spacing: Spacing.md) {
+            HStack(spacing: Spacing.sm) {
                 Spacer()
 
                 Button("Cancel", action: onCancel)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(palette.textSecondary)
+                    .buttonStyle(LoopflowButtonStyle())
+                    .keyboardShortcut(.cancelAction)
                     .disabled(isCreating)
 
                 Button {
@@ -696,13 +673,29 @@ struct CreateWaveSheet: View {
                     if isCreating {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("Create wave")
+                        Text("Create")
                     }
                 }
-                .buttonStyle(DarkButtonStyle())
+                .buttonStyle(LoopflowButtonStyle(.accent))
                 .disabled(isCreating || trimmedName.isEmpty || selectedRepoPath.isEmpty)
+                .accessibilityIdentifier("new-wave-create")
             }
         }
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text).font(Typography.meta).foregroundStyle(palette.textSecondary)
+    }
+
+    private func field(_ prompt: String, text: Binding<String>) -> some View {
+        TextField(prompt, text: text)
+            .textFieldStyle(.plain)
+            .font(Typography.text)
+            .foregroundStyle(palette.text)
+            .padding(Spacing.sm)
+            .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: CornerRadius.control))
+            .onSubmit(submit)
+            .disabled(isCreating)
     }
 
     private func submit() {

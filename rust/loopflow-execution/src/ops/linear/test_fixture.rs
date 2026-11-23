@@ -48,7 +48,7 @@ impl Fixture {
         rusqlite::Connection::open(&self.database)
             .unwrap()
             .query_row(
-                "SELECT synced_at FROM pm_wave_sync WHERE wave_id=?1",
+                "SELECT synced_at FROM tracker_wave_sync WHERE wave_id=?1",
                 [wave.id().as_str()],
                 |r| r.get(0),
             )
@@ -169,19 +169,19 @@ impl Drop for PlanningEnvironment {
     }
 }
 
-/// Refresh through the actual acquisition path, then retain its input for replay.
+/// Refresh through the actual refresh path, then retain its input for replay.
 pub(crate) async fn refresh_task_input(
     repo: &std::path::Path,
     selector: &str,
     refresh: super::LinearRefresh,
 ) -> crate::ops::OpsResult<crate::test_linear_input::IssueFixture> {
     let read = super::inspect_task_planning_async(repo, selector, refresh).await?;
-    if read.observation.state != crate::store::PlanningState::Available {
+    if read.issue_state.state != crate::store::PlanningState::Available {
         return Err(crate::ops::OpsError::Message(
             read.refresh_error.unwrap_or_else(|| {
                 format!(
                     "Task {selector:?} planning is {:?}; run `lf task sync {selector}`",
-                    read.observation.state
+                    read.issue_state.state
                 )
             }),
         ));

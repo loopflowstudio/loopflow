@@ -95,13 +95,12 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Record Close. An earlier build's owner polls this; a held shell is
-    /// ended by its caller.
+    /// Record Close. A shell that never started has no jobs left; a held
+    /// shell is ended by its caller.
     pub fn close_desktop_shell(&self, id: &str) -> StoreResult<()> {
         self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE desktop_shells SET close_requested=1,
-            jobs_settled=CASE WHEN owner IS NULL AND terminal_id IS NULL THEN 1 ELSE jobs_settled END
-            WHERE id=?1",
+            "UPDATE desktop_shells SET jobs_settled=1
+            WHERE id=?1 AND owner IS NULL AND terminal_id IS NULL",
             [id],
         )?;
         Ok(())

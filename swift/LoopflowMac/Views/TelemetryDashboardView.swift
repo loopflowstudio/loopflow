@@ -84,12 +84,12 @@ struct TelemetryDashboardView: View {
 
     private var header: some View {
         HStack(spacing: Spacing.lg) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text("Telemetry")
-                    .font(Typography.heroTitle(26))
+                    .serif(.title)
                     .foregroundStyle(palette.text)
                 Text("Where the tokens went, and whether the ledger heard it.")
-                    .font(Typography.caption())
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
             }
             Spacer()
@@ -103,7 +103,7 @@ struct TelemetryDashboardView: View {
                 .frame(maxWidth: 220)
             }
             Text(totalLabel)
-                .font(Typography.code(12))
+                .font(Typography.mono)
                 .foregroundStyle(palette.textSecondary)
             Button {
                 Task { await refresh() }
@@ -167,7 +167,7 @@ struct TelemetryDashboardView: View {
             }
             Spacer()
         }
-        .font(Typography.code(11))
+        .font(Typography.mono)
     }
 
     private var crumbs: [(name: String, path: String)] {
@@ -198,7 +198,7 @@ struct TelemetryDashboardView: View {
     private var ledgerHealth: some View {
         if let errorMessage {
             Text(errorMessage)
-                .font(Typography.caption())
+                .font(Typography.meta)
                 .foregroundStyle(palette.failure)
         } else if let doctor {
             HStack(spacing: Spacing.sm) {
@@ -208,7 +208,7 @@ struct TelemetryDashboardView: View {
                             .fill(healthColor(check.status))
                             .frame(width: 7, height: 7)
                         Text(check.name)
-                            .font(Typography.caption(11))
+                            .font(Typography.meta)
                             .foregroundStyle(palette.text)
                     }
                     .padding(.horizontal, Spacing.sm)
@@ -217,9 +217,6 @@ struct TelemetryDashboardView: View {
                     .help(check.detail)
                 }
                 Spacer()
-                Text("\(doctor.rows) events")
-                    .font(Typography.code(11))
-                    .foregroundStyle(palette.textSecondary)
             }
         }
     }
@@ -230,20 +227,20 @@ struct TelemetryDashboardView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(title)
-                    .font(Typography.sectionTitle(18))
+                    .font(Typography.lede)
                     .foregroundStyle(palette.text)
                 Text(subtitle)
-                    .font(Typography.caption(11))
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
             }
             content()
         }
         .padding(Spacing.lg)
-        .background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.lg))
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.pane))
         .overlay {
-            RoundedRectangle(cornerRadius: CornerRadius.lg)
+            RoundedRectangle(cornerRadius: CornerRadius.pane)
                 .stroke(palette.border, lineWidth: 1)
         }
     }
@@ -370,7 +367,7 @@ private struct DirectSessionUsageList: View {
             Text(finality).frame(width: 70, alignment: .trailing)
             Text(gaps).frame(width: 60, alignment: .trailing)
         }
-        .font(heading ? Typography.caption(10) : Typography.code(12))
+        .font(heading ? Typography.meta : Typography.mono)
         .foregroundStyle(heading ? palette.textSecondary : palette.text)
         .padding(.vertical, Spacing.sm)
     }
@@ -531,11 +528,11 @@ private struct IcicleNode: View {
 
     private var bar: some View {
         ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: CornerRadius.sm)
+            RoundedRectangle(cornerRadius: CornerRadius.control)
                 .fill(depthColor.opacity(0.85))
             if width > 44 {
                 Text("\(node.name)  \(compactTokens(node.tokens))")
-                    .font(Typography.code(11))
+                    .font(Typography.mono)
                     .foregroundStyle(palette.text)
                     .padding(.leading, Spacing.xs)
                     .lineLimit(1)
@@ -583,22 +580,22 @@ struct RetentionCard: View {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 ForEach(summary.harnesses) { harness in
                     Text(Self.line(harness))
-                        .font(Typography.code(12))
+                        .font(Typography.mono)
                         .foregroundStyle(palette.text)
                 }
                 Text("Expiring in the next 7 days: \(summary.expiringWithinWeek)")
-                    .font(Typography.caption(11))
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
                 ForEach(summary.nextExpiries.prefix(Self.shownExpiries)) { expiring in
                     Text("after \(Self.date(expiring.after))  \(expiring.harness)  \(expiring.title)")
-                        .font(Typography.code(11))
+                        .font(Typography.mono)
                         .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)
                         .help(expiring.sessionID)
                 }
                 if let hint = Self.keepMoreHint(summary) {
                     Text(hint)
-                        .font(Typography.caption(11))
+                        .font(Typography.meta)
                         .foregroundStyle(palette.textSecondary)
                 }
             }
@@ -648,10 +645,10 @@ private struct EmptyChartHint: View {
     var body: some View {
         VStack(spacing: Spacing.xs) {
             Text(message)
-                .font(Typography.caption())
+                .font(Typography.meta)
                 .foregroundStyle(palette.textSecondary)
             Text(hint)
-                .font(Typography.code(11))
+                .font(Typography.mono)
                 .foregroundStyle(palette.textSecondary)
         }
         .frame(maxWidth: .infinity, minHeight: 120)

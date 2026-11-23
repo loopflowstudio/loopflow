@@ -7,7 +7,7 @@ use crate::ops::error::OpsResult;
 
 const PAGE_SIZE: usize = 500;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskFileKind {
     File,
@@ -15,7 +15,7 @@ pub enum TaskFileKind {
     Symlink,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskFileEntry {
     pub path: String,
     pub kind: TaskFileKind,
@@ -27,7 +27,7 @@ impl TaskFileEntry {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskDirectory {
     pub path: String,
     pub entries: Vec<TaskFileEntry>,

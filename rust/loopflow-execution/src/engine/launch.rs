@@ -1,6 +1,6 @@
 //! Start an `lf` execution detached from its caller and wait for its result.
 //!
-//! A served request has no Process to carry a Task run or a ship, and must not
+//! A served request has no Process to carry a Task run, and must not
 //! hold one open. The operation starts the same command a terminal would,
 //! as a detached lf process of its own, with `LF_LAUNCH_REPORT=<path>`. The
 //! command writes its typed result there once it knows it, as its CLI prints
@@ -15,7 +15,7 @@ use anyhow::Context;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::{Error, ErrorCode, Result};
-use crate::journal::ProcessIdentityEvidence;
+use crate::store::ProcessIdentityEvidence;
 use loopflow_model::id::LfProcessId;
 
 const REPORT_ENV: &str = "LF_LAUNCH_REPORT";
@@ -24,12 +24,12 @@ static REPORT: Mutex<Option<PathBuf>> = Mutex::new(None);
 const CREATION_ENV: &str = "LF_CREATION_REQUEST";
 static CREATION: Mutex<Option<String>> = Mutex::new(None);
 
-/// What a detached operation set going: the `lf` Process that carries it.
-/// `process.get` reads how it is going; `log` is its output.
+/// What a detached operation set going: the `lf` that carries it, and `log`,
+/// its output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Launched {
-    /// The operation the Process carries: `checkout.sync`, `pr.land`,
+    /// The operation that `lf` carries: `checkout.sync`, `pr.land`,
     /// `repo.release`, `graph.run`, `skill.run`.
     pub operation: String,
     #[serde(rename = "lf_process_id")]
@@ -43,10 +43,8 @@ pub struct Launched {
 impl Launched {
     pub fn render(&self) -> String {
         format!(
-            "{} running as process {}\n  follow: lf process show {}\n  log:    {}",
+            "{} running in the background\n  log:    {}",
             self.run,
-            self.process,
-            self.process,
             self.log.display()
         )
     }
@@ -140,7 +138,17 @@ fn write(
 /// the result it reports. Wait while that process is live, but bound the wait when
 /// its liveness cannot be determined. Giving up never stops or retries the work.
 pub fn start<T: DeserializeOwned>(directory: &Path, args: &[String]) -> Result<T> {
-    start_reported(directory, args, None)
+    start_reported(directory, args, &[], None)
+}
+
+/// [`start`], the process running with `environment` too: what a launch
+/// another Machine sent carries.
+pub fn start_with<T: DeserializeOwned>(
+    directory: &Path,
+    args: &[String],
+    environment: &[(String, String)],
+) -> Result<T> {
+    start_reported(directory, args, environment, None)
 }
 
 pub(crate) fn start_creation<T: DeserializeOwned>(
@@ -148,12 +156,13 @@ pub(crate) fn start_creation<T: DeserializeOwned>(
     args: &[String],
     request: &str,
 ) -> Result<T> {
-    start_reported(directory, args, Some(request))
+    start_reported(directory, args, &[], Some(request))
 }
 
 fn start_reported<T: DeserializeOwned>(
     directory: &Path,
     args: &[String],
+    sent: &[(String, String)],
     creation: Option<&str>,
 ) -> Result<T> {
     let launched = (|| -> anyhow::Result<_> {
@@ -165,7 +174,11 @@ fn start_reported<T: DeserializeOwned>(
             .into_owned()];
         argv.extend(args.iter().cloned());
         let report = path.to_string_lossy().into_owned();
-        let mut environment = vec![(REPORT_ENV, report.as_str())];
+        let mut environment: Vec<_> = sent
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        environment.push((REPORT_ENV, report.as_str()));
         if let Some(id) = creation {
             environment.push((CREATION_ENV, id));
         }
@@ -174,16 +187,7 @@ fn start_reported<T: DeserializeOwned>(
         Ok((path, process))
     })();
     let (path, process) = launched.map_err(|error| Error::outcome_unknown(&error))?;
-    wait(&path, args, || process_evidence(&process), SystemTime::now)
-}
-
-fn process_evidence(process: &LfProcessId) -> ProcessIdentityEvidence {
-    crate::store::read_existing_registry()
-        .ok()
-        .flatten()
-        .map_or(ProcessIdentityEvidence::Unknown, |store| {
-            crate::journal::lf_evidence(&store.sqlite, process)
-        })
+    wait(&path, args, || process.evidence(), SystemTime::now)
 }
 
 fn wait<T: DeserializeOwned>(
@@ -242,9 +246,10 @@ fn read<T: DeserializeOwned>(path: &Path) -> Result<Option<Result<T>>> {
 mod tests {
     use std::time::{Duration, SystemTime};
 
-    use super::{process_evidence, wait, write, UNKNOWN_GRACE};
+    use super::{wait, write, UNKNOWN_GRACE};
     use crate::engine::{Error, ErrorCode};
-    use crate::journal::{ProcessIdentityEvidence, TestLedgerGuard};
+    use crate::os_process::detached::Started;
+    use crate::store::ProcessIdentityEvidence;
 
     use loopflow_model::id::LfProcessId;
 
@@ -367,38 +372,20 @@ mod tests {
     }
 
     #[test]
-    fn polling_recovers_when_a_missing_or_unreadable_registry_returns() {
-        for unreadable in [false, true] {
-            let ledger = TestLedgerGuard::new();
-            let database = ledger.home().join("loopflow.db");
-            let path = ledger.home().join("report.json");
-            let process = LfProcessId::new();
-            if unreadable {
-                std::fs::write(&database, "not a database").unwrap();
-            }
-            let mut recovered = false;
-            let error = wait::<String>(
-                &path,
-                &[],
-                || process_evidence(&process),
-                || {
-                    assert!(!recovered, "the next poll must see the finished process");
-                    recovered = true;
-                    if unreadable {
-                        std::fs::remove_file(&database).unwrap();
-                    }
-                    let _store = crate::store::opening::open_ephemeral(&database).unwrap();
-                    let connection = rusqlite::Connection::open(&database).unwrap();
-                    connection.execute(
-                        "INSERT INTO processes(id,trace_id,started_at,completed_at) VALUES(?1,?1,1,2)",
-                        [&process],
-                    ).unwrap();
-                    SystemTime::UNIX_EPOCH
-                },
-            )
-            .unwrap_err();
-            assert_eq!(error.code, ErrorCode::OutcomeUnknown);
-            assert!(error.message.contains("ended without a result"));
-        }
+    fn a_child_that_exits_without_a_report_ended_without_a_result() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("report.json");
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        // No store: liveness is the child's own pid.
+        let started = Started {
+            id: LfProcessId::new(),
+            pid,
+            os_started_at: Some(1),
+        };
+        let error = wait::<String>(&path, &[], || started.evidence(), SystemTime::now).unwrap_err();
+        assert_eq!(error.code, ErrorCode::OutcomeUnknown);
+        assert!(error.message.contains("ended without a result"));
     }
 }

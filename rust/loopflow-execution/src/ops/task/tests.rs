@@ -1,8 +1,5 @@
 use super::delivery::apply_merged_task_landing;
-use super::{
-    checkout_execution_boundary, lock_task_pr_mutation, resolve_task_create_input,
-    task_event_process_refusal,
-};
+use super::{lock_task_pr_mutation, resolve_task_create_input, task_event_process_refusal};
 use crate::durable::TaskState;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::ops::pr_landing::{reconcile_pr_landing, wait_with_io, LandingIo, LandingObservation};
@@ -143,7 +140,7 @@ async fn task_fixture(identifier: &str) -> TaskFixture {
 
 #[test]
 fn task_decision_preserves_unknown_history_and_live_process_protection() {
-    let ledger = crate::journal::TestLedgerGuard::new();
+    let _ledger = crate::journal::TestLedgerGuard::new();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let repo = loopflow_test_support::TestRepo::new();
     let fixture = runtime.block_on(task_fixture_at("ACCEPT-HISTORY", repo.path().into()));
@@ -157,7 +154,7 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
         .block_on(fixture.store.sync_task_placement(
             &pr.task_id,
             &pr.base_commit,
-            false,
+            pr.parent_pr_id.as_ref(),
             pr.updated_at,
         ))
         .unwrap();
@@ -169,26 +166,26 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
             [fixture.task.id.as_str()],
         )
         .unwrap();
-    let process = crate::process::LfProcess {
-        os_started_at: None,
-        id: loopflow_model::id::LfProcessId::new(),
-        pid: None,
-        trace_id: loopflow_model::id::TraceId::new(),
-        parent_lf_process_id: None,
-        via_agent: None,
-        caller_session_id: None,
-        caller_agent_process_id: None,
-        command: Some("historical diagnostic".into()),
-        repo: None,
-        cwd: Some(repo.path().to_string_lossy().into_owned()),
-        started_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-        completed_at: None,
-        outcome: None,
-        exit_code: None,
-        signal: None,
-        error: None,
-    };
-    fixture.store.sqlite.record_process(&process).unwrap();
+    // A Graph run in the checkout that recorded no OS process: its liveness is unknown.
+    let graph = loopflow_model::id::LfProcessId::new();
+    fixture
+        .store
+        .sqlite
+        .record_graph(
+            &graph,
+            &loopflow_storage::graph::CompiledGraph {
+                name: "historical".into(),
+                steps: vec![],
+            },
+            None,
+            &loopflow_storage::graph_process::ExecutionStart::reserved(
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            ),
+            None,
+            Some(&repo.path().to_string_lossy()),
+            None,
+        )
+        .unwrap();
     let session = fixture.store.sqlite.test_session(
         "reserved-session",
         &crate::session_record::new_artifact_key(),
@@ -206,24 +203,17 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
     fixture
         .store
         .sqlite
-        .record_session_event(
-            &session.id,
-            &"thread".into(),
-            "turn",
-            crate::session::SessionEventKind::Started,
-            &serde_json::json!({}),
-        )
-        .unwrap();
+        .record_turn_start(&session.id, &"thread".into(), "turn", 1);
     let before = fixture.store.sqlite.session(&session.id).unwrap();
     // A reserved input and an unanswered turn are history; only the
-    // Process with unknown evidence blocks.
+    // Graph run with unknown evidence blocks.
     let blockers = crate::ops::task_execution::task_execution_blockers(
         &fixture.store.sqlite,
         &fixture.task.id,
     )
     .unwrap();
     assert_eq!(blockers.len(), 1, "{blockers:?}");
-    assert!(blockers[0].contains(&format!("lf history show {}", process.id)));
+    assert!(blockers[0].contains(&format!("lf history show {graph}")));
     let gate = runtime
         .block_on(super::task_completion_refusal(
             &fixture.store,
@@ -233,19 +223,20 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
     assert!(gate.is_none(), "{:?}", gate);
 
     // Exact live identity does not change the decision or confer stop authority.
-    let root = ledger.home().join(crate::journal::PROCESS_RECEIPT_ROOT);
-    std::fs::create_dir_all(&root).unwrap();
     let pid = std::process::id();
-    let receipt = crate::journal::ProcessReceipt {
-        schema_version: 1,
-        trace_id: process.trace_id.to_string(),
-        lf_process_id: process.id.to_string(),
-        pid,
-        started_at: crate::journal::process_started_at(pid).unwrap().unwrap(),
-    };
-    let receipt_path = root.join(format!("{}.json", process.id));
-    let receipt_bytes = serde_json::to_vec(&receipt).unwrap();
-    std::fs::write(&receipt_path, &receipt_bytes).unwrap();
+    rusqlite::Connection::open(&fixture.database_path)
+        .unwrap()
+        .execute(
+            "UPDATE graph_processes SET pid=?2,os_started_at=?3 WHERE lf_process_id=?1",
+            rusqlite::params![
+                graph,
+                pid,
+                crate::process::os_process::process_started_at(pid)
+                    .unwrap()
+                    .unwrap()
+            ],
+        )
+        .unwrap();
     assert!(runtime
         .block_on(super::task_completion_refusal(
             &fixture.store,
@@ -278,12 +269,11 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
             .unwrap(),
         WorkStatus::Done
     );
-    assert_eq!(
-        fixture.store.sqlite.lf_process(&process.id).unwrap(),
-        Some(process)
-    );
+    assert!(fixture.store.sqlite.graphs_at(repo.path()).unwrap()[0]
+        .run
+        .ended_at
+        .is_none());
     assert_eq!(fixture.store.sqlite.session(&session.id).unwrap(), before);
-    assert_eq!(std::fs::read(receipt_path).unwrap(), receipt_bytes);
     assert!(crate::ops::task_execution::task_execution_blockers(
         &fixture.store.sqlite,
         &fixture.task.id,
@@ -328,7 +318,6 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
             .block_on(fixture.store.seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: fixture.task.wave_id.clone().unwrap(),
-                    provider: "linear".into(),
                     initiative: snapshot.projects[0].initiative_ids[0].clone(),
                     synced_at: 7,
                     snapshot,
@@ -363,7 +352,7 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
         {
             assert_eq!(task.title, "Accepted after resolution");
             assert_eq!(task.description, "Preserve this direction");
-            assert_eq!(task.pm_snapshot_synced_at, Some(7));
+            assert_eq!(task.tracker_synced_at, Some(7));
             assert_eq!(task.worktree.as_ref(), Some(&checkout));
             assert_eq!(
                 runtime.block_on(fixture.store.get_task(&task.id)).unwrap(),
@@ -521,15 +510,21 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
     .unwrap();
 
     // Use this process's identity without launching a provider or a watcher.
+    let live = rusqlite::params![
+        std::process::id(),
+        crate::process::os_process::process_started_at(std::process::id())
+            .unwrap()
+            .unwrap(),
+        graph
+    ];
     conn.execute(
-        "UPDATE processes SET pid=?1,os_started_at=?2 WHERE id=?3 OR parent_lf_process_id=?3",
-        rusqlite::params![
-            std::process::id(),
-            crate::journal::process_started_at(std::process::id())
-                .unwrap()
-                .unwrap(),
-            graph
-        ],
+        "UPDATE graph_processes SET pid=?1,os_started_at=?2 WHERE lf_process_id=?3",
+        live,
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE graph_process_steps SET pid=?1,os_started_at=?2 WHERE graph_lf_process_id=?3",
+        live,
     )
     .unwrap();
     let assert_running = |state| {
@@ -558,6 +553,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
             adopted.path(),
             None,
             None,
+            false,
             |_| false,
         )
         .unwrap_err();
@@ -571,22 +567,18 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
     };
     assert_running(crate::ops::task_execution::TaskExecutionState::Running);
     conn.execute(
-        "UPDATE processes SET pid=NULL,os_started_at=NULL WHERE id=?1 OR parent_lf_process_id=?1",
+        "UPDATE graph_processes SET pid=NULL,os_started_at=NULL WHERE lf_process_id=?1",
         [&graph],
     )
     .unwrap();
     assert_running(crate::ops::task_execution::TaskExecutionState::Unknown);
-    // An exited owner does not hide its still-open step.
+    // The Graph run's end is the end of its execution in the Task's work; a
+    // step still running is a Session of its own.
     conn.execute(
-        "UPDATE processes SET completed_at=started_at,outcome='interrupted' WHERE id=?1",
+        "UPDATE graph_processes SET ended_at=started_at,exit_code=130 WHERE lf_process_id=?1",
         [&graph],
     )
     .unwrap();
-    assert_running(crate::ops::task_execution::TaskExecutionState::Unknown);
-    conn.execute(
-        "UPDATE processes SET completed_at=started_at,outcome='interrupted' WHERE parent_lf_process_id=?1",
-        [&graph],
-    ).unwrap();
     let snapshot = runtime
         .block_on(super::snapshot::read_task_snapshot(
             &fixture.store,
@@ -604,6 +596,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
         adopted.path(),
         None,
         None,
+        false,
         |_| false
     )
     .is_ok());
@@ -644,42 +637,31 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
         .any(|reason| reason.contains(live.as_str())));
     let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
     conn.execute(
-            "UPDATE processes SET completed_at=started_at,outcome='interrupted' WHERE completed_at IS NULL",
-            [],
-        )
-        .unwrap();
+        "UPDATE graph_processes SET ended_at=started_at,exit_code=130 WHERE ended_at IS NULL",
+        [],
+    )
+    .unwrap();
     assert!(blockers().is_empty());
 
     // A reboot proves stale execution exited without settling the Graph.
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let process = crate::process::LfProcess {
-        os_started_at: None,
-        id: loopflow_model::id::LfProcessId::new(),
-        pid: None,
-        trace_id: loopflow_model::id::TraceId::new(),
-        parent_lf_process_id: None,
-        via_agent: None,
-        caller_session_id: None,
-        caller_agent_process_id: None,
-        command: Some("implement".into()),
-        repo: None,
-        cwd: Some(
-            fixture
-                .task
-                .worktree
-                .as_ref()
-                .unwrap()
-                .to_string_lossy()
-                .into_owned(),
-        ),
-        started_at: now - 100,
-        completed_at: None,
-        outcome: None,
-        exit_code: None,
-        signal: None,
-        error: None,
-    };
-    fixture.store.sqlite.record_process(&process).unwrap();
+    let stale = loopflow_model::id::LfProcessId::new();
+    fixture
+        .store
+        .sqlite
+        .record_graph(
+            &stale,
+            &loopflow_storage::graph::CompiledGraph {
+                name: "code".into(),
+                steps: vec![],
+            },
+            None,
+            &loopflow_storage::graph_process::ExecutionStart::reserved(now - 100),
+            None,
+            Some(&worktree),
+            None,
+        )
+        .unwrap();
     let session = fixture
         .store
         .sqlite
@@ -692,25 +674,24 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
         ],
     )
     .unwrap();
-    conn.execute(
-            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
-             VALUES(?1,'thread','turn','started','turn',?2,'{}')",
+    fixture
+        .store
+        .sqlite
+        .execute_history(
+            "INSERT INTO turns(session_id,provider_thread,provider_turn,started_at)
+             VALUES(?1,'thread','turn',?2)",
             rusqlite::params![session.id, now - 100],
         )
         .unwrap();
-    crate::journal::set_test_machine_booted_at(Some(now - 200));
+    crate::process::os_process::set_test_machine_booted_at(Some(now - 200));
     let unresolved = blockers();
-    crate::journal::set_test_machine_booted_at(Some(now - 50));
+    crate::process::os_process::set_test_machine_booted_at(Some(now - 50));
     let after_boot = blockers();
-    crate::journal::set_test_machine_booted_at(None);
+    crate::process::os_process::set_test_machine_booted_at(None);
     // The stalled Session's unanswered turn is history, not execution.
     assert_eq!(unresolved.len(), 1, "{unresolved:?}");
-    assert!(unresolved[0].contains(process.id.as_str()));
+    assert!(unresolved[0].contains(stale.as_str()));
     assert!(after_boot.is_empty(), "{after_boot:?}");
-    assert_eq!(
-        fixture.store.sqlite.lf_process(&process.id).unwrap(),
-        Some(process)
-    );
     assert_eq!(
         fixture
             .store
@@ -741,13 +722,13 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
 
         summary: String::new(),
         status: loopflow_storage::work::project::ProjectStatus::Started,
-        linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
+        tracker_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
         slug: "task-recovery".to_string(),
         name: "Task recovery".to_string(),
         description: "Keep automatic Task recovery bounded.".to_string(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
         created_at: now,
@@ -759,13 +740,13 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         id: TaskId::new(),
 
         revision: 0,
-        linear_id: Some(LinearIssueId::new(format!("{identifier}-issue")).unwrap()),
+        tracker_id: Some(LinearIssueId::new(format!("{identifier}-issue")).unwrap()),
         identifier: identifier.to_string(),
         title: "Task recovery fixture".to_string(),
         description: String::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
-        pm_writeback: loopflow_storage::work::task::LinearWritebackState::Current,
+        tracker_writeback: loopflow_storage::work::task::LinearWritebackState::Current,
         wave_id: Some(wave.id().clone()),
         project_id: Some(project.id.clone()),
         worktree: Some(repository),
@@ -807,7 +788,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         &store.sqlite,
         wave.id(),
         None,
-        project.linear_id.as_ref().unwrap().as_str(),
+        project.tracker_id.as_ref().unwrap().as_str(),
         &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
     )
     .unwrap();
@@ -893,9 +874,9 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
                 fixture.task.id.as_str(),
                 &fixture.task.id.as_str()[5..9],
                 &fixture.task.id.as_str()[..9],
-                fixture.task.linear_id.as_ref().unwrap().as_str(),
+                fixture.task.tracker_id.as_ref().unwrap().as_str(),
             ] {
-                let file = super::task_file(issue, "scratch/note.md", false).unwrap();
+                let file = super::task_file(issue, "scratch/note.md", None, false).unwrap();
                 assert_eq!(file.content.as_deref(), Some("local note\n"));
                 let changes = super::task_changes(issue, "parent", None).unwrap();
                 assert_eq!(changes.base_commit, pr.base_commit);
@@ -904,7 +885,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
                     super::task_diff(issue, Some("scratch/note.md"), "head", None, None).unwrap();
                 assert!(diff.patch.contains("+local note"));
             }
-            let file = super::task_file("FILES-1", "scratch/note.md", false).unwrap();
+            let file = super::task_file("FILES-1", "scratch/note.md", None, false).unwrap();
             let saved = super::file_save::task_save(
                 "FILES-1",
                 "scratch/note.md",
@@ -940,7 +921,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
             graphql_url: "http://127.0.0.1:1".into(),
         },
         || {
-            let file = super::task_file("FILES-1", "scratch/note.md", false).unwrap();
+            let file = super::task_file("FILES-1", "scratch/note.md", None, false).unwrap();
             let saved = super::task_save(
                 "FILES-1",
                 "scratch/note.md",
@@ -1006,7 +987,7 @@ fn task_without_a_local_checkout_never_reads_a_local_path() {
         },
         || {
             let expected = "not checked out on this Machine";
-            assert!(super::task_file("LOCATION-1", "note.md", false)
+            assert!(super::task_file("LOCATION-1", "note.md", None, false)
                 .unwrap_err()
                 .to_string()
                 .contains(expected));
@@ -1033,6 +1014,165 @@ fn task_without_a_local_checkout_never_reads_a_local_path() {
         std::fs::read_to_string(repo.path().join("note.md")).unwrap(),
         "local file"
     );
+}
+
+#[test]
+fn task_changes_offer_first_parent_commits_without_merges() {
+    let repo = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        super::git_output(repo.path(), args)
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    let commit = |file: &str, subject: &str| {
+        std::fs::write(repo.path().join(file), subject).unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", subject]);
+        git(&["rev-parse", "HEAD"])
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.name", "Test"]);
+    git(&["config", "user.email", "test@example.com"]);
+    let base = commit("base.txt", "base");
+    git(&["checkout", "-qb", "task"]);
+    let before = commit("task.txt", "lf implement: before");
+    git(&["checkout", "-q", "main"]);
+    commit("main.txt", "main moves on");
+    git(&["checkout", "-q", "task"]);
+    git(&["merge", "-q", "--no-edit", "main"]);
+    let merge = git(&["rev-parse", "HEAD"]);
+    let after = commit("task.txt", "lf implement: after");
+    let id = TaskId::new();
+    let changes = super::snapshot::changes_snapshot(super::TaskComparison {
+        checkout: super::TaskWorkspace {
+            issue_identifier: "TEST-1",
+            task_id: &id,
+            worktree: repo.path(),
+        },
+        base_commit: &base,
+        head_commit: None,
+    })
+    .unwrap();
+    // Neither the merge nor main's commit is offered; the commit after the
+    // merge compares against the merge, so it cannot fold into `before`.
+    assert_eq!(
+        changes.commits,
+        [
+            super::TaskCommit {
+                sha: before,
+                parent: base,
+                subject: "lf implement: before".to_string()
+            },
+            super::TaskCommit {
+                sha: after,
+                parent: merge,
+                subject: "lf implement: after".to_string()
+            },
+        ]
+    );
+}
+
+#[test]
+fn task_changes_count_each_files_stops_before_any_patch_is_read() {
+    let repo = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        super::git_output(repo.path(), args)
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    let lines = |numbers: &[&str]| numbers.join("\n") + "\n";
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.name", "Test"]);
+    git(&["config", "user.email", "test@example.com"]);
+    let file = |name: &str, content: &str| std::fs::write(repo.path().join(name), content).unwrap();
+    let ten = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+    file("edited.txt", &lines(&ten));
+    file("with space.txt", &lines(&ten));
+    file("old name.txt", &lines(&ten));
+    file("removed.txt", &lines(&["a", "b"]));
+    git(&["add", "."]);
+    git(&["commit", "-qm", "base"]);
+    let base = git(&["rev-parse", "HEAD"]);
+    // Two runs: the first line, and the last line replaced with one added.
+    file(
+        "edited.txt",
+        &lines(&[
+            "one", "2", "3", "4", "5", "6", "7", "8", "9", "ten", "eleven",
+        ]),
+    );
+    file(
+        "with space.txt",
+        &lines(&["1", "2", "3", "4", "five", "6", "7", "8", "9", "10"]),
+    );
+    git(&["mv", "old name.txt", "renamed.txt"]);
+    git(&["rm", "-q", "removed.txt"]);
+    file("binary.bin", "\0\u{1}\u{2}");
+    git(&["add", "binary.bin"]);
+    file("new.txt", &lines(&["a", "b", "c"]));
+    file("empty.txt", "");
+    let id = TaskId::new();
+    let changes = super::snapshot::changes_snapshot(super::TaskComparison {
+        checkout: super::TaskWorkspace {
+            issue_identifier: "TEST-1",
+            task_id: &id,
+            worktree: repo.path(),
+        },
+        base_commit: &base,
+        head_commit: None,
+    })
+    .unwrap();
+    let counts = changes
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file.changes))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        counts,
+        std::collections::BTreeMap::from([
+            ("binary.bin", 0),
+            ("edited.txt", 2),
+            ("empty.txt", 0),
+            ("new.txt", 1),
+            ("removed.txt", 1),
+            ("renamed.txt", 0),
+            ("with space.txt", 1),
+        ])
+    );
+    // The Diff's patch holds the same stops; Swift parses the checked-in copy.
+    let diff = super::snapshot::diff_snapshot(
+        super::TaskComparison {
+            checkout: super::TaskWorkspace {
+                issue_identifier: "TEST-1",
+                task_id: &id,
+                worktree: repo.path(),
+            },
+            base_commit: &base,
+            head_commit: None,
+        },
+        None,
+    )
+    .unwrap();
+    let nonzero = counts
+        .iter()
+        .filter(|(_, count)| **count > 0)
+        .map(|(path, count)| (path.to_string(), *count))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        super::snapshot::count_changes(diff.patch.as_bytes()),
+        nonzero
+    );
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/review/change_counts.patch");
+    assert_eq!(
+        super::snapshot::count_changes(&std::fs::read(fixture).unwrap()),
+        nonzero
+    );
+    let adjacent =
+        b"diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n+new\n-old\n+again\n-more\n";
+    // A removal right after additions starts a new stop, as the Diff reads it.
+    assert_eq!(super::snapshot::count_changes(adjacent)["x"], 3);
 }
 
 #[test]
@@ -1102,6 +1242,14 @@ fn task_files_compare_net_parent_head_and_revisioned_drafts() {
         ..workspace
     };
     let committed_files = super::snapshot::changes_snapshot(committed).unwrap();
+    assert_eq!(
+        committed_files.commits,
+        [super::TaskCommit {
+            sha: head.clone(),
+            parent: parent.clone(),
+            subject: "fixture".to_string()
+        }]
+    );
     assert!(committed_files
         .files
         .iter()
@@ -1186,6 +1334,78 @@ fn task_files_compare_net_parent_head_and_revisioned_drafts() {
         );
         assert!(super::file_snapshot(workspace.checkout, "scratch/link/private").is_err());
     }
+}
+
+#[test]
+fn task_files_read_committed_versions_and_carry_binary_bytes() {
+    use base64::Engine as _;
+    let repo = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        super::git_output(repo.path(), args)
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    git(&["init", "-q", "-b", "main"]);
+    let image = [b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".as_slice(), &[7; 1_500_000]].concat();
+    std::fs::write(repo.path().join("notes.md"), "first\n").unwrap();
+    std::fs::write(repo.path().join("image.png"), &image).unwrap();
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "fixture",
+    ]);
+    let parent = git(&["rev-parse", "HEAD"]);
+    std::fs::write(repo.path().join("notes.md"), "second\n").unwrap();
+    std::fs::remove_file(repo.path().join("image.png")).unwrap();
+    let id = TaskId::new();
+    let workspace = super::TaskWorkspace {
+        issue_identifier: "TEST-1",
+        task_id: &id,
+        worktree: repo.path(),
+    };
+
+    let old = super::snapshot::committed_file_snapshot(workspace, &parent, "notes.md").unwrap();
+    assert_eq!(old.content.as_deref(), Some("first\n"));
+    assert_eq!(old.state, super::TaskFileState::Text);
+    assert_eq!(
+        old.read_only_reason.as_deref(),
+        Some("A committed version is read-only.")
+    );
+    let current = super::file_snapshot(workspace, "notes.md").unwrap();
+    assert_eq!(current.content.as_deref(), Some("second\n"));
+    assert!(current.read_only_reason.is_none());
+
+    // A binary file past the 1 MB text limit still carries its bytes, at a commit and on disk.
+    let committed =
+        super::snapshot::committed_file_snapshot(workspace, &parent, "image.png").unwrap();
+    assert_eq!(committed.state, super::TaskFileState::Binary);
+    assert_eq!(committed.size_bytes, image.len() as u64);
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(committed.data.unwrap())
+        .unwrap();
+    assert_eq!(decoded, image);
+    assert_eq!(
+        super::file_snapshot(workspace, "image.png").unwrap().state,
+        super::TaskFileState::Missing
+    );
+    std::fs::write(repo.path().join("image.png"), &image).unwrap();
+    let on_disk = super::file_snapshot(workspace, "image.png").unwrap();
+    assert_eq!(on_disk.state, super::TaskFileState::Binary);
+    assert_eq!(
+        on_disk.data,
+        Some(base64::engine::general_purpose::STANDARD.encode(&image))
+    );
+
+    let absent = super::snapshot::committed_file_snapshot(workspace, &parent, "new.md").unwrap();
+    assert_eq!(absent.state, super::TaskFileState::Missing);
+    assert!(absent.data.is_none());
+    assert!(super::snapshot::committed_file_snapshot(workspace, &parent, "../outside").is_err());
 }
 
 #[tokio::test]
@@ -1792,10 +2012,12 @@ fn deleted_task_status_requires_explicit_history_lookup() {
             [fixture.task.id.as_str()],
         )
         .unwrap();
-    connection.execute(
-            "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES (?1,?2,?3,456)",
-            rusqlite::params![fixture.task.wave_id.as_ref().unwrap().as_str(), fixture.task.linear_id.as_ref().unwrap().as_str(), fixture.task.identifier],
-        ).unwrap();
+    connection
+        .execute(
+            "UPDATE tasks SET planning_deleted_at=456 WHERE id=?1",
+            [fixture.task.id.as_str()],
+        )
+        .unwrap();
     let pr = runtime
         .block_on(fixture.store.active_task_pr(&fixture.task.id))
         .unwrap();
@@ -1925,7 +2147,7 @@ async fn stacking_is_idempotent_and_preserves_history() {
         .unwrap();
     let mut parent_task = fixture.task.clone();
     parent_task.id = TaskId::new();
-    parent_task.linear_id = Some(LinearIssueId::new("stack-parent-issue").unwrap());
+    parent_task.tracker_id = Some(LinearIssueId::new("stack-parent-issue").unwrap());
     parent_task.identifier = "STACK-2".into();
     parent_task.worktree = Some(repo.path().join("parent"));
     parent_task.workspace_slug = "stack-parent".into();
@@ -1991,7 +2213,7 @@ async fn stacking_is_idempotent_and_preserves_history() {
     let mut next_task = parent_task.clone();
     next_task.id = TaskId::new();
     next_task.identifier = "STACK-3".into();
-    next_task.linear_id = None;
+    next_task.tracker_id = None;
     next_task.branch = "test/next-parent".into();
     next_task.workspace_slug = "next-parent".into();
     next_task.worktree = Some(repo.path().join("next-parent"));
@@ -2787,59 +3009,6 @@ async fn task_preparation_stacks_on_origin_when_the_parent_branch_diverged() {
         .output()
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&remote.stdout).trim(), origin_tip);
-}
-
-#[test]
-fn execution_boundary_resolves_linked_git_and_control_roots() {
-    let _env_lock = crate::journal::test_env_lock();
-    let _restore = EnvRestore::capture(&["LF_BIN", "LF_HOME"]);
-    let directory = tempfile::tempdir().unwrap();
-    let main = directory.path().join("repo");
-    let worktree = directory.path().join("repo.task");
-    std::fs::create_dir(&main).unwrap();
-    for args in [
-        vec!["init", "-b", "main"],
-        vec!["config", "user.email", "test@example.com"],
-        vec!["config", "user.name", "Loopflow Test"],
-    ] {
-        assert!(std::process::Command::new("git")
-            .current_dir(&main)
-            .args(args)
-            .status()
-            .unwrap()
-            .success());
-    }
-    std::fs::write(main.join("README.md"), "proof\n").unwrap();
-    for args in [vec!["add", "."], vec!["commit", "-m", "proof"]] {
-        assert!(std::process::Command::new("git")
-            .current_dir(&main)
-            .args(args)
-            .status()
-            .unwrap()
-            .success());
-    }
-    assert!(std::process::Command::new("git")
-        .current_dir(&main)
-        .args(["worktree", "add", "-b", "task", worktree.to_str().unwrap()])
-        .status()
-        .unwrap()
-        .success());
-    let control = directory.path().join("control");
-    std::fs::create_dir(&control).unwrap();
-    std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-    std::env::set_var("LF_HOME", &control);
-
-    let boundary = checkout_execution_boundary(&worktree, "codex").unwrap();
-
-    assert_eq!(boundary.writable_roots.len(), 2);
-    assert!(boundary
-        .writable_roots
-        .contains(&main.join(".git").canonicalize().unwrap()));
-    assert!(boundary.writable_roots.contains(&control));
-    assert_eq!(
-        checkout_execution_boundary(&worktree, "pi:fixture/model").unwrap(),
-        boundary
-    );
 }
 
 #[tokio::test]

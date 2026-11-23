@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Launch the release app for real against a private copy of the Machine and report its own timings.
 
-uv run python scripts/benchmarks/desktop-performance/launch.py run --work /tmp/desktop-launch --output /tmp/desktop-launch/run
-uv run python scripts/benchmarks/desktop-performance/launch.py run --work /tmp/desktop-launch --output /tmp/run2 --built --saved 5 --uncached 1 --failed 1
+uv run python scripts/benchmarks/desktop-performance/launch.py run \
+    --work /tmp/desktop-launch --output /tmp/desktop-launch/run
+uv run python scripts/benchmarks/desktop-performance/launch.py run \
+    --work /tmp/desktop-launch --output /tmp/run2 --built --saved 5 --uncached 1 --failed 1
 
 `run` copies the Machine's database with SQLite's backup (a read of the live
 file and its write-ahead log), builds the release binary into a private app
@@ -34,7 +36,7 @@ from collections import Counter
 from contextlib import closing
 from pathlib import Path
 
-from timings import BUDGETS_MS, _stats
+from timings import _stats
 
 REPO = Path(__file__).resolve().parents[3]
 SWIFT = REPO / "swift"
@@ -186,7 +188,6 @@ def launch(app: Path, home: Path, repo: Path, scenario: str, timeout: float) -> 
     log.write_text("")
     env = {
         "LF_HOME": str(home),
-        "LF_DB_PATH": str(home / "loopflow.db"),
         "LF_BENCH_LOG": str(log),
         "LF_BENCH_LF": _lf(),
         "LF_BENCH_FAIL": spec["fail"],
@@ -279,12 +280,10 @@ def summarize(rows: list[dict], manifest: dict) -> dict:
         }
     return {
         **manifest,
-        "budgets_ms": {
-            "first_frame": BUDGETS_MS["first_frame"],
-            "usable": BUDGETS_MS["usable_saved"],
-        },
         "endpoints": {
-            "first_frame": "first window content committed to the render server; not on-glass presentation",
+            "first_frame": (
+                "first window content committed to the render server; not on-glass presentation"
+            ),
             "usable": "outline rows observed, next main-queue callback",
             "fresh": "every part of the workspace read by this launch",
         },
@@ -306,7 +305,6 @@ def render(report: dict) -> str:
         "",
         f"Release build of `{report['source']}`, `{report['lf']}`, {report['host']}. "
         f"Machine copy: {report['database_mb']} MB database.",
-        f"Budgets: first frame {report['budgets_ms']['first_frame']} ms, usable {report['budgets_ms']['usable']} ms. "
         "Milliseconds from kernel process start; p95 needs 20 samples.",
     ]
     for name, scenario in report["scenarios"].items():
@@ -314,7 +312,8 @@ def render(report: dict) -> str:
             "",
             f"## {name}",
             "",
-            f"{scenario['launches']} launches, {scenario['reached_endpoint']} reached the endpoint; "
+            f"{scenario['launches']} launches, "
+            f"{scenario['reached_endpoint']} reached the endpoint; "
             f"saved workspace {scenario['cache']}; usable from {scenario['usable_source']}.",
             "",
             "| | samples | median | p95 | max |",
@@ -332,12 +331,14 @@ def render(report: dict) -> str:
             lines.append(f"| {key}{unit} | {stats['samples']} | " + " | ".join(cells) + " |")
         for label, stats in scenario["reads"].items():
             lines.append(
-                f"| `{label}` ms | {stats['samples']} | {ms(stats['median_ms'])} | {ms(stats['p95_ms'])} | {ms(stats['max_ms'])} |"
+                f"| `{label}` ms | {stats['samples']} | {ms(stats['median_ms'])} | "
+                f"{ms(stats['p95_ms'])} | {ms(stats['max_ms'])} |"
             )
         lines += [
             "",
             f"`lf` processes across these launches: {scenario['lf_calls']}; "
-            f"failed reads: {scenario['failed_reads'] or 'none'}; refused: {scenario['lf_refused'] or 'none'}; "
+            f"failed reads: {scenario['failed_reads'] or 'none'}; "
+            f"refused: {scenario['lf_refused'] or 'none'}; "
             f"saved workspace kept: {scenario['saved_workspace_kept']}.",
         ]
     lines += ["", "Not measured: " + ", ".join(report["not_measured"]) + "."]
@@ -366,7 +367,8 @@ def run(args: argparse.Namespace) -> int:
                 journal.write(json.dumps(row) + "\n")
                 journal.flush()
                 print(
-                    f"{scenario} {index + 1}/{count}: first_frame {row['first_frame']} usable {row['usable']} fresh {row['fresh']}"
+                    f"{scenario} {index + 1}/{count}: first_frame {row['first_frame']} "
+                    f"usable {row['usable']} fresh {row['fresh']}"
                 )
     manifest = {
         "source": (app / "Contents/Resources/source").read_text(encoding="utf-8"),

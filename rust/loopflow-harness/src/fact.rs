@@ -1,0 +1,188 @@
+//! What a provider's native stream established, decoded once per message.
+//!
+//! Each harness has one decoder that turns a native message into an ordered
+//! `Vec<Decoded>`: `Fact` for what Loopflow records (receipts, availability,
+//! native conversation identity, explicit turn refusals) and `Display` for what a
+//! person watches live. Decoders hold only the cross-message correlation their
+//! provider needs; `FactWriter` owns receipts and availability writes.
+
+use std::collections::BTreeSet;
+
+use serde_json::Value;
+
+use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
+use loopflow_model::id::AgentSessionId;
+
+/// One provider turn in its native conversation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderTurn {
+    pub thread: AgentSessionId,
+    pub turn: String,
+}
+
+/// What a provider's stream says about a conversation's availability.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Signal {
+    /// The provider is producing a turn.
+    Working,
+    /// A new native turn began; earlier preview text no longer describes it.
+    NewTurn,
+    ToolStarted(String),
+    ToolResolved(String),
+    InputRequested(String),
+    InputResolved(String),
+    /// The provider's complete set of backgrounded tasks. They outlive the
+    /// turn that started them, and the provider starts a turn when they finish.
+    Background(BTreeSet<String>),
+    /// The provider handed the turn back; `true` when it succeeded.
+    Yielded(bool),
+    /// Assistant prose the current turn produced, shown as its preview.
+    Previewed {
+        turn: ProviderTurn,
+        source: &'static str,
+        text: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum ProviderFact {
+    /// The provider named the native conversation this stream continues.
+    SessionObserved(AgentSessionId),
+    /// The provider reported that a native turn began.
+    TurnStarted {
+        turn: ProviderTurn,
+    },
+    /// The decoder correlated a native turn with the input `request` it
+    /// answers. Input Loopflow sent has its origin frozen at send; input the
+    /// provider's own client submitted takes the current attachment's.
+    TurnAnswered {
+        turn: ProviderTurn,
+        request: String,
+    },
+    Activity(Signal),
+    /// A provider that counts its own availability reported a whole reading.
+    AvailabilityReading {
+        open_tools: usize,
+        pending_input: usize,
+        yielded: bool,
+        /// The turn ended; a settled turn that did not yield failed.
+        settled: bool,
+    },
+    /// A provider turn ended. `turn` is absent when Loopflow cannot tell which
+    /// native turn it was; `detail` is the retained completion payload.
+    TurnCompleted {
+        turn: Option<ProviderTurn>,
+        status: Lifecycle,
+        detail: Value,
+    },
+    /// Claude explicitly rejected a turn; snapshots alone never refuse work.
+    TurnRejected {
+        reason: String,
+    },
+    /// One main-conversation model request and the input it carried, counted
+    /// by the provider (cache reads and writes included).
+    Request {
+        input_tokens: u64,
+    },
+    /// The provider compacted the conversation; `pre_tokens` were in context.
+    Compacted {
+        pre_tokens: Option<u64>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum Decoded {
+    Fact(ProviderFact),
+    Display(ConversationEvent),
+}
+
+impl Decoded {
+    #[cfg(test)]
+    pub fn fact(&self) -> Option<&ProviderFact> {
+        match self {
+            Self::Fact(fact) => Some(fact),
+            Self::Display(_) => None,
+        }
+    }
+}
+
+impl From<ProviderFact> for Decoded {
+    fn from(fact: ProviderFact) -> Self {
+        Self::Fact(fact)
+    }
+}
+
+impl From<ConversationEvent> for Decoded {
+    fn from(event: ConversationEvent) -> Self {
+        Self::Display(event)
+    }
+}
+
+/// Availability facts for a batch of signals.
+pub(crate) fn activity(signals: impl IntoIterator<Item = Signal>) -> Vec<Decoded> {
+    signals
+        .into_iter()
+        .map(|signal| ProviderFact::Activity(signal).into())
+        .collect()
+}
+
+/// Why a headless turn failed when its agent asked a person something.
+pub fn unanswered_question(harness: &str, question: &str) -> String {
+    let question = question.trim();
+    if question.is_empty() {
+        format!("{harness} asked a question with nobody there to answer it")
+    } else {
+        format!("{harness} asked a question with nobody there to answer it: {question}")
+    }
+}
+
+/// A recorded native trace under `src/testdata/`, one JSON value per line.
+#[cfg(any(test, feature = "test-support"))]
+pub fn trace(file: &str) -> Vec<Value> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/testdata")
+        .join(file);
+    std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+/// The facts in `decoded`, one short line each, for asserting a sequence.
+#[cfg(test)]
+pub fn fact_lines(decoded: &[Decoded]) -> Vec<String> {
+    let turn = |turn: &ProviderTurn| format!("{}/{}", turn.thread.as_str(), turn.turn);
+    decoded
+        .iter()
+        .filter_map(Decoded::fact)
+        .map(|fact| match fact {
+            ProviderFact::SessionObserved(thread) => format!("SessionObserved {}", thread.as_str()),
+            ProviderFact::TurnStarted { turn: t } => format!("TurnStarted {}", turn(t)),
+            ProviderFact::TurnAnswered { turn: t, request } => {
+                format!("TurnAnswered {} request={request}", turn(t))
+            }
+            ProviderFact::Activity(Signal::Previewed { text, .. }) => {
+                format!("Activity Previewed {text:?}")
+            }
+            ProviderFact::Activity(signal) => format!("Activity {signal:?}"),
+            ProviderFact::AvailabilityReading {
+                open_tools,
+                pending_input,
+                yielded,
+                settled,
+            } => format!(
+                "AvailabilityReading tools={open_tools} input={pending_input} yielded={yielded} settled={settled}"
+            ),
+            ProviderFact::TurnCompleted { turn: t, status, .. } => format!(
+                "TurnCompleted {} {status:?}",
+                t.as_ref().map_or("-".to_owned(), turn)
+            ),
+            ProviderFact::TurnRejected { reason } => format!("TurnRejected {reason}"),
+            ProviderFact::Request { input_tokens } => format!("Request {input_tokens}"),
+            ProviderFact::Compacted { pre_tokens } => format!("Compacted {pre_tokens:?}"),
+        })
+        .collect()
+}

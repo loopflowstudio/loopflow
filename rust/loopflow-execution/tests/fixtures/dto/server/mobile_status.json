@@ -13,5 +13,6 @@
     },
     "ready": false,
     "error": "Sign in to Tailscale on this Machine"
-  }
+  },
+  "revisions": null
 }

@@ -12,12 +12,11 @@ pub const AMBIENT_TASK_ENV: &[&str] = &[
     "LF_CAPTURE_KEY",
     "LF_AGENT_CALLER",
     "LF_AS",
-    "LF_RUN_ID",
+    "LF_EXECUTION_ID",
     "LF_RUN_DIR",
     "LF_GRAPH_ID",
     "LF_WAVE_ID",
     "LF_ACCOUNT_SELECTION",
-    "LF_HUMAN_SESSION",
     // A test run from a Rex terminal must not route in-process openings to that host.
     "REX_SERVER",
     "REX_SESSION",

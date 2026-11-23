@@ -1,19 +1,21 @@
 //! Blocking client for the server protocol: the readiness probe, one
 //! connection with requests by id, and the ticketed connections that carry a
-//! terminal's bytes or one message over the control limit.
+//! terminal's bytes or one message over the control limit. A connection
+//! reaches this Machine's server on its socket and another Machine's over SSH.
 use std::collections::VecDeque;
-use std::io::{BufRead, BufReader, Read as _, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
 use super::wire::{
-    ClientIdentity, ConnectedClient, Hello, ServerMessage, ServerOperation, SessionAttached,
-    Welcome, MAX_BULK, MAX_MESSAGE, MIN_REVISION, REVISION,
+    ClientIdentity, ConnectedClient, Hello, Sender, ServerMessage, ServerOperation,
+    SessionAttached, Welcome, MAX_BULK, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
-use crate::engine::Error;
+use crate::engine::{Error, ErrorCode};
+use loopflow_model::durable::Machine;
 use loopflow_model::id::LfSessionId;
 
 type ClientMessage = super::wire::ClientMessage;
@@ -22,6 +24,9 @@ type ClientMessage = super::wire::ClientMessage;
 /// a ticket. A session's later waits are unbounded unless the caller sets its
 /// own limit.
 const HANDSHAKE: Duration = Duration::from_secs(10);
+/// How long another Machine's server has to answer a request over SSH. A
+/// subscription's quiet stream is not bounded.
+const ANSWER: Duration = Duration::from_secs(120);
 
 /// `lf server status`: readiness observed without opening Work.
 #[derive(Debug, serde::Serialize)]
@@ -33,6 +38,9 @@ pub struct Status {
     pub instance: Option<String>,
     /// The newest protocol revision the server speaks.
     pub revision: Option<u32>,
+    /// The server's own executable; `lf install server` replaces a server
+    /// whose executable is not the selected installation's.
+    pub executable_sha256: Option<String>,
     /// Every welcomed connection still open; empty when no server answered.
     pub clients: Vec<ConnectedClient>,
     pub error: Option<String>,
@@ -45,6 +53,7 @@ pub fn status() -> Result<Status> {
         listening: false,
         instance: None,
         revision: None,
+        executable_sha256: None,
         clients: Vec::new(),
         error: None,
     };
@@ -57,7 +66,7 @@ pub fn status() -> Result<Status> {
     };
     status.listening = true;
     stream.set_read_timeout(Some(HANDSHAKE))?;
-    let mut socket = Socket::new(stream)?;
+    let mut socket = Socket::local(stream, 64 * 1024)?;
     status.error = match socket
         .send(&ClientMessage::Status)
         .and_then(|()| socket.receive())
@@ -70,24 +79,13 @@ pub fn status() -> Result<Status> {
             status.instance = Some(answer.instance);
             status.revision = Some(answer.revision);
             status.clients = answer.clients;
-            let expected = crate::installation::ArtifactIdentity::capture(
-                crate::installation::ArtifactRole::Cli,
-                &std::env::current_exe()?,
-            )?
-            .sha256;
-            if answer.executable_sha256 != expected {
-                Some(
-                    "Loopflow server uses another executable; obtain the selected installation"
-                        .into(),
-                )
-            } else if answer.min_revision > REVISION || answer.revision < MIN_REVISION {
-                Some(format!(
+            status.executable_sha256 = Some(answer.executable_sha256);
+            (answer.min_revision > REVISION || answer.revision < MIN_REVISION).then(|| {
+                format!(
                     "Loopflow server speaks protocol revisions {}–{}; this build speaks {MIN_REVISION}–{REVISION}; update the selected installation",
                     answer.min_revision, answer.revision
-                ))
-            } else {
-                None
-            }
+                )
+            })
         }
         Ok(Some(ServerMessage::Error { code, message, .. })) => Some(format!("{code}: {message}")),
         Ok(Some(_)) => Some("Server did not answer the readiness request".into()),
@@ -119,6 +117,42 @@ pub struct Response {
     pub result: serde_json::Value,
 }
 
+/// What carries a connection's bytes to a server.
+#[derive(Debug, Clone)]
+enum Carrier {
+    /// This Machine's server, at its socket.
+    Socket(PathBuf),
+    /// Another Machine's server, through `lf server connect` there, which
+    /// runs every request with what `sender` says this `lf` runs with.
+    Ssh(Machine, Box<Sender>),
+}
+
+impl Carrier {
+    /// What each request says of the `lf` that sent it; null on this Machine.
+    fn sender(&self) -> Option<Sender> {
+        match self {
+            Self::Socket(_) => None,
+            Self::Ssh(_, sender) => Some(Sender::clone(sender)),
+        }
+    }
+
+    /// A fresh connection that reads at most `capacity` bytes ahead.
+    fn open(&self, capacity: usize) -> Result<Socket> {
+        match self {
+            Self::Socket(path) => Socket::local(connect(path)?, capacity),
+            Self::Ssh(machine, _) => {
+                let (pipe, output, input) = super::ssh::Pipe::open(machine)?;
+                let output = Timed::new(output);
+                Ok(Socket {
+                    end: End::Pipe(pipe, output.timeout.clone()),
+                    reader: BufReader::with_capacity(capacity, Box::new(output)),
+                    writer: Box::new(input),
+                })
+            }
+        }
+    }
+}
+
 /// One connection: hello and welcome once, then requests, subscriptions and
 /// cancels by id for its lifetime.
 #[derive(Debug)]
@@ -128,7 +162,9 @@ pub struct Connection {
     /// Messages received while waiting for another id's answer.
     pending: VecDeque<ServerMessage>,
     /// Where ticketed connections for bulk messages open.
-    path: PathBuf,
+    carrier: Carrier,
+    /// When the caller stops waiting for another Machine's answers.
+    until: Option<Instant>,
 }
 
 impl Connection {
@@ -138,35 +174,59 @@ impl Connection {
     }
 
     pub fn open_at(path: &Path) -> Result<Self> {
-        let connection = Self::start(connect(path)?, path, identity("cli", "lf"), HANDSHAKE)?;
+        let carrier = Carrier::Socket(path.to_path_buf());
+        let connection = Self::start(carrier, identity("cli", "lf"), HANDSHAKE)?;
+        connection.set_read_timeout(None)?;
+        Ok(connection)
+    }
+
+    /// `machine`'s server, over SSH. Its `lf server connect` starts the
+    /// server when none is running. Every operation sent here runs there,
+    /// with what `sender` says this `lf` runs with.
+    ///
+    /// With `until`, the welcome and every answer have what is left of it,
+    /// and [`ANSWER`] at most.
+    pub fn open_on(machine: &Machine, sender: Sender, until: Option<Instant>) -> Result<Self> {
+        let mut connection = Self::start(
+            Carrier::Ssh(machine.clone(), Box::new(sender)),
+            identity(super::wire::MACHINE_CLIENT, "lf"),
+            // The entry may start the server first.
+            left(until),
+        )?;
+        connection.until = until;
         connection.set_read_timeout(None)?;
         Ok(connection)
     }
 
     /// Hello and welcome within `within`, which stays set until the caller
     /// has what it opened the connection for.
-    fn start(
-        stream: UnixStream,
-        path: &Path,
-        client: ClientIdentity,
-        within: Duration,
-    ) -> Result<Self> {
-        stream.set_read_timeout(Some(within))?;
-        let mut socket = Socket::new(stream)?;
-        socket.send(&ClientMessage::Hello(Hello {
+    fn start(carrier: Carrier, client: ClientIdentity, within: Duration) -> Result<Self> {
+        let mut socket = carrier.open(64 * 1024)?;
+        socket.set_read_timeout(Some(within))?;
+        let hello = socket.send(&ClientMessage::Hello(Hello {
             revision: REVISION,
             min_revision: MIN_REVISION,
             client,
-        }))?;
-        let answer = socket
-            .receive()
-            .map_err(|error| stalled(error, "welcome the connection", within))?;
+        }));
+        // A destination that exits before reading, as SSH does when it cannot
+        // connect, closes the pipe under the hello: its exit says why.
+        if let Err(error) = hello {
+            return Err(match resets(&error) {
+                true => socket.ended(OLDER_PROTOCOL, ErrorCode::Unavailable),
+                false => error,
+            });
+        }
+        let answer = socket.receive().map_err(|error| match &carrier {
+            Carrier::Ssh(machine, _) => unanswered(error, machine, within, ErrorCode::Unavailable),
+            Carrier::Socket(_) => stalled(error, "welcome the connection", within),
+        })?;
         match answer.map(accepted).transpose()? {
             Some(ServerMessage::Welcome(welcome)) => Ok(Self {
                 socket,
                 welcome,
                 pending: VecDeque::new(),
-                path: path.to_path_buf(),
+                carrier,
+                until: None,
             }),
             Some(ServerMessage::Error {
                 code,
@@ -180,7 +240,7 @@ impl Connection {
             }
             .into()),
             Some(other) => anyhow::bail!("Server did not welcome the connection: {other:?}"),
-            None => anyhow::bail!(OLDER_PROTOCOL),
+            None => Err(socket.ended(OLDER_PROTOCOL, ErrorCode::Unavailable)),
         }
     }
 
@@ -190,7 +250,7 @@ impl Connection {
 
     /// How long a wait for the server may last; none by default.
     pub fn set_read_timeout(&self, timeout: Option<Duration>) -> Result<()> {
-        Ok(self.socket.writer.set_read_timeout(timeout)?)
+        self.socket.set_read_timeout(timeout)
     }
 
     /// Send a request without waiting; its answer arrives through
@@ -202,6 +262,8 @@ impl Connection {
             id: id.clone(),
             operation: serde_json::to_value(operation)?,
             select: None,
+            sender: self.carrier.sender(),
+            request_id: None,
         })?;
         if line.len() <= MAX_MESSAGE {
             self.socket.write(&line)?;
@@ -222,16 +284,14 @@ impl Connection {
         let ticket = ticket["ticket"]
             .as_str()
             .context("Server did not issue an upload ticket")?;
-        let mut stream = redeem(&self.path, ticket)?;
-        stream.write_all(line.as_bytes())?;
-        Ok(())
+        redeem(&self.carrier, ticket)?.write(&line)
     }
 
     /// One message the server moved to a ticketed connection.
     fn fetch(&self, ticket: &str) -> Result<ServerMessage> {
-        let stream = redeem(&self.path, ticket)?;
+        let mut socket = redeem(&self.carrier, ticket)?;
         let mut line = Vec::new();
-        BufReader::new(stream)
+        (&mut socket.reader)
             .take(MAX_BULK as u64 + 1)
             .read_until(b'\n', &mut line)?;
         anyhow::ensure!(
@@ -244,7 +304,20 @@ impl Connection {
     /// One request and its answer; other ids' messages wait in `pending`.
     pub fn request(&mut self, operation: impl serde::Serialize) -> Result<Response> {
         let id = self.send(operation)?;
-        match self.wait(|message| answers(message, &id))? {
+        let answer = match &self.carrier {
+            Carrier::Ssh(machine, _) => {
+                let machine = machine.clone();
+                let within = left(self.until);
+                self.set_read_timeout(Some(within))?;
+                let answer = self.wait(|message| answers(message, &id)).map_err(|error| {
+                    unanswered(error, &machine, within, ErrorCode::OutcomeUnknown)
+                });
+                self.set_read_timeout(None)?;
+                answer?
+            }
+            Carrier::Socket(_) => self.wait(|message| answers(message, &id))?,
+        };
+        match answer {
             ServerMessage::Response {
                 trace_id, result, ..
             } => Ok(Response { trace_id, result }),
@@ -263,14 +336,20 @@ impl Connection {
         }
     }
 
-    /// Start a subscription and return its id once the server confirms it.
-    pub fn subscribe(&mut self, operation: impl serde::Serialize) -> Result<String> {
+    /// Start a subscription keeping only `select` of each reading, and return
+    /// its id once the server confirms it.
+    pub fn subscribe(
+        &mut self,
+        operation: impl serde::Serialize,
+        select: Option<Vec<String>>,
+    ) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
         self.socket.send(&ClientMessage::Subscribe {
             id: id.clone(),
             operation: serde_json::to_value(operation)?,
-            select: None,
+            select,
             resume: None,
+            sender: self.carrier.sender(),
         })?;
         match self.wait(|message| answers(message, &id))? {
             ServerMessage::Response { .. } => Ok(id),
@@ -350,10 +429,12 @@ impl Connection {
             );
         }
         loop {
-            let mut message = self
-                .socket
-                .receive()?
-                .context("Loopflow server closed the connection; the outcome is unknown")?;
+            let Some(mut message) = self.socket.receive()? else {
+                return Err(self.socket.ended(
+                    "Loopflow server closed the connection; the outcome is unknown",
+                    ErrorCode::OutcomeUnknown,
+                ));
+            };
             if let ServerMessage::Bulk { ticket, .. } = &message {
                 message = self.fetch(ticket)?;
             }
@@ -382,10 +463,8 @@ pub fn hook_request(
     within: Duration,
 ) -> Result<Response> {
     let deadline = std::time::Instant::now() + within;
-    let stream = connect(path)?;
-    stream.set_write_timeout(Some(within))?;
     let client = identity("hook", "lf __context-block");
-    let mut connection = Connection::start(stream, path, client, within)?;
+    let mut connection = Connection::start(Carrier::Socket(path.to_path_buf()), client, within)?;
     let left = deadline.saturating_duration_since(std::time::Instant::now());
     anyhow::ensure!(
         !left.is_zero(),
@@ -430,7 +509,8 @@ fn accepted(message: ServerMessage) -> Result<ServerMessage> {
 /// with the Session's held terminal; until then it reads one byte at a time,
 /// so no terminal byte is left in a buffer.
 pub fn attach(path: &Path, session: &LfSessionId) -> Result<UnixStream> {
-    let mut connection = Connection::start(connect(path)?, path, identity("cli", "lf"), HANDSHAKE)?;
+    let carrier = Carrier::Socket(path.to_path_buf());
+    let mut connection = Connection::start(carrier.clone(), identity("cli", "lf"), HANDSHAKE)?;
     let issued = connection
         .request(ServerOperation::SessionAttach {
             session: session.clone(),
@@ -440,9 +520,8 @@ pub fn attach(path: &Path, session: &LfSessionId) -> Result<UnixStream> {
     let issued: SessionAttached = serde_json::from_value(issued.result)
         .context("Loopflow server answered session.attach without a ticket")?;
     drop(connection);
-    let stream = connect(path)?;
-    stream.set_read_timeout(Some(HANDSHAKE))?;
-    let mut socket = Socket::with_capacity(stream, 1)?;
+    let mut socket = carrier.open(1)?;
+    socket.set_read_timeout(Some(HANDSHAKE))?;
     socket.send(&ClientMessage::Attach {
         ticket: issued.ticket,
     })?;
@@ -467,24 +546,67 @@ pub fn attach(path: &Path, session: &LfSessionId) -> Result<UnixStream> {
         Some(other) => anyhow::bail!("unexpected server message: {other:?}"),
         None => anyhow::bail!("Loopflow server closed the connection before bridging"),
     }
-    let stream = socket.reader.into_inner();
+    // Reading one byte at a time left nothing of the terminal's in a buffer.
+    let End::Socket(stream) = socket.end else {
+        unreachable!("a local carrier ends in a socket")
+    };
     stream.set_read_timeout(None)?;
     Ok(stream)
 }
 
+/// How long another Machine's server has to answer for a caller that stops
+/// waiting at `until`. Never zero, which a read takes as no limit.
+fn left(until: Option<Instant>) -> Duration {
+    until.map_or(ANSWER, |until| {
+        until
+            .saturating_duration_since(Instant::now())
+            .clamp(Duration::from_millis(1), ANSWER)
+    })
+}
+
+/// A wait for another Machine's answer that `within` cut short. `code` says
+/// whether the work may have happened there.
+fn unanswered(
+    error: anyhow::Error,
+    machine: &Machine,
+    within: Duration,
+    code: ErrorCode,
+) -> anyhow::Error {
+    if !timed_out(&error) {
+        return error;
+    }
+    let message = anyhow::anyhow!(
+        "{} did not answer within {}s; check `ssh {} lf server status`",
+        machine.name(),
+        within.as_secs_f64().ceil(),
+        machine.route
+    );
+    match code {
+        ErrorCode::OutcomeUnknown => Error::outcome_unknown(&message),
+        code => Error::new(code, message.to_string()),
+    }
+    .into()
+}
+
+fn timed_out(error: &anyhow::Error) -> bool {
+    matches!(
+        error
+            .root_cause()
+            .downcast_ref::<std::io::Error>()
+            .map(std::io::Error::kind),
+        Some(std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)
+    )
+}
+
 /// A wait that `within` cut short, named for the answer it waited for.
 fn stalled(error: anyhow::Error, answer: &str, within: Duration) -> anyhow::Error {
-    match error
-        .root_cause()
-        .downcast_ref::<std::io::Error>()
-        .map(std::io::Error::kind)
-    {
-        Some(std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => anyhow::anyhow!(
-            "Loopflow server did not {answer} within {}s; check `lf server status`",
-            within.as_secs()
-        ),
-        _ => error,
+    if !timed_out(&error) {
+        return error;
     }
+    anyhow::anyhow!(
+        "Loopflow server did not {answer} within {}s; check `lf server status`",
+        within.as_secs()
+    )
 }
 
 fn connect(path: &Path) -> Result<UnixStream> {
@@ -495,23 +617,120 @@ fn connect(path: &Path) -> Result<UnixStream> {
     Ok(stream)
 }
 
-/// Newline-delimited JSON messages over one stream.
-#[derive(Debug)]
+/// Newline-delimited JSON messages over one carrier's byte streams.
 struct Socket {
-    reader: BufReader<UnixStream>,
-    writer: UnixStream,
+    reader: BufReader<Box<dyn Read + Send>>,
+    writer: Box<dyn Write + Send>,
+    end: End,
+}
+
+/// The far end of a [`Socket`]'s byte streams.
+#[derive(Debug)]
+enum End {
+    /// This Machine's socket, which bounds reads.
+    Socket(UnixStream),
+    /// SSH to another Machine, which says why it closed, and the bound on a
+    /// read from it.
+    Pipe(super::ssh::Pipe, Timeout),
+}
+
+type Timeout = std::sync::Arc<std::sync::Mutex<Option<Duration>>>;
+
+/// A pipe's reads, bounded like a socket's: a thread reads, and a read that
+/// waits past the timeout fails as `TimedOut`.
+struct Timed {
+    chunks: std::sync::mpsc::Receiver<std::io::Result<Vec<u8>>>,
+    unread: Vec<u8>,
+    timeout: Timeout,
+}
+
+impl Timed {
+    fn new(mut source: impl Read + Send + 'static) -> Self {
+        let (sent, chunks) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let mut buffer = vec![0; 64 * 1024];
+            loop {
+                let chunk = match source.read(&mut buffer) {
+                    Ok(read) => Ok(buffer[..read].to_vec()),
+                    Err(error) => Err(error),
+                };
+                let ended = !matches!(&chunk, Ok(chunk) if !chunk.is_empty());
+                if sent.send(chunk).is_err() || ended {
+                    return;
+                }
+            }
+        });
+        Self {
+            chunks,
+            unread: Vec::new(),
+            timeout: Timeout::default(),
+        }
+    }
+}
+
+impl Read for Timed {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        use std::sync::mpsc::RecvTimeoutError;
+        if self.unread.is_empty() {
+            let timeout = *self.timeout.lock().expect("pipe timeout lock poisoned");
+            let chunk = match timeout {
+                Some(timeout) => self
+                    .chunks
+                    .recv_timeout(timeout)
+                    .map_err(|error| match error {
+                        RecvTimeoutError::Timeout => std::io::ErrorKind::TimedOut,
+                        RecvTimeoutError::Disconnected => std::io::ErrorKind::UnexpectedEof,
+                    }),
+                None => self
+                    .chunks
+                    .recv()
+                    .map_err(|_| std::io::ErrorKind::UnexpectedEof),
+            };
+            match chunk {
+                Ok(chunk) => self.unread = chunk?,
+                // The reader thread ended after an end of file it sent.
+                Err(std::io::ErrorKind::UnexpectedEof) => return Ok(0),
+                Err(kind) => return Err(kind.into()),
+            }
+        }
+        let read = buffer.len().min(self.unread.len());
+        buffer[..read].copy_from_slice(&self.unread[..read]);
+        self.unread.drain(..read);
+        Ok(read)
+    }
+}
+
+impl std::fmt::Debug for Socket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Socket")
+            .field("end", &self.end)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Socket {
-    fn new(stream: UnixStream) -> Result<Self> {
-        Self::with_capacity(stream, 64 * 1024)
+    fn local(stream: UnixStream, capacity: usize) -> Result<Self> {
+        Ok(Self {
+            writer: Box::new(stream.try_clone()?),
+            reader: BufReader::with_capacity(capacity, Box::new(stream.try_clone()?)),
+            end: End::Socket(stream),
+        })
     }
 
-    fn with_capacity(stream: UnixStream, capacity: usize) -> Result<Self> {
-        Ok(Self {
-            writer: stream.try_clone()?,
-            reader: BufReader::with_capacity(capacity, stream),
-        })
+    fn set_read_timeout(&self, timeout: Option<Duration>) -> Result<()> {
+        match &self.end {
+            End::Socket(stream) => stream.set_read_timeout(timeout)?,
+            End::Pipe(_, bound) => *bound.lock().expect("pipe timeout lock poisoned") = timeout,
+        }
+        Ok(())
+    }
+
+    /// Why the server closed before answering: SSH says, the socket cannot.
+    fn ended(&mut self, local: &str, code: ErrorCode) -> anyhow::Error {
+        match &mut self.end {
+            End::Pipe(pipe, _) => pipe.ended(code),
+            End::Socket(_) => anyhow::anyhow!("{local}"),
+        }
     }
 
     fn send(&mut self, message: &ClientMessage) -> Result<()> {
@@ -530,7 +749,8 @@ impl Socket {
     }
 
     fn write(&mut self, line: &str) -> Result<()> {
-        Ok(self.writer.write_all(line.as_bytes())?)
+        self.writer.write_all(line.as_bytes())?;
+        Ok(self.writer.flush()?)
     }
 
     /// The next message; `None` once the server closed after a whole message.
@@ -554,33 +774,29 @@ impl Socket {
     }
 }
 
-fn redeem(path: &Path, ticket: &str) -> Result<UnixStream> {
-    let mut stream = connect(path)?;
-    stream.set_read_timeout(Some(HANDSHAKE))?;
-    stream.write_all(
-        Socket::line(&ClientMessage::Attach {
-            ticket: ticket.into(),
-        })?
-        .as_bytes(),
-    )?;
-    let mut line = Vec::new();
-    let mut byte = [0u8; 1];
-    while !line.ends_with(b"\n") {
-        anyhow::ensure!(
-            line.len() <= MAX_MESSAGE,
-            "Server answer to a ticket exceeds {MAX_MESSAGE} bytes"
-        );
-        stream
-            .read_exact(&mut byte)
-            .map_err(|error| stalled(error.into(), "admit the ticket", HANDSHAKE))?;
-        line.push(byte[0]);
+/// A ticketed connection, admitted. It reads one byte at a time until then,
+/// so no byte meant for the ticket's purpose waits in a buffer.
+fn redeem(carrier: &Carrier, ticket: &str) -> Result<Socket> {
+    let mut socket = carrier.open(1)?;
+    socket.set_read_timeout(Some(HANDSHAKE))?;
+    socket.send(&ClientMessage::Attach {
+        ticket: ticket.into(),
+    })?;
+    let answer = socket
+        .receive()
+        .map_err(|error| stalled(error, "admit the ticket", HANDSHAKE))?;
+    match answer.map(accepted).transpose()? {
+        Some(ServerMessage::Admitted) => {}
+        Some(other) => anyhow::bail!("Server did not admit the ticket: {other:?}"),
+        None => {
+            return Err(socket.ended(
+                "Loopflow server closed the connection before admitting the ticket",
+                ErrorCode::Unavailable,
+            ))
+        }
     }
-    match accepted(serde_json::from_slice(&line)?)? {
-        ServerMessage::Admitted => {}
-        other => anyhow::bail!("Server did not admit the ticket: {other:?}"),
-    }
-    stream.set_read_timeout(None)?;
-    Ok(stream)
+    socket.set_read_timeout(None)?;
+    Ok(socket)
 }
 
 #[cfg(test)]
@@ -589,11 +805,32 @@ mod tests {
     use std::os::unix::net::UnixListener;
     use std::time::Instant;
 
-    use super::{attach, hook_request, Connection, HANDSHAKE};
+    use super::{attach, hook_request, Connection, End, HANDSHAKE};
     use crate::machine::wire::{
         Limits, ServerMessage, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION,
     };
     use loopflow_model::id::LfSessionId;
+
+    #[test]
+    fn a_pipe_that_stays_silent_past_its_bound_times_out_and_keeps_what_arrived() {
+        use std::io::Read;
+        let (reader, mut writer) = std::os::unix::net::UnixStream::pair().unwrap();
+        let mut timed = super::Timed::new(reader);
+        *timed.timeout.lock().unwrap() = Some(std::time::Duration::from_millis(50));
+        writer.write_all(b"answer").unwrap();
+        let mut buffer = [0; 3];
+        timed.read_exact(&mut buffer).unwrap();
+        assert_eq!(&buffer, b"ans");
+        timed.read_exact(&mut buffer).unwrap();
+        assert_eq!(&buffer, b"wer");
+        let started = Instant::now();
+        let error = timed.read(&mut buffer).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(super::timed_out(&error.into()));
+        assert!(started.elapsed() < HANDSHAKE);
+        drop(writer);
+        assert_eq!(timed.read(&mut buffer).unwrap(), 0);
+    }
 
     /// A server that accepts one connection and answers nothing until the
     /// client gives up; `welcome` first when `after_hello`.
@@ -710,6 +947,9 @@ mod tests {
     fn a_welcomed_session_reads_without_a_bound() {
         let (_home, path) = silent_server(true);
         let connection = Connection::open_at(&path).unwrap();
-        assert_eq!(connection.socket.writer.read_timeout().unwrap(), None);
+        let End::Socket(stream) = &connection.socket.end else {
+            panic!("a local connection ends in a socket")
+        };
+        assert_eq!(stream.read_timeout().unwrap(), None);
     }
 }

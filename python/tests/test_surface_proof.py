@@ -72,13 +72,13 @@ def _events(root: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
-def test_captures_overlap_in_pairs_and_keep_all_eight_images(tmp_path: Path) -> None:
+def test_captures_overlap_in_pairs_and_keep_all_four_images(tmp_path: Path) -> None:
     script, env = _fixture(tmp_path)
     result = subprocess.run(
         ["bash", str(script)], env=env, capture_output=True, text=True, timeout=15
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "all 8 captures" in result.stdout
+    assert "all 4 captures" in result.stdout
     active = peak = count = 0
     for event in _events(tmp_path):
         if event["event"] == "start":
@@ -87,7 +87,7 @@ def test_captures_overlap_in_pairs_and_keep_all_eight_images(tmp_path: Path) -> 
             peak = max(peak, active)
         else:
             active -= 1
-    assert (count, peak, active) == (8, 2, 0)
+    assert (count, peak, active) == (4, 2, 0)
 
 
 def test_missing_capture_keeps_the_proof_red(tmp_path: Path) -> None:

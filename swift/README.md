@@ -1,16 +1,32 @@
 # Loopflow for macOS
 
-```bash
-uv run python scripts/loopflow-dev.py run          # build and launch
-uv run python scripts/loopflow-dev.py install      # install without launching
-uv run python scripts/loopflow-dev.py run-debug    # launch with logs visible
-uv run python scripts/loopflow-dev.py test         # run Swift tests
+With [Loopflow installed](../docs/getting-started.md#install), run this from
+the repository root after a Swift edit.
+
+```console
+$ uv run python scripts/loopflow-dev.py run
+Opening the Machine.
 ```
 
-The development app runs its bundled CLI on the main Machine's store, which it
-reads but never migrates. Only an install advances the store's schema:
-`lf install --dev` for a green main build, `lf install` for your stream's release.
-With a private `LF_HOME`, an explicit `LF_BIN` selects the CLI instead.
+The command builds the checkout's Swift app and opens
+**Loopflow Dev** beside Loopflow, using the installed server and `lf`. Both
+apps show your live Waves, Tasks and Sessions. A Task edited in either app
+updates in the other. Open the same running Session in a terminal and in Dev
+to see its output and type into it from either view.
+
+Each run quits the previous **Loopflow Dev** and opens this checkout's build.
+The running server and Sessions keep going. Use `run-debug` to see app
+logs as it runs.
+
+Dev waits until you visit a Task, Wave, or repository to open its terminals.
+On launch, even the restored selection shows a placeholder. Opening Dev beside
+release Desktop leaves the running Session at its current size.
+
+If the branch needs server features that your installation lacks, the affected
+read or action reports the mismatch. The rest of the window keeps working
+when both builds can connect. Test branch changes to `lf` on a
+[private Machine](../docs/dev/machines.md#one-main-machine).
+
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
@@ -21,18 +37,27 @@ the workspace saved at `<Machine>/desktop-cache/workspace.json` and shows
 and navigate; Graph process state, Task condition, Session state and every action except
 opening a Session wait for the fresh read. The Portfolio window opens from the
 same saved workspace. With no known Task name yet, a row says **Loading Task…**
-until its first read answers. The working Task list shows loading until it has
-answered; an empty result then says there are no working Tasks. Newly created
+until its first read answers. The working Task list opens on the list saved at
+the last launch, else shows loading until it has answered; an empty result then
+says there are no working Tasks. Newly created
 and reopened Tasks use their locally recorded names while tracker updates are
 pending.
 
-**Last known** describes the reading supplying the displayed name. Other read
-failures remain visible beside **Retry**, combining shared failures into one
-notice. A Task without a description has no summary line.
+**Last known** describes the reading supplying the displayed name. A read that
+starts failing raises one Notice for its part; the view keeps its last good
+reading, or stays empty, and the Notice goes when a read succeeds.
 If no name is known, the failed row says
-**Task unavailable**. Desktop reconnects automatically; choose **Retry** beside
-the failure to request another read. A successful replacement clears the notice
-and updates the rows, retaining the selected workspace, panes and drafts.
+**Task unavailable**. Desktop reconnects automatically. A successful replacement
+updates the rows, retaining the selected workspace, panes and drafts.
+When the app and the server are different builds and a read arrives that the
+app can't decode, the Notice for that part names both and where decoding
+stopped, and `lf install` brings them together. The other parts stay current:
+
+```
+The plan couldn't be read: This Loopflow (0.16.0+3500440e9) can't read what the server (0.16.0+21d541a87) sent. (missing owned_by_you at body.tasks.0)
+```
+
+**The Machine is away** means only that the connection is down.
 Repeated identical Session errors leave the displayed reading unchanged; failed
 per-Wave or truncated replacements keep previously readable planning, including
 its saved copy. Delete the cache file to start from **Loading workspace…**.
@@ -68,11 +93,34 @@ yourself, call `/usr/bin/log`, since zsh's builtin `log` shadows it:
 Working Tasks lists owned, started, unfinished Tasks, on any Machine this store
 records, in the repository's shared Task order. It is the
 repository's built-in query, so opening a Task neither adds nor reorders it.
-Click a Wave to scope the sidebar to its Working Tasks and subwaves; its board's
-Backlog keeps the unstarted ones. **‹ Repo** returns to Working Tasks. Unstarted Tasks
+Click a Wave to scope the sidebar to its Working Tasks and subwaves; its backlog
+keeps the open work nobody is running. **‹ Repo** returns to Working Tasks. Unstarted Tasks
 open their brief beside **Start**, which runs the Task's Workflow; opening alone
 starts nothing. Waves follow Tasks in the same scrolling sidebar, with counts
 from the planning inventory.
+
+**New Wave**, under the sidebar's Waves or in the Portfolio, is one form: a
+name, and a repository picker when there is more than one to choose from.
+**Create** adds the Wave; with no repository, Create is off.
+
+**⌘N** opens New Task. Type what you want and click **Start**: the sheet closes
+in the click and the Task's workspace shows your words in its conversation, with
+the Task already in Working. Setup prints under them as it finishes, then the
+agent's prompt takes typing:
+
+```
+Fix the flaky reconnect test
+Checkout ready  0.2 s
+Graph code started
+```
+
+The checkout branches from the default branch as of Loopflow's last background
+fetch; the Task's first sync catches up. A setup step that fails prints its error
+in the pane, and the agent still starts once the checkout exists. Reopening the
+conversation continues setup from the step that stopped; it never starts a
+second Graph. If the Machine refuses before filing, your words stay with the
+error and **Try again**; once it has answered, the Task exists, so a failure to
+open its conversation shows in the Task's pane with Retry, never a second Start.
 
 Click a row to select its retained workspace. The title-bar **Repo › Wave › Task**
 path follows hierarchy: click a name to go there, or the **›** after it to list and
@@ -97,7 +145,7 @@ shown across Desktop. Completing or canceling a never-started Task instead shows
 it as completed or abandoned and offers **Reopen**.
 
 Ownership is separate. Unassigning a started, unfinished Task puts it in **Backlog** while
-keeping its lifecycle, checkout, PR and conversations. **Start** and **Not started**
+keeping its lifecycle, checkout, PR and conversations. **Start** and **Unstarted**
 apply to work that has never started; an unassigned running Task remains Active.
 
 A Task is **Available** when one of its conversations is available for your next
@@ -112,16 +160,45 @@ its checkout. Repository and Wave primary conversations keep their own scope,
 even in a Task checkout. The Task's conversation list and breadcrumb Session
 picker use the same membership.
 
+A Task's row is its whole title, wrapped rather than cut, then its ID and one
+status word. A row that needs someone adds one line saying why:
+
+```text
+Loopflow for Mac's Task workspace matches
+the design prototype
+3d4350  Blocked
+Approve the plan?
+```
+
+The word is the first of these that applies:
+
+1. What the Task's program reports: **Busy**, **Available**, **Blocked**,
+   **Done**. A blocked program's line is what it asked.
+2. **Blocked** or **Waiting**, when the Task's condition says so and no
+   program reports. The line is the condition's reason, the one
+   `lf plan list` prints. A Task whose Graph has never run waits on nobody,
+   opened or not: it reads its lifecycle word and its row offers Start.
+3. Its lifecycle word: **Unstarted**, **Idle**, **Active**, **Done**,
+   **Abandoned**.
+
+A Task whose condition could not be read adds no word for it. The row is the
+same in the sidebar, the title bar, a Dashboard tile's header, the roadmap,
+the Now list and a Wave's Portfolio page, and the Task's own page and the
+jump menu print its word, so a Task never says two things about itself. The
+Now list holds the Tasks whose rows say they need someone, under that word. The Portfolio has no program reports, so its rows start at the
+second rule. Click the row on any of them and the Task opens.
+
+The selected row is filled; rows carry no stripe or border. A Wave's count
+beside its name is in the same face as its name.
+
 Drag a Task in the sidebar to change its shared order. Ordinary repository and
 Wave lists, boards and Task pickers keep that relative order after refresh.
 Filtering or opening a Task leaves the order intact. Saved Dashboard arrangements,
 search results and Done's completion-date ordering keep their own order.
 
-Each Work keeps one pane layout and document store. The browser offers Files,
-Changes, Task & workflow, Graph processes and web pages. A Task with no saved
-layout inherits its Wave's semantic default; later Wave edits leave saved Task
-layouts alone. Rex reads those defaults for new windows and owns its active
-native layout independently.
+Each Work keeps one pane layout and document store. The browser offers Brief,
+Diff, Files, Task & workflow, Graph processes and web pages. Rex, Herdr and cmux
+open only a Task's conversation and never read Desktop's layouts.
 
 Repository and Wave
 entry shows their conversation, opened on load or on selection.
@@ -137,13 +214,12 @@ Desktop quits. Reopening a known repository shows retained content immediately,
 even while repository resolution waits or fails. Errors remain visible; new Task
 links wait for resolution before delivery. Unknown repositories need an initial lookup.
 
-Every conversation a window can select opens on load, before any selection and
-with no saved recent visits: the repository's, each Wave's and every claimed
-working Task's (idle, active or moving). Selecting any of them shows opening, the
-live conversation, a passive view of a conversation another client controls, or a
-failure with **Retry**; never a **No session** or **Open** gate. Load opens the
-selected Work first, then visible tiles, then the repository and Waves, then
-recent working Tasks, two preparations at a time; initial rendering does not wait.
+Release Desktop opens conversations on load for the repository, each Wave, and
+every claimed working Task (idle, active or moving), even on a first visit.
+Selecting one shows its opening progress, the live conversation, or a failure
+with **Retry**. Desktop prepares two conversations at a time, starting with the
+selected Work, then visible tiles, the repository and Waves, and recent working
+Tasks. The window renders while they open.
 A prepared conversation starts its provider at once, before any pane shows it;
 selecting the Work shows the running terminal. One **Opening… Input paused**
 reading remains through preparation, attachment and native input readiness. The
@@ -170,21 +246,33 @@ opens whether or not anyone owns it. An unstarted Task has no checkout and no
 conversation: its Session slot offers **Start**, which runs its Workflow. Opening never launches a Graph, claims or starts a Task, runs the
 repository or Wave operator, or replays consumed input: with no request, the first
 turn of any primary reads its scope and reports where it stands. A failed
-automatic Start shows its error with **Retry**. A launch that ended with no saved
-history stays closed until **Try again** repeats it; Retry and refresh never do.
-If another client holds input, the pane offers **Take back** and leaves that client
-in control until clicked or until it closes. Close and eviction discard late opening results.
+automatic opening shows its error with **Retry**. A finished Task opens by itself
+only when it already has a conversation; otherwise **Open conversation** starts one.
+Every opening is `lf resume`: a held terminal gains a view, an ended Session resumes
+from its history, and a provider running in a native client lf can't share is taken
+over, ending that client. A pane's button carries Rust's label for which it will do
+(**Reconnect**, **Open here**, **Take over**, **Try again**, **Start conversation**).
+Every view of a held terminal can type into the same draft. Desktop runs the
+server’s command with `LF_RELAY_FOCUSED=0` in the pane environment. Older CLIs
+can run the same command. With a relay and holder that support initial focus,
+a background pane leaves the terminal’s size and colors alone. Typing in a pane
+takes ownership, as does focusing it before the first key. When the owner
+closes, the most recently used live view takes over.
+Close and eviction discard late opening results.
 
 Finite CLI requests time out after 30 seconds. Canceling preparation ends only
 that request; running Sessions continue. If a change times out, refresh to learn
 its result before retrying.
 
-Session panes receive their relay's status and send Retry/Move actions over one
+Session panes receive their relay's status and send Retry over one
 private Unix connection. Quiet streams schedule no reads, including in retained
 hidden panes. Status loss pauses input while the relay continues; a fresh status
 connection supplies the current reading without replaying actions. Closing a pane
-stops observation and removes its private socket directory. Native readiness and
-attachment permission share that reading; a saved screen cannot enable input.
+stops observation and removes its private socket directory. Input waits for a
+connected reading with native readiness; a saved screen cannot enable input.
+The terminal view tells Ghostty when it gains or loses focus (first responder in
+the key window); the relay turns Ghostty's focus reports into the holder's
+`focus` requests, so the pane being looked at sets the size.
 
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
@@ -201,12 +289,11 @@ instead of replayed after reconnect.
 Progress posts name the runs that changed, including an earlier run that finishes
 or fails while newer work is running.
 
-Task rows show reported program status, Task IDs, stored PR links and the recorded
-remote Machine. Task IDs link to the issue when its URL is recorded; otherwise they
-remain plain text. Qualified Session excerpts show their source age; stale output
-falls back to a labeled summary. Local Machine names stay hidden. Links open
-separately from the Task row; unknown activity and live clients without reports
-show no activity label.
+Task IDs in the sidebar link to the issue when its URL is recorded; otherwise
+they remain plain text. The link opens separately from the Task row. Unknown
+activity and live clients without reports show the Task's condition or
+lifecycle word. The PR link
+and owner are in the Task pane, not the row.
 
 Follow a conversation in the pane and sidebar: Busy for a working report,
 Available for an idle report, Blocked for a question or permission request, and
@@ -222,15 +309,32 @@ Work selection uses the theme’s selection fill and contrasting text.
 File selection keeps a neutral fill and edge; keyboard focus has a separate outline.
 Ordinary controls and links use text roles; the theme’s accent emphasizes deliberate actions.
 Status labels and shapes retain their meaning across palettes.
-Choose **Settings → Appearance** to preview the whole workspace. Set
-**Light theme** and **Dark theme** independently; **System** follows macOS using
-both. System lists both pickers; Light or Dark lists only its own. Each picker
-shows built-ins, then **Yours**, ending with a dashed **Import file…** tile.
+Choose **Settings → Appearance** to preview the whole workspace. Pick
+**System**, **Light** or **Dark**; System follows macOS and lists both sides,
+Light or Dark lists only its own. Each side's heading names its chosen theme
+(**Light themes · Fjord Light**), then shows built-ins as cards and **Yours**,
+ending with a dashed **Import file…** tile. An imported file joins the side its
+own colors say; in Light or Dark mode the preview switches to that side. Every card is drawn in its
+own theme: a title bar strip, its name as a heading, Busy, Blocked and Error,
+ANSI 1–6, a selected row and a **Run** button:
+
+```text
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+Fig
+Busy  Blocked  Error
+● ● ● ● ● ●
+[Selected row] [Run]
+```
+
+Families sort by name after Loopflow, so a family's light and dark halves sit in
+the same column. Clicking a card previews it in every window; the chosen card is
+ringed in the window's focus color. A theme with unreadable roles shows why
+under the cards, before **Apply**.
 
 ```yaml
 # ~/.lf/config.yaml
-theme: "light:Linen,dark:Hearth"   # System
-theme: "Hearth"                    # Dark (or Light) mode: one name
+theme: "light:Folio,dark:Fig"   # System
+theme: "Fig"                    # Dark (or Light) mode: one name
 ```
 
 **Apply** rewrites only that line; **Cancel**, Escape or closing writes nothing.
@@ -238,22 +342,28 @@ Edit it by hand and every window follows; a misspelled name keeps the last theme
 and names the fix. Absent means Loopflow Light/Dark. A repository's
 `.lf/config.yaml` never sets the theme.
 
-Built-ins are 12 light and 12 dark. **Loopflow Light** keeps the original
-cream/burgundy; **Loopflow Dark** is slate with warm bronze; **Linen** and **Hearth**
-are quieter light and charcoal alternatives.
+Built-ins are 12 families, each a light and a dark theme. **Loopflow Light** keeps
+the original cream/burgundy; **Loopflow Dark** is blue-grey with rose headings and
+links, under the same burgundy title bar. The other eleven are generated from
+specs in `scripts/theme_catalogue.py`: **Fig** is plum with a lime accent, its
+light half **Fig Leaf** a leaf-green ground with plum ink.
 
 Your themes are Ghostty theme files in `~/.lf/themes/`; `~/.config/ghostty/themes/`
 is read too, never written. Names resolve to yours, then built-ins, then Ghostty's.
-A file named like a built-in overrides it. **Customize** on a built-in writes your
-copy; on yours it edits in place. **Delete** removes yours (**Revert to built-in**
-for an override). **Import file…** copies a theme into Yours, accepting only the
-picker's appearance; a dark file in the Light picker explains itself instead.
+A file named like a built-in overrides it. **Customize <name>**, beside Cancel and Apply,
+acts on the card chosen last: on a built-in it writes your copy; on yours it edits in
+place. **Delete <name>** removes yours (**Revert <name> to built-in** for an override).
+**Import file…** copies a theme into Yours on the side its colors say; in Light or
+Dark mode the preview switches to that side.
 
 ```
 background = #171924
 foreground = #cad2ef
 palette = 4=#7aa2f7
-loopflow-accent = #3d59a1    # optional app roles; the rest derive from ANSI colors
+# Optional app roles; the rest derive from ANSI colors.
+loopflow-accent = #3d59a1
+# Optional; without it the bar follows the accent.
+loopflow-titlebar = #242f50
 ```
 
 Files read up to 256 KiB of UTF-8. Six-digit RGB background/foreground are
@@ -261,16 +371,42 @@ required; cursor, selection, `palette = N=#RRGGBB` and `loopflow-` roles are
 optional. Preview explains defaults, repeats and omitted settings. Fonts,
 commands, keybindings, includes and theme references are never followed.
 
+The title bar is its own role. A file that leaves it out gets a bar from its
+accent, darkened where needed (lightened under black text) so the bar's text
+stays readable; a theme you made before the role existed may show a slightly
+darker bar. **Customize** lists **Title bar** under Actions and focus, and saving
+states it: after that, changing **Button** leaves the bar alone.
+
 Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
 their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
 Source and license notices ship offline with the catalogue.
 
-**Auto-Ship** hands a Task off; it leaves Working tasks and its ship process lands it.
-It sits at the right end of the Workflow bar under the jump bar, beside the Task's
-stages as dots (click them for each stage) and what is running now. While the
-handoff exists, the same spot holds Stop Auto-Ship, including while it is
-restarting or waiting for assignment; the toast's Undo is Stop Auto-Ship.
-Open a Dashboard with `state:shipping` to watch Tasks executing autonomously.
+Under the jump bar, the workflow bar reads where the Task stands:
+
+```text
+code  plan  build  👤ship-review  deliver  👤verify   build is running implement. You are next needed at ship-review.   [Auto-Ship]  …
+```
+
+The Graph's name, then its top-level steps in order, a person before each step
+that waits for you. Steps already passed are quieter; the step the Task stands
+in is strong, in the working colour while it runs and in the waiting colour
+when it has stopped or is waiting for you. A step that appears in more than one
+part of the Graph (`concept-review` runs in both `plan` and `build`) marks the
+part it is running in. The sentence is the one `lf task status` prints. In a
+narrow window the steps go and the sentence stays.
+
+When the Task can move, one button says how: **Start** before it has run,
+**Run** once its Graph has stopped. **Auto-Ship** turns the Task's auto setting
+on and runs it, as `lf task auto on` does: its run stands in at each
+interactive step and lands the PR. Turning it on raises the Notice "LOO-5
+Auto-Ship requested · Undo"; Undo is Stop Auto-Ship (`lf task auto off`), and
+so is the button, which reads **Stop Auto-Ship** while auto is on. While auto is on,
+the sentence names auto instead of you, and the Task's board card and sidebar
+row carry an Auto badge. Open a Dashboard with `state:auto` to watch those Tasks.
+
+Everything else is in **…**, the same list as the sidebar row's context menu:
+**Start from…** (or **Start with…** before the Task has a Graph), Complete or
+Reopen, Claim or Unassign, Move, Copy ID and link, and **Abandon…**.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool
@@ -295,32 +431,184 @@ Task workspaces start with the Session on the left and Files on the right,
 at 61.8/38.2. Use **View → Toggle Shell** or **Toggle Files**, or their shortcuts.
 If every pane is hidden, **Show pane** restores the retained pane; **Open conversation**
 remains available when the Work has no conversation open.
-Shell holds retained shell tabs; Files holds documents, **Brief**, **Changes** and
-recorded **Pull request** tabs. Hidden tools keep their clients and drafts. Files starts with its chooser closed. Click the file-browser toggle or press
-Command-P in the file pane to search **scratch** and files changed from the
-branch's recorded parent commit. Selection closes the dropdown; pin it to keep
-the list alongside the document (Control-Command-B). Escape dismisses the dropdown.
-Sidebar selection switches the whole
-Task workspace; selections inside a Task can focus its companion.
+Shell holds retained shell tabs. The Task's pane has one row of tabs: **Brief**,
+**Diff** and **Files** (Option-Command-1/2/3), then anything else open beside
+them. Hidden tools keep their clients and drafts.
+
+**Brief** opens on the Task's title, then one sentence with the word its row
+says when no program reports, its step and why
+("Moving, at build. The loop chose another pass on the concept review.",
+"Waiting, at demo. ready."; a Task that needs nobody gives no why when it
+would only repeat its condition: "Idle."), a line for what it
+needs when that sentence has not already said it ("Blocked: checkout has uncommitted changes"), then its PR, the Tasks the brief names
+(click one to open it) and an outline when the brief has headings or an
+`Acceptance:` lead, as a two-column table that wraps in a narrow pane. Its
+scroll position survives page and Task switches in this window; a brief that
+changed since you last read it says so above its text.
+
+**Diff** opens on how much changed ("4 changed files", with the **Whole Task**
+step menu beside it), then what is compared: the base branch and its commit,
+wrapping rather than cut. The changed files sit beside the
+whole comparison as one stream. `lf task changes` returns each file’s change count with the list,
+before the pane reads any patches. Each shown file's lines are read on their own,
+those near the top of the pane first, so a large file never cuts another short
+and a hidden file is never read. A new file reads as its contents. Size
+collapses nothing: a line past 1,000 characters shows its start and **N more
+characters · Show**, a file past 1 MB shows its first 1 MB and says it was cut,
+and a file that could not be read offers **Retry**. Code is colored by its
+language's grammar, here and in Files, in your theme's terminal colors:
+keywords, types, functions, properties, strings, numbers and comments each
+have their own, readable on every row. A hunk is colored by its own lines
+first and by the whole file once both sides are read, so a hunk that opens
+inside a Python docstring colors as a docstring. Swift, Rust, Python,
+TypeScript, JavaScript, Go, C, C++, Objective-C, C#, Zig, Ruby, Java, Kotlin,
+SQL, shell, HTML, CSS, Markdown, YAML, TOML, JSON, INI, Dockerfiles, Makefiles
+and justfiles have grammars; other files stay plain. The page fits a pane 360 pt wide: the toolbar keeps the
+sidebar toggle, the stepper and the **…** menu, which holds what has no room,
+layout first, named in words (**New code**, **Unified**, **Side by side**), then order and
+tour, then Focus, and **Wrap long lines**. **Whole Task** opens a menu of the
+Graph steps in the branch's
+commits since its base: a run of commits whose subjects start `lf implement:`
+is one step, any other commit stands alone, and picking one compares that
+step's commits. A button by the title says where the work is
+delivered and opens the delivery card, whose link reads **Open on GitHub**. Loopflow's record decides whether there
+is a PR: none, publishing, open, merged or abandoned. GitHub's reading adds
+checks, review and description with its age; a failed, stale (over two minutes)
+or behind-the-checkout reading stays readable but loses its colors, and merged
+never reads as a finished Task.
+
+The files read in the tour's order when the checkout has
+`scratch/tour.yaml`, which the `tour` skill writes (`lf help tour`):
+
+```yaml
+at: 81d3fa5973e63a4394a25357502e635a3baf5d5b
+first:
+  - path: swift/LoopflowMac/TaskFileDocument.swift
+    why: Each file's lines are read on their own
+hide:
+  - path: docs/
+    why: Path literal renamed, nothing else
+```
+
+`first` puts those files at the top in that order, each `why` heading its files
+in the stream and the sidebar. Every file it does not name follows **By group**,
+by path within each group. Without the file the Diff reads By group. The order menu switches between **Tour**, **By group** and **By path**.
+`hide` leaves those paths out for this change only; the sidebar lists each with
+its reason and **Show**, and they never join the hidden paths below.
+
+The groups are the `diff_groups` setting, an ordered list read as `lf`
+resolves it (`lf config explain diff_groups`). The nearest layer that sets it
+wins whole: yours for the repository, then your global one, then the
+repository's `.lf/config.yaml`, then the default. A file goes under the first
+group with a matching pattern; files no group matches go where the list says
+`rest`, or last when it has none:
+
+```yaml
+diff_groups:
+- title: Docs
+  paths: ['*.md', /docs/]
+- title: Data model
+  paths: [/migrations/, '*.sql', schema, /models/, '*.proto', dto]
+- rest: Everything else
+- title: Tests
+  paths: [/test/, tests/, _test., .test., .spec., tests.]
+- title: Generated and lock files
+  paths: ['*.lock', '*.snap', /generated/, /vendor/]
+```
+
+A pattern matches `/` followed by the file's path, ignoring case: anywhere in
+it, or at its end when the pattern starts with `*`. That is the default, a
+little shortened; `lf config catalog` prints it whole.
+
+`at` is the commit the tour was written at. Once a later commit changes a file
+outside `scratch/`, the stream says so ("The tour was written at 81d3fa5 · 3
+files changed since") and the toolbar offers **Update tour**; with no tour it
+offers **Write tour**. Either runs the `tour` skill headless in the Task's
+checkout and reads in Tour when the new file lands. Until then the stream
+shows "Writing the tour…" with the run's log path, and the button stays beside
+it: nothing reports the run ending, so a run that died is started again with a
+click. Files changed since `at` still follow the named ones. Nothing rewrites
+the tour on its own, and a Task on another Machine offers neither button.
+
+The sidebar lists the files in that order: type to narrow the stream, click a
+file to bring it to the top. The stream draws about 1,500 rows from where it
+starts, more as you scroll down, so a jump lands at once however far it goes:
+a jump past that starts the stream at its file, with **N files above · Show**
+over it. Under them, **Always hidden** is the `diff_hidden`
+setting, patterns matched the same way. Every layer adds to it (`scratch/` by
+default; `[]` clears the layers below), and each pattern is named by the layer
+that added it. Only yours can be removed or added there; they are saved in the
+repository's `.lf/config.local.yaml`. Hidden files stay in the count: "4 of
+9 changed files". Below 620 pt the sidebar opens over the stream from
+its button and closes when you choose a file.
+
+The stream follows the comparison live without moving what you are reading. A
+bar above it names the file you are in, with its counts, **Open** and
+**Viewed**, and under it the function, type or Markdown heading the top line
+sits in. **Viewed** folds a file to its header until its lines change; the
+sidebar counts "12 of 60 viewed" and marks each folded file **Viewed**.
+Press `]`
+and `[` (or the arrows around the position) to step through changes across
+files, skipping folded files. The change you land on pulses once. **Focus** shows one file and still
+steps into the next. Between hunks the stream says how many lines it skipped
+and which declaration follows; click that row to read the lines in place,
+in a step's comparison as in the whole Task's.
+Edited lines emphasize the changed words. A block moved within a file collapses
+to one row, "Moved here from L12", that expands to its old and new lines.
+The stream opens on **New code**: the file as it is now, removed lines folded
+to "N old lines · Show". **Unified** shows both; **Side by side** needs a
+stream at least 640 pt wide.
+
+Markdown, images and HTML open rendered. A changed `.md` reads as a redline:
+added words filled, removed words struck, a new paragraph filled whole and a
+deleted list item struck whole. **Side by side** puts the old document left
+and the new one right, block beside block. A changed PNG, JPEG, GIF, WebP or
+SVG shows old and new side by side, each with its pixel and byte size
+(`1200×800 · 84 KB`); an added image says "Added" on the old side. A changed
+`.html` shows both pages live, side by side, each scrolling on its own and
+neither reaching the network. Images and pages stay two panes in every
+layout, stacked old above new in a pane under 640 pt. **Source** in a
+Markdown, SVG or HTML file's header shows its line Diff instead, until you
+switch back or close the window. An image too large to show says so with its
+size, and one that can't be decoded says that; the other side still shows.
+
+Click a line number (Shift-click extends) to write a comment under those lines;
+Return keeps it there. **Send to conversation** (Command-Return) puts every
+comment into the conversation's unsent input as one line, each naming its file,
+lines and side, and sending stays yours. A comment follows its lines when the
+worker edits above them; when the lines themselves change it says so, keeps its
+place and is still sent. Comments last as long as the window. **Copy** takes
+the selected lines without patch markers, as does a line's context menu, which
+also copies the selection or the new code shown; selecting text never takes
+the + and −. **Reference in conversation** types
+`path:L4-6 (after, working tree on <sha>)` alone. Files' Diff has the
+same comments, skipped lines and Send.
+
+**Files** holds open documents and their Read, Edit and Diff controls. One menu
+names the open file and, once several are open, where it sits among them
+(**TaskRow.swift** 1 of 3), and switches between them or closes it; under it,
+the Machine as a place (This Mac), then the checkout and folder in mono. Files starts with
+its chooser closed. Click the file-browser toggle or press Command-P for
+**scratch** and the Task's checkout tree, read from the Task's Machine as you
+open folders, 500 entries at a time (**Load more** for the rest). `M`, `R` and
+`U` mark files changed from the branch's recorded parent commit; `•` marks the
+folders holding them. ↑/↓ move, → opens a folder, ← closes it, Return opens the
+file. Search matches scratch, the folders you have opened and changed files. A
+folder that can't be read says why under it, with **Retry**. Expanded folders
+and scroll stay put across page and Task switches. Selection closes the dropdown; pin it to keep the list alongside the document
+(Control-Command-B). Escape dismisses the dropdown. Sidebar selection switches
+the whole Task workspace; selections inside a Task can focus its companion.
 Resizing or closing the browser is remembered while the window stays open;
 layouts are not yet restored after quitting the app.
 
-Choose **PR** for a compact GitHub page: status, checks, pending reviewers,
-description and change totals. Expand **Files changed** and individual files to
-read published patches. Refresh updates GitHub data using the signed-in GitHub
-CLI on this Mac. Missing access and omitted large/binary patches are shown inline;
-local uncommitted edits stay in Files.
-
 Open **•••** or press Command-/ for the selected Task’s actions. Row context
 menus use the same actions for the clicked Task. Command-T adds a shell tab. The main Session's menu switches between **Claude**,
-**Codex**, and **OpenCode**, continuing the same Session with its history.
+**Codex**, **OpenCode**, **Pi** and **Antigravity**, continuing the same Session with its history.
 **Refresh session** reconnects the pane to that conversation, including after a
 failed launch or stale connection. It keeps the provider's history and running
-process; a conversation open elsewhere still offers **Take back**. The control
+process, and takes over a conversation a native client holds. The control
 stays visible when the Session is the only pane. The same action is available
-through `lf desktop do refresh-session -p session`. **Take back** transfers input
-from another terminal; `lf desktop do take-back-session -p session` uses the same
-action.
+through `lf desktop do refresh-session -p session`.
 **Reset session** starts a fresh provider thread in the same Session, seeded with
 its saved conversation. Reset and provider switching first read that history,
 then replace the current provider process. If the
@@ -359,18 +647,9 @@ Graph processes and http(s) pages. ⌘W closes the selected tab, or hides the pa
 ⇧⌘T restores the last closed tab's identity and history. Close ends its shell
 and jobs; New Shell starts fresh execution.
 
-**View → Toggle Files** shows a Task's checkout in the browser pane beside the
-retained terminal. Expand folders to read one page of up to 500 entries;
-**Load more** continues the directory and **Show ignored** includes ignored paths.
-Tracked, unchanged and untracked files remain available without an active PR.
-**Changes** optionally compares the worktree with the Task PR's
-recorded base; **HEAD** compares with its current commit. The displayed SHA pins
-the file list and selected diff. A recorded PR links above the file navigator.
-Use ↑/↓ in the navigator to select files; hover a row for its full path.
-Closing the pane keeps its drafts in this window.
-
 **Read** is where documents open: Markdown renders formatted, HTML as a live
-page that runs its scripts but never reaches the network. Links open in the
+page that runs its scripts but never reaches the network, and an image as the
+picture, whatever its extension. Links open in the
 browser. **Edit** retains editable UTF-8 drafts and selection in this window;
 **Diff** shows the draft comparison read-only.
 
@@ -423,10 +702,8 @@ long lines retain the native editor's known responsiveness limitation.
 
 Select a repository, then a Task to open its conversation. Its workspace retains
 conversations, shells, file drafts and layout across visits. Use **+** for supporting
-panes; expand **Overview** for Task details. Active clients elsewhere require
-explicit **Take back**. The pane retains its last available screen and shows
-Rust's command beside the action. Passive reveal leaves the other client in control.
-With no saved screen, the pane explains where the conversation is controlled.
+panes; **Task details** holds its description. Opening a conversation a native
+client holds takes it over here; that client ends.
 
 Exiting a disposable CLI conversation retires it from navigation while keeping
 its provider history. Ctrl-C interruption is recorded; interrupted Graph reviews,
@@ -445,31 +722,25 @@ readable without granting completion authority. Failed provider starts offer rec
 
 Search Work names and identifiers with **⌘K**. The repository name opens its
 conversation. Unscoped Sessions remain available through `lf session list --orphan`.
-Missing planning or selection readings retain known Work and show the read error.
+Missing planning or selection readings retain known Work and raise a Notice.
 **Task details** opens the description, comments and Run history.
 
 Opening a Task enters its retained panes and opens its conversation.
 Navigation never starts its Graph. Returning preserves panes, drafts and focus, including historical
 conversations. Explicit bare CLI Task links still support inspection without
 conversation acquisition.
-The compact header shows the current Workflow position and available actions;
-**Overview** expands its graph and description above the multiplexer. Opening
+The workflow bar shows where the Task stands and what it can do next. Opening
 feedback stays inside the terminal area. Resolving a conversation installs its
 record and pane before ending preparation, including explicit Session links.
 Cached switches reuse their panes and drafts without preparing again.
 When the selected Task's lifecycle becomes completed or abandoned, it stays
-visible with a green **Completed** or red **Canceled** header. Navigating away restores the ordinary
+visible with a green **Done** or red **Abandoned** header. Navigating away restores the ordinary
 sidebar filters. **Back** (⌘[) returns to the retained workspace and its sidebar
 row, preserving conversations, files and drafts without starting execution.
-The expanded graph scales to the window:
-`start` and `end` as circles, each node a box saying what you do there, one
-labelled arrow per edge, a loop back as an arc over its node. The current node
-or running edge is marked. The labels of the edges leaving the current node
-are buttons; each runs `lf -b task run` as a child of the app. No edge is offered while one runs. An edge whose Graph stopped holds the
-Task, is drawn stopped, and is offered again with the others leaving its
-node. **Move to** changes Workflow position; `end` requests completion.
-**Complete** changes Task status independently. **Retry completion** retries a
-failed request without replaying the Graph.
+**Start from…** in **…** lists `start` and the Task's interactive steps; picking
+one runs `lf task run ISSUE --from STEP` as a child of the app. **Complete** changes Task status independently: the row leaves the list in the
+click and the next Task opens. A refused completion brings the row back with a
+Notice saying why; completing again never replays the Graph.
 Linear completion leaves the displayed Workflow and live Processes intact.
 Loading or unavailable Workflow readings remain explicit; a failed refresh keeps
 the last recorded graph with its actions disabled. Only a successful Task reading
@@ -480,9 +751,8 @@ Choose **Graph processes** in **⌘K** to open the Graph process log. It lists e
 Task's checkout, newest first, whether an edge or a person started it; it is
 not the Workflow's history. One line each: Graph, state, when it started and
 how long it ran. A row opens to its id, graph and steps (the shape of
-`lf process show ID --json`). A Graph whose process exited early reads
-**stopped**. One whose process was killed has no exit record and keeps reading
-as running. **Task details → Debug** lists the Task's raw Sessions and Processes.
+`lf graph show ID --json`). A Graph whose runner exited or was killed reads
+**stopped**. **Task details → Debug** lists the Task's raw Sessions.
 Sessions list **Waiting** first and working ones in a compact group.
 The Wave page's **Workflow** opens its definition in the catalogue inspector.
 **Customize** or **Edit** opens the existing source editor; captured Task
@@ -503,14 +773,18 @@ The toolbar above the workspace shows its Work ancestry. On the left it drills
 Wave → Task → Session: Wave and Task crumbs return to their details; the Task's
 issue ID links to Linear. The Task crumb keeps the exact conversation name
 without a sibling picker. Repository/Wave crumbs can choose among their Sessions. The pencil renames the Session in place through `lf session
-rename`; the shown name is the shared readback, and a rejected name stays in the
-field with its error. A remote Graph Session's name lives on its Machine and is not
+rename`; the new name shows when you save, and a rejected name returns with a
+Notice saying why. A remote Graph Session's name lives on its Machine and is not
 renamed here. Outside Task navigation, the Session shows its Graph membership
 beside the name. Task navigation keeps that provenance in inspection. On the right sit
 the Task's read-only worktree location and the Activity glyph.
 
 Each nonempty pane has a compact program header with its known provider,
-conversation or terminal title, directory and current reported status. Hovering
+conversation or terminal title, directory and current reported status: one
+dot in the status's colour and a short phrase.
+When a Task's conversation starts fresh rather than resuming, "New
+conversation; earlier one left behind" sits on its own line between the header
+and the terminal, never over the terminal's text. Hovering
 the focused header reveals Close; its context menu offers zoom. Shell tabs share
 one tool pane. A lone terminal omits the redundant pane header. A neutral edge and subtle shadow
 distinguish the selected pane without recoloring its reported activity.
@@ -526,8 +800,16 @@ current match for 160 ms; hiding a pane cancels the cue. Reduce Motion uses
 Find's persistent match styling. Programs that own selection may show their own
 copy confirmation; terminal feedback describes only a terminal-owned copy.
 
+Terminals draw in Spline Sans Mono 13 with its real bold and italic faces and
+ligatures off; Ghostty draws box drawing, blocks and braille itself, so Claude's
+frames stay continuous. Your Ghostty configuration still wins: a
+`font-family` you set comes first and Spline Sans Mono fills the glyphs it
+lacks, and your `font-size`, `adjust-cell-height` or `font-feature` replace
+Loopflow's.
+
 ```ini
 # In your Ghostty configuration; reopen Loopflow after editing.
+font-family = Berkeley Mono
 minimum-contrast = 1
 ```
 
@@ -612,8 +894,8 @@ Sessions and Task human GraphSteps.
 Runs resumed interactively also appear, including those originally launched
 headlessly. Closing their client preserves the Session and its history.
 
-**Take back** transfers input to this pane; the previous terminal reports the move.
-Opening the pane leaves the other client in control.
+Opening the pane takes input from a native client, which ends; a held terminal
+only gains this view.
 
 Discuss review feedback in the ongoing conversation. Closing a pane only hides
 the view and releases its Desktop hold. Shared lifecycle protections determine
@@ -650,7 +932,7 @@ directory does not move it into another workspace.
 Manually launched agents in these shells register against their actual terminal.
 Selecting their Session focuses the existing shell; selection leaves both the
 conversation and shell running.
-External clients require explicit **Take back**. Terminals and their command titles survive Work list and detail
+Terminals and their command titles survive Work list and detail
 navigation. Switching repositories focuses that repository’s window without replacing
 the origin’s panes or drafts. Native surfaces belong to
 that window and are never mounted twice.
@@ -689,8 +971,13 @@ keeps its open conversations and files.
 `lf desktop portfolio --json` reads this same Machine-local selection. RegistryQuery carries
 all reads and mutations; Swift owns no membership writer or folder scanner.
 
-Portfolio retains the Wave inspectors. Opening a Task there routes to its
+Portfolio retains the Wave inspectors. A click on a Task's row there, on the
+roadmap, the Now list or a Wave's page, opens it in its
 repository window rather than creating another Task workspace in a sheet.
+A Wave on the roadmap is a section under its name, divided from the next by a
+line. A Wave's page shows its name, objective and key results, every Task, then
+its metric table. A metric whose contract has an issue shows a notice above the
+table with the count and each issue's summary; **Copy** copies the summaries.
 Wave Chat loads the active backing's bounded history before SSE, keeps it visible
 through reconnects, and rolls equivalent operational failures into one
 disclosed notice. Cold launch does not start a chat transcript read.
@@ -703,9 +990,11 @@ decisions, deliveries, and actionable failures remain visible. The detail pane
 reads the Wave's plan, Tasks, decisions, PR delivery, and Task conditions
 from `lf wave plan <wave> --json`.
 
-Open a Task from the planning list in its repository window, start its legal Graph,
-or open its PR. **Worktree** opens the recorded checkout in Warp.
-Rows show the shared condition and reason from `lf plan list`; unknown means
+Beside each Task's row, **Start** (**Run** once its Graph has run),
+**Open PR** and **Worktree** start its legal Graph, open its PR, and open the
+recorded checkout in Warp.
+Rows show the shared condition and reason from `lf plan list` as their status
+word and line; an unknown condition adds no word, because
 the required evidence could not be read.
 
 Open **Go → Telemetry** for token spend, codebase growth, a token-weighted
@@ -724,11 +1013,34 @@ codebase tree, and registry health.
   Lifecycle mutations remain `lf task run` and `lf task interrupt`; review stages use
   the Task's persisted graph position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
-  `lf wave list/show/status`, `lf process list`, and `lf session history` JSON commands; the app does not
+  `lf wave list/show/status` and `lf session history` JSON commands; the app does not
   maintain a second planning or lifecycle database. Unavailable per-Wave evidence
   renders its reason, and refresh failures leave the last successful planning or
   Activity history visible.
 
+## Work tracking
+
+The sidebar presents the repository's retained working Task order, then direct Wave
+rows. Opening started, unpaused Work appends once. Activity and query refresh never
+reorder slots; explicit pause hides a slot without deleting its stored position.
+Working references are saved through WorkCache; they convey no execution authority.
+Unstarted Tasks show their brief beside a Start offer in the Session slot without
+joining the working set. Only Start runs anything.
+
+The navigator's Working tasks / Available / Running choice filters presentation
+without selecting Work or changing panes, clients, focus or drafts. Missing planning
+keeps an unavailable row. Work observation retains its last reading on failure.
+Wave navigation leaves working positions and the sidebar viewport intact.
+
+Title-bar breadcrumbs follow hierarchy as a jump bar: each name navigates, and the
+› after it lists what is inside (repository › Waves, Wave › Tasks) with a filter
+that searches that scope. Back follows visits, and Cmd+K routes
+cross-repository Work to its own window. Cmd+1–9 and Control+Tab address the same
+stable eligible slots, independent of the filter. Each Work owns one retained
+workspace. Dashboard queries compose those workspaces side by side; ordinary
+navigation selects one destination. Rust owns query membership and arrangement,
+including hidden occurrences and duplicate suppression. Tiles show the primary
+Session or explicit zoom without acquiring a provider.
 
 ## Code map
 
@@ -758,20 +1070,11 @@ offline. Matching source and rebuild instructions ship inside the app under
 
 ## Build system
 
-`./dev` uses Swift Package Manager and installs to a stable application path
-so macOS permissions survive rebuilds. The app queries `lf` directly and starts
-only the selected Wave's `lf wave` process; it has no machine-wide service or
-remote-connection mode.
-
-The dev app supplies its bundled helper through `LF_BIN` and embedded shell PATH.
-Main-Machine commands forward to installed lf; new Sessions and agent children
-use its stable entry. Private-Home launches retain the bundled helper selection.
-Existing providers keep their environment when reattached.
-
-`run` and `run-debug` check `config repo --json` through that helper before
-launching. This checks repository registration, not all Desktop actions. Schema
-compatibility is checked by the store; ordinary commands cannot migrate the main
-database. Private `LF_HOME` experiments remain disposable and explicit.
+The launcher builds with Swift Package Manager and uses a stable bundle at
+`~/Applications/Loopflow Dev.app` so macOS permissions survive rebuilds.
+The launcher clears the calling shell's `LF_*` variables. Dev looks up
+`~/.local/bin/lf`, or `$LF_INSTALL_DIR/lf` when the app itself has a custom
+installation directory in its environment. Swift edits need only a Swift build.
 
 The installed app updates itself (`AppUpdater`, Sparkle), including a custom
 location reached by the public `lf` entry or selected by `LF_APPLICATIONS_DIR`. It
@@ -781,9 +1084,9 @@ appcast), never check for updates.
 
 | Command | What it does |
 | --- | --- |
-| `uv run python scripts/loopflow-dev.py run` | Build and launch |
-| `uv run python scripts/loopflow-dev.py install` | Build and install without launching |
-| `uv run python scripts/loopflow-dev.py run-debug` | Build and run with stdout |
+| `uv run python scripts/loopflow-dev.py run` | Build and open Loopflow Dev on the live Machine |
+| `uv run python scripts/loopflow-dev.py install` | Build and install Loopflow Dev without launching |
+| `uv run python scripts/loopflow-dev.py run-debug` | Build and open Loopflow Dev with logs visible |
 | `uv run python scripts/loopflow-dev.py build` | Build only |
 | `uv run python scripts/loopflow-dev.py ghostty-build` | Rebuild the pinned patched GhosttyKit and emit its SwiftPM artifact/checksum |
 | `uv run python scripts/loopflow-dev.py test` | Run unit tests |
@@ -852,7 +1155,7 @@ The repository-wide gate is `uv run python scripts/test.py --all`.
 lf plan list --all --json --subscribe       # every Wave's plan and open Tasks as Desktop shows them
 lf task show LOO-1 --json --subscribe       # the shown Task: work, Graphs, thread
 lf session list --json --subscribe         # the repository's Sessions as Desktop lists them
-lf repo plan --json --subscribe          # stored sync receipts
+lf repo tracker --json --subscribe       # stored sync receipts
 ```
 
 A window observes these reads through `RegistryQuery.subscribeWork()`, one server
@@ -876,8 +1179,17 @@ Task run and ship dispatch detached execution under existing Graph owners.
 Terminal launches and remote Task file streams retain their CLI transports;
 Desktop's UI automation remains app-owned.
 
-Canceling releases the client's wait, but an admitted mutation may still complete.
-After a lost response, refresh authoritative state before another deliberate edit.
+Task changes answer once their write commits; planning sync to Linear runs
+after the reply. Each answer carries the store revisions it moved, and each
+reading carries the revisions it read at. `PendingChanges` patches shown rows
+(the table in [Changes show at once](../docs/surfaces.md#changes-show-at-once))
+until a reading at or past the answer's revisions arrives; it drops a patch on a
+refusal, never by comparing values or on a timer. Each change carries a request
+ID; a repeat within a day returns the stored answer without running again.
+`PendingChanges` is one per Machine (Desktop's windows share one), sends each
+change under its request ID, resends while the link is lost and holds the link
+state: a blip keeps changes in memory, away greys out change controls and
+stands one condition Notice. Readings are `Reading<Value>`, carrying `readAt`.
 Task creation (including Session adoption) and new Session threads additionally
 have creation receipts. `CreationSubmissions` saves the exact submitted payload,
 request ID, original Machine and protocol version before sending; the payload
@@ -896,7 +1208,7 @@ See the [creation contract](../rust/loopflow/src/server/README.md#creation-recei
 
 The parts: the plan, the repository's Dashboard plans
 (`lf desktop view list`), Sessions (`lf session list`) and planning status, the shown Task's status, its
-activity (`lf session history`) and live call trees (`lf process list`). Each subscription is
+activity (`lf session history`). Each subscription is
 internally consistent; panes do not share one snapshot. Changing what the window
 shows restarts only the subscriptions whose read changed; the rest answer from their last frame without reading again.
 
@@ -969,7 +1281,7 @@ supplies `graph_processes`, using the same execution details as CLI inspection.
 ### Inspect retained workspaces
 
 ```sh
-lf open loopflow://loopflow/task/LOO-427 --diff --json
+lf open loopflow://loopflow/task/LOO-427 --explain --json
 lf desktop state --json
 lf task run LOO-427 --explain --json
 ```
@@ -1004,13 +1316,11 @@ window. After explicit `config repo --bind`, the next open reuses the existing
 scene, including one still registering. Retained local IDs come from `lf`, not
 path matching. Drafts, native views and pending links stay in place; old pane
 targets become stale, so inspect again before control. Restoration accepts a
-retained ID but refuses a location that no longer owns it. `--diff` reveals the existing Changes browser beside the conversation,
-retaining file selection and drafts. Launch acceptance returns `opening`; it does
+retained ID but refuses a location that no longer owns it. Launch acceptance returns `opening`; it does
 not prove a usable native endpoint. Inspection retains the latest request's outcome:
-`usable` for a Session request requires the Session's native-surface callback and a loaded Changes reading
-when requested, with both original panes still visible. Closing, hiding, replacing or
-zooming away a requested pane fails the pending request, as do connection, surface and
-comparison errors. Navigation cancels an unfinished opening; late results cannot settle a newer
+`usable` for a Session request requires the Session's native-surface callback, with its
+pane still visible. Closing, hiding, replacing or zooming away that pane fails the pending
+request, as do connection and surface errors. Navigation cancels an unfinished opening; late results cannot settle a newer
 request, even for the same URL. This is endpoint readiness, not provider-turn completion
 or proof of compositor rendering. A plain Task link waits for its Task page to mount;
 it does not require a Session or checkout. An unavailable workspace reports failure.
@@ -1020,16 +1330,15 @@ including lookup/validation failures before any window registers. A plain reposi
 becomes usable when its validated workspace receiver registers, even while planning
 loads. Registered Task links report their page/Session outcome on the window instead.
 Each receipt has a revision so a repeated request cannot consume its previous
-result. Session panes report attachment separately from native surface existence;
-`elsewhere` means another client retains input. Failed panes can reconnect in
+result. Session panes report attachment separately from native surface existence.
+Failed panes can reconnect in
 place, while a pending attachment stays with its current viewer.
 These are transient receipts, not opening history or Work identity. Remote Task links
 retain the local repository window and re-observe the named execution Machine before
-opening its Session and optional Changes pane. A remote link without `--session`
-shows the Task without creating or connecting a Session. An explicit Changes
-request without a Session still uses that Task's primary Session. Missing, changed or unavailable recorded locations
+opening its Session. A remote link without `--session` shows the Task without
+creating or connecting a Session. Missing, changed or unavailable recorded locations
 never prepare another checkout. The CLI transports native Session argv over SSH,
-keeping the owner's data directory and explicit takeover behavior. Local panes and
+keeping the owner's data directory and takeover behavior. Local panes and
 drafts remain retained; no remote planning tree or execution record is imported.
 
 Every Desktop gesture is a `DesktopAction` in `LoopflowMac/DesktopActions.swift`:
@@ -1038,7 +1347,7 @@ name (the `lf desktop` verb), title, arguments, default keys and `perform`.
 the Desktop socket look actions up there; nothing else mutates navigation or panes.
 Keys and menus act on the shown workspace's focused pane; a socket request names an
 exact window and pane, and `lf desktop` resolves those from one inspection (see the
-[CLI examples](../docs/surfaces.md#drive-desktop-from-a-script)).
+[CLI examples](../docs/surfaces.md#script-desktop)).
 
 `DesktopServer` (`LoopflowMac/DesktopServer.swift`) binds
 `$LF_HOME/run/desktop/<bundle-id>.sock` at launch (0700 directory, 0600 socket,
@@ -1092,12 +1401,8 @@ composition must finish first. Missing/exited/replaced surfaces never reopen or
 redirect input. A lost reply is uncertain: do not automatically resend. The native
 fixture covers cursor insertion and submission but has not run here.
 
-Sidebar excerpts use current native-turn evidence when available, with a 30-second
-working-output lifetime. A current Available result shows its source age. Missing,
-stale or disconnected evidence shows a labeled Task summary. Codex currently
-supplies turn-qualified excerpts; providers without that evidence use the summary.
 Repository and Wave navigation displays retained conversation entry without
-starting a provider. Waves group their full inventory as Owned and Unowned; rows read "Jack Heart on mini" or "Unowned".
+starting a provider.
 
 
 ## Testing
@@ -1108,7 +1413,7 @@ concurrent request traces in `logs/lf.log`, and no request Process rows or globa
 context changes. Native cancellation releases the client's wait; a lost reply
 remains unknown without replay.
 
-Terminal recovery must preserve the exact owner, draft and newer control claims.
+Terminal recovery must preserve the exact owner and draft.
 Opening shows **Opening… Input paused** through attachment and native readiness;
 **Reconnecting…** follows a previously acknowledged connection.
 Connection feedback overlays the terminal, so clearing it does not resize the
@@ -1116,13 +1421,12 @@ provider or move its cursor. Both mount layout and pre-mount sizing keep the sam
 viewport while status changes.
 Refresh waits for its previous viewer to retire before preparing a replacement.
 `WarmPaneMountTests` checks this headless with paused input and overlapping
-Refresh requests. Take back replaces read-only and ended attachments; the transport
-fixture `desktop_crash_reopen` checks control loss, read-only Refresh, explicit
-takeover and input returning when the other viewer closes, against a surviving
-provider. `GhosttyTerminalMountTests` checks mounted
+Refresh requests. Opening again replaces an ended attachment; the transport fixture `desktop_crash_reopen` checks that the draft survives
+a Desktop crash and new input submits once, against a surviving provider.
+`GhosttyTerminalMountTests` checks mounted
 focus separately.
 Check native status, paused input, local copy/Find/scroll, Retry after exhaustion,
-one-shot **Move here**, and cancellation on pane closure. An orderly terminal close
+typing from two views at once, and cancellation on pane closure. An orderly terminal close
 ends recovery and shows its replacement or retirement reason; bare EOF keeps the
 reason unknown. Installed-helper replacement must preserve the Session and Graph
 identities and prove continued input and Graph progress; a socket restart alone is insufficient.
@@ -1176,12 +1480,17 @@ which reads the event stream and ends the whole run, naming the test, when one
 test function outlives 300 s. Swift Testing's `.timeLimit` only records an
 issue; a test blocked on a child process still holds the run.
 CI passes `--skip-build` after its separate Rust and Swift builds so compilation
-does not consume the test deadline.
+does not consume the test deadline. With `--skip-build` the script runs the
+tests as last built: after an edit, run `swift build --build-tests
+--package-path swift` first, or a new test is silently absent and an old
+binary passes.
 
-On a pull request the Swift tests get 5 minutes after the build (161 s on
-2026-10-22); the merge queue and main keep a 20-minute hang guard. A PR that makes
-the suite slower fails on its own PR: make the slow test fast or share its setup,
-and raise the budget only with a measured reason.
+On a pull request CI runs two complementary groups after the build: transport/CLI
+fixtures and the remaining model/view tests. Each gets six minutes; main keeps a
+20-minute hang guard per group. Both remain under the required `swift-test` check.
+The same suite expression supplies `--filter` and `--skip`, so every test runs once.
+The local command runs both groups together. A PR that makes a group slower fails
+on its own PR: make the slow test fast or share its setup.
 
 After the tests, `swift-test` launches the debug app it built and waits for it
 to quit, the same check the release package runs:
@@ -1200,10 +1509,9 @@ frame the app is waiting in (for #1811's hang, `uiTestSnapshot`).
 
 Failed Swift CI runs write the unfinished and slowest tests to the job summary
 (`scripts/swift_test_report.py`) and retain a `swift-tests-<run>-<attempt>`
-artifact for seven days with the toolchain, output log, and Swift Testing event
-stream. Tests run in parallel, so the last test the log shows starting is not
-necessarily the stuck one. SwiftPM buffers console output, so silence alone does
-not establish that test execution never began.
+artifact for seven days with the toolchain and each group's output log and Swift
+Testing event stream. Tests run serially within each group. SwiftPM buffers
+console output, so silence alone does not establish that test execution never began.
 
 The Swift transport suite launches `target/debug/lf` against a temporary Machine.
 Build it before running the suite; an existing developer build can hide a missing
@@ -1279,6 +1587,21 @@ lf desktop view 'state:available'             # open an unsaved Dashboard
 lf desktop view 'query:attention'             # open a saved one
 ```
 
+A Dashboard is headed by its name, with its query beside it. Each tile is
+headed by the Task's row, the same one the sidebar shows, with open in full,
+more and hide at its end. Under the row is one sentence for the workflow,
+unless the Task's program is asking something, which the row already prints:
+
+```text
+Available and blocked   state:available or state:blocked        Default Slots  Edit Dashboard
+
+Keep interrupted terminal pastes from swallowing Session input
+LOO-912  Busy
+build is running. You are next needed at human-review.
+```
+
+Past one page of tiles, the pager reads "Page 1 of 2".
+
 Dashboards open only through `lf desktop`; the sidebar, Cmd-K and menus offer none.
 Save an open query to name, pin and arrange it. Edit changes only that Dashboard;
 repository and Wave conversations keep their normal views. Unstarted Tasks show
@@ -1291,10 +1614,12 @@ restore it from Hidden. Rust resolves membership and the first visible occurrenc
 reuse each Task's retained Session, tools and drafts. Focus never changes which
 occurrence wins or replaces its primary Session face.
 
-Task pane layouts, selected shell/file tabs and file drafts save through lfdb.
-A delayed restore keeps newer tabs and edits. Conflicts leave local content intact
-and show an error; **Reload saved intent** reconciles retained content before another
-save. File drafts compare their saved base with disk before editing. Restored shell
+Each Mac saves its own pane layouts, selected shell/file tabs and file drafts, one
+file per Work under `$LF_HOME/desktop-cache/pane-layouts/<machine>/<kind>/`; two
+Macs driving one Machine keep separate layouts. Restoring into open Work keeps its
+newer tabs and edits, and a pane naming a Session the current reading lacks opens
+empty. A failed save leaves local content intact and shows an error; **Reload saved
+intent** reconciles retained content before another save. File drafts compare their saved base with disk before editing. Restored shell
 intent retains its identity without initial commands: opening it attaches to the
 same owner and never replays startup or creates replacement execution.
 
@@ -1332,8 +1657,8 @@ xcodegen generate --spec swift/ios.yml
 open swift/LoopflowMobile.xcodeproj
 ```
 
-The **LoopflowiOS** scheme opens an explicitly offline Task → Session fixture.
-Disable its `--fixture` argument to connect a Machine over host Tailscale.
-[Native client and focused input tests](LoopflowiOS/README.md) describe its build,
-renderer choice and remaining device/live-integration proof. Desktop's project
-and package remain unchanged.
+Run the **LoopflowiOS** scheme and connect a Machine over host Tailscale.
+[Loopflow for iOS](LoopflowiOS/README.md) covers its build, screens, terminal
+and tests. It draws with the shared tokens and components in
+`Loopflow/Design/`, on the iPhone sizes of the ramp in
+[DESIGN.md](../DESIGN.md#type).

@@ -110,32 +110,12 @@ pub struct ProviderAccount {
     pub observed_credential_digest: Option<String>,
     pub observed_plan: Option<String>,
     pub credential_state: CredentialState,
-    pub routing_state: RoutingState,
-    pub plan: Option<String>,
-    pub paid_through: Option<time::Date>,
     pub utilization_percent: Option<u8>,
     pub cooldown_until: Option<i64>,
     pub cooldown_reason: Option<String>,
     pub last_selected_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
-}
-
-impl ProviderAccount {
-    pub fn effective_routing_state(&self, today: time::Date) -> RoutingState {
-        if self.routing_state == RoutingState::Automatic
-            && self.paid_through.is_some_and(|date| date < today)
-        {
-            RoutingState::ExplicitOnly
-        } else {
-            self.routing_state
-        }
-    }
-
-    pub fn eligible_for_automatic_routing(&self, today: time::Date) -> bool {
-        self.credential_state == CredentialState::Connected
-            && self.effective_routing_state(today) == RoutingState::Automatic
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -160,82 +140,4 @@ impl CredentialState {
             other => Err(format!("unknown credential state '{other}'")),
         }
     }
-}
-
-#[derive(
-    schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum RoutingState {
-    Automatic,
-    ExplicitOnly,
-    Disabled,
-}
-
-impl RoutingState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Automatic => "automatic",
-            Self::ExplicitOnly => "explicit_only",
-            Self::Disabled => "disabled",
-        }
-    }
-
-    pub fn from_db(value: &str) -> Result<Self, String> {
-        match value {
-            "automatic" => Ok(Self::Automatic),
-            "explicit_only" => Ok(Self::ExplicitOnly),
-            "disabled" => Ok(Self::Disabled),
-            other => Err(format!("unknown routing state '{other}'")),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderAccountSelection {
-    pub account: ProviderAccount,
-}
-
-#[derive(Debug)]
-pub struct AccountCapacity {
-    pub utilization_percent: Option<u8>,
-    pub cooldown_until: Option<i64>,
-    pub cooldown_reason: Option<String>,
-    pub windows: Vec<AccountLimitWindow>,
-}
-
-/// One observed subscription rate-limit window: how much of the plan's
-/// `session`/`weekly`/`weekly:<model>` window an account has consumed.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct AccountLimitWindow {
-    pub window: String,
-    pub used_percent: u8,
-    pub resets_at: Option<i64>,
-    pub plan: Option<String>,
-    /// The one model this window limits; `None` limits every model.
-    pub model: Option<String>,
-    /// Set while the window holds launches it affects back.
-    pub limited_until: Option<i64>,
-}
-
-/// A stored window observation for one managed account.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct AccountLimitRow {
-    pub provider: String,
-    pub account_id: ProviderAccountId,
-    pub window: String,
-    pub used_percent: u8,
-    pub resets_at: Option<i64>,
-    pub plan: Option<String>,
-    pub observed_at: i64,
-    /// 'stream' when a running harness reported it; 'poll' when asked for.
-    pub source: String,
-    /// The one model this window limits; `None` limits every model.
-    pub model: Option<String>,
-    /// Set while the window holds launches it affects back.
-    pub limited_until: Option<i64>,
 }

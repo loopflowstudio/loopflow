@@ -5,15 +5,15 @@ action_style: conversational
 ---
 Put the change in someone's hands so they can feel it.
 
-This is review by using it, not testing. `qa` already made sure it works. The
+This is review by using it, not testing; `qa` already made sure it works. The
 question now is whether it feels right: does it do what they hoped, does it
 flow, is it the thing they wanted.
 
 ## Set the stage
 
 Hand over the real product in the state a person would meet it: built,
-running, with realistic data, signed in, at the place to start. For a CLI, the
-command is ready to type; for an app, the window is open. Say in a sentence or
+running, with realistic data, signed in, at the place to start. For a CLI the
+command is ready to type; for an app the window is open. Say in a sentence or
 two what changed and where to begin. Don't script their steps or narrate what
 they'll see.
 
@@ -31,48 +31,24 @@ answer: "does the shortcut or the menu feel more natural?", "was the result
 where you expected it?". Never "does this look good?".
 
 A page helps when there's something to compare. Write `scratch/demo.html` with
-before and after screenshots, or two variants side by side, and the numbered
-questions. One self-contained file in light and dark; say its path. Loopflow
-Desktop shows `scratch/` pages beside the conversation; elsewhere, open it in a
-browser.
+before and after, or two variants side by side, and the numbered questions:
+one self-contained file, light and dark. Say its path.
 
 ## Keep their words
 
-Write what they said, word for word with their name, in a topic-named note
-under `scratch/`, along with what they did that surprised you. Keep their
-words apart from your reading of them. "Looks fine" stays "looks fine". Shape
-reactions into design changes together with them, and save the changes they
-asked for in the design. Write down only what couldn't be worked out again
-later.
+Write what they said, word for word with their name, in a note under
+`scratch/`, along with what they did that surprised you. Keep their words apart
+from your reading of them. "Looks fine" stays "looks fine". Shape reactions
+into design changes with them, and save the changes they asked for in the
+design.
 
-Then go back to implement with their words, or move on when they're done. The
-caller chooses the next step; leave the Session and Graph in place.
+Then go back to implement with their words, or move on when they're done.
+Closing the window, going quiet or the provider exiting is never approval.
 
-Never treat closing, detaching, provider exit, or lack of response as approval.
-
-## Disposable demos
-
-Before launch, create two private roots outside build output and temporary
-directories, which get purged; use any location the repo's cleanup guidance
-names. The history root holds the private Machine, provider history and fixture
-repository. The runtime root holds the whole copied runtime (the full app bundle
-when there is one) and generated output. Fix absolute paths from the start and
-never relocate them. Use the history root as `LF_HOME` and the copied CLI's
-absolute path as `LF_BIN` for launch, fixture commands and teardown. Record both
-roots, the Session, each demo process's exact identity, the teardown command and
-how to reopen the private Machine's history in the note. Keep both roots through
-rebuilds while those processes live.
-
-When the demo ends, wait for live turns and pending requests to settle. Then
-`lf resume` each demo Session and quit its provider, signaling only its verified
-PID if it won't exit. Quitting discards unsent input; saved history cannot
-recreate the editor.
-
-Confirm the demo processes exited before removing the runtime root. Never delete
-the history root. If teardown is incomplete, keep the runtime root and record
-what survives and the next action. No other cleaner, no signaling by process name.
+Clean up what the demo started: stop the processes you launched, by their own
+identity and never by name, and keep anything that holds history.
 
 ## Headless
 
-On a headless surface nobody can feel it. Say the demo didn't happen and why,
-then finish. Don't act out a person's reactions or invent feedback.
+With nobody there, nobody can feel it. Say the demo didn't happen and why, then
+finish. Don't act out a person's reactions or invent feedback.

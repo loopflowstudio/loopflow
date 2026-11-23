@@ -6,8 +6,6 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
-use loopflow_storage::work::selection::SplitAxis;
-
 use loopflow_execution::terminal_host::HerdrLocation;
 
 pub(super) struct Herdr {
@@ -158,21 +156,13 @@ pub(super) fn terminal(label: &str, cwd: &Path, argv: Vec<String>) -> Value {
     json!({"type":"pane","label":label,"cwd":cwd,"command":argv,"env":{}})
 }
 
-pub(super) fn split(axis: SplitAxis, ratio: f64, before: Value, after: Value) -> Value {
-    json!({"type":"split",
-        "direction": if axis == SplitAxis::Vertical { "right" } else { "down" },
-        "ratio":ratio,"first":before,"second":after,
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{split, terminal};
-    use loopflow_storage::work::selection::SplitAxis;
+    use super::terminal;
     use std::path::Path;
 
     #[test]
-    fn layout_preserves_command_argv_and_split_axes() {
+    fn panes_keep_their_command_argv() {
         let pane = terminal(
             "Files",
             Path::new("/repo/task"),
@@ -180,10 +170,5 @@ mod tests {
         );
         assert_eq!(pane["cwd"], "/repo/task");
         assert_eq!(pane["command"], serde_json::json!(["editor", "a b"]));
-        let below = split(SplitAxis::Horizontal, 0.6, pane.clone(), pane.clone());
-        let beside = split(SplitAxis::Vertical, 0.5, pane.clone(), below);
-        assert_eq!(beside["direction"], "right");
-        assert_eq!(beside["second"]["direction"], "down");
-        assert_eq!(beside["second"]["second"], pane);
     }
 }

@@ -1,13 +1,13 @@
 //! Diagnose current storage, execution records and the installation.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
 use loopflow_execution::output::Colors;
-use loopflow_execution::process::diagnosis::{check_lineage, Check, Status};
-use loopflow_execution::process::ProcessEntry;
+use loopflow_execution::process::diagnosis::{Check, Status};
+use loopflow_execution::process::OsProcess;
 use loopflow_execution::store::contention::read_contention;
 
 /// Exits non-zero when any check fails, so a caller can gate on it.
@@ -15,7 +15,6 @@ use loopflow_execution::store::contention::read_contention;
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct DoctorReport {
     store: StoreReport,
-    rows: usize,
     checks: Vec<Check>,
 }
 
@@ -38,7 +37,7 @@ pub fn run(json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string(&report)?);
     } else {
-        print_checks(&report.store, &report.checks, report.rows);
+        print_checks(&report.store, &report.checks);
     }
     if report
         .checks
@@ -50,7 +49,7 @@ pub fn run(json: bool) -> Result<()> {
     Ok(())
 }
 
-/// The store, Process evidence and installation checks `lf doctor` reports.
+/// The store and installation checks `lf doctor` reports.
 pub fn report() -> Result<DoctorReport> {
     let database_path = loopflow_execution::store::database_path_from_env()?;
     let store_report = inspect_store(&database_path);
@@ -58,46 +57,23 @@ pub fn report() -> Result<DoctorReport> {
         Some(error) => Check::fail("store", error.clone()),
         None => Check::ok("store", "selected database is compatible with this build"),
     }];
-    // The remedy hint counts exactly what `lf monitor prune` would repair.
-    let events = match loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
-        &database_path,
-        loopflow_execution::store::token_key::encryption_key,
-    )
-    .and_then(|store| {
-        Ok((
-            store.processes_since(0)?,
-            store.unrecorded_agent_ancestry()?.len(),
-        ))
-    }) {
-        Ok(events) => Some(events),
-        Err(error) => {
-            checks.push(Check::fail(
-                "processes",
-                format!("cannot read Process evidence: {error}"),
-            ));
-            None
-        }
-    };
-    if let Some((events, repairable)) = &events {
-        checks.extend([
-            check_attribution(events),
-            check_identity(events),
-            check_lineage(events, *repairable),
-        ]);
-    }
-    let rows = events.as_ref().map_or(0, |(events, _)| events.len());
     // Binary freshness remains useful when the store cannot open.
     checks.extend(check_installation(&database_path));
+    checks.push(check_history(
+        &database_path,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    ));
     checks.push(check_running_binaries());
+    checks.push(check_strays(&database_path));
     checks.push(check_binary_freshness());
     checks.push(check_contention(
         &loopflow_execution::diagnostic_log::log_path(),
         time::OffsetDateTime::now_utc().unix_timestamp() - CONTENTION_WINDOW_SECONDS,
     ));
     checks.push(loopflow_execution::desktop_exits::check());
+    checks.push(check_ptys());
     Ok(DoctorReport {
         store: store_report,
-        rows,
         checks,
     })
 }
@@ -136,7 +112,182 @@ fn check_running_binaries() -> Check {
     }
 }
 
+const PTYS: &str = "ptys";
+
+/// PTYs in use against the Machine's limit. Each Task conversation's held
+/// terminal takes one, as does every terminal tab; they run out first.
+fn check_ptys() -> Check {
+    match loopflow_execution::transport::pty_usage() {
+        Some(usage) => pty_check(usage),
+        None => Check::warn(PTYS, "cannot read this Machine's PTY limit"),
+    }
+}
+
+/// Fewer PTYs left than this warns: a reboot starts every Task conversation again.
+const PTY_HEADROOM: u64 = 32;
+
+fn pty_check(usage: loopflow_execution::transport::PtyUsage) -> Check {
+    use loopflow_execution::transport::PtyUsage;
+    let PtyUsage { in_use, max, limit } = usage;
+    let left = max.saturating_sub(in_use);
+    let detail = format!(
+        "{in_use} of {max} PTYs in use ({limit}), {left} left; each Task conversation holds one"
+    );
+    if left < PTY_HEADROOM.min(max / 10).max(1) {
+        Check::warn(
+            PTYS,
+            format!("{detail}. A conversation that cannot get one says so in `lf task status`"),
+        )
+    } else {
+        Check::ok(PTYS, detail)
+    }
+}
+
+const STRAYS: &str = "strays";
+/// What a Loopflow agent's processes inherit: its Session or the lf they run
+/// under, and the home whose store claims them.
+const STRAY_VARIABLES: [&str; 3] = ["LF_STEER_SESSION", "LF_PROCESS_ID", "LF_HOME"];
+
+/// OS processes carrying a Loopflow identity that no live Session or run
+/// claims. A descendant of a claimed process is that process's. Reports,
+/// never kills.
+fn check_strays(database: &Path) -> Check {
+    match strays(database) {
+        Ok(strays) if strays.is_empty() => Check::ok(
+            STRAYS,
+            "every process carrying a Loopflow identity belongs to a live Session or run",
+        ),
+        Ok(strays) => Check::warn(
+            STRAYS,
+            format!(
+                "{} process(es) carry a Loopflow identity no live Session or run claims: {}",
+                strays.len(),
+                strays
+                    .iter()
+                    .take(10)
+                    // The program alone: arguments can hold a prompt.
+                    .map(|process| {
+                        let program = process.command.split_whitespace().next().unwrap_or("");
+                        let name = Path::new(program)
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or(program);
+                        format!("{} ({name})", process.pid)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ),
+        Err(error) => Check::warn(STRAYS, format!("cannot scan for strays: {error:#}")),
+    }
+}
+
+fn strays(database: &Path) -> Result<Vec<OsProcess>> {
+    let processes = OsProcess::sample(time::OffsetDateTime::now_utc().unix_timestamp())?;
+    let parents: HashMap<u32, u32> = processes
+        .iter()
+        .map(|process| (process.pid, process.ppid))
+        .collect();
+    let ancestry = |pid: u32| {
+        std::iter::successors(Some(pid), |pid| {
+            parents
+                .get(pid)
+                .copied()
+                .filter(|parent| *parent > 1 && parent != pid)
+        })
+    };
+    // This doctor and whatever runs it are not strays; their other
+    // descendants still can be.
+    let exempt: HashSet<u32> = ancestry(std::process::id()).collect();
+    let mut claimed = HashSet::new();
+    if database.exists() {
+        let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
+            database,
+            loopflow_execution::store::token_key::encryption_key,
+        )?;
+        claimed.extend(store.recorded_lfs()?.into_iter().map(|lf| lf.pid));
+        claimed.extend(
+            store
+                .agent_processes()?
+                .into_iter()
+                .filter_map(|agent| agent.pid),
+        );
+    }
+    // A process works for the Machine its `LF_HOME` names, the account's own
+    // when unset; another home's work is that home's to claim.
+    let resolve = |home: &Path| std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+    let this_home = resolve(database.parent().unwrap_or(database));
+    let account_home = loopflow_execution::store::production_database_path()
+        .parent()
+        .map(Path::to_path_buf)
+        .expect("the account's database lives in its home");
+    Ok(processes
+        .into_iter()
+        .filter(|process| !exempt.contains(&process.pid))
+        .filter(|process| !ancestry(process.pid).any(|pid| claimed.contains(&pid)))
+        .filter(|process| {
+            let Some(found) = OsProcess::environment(process.pid, &STRAY_VARIABLES)
+                .ok()
+                .flatten()
+            else {
+                return false;
+            };
+            let mut home = account_home.clone();
+            let mut identified = false;
+            for (name, value) in found {
+                if name != "LF_HOME" {
+                    identified = true;
+                } else if !value.is_empty() {
+                    home = value.into();
+                }
+            }
+            identified && resolve(&home) == this_home
+        })
+        .collect())
+}
+
 const CONTENTION_WINDOW_SECONDS: i64 = 86_400;
+
+/// `history.db` grows with use: its size and oldest rows. A history row past
+/// retention means no prune has run on this Machine.
+fn check_history(database: &Path, now: i64) -> Check {
+    const NAME: &str = "history";
+    let path = loopflow_storage::history::history_path(database);
+    let Ok(metadata) = std::fs::metadata(&path) else {
+        return Check::ok(NAME, "history.db absent");
+    };
+    let retained = now - (loopflow_storage::sqlite::retention::HISTORY_DAYS + 2) * 86_400;
+    let conn =
+        rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY);
+    let oldest = |query: &str| -> Option<i64> {
+        conn.as_ref()
+            .ok()
+            .and_then(|conn| conn.query_row(query, [], |row| row.get(0)).ok())
+            .flatten()
+    };
+    let since = |oldest: Option<i64>| {
+        oldest
+            .and_then(|at| time::OffsetDateTime::from_unix_timestamp(at).ok())
+            .map_or("empty".into(), |at| format!("oldest {}", at.date()))
+    };
+    let history = oldest("SELECT MIN(observed_at) FROM session_history");
+    let turns = oldest("SELECT MIN(COALESCE(started_at,ended_at)) FROM turns");
+    let stale = history.is_some_and(|at| at < retained);
+    let detail = format!(
+        "history.db {:.1} MB; Session history {}; turns {}",
+        metadata.len() as f64 / 1_000_000.0,
+        since(history),
+        since(turns)
+    );
+    if stale {
+        Check::warn(
+            NAME,
+            format!("{detail}; history is past retention: is the Machine server running? `lf machine prune` applies it now"),
+        )
+    } else {
+        Check::ok(NAME, detail)
+    }
+}
 
 /// Who waited on the store's write lock and who held it, by binary, from lf.log.
 fn check_contention(log: &Path, since: i64) -> Check {
@@ -411,46 +562,7 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
     }
 }
 
-/// A process may name only one command, and its terminal row names that work.
-fn check_attribution(events: &[ProcessEntry]) -> Check {
-    let unnamed = events
-        .iter()
-        .filter(|process| process.completed_at().is_some() && process.command().is_none())
-        .count();
-    if unnamed == 0 {
-        Check::ok("attribution", "every completed Process names its command")
-    } else {
-        Check::fail(
-            "attribution",
-            format!("{unnamed} completed Processes name no command"),
-        )
-    }
-}
-
-/// Processes may be machine-scoped; recorded repositories must be absolute.
-fn check_identity(events: &[ProcessEntry]) -> Check {
-    let repos: HashSet<&str> = events.iter().filter_map(ProcessEntry::repo).collect();
-    let unscoped = events.iter().filter(|event| event.repo().is_none()).count();
-    let invalid = repos
-        .iter()
-        .filter(|repo| !Path::new(repo).is_absolute())
-        .count();
-    if invalid == 0 {
-        return Check::ok(
-            "identity",
-            format!(
-                "{} repo value(s), all absolute; {unscoped} Process(s) without repository scope",
-                repos.len()
-            ),
-        );
-    }
-    Check::fail(
-        "identity",
-        format!("{invalid}/{} repo value(s) are not absolute", repos.len()),
-    )
-}
-
-fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
+fn print_checks(store: &StoreReport, checks: &[Check]) {
     let colors = Colors::default();
     let build = store
         .build_label
@@ -476,7 +588,7 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
     if let Some(error) = &store.migration_error {
         println!("migration error: {error}");
     }
-    println!("ledger: {rows} Processes\n");
+    println!();
     for check in checks {
         let (mark, color) = match check.status {
             Status::Ok => ("ok  ", colors.green),
@@ -498,12 +610,37 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        check_attribution, check_contention, check_identity, check_lineage, inspect_store, Status,
-    };
-    use loopflow_execution::process::LfProcess;
+    use super::{check_contention, inspect_store, pty_check, strays, Status};
+    use loopflow_execution::process::OsProcess;
+    use loopflow_execution::transport::PtyUsage;
 
-    const DAY: i64 = 86_400;
+    const STRAY_CHILD: &str = "LOOPFLOW_DOCTOR_STRAY_CHILD";
+
+    /// Waits as a child of the stray test; does nothing in an ordinary run.
+    #[test]
+    fn stray_child() {
+        if std::env::var_os(STRAY_CHILD).is_some() {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+        }
+    }
+
+    /// Headroom is the room left under the limit; little of it warns.
+    #[test]
+    fn pty_headroom_counts_what_is_left_and_warns_when_little_is() {
+        let usage = |in_use| PtyUsage {
+            in_use,
+            max: 511,
+            limit: "kern.tty.ptmx_max",
+        };
+        let roomy = pty_check(usage(144));
+        assert_eq!(roomy.status, Status::Ok);
+        assert_eq!(
+            roomy.detail,
+            "144 of 511 PTYs in use (kern.tty.ptmx_max), 367 left; each Task conversation holds one"
+        );
+        assert_eq!(pty_check(usage(490)).status, Status::Warn);
+        assert_eq!(pty_check(usage(511)).status, Status::Warn);
+    }
 
     #[test]
     fn store_report_admits_a_newer_migration_tail() {
@@ -529,48 +666,55 @@ mod tests {
         assert_eq!(report.migration_error, None);
     }
 
-    fn row(ts: i64, event: &str) -> LfProcess {
-        LfProcess {
-            os_started_at: None,
-            id: loopflow_model::id::LfProcessId::new(),
-            pid: None,
-            trace_id: loopflow_model::id::TraceId::new(),
-            parent_lf_process_id: None,
-            via_agent: Some(false),
-            caller_session_id: None,
-            caller_agent_process_id: None,
-            command: None,
-            repo: Some("/src/loopflow".into()),
-            cwd: None,
-            started_at: ts,
-            completed_at: (event != "started").then_some(ts),
-            outcome: (event != "started").then(|| "succeeded".into()),
-            exit_code: None,
-            signal: None,
-            error: None,
-        }
-    }
-
-    fn named(mut row: LfProcess, command: &str) -> LfProcess {
-        row.command = Some(command.to_string());
-        row
-    }
-
-    fn status_of(rows: &[LfProcess], name: &str) -> Status {
-        let rows = &rows
+    #[test]
+    fn a_process_carrying_a_session_that_nothing_claims_is_a_stray() {
+        let home = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        // This test binary waits as the child: macOS hides the environment
+        // of platform binaries such as /bin/sleep.
+        let spawn = |session: Option<&str>, lf_home: &std::path::Path| {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "lf::commands::doctor::tests::stray_child",
+                    "--nocapture",
+                ])
+                .env(STRAY_CHILD, "1")
+                .env_remove("LF_STEER_SESSION")
+                .env_remove("LF_PROCESS_ID")
+                .env("LF_HOME", lf_home)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            if let Some(session) = session {
+                command.env("LF_STEER_SESSION", session);
+            }
+            let child = command.spawn().unwrap();
+            // The harness has started once its own arguments are readable.
+            while OsProcess::arguments(child.id())
+                .ok()
+                .flatten()
+                .is_none_or(|args| !args.iter().any(|arg| arg == "--exact"))
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            child
+        };
+        let mut stray = spawn(Some("session_gone"), home.path());
+        let mut plain = spawn(None, home.path());
+        let mut other_home = spawn(Some("session_gone"), elsewhere.path());
+        let found: Vec<u32> = strays(&home.path().join("loopflow.db"))
+            .unwrap()
             .iter()
-            .cloned()
-            .map(loopflow_execution::process::ProcessEntry::Lf)
-            .collect::<Vec<_>>();
-        [
-            check_attribution(rows),
-            check_identity(rows),
-            check_lineage(rows, 0),
-        ]
-        .into_iter()
-        .find(|check| check.name == name)
-        .expect("check exists")
-        .status
+            .map(|process| process.pid)
+            .collect();
+        for child in [&mut stray, &mut plain, &mut other_home] {
+            child.kill().unwrap();
+            child.wait().unwrap();
+        }
+        assert!(found.contains(&stray.id()), "{found:?}");
+        assert!(!found.contains(&plain.id()), "{found:?}");
+        assert!(!found.contains(&other_home.id()), "{found:?}");
     }
 
     #[test]
@@ -597,27 +741,5 @@ mod tests {
             "{}",
             check.detail
         );
-    }
-
-    #[test]
-    fn a_terminal_row_that_names_its_work_attributes_cleanly() {
-        let mut terminal = row(DAY, "completed");
-        terminal.command = Some(r#"["lf","code"]"#.to_string());
-        let rows = [named(row(DAY, "started"), r#"["lf","code"]"#), terminal];
-        assert_eq!(status_of(&rows, "attribution"), Status::Ok);
-    }
-
-    #[test]
-    fn machine_scoped_processes_have_valid_identity() {
-        let mut event = named(row(DAY, "completed"), "lf help");
-        event.repo = None;
-        assert_eq!(status_of(&[event], "identity"), Status::Ok);
-    }
-
-    #[test]
-    fn a_repo_basename_fails_identity() {
-        let mut event = row(DAY, "completed");
-        event.repo = Some("loopflow".to_string());
-        assert_eq!(status_of(&[event], "identity"), Status::Fail);
     }
 }

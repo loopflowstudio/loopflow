@@ -5,30 +5,72 @@ runs each step, which machine runs the Graph, how a Task moves from idea to
 landed PR, and how a Wave keeps going.
 
 Loopflow ships reasonable Graphs for software engineering, and they are
-templates. Copy one with `lf graph customize pursue`, change it, or write down
+templates. Copy one with `lf graph customize feature`, change it, or write down
 the way you work and share it.
 
 ## Skills
 
+A Skill is one job in Markdown: `design` plans, `implement` builds, `qa`
+verifies, `gate` reviews and publishes. Chain Skills in a Graph rather than
+cramming everything into one prompt; steps pass work through Git commits and
+notes in `scratch/`.
+
+### Extend or replace a builtin
+
 ```bash
-lf skill customize pr-message    # copies the builtin to .lf/skills/pr-message.md and prints the path
-lf audit focus on the token refresh path   # your .lf/skills/audit.md, with a message
-lf -a codex audit                # the same Skill on Codex
+lf skill customize pr-message    # creates .lf/skills/pr-message.md extending the builtin
+lf skill customize gate --full   # copies the full builtin text to replace it
+lf list skill                    # shows which Skills extend vs. replace builtins
 ```
 
-A repository Skill replaces the builtin of the same name, for everyone who has
-your commit. Customize copies once, then keeps printing the existing file.
-
-One Skill, one job: `design` writes the plan, `implement` builds it, `gate`
-judges whether it ships. Chain them in a Graph rather than writing one Skill
-that does everything. Pass work between steps through what already holds it:
-commits, and notes in `scratch/`.
-
-## Pick the agent for each step
+Extending a builtin lets you add repo-specific instructions while still
+receiving upstream improvements to the builtin:
 
 ```markdown
+<!-- .lf/skills/gate.md -->
+---
+extends: builtin
+---
+## In this repository
+
+Run `make e2e` before publishing.
+```
+
+A Skill without `extends: builtin` replaces the builtin of the same name for
+everyone on your team.
+
+### Automatic commits per step
+
+When a Skill step edits files in a Graph, Loopflow commits them automatically
+(and pushes on non-default branches):
+
+```text
+lf implement: Count retries per Task
+
+The board read attempts from the wrong row.
+```
+
+The `commit-message` Skill writes commit messages (and `pr-message` writes PR
+copy). Route them to a fast, cheap model:
+
+```bash
+lf set --global skill.commit-message.default_agent claude:haiku
+```
+
+Using `default_agent` keeps your `agents` failover list behind it if Haiku is
+unavailable. Run the same commit helper manually with `lf commit --step implement`.
+
+## Pick the agent per Skill or Graph step
+
+Specify `agent:` (pinned) or `default_agent:` (with failover) in Skill
+frontmatter, Graph steps, or config:
+
+```markdown
+<!-- .lf/skills/audit.md -->
 ---
 agent: codex
+context:
+  docs: [scripts/testing.md]
 ---
 Audit auth changes on this branch. Fix missing validation and untested paths.
 ```
@@ -36,101 +78,84 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 ```yaml
 # .lf/graphs/ship-api.yaml
 - step: {name: implement, agent: claude:opus}
-- audit                         # its own frontmatter: Codex
+- audit                         # runs on Codex per its frontmatter
 - gate
 ```
 
-A Skill's frontmatter `agent:` names its harness and model; a Graph step can
-name another for that occurrence. Explicit Graph `-a` applies to all its steps,
-including nested Graphs and routers. It is not exported to unrelated child work.
-Personal preferences can target the skill or an authored step ID;
-see [setting precedence](config.md). Use `default_agent:` in either definition
-for a fallback: every applicable `agent:` choice wins before any fallback,
-then source, scope and target decide within each class. A step on a fallback
-moves through [`agents`](config.md#keep-going-when-a-provider-runs-out) when a
-usage limit or unavailable model refuses it; a step with `agent:` stays on its
-provider and keeps its model when one is named. Builtin skills recommend
-no harness; the application's fallback applies when nothing else selects one.
+- `agent:` pins the harness (and model, if named).
+- `default_agent:` sets the preferred starting point while letting headless
+  steps fail over through your [`agents`](config.md#keep-going-when-a-provider-runs-out)
+  list on usage limits or unavailable models.
+- Passing `-a <harness>` to `lf graph` overrides every step in that Graph run
+  (including nested Graphs and routers) without affecting unrelated child Tasks.
+- `context.docs` in Skill frontmatter attaches extra files whenever that Skill
+  runs.
 
-```markdown
----
-context:
-  docs: [scripts/testing.md]
----
-Run the affected suites once for this tree.
-```
+See [Configuration](config.md) for the full precedence rules across personal,
+repository, Wave, Skill, and Graph-step settings.
 
-A repository Skill's `context.docs` adds files to its context, resolved like `--docs`.
+## Compose Graphs, loops, and branches
 
-## Run a Graph anywhere
+Run any Graph directly, headless, interactively, or on another Machine:
 
 ```bash
-lf -b graph ship-api                     # headless, step to step; returns when it ends
-lf -i graph ship-api                     # every step opens in the agent; exit it to advance
-lf --machine mini -b graph ship-api      # the whole Graph on another machine you added
-lf graph ship-api --context --json       # what the first step would receive; launches nothing
+lf -b graph ship-api                     # headless end to end
+lf -i graph ship-api                     # every step interactive
+lf --machine mini -b graph ship-api      # run on a remote Machine
+lf graph ship-api --context --json       # preview first step's context without launching
 ```
 
-Without `-i` or `-b`, steps run headless except `interactive:` ones, which open
-here ([below](#where-a-person-takes-part)). A failed step stops the Graph. A
-stopped Graph is history: inspect it with `lf process show ID`, then
-start fresh work. Nothing resumes it.
-
-Mechanical steps ride along as commands:
+Mix Skills and mechanical `cmd:` steps:
 
 ```yaml
-# .lf/graphs/deliver.yaml (the builtin)
-- gate                        # publish so CI starts, then review while it runs
-- cmd: land --wait-and-fix    # merge, repairing CI until it lands
+# deliver (builtin)
+- reflect                     # folds your feedback from this Task into skill edits
+- gate                        # publishes PR so CI starts, then reviews while CI runs
+- cmd: land --wait-and-fix    # merges when checks pass, repairing CI failures
 ```
 
-[What gate does and reports](ops.md#review-while-ci-runs).
+### Loops (`loop:`)
 
-## Loops and branches
-
-`pursue` is a Graph with a backward edge:
+A `loop:` block repeats as long as its final step says `iterate`. The built-in
+`plan` and `build` Graphs compose two nested loops:
 
 ```yaml
-- kickoff              # plan the change, risks answered
-- write-docs           # edit the actual user docs before implementation
-- implement
-- concept-review
-- graph: refresh      # sync with main, then realign the plan
-- loop: implement     # loop-or-next decides: advance, iterate, or blocked
-- compress
-- qa                  # use the change through its real path before anyone demos it
-- loop: implement
+# plan (builtin)
+- kickoff              # plan the change, answering key risks
+- concept-review       # pressure-test the premise before writing code
+- write-docs           # update actual user docs before implementation
+
+# build (builtin)
+- loop:
+    - loop:
+        - implement        # build one reviewable chunk
+        - cmd: sync
+        - realign          # decides: next chunk (iterate) or move on (advance)
+    - compress             # simplify what the branch touched
+    - qa                   # exercise the real change end to end
+    - concept-review       # decides: ship whole change or loop back
 - pr-publish
 ```
 
-`write-docs` edits the actual README, guides, or reference files before code:
-examples, expected results, and what someone needs to know to use the change.
-In `pursue`, this happens right after kickoff plans the change. An already attached Loopflow
-Desktop shows the relevant files in Files, with rendered Markdown/HTML and
-existing drafts preserved. In other hosts, or without an attached Desktop,
-the conversation reports the actual documentation paths and continues. Automatic
-presentation never launches an editor, host, browser or conversation.
+Any Skill can be the deciding step of a loop: it returns `advance`, `iterate`
+(with direction), or `blocked` (with a question). There is no arbitrary pass
+limit; loops continue while useful work remains.
 
-Edit the docs or discuss changes while work continues. There is no extra review
-stop or scratch copy. Saved edits guide implementation; for a change that needs
-attention now, tell the Task conversation. `lf open --file <path>` presents the
-original in an attached Desktop Files view. Internal changes with no
-documentation impact leave the docs alone.
+### Docs-first (`write-docs`) and QA playbooks (`.lf/qa/`)
 
-At each `loop:`, the deciding step reads the work and the plan and returns
-advance, iterate (back to the target, with direction) or blocked (with the
-question). There is no pass limit; iterate repeats as long as there's useful
-work. Name your own decider with `step:`:
+- **`write-docs`** updates your actual README, guides, or reference docs right
+  after planning so you can read and edit what is being built while
+  implementation runs (in Loopflow Desktop, the edited files open in the Files
+  pane automatically; elsewhere, their paths are printed in the conversation).
+- **`qa`** maintains repo-local verification playbooks under `.lf/qa/`, one
+  file per surface. The first line of each file states when to read it, so runs
+  open only the playbooks relevant to their diff, and update them when a
+  surface changes.
 
-```yaml
-- step: {name: implement, id: first}
-- implement
-- loop: first
-  step: my-decider
-```
+### Conditional routing (`xor:`)
 
-`xor:` picks exactly one path. The router Skill reads the evidence and returns
-`{"path":"NAME"}`; a path with nothing to run exits cleanly:
+`xor:` picks exactly one branch based on a router Skill's `{"path": "NAME"}`
+output (an empty branch exits cleanly):
 
 ```yaml
 - qa
@@ -144,15 +169,15 @@ work. Name your own decider with `step:`:
         description: "No actionable defect in the supplied change"
 ```
 
-## Move one number
+### Optimization loops (`optimize`)
 
 ```bash
 lf graph optimize : "cut p50 export time on the 60k-row dataset"
 ```
 
-`optimize` measures, plans one change, makes it, and keeps or reverts it, until
-no clear way forward remains. It then compresses, refreshes and measures the
-whole result. It runs without a person and delivers nothing, so compose it:
+`optimize` measures a baseline, plans one change, implements it, and keeps or
+reverts based on the measurement until no clear improvement remains, then
+compresses and re-measures. Compose it with `deliver` to ship the win:
 
 ```yaml
 # .lf/graphs/speed-up.yaml
@@ -162,97 +187,161 @@ whole result. It runs without a person and delivers nothing, so compose it:
 
 ## Where a person takes part
 
-A step written `interactive: <skill>` is where a person takes part; every other
-step runs headless. A Task's workflow is the Graph it took up and the step it
-stands at.
+Mark any step `interactive:` to pause for human input; every other step runs
+headless. Built-in `feature` puts you in the loop at three high-leverage
+moments:
 
 ```yaml
 # feature (builtin)
-- interactive: explore      # you choose what to build, for as many rounds as it takes
-- graph: pursue             # kickoff plans it, then docs, code and a published PR
-- loop: implement
-  interactive: demo         # you try the change
-- graph: deliver            # gate, then land and stay until it merges
-- loop: implement
-  interactive: verify       # you check it on main; fix forward or finish
+- interactive: explore      # choose what to build
+- graph: plan               # kickoff, concept-review, write-docs
+- loop:
+    - loop:
+        - graph: build      # implement, compress, qa, publish PR
+        - interactive: ship-review  # read one summary page; iterate sends feedback back to build
+    - graph: deliver        # reflect, gate, land --wait-and-fix
+    - interactive: verify   # check it on main; finish or fix forward
 ```
 
 ```bash
-lf graph feature                    # explore and demo open here with you; the rest runs on its own
-lf -b graph feature                 # every step headless; an agent stands in at explore and demo
-lf task run LOO-12 feature          # runs up to explore and stops; the Task waits in its conversation
-lf task run LOO-12                  # after you're done there: on to demo
-lf task run LOO-12 --from explore   # back to choosing what to build
-lf -b task run LOO-12               # the rest, straight through to a merged PR
-lf ship LOO-12                      # the same, returning once the Task is shipping
+lf task run LOO-12 feature          # stops at explore; opens in the Task conversation
+lf task run LOO-12                  # continues from where it stopped
+lf task run LOO-12 --from explore   # jump back to any step (by id, Skill, or sub-Graph)
+lf -b task run LOO-12               # run headless through all remaining steps
+lf task auto on LOO-12              # auto on: an agent stands in for you at every remaining step
 ```
 
-`-i` makes every step of a launch interactive and `-b` every step headless. At an
-interactive step with a loop behind it, you, or the agent standing in, decide
-advance or iterate; blocked there, the Task waits at that step. A step that
-fails is tried again, up to three attempts, starting at that step; the steps
-before it stay done. A run that stops leaves the Task at the step it stopped
-on, `lf task status` names it, and the next `lf task run` starts there:
+At **`ship-review`**, Loopflow builds one HTML page (`scratch/ship-review.html`):
+what ships, in your terms, and everything the run left outside the PR, each
+with a proposal to fix it here, give it its own Task, or drop it. It is not a
+code review; concept review and gate already answered whether the change is
+right. Ask for changes in the Task conversation to loop back to `build`, or
+move on to `deliver`.
 
-```bash
-lf task status LOO-12               # Graph code: stopped at land --wait-and-fix
-lf task run LOO-12                  # lands again; gate does not rerun
-lf task run LOO-12 --from gate      # when gate's work must be redone
-```
+### Built-in Graphs
 
-`--from` takes a step's id, its Skill, or the Graph it was composed from;
-starting from an interactive step only puts the Task there. After the last step
-the Task reaches `end`, which requests completion.
-`lf ship` or any run into `end` hands the Task to Auto-Ship, which may land its
-PR. Other Graphs in the Task's worktree never move it. There is no approve command: give feedback in the
-Task's conversation, which knows its step and how to go on. `lf task hold`
-withdraws Auto-Ship, and the stop stands: a later run into `end` no longer
-approves it, and a run that reaches a merging step (`lf land`, `lf pr arm`,
-`pr-land`) waits there instead. Only `lf ship` lifts the stop. A ship whose run
-fails the same way on every attempt withdraws it too, recording the error in the
-Task's history; that is no stop, and `lf ship` or a fixed run resumes it.
-
-| Task state | When |
+| Graph | What it does |
 |---|---|
-| `unstarted` | no checkout yet |
-| `idle` | a checkout, nothing running, not at an interactive step |
-| `active` | at an interactive step, in its Task Session |
-| `moving` | a run carries it, with an interactive step ahead |
-| `shipping` | a run carries it and nothing ahead stops it |
-| `done` · `abandoned` | completed, dropped |
+| `feature` | `explore` (interactive) → `plan` → `build` ↔ `ship-review` (interactive) → `deliver` → `verify` (interactive) |
+| `code` | Same as `feature`, starting at `plan` (default when no Graph is configured) |
+| `pursue` | `plan` then `build` with no interactive stops: request to published PR |
+| `research` | Investigate and report findings without opening a PR |
+| `optimize` | Iterative measure → change → keep/revert loop |
 
-Builtins are `feature` (explore, then pursue, demo, deliver, verify), `code` (demo, deliver,
-verify), `auto` (pursue then deliver, no interactive step: request to merged PR
-without you) and `research` (findings, no PR). To change one, copy it, commit it,
-and select it for a Wave with `graph: feature` in `.lf/wave/product/config.yaml`:
+Copy any builtin to customize it for your team:
 
 ```bash
-lf graph customize feature                # copies the builtin to .lf/graphs/feature.yaml
-lf --wave product set wave.graph feature  # or only for you, without committing
+lf graph customize feature                # writes .lf/graphs/feature.yaml
+lf --wave product set wave.graph feature  # personal override without committing
 ```
 
-Commit those files; teammates run your definition once they have your commit.
+### Describe a Graph
 
-A Task takes up its Graph on its first `lf task run`: the one you name, then
-your `lf set wave.graph` for its Wave and then its repository, then its Wave's
-`graph:`, then the repository's in `.lf/config.yaml`, then builtin `code`. It keeps
-that Graph as it was; later edits apply to Tasks that take it up afterwards.
+```yaml
+# .lf/graphs/ship-api.yaml
+description: Build the endpoint, audit it, then deliver.
+steps:
+- implement
+- audit
+- interactive: demo
+- graph: deliver
+```
 
-## Run Tasks on other machines
+```console
+$ lf graph list
+code       Build, deliver and verify. You review the change, then check it on main.
+my-graph
+ship-api   Build the endpoint, audit it, then deliver.
+```
+
+`description:` is one line saying what running the Graph gets you. Desktop's
+Start menu shows it beside the Graph's name, with a stop count taken from its
+`interactive:` steps. Every builtin has one. A Graph without it, written as a
+bare list of steps, still runs and still lists; Start offers it under
+**More ›**.
+
+`lf graph list --json` adds each Graph as a Task's workflow line draws it,
+before any Task runs it:
+
+```console
+$ lf graph list --json | jq '.[] | select(.name=="code") | .workflow'
+{
+  "steps": [
+    {"name": "plan", "interactive": false},
+    {"name": "build", "interactive": false},
+    {"name": "ship-review", "interactive": true},
+    {"name": "deliver", "interactive": false},
+    {"name": "verify", "interactive": true}
+  ],
+  "interactive_steps": [...],
+  "sentence": "You take part at ship-review and verify."
+}
+```
+
+`steps` are the top-level steps, with a Graph included by `graph:` as one
+step under its name. A step is `interactive` when a person takes part anywhere
+inside it, an `xor:` branch included. `interactive_steps` lists each of those
+stops, and the stop count is its length. `sentence` is what Desktop's
+[New Task](surfaces.md#new-task) sheet shows; a Graph with no stop reads "Runs
+on its own." `workflow` is null for a Graph whose definition does not load.
+
+### Auto
+
+Auto is a setting on the Task: on, off, or never set. While it is on, the
+Task's runs stand in for you at each interactive step they reach and may merge
+the PR. Turning it on runs the Task: `lf task auto on` and Desktop's **Auto**
+toggle are one operation.
 
 ```bash
-lf task run LOO-12 --pool lab --rent code --quote # where it would run, and the most it could cost
-lf task run LOO-12 --pool lab --rent code         # a free lab machine, else rent one
+lf task auto on LOO-12              # LOO-12 · code from ship-review running as Graph run …
+lf task status LOO-12               # LOO-12  moving · auto: on by Maya, Nov 18 09:04
+lf task auto off LOO-12             # LOO-12: auto off
 ```
 
-The Task's Graph runs on a free machine from your `lab` pool, or on one rented
-from the `code` on-demand when none is free. When it ends, its Sessions and
-Processes are copied back here before a rented machine is given back. Adding
-machines, pools and on-demands is under [Machines](ops.md#machines).
+- The run reads auto at each interactive step, not at launch: turn it on while
+  `build` runs and that run stands in at `ship-review` when it gets there.
+- `lf task auto off` kills nothing. The run waits at its next interactive step,
+  or before a merging step (`lf land`, `lf pr arm`, `pr-land`): "Waiting at pr
+  land: auto is off (Maya). `lf task auto on INF-1` lands it." Auto-merge that
+  Loopflow armed is disarmed.
+- Off stands: only `lf task auto on` turns it back on; an `auto: on` in
+  configuration never does. `lf -b task run` stands in for its own run and
+  writes no auto, so with auto off it still waits at the landing step.
+- Never set, a run that reaches a merging step lands; `lf task run` says so on
+  its `merges:` line. A failing run leaves auto alone.
+- `auto: on` beside `graph:` in a Wave's config turns auto on for every Task
+  that takes the Graph up. Reopening a Task clears it.
 
-## Goals
+### Failure and retries
 
-A Wave's `GOAL.md` is the prompt its conversation works from:
+- A failed step is tried again, up to three attempts, starting at that step (earlier steps stay done).
+  Pre-launch failures (such as a missing harness CLI) fail immediately so you
+  can fix them and run `lf task run`.
+- If a headless OpenCode or Pi agent asks a question, the run stops and prints
+  it; answer with `lf steer LOO-12 "…"` and continue with `lf task run LOO-12`.
+
+| Task state | Meaning |
+|---|---|
+| `unstarted` | No worktree yet |
+| `idle` | Checked out, nothing running, not at an interactive step |
+| `active` | Waiting at an interactive step in its Task conversation |
+| `moving` | Graph running, whatever the auto setting |
+| `done` / `abandoned` | Completed / dropped |
+
+## Run Tasks on pools or rented machines
+
+```bash
+lf task run LOO-12 --pool lab --rent code --quote   # preview placement and max cost
+lf task run LOO-12 --pool lab --rent code           # run on a free `lab` box or rent from `code`
+```
+
+When the run ends, its Sessions and Graph history copy back to your machine
+before any rented box is returned. See [Machines](ops.md#machines).
+
+## Wave Goals
+
+A Wave's `.lf/wave/<name>/GOAL.md` is the operating brief for its conversation
+and Tasks:
 
 ```markdown
 <!-- .lf/wave/infra/GOAL.md -->
@@ -264,16 +353,8 @@ memory, pick the next useful move, and fold what shipped into memory.
 ## Process
 
 Make mechanical changes directly; write a scratch design first when the
-change crosses storage, auth or public APIs.
+change crosses storage, auth, or public APIs.
 ```
 
-**Objective** is what the Wave is for and how it moves. **Process** is
-constraint: when to design first, what never to touch. KRs live in the plan
-([Waves](work.md#waves)). To keep it moving without you, run an ordinary
-command from your own cron or launchd:
-
-```bash
-# 0 9 * * *  cd ~/src/product && lf --wave product -b skill wave/operate
-```
-
-Next: [Troubleshooting](troubleshooting.md), what survives and what to run when something goes wrong.
+Next: [Troubleshooting](troubleshooting.md): what survives crashes and how to
+diagnose anything that stops.

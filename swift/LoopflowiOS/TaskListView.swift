@@ -18,67 +18,148 @@ extension TaskList {
 @MainActor
 @Observable
 final class TaskFeed {
-    private(set) var repositories: [RepositoryTasks] = []
-    private(set) var loaded = false
-    private(set) var error: String?
+    /// The last reading; while reads fail it keeps what the list showed and the Notice says why.
+    private(set) var tasks: Reading<[RepositoryTasks]> = .loading {
+        didSet {
+            notices.read("tasks", "Tasks", from: oldValue.failure, to: tasks.failure, link: pendingChanges.link,
+                         action: Notice.Action("Try again") { [weak self] in Task { await self?.start() } })
+        }
+    }
     private(set) var waves: [Wave] = []
-    var filter = TaskList.started
+    /// This Machine's changes shown before the reading that shows them.
+    let pendingChanges: PendingChanges
+    /// The app's one Notice.
+    let notices: NoticeCenter
+    var filter = TaskList.started {
+        didSet {
+            guard filter != oldValue else { return }
+            requested?.finish(.superseded)
+            requested = Perf.begin("find_work", scenario: filter.rawValue)
+            if let requested { Perf.acknowledged(requested) }
+        }
+    }
+    private(set) var reading = 0
+    @ObservationIgnored private var requested: Interaction?
     /// The Wave whose Tasks are listed; nil lists every Wave's.
     var wave: String?
-    @ObservationIgnored private var waiting: Perf.Wait?
+    @ObservationIgnored private var waiting: Interaction?
     @ObservationIgnored private let client: RemoteMobileClient
+    @ObservationIgnored private let saved: SavedReadings
     @ObservationIgnored private var observation: RemoteTaskObservation?
     @ObservationIgnored private var reader: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
 
-    init(client: RemoteMobileClient) { self.client = client }
+    init(client: RemoteMobileClient, notices: NoticeCenter) {
+        self.client = client
+        self.notices = notices
+        saved = SavedReadings(machine: client.savedMachine.machineID)
+        pendingChanges = PendingChanges(send: { try await client.change($0, requestID: $1) },
+                                        describe: machineConnectionMessage)
+        pendingChanges.report(to: notices)
+    }
+
+    var repositories: [RepositoryTasks] { tasks.value ?? [] }
+    var loaded: Bool { tasks.value != nil }
+    var failed: Bool { tasks.failure != nil }
+
+    /// The Machine's Tasks with this phone's pending changes made.
+    var shownRepositories: [RepositoryTasks] {
+        guard !pendingChanges.changes.isEmpty else { return repositories }
+        return repositories.map { entry in
+            RepositoryTasks(repository: entry.repository, path: entry.path,
+                            tasks: pendingChanges.apply(to: entry.tasks, readAt: tasks.readAt, wave: wave))
+        }
+    }
+
+    /// The row leaves the list in the swipe; a refusal brings it back and the Notice
+    /// says why, its Show running `show` to open the Task.
+    func complete(_ task: WorkViewPlan.Content, show: @escaping @MainActor () -> Void) {
+        guard let directory = directory(of: task) else { return }
+        let issue = task.identifier ?? task.work.id
+        pendingChanges.make(.complete(task: issue), subject: issue, verb: "completed",
+                            write: .taskComplete(directory: directory, issue: issue), notices: notices,
+                            show: Notice.Action("Show", perform: show)) { [weak self] in
+            try? await self?.observation?.refresh()
+        }
+    }
+
+    /// Start, Run, Auto-Ship and Stop Auto-Ship: the Notice says the change was requested.
+    func request(_ name: String, issue: String, write: ServedWrite) {
+        pendingChanges.request(name, subject: issue, write: write, notices: notices) { [weak self] in
+            try? await self?.observation?.refresh()
+        }
+    }
+
+    /// The repository on the Machine whose reading listed `task`.
+    private func directory(of task: WorkViewPlan.Content) -> String? {
+        repositories.first { $0.tasks.contains { $0.work == task.work } }?.path
+    }
+
+    /// A read failed: the list keeps what it showed.
+    private func failed(_ message: String) {
+        tasks = tasks.failed(message)
+    }
+
+    private var subscription: String { "tasks-\(filter.rawValue)\(wave.map { "-\($0)" } ?? "")" }
 
     func start() async {
         stop()
         let current = generation
-        waiting = Perf.begin("tasks_current")
+        waiting = requested ?? Perf.begin("find_work", scenario: filter.rawValue)
+        requested = nil
         // The last reading under each filter, shown at once while the Machine answers.
-        // It is kept as wire bytes and read by the live decoder, so a file an older
-        // app wrote fails to load instead of showing a stale shape.
-        let url = savedURL
-        let saved = await Task.detached(priority: .userInitiated) {
-            (try? RemoteTaskObservation.decode(frame: RawJSON(Data(contentsOf: url))).reading).flatMap { try? $0.get() }
+        let (subscription, saved) = (subscription, saved)
+        let restored = await Task.detached(priority: .userInitiated) {
+            saved.load(subscription).flatMap { try? RemoteTaskObservation.decode(frame: RawJSON($0)).reading }
         }.value
         guard current == generation else { return }
-        if let saved {
-            repositories = saved
-            loaded = true
+        if let restored, restored.failure == nil {
+            tasks = restored
             Perf.launch("tasks_saved")
         } else {
-            repositories = []
-            loaded = false
+            tasks = .loading
         }
-        let observation = client.observeTasks(expression: filter.expression(wave: wave))
+        let observation = InteractionTrace.$current.withValue(waiting) {
+            client.observeTasks(expression: filter.expression(wave: wave), saved: saved, subscription: subscription)
+        }
         self.observation = observation
-        reader = Task { [weak self] in
+        reader = InteractionTrace.$current.withValue(waiting) { Task { [weak self] in
             do {
                 for try await update in observation.readings {
                     guard let self, current == self.generation else { return }
-                    switch update.reading {
-                    case .success(let repositories):
-                        let changed = repositories != self.repositories || !self.loaded
-                        if changed { self.repositories = repositories }
-                        self.loaded = true
-                        self.error = nil
-                        Perf.launch("tasks_current")
-                        if let waiting = self.waiting { Perf.end(waiting, self.filter.rawValue) }
+                    self.pendingChanges.linkReturned()
+                    self.pendingChanges.read("tasks", update)
+                    if let reason = update.failure {
+                        self.waiting?.finish(.failed)
                         self.waiting = nil
-                        if changed { self.save(update.wire) }
-                        if self.waves.isEmpty, let found = try? await self.client.waves() { self.waves = found }
-                    case .failure(let error): self.error = error.message
+                        self.failed(reason)
+                        continue
                     }
+                    guard self.tasks.yields(to: update) else { continue }
+                    if update != self.tasks { self.tasks = update }
+                    Perf.launch("tasks_current")
+                    self.reading += 1
+                    if self.waves.isEmpty, let found = try? await self.client.waves() { self.waves = found }
                 }
                 throw RegistryQueryError("Task updates ended.")
             } catch {
                 guard let self, current == self.generation else { return }
+                self.waiting?.finish(.failed)
                 self.stop()
-                self.error = machineConnectionMessage(error)
+                if ServerLink.lostLink(error) { self.pendingChanges.linkLost() }
+                self.failed(machineConnectionMessage(error))
             }
+        } }
+    }
+
+    func project() { (requested ?? waiting)?.work.project() }
+
+    func observed() {
+        guard let waiting else { return }
+        Perf.end(waiting)
+        Task {
+            await waiting.waitForObservation()
+            if self.waiting === waiting { self.waiting = nil }
         }
     }
 
@@ -86,67 +167,63 @@ final class TaskFeed {
         guard let observation else { await start(); return }
         do { try await observation.refresh() } catch {
             stop()
-            self.error = machineConnectionMessage(error)
+            failed(machineConnectionMessage(error))
         }
     }
 
     func stop() {
+        waiting?.finish(.cancelled)
+        waiting = nil
         generation += 1
         reader?.cancel()
         reader = nil
         observation?.close()
         observation = nil
+        pendingChanges.ended("tasks")
     }
 
     /// Removes what this Machine's readings left on the phone.
     func forget() {
         stop()
-        let saved = (try? FileManager.default.contentsOfDirectory(at: .cachesDirectory, includingPropertiesForKeys: nil)) ?? []
-        for file in saved where file.lastPathComponent.hasPrefix("tasks-\(client.savedMachine.machineID)-") {
-            try? FileManager.default.removeItem(at: file)
-        }
+        saved.forget()
     }
-
-    private var savedURL: URL {
-        URL.cachesDirectory.appending(path: "tasks-\(client.savedMachine.machineID)-\(filter.rawValue)\(wave.map { "-\($0)" } ?? "").json")
-    }
-
-    private func save(_ wire: Data) {
-        let url = savedURL
-        Task.detached(priority: .utility) {
-            try? wire.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        }
-    }
-
 }
 
 struct TaskListView: View {
     let client: RemoteMobileClient
+    /// Read again on connect and whenever the app returns to the foreground.
+    let machineTheme: MachineTheme
     let onForget: () -> Void
     let onChangeAddress: () -> Void
     @State private var feed: TaskFeed
     @State private var search = ""
-    @State private var drafts: [WorkWorkspaceKey: String] = [:]
+    @State private var drafts: [String: String] = [:]
     @State private var creation: MobileTaskCreation?
-    @State private var created: WorkViewPlan.Content?
+    @State private var created: MobileTask?
     @State private var showingCreated = false
+    @State private var captureError: String?
+    @State private var selectedTask: MobileTask?
+    @State private var notices: NoticeCenter
     /// The repository shown, by durable ID; empty shows every repository.
     @AppStorage("repository") private var repository = ""
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
-    private var theme: ThemeDefinition { colorScheme == .dark ? .dark : .light }
+    @Environment(\.theme) private var theme
 
-    init(client: RemoteMobileClient, onForget: @escaping () -> Void, onChangeAddress: @escaping () -> Void) {
+    init(client: RemoteMobileClient, machineTheme: MachineTheme, onForget: @escaping () -> Void, onChangeAddress: @escaping () -> Void) {
         self.client = client
+        self.machineTheme = machineTheme
         self.onForget = onForget
         self.onChangeAddress = onChangeAddress
-        _feed = State(initialValue: TaskFeed(client: client))
+        let notices = NoticeCenter()
+        _notices = State(initialValue: notices)
+        _feed = State(initialValue: TaskFeed(client: client, notices: notices))
     }
 
     /// Repositories with matching Tasks, each split into Tasks with a conversation and those without.
     private var sections: [(repository: String, open: [WorkViewPlan.Content], quiet: [WorkViewPlan.Content])] {
+        feed.project()
         let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        return feed.repositories.compactMap { entry in
+        return feed.shownRepositories.compactMap { entry in
             guard shown.isEmpty || entry.repository == shown else { return nil }
             let tasks = term.isEmpty ? entry.tasks : entry.tasks.filter {
                 $0.title.localizedStandardContains(term) || $0.location?.cwd.localizedStandardContains(term) == true
@@ -178,15 +255,6 @@ struct TaskListView: View {
     var body: some View {
         NavigationStack {
             List {
-                if let error = feed.error {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Couldn’t update Tasks", systemImage: "wifi.exclamationmark").font(Typography.strong(15))
-                        Text(error).font(Typography.caption(13))
-                        Button("Try again") { Task { await feed.start() } }
-                    }
-                    .foregroundStyle(theme.palette.textSecondary)
-                    .listRowBackground(theme.palette.surface)
-                }
                 ForEach(sections, id: \.repository) { section in
                     Section {
                         ForEach(section.open, id: \.work) { link($0) }
@@ -195,14 +263,14 @@ struct TaskListView: View {
                             DisclosureGroup("\(section.quiet.count) without a conversation") {
                                 ForEach(section.quiet, id: \.work) { link($0) }
                             }
-                            .font(Typography.caption(14))
+                            .font(Typography.meta)
                             .foregroundStyle(theme.palette.textSecondary)
                             .listRowBackground(theme.palette.background)
                         }
                     } header: {
                         if shown.isEmpty {
                             Text(name(section.repository))
-                                .font(Typography.strong(14))
+                                .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textCase(nil)
                         }
@@ -213,16 +281,21 @@ struct TaskListView: View {
             .scrollContentBackground(.hidden)
             .background(theme.palette.background)
             .overlay {
-                if !feed.loaded && feed.error == nil {
+                if !feed.loaded && !feed.failed {
                     ProgressView()
-                } else if sections.isEmpty && feed.error == nil {
+                } else if sections.isEmpty && feed.loaded {
                     if search.isEmpty {
-                        ContentUnavailableView("No \(feed.filter.title.lowercased()) Tasks", systemImage: "checkmark.circle")
+                        StateView("No \(feed.filter.title.lowercased()) Tasks") {
+                            Button("New Task", action: newTask).buttonStyle(LoopflowButtonStyle(.accent))
+                        }
                     } else {
-                        ContentUnavailableView.search(text: search)
+                        StateView("No results for “\(search)”") {
+                            Button("Clear search") { search = "" }.buttonStyle(LoopflowButtonStyle(.accent))
+                        }
                     }
                 }
             }
+            .overlay { NoticeView(center: notices) }
             .refreshable { await feed.refresh() }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
@@ -235,11 +308,16 @@ struct TaskListView: View {
                 }
             }
             .searchable(text: $search, prompt: "Search Tasks")
+            .textInputAutocapitalization(.never)
+            .onChange(of: feed.reading) { _, _ in feed.observed() }
+            .navigationDestination(isPresented: Binding(get: { selectedTask != nil }, set: { if !$0 { selectedTask = nil } })) {
+                if let selectedTask { workspace(selectedTask) }
+            }
             .navigationDestination(isPresented: $showingCreated) {
                 if let created { workspace(created) }
             }
             .sheet(item: $creation, onDismiss: { showingCreated = created != nil }) { model in
-                MobileNewTaskView(model: model, theme: theme) { opening in
+                MobileNewTaskView(model: model) { opening in
                     opening.presented()
                     created = opening.task
                     creation = nil
@@ -265,15 +343,20 @@ struct TaskListView: View {
                     .accessibilityValue(feed.filter.title)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        created = nil
-                        creation = MobileTaskCreation(client: client)
-                    } label: { Image(systemName: "plus") }
+                    Button(action: newTask) { Image(systemName: "plus") }
                         .accessibilityLabel("New Task")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Text(client.savedMachine.endpoint.host ?? "Machine")
+                        Button(InteractionFrame.isEnabled ? "Stop visual timing" : "Start visual timing…") {
+                            Task {
+                                do {
+                                    if InteractionFrame.isEnabled { await InteractionFrame.disableCapture() }
+                                    else { try await InteractionFrame.enableCapture() }
+                                } catch { captureError = error.localizedDescription }
+                            }
+                        }
                         Button("Change address", action: onChangeAddress)
                         Button("Forget Machine", role: .destructive) {
                             feed.forget()
@@ -284,12 +367,22 @@ struct TaskListView: View {
                 }
             }
         }
+        .alert("Visual timing unavailable", isPresented: Binding(get: { captureError != nil }, set: { if !$0 { captureError = nil } })) {
+            Button("OK") { captureError = nil }
+        } message: { Text(captureError ?? "") }
         .tint(theme.palette.accentInk)
-        .environment(\.palette, theme.palette)
         .onChange(of: repository) { feed.wave = nil }
+        .task(id: scenePhase == .active) {
+            if scenePhase == .active { await machineTheme.refresh(client) }
+        }
         .task(id: [feed.filter.rawValue, feed.wave ?? "", String(scenePhase == .active)]) {
             if scenePhase == .active { await feed.start() } else { feed.stop() }
         }
+    }
+
+    private func newTask() {
+        created = nil
+        creation = MobileTaskCreation(client: client)
     }
 
     /// A repository's folder name; one the Machine cannot place keeps its short ID,
@@ -299,39 +392,30 @@ struct TaskListView: View {
     }
 
     private func link(_ task: WorkViewPlan.Content) -> some View {
-        NavigationLink { workspace(task) } label: { row(task) }
-            .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 16))
+        Button {
+            if task.primarySession != nil { Perf.opening(task.work.id) }
+            selectedTask = MobileTask(task)
+        } label: {
+            // The list reading carries no issue link: the whole row opens the Task.
+            TaskRow(id: task.work.id, title: task.title, identifier: task.identifier, status: task.status,
+                    auto: task.states.contains(.auto))
+                .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
+        }
+            .buttonStyle(.plain)
+            .swipeActions(edge: .trailing) {
+                Button("Complete", systemImage: "checkmark") { feed.complete(task) { selectedTask = MobileTask(task) } }
+                    .tint(theme.palette.success)
+                    .disabled(!feed.pendingChanges.acceptsChanges)
+            }
+            // With the row's own padding the title starts where the section header does.
+            .listRowInsets(EdgeInsets(top: Spacing.xs, leading: Spacing.xs, bottom: Spacing.xs, trailing: Spacing.xs))
             .listRowBackground(theme.palette.background)
     }
 
-    private func workspace(_ task: WorkViewPlan.Content) -> some View {
-        TaskWorkspaceView(client: client, task: task, theme: theme, draft: Binding(
-            get: { drafts[task.work] ?? "" },
-            set: { drafts[task.work] = $0 }))
-    }
-
-    private func row(_ task: WorkViewPlan.Content) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(task.status.tone.ink(in: theme.palette))
-                .frame(width: 3)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(task.title)
-                    .font(Typography.strong(17))
-                    .foregroundStyle(theme.palette.text)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 6) {
-                    Text(task.status.label)
-                        .foregroundStyle(task.status.tone.ink(in: theme.palette))
-                    if let identifier = task.identifier {
-                        Text(identifier).foregroundStyle(theme.palette.textSecondary)
-                    }
-                }
-                .font(Typography.caption(13))
-            }
-        }
-        .padding(.vertical, 2)
-        .accessibilityElement(children: .combine)
+    private func workspace(_ task: MobileTask) -> some View {
+        TaskWorkspaceView(client: client, feed: feed, task: task, draft: Binding(
+            get: { drafts[task.id] ?? "" },
+            set: { drafts[task.id] = $0 }))
     }
 }

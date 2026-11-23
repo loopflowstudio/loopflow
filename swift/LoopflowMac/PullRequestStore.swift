@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import Loopflow
 import Observation
 
 /// GitHub's published PR, independent of local uncommitted changes.
@@ -73,61 +74,26 @@ struct GitHubPullRequest: Decodable, Sendable {
     }
 }
 
-struct GitHubPullRequestFile: Decodable, Sendable, Identifiable {
-    let filename: String
-    let previousFilename: String?
-    let status: String
-    let additions: Int
-    let deletions: Int
-    let patch: String?
-    let blobURL: URL?
-    var id: String { filename }
-
-    enum CodingKeys: String, CodingKey {
-        case filename, status, additions, deletions, patch
-        case previousFilename = "previous_filename"
-        case blobURL = "blob_url"
-    }
-
-    var incompletePatch: Bool {
-        guard let patch else { return true }
-        let lines = patch.split(separator: "\n", omittingEmptySubsequences: false)
-        return lines.filter { $0.hasPrefix("+") }.count < additions
-            || lines.filter { $0.hasPrefix("-") }.count < deletions
-    }
-}
-
 @MainActor
 @Observable
 final class PullRequestStore {
     private(set) var pullRequest: GitHubPullRequest?
-    private(set) var files: [GitHubPullRequestFile]?
     private(set) var error: String?
-    private(set) var filesError: String?
     private(set) var refreshing = false
-    private(set) var loadingFiles = false
-    private(set) var updatedAt: Date?
-    var showsFiles = false
-    var expandedFiles: Set<String> = []
+    /// When GitHub last answered; a retained reading keeps its own time.
+    private(set) var readAt: Date?
     private var requestedURL: URL?
     private var generation = 0
-    private var fileGeneration = 0
 
     func refresh(_ url: URL?) async {
         generation += 1
         let generation = generation
         if requestedURL != url || url == nil {
             pullRequest = nil
-            files = nil
             error = nil
-            filesError = nil
-            showsFiles = false
-            expandedFiles.removeAll()
-            updatedAt = nil
+            readAt = nil
         }
         requestedURL = url
-        fileGeneration += 1
-        loadingFiles = false
         guard let url else {
             refreshing = false
             return
@@ -141,48 +107,78 @@ final class PullRequestStore {
             ])
             let next = try JSONDecoder().decode(GitHubPullRequest.self, from: Data(text.utf8))
             guard !Task.isCancelled, generation == self.generation else { return }
-            files = nil
-            filesError = nil
             pullRequest = next
             error = nil
-            updatedAt = Date()
+            readAt = Date()
         } catch {
             guard !Task.isCancelled, generation == self.generation else { return }
             self.error = error.localizedDescription
         }
     }
+}
 
-    func loadFiles() async {
-        guard let pr = pullRequest, files == nil else { return }
-        fileGeneration += 1
-        let generation = fileGeneration
-        loadingFiles = true
-        defer { if fileGeneration == generation { loadingFiles = false } }
-        do {
-            let parts = pr.url.pathComponents.filter { $0 != "/" }
-            guard parts.count >= 4, parts[2] == "pull", let host = pr.url.host else {
-                throw LocalLfError(errorDescription: "GitHub PR URL is unavailable.")
+/// What the Changes page says about delivery: Loopflow's record decides whether
+/// a PR exists; GitHub's reading adds checks and review only while it is fresh.
+/// Nothing here reads as Task completion.
+struct TaskDelivery: Equatable {
+    let headline: String
+    let detail: String?
+    let warning: Bool
+    /// Whether check and review results describe the PR as it is now.
+    let readingIsCurrent: Bool
+
+    /// A reading this old no longer stands for the PR.
+    static let staleAfter: TimeInterval = 120
+
+    static func describe(record: PrSnapshot?, taskOpen: Bool, reading: GitHubPullRequest?, error: String?,
+                         readAt: Date?, localHead: String?, now: Date = .now) -> TaskDelivery {
+        let stillOpen = taskOpen ? "Task still open" : nil
+        let none = TaskDelivery(headline: "No pull request yet. Changes below are local.", detail: nil,
+                                warning: false, readingIsCurrent: false)
+        guard let record else { return none }
+        switch record.phase {
+        case .working:
+            return none
+        case .merged:
+            let sha = record.mergeCommit.map { " \($0.prefix(10))" } ?? ""
+            return TaskDelivery(headline: "Merged\(sha)", detail: stillOpen, warning: false, readingIsCurrent: false)
+        case .abandoned:
+            return TaskDelivery(headline: "Abandoned", detail: stillOpen, warning: false, readingIsCurrent: false)
+        case .publishing, .open:
+            guard let github = record.publication?.github else {
+                let requested = record.publication.map { " · requested \($0.requestedAt)" } ?? ""
+                return TaskDelivery(headline: "Publishing…\(requested)", detail: nil, warning: false, readingIsCurrent: false)
             }
-            let text = try await LocalWaveAgentLauncher.queryGitHub([
-                "api", "--hostname", host, "--paginate", "--slurp",
-                "repos/\(parts[0])/\(parts[1])/pulls/\(pr.number)/files?per_page=100"
-            ])
-            let pages = try JSONDecoder().decode([[GitHubPullRequestFile]].self, from: Data(text.utf8))
-            // Files are read from the PR's moving head; do not label another head's patch with this one.
-            let head = try await LocalWaveAgentLauncher.queryGitHub([
-                "pr", "view", pr.url.absoluteString, "--json", "headRefOid,baseRefOid", "--jq", "[.headRefOid, .baseRefOid] | join(\" \")"
-            ]).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard head == "\(pr.headRefOid) \(pr.baseRefOid)" else {
-                throw LocalLfError(errorDescription: "The PR changed while loading diffs. Refresh to read the new head.")
+            let age = readAt.map { Self.age(now.timeIntervalSince($0)) }
+            if let error {
+                return TaskDelivery(headline: "GitHub unavailable: \(error)",
+                                    detail: age.map { "Last read \($0) ago" }, warning: true, readingIsCurrent: false)
             }
-            let next = pages.flatMap { $0 }
-            guard !Task.isCancelled, generation == fileGeneration, pullRequest?.url == pr.url, pullRequest?.headRefOid == pr.headRefOid, pullRequest?.baseRefOid == pr.baseRefOid else { return }
-            files = next
-            filesError = nil
-        } catch {
-            guard !Task.isCancelled, generation == fileGeneration, pullRequest?.url == pr.url, pullRequest?.headRefOid == pr.headRefOid, pullRequest?.baseRefOid == pr.baseRefOid else { return }
-            filesError = error.localizedDescription
+            guard let reading, let readAt, let age else {
+                return TaskDelivery(headline: "Open #\(github.number) · reading GitHub…", detail: nil,
+                                    warning: false, readingIsCurrent: false)
+            }
+            let state = "\(reading.statusLabel) #\(reading.number)"
+            if now.timeIntervalSince(readAt) > staleAfter {
+                return TaskDelivery(headline: "\(state) · stale · read \(age) ago", detail: nil,
+                                    warning: true, readingIsCurrent: false)
+            }
+            if let localHead, localHead != reading.headRefOid {
+                return TaskDelivery(headline: "\(state) · read \(age) ago", detail: "Local checkout is ahead of the PR",
+                                    warning: true, readingIsCurrent: false)
+            }
+            let detail = reading.state == "MERGED" ? stillOpen : reading.reviewLabel
+            return TaskDelivery(headline: "\(state) · \(reading.checksSummary) · read \(age) ago", detail: detail,
+                                warning: false, readingIsCurrent: true)
         }
+    }
+
+    static func age(_ seconds: TimeInterval) -> String {
+        let seconds = max(0, Int(seconds))
+        if seconds < 60 { return "\(seconds) s" }
+        if seconds < 3600 { return "\(seconds / 60) min" }
+        if seconds < 86_400 { return "\(seconds / 3600) h" }
+        return "\(seconds / 86_400) d"
     }
 }
 #endif

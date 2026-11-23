@@ -83,8 +83,8 @@ Normal completion, abort and provider death close the writer. Custom extension
 tools retain their own execution ownership; there is no tool PID registry or
 postmortem discovery of signal targets.
 
-One exception to local-handle control exists. The scheduled repository check and
-`lf process prune` terminate an AgentProcess that outlived its attachment: the recorded PID and
+One exception to local-handle control exists. The server's recovery pass
+terminates an AgentProcess that outlived its attachment: the recorded PID and
 start time still name a live provider server leading its own process group, and
 every Session naming it is headless with an attached LfProcess that is provably dead.
 Unknown evidence, a live attachment, an interactive Session or a reused PID leaves it
@@ -144,8 +144,9 @@ lf task unassign LOO-523
 
 A Task is owned by (person, Machine) or unowned. Its `task_ownership` log holds
 `claim` and `unclaim` entries that are never updated or deleted; the later entry
-wins in provider order (Linear comment time, or the Git planning journal order,
-where each entry sorts after every entry its writing Machine had seen). Each
+wins in tracker order (Linear comment time; without a tracker, the order each
+entry carries from its writer, past every entry that Machine held, where a
+claim made without seeing the claim holding the Task loses to it). Each
 entry names the Machine that wrote it, so every Machine stores the same rows. A
 move is a claim by the same person naming another Machine; it needs only the
 target's identity, not a connection.
@@ -178,8 +179,9 @@ stops showing this Machine as owner for any other reason, such as a stale
 Machine's unclaim, the owner claims again.
 
 The target uses its own store, repository, provider homes, OS locks and payload
-directory. Reads remain Machine-local. Foreground SSH may explicitly forward
-selected account authority; detached processes use installed credentials.
+directory. Reads remain Machine-local. Claude and Codex use destination-native authentication for foreground and detached
+launches. Explicitly named variables and home files can be forwarded through SSH
+stdin; native clients interpret the resulting authentication.
 
 Wave selection always resolves `(canonical repository, slug)` to one UUID.
 Bare-slug diagnostics fail when more than one repository owns the slug; no

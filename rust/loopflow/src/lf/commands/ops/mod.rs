@@ -383,6 +383,31 @@ pub fn run_commit(
     Ok(())
 }
 
+/// A step commit runs under a skill run or a Graph, whose stdout carries the
+/// answer, so its progress goes to stderr.
+struct StepCommitProgress;
+
+impl Progress for StepCommitProgress {
+    fn status(&self, msg: &str) {
+        eprintln!("{msg}");
+    }
+
+    fn error(&self, msg: &str) {
+        eprintln!("{msg}");
+    }
+
+    fn confirm(&self, _msg: &str) -> bool {
+        false
+    }
+}
+
+/// `lf commit --step <skill>`: everything a finished skill step left, as one commit.
+pub fn run_step_commit(step: &str, agent_override: Option<&str>) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    loopflow_execution::ops::commit_step(&repo_root, step, agent_override, &StepCommitProgress)?;
+    Ok(())
+}
+
 pub fn connect_wave(
     repo_root: &std::path::Path,
     wave: Option<&str>,
@@ -436,7 +461,6 @@ pub fn sync_planning(
     repo: &std::path::Path,
     wave: Option<&str>,
     all: bool,
-    plan: bool,
     json: bool,
 ) -> Result<()> {
     let wave = if all {
@@ -446,7 +470,7 @@ pub fn sync_planning(
     };
     let result = loopflow_execution::ops::linear::refresh(
         repo,
-        &loopflow_execution::ops::linear::LinearSyncOptions { wave, plan },
+        &loopflow_execution::ops::linear::LinearSyncOptions { wave },
         &CliProgress,
     )?;
     if json {
@@ -465,7 +489,7 @@ pub fn sync_planning(
 /// What `lf wave sync` refreshed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanningRefresh {
-    /// Git planning: the repository's whole plan.
+    /// No tracker: the repository's whole plan, from the hub.
     Repository,
     /// One Wave, from its Linear Initiative.
     Wave(String),
@@ -483,11 +507,11 @@ impl PlanningRefresh {
 }
 
 /// Refresh shared planning before `wave status --sync` reads it: the Wave from
-/// Linear, or the repository's Git planning ref, whose exchange is per repository.
+/// Linear, or without a tracker the repository's plan by each carrier it has.
 pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<PlanningRefresh> {
     let repo = loopflow_execution::repo::working_directory_in(directory)?;
-    if crate::lf::commands::plan::plans_through_git(&repo)? {
-        crate::lf::commands::plan::refresh(&repo)?;
+    if !loopflow_execution::ops::tracker::connected(&repo.to_string_lossy()) {
+        crate::lf::commands::tracker::refresh(&repo)?;
         return Ok(PlanningRefresh::Repository);
     }
     let wave =
@@ -1013,19 +1037,14 @@ fn wt_timing(json: bool) -> Result<()> {
             seconds(group.total_ms.max)
         );
         println!(
-            "  median / p95:  startup {}   local git {}   remote {}   receipts {}",
+            "  median / p95:  startup {}   local git {}   remote {}",
             phase(Some(group.startup_ms)),
             phase(group.local_git_ms),
-            phase(group.remote_ms),
-            phase(group.receipt_ms)
+            phase(group.remote_ms)
         );
         println!(
-            "  failed {}   interrupted {}   remote timed out {}   remote unavailable {}   receipts unrecorded {}",
-            group.failed,
-            group.interrupted,
-            group.remote_timed_out,
-            group.remote_unavailable,
-            group.receipts_unrecorded
+            "  failed {}   interrupted {}   remote timed out {}   remote unavailable {}",
+            group.failed, group.interrupted, group.remote_timed_out, group.remote_unavailable
         );
     }
     println!(

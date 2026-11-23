@@ -10,9 +10,6 @@ struct WorkActivityView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if let reason = model.workActivity.errorMessage {
-                evidenceBanner(reason)
-            }
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -29,10 +26,10 @@ struct WorkActivityView: View {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
                     Text("Activity")
-                        .font(Typography.sectionTitle(20))
+                        .font(Typography.lede)
                         .foregroundStyle(palette.text)
                     Text(scopeTitle)
-                        .font(Typography.caption(10))
+                        .font(Typography.meta)
                         .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)
                         .accessibilityIdentifier("loopflow-activity-scope")
@@ -44,7 +41,7 @@ struct WorkActivityView: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(LoopflowButtonStyle())
                     .help("Show all Activity")
                     .accessibilityLabel("Show all Activity")
                 }
@@ -52,7 +49,7 @@ struct WorkActivityView: View {
 
             if let selectedSummary {
                 Text(selectedSummary)
-                    .font(Typography.body(11))
+                    .font(Typography.meta)
                     .foregroundStyle(palette.text)
                     .lineLimit(2)
                     .textSelection(.enabled)
@@ -65,7 +62,7 @@ struct WorkActivityView: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.workActivity.value == nil, model.workActivity.errorMessage == nil {
+        if model.workActivity.isLoading {
             ProgressView("Reading Activity…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("loopflow-activity-loading")
@@ -78,7 +75,7 @@ struct WorkActivityView: View {
                     }
                     if model.workActivity.value?.truncated == true {
                         Text("Older Activity exists outside this window.")
-                            .font(Typography.caption(9))
+                            .font(Typography.meta)
                             .foregroundStyle(palette.textSecondary)
                             .padding(Spacing.lg)
                     }
@@ -86,11 +83,8 @@ struct WorkActivityView: View {
             }
             .accessibilityIdentifier("loopflow-activity-list")
         } else {
-            ContentUnavailableView(
-                "No Activity in this window",
-                systemImage: "clock.arrow.circlepath",
-                description: Text("Work creation, Runs, PRs, and Steers will appear here.")
-            )
+            EmptyState(title: "No activity in this window",
+                       sentence: "Work creation, runs, PRs and steers appear here.")
             .accessibilityIdentifier("loopflow-activity-empty")
         }
     }
@@ -103,25 +97,24 @@ struct WorkActivityView: View {
                     .fill(appearance.color.opacity(0.12))
                     .frame(width: 30, height: 30)
                 Image(systemName: appearance.icon)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Typography.meta).fontWeight(.semibold)
                     .foregroundStyle(appearance.color)
             }
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                    Text("\((entry.work.kind == .project ? "CHAPTER" : entry.work.kind.rawValue.uppercased())) · \(entry.subject)")
-                        .font(Typography.strong(8))
-                        .tracking(0.6)
+                    Text("\(entry.work.kind.rawValue.capitalized), \(entry.subject)")
+                        .font(Typography.textStrong)
                         .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     Text(activityTime(entry.recordedAt))
-                        .font(Typography.code(8))
+                        .font(Typography.meta).monospacedDigit()
                         .foregroundStyle(palette.textSecondary)
                         .help(exactTime(entry.recordedAt))
                 }
                 Text(entry.summary)
-                    .font(Typography.body(11).weight(.semibold))
+                    .font(Typography.meta.weight(.semibold))
                     .foregroundStyle(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
@@ -144,7 +137,7 @@ struct WorkActivityView: View {
             case .wave:
                 "Wave · \(waveName(work.id))"
             case .project:
-                "Wave · \(model.waveForChapter(projectId: work.id)?.wave.name ?? work.id)"
+                "Wave · \(model.waveForProject(projectId: work.id)?.wave.name ?? work.id)"
             case .task:
                 "Task · \(model.task(id: work.id)?.task.task.identifier ?? work.id)"
             }
@@ -160,9 +153,9 @@ struct WorkActivityView: View {
             case .wave:
                 model.wave(id: work.id)?.wave.goal
             case .project:
-                model.waveForChapter(projectId: work.id)?.wave.goal
+                model.waveForProject(projectId: work.id)?.wave.goal
             case .task:
-                model.task(id: work.id)?.task.condition.reason
+                model.task(id: work.id).flatMap { TaskRowStatus(task: $0.task).line }
             }
         }
     }
@@ -192,18 +185,6 @@ struct WorkActivityView: View {
 
     private func exactTime(_ time: Date) -> String {
         time.formatted(date: .abbreviated, time: .shortened)
-    }
-
-    private func evidenceBanner(_ reason: String) -> some View {
-        Label(reason, systemImage: "exclamationmark.triangle.fill")
-            .font(Typography.caption(9))
-            .foregroundStyle(palette.warning)
-            .lineLimit(2)
-            .textSelection(.enabled)
-            .padding(.horizontal, Spacing.lg)
-            .padding(.vertical, Spacing.sm)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.warning.opacity(0.10))
     }
 
 }

@@ -26,9 +26,6 @@ pub struct CaptureHandoff {
     attempt: u32,
     attempt_started: bool,
     event_seq: u64,
-    account_id: Option<crate::store::ProviderAccountId>,
-    account_observed: bool,
-    agent_session: Option<loopflow_model::id::AgentSessionId>,
 }
 
 impl SessionRecorder {
@@ -308,7 +305,6 @@ impl SessionRecorder {
                 title,
                 title_source: crate::session::TitleSource::Generated,
                 request: None,
-                ready_summary: None,
                 completed_at: None,
                 created_at: manifest.created_at.unix_timestamp(),
             },
@@ -325,20 +321,12 @@ impl SessionRecorder {
         self.dir.clone()
     }
 
-    pub fn hand_off(
-        &self,
-        account_id: Option<crate::store::ProviderAccountId>,
-        account_observed: bool,
-        agent_session: Option<loopflow_model::id::AgentSessionId>,
-    ) -> CaptureHandoff {
+    pub fn hand_off(&self) -> CaptureHandoff {
         CaptureHandoff {
             key: self.artifact_key(),
             attempt: self.attempt,
             attempt_started: self.attempt_started,
             event_seq: self.event_seq,
-            account_id,
-            account_observed,
-            agent_session,
         }
     }
 

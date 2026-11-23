@@ -493,17 +493,20 @@ fn build_cleanup_retains_unfinished_association_and_unknown_execution() {
     );
     conn.execute("DELETE FROM tasks WHERE id=?1", [pending.as_str()])
         .unwrap();
-    let process = loopflow_model::id::LfProcessId::new();
+    // A Graph run for the Task whose pid has no OS start cannot be told from a
+    // reused pid.
+    let run = loopflow_model::id::LfProcessId::new();
     conn.execute(
-        "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,?3,?4)",
+        "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id,started_at,pid,cwd)
+         VALUES(?1,'proof','{}',?2,?3,1,?4)",
         params![
-            process,
-            loopflow_model::id::TraceId::new(),
-            fixture.checkout.to_str().unwrap(),
+            run,
+            fixture.task,
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
-                .as_secs() as i64
+                .as_secs() as i64,
+            fixture.checkout.to_str().unwrap(),
         ],
     )
     .unwrap();
@@ -514,8 +517,8 @@ fn build_cleanup_retains_unfinished_association_and_unknown_execution() {
     );
     assert!(fixture.checkout.join("target").exists());
     conn.execute(
-        "UPDATE processes SET completed_at=2,outcome='succeeded' WHERE id=?1",
-        [process],
+        "UPDATE graph_processes SET ended_at=2,exit_code=0,pid=NULL WHERE lf_process_id=?1",
+        [run],
     )
     .unwrap();
     assert_eq!(fixture.entry(&fixture.prune(&[]))["status"], "removed");

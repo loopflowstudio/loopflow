@@ -1,6 +1,6 @@
 //! Conversation selection and host presentation. `open` reaches one Session;
-//! `workspace` applies layouts and follows Task arrivals. Both use the shared
-//! non-replacing Session connection; explicit resume owns input takeover.
+//! `open --workspace` opens a Wave's or repository's started Tasks as tabs, each
+//! the Task's Session.
 
 use loopflow_execution::store::session_projection;
 mod cmux;
@@ -98,7 +98,6 @@ pub struct WorkLinkTarget {
     pub wave: Option<String>,
     /// An explicit Session selection; ordinary Work links leave it absent.
     pub session: Option<String>,
-    pub diff: bool,
     /// The execution owner when it is another Machine.
     pub execution_machine: Option<String>,
 }
@@ -120,8 +119,6 @@ pub enum OpenStatus {
     Usable,
     /// An existing view was revealed; this does not establish attachment.
     Focused,
-    /// Another client holds the conversation; nothing new was opened.
-    Elsewhere,
     Failed,
 }
 
@@ -163,7 +160,6 @@ struct Resolved {
     session: Option<String>,
     /// The cwd an exact Session reconnects from.
     session_cwd: Option<PathBuf>,
-    agent: Option<String>,
     /// The Work's current primary conversation, read without admitting one.
     primary: Option<String>,
     /// The other Machine of yours whose store holds this Work's primary; the
@@ -172,6 +168,8 @@ struct Resolved {
     execution_machine: Option<String>,
     /// Why the Task's execution owner could not be read; opening refuses.
     execution_unavailable: Option<String>,
+    /// Opened as its Wave or repository overview (`--workspace`).
+    overview: bool,
 }
 
 impl Resolved {
@@ -191,20 +189,17 @@ impl Resolved {
     }
 
     fn resume_argv(&self, lf: &str) -> Vec<String> {
-        let mut argv = vec![
-            lf.to_string(),
-            "session".into(),
-            "resume".into(),
-            "--start-if-free".into(),
-        ];
+        let mut argv = vec![lf.to_string(), "session".into(), "resume".into()];
         match (&self.session, &self.url.target) {
             (Some(session), _) => argv.push(session.clone()),
             (None, WorkTarget::Task(id)) => argv.extend(["--task".into(), id.clone()]),
             (None, WorkTarget::Wave(name)) => argv.extend(["--wave".into(), name.clone()]),
             (None, WorkTarget::Repository) => {}
         }
-        if let Some(agent) = &self.agent {
-            argv.extend(["--agent".into(), agent.clone()]);
+        // Only the invocation's own choice: a recorded harness named here
+        // would move the conversation back each time this command replays.
+        if let Some(agent) = loopflow_execution::config::agent_override() {
+            argv.extend(["--agent".into(), agent]);
         }
         argv
     }
@@ -225,7 +220,12 @@ impl Resolved {
                 self.session.clone().expect("exact Session"),
             ];
         }
-        vec!["lf".into(), "open".into(), self.url.to_string()]
+        let mut argv = vec!["lf".into(), "open".into()];
+        if self.overview {
+            argv.push("--workspace".into());
+        }
+        argv.push(self.url.to_string());
+        argv
     }
 
     fn receipt(
@@ -266,7 +266,6 @@ impl Resolved {
                 task_id: self.task.as_ref().map(|task| task.id.to_string()),
                 wave: self.wave.clone(),
                 session: self.session.clone(),
-                diff: self.url.diff,
                 execution_machine: self.execution_machine.clone(),
             },
             conversation,
@@ -352,9 +351,9 @@ fn work_context(
     // Without a Task, an exact Session selects the Work; a Wave must contain it.
     let mut resolution = match (task, session) {
         (None, Some(session)) => {
-            let selected = super::context::explain_in(directory, None, None, Some(session), None)?;
+            let selected = super::context::explain_in(directory, None, None, Some(session))?;
             if let Some(wave) = wave {
-                let work = super::context::explain_in(directory, Some(wave), None, None, None)?;
+                let work = super::context::explain_in(directory, Some(wave), None, None)?;
                 anyhow::ensure!(
                     matches!((&work.wave, &selected.wave),
                     (ContextFact::Bound { value: wave, .. }, ContextFact::Bound { value: session_wave, .. }) if wave == session_wave),
@@ -363,7 +362,7 @@ fn work_context(
             }
             selected
         }
-        _ => super::context::explain_in(directory, wave, task, None, None)?,
+        _ => super::context::explain_in(directory, wave, task, None)?,
     };
     if let ContextFact::Bound { value, .. } = &resolution.task {
         let task = loopflow_model::durable::TaskId::parse(value)?;
@@ -388,7 +387,7 @@ fn work_context(
                 source: "explicit_session_on_execution_machine".into(),
             };
         } else {
-            let selected = super::context::explain_in(directory, None, None, Some(session), None)?;
+            let selected = super::context::explain_in(directory, None, None, Some(session))?;
             anyhow::ensure!(
                 matches!((&resolution.task, &selected.task),
                 (ContextFact::Bound { value: task, .. }, ContextFact::Bound { value: session_task, .. }) if task == session_task),
@@ -405,7 +404,6 @@ fn describe(
     store: Option<&Store>,
     context: &ContextExplanation,
     session: Option<String>,
-    diff: bool,
     session_cwd: Option<PathBuf>,
 ) -> Result<Resolved> {
     if let ContextFact::Unavailable { reason } = &context.task {
@@ -443,10 +441,6 @@ fn describe(
         }
         _ => None,
     };
-    anyhow::ensure!(
-        !diff || task.is_some(),
-        "--diff needs a Task; select --task or a Task-associated --session. Nothing was opened."
-    );
     let execution_machine = match (&task, &context.execution_machine, &context.machine) {
         (
             Some(_),
@@ -454,7 +448,7 @@ fn describe(
             ContextFact::Bound { value: local, .. },
             // The owner creates its checkout when the routed connect arrives.
         ) if owner != local => Some(owner.clone()),
-        (Some(_), ContextFact::Unavailable { reason }, _) if session.is_some() || diff => {
+        (Some(_), ContextFact::Unavailable { reason }, _) if session.is_some() => {
             bail!("Task execution location unavailable: {reason}. Nothing was opened.");
         }
         _ => None,
@@ -486,7 +480,6 @@ fn describe(
     let mut url = WorkUrl::new(short_name.clone(), target);
     url.qualifier = own.and_then(|own| qualifier_for(&registered, own, &short_name));
     url.session = session.clone();
-    url.diff = diff;
     let (primary, primary_machine) = match store {
         Some(store) => {
             let scope = match (&task, &context.wave) {
@@ -555,11 +548,11 @@ fn describe(
         wave,
         session,
         session_cwd,
-        agent: None,
         primary,
         primary_machine,
         execution_machine,
         execution_unavailable,
+        overview: false,
     })
 }
 
@@ -683,7 +676,7 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
     let wave = cli
         .wave
         .as_deref()
-        .map(|wave| super::context::explain(Some(wave), None, None, None))
+        .map(|wave| super::context::explain(Some(wave), None, None))
         .transpose()?
         .and_then(|context| match context.wave {
             ContextFact::Bound { value, .. } => Some(value),
@@ -692,7 +685,6 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
     let records = runtime.block_on(loopflow_execution::ops::human_session::list(
         &store,
         &loopflow_execution::session::SessionFilter {
-            blocked: false,
             on: None,
             orphan: false,
             repo: if scoped {
@@ -773,7 +765,6 @@ fn available_target(
         Some(store),
         &context,
         exact.clone(),
-        false,
         exact.as_ref().map(|_| session.cwd.clone()),
     )?;
     if exact.is_some() {
@@ -957,6 +948,8 @@ struct ConversationView {
     reason: String,
     placement: Option<String>,
     attachment: super::desktop::DesktopOpeningStatus,
+    /// Desktop shows it, even before its pane exists.
+    in_desktop: bool,
 }
 
 impl ConversationView {
@@ -968,7 +961,7 @@ impl ConversationView {
         if self.attachment == super::desktop::DesktopOpeningStatus::Opening {
             OpenStatus::Opening
         } else {
-            OpenStatus::Elsewhere
+            OpenStatus::Usable
         }
     }
 }
@@ -986,18 +979,19 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
                     reason: "Still opening in Desktop; no conversation pane exists yet".into(),
                     placement: None,
                     attachment,
+                    in_desktop: true,
                 });
             };
             let description = match attachment {
                 DesktopOpeningStatus::Opening => "Still opening",
                 DesktopOpeningStatus::Usable => "Already open",
-                DesktopOpeningStatus::Elsewhere => "Conversation held elsewhere; view retained",
                 DesktopOpeningStatus::Failed => "Attachment failed or ended; view retained",
             };
             Ok(ConversationView {
                 reason: format!("{description} in Desktop (window {}, pane {}); reveal it with `lf open --session {id} --focus`", view.window, view.pane),
                 placement: Some(format!("desktop:{}", serde_json::to_string(&view)?)),
                 attachment,
+                in_desktop: true,
             })
         }).transpose()?;
     if desktop
@@ -1015,14 +1009,15 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
     };
     // The terminal's stored viewer flag can lag the attachment handshake.
     // Ask the live terminal before using that flag to decide whether to attach.
-    let (viewed, ready) = if let Some(terminal) = store.sqlite.session_terminal(id)? {
-        loopflow_execution::transport::attachment(&terminal)
+    let held = store.sqlite.session_terminal(id)?;
+    let (viewed, ready) = if let Some(terminal) = &held {
+        loopflow_execution::transport::attachment(terminal)
             .context("read conversation attachment")?
     } else {
         (
             !summary.unviewed
                 && summary.agent_process_evidence
-                    == loopflow_execution::journal::ProcessIdentityEvidence::Live,
+                    == loopflow_execution::store::ProcessIdentityEvidence::Live,
             true,
         )
     };
@@ -1045,6 +1040,7 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
         } else {
             DesktopOpeningStatus::Opening
         },
+        in_desktop: false,
     }))
 }
 
@@ -1089,9 +1085,6 @@ pub struct OpenSelection {
     /// Open this exact Session rather than its scope's primary
     #[arg(long)]
     pub session: Option<String>,
-    /// Show the Task's Changes browser beside its conversation (Desktop)
-    #[arg(long)]
-    pub diff: bool,
     /// Print a link without opening or preparing anything
     #[arg(long)]
     pub link: bool,
@@ -1106,47 +1099,66 @@ pub struct OpenSelection {
 
 #[derive(Debug, Clone, clap::Args)]
 #[command(
-    after_help = "Direct CLI calls attach here; agent calls open a sibling tab. An already-open conversation stays where it is: use --focus to reveal it, or lf resume to move input. Layouts and overviews: lf workspace."
+    after_help = "Direct CLI calls attach here; agent calls open a sibling tab. A conversation takes any number of views and each one types: --here and --tab add one, --focus reveals an existing one. --workspace opens the repository or Wave overview instead: its started, unfinished Tasks as tabs, each the Task's conversation."
 )]
 pub struct OpenArgs {
     #[command(flatten)]
     pub selection: OpenSelection,
     /// Attach in this terminal (direct CLI default)
-    #[arg(long, conflicts_with_all = ["tab", "focus"])]
+    #[arg(long, conflicts_with_all = ["tab", "focus", "workspace", "available"])]
     pub here: bool,
     /// Attach in a sibling tab (agent default)
-    #[arg(long, conflicts_with = "focus")]
+    #[arg(long, conflicts_with_all = ["focus", "workspace", "available"])]
     pub tab: bool,
     /// Reveal an existing conversation view; create nothing
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["workspace", "available"])]
     pub focus: bool,
     /// Present original files in an attached Desktop Files view
-    #[arg(long = "file", value_name = "PATH", conflicts_with_all = ["session", "diff", "link", "here", "tab", "focus"])]
+    #[arg(long = "file", value_name = "PATH", conflicts_with_all = ["session", "link", "here", "tab", "focus", "workspace", "available"])]
     pub files: Vec<PathBuf>,
-}
-
-#[derive(Debug, Clone, clap::Args)]
-pub struct WorkspaceArgs {
-    #[command(flatten)]
-    pub selection: OpenSelection,
+    /// Open the repository or Wave overview: started, unfinished Tasks as tabs
+    #[arg(long)]
+    pub workspace: bool,
     /// Open every conversation available for you to work with
-    #[arg(long, conflicts_with_all = ["url", "session"])]
+    #[arg(long, conflicts_with_all = ["url", "session", "workspace"])]
     pub available: bool,
     /// Keep the host's current selection
     #[arg(long)]
     pub no_focus: bool,
-    #[arg(long, hide = true, requires = "server")]
-    pub follow: Option<String>,
-    #[arg(long, hide = true, requires = "follow", value_delimiter = ',')]
-    pub seen: Vec<String>,
-    #[arg(long, hide = true)]
+    /// Another Machine's overview request: open only that Machine's Tasks.
+    #[arg(long, hide = true, requires = "workspace")]
     pub local_workspace: bool,
-    #[arg(long, hide = true, requires = "local_workspace", value_delimiter = ',')]
-    pub arrive_task: Vec<String>,
-    #[arg(long, hide = true, requires = "arrive_task")]
-    pub into: Option<String>,
-    #[arg(long = "remote", hide = true, requires = "follow")]
-    pub remote: Vec<String>,
+}
+
+impl OpenArgs {
+    /// `lf open --workspace` for `selection`.
+    pub(crate) fn overview(selection: OpenSelection) -> Self {
+        Self {
+            selection,
+            here: false,
+            tab: false,
+            focus: false,
+            files: Vec::new(),
+            workspace: true,
+            available: false,
+            no_focus: false,
+            local_workspace: false,
+        }
+    }
+
+    /// Several conversations at once: an overview or everything available.
+    fn opens_workspace(&self) -> bool {
+        self.workspace || self.available
+    }
+
+    /// One item of a workspace, opened as a single conversation.
+    fn conversation(&self, tab: bool) -> Self {
+        Self {
+            tab,
+            workspace: false,
+            ..Self::overview(self.selection.clone())
+        }
+    }
 }
 
 /// The one conversation named by an address, root selectors or checkout.
@@ -1160,11 +1172,11 @@ fn target(cli: &crate::lf::Cli, args: &OpenSelection) -> Result<Resolved> {
                 cli.task.is_none() && cli.wave.is_none(),
                 "select Work with either a link or --task/--wave, not both"
             );
-            url_target(store, &std::env::current_dir()?, text, session, args.diff)?
+            url_target(store, &std::env::current_dir()?, text, session)?
         }
         None => {
             let context = selected_context(cli, session.as_deref())?;
-            describe(store, &context, session, args.diff, None)?
+            describe(store, &context, session, None)?
         }
     };
     Ok(resolved)
@@ -1176,11 +1188,9 @@ fn url_target(
     directory: &Path,
     text: &str,
     session: Option<String>,
-    diff: bool,
 ) -> Result<Resolved> {
     let url = WorkUrl::parse(text)?;
     let session = session.or_else(|| url.session.clone());
-    let diff = diff || url.diff;
     let repository = repository_for(store, &url, directory)?;
     let (task, wave) = match &url.target {
         WorkTarget::Task(id) => (Some(id.as_str()), None),
@@ -1193,13 +1203,13 @@ fn url_target(
         context.task = ContextFact::Unbound;
         context.wave = ContextFact::Unbound;
     }
-    describe(store, &context, session, diff, None)
+    describe(store, &context, session, None)
 }
 
 /// What `lf --cwd <directory> open <url> --link --json` prints.
 pub fn url_links(directory: &Path, url: &str) -> Result<Vec<WorkLink>> {
     let store = loopflow_execution::store::read_existing_registry()?;
-    let target = url_target(store.as_ref(), directory, url, None, false)?;
+    let target = url_target(store.as_ref(), directory, url, None)?;
     let presentation = if loopflow_execution::journal::agent_caller().is_some() {
         route(OpenHost::Auto)
     } else {
@@ -1211,6 +1221,16 @@ pub fn url_links(directory: &Path, url: &str) -> Result<Vec<WorkLink>> {
 pub fn explain(cli: &crate::lf::Cli, args: &OpenArgs, json: bool) -> Result<()> {
     if !args.files.is_empty() {
         return files::run(cli, args, true);
+    }
+    if args.opens_workspace() {
+        let mut selection = args.selection.clone();
+        selection.json = json;
+        return print_links(
+            cli,
+            workspace_targets(cli, args)?,
+            &selection,
+            route(selection.host),
+        );
     }
     let link = target(cli, &args.selection)?.link(conversation::presentation(args)?);
     if json {
@@ -1230,15 +1250,18 @@ pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
     if !args.files.is_empty() {
         return files::run(cli, args, false);
     }
+    if args.opens_workspace() {
+        return run_workspace(cli, args);
+    }
     if args.selection.link {
         return print_links(
             cli,
+            (vec![target(cli, &args.selection)?], Vec::new()),
             &args.selection,
-            false,
             conversation::presentation(args)?,
         );
     }
-    let receipt = conversation::open(target(cli, &args.selection)?, args, true);
+    let receipt = conversation::open(target(cli, &args.selection)?, args, !args.no_focus);
     print_report(
         OpenReport {
             receipts: vec![receipt],
@@ -1248,21 +1271,10 @@ pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
     )
 }
 
-pub fn explain_workspace(cli: &crate::lf::Cli, args: &WorkspaceArgs, json: bool) -> Result<()> {
-    let mut selection = args.selection.clone();
-    selection.json = json;
-    print_links(cli, &selection, args.available, route(selection.host))
-}
-
-fn desktop_workspace_url(
-    repository: &Path,
-    task: Option<&str>,
-    wave: Option<&str>,
-) -> reqwest::Url {
-    let expression = match (task, wave) {
-        (Some(task), _) => format!("task:{task}"),
-        (_, Some(wave)) => format!("wave:{wave} state:working"),
-        _ => "state:working".into(),
+fn desktop_workspace_url(repository: &Path, wave: Option<&str>) -> reqwest::Url {
+    let expression = match wave {
+        Some(wave) => format!("wave:{wave} state:working"),
+        None => "state:working".into(),
     };
     let mut url = reqwest::Url::parse("loopflow://open").expect("fixed Desktop URL");
     url.query_pairs_mut()
@@ -1271,93 +1283,123 @@ fn desktop_workspace_url(
     url
 }
 
-pub fn run_workspace(cli: &crate::lf::Cli, args: &WorkspaceArgs) -> Result<()> {
+pub(crate) fn run_workspace(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
     if args.selection.link {
         return print_links(
             cli,
+            workspace_targets(cli, args)?,
             &args.selection,
-            args.available,
             route(args.selection.host),
         );
     }
+    if args.available {
+        return open_available(cli, args);
+    }
+    let target = overview(cli, &args.selection)?;
     let host = route(args.selection.host)
         .host
         .expect("host selection always names a host");
     if host == OpenHost::Desktop {
-        let (targets, unknown) = workspace_targets(cli, args)?;
-        let receipts = targets
-            .iter()
-            .enumerate()
-            .map(|(index, target)| {
-                let focus = !args.no_focus && index + 1 == targets.len();
-                if target.session.is_some() || args.available {
-                    return conversation::open(
-                        target.clone(),
-                        &OpenArgs {
-                            selection: args.selection.clone(),
-                            here: false,
-                            tab: false,
-                            focus: false,
-                            files: Vec::new(),
-                        },
-                        focus,
-                    );
-                }
-                let url = desktop_workspace_url(
-                    &target.repository_path,
-                    target.task.as_ref().map(|task| task.id.as_str()),
-                    target.wave.as_deref(),
-                );
-                match open_desktop(url.as_str(), focus) {
-                    Ok(()) => target.receipt(Some(host), None, OpenStatus::Opening, None),
-                    Err(error) => target.receipt(
-                        Some(host),
-                        None,
-                        OpenStatus::Failed,
-                        Some(format!("{error:#}")),
-                    ),
-                }
-            })
-            .collect();
+        let url = desktop_workspace_url(&target.repository_path, target.wave.as_deref());
+        let receipt = match open_desktop(url.as_str(), !args.no_focus) {
+            Ok(()) => target.receipt(Some(host), None, OpenStatus::Opening, None),
+            Err(error) => target.receipt(
+                Some(host),
+                None,
+                OpenStatus::Failed,
+                Some(format!("{error:#}")),
+            ),
+        };
         return print_report(
-            OpenReport { receipts, unknown },
+            OpenReport {
+                receipts: vec![receipt],
+                unknown: Vec::new(),
+            },
             args.selection.json || cli.json,
         );
     }
     anyhow::ensure!(
         matches!(host, OpenHost::Rex | OpenHost::Herdr | OpenHost::Cmux),
-        "{} does not support workspaces; use lf open, lf task view or lf diff",
+        "{} does not support workspaces; use lf open without --workspace",
         host.label()
     );
     anyhow::ensure!(
         args.selection.server.is_none() || host == OpenHost::Rex,
         "--server selects a Rex server"
     );
-    workspace::run(cli, args, host)
+    workspace::run(cli, args, &target, host)
+}
+
+/// Every available conversation, each opened as one conversation.
+fn open_available(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
+    let (targets, unknown) = available(cli)?;
+    let json = args.selection.json || cli.json;
+    if targets.is_empty() && !json {
+        println!("No available conversations.");
+    }
+    let single = args.conversation(args.selection.host != OpenHost::Desktop);
+    let last = targets.len();
+    let receipts = targets
+        .into_iter()
+        .enumerate()
+        .map(|(index, target)| {
+            conversation::open(target, &single, !args.no_focus && index + 1 == last)
+        })
+        .collect();
+    print_report(OpenReport { receipts, unknown }, json)
+}
+
+/// What `--workspace` opens: a Wave or repository. A Task or one Session is a
+/// single conversation, so naming one is an error that names the overview.
+fn overview(cli: &crate::lf::Cli, args: &OpenSelection) -> Result<Resolved> {
+    let mut target = target(cli, args)?;
+    if let Some(task) = &target.task {
+        let wave = match &task.wave_id {
+            Some(id) => loopflow_execution::store::read_existing_registry()?
+                .context("Wave records are unavailable on this Machine")?
+                .sqlite
+                .get_wave(id)?
+                .map(|wave| wave.slug().to_owned()),
+            None => None,
+        };
+        let instead = match wave {
+            Some(wave) => format!("lf open --wave {wave} --workspace"),
+            None => format!(
+                "lf open --workspace {}",
+                WorkUrl::new(target.url.repository.clone(), WorkTarget::Repository)
+            ),
+        };
+        bail!(
+            "{} is a Task; --workspace opens a Wave or repository. Run {instead}, or lf open --task {} without --workspace",
+            task.identifier,
+            task.identifier
+        );
+    }
+    anyhow::ensure!(
+        target.session.is_none(),
+        "--workspace opens a Wave or repository, not one Session; drop --session"
+    );
+    target.overview = true;
+    Ok(target)
 }
 
 fn workspace_targets(
     cli: &crate::lf::Cli,
-    args: &WorkspaceArgs,
+    args: &OpenArgs,
 ) -> Result<(Vec<Resolved>, Vec<String>)> {
     if args.available {
         available(cli)
     } else {
-        Ok((vec![target(cli, &args.selection)?], Vec::new()))
+        Ok((vec![overview(cli, &args.selection)?], Vec::new()))
     }
 }
 
 fn print_links(
     cli: &crate::lf::Cli,
+    (targets, unknown): (Vec<Resolved>, Vec<String>),
     args: &OpenSelection,
-    all: bool,
     presentation: OpenRoute,
 ) -> Result<()> {
-    let (targets, unknown) = if all {
-        available(cli)?
-    } else {
-        (vec![target(cli, args)?], Vec::new())
-    };
     let links: Vec<_> = targets
         .iter()
         .map(|target| target.link(presentation.clone()))
@@ -1365,7 +1407,7 @@ fn print_links(
     if args.json || cli.json {
         println!("{}", serde_json::to_string_pretty(&links)?);
     } else {
-        if all && links.is_empty() {
+        if links.is_empty() {
             println!("No available conversations.");
         }
         for link in &links {
@@ -1398,7 +1440,6 @@ fn print_report(report: OpenReport, json: bool) -> Result<()> {
                     OpenStatus::Opening => "Opening",
                     OpenStatus::Focused => "Focused",
                     OpenStatus::Usable => "Attached",
-                    OpenStatus::Elsewhere => "Already open",
                     OpenStatus::Failed => "Opening failed",
                 })
             );
@@ -1432,18 +1473,54 @@ fn print_unknown(unknown: &[String]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{named_bundle, DesktopApp, DESKTOP_BUNDLE};
+    use super::{named_bundle, DesktopApp, Resolved, DESKTOP_BUNDLE};
+    use loopflow_execution::work::link::{WorkTarget, WorkUrl};
     use std::path::PathBuf;
 
     #[test]
+    fn a_pane_command_names_only_the_invocations_harness() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let resolved = Resolved {
+            url: WorkUrl::new("loopflow", WorkTarget::Task("LOO-1".into())),
+            label: "LOO-1".into(),
+            repository_path: PathBuf::from("/repo"),
+            repository_id: None,
+            task: None,
+            wave: None,
+            session: Some("session_1".into()),
+            session_cwd: None,
+            primary: None,
+            primary_machine: None,
+            execution_machine: None,
+            execution_unavailable: None,
+            overview: false,
+        };
+        let env = loopflow_execution::config::AGENT_OVERRIDE_ENV;
+        let saved = std::env::var_os(env);
+        std::env::remove_var(env);
+        assert_eq!(
+            resolved.resume_argv("lf"),
+            ["lf", "session", "resume", "session_1"]
+        );
+        std::env::set_var(env, "codex");
+        let moved = resolved.resume_argv("lf");
+        match saved {
+            Some(saved) => std::env::set_var(env, saved),
+            None => std::env::remove_var(env),
+        }
+        assert_eq!(
+            moved,
+            ["lf", "session", "resume", "session_1", "--agent", "codex"]
+        );
+    }
+
+    #[test]
     fn desktop_workspace_urls_select_working_tasks_in_repository_and_wave() {
-        for (task, wave, expression) in [
-            (None, None, "state:working"),
-            (None, Some("product"), "wave:product state:working"),
-            (Some("task_123"), Some("product"), "task:task_123"),
+        for (wave, expression) in [
+            (None, "state:working"),
+            (Some("product"), "wave:product state:working"),
         ] {
-            let url =
-                super::desktop_workspace_url(std::path::Path::new("/repo with spaces"), task, wave);
+            let url = super::desktop_workspace_url(std::path::Path::new("/repo with spaces"), wave);
             assert_eq!(url.scheme(), "loopflow");
             assert_eq!(url.host_str(), Some("open"));
             assert_eq!(

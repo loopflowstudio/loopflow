@@ -211,8 +211,9 @@ fn owned_unstarted_task_is_open_but_excluded_from_working_queries() {
     let (_dir, store, repo) = fixture();
     let task = "task_33333333333333333333333333333333";
     store.conn.lock().unwrap().execute(
-        "INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here)
-         VALUES('own_33333333333333333333333333333333',?1,'recorded',NULL,NULL,2,2000,1)",
+        "INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id,written_here)
+         VALUES('own_33333333333333333333333333333333',?1,'recorded',NULL,NULL,2,2000,
+             (SELECT id FROM machines WHERE is_local=1),1)",
         [task],
     ).unwrap();
     for expression in [
@@ -292,7 +293,7 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
         .lock()
         .unwrap()
         .execute_batch(&format!(
-            "INSERT INTO task_events(task_id,kind_json,created_at) VALUES('{three}','{{\"kind\":\"started\"}}',2); INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here) VALUES('own_33333333333333333333333333333333','{three}','recorded',NULL,NULL,2,2000,1); INSERT INTO task_checkouts(task_id,worktree) VALUES('{three}','/repo/fix-3');"
+            "INSERT INTO task_events(task_id,kind_json,created_at) VALUES('{three}','{{\"kind\":\"started\"}}',2); INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id,written_here) VALUES('own_33333333333333333333333333333333','{three}','recorded',NULL,NULL,2,2000,(SELECT id FROM machines WHERE is_local=1),1); INSERT INTO task_checkouts(task_id,worktree) VALUES('{three}','/repo/fix-3');"
         ))
         .unwrap();
     assert_eq!(
@@ -551,414 +552,6 @@ fn dashboards_leave_repository_and_wave_defaults_unchanged() {
 }
 
 #[test]
-fn selection_pane_ownership_is_repository_scoped_for_every_work_kind() {
-    use crate::store::StoreError;
-    use loopflow_storage::work::selection::{WorkPaneLayout, WorkWorkspaceKey};
-    let (_dir, store, repo) = fixture();
-    let other = crate::repository::location::ensure_repository(&store, "/other").unwrap();
-    for (kind, id) in [
-        (WorkWorkspaceKind::Repository, repo.to_string()),
-        (
-            WorkWorkspaceKind::Wave,
-            "11111111-1111-1111-1111-111111111111".into(),
-        ),
-        // Backlog Work still owns panes even though it is outside the default view.
-        (
-            WorkWorkspaceKind::Task,
-            "task_33333333333333333333333333333333".into(),
-        ),
-    ] {
-        let mut layout = WorkPaneLayout {
-            work: WorkWorkspaceKey {
-                repository: repo.to_string(),
-                kind: kind.clone(),
-                id,
-            },
-            revision: 0,
-            tree: designated_tree(&kind),
-            focused: None,
-            zoomed: None,
-            hidden: Default::default(),
-            drafts: vec![],
-        };
-        assert!(store.pane_layout(&layout.work).unwrap().is_none());
-        let saved = store.save_pane_layout(&layout).unwrap();
-        assert_eq!(
-            store.pane_layout(&layout.work).unwrap(),
-            Some(saved.clone())
-        );
-        if layout.work.kind == WorkWorkspaceKind::Task {
-            // Leaving a Project changes membership, not the Task's pane owner.
-            store
-                .conn
-                .lock()
-                .unwrap()
-                .execute(
-                    "UPDATE tasks SET project_id=NULL WHERE id=?1",
-                    [&layout.work.id],
-                )
-                .unwrap();
-            assert_eq!(
-                store.pane_layout(&layout.work).unwrap(),
-                Some(saved.clone())
-            );
-            assert_eq!(store.save_pane_layout(&saved).unwrap().revision, 2);
-        }
-        let revision = store.revisions().unwrap();
-        layout.work.repository = other.to_string();
-        assert!(matches!(
-            store.pane_layout(&layout.work),
-            Err(StoreError::NotFound)
-        ));
-        assert!(matches!(
-            store.save_pane_layout(&layout),
-            Err(StoreError::NotFound)
-        ));
-        assert_eq!(store.revisions().unwrap(), revision);
-        layout.work.repository = repo.to_string();
-        match layout.work.kind {
-            WorkWorkspaceKind::Task => {
-                store
-                    .conn
-                    .lock()
-                    .unwrap()
-                    .execute(
-                        "UPDATE tasks SET planning_deleted_at=1 WHERE id=?1",
-                        [&layout.work.id],
-                    )
-                    .unwrap();
-            }
-            WorkWorkspaceKind::Wave => {
-                // Use the empty Wave so the later Task case remains available.
-                layout.work.id = "22222222-2222-2222-2222-222222222222".into();
-                store
-                    .conn
-                    .lock()
-                    .unwrap()
-                    .execute(
-                        "UPDATE waves SET retired_at=1, superseded_by_wave_id='11111111-1111-1111-1111-111111111111', retirement_reason='Merged into Product' WHERE id=?1",
-                        [&layout.work.id],
-                    )
-                    .unwrap();
-            }
-            WorkWorkspaceKind::Repository => continue,
-        }
-        assert!(matches!(
-            store.pane_layout(&layout.work),
-            Err(StoreError::NotFound)
-        ));
-    }
-}
-
-fn designated_tree(kind: &WorkWorkspaceKind) -> loopflow_storage::work::selection::PaneTree {
-    use loopflow_storage::work::selection::{PaneIntent, PaneTree, SplitAxis};
-    let pane = |id: &str, content| PaneTree::Pane {
-        id: id.into(),
-        content,
-    };
-    let session = pane(
-        "session",
-        PaneIntent::Session {
-            session_id: None,
-            location: None,
-        },
-    );
-    if *kind != WorkWorkspaceKind::Task {
-        return session;
-    }
-    let split = |first, second| PaneTree::Split {
-        axis: SplitAxis::Vertical,
-        ratio: 0.5,
-        first: Box::new(first),
-        second: Box::new(second),
-    };
-    split(
-        session,
-        split(
-            pane(
-                "shell",
-                PaneIntent::Shell {
-                    tabs: vec![],
-                    selected: None,
-                },
-            ),
-            pane(
-                "browser",
-                PaneIntent::Browser {
-                    location: None,
-                    tabs: vec![],
-                    selected: None,
-                },
-            ),
-        ),
-    )
-}
-
-#[test]
-fn selection_designated_panes_restore_and_invalid_writes_are_atomic() {
-    use loopflow_storage::work::selection::{BrowserTab, PaneIntent, PaneTree, WorkPaneLayout};
-    let (dir, store, repo) = fixture();
-    let mut layout: WorkPaneLayout = serde_json::from_str(include_str!(
-        "../../../../../tests/fixtures/dto/pane_layout.json"
-    ))
-    .unwrap();
-    layout.work.repository = repo.to_string();
-    layout.revision = 0;
-    // The fixture's conversation is not recorded here; the pane shows the start state.
-    layout.tree = match layout.tree {
-        PaneTree::Split {
-            axis,
-            ratio,
-            second,
-            ..
-        } => PaneTree::Split {
-            axis,
-            ratio,
-            first: Box::new(PaneTree::Pane {
-                id: "pane-0".into(),
-                content: PaneIntent::Session {
-                    session_id: None,
-                    location: None,
-                },
-            }),
-            second,
-        },
-        tree => tree,
-    };
-    let saved = store.save_pane_layout(&layout).unwrap();
-    let reader = SqliteStore::open_read_only(
-        &dir.path().join("db"),
-        crate::store::token_key::encryption_key,
-    )
-    .unwrap();
-    assert_eq!(
-        reader.pane_layout(&saved.work).unwrap(),
-        Some(saved.clone())
-    );
-    let revision = store.revisions().unwrap();
-    let Some(PaneIntent::Shell { tabs, selected }) = saved.tree.pane("pane-1") else {
-        panic!("shell")
-    };
-    assert_eq!(
-        tabs.iter().map(|tab| tab.id.as_str()).collect::<Vec<_>>(),
-        ["shell-1", "shell-2"]
-    );
-    assert_eq!(selected.as_deref(), Some("shell-2"));
-    let Some(PaneIntent::Browser { tabs, selected, .. }) = saved.tree.pane("pane-2") else {
-        panic!("browser")
-    };
-    assert!(matches!(&tabs[0], BrowserTab::Files { tabs, .. } if tabs.len() == 2));
-    assert_eq!(selected.as_deref(), Some("files"));
-    assert_eq!(saved.drafts[0].text, "unsaved edits");
-    for kind in [WorkWorkspaceKind::Repository, WorkWorkspaceKind::Wave] {
-        let mut invalid = saved.clone();
-        invalid.work.kind = kind;
-        assert!(store.save_pane_layout(&invalid).is_err());
-    }
-    // A fourth pane, a missing pane, a stale tab selection and a non-web page are rejected.
-    let mut invalid = saved.clone();
-    invalid.tree = PaneTree::Split {
-        axis: loopflow_storage::work::selection::SplitAxis::Vertical,
-        ratio: 0.5,
-        first: Box::new(invalid.tree),
-        second: Box::new(PaneTree::Pane {
-            id: "second-shell".into(),
-            content: PaneIntent::Shell {
-                tabs: vec![],
-                selected: None,
-            },
-        }),
-    };
-    assert!(store.save_pane_layout(&invalid).is_err());
-    let mut invalid = saved.clone();
-    if let PaneTree::Split { second, .. } = &invalid.tree {
-        invalid.tree = (**second).clone();
-    }
-    invalid.focused = None;
-    assert!(store.save_pane_layout(&invalid).is_err());
-    let edit = |change: &dyn Fn(&mut PaneIntent)| {
-        let mut invalid = saved.clone();
-        fn visit(tree: &mut PaneTree, change: &dyn Fn(&mut PaneIntent)) {
-            match tree {
-                PaneTree::Pane { content, .. } => change(content),
-                PaneTree::Split { first, second, .. } => {
-                    visit(first, change);
-                    visit(second, change);
-                }
-            }
-        }
-        visit(&mut invalid.tree, change);
-        invalid
-    };
-    assert!(store
-        .save_pane_layout(&edit(
-            &|content| if let PaneIntent::Shell { selected, .. } = content {
-                *selected = Some("removed".into());
-            }
-        ))
-        .is_err());
-    assert!(store
-        .save_pane_layout(&edit(
-            &|content| if let PaneIntent::Browser { tabs, .. } = content {
-                tabs.push(BrowserTab::Url {
-                    id: "page-2".into(),
-                    url: "file:///etc/passwd".into(),
-                });
-            }
-        ))
-        .is_err());
-    assert_eq!(store.revisions().unwrap(), revision);
-    assert_eq!(store.pane_layout(&saved.work).unwrap(), Some(saved));
-}
-
-#[test]
-fn selection_panes_restore_drafts_and_reject_stale_or_foreign_intent() {
-    use loopflow_storage::work::selection::{
-        BrowserTab, FileDraft, PaneIntent, PaneTree, ViewLocation, WorkPaneLayout, WorkWorkspaceKey,
-    };
-    let (dir, store, repo) = fixture();
-    store.test_session(
-        "selection-primary",
-        &crate::session_record::new_artifact_key(),
-    );
-    store.conn.lock().unwrap().execute_batch("UPDATE agent_sessions SET repo='/repo',task_id='task_22222222222222222222222222222222',wave_id='11111111-1111-1111-1111-111111111111' WHERE id='selection-primary'; INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task_22222222222222222222222222222222','selection-primary');").unwrap();
-    let location = ViewLocation {
-        machine_id: "machine_recorded".into(),
-        cwd: "/repo/task".into(),
-    };
-    let with_session = |session_id: Option<&str>| {
-        fn visit(tree: &mut PaneTree, session: Option<&str>, location: &ViewLocation) {
-            match tree {
-                PaneTree::Pane { content, .. } => match content {
-                    PaneIntent::Session { session_id, .. } => *session_id = session.map(Into::into),
-                    PaneIntent::Browser {
-                        location: place,
-                        tabs,
-                        selected,
-                    } => {
-                        *place = Some(location.clone());
-                        *tabs = vec![BrowserTab::Files {
-                            id: "files".into(),
-                            tabs: vec![loopflow_storage::work::selection::FileTab {
-                                id: "file-1".into(),
-                                path: "src/lib.rs".into(),
-                            }],
-                            selected: Some("file-1".into()),
-                        }];
-                        *selected = Some("files".into());
-                    }
-                    PaneIntent::Shell { .. } => {}
-                },
-                PaneTree::Split { first, second, .. } => {
-                    visit(first, session, location);
-                    visit(second, session, location);
-                }
-            }
-        }
-        let mut tree = designated_tree(&WorkWorkspaceKind::Task);
-        visit(&mut tree, session_id, &location);
-        tree
-    };
-    let layout = WorkPaneLayout {
-        work: WorkWorkspaceKey {
-            repository: repo.to_string(),
-            kind: WorkWorkspaceKind::Task,
-            id: "task_22222222222222222222222222222222".into(),
-        },
-        revision: 0,
-        tree: with_session(None),
-        focused: Some("browser".into()),
-        zoomed: Some("browser".into()),
-        hidden: Default::default(),
-        drafts: vec![FileDraft {
-            location: location.clone(),
-            path: "src/lib.rs".into(),
-            base_revision: "disk-revision".into(),
-            base_content: "base".into(),
-            text: "unsaved edits".into(),
-        }],
-    };
-    let saved = store.save_pane_layout(&layout).unwrap();
-    let plan =
-        selections::view_plan(&store, &repo, Some(&format!("task:{}", layout.work.id))).unwrap();
-    assert_eq!(plan.contents[0].pane_revision, Some(saved.revision));
-    assert!(matches!(
-        plan.contents[0].face,
-        Some(PaneIntent::Browser { .. })
-    ));
-    assert!(plan.contents[0].argv.is_none());
-    for id in ["first", "second"] {
-        selections::edit_dashboard(
-            &store,
-            &repo,
-            &DashboardId(id.into()),
-            &format!("task:{}", layout.work.id),
-            None,
-        )
-        .unwrap();
-    }
-    let first = selections::read_dashboard(&store, &repo, &DashboardId("first".into()))
-        .unwrap()
-        .unwrap();
-    let mut hidden = first.arrangement;
-    hidden.hide(&hidden.order[0].clone(), true).unwrap();
-    selections::save_dashboard(
-        &store,
-        &repo,
-        &first.saved.id,
-        Some(first.saved.revision),
-        &first.saved.selection,
-        &hidden.to_edit(),
-    )
-    .unwrap();
-    let revisions = store.revisions().unwrap();
-    let reader = SqliteStore::open_read_only(
-        &dir.path().join("db"),
-        crate::store::token_key::encryption_key,
-    )
-    .unwrap();
-    let first = selections::view_plan(&reader, &repo, Some("query:first")).unwrap();
-    let second = selections::view_plan(&reader, &repo, Some("query:second")).unwrap();
-    assert!(first.projection.visible.is_empty());
-    assert!(!second.projection.visible.is_empty());
-    assert_ne!(first.dashboard_id, second.dashboard_id);
-    assert_eq!(first.contents, second.contents);
-    assert_eq!(first.contents[0].pane_revision, Some(saved.revision));
-    assert_eq!(
-        reader.pane_layout(&layout.work).unwrap(),
-        Some(saved.clone())
-    );
-    assert!(store.save_pane_layout(&layout).is_err());
-    let mut invalid = saved.clone();
-    invalid.hidden.insert("browser".into());
-    assert!(store.save_pane_layout(&invalid).is_err());
-    invalid = saved.clone();
-    invalid.drafts[0].path = "../outside".into();
-    assert!(store.save_pane_layout(&invalid).is_err());
-    invalid = saved.clone();
-    invalid.tree = with_session(Some("unknown-session"));
-    assert!(store.save_pane_layout(&invalid).is_err());
-    invalid = saved.clone();
-    invalid.work.id = "task_99999999999999999999999999999999".into();
-    assert!(store.save_pane_layout(&invalid).is_err());
-    assert_eq!(store.revisions().unwrap(), revisions);
-    assert_eq!(store.pane_layout(&saved.work).unwrap(), Some(saved.clone()));
-    let mut unzoomed = saved;
-    unzoomed.zoomed = None;
-    let mut unzoomed = store.save_pane_layout(&unzoomed).unwrap();
-    let plan =
-        selections::view_plan(&store, &repo, Some(&format!("task:{}", unzoomed.work.id))).unwrap();
-    assert!(
-        matches!(&plan.contents[0].face, Some(PaneIntent::Session {session_id: Some(session_id), ..}) if session_id == "selection-primary")
-    );
-    unzoomed.tree = with_session(Some("selection-primary"));
-    let mut session_layout = store.save_pane_layout(&unzoomed).unwrap();
-    session_layout.work.id = "task_11111111111111111111111111111111".into();
-    session_layout.revision = 0;
-    assert!(store.save_pane_layout(&session_layout).is_err());
-}
-
-#[test]
 fn query_selection_identical_saved_expressions_keep_distinct_sources() {
     let (_dir, store, repo) = fixture();
     for id in ["first", "second"] {
@@ -1002,7 +595,6 @@ fn query_selection_uses_current_reported_attention_and_prunes_ended_activity() {
         "selection-session",
         None,
         &store.test_lf_process(),
-        true,
     )
     .unwrap();
     store
@@ -1010,7 +602,7 @@ fn query_selection_uses_current_reported_attention_and_prunes_ended_activity() {
             "selection-session",
             &attachment,
             std::process::id(),
-            crate::journal::process_started_at(std::process::id())
+            crate::process::os_process::process_started_at(std::process::id())
                 .unwrap()
                 .unwrap(),
         )
@@ -1106,14 +698,9 @@ fn stale_conversations_leave_task_activity_known() {
             .unwrap();
     }
     let unattached = selections::resolve_selection(&store, &repo, &running).unwrap();
-    let attachment = attachment::claim_session_attachment(
-        &store,
-        "before-boot",
-        None,
-        &store.test_lf_process(),
-        true,
-    )
-    .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, "before-boot", None, &store.test_lf_process())
+            .unwrap();
     let started: i64 = store
         .conn
         .lock()
@@ -1124,11 +711,11 @@ fn stale_conversations_leave_task_activity_known() {
             |row| row.get(0),
         )
         .unwrap();
-    crate::journal::set_test_machine_booted_at(Some(started - 1));
+    crate::process::os_process::set_test_machine_booted_at(Some(started - 1));
     let unknown = selections::resolve_selection(&store, &repo, &running).unwrap();
-    crate::journal::set_test_machine_booted_at(Some(started + 1));
+    crate::process::os_process::set_test_machine_booted_at(Some(started + 1));
     let restarted = selections::resolve_selection(&store, &repo, &running).unwrap();
-    crate::journal::set_test_machine_booted_at(None);
+    crate::process::os_process::set_test_machine_booted_at(None);
     // Only the attached Process without OS identity, begun since boot, is unknown.
     assert!(unattached.unavailable.is_empty());
     assert_eq!(unknown.unavailable, ["Task FIX-2 activity is unavailable"]);
@@ -1271,12 +858,10 @@ fn released_work_upgrades_to_saved_intent_without_rewriting_work() {
     )
     .unwrap();
     drop(conn);
-    let store = SqliteStore {
-        token_key: crate::store::token_key::encryption_key,
-        conn: std::sync::Arc::new(std::sync::Mutex::new(
-            rusqlite::Connection::open(&path).unwrap(),
-        )),
-    };
+    let store = SqliteStore::from_fixture_connection(
+        rusqlite::Connection::open(&path).unwrap(),
+        crate::store::token_key::encryption_key,
+    );
     let repo = RepositoryId::parse("repo_11111111111111111111111111111111").unwrap();
     let selection = selection();
     let result = selections::resolve_selection(&store, &repo, &selection).unwrap();
@@ -1542,4 +1127,19 @@ fn a_task_order_changed_after_preparation_keeps_the_new_order() {
         .unwrap()
         .unwrap();
     assert_eq!(retained, later);
+}
+
+#[test]
+fn a_view_plan_names_who_a_claim_here_would_make_owner() {
+    let (_dir, store, repo) = fixture();
+    let plan = selections::view_plan(&store, &repo, None).unwrap();
+    let viewer = plan.viewer.expect("the test home has a Git identity");
+    assert_eq!(
+        viewer.person_key,
+        crate::config::participant_email(std::path::Path::new(&plan.repo_path))
+    );
+    assert_eq!(
+        viewer.machine.id,
+        Some(store.saved_local_machine().unwrap().id)
+    );
 }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import sqlite3
@@ -509,46 +510,14 @@ def test_changed_cli_binary_invalidates_completed_journey(tmp_path: Path) -> Non
 
 
 def test_fixture_setup_volume_is_excluded_from_scenario_totals(tmp_path: Path) -> None:
-    builder = tmp_path / "lf-world"
-    builder.write_text(
-        f"#!{sys.executable}\n"
-        "import json, pathlib, sqlite3, sys\n"
-        "world = pathlib.Path(sys.argv[3])\n"
-        "project = world / 'claude/projects/repo'\n"
-        "project.mkdir(parents=True)\n"
-        "(world / 'repo').mkdir()\n"
-        "(world / 'home').mkdir()\n"
-        "with sqlite3.connect(world / 'home/loopflow.db') as database:\n"
-        "    database.execute('CREATE TABLE agent_sessions (id TEXT)')\n"
-        "    database.execute(\"INSERT INTO agent_sessions VALUES ('retained-session')\")\n"
-        "(project / 'native.jsonl').write_text('retained\\n')\n"
-        "homes = {name: str(world / name) for name in ('home', 'claude', 'codex')}\n"
-        "(world / 'env.json').write_text(json.dumps({'LF_HOME': homes['home'], "
-        "'CLAUDE_CONFIG_DIR': homes['claude'], 'CODEX_HOME': homes['codex']}))\n"
-    )
-    cli = tmp_path / "lf"
-    cli.write_text(
-        f"#!{sys.executable}\n"
-        "import json, os, pathlib, sys\n"
-        "directory = pathlib.Path(os.environ['LF_PERF_OUTPUT'])\n"
-        "start = dict(event='start', pid=os.getpid(), time=10, elapsed_ms=0, "
-        "connections=0, statements=0, rows=0)\n"
-        "end = dict(start, event='end', elapsed_ms=1, statements=12)\n"
-        "(directory / f'lf-{os.getpid()}.jsonl').write_text("
-        "json.dumps(start) + '\\n' + json.dumps(end))\n"
-        "task = {'id': 'owned-task', 'identifier': 'PERF-304', 'worktree': '/checkout'}\n"
-        "answers = {('desktop', 'task'): {'task': task}}\n"
-        "session = {'id': 'retained-session', 'task_ids': ['owned-task']}\n"
-        "print(json.dumps(answers.get(tuple(sys.argv[1:3]), {'session': session})))\n"
-    )
-    for executable in (builder, cli):
-        executable.chmod(0o755)
-    fixture = json.loads(performance._prepare_native_fixture(tmp_path, cli).read_text())
-    assert (fixture["issue"], fixture["native_id"]) == ("PERF-304", "native")
-    assert fixture["environment"]["LF_PERF_OUTPUT"] == str(tmp_path / "cli-volume")
+    setup = tmp_path / "fixture-setup-cli-volume"
+    setup.mkdir()
+    start = dict(event="start", pid=1, time=10, elapsed_ms=0, connections=0, statements=0, rows=0)
+    end = dict(start, event="end", elapsed_ms=1, statements=12)
+    (setup / "lf-1.jsonl").write_text(json.dumps(start) + "\n" + json.dumps(end))
     report = _report(tmp_path, _events())
-    assert report["fixture_setup_cli_volume"]["processes_started"] == 2
-    assert report["fixture_setup_cli_volume"]["observed_totals"]["statements"] == 24
+    assert report["fixture_setup_cli_volume"]["processes_started"] == 1
+    assert report["fixture_setup_cli_volume"]["observed_totals"]["statements"] == 12
     assert report["cli_volume"]["status"] == "unmeasured"
     assert report["cli_volume"]["observed_totals"]["statements"] is None
 
@@ -581,10 +550,8 @@ time.sleep(60)
         "_native_command",
         lambda *_: [sys.executable, "-u", str(executable), "--test-bundle-path", str(executable)],
     )
-    monkeypatch.setattr(
-        performance, "_prepare_native_fixture", lambda output, cli: output / "fixture"
-    )
 
+    monkeypatch.setattr(performance, "_measurement_preflight", lambda *_: True)
     with pytest.raises(KeyError, match="pid"):
         performance._run_native(
             tmp_path, {}, samples=1, soak_seconds=1, cli=tmp_path / "unused-cli"
@@ -611,12 +578,9 @@ def test_sandbox_paths_do_not_change_test_binary_hash_or_comparison_command(
     executable.write_text("pass\n")
     monkeypatch.setattr(performance, "BUILD_COMMAND", [sys.executable, "-c", "pass"])
     monkeypatch.setattr(
-        performance, "_prepare_native_fixture", lambda output, *_: output / "fixture"
-    )
-    monkeypatch.setattr(
         performance,
         "_native_command",
-        lambda _, env, optimized=False: [
+        lambda _, env, output, optimized=False: [
             "/usr/bin/env",
             f"HOME={env['HOME']}",
             sys.executable,
@@ -625,12 +589,14 @@ def test_sandbox_paths_do_not_change_test_binary_hash_or_comparison_command(
             str(executable),
         ],
     )
+    monkeypatch.setattr(performance, "_measurement_preflight", lambda *_: True)
     receipts = []
     for name in ("before", "after"):
         output = tmp_path / name
         output.mkdir()
         receipt = {}
-        performance._run_native(output, receipt, 1, 0, tmp_path / "unused-cli")
+        performance._run_native(output, receipt, 1, 0, None)
+        assert not (output / "native-fixture.json").exists()
         receipts.append(receipt)
     assert all(receipt["exit_code"] == 0 for receipt in receipts)
     assert receipts[0]["command"] == receipts[1]["command"]
@@ -725,9 +691,9 @@ def test_checkout_observation_preserves_read_boundary_and_detects_changes(tmp_pa
     missing = tmp_path / "missing"
     database = tmp_path / "observations.db"
     with sqlite3.connect(database) as db:
-        db.execute("CREATE TABLE tasks (worktree TEXT)")
+        db.execute("CREATE TABLE task_checkouts (worktree TEXT)")
         db.executemany(
-            "INSERT INTO tasks VALUES (?)", [(str(p),) for p in [checkout, alias, missing]]
+            "INSERT INTO task_checkouts VALUES (?)", [(str(p),) for p in [checkout, alias, missing]]
         )
         db.execute("CREATE TABLE waves (repo TEXT, name TEXT)")
     policy = tmp_path / "policy.sb"
@@ -798,3 +764,103 @@ def test_changed_repository_inputs_and_failed_git_cannot_compare(tmp_path: Path)
     current["metadata"]["repository_inputs_unchanged"] = True
     current["metadata"]["git_observations_complete"] = False
     assert not performance._comparison(current, baseline)["available"]
+
+
+def test_host_load_reports_cores_without_retaining_process_arguments() -> None:
+    load = performance._host_load(
+        "100.0 /usr/bin/python3\n"
+        " 7.5 /Applications/Example App.app/Contents/MacOS/Example App\n"
+        "not-a-number /usr/bin/no\nnan /usr/bin/no\n"
+    )
+    assert load["cpu_percent"] == 107.5
+    assert load["top"] == [
+        {"cpu_percent": 100.0, "executable": "python3"},
+        {"cpu_percent": 7.5, "executable": "Example App"},
+    ]
+
+
+def test_preflight_retains_contamination_and_does_not_launch_native_probe(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        performance.subprocess, "check_output", lambda *args, **kwargs: "125.0 /usr/bin/python3\n"
+    )
+    monkeypatch.setattr(performance.platform, "platform", lambda: "fixture")
+    result = performance._preflight(tmp_path / "trial")
+    report = json.loads((tmp_path / "trial/preflight.json").read_text())
+    assert result == 1
+    assert report["status"] == "rejected"
+    assert report["samples"][0]["cpu_percent"] == 125
+    assert report["native"] is None
+
+
+def test_cli_volume_separates_sql_profile_time_from_process_wall_time(tmp_path: Path) -> None:
+    base = dict(
+        event="start", pid=1, time=1, elapsed_ms=0, connections=0, statements=0, rows=0, sql_ms=0
+    )
+    end = dict(
+        base, event="end", time=2, elapsed_ms=1000, connections=1, statements=10, rows=1, sql_ms=12
+    )
+    (tmp_path / "lf-1.jsonl").write_text(json.dumps(base) + "\n" + json.dumps(end) + "\n")
+    report = performance._cli_volume(tmp_path)
+    assert report["sql_profile_ms"] == 12
+    del base["sql_ms"]
+    del end["sql_ms"]
+    (tmp_path / "lf-1.jsonl").write_text(json.dumps(base) + "\n" + json.dumps(end) + "\n")
+    assert performance._cli_volume(tmp_path)["sql_profile_ms"] is None
+
+
+def test_missing_host_observation_retains_a_rejected_report(tmp_path, monkeypatch) -> None:
+    def unavailable(*args, **kwargs):
+        raise FileNotFoundError("ps")
+
+    monkeypatch.setattr(performance.subprocess, "check_output", unavailable)
+    assert performance._preflight(tmp_path / "trial") == 1
+    report = json.loads((tmp_path / "trial/preflight.json").read_text())
+    assert report["status"] == "rejected"
+    assert report["samples"] == []
+    assert report["native"] is None
+
+
+def test_short_quiet_sample_cannot_qualify_a_host(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(performance.subprocess, "check_output", lambda *a, **k: "0.0 fixture\n")
+    assert performance._preflight(tmp_path / "trial", seconds=1) == 1
+    report = json.loads((tmp_path / "trial/preflight.json").read_text())
+    assert report["status"] == "rejected"
+    assert "fewer than 60" in report["reason"]
+    assert report["native"] is None
+
+
+def test_native_write_fixture_uses_normalized_tasks_and_keeps_repository_identity() -> None:
+    # Exercise the SQL the native runner actually sends against the released
+    # normalized Task schema, without needing a display to discover stale columns.
+    migration = (
+        performance.REPO / "rust/loopflow-storage/src/migrations/0.14.6.001_release.sql"
+    ).read_text()
+    schema = re.search(r"CREATE TABLE tasks_migration \(.*?;", migration, re.S).group()
+    source = (performance.REPO / "swift/LoopflowTests/DesktopPerformanceTests.swift").read_text()
+    rename = re.search(r"UPDATE tasks SET issue_title=.*?;", source).group()
+    create = re.search(r"INSERT INTO tasks\(id,repository_id.*?;", source, re.S).group()
+    replacements = {
+        r"\(template.name.sqlQuoted)": "O''Brien",
+        r"\(template.id.sqlQuoted)": "source",
+        r"\(task)": "probe",
+        r"\(attempt)": "1",
+        r"\(fresh)": "Fresh O''Brien",
+    }
+    for marker, value in replacements.items():
+        rename = rename.replace(marker, value)
+        create = create.replace(marker, value)
+    with sqlite3.connect(":memory:") as database:
+        database.executescript(schema + "ALTER TABLE tasks_migration RENAME TO tasks;")
+        database.execute(
+            "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,issue_title) "
+            "VALUES('source','repo','FIX-1',1,'Original')"
+        )
+        database.executescript(rename + create)
+        assert database.execute("SELECT issue_title FROM tasks WHERE id='source'").fetchone() == (
+            "O'Brien",
+        )
+        assert database.execute(
+            "SELECT issue_title,repository_id,planning_state FROM tasks WHERE id='probe'"
+        ).fetchone() == ("Fresh O'Brien", "repo", "unstarted")

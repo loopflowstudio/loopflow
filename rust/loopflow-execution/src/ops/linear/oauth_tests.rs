@@ -43,7 +43,6 @@ impl Fixture {
     async fn seed_snapshot(&self, wave: &Wave) -> InventoryFixture {
         let row = InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".into(),
             initiative: "initiative-1".into(),
             synced_at: 1,
             snapshot: Inventory {
@@ -111,13 +110,13 @@ async fn pm_read_linear_oauth_recovers() {
 
         summary: String::new(),
         status: loopflow_storage::work::project::ProjectStatus::Started,
-        linear_id: Some(LinearProjectId::new("project-1").unwrap()),
+        tracker_id: Some(LinearProjectId::new("project-1").unwrap()),
         slug: "reliability".into(),
         name: "Reliability".into(),
         description: "Retain this planning history.".into(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(1),
+        tracker_synced_at: Some(1),
 
         wave_id: wave.id().clone(),
         created_at: timestamp,
@@ -180,14 +179,14 @@ async fn pm_read_linear_oauth_recovers() {
     assert_eq!(refreshed.wave_id, project.wave_id);
     assert_eq!(refreshed.created_at, project.created_at);
     assert!(refreshed.updated_at >= project.updated_at);
-    assert_eq!(refreshed.linear_id, project.linear_id);
+    assert_eq!(refreshed.tracker_id, project.tracker_id);
     assert_eq!(
         refreshed.status,
         loopflow_storage::work::project::ProjectStatus::Started
     );
 
     assert!(refreshed.krs.iter().any(|kr| kr.text == "Fresh proof"));
-    assert!(refreshed.pm_snapshot_synced_at > project.pm_snapshot_synced_at);
+    assert!(refreshed.tracker_synced_at > project.tracker_synced_at);
     assert_eq!(
         fixture
             .store

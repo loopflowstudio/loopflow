@@ -1,152 +1,87 @@
 ---
 description: Clear your obsolete work state, report activity, and keep your started Tasks moving across the repository's Waves.
 ---
-Clear your old work state, keep your started Tasks moving through their Waves, and report what is happening across the repository.
+Clear your old work state, keep your started Tasks moving, and report what is happening across the repository.
 
 A Task is yours when its person is `lf config user` or it names no person.
 Another person's Task is listed as theirs and left alone; unowned backlog is
-listed for someone to pick up. This pass works existing Tasks only: plans,
-targets, chapters, new Tasks and backlog are out of scope. Report gaps instead
-of filing them.
+listed for someone to pick up. This pass works existing Tasks only. Plans,
+targets, projects and new Tasks are out of scope: report gaps, don't file them.
 
-## Clear old work state
-
-### Find stale work
+## Clear old work
 
 Read `lf wave show --json`, `lf session list --json` and `lf wt list --json`,
-and join Tasks and Sessions to worktrees by the ids and paths they return. Look
-at branches and PRs only to explain gaps.
+and join Tasks and Sessions to worktrees by the ids and paths they return.
+Then look for what has no future:
 
-Clean up only your own work. A branch, PR or worktree linked to a Task is yours
-only when the Task is. Never abandon or prune another person's Task, even if you
-wrote its PR. For a branch with no Task, check `gh api user --jq .login`,
-`git config user.email`, PR authorship and the repository's branch naming; a tip
-commit's author alone is not enough. When unsure, leave it and move on.
+- Open PRs of yours: `gh pr list --author @me --state open --json number,title,headRefName,url,isDraft,mergeStateStatus,updatedAt`.
+- Worktrees: `lf wt prune --dry-run` lists merged, closed-PR, remote-gone and
+  inactive candidates. Inactive is not abandoned: check for dirty files,
+  unpushed commits, linked Tasks and live Sessions.
+- Branches: a merged PR doesn't cover commits added after the merge.
+- Remote-only branches with no worktree, no open PR and no commits in 60 days.
+  Age alone doesn't make work obsolete.
 
-- Open PRs: `gh pr list --author @me --state open --limit 1000 --json number,title,headRefName,url,isDraft,mergeStateStatus,statusCheckRollup,updatedAt`.
-  Paginate if it hits the limit.
-- Remote branches: `git for-each-ref --format='%(refname:short) %(committerdate:iso8601) %(authoremail)' refs/remotes/origin`,
-  filtered to your branch namespace. These refs are cached; confirm with
-  `git ls-remote --heads origin`. Skip the default branch and symbolic refs.
-- Worktrees: `git -C <path> status --short`, unpushed commits, linked Tasks and
-  live Sessions or Graphs. `lf wt prune --dry-run` lists merged, squash-merged,
-  closed-PR, remote-gone and inactive candidates. Inactive is not abandoned.
-- Branches: compare against the default branch, look at unique commits, and
-  check for commits added after a merge; a merged PR doesn't cover later work.
-- Remote-only branches with no worktree, no open PR and no commits in 60 days:
-  check `gh pr list --head <branch> --state all --limit 1000 --json number,state,author,url,mergedAt,headRepository`,
-  matching the head repository too, and any open PR by anyone. Age alone doesn't
-  make work obsolete.
+Clean up only what is yours. A branch, PR or worktree linked to a Task is
+yours only when the Task is; for a branch with no Task, check PR authorship
+and the branch namespace, not just the tip commit's author. Unsure means leave
+it. Finish the clear cases and keep going past an uncertain one:
 
-### Clear it
+- **Ship it:** run the delivery skill in the Task's checkout.
+- **Abandon it:** `lf task abandon <issue>` retires a Task and its PR;
+  `lf pr abandon <branch>` does the same for a branch with no Task.
+- **Prune it:** `lf wt delete <branch>` removes the checkout and its local and
+  origin branch, keeping PR and Task history. `lf wt prune` applies the whole
+  preview; recheck it first.
 
-Finish the clear cases and keep going when one is uncertain. In
-`scratch/open-work.md`, keep only what the next pass couldn't read again from
-git or `lf`: what people said, word for word, what a check showed at
-the time, and open questions, with Task and PR links. Don't create Waves for
-waveless branches.
-Bring only real judgment calls to the conversation, with a recommendation and
-why.
+Never discard dirty files, unpushed commits or live work, and never use raw
+`git branch -D`, worktree removal or SQLite edits. Afterwards reread the state
+and report what happened, not what was attempted. Bring only real judgment
+calls to the conversation, each with a recommendation. Keep in
+`scratch/open-work.md` only what the next pass couldn't read again from git or
+`lf`. Clearing the whole list is never a prerequisite for the next request.
 
-- **Ship / ship-partial:** run the matching delivery skill in the Task's
-  checkout. Note leftover scope in `scratch/open-work.md`. Leave running Graphs
-  and review conversations alone.
-- **Abandon:** `lf task abandon <issue>` retires a Task and its PR together. For
-  a branch with no Task, `lf pr abandon <branch>` closes its PR and removes its
-  checkout and branches.
-- **Prune:** `lf wt delete <branch>` removes the checkout, local branch and
-  origin branch, keeping PR and Task history. It also takes a remote-only branch
-  name (without `origin/`). Use abandon when an open PR should close.
-- **Batch:** `lf wt prune` applies the whole preview; recheck it first. It
-  doesn't cover the remote-only scan.
-- **Database:** use Loopflow's reconcile and cleanup commands (check their
-  help). Never edit SQLite directly. If a needed command is missing, note it.
+## Keep work moving
 
-Never discard dirty files, unpushed commits or live work. Use Loopflow's cleanup
-commands, not raw `git branch -D` or worktree removal. Afterwards, reread the
-worktree, branch, PR and Task state and report what actually happened, not what
-was attempted. Clearing the whole list is never a prerequisite for the next
-request.
+Operate each Wave that has started work by following `lf help wave-operate`,
+here or with `lf --wave <wave> wave-operate "<direction>"`, and operate your
+started Tasks outside any Wave with `lf task-operate <issue>`. Sending someone
+to another conversation is not operating. Follow each intervention to its
+result. Never start a competing Graph run.
 
-## Summarize current activity
+`lf task run <issue>` continues a Task to its next interactive step. `lf task
+auto on` turns auto on, so the run stands in at interactive steps and may
+merge the PR; `lf -b task run` stands in for its own run, and a run with no
+interactive step left ahead may merge it too. Use them only when asked to ship or land, and never turn auto back on
+for a Task someone turned it off for. When a Task of yours is heading the wrong way,
+`lf task interrupt <issue>` stops it; discuss the new direction in its
+conversation.
 
-Report in this order: what is available to work on, what is moving, what is
-stuck, other people's work left alone, then what finished, due follow-ups and
-backlog. Include cleanup results and next moves. Use `lf wave list --json`,
-`lf wave status <wave> --json` and Task status; check PRs and branches where
-they explain a gap. Link every Task and PR. Routine progress goes in this
-conversation, not Task comments; open upkeep stays in `scratch/open-work.md`.
+## Report
 
-## Drive work through Waves
+In this order: what is available to work on, what is moving, what is stuck,
+other people's work left alone, then what finished and the backlog. Link every
+Task and PR. Routine progress goes in this conversation, not Task comments.
 
-Operate each Wave with started work by following `lf help wave-operate`, which
-owns the ownership rule and dispositions. Do it here, or run
-`lf --wave <wave> wave-operate "<concrete direction>"` and read the result.
-Operate your started Tasks outside any Wave with `lf task-operate <issue>`.
-Sending someone to another conversation is not operating. This view connects
-outcomes across Waves; each Wave pass judges the work inside it.
+## Reading the Machine
 
-Never start a competing Graph process, and never make a Task wait for this pass.
-Follow each intervention to its result and include that result in the update.
-
-## Reviewer mode
-
-- **Interactive reviewer:** discuss judgment calls here.
-- **Parent reviewer:** send recommendations through the review protocol and
-  check the Task's replies. Don't touch its checkout or start competing
-  execution. Name open choices in the review outcome.
-
-## Sessions and reviews
-
-`lf session list --available --json` shows conversations available to work in,
-by `availability`; a quiet working step can appear there. `task_ids` is the Task
-membership; `work` alone is not. An open or interrupted conversation doesn't
-mean its Task is blocked.
-
-`lf session list --json` lists all current conversations. Reread after changing
-a Session; never trust Session state from an earlier turn or the launch prompt.
-A failed read is not an empty list. Compare CLI and Desktop only on the same
-Machine.
-
-Lists cover this repository (worktrees fold into the main checkout); `--all`
-shows every repository on this Machine. `lf wave list` and `lf wave show` work
-the same way; `lf wave status` resolves one Wave here.
-
-To open a Session, run `lf resume <session-id> --prepare --json` and execute the
-returned `open_argv` unchanged. Preparing it doesn't mean it opened; check the
-provider is ready in the terminal. A Session missing from the list may still
-exist in another installation.
-
-Questions stay in this conversation. A separate perspective on a Task is
-`lf --task <task> : "<prompt>"`. Headless work missing input explains why and
-stops; the Wave operator reads its logs.
-
-## Machines
-
-A Task belongs to a person on a Machine, or to no one. Each person picks the
-Machine for new Tasks with `lf --wave <wave> set machine <machine>` or
-`lf --repo <repo> set machine <machine>`, never committed; unset means the
-Machine running the command. This pass changes no Task's person or Machine. Use
-`lf id`, then `lf --wave <wave> wave-operate` locally or
-`lf --machine <machine-id> --wave <wave> wave-operate` on the Wave's Machine.
-`lf --machine` runs that Machine's `lf`. Connect missing logins in the
-foreground with `lf machine connect`; work uses its own Machine's credentials.
-
-When a Task you own is heading the wrong way, `lf task interrupt <issue>` stops
-it; discuss the new direction in the Task conversation. The stopped Graph stays
-as history; Task, worktree and PR are unchanged.
-
-## Diagnose execution and accounts
-
-When work looks stuck, run `lf top` before guessing (`lf ps --json` for a
-snapshot). It shows live call trees, output rates, tokens, age, idle time,
-health and PIDs. Time alone never means dead. `lf mon prune --dry-run` shows
-cleanup candidates; plain prune removes dead records and orphaned provider
-groups. Never kill an `unclaimed` PID.
-
-Check `lf account --cached` (offline) before proposing an account fix;
-`lf account --json` shows managed status. OAuth client credentials come from the
-environment, then Doppler; in a Doppler repository, give
-`doppler run -- lf account connect <provider>`, otherwise name the missing
-variables. Never print values or run a secret getter bare. Don't change accounts
-or Task ownership just to get a pass through.
+- **Sessions.** `lf session list --available --json` shows conversations
+  waiting for input; an open conversation doesn't mean its Task is blocked.
+  Reread after changing anything, and never trust Session state from an
+  earlier turn. A failed read is not an empty list. To open one, run
+  `lf resume <session-id> --prepare --json` and execute its `open_argv`
+  unchanged.
+- **Execution.** When work looks stuck, run `lf session list --json` and
+  `lf graph list --runs --state current --json`: what runs, confirmed
+  against the OS. Time alone
+  never means dead. `lf machine doctor` reports strays and kills nothing.
+  Never kill a PID you can't account for.
+- **Machines.** A Task belongs to a person on a Machine. Each person picks
+  where new Tasks run with `lf --wave <wave> set machine <machine>` or
+  `lf --repo <repo> set machine <machine>`, never committed. This pass changes
+  no Task's person or Machine; operate a remote Task on its own Machine with
+  `lf --machine <machine-id>`.
+- **Accounts.** Check `lf account --json` (saved service authentication,
+  offline) before proposing an account fix. Claude and Codex own native
+  sign-in. Never print credential values, and don't change accounts or
+  ownership just to get a pass through.

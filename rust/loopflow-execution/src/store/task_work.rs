@@ -1,25 +1,22 @@
 //! Task membership and saved Graph positions, with observed execution state.
 use crate::graph::runner::ExecutionCursor;
-use crate::process::LfProcess;
 use crate::store::{sqlite::SqliteStore, StoreResult};
-use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphPosition};
+use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphRun};
 use crate::task_work::{TaskOverview, TaskWork};
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::LfProcessId;
+use loopflow_storage::graph_process::{ExecutionStart, TaskCarrier};
 
-/// Unknown execution remains potentially running.
-pub(crate) fn process_may_run(store: &SqliteStore, process: &crate::process::LfProcess) -> bool {
-    crate::journal::lf_process_evidence(
-        process,
-        &crate::journal::recorded_process_receipt(store, process),
-        crate::journal::process_identity_evidence,
-    ) != crate::store::ProcessIdentityEvidence::Dead
+/// A carrier whose OS process cannot be read stays potentially running.
+pub(crate) fn carrier_may_run(carrier: &TaskCarrier) -> bool {
+    crate::process::os_process::carrier_evidence(carrier)
+        != crate::store::ProcessIdentityEvidence::Dead
 }
 
 pub fn task_graph(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<TaskGraph>> {
     store
         .task_graph_row(task)?
-        .map(|row| decode_row(row).map(|row| read_task_graph(store, row)))
+        .map(|row| decode_row(row).map(read_task_graph))
         .transpose()
 }
 
@@ -28,10 +25,9 @@ pub fn task_work(store: &SqliteStore, task: &TaskId) -> StoreResult<TaskWork> {
     Ok(TaskWork {
         sessions: records.sessions,
         graph_processes: records.graph_processes,
-        processes: records.processes,
         graph: records
             .graph
-            .map(|row| decode_row(row).map(|row| read_task_graph(store, row)))
+            .map(|row| decode_row(row).map(read_task_graph))
             .transpose()?,
     })
 }
@@ -47,7 +43,7 @@ pub fn task_overview(
             graph_processes: records.graph_processes,
             graph: records
                 .graph
-                .map(|row| decode_row(row).map(|row| read_task_graph(store, row)))
+                .map(|row| decode_row(row).map(read_task_graph))
                 .transpose()?,
         },
         details,
@@ -61,30 +57,19 @@ pub(crate) fn task_progress(
     let (graph, details) = store.task_progress_records(task)?;
     Ok((
         graph
-            .map(|row| decode_row(row).map(|row| read_task_graph(store, row)))
+            .map(|row| decode_row(row).map(read_task_graph))
             .transpose()?,
         details,
     ))
 }
 
-fn read_task_graph(store: &SqliteStore, row: TaskGraphRow) -> TaskGraph {
-    let position = match row.run {
-        None => TaskGraphPosition::At { step: row.step },
-        Some((cursor, process)) => TaskGraphPosition::Run {
-            at: row
-                .graph
-                .step_name_of(&cursor)
-                .unwrap_or_else(|| row.step.clone()),
-            step: row.step,
-            lf_process_id: process.id.to_string(),
-            running: process.completed_at.is_none() && process_may_run(store, &process),
-        },
-    };
-    TaskGraph {
-        name: row.graph.name.clone(),
-        interactive_steps: row.graph.interactive_summary(),
-        position,
-    }
+fn read_task_graph(row: TaskGraphRow) -> TaskGraph {
+    let run = row.run.as_ref().map(|(cursor, process)| TaskGraphRun {
+        cursor,
+        lf_process_id: process.id.to_string(),
+        running: carrier_may_run(process),
+    });
+    TaskGraph::read(&row.graph, row.step, run, row.auto)
 }
 
 #[cfg(test)]
@@ -94,48 +79,44 @@ mod tests {
     use crate::task_graph::{CapturedGraph, TaskGraphPosition};
 
     #[test]
-    fn a_saved_run_without_identity_stays_potentially_running() {
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let process = crate::process::LfProcess {
-            id: loopflow_model::id::LfProcessId::new(),
-            pid: None,
-            os_started_at: None,
-            trace_id: loopflow_model::id::TraceId::new(),
-            parent_lf_process_id: None,
-            via_agent: None,
-            caller_session_id: None,
-            caller_agent_process_id: None,
-            command: None,
-            repo: None,
-            cwd: None,
-            started_at: i64::MAX,
-            completed_at: None,
-            outcome: None,
-            exit_code: None,
-            signal: None,
-            error: None,
-        };
-        let row = |process| TaskGraphRow {
+    fn a_run_reads_running_while_its_carrier_lives() {
+        let row = |pid: Option<u32>| TaskGraphRow {
             graph: CapturedGraph {
                 name: "proof".into(),
                 steps: Vec::new(),
             },
             step: "implement".into(),
-            run: Some((Default::default(), process)),
+            run: Some((
+                Default::default(),
+                loopflow_storage::graph_process::TaskCarrier {
+                    id: loopflow_model::id::LfProcessId::new(),
+                    pid,
+                    os_started_at: pid.map(|pid| {
+                        crate::process::os_process::process_started_at(pid)
+                            .unwrap()
+                            .unwrap()
+                    }),
+                    died_at: None,
+                },
+            )),
+            auto: None,
         };
-        let graph = read_task_graph(&store, row(process.clone()));
-        assert!(matches!(
-            graph.position,
-            TaskGraphPosition::Run { running: true, .. }
-        ));
-        let mut ended = process;
-        ended.completed_at = Some(10);
-        let graph = read_task_graph(&store, row(ended));
-        assert!(matches!(
-            graph.position,
-            TaskGraphPosition::Run { running: false, .. }
-        ));
+        let running = |row| match read_task_graph(row).position {
+            TaskGraphPosition::Run { running, .. } => running,
+            TaskGraphPosition::At { .. } => panic!("the Task is on a run"),
+        };
+        assert!(running(row(Some(std::process::id()))));
+
+        let mut child = std::process::Command::new("sleep")
+            .arg("5")
+            .spawn()
+            .unwrap();
+        let dead = row(Some(child.id()));
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(!running(dead));
+        // Its end cleared the carrier's OS process: the run stopped.
+        assert!(!running(row(None)));
     }
     #[test]
     fn moved_task_graph_json_keeps_nested_values_and_stored_bytes() {
@@ -205,11 +186,12 @@ mod tests {
 pub struct TaskGraphRow {
     pub graph: CapturedGraph,
     pub step: String,
-    pub run: Option<(ExecutionCursor, LfProcess)>,
+    pub run: Option<(ExecutionCursor, TaskCarrier)>,
+    pub auto: Option<loopflow_storage::sqlite::AutoState>,
 }
 
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
-/// step it stands at, and the cursor its run sets out from again, if it is on
+/// step it stands at and the cursor its run sets out from again, if it is on
 /// one. The run's Process stays behind.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaskGraphRecord {
@@ -227,6 +209,7 @@ fn decode_row(row: super::sqlite::task_work::SavedTaskGraphRow) -> StoreResult<T
             .map(|(cursor, process)| serde_json::from_str(&cursor).map(|cursor| (cursor, process)))
             .transpose()
             .map_err(crate::store::StoreError::from)?,
+        auto: row.auto,
     })
 }
 pub fn task_graph_row(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<TaskGraphRow>> {
@@ -282,17 +265,15 @@ pub fn start_task_graph_run(
     store: &SqliteStore,
     task: &TaskId,
     row: &TaskGraphRow,
-    start: &ExecutionCursor,
-    by: &LfProcessId,
-    ships: bool,
+    cursor: &ExecutionCursor,
+    carrier: (&LfProcessId, &ExecutionStart),
 ) -> StoreResult<bool> {
     store.start_task_graph_run(
         task,
         &row.step,
-        row.run.as_ref().map(|(_, process)| &process.id),
-        &serde_json::to_string(start)?,
-        by,
-        ships,
+        row.run.as_ref().map(|(_, carrier)| &carrier.id),
+        &serde_json::to_string(cursor)?,
+        carrier,
     )
 }
 pub fn advance_task_graph_run(

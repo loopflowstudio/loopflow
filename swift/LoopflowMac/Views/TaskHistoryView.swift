@@ -11,7 +11,7 @@ struct TaskHistoryView: View {
     let task: RoadmapTask
     @Environment(\.palette) private var palette
 
-    private var reading: WorkReading<[SessionHistory]> { model.sessionHistory[task.id] }
+    private var reading: Reading<[SessionHistory]> { model.sessionHistory[task.id] }
     private var history: [SessionHistory]? { reading.value }
     private var expanded: Bool { model.navigation.expandedHistory.contains(task.id) }
     private var inFlight: Bool { model.sessionHistory.inFlight.contains(task.id) }
@@ -24,7 +24,6 @@ struct TaskHistoryView: View {
                 count: expanded ? history?.count : nil,
                 expanded: expanded,
                 inFlight: inFlight,
-                failure: expanded && reading.errorMessage != nil ? history != nil : nil,
                 identifier: "task-history",
                 accessibilityLabel: "Session history, \(expanded ? "expanded" : "collapsed")",
                 help: "Complete recorded Session history for \(task.task.identifier)",
@@ -34,8 +33,7 @@ struct TaskHistoryView: View {
                         navigation.expandedHistory.insert(task.id)
                         load()
                     }
-                },
-                retry: load
+                }
             )
             if expanded {
                 if let history { list(history) } else { statusText }
@@ -50,8 +48,8 @@ struct TaskHistoryView: View {
 
     @ViewBuilder
     private var statusText: some View {
-        Text(reading.errorMessage.map { "History could not be read: \($0)" } ?? "Reading history…")
-            .font(Typography.body(12))
+        Text(reading.isLoading ? "Reading history…" : "")
+            .font(Typography.text)
             .foregroundStyle(palette.textSecondary)
             .textSelection(.enabled)
             .accessibilityIdentifier("task-history-status")
@@ -59,19 +57,9 @@ struct TaskHistoryView: View {
 
     private func list(_ history: [SessionHistory]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let reason = reading.errorMessage {
-                Text("Latest read failed: \(reason)")
-                    .font(Typography.body(12))
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
-                    .padding(.bottom, Spacing.xs)
-                    .accessibilityIdentifier("task-history-status")
-            }
             if history.isEmpty {
                 Text("No Session history recorded for this Task.")
-                    .font(Typography.body(12))
-                    .foregroundStyle(palette.textSecondary)
-                    .accessibilityIdentifier("task-history-empty")
+                    .accessibilityIdentifier("task-history-empty").emptyLine()
             }
             if let totals = context?.totals, let line = Self.sources(totals) {
                 contextLine("Task context  \(line)", flagged: totals.contains(where: \.overBudget))
@@ -81,26 +69,26 @@ struct TaskHistoryView: View {
             ForEach(history) { input in
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Text(input.skill ?? input.harness)
-                        .font(Typography.code(11.5))
+                        .font(Typography.mono)
                         .foregroundStyle(palette.text)
                     Text(Self.agent(input))
-                        .font(Typography.caption(11))
+                        .font(Typography.meta)
                         .foregroundStyle(palette.textSecondary)
                     Spacer(minLength: Spacing.sm)
                     Text(Self.started(input.observedAt))
-                        .font(Typography.caption(11))
+                        .font(Typography.meta)
                         .foregroundStyle(palette.textTertiary)
                     Text(input.status)
-                        .font(Typography.caption(11))
+                        .font(Typography.meta)
                         .foregroundStyle(palette.textSecondary)
                         .frame(minWidth: 72, alignment: .trailing)
                     Text(Self.shortId(input.id))
-                        .font(Typography.code(10.5))
+                        .font(Typography.mono)
                         .foregroundStyle(palette.textTertiary)
                         .textSelection(.enabled)
                         .help(input.id)
                 }
-                .padding(.vertical, 5)
+                .padding(.vertical, Spacing.xs)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("task-history-input-\(input.id)")
                 if let step = context?.steps.first(where: { $0.input == (input.artifactKey ?? input.sessionId) }) {
@@ -108,7 +96,7 @@ struct TaskHistoryView: View {
                         Self.summary(step),
                         flagged: step.sources.contains(where: \.overBudget)
                     )
-                    .padding(.bottom, 5)
+                    .padding(.bottom, Spacing.xs)
                     .accessibilityIdentifier("task-history-input-context-\(input.id)")
                 }
             }
@@ -118,7 +106,7 @@ struct TaskHistoryView: View {
 
     private func contextLine(_ text: String, flagged: Bool) -> some View {
         Text(text)
-            .font(Typography.code(10.5))
+            .font(Typography.mono)
             .foregroundStyle(flagged ? palette.text : palette.textTertiary)
             .textSelection(.enabled)
             .help("Submitted input by source, in tokens. ! marks a source over its budget; ? is unrecorded.")

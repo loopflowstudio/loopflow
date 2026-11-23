@@ -185,7 +185,6 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                 max_machines: *max,
                 max_usd_per_hour: *max_usd_per_hour,
                 hours: hours.min(rental::MAX_HOURS),
-                created_at: now(),
             };
             let price = ondemand.usd_per_hour().map_err(|reason| anyhow!(reason))?;
             loopflow_execution::store::rentals::add_ondemand(sqlite, &ondemand)?;
@@ -247,6 +246,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             max_usd,
             json,
         } => {
+            loopflow_execution::machine::forward::read_for_rental(&std::env::current_dir()?)?;
             let (rental, machine) = rent(&runtime, sqlite, name, *hours, *max_usd, true)?;
             if *json {
                 println!("{}", serde_json::to_string(&rental)?);
@@ -261,7 +261,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                 );
                 if !batch {
                     println!(
-                        "Next: `lf machine connect {label} github` and `lf machine connect {label} claude`; \
+                        "Next: `lf machine connect {label} github`; launches carry `forward`; \
                          `lf machine end {label}` gives it back"
                     );
                 }
@@ -295,7 +295,7 @@ fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing
             loopflow_execution::store::machines::machine_by_id(sqlite, id)?
                 .and_then(|machine| machine.label),
             held_ids(sqlite, id)?,
-            Some(sqlite.copy_counts(id)?).filter(|counts| counts.sessions + counts.processes > 0),
+            Some(sqlite.copy_counts(id)?).filter(|counts| counts.sessions > 0),
         ),
         None => (None, Vec::new(), None),
     };
@@ -582,7 +582,7 @@ pub fn place(
     let sqlite = &store.sqlite;
     if let Some(pool) = placement.pool {
         let record = loopflow_execution::store::rentals::pool(sqlite, pool)?
-            .ok_or_else(|| anyhow!("no pool {pool}; `lf pool add {pool}` creates it"))?;
+            .ok_or_else(|| anyhow!("no pool {pool}; `lf machine pool add {pool}` creates it"))?;
         let machines = loopflow_execution::store::machines::pool_machines(sqlite, pool)?;
         match rental::free_machine(&record, &machines, now()) {
             Ok(free) if placement.quote => {
@@ -615,16 +615,12 @@ pub fn place(
         );
         return Ok(true);
     }
-    if batch {
-        runtime.block_on(async {
-            let accounts = loopflow_execution::provider_account::open_account_store().await?;
-            loopflow_execution::machine::credentials::require_unattended_logins(&accounts).await
-        })?;
-    }
     // The Task's own repository, wherever this checkout was first recorded.
     let (_, task) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
         repo, None, issue,
     ))?;
+    // A rental that could not authenticate its launch is money for nothing.
+    loopflow_execution::machine::forward::read_for_rental(repo)?;
     let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
     let label = machine.name();
     if let Err(error) = prepare(&runtime, &label, repo, &task.repository_id, batch) {
@@ -736,25 +732,20 @@ fn prepare(
         Login::GitHub,
         None,
         None,
-        false,
         batch,
     ))?;
-    runtime.block_on(
-        loopflow_execution::machine::credentials::connect_claude_accounts(&machine, batch),
-    )?;
     let planning = loopflow_execution::config::load_config(Some(repo))?
         .unwrap_or_default()
         .planning_transport();
     if matches!(
         planning,
-        loopflow_execution::config::PlanningConfig::Linear { .. }
+        Some(loopflow_execution::config::TrackerConfig::Linear { .. })
     ) {
         runtime.block_on(loopflow_execution::machine::credentials::connect(
             &machine,
             Login::Linear,
             None,
             None,
-            false,
             batch,
         ))?;
     }
@@ -804,7 +795,7 @@ fn checkout_script(
         .collect();
     let script = format!(
         "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf config repo --bind {repository}",
-        loopflow_execution::machine::ssh::REMOTE_PATH,
+        loopflow_execution::machine::ssh::remote_path(),
         dir = q(directory),
     );
     Ok((origin, script))

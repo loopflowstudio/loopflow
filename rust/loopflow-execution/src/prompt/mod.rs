@@ -88,22 +88,6 @@ pub struct GatherSpec {
     pub related_repos: Vec<RelatedRepoContext>,
 }
 
-/// The existing Work association that selects its API guidance.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorkContext {
-    Task(String),
-    Wave(String),
-}
-
-impl WorkContext {
-    pub fn reason(&self) -> String {
-        match self {
-            Self::Task(task) => format!("Task association: {task}"),
-            Self::Wave(wave) => format!("Wave association: {wave}"),
-        }
-    }
-}
-
 /// Whether context includes clipboard text.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ClipboardContext {
@@ -124,8 +108,6 @@ pub struct GatherContextOpts {
     pub message: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
-    /// Include work API guidance for a selected or existing Work association.
-    pub work: Option<WorkContext>,
     pub surface: Surface,
     /// Explicit docs paths, globs, or directories to include in context.
     pub docs: Vec<String>,
@@ -213,8 +195,6 @@ pub struct PromptComponents {
     pub wave: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
-    /// Include work API guidance for a selected or existing Work association.
-    pub work: Option<WorkContext>,
     /// User message (positional args after skill/graph name)
     pub message: Option<String>,
     /// Semantic attribution for generated intent carried in `message`.
@@ -426,10 +406,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         summaries,
         wave: opts.wave.clone(),
         operate: opts.operate,
-        work: opts
-            .work
-            .clone()
-            .or_else(|| opts.wave.clone().map(WorkContext::Wave)),
         message: opts.message.clone(),
         message_context: None,
         diff_tier,
@@ -1516,49 +1492,12 @@ fn read_text_file(path: &Path) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-/// Ensure an entry exists in the repo's root .gitignore.
-///
-/// Adds the entry on a new line if not already present.
-pub(crate) fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError> {
-    let gitignore_path = repo_root.join(".gitignore");
-    let content = if gitignore_path.exists() {
-        fs::read_to_string(&gitignore_path)?
-    } else {
-        String::new()
-    };
-
-    // Check if entry already exists (as a line)
-    let entry_line = entry.trim();
-    let already_present = content.lines().any(|line| line.trim() == entry_line);
-
-    if !already_present {
-        let mut new_content = content;
-        // Ensure file ends with newline before adding entry
-        if !new_content.is_empty() && !new_content.ends_with('\n') {
-            new_content.push('\n');
-        }
-        new_content.push_str(entry_line);
-        new_content.push('\n');
-        fs::write(&gitignore_path, new_content)?;
-    }
-
-    Ok(())
-}
-
 /// Render Loopflow's operating and surface instructions.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
     if components.operate {
         parts.push(loopflow_section());
-        if components.work.is_some()
-            && !components
-                .skill
-                .as_ref()
-                .is_some_and(|skill| skill.name == "work")
-        {
-            parts.push(work_section());
-        }
     }
 
     let user = render_user_context(components.user_name.as_deref());
@@ -1574,21 +1513,12 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     parts
 }
 
-/// The launcher contract, independent of Work association.
+/// The launcher contract every launch carries: how to work, Tasks and notes.
 pub fn loopflow_section() -> String {
     format!(
         "<lf:loopflow>\n{}\n</lf:loopflow>",
         loopflow_definitions::builtins::LOOPFLOW_DOC
     )
-}
-
-/// The work API contract is also available as the `work` skill.
-pub fn work_section() -> String {
-    let source =
-        loopflow_definitions::builtins::get_builtin_skill("work").expect("bundled work skill");
-    let body =
-        loopflow_definitions::text::split_frontmatter(source).map_or(source, |(_, body)| body);
-    format!("<lf:work-guidance>\n{body}\n</lf:work-guidance>")
 }
 
 /// Name context is display data, not authorship for historical or external requests.
@@ -1711,7 +1641,7 @@ pub(crate) fn format_clipboard(clipboard: &str) -> String {
 /// `{trace_id}` segment present when `LF_TRACE_ID` is set, joining the prompt
 /// to its command trace.
 ///
-/// Ensures `.lf/prompts/` is in the repo's root `.gitignore`.
+/// Keeps `.lf/prompts/` out of Git through the checkout's `info/exclude`.
 pub fn write_prompt_log(
     repo_root: &Path,
     prompt: &str,
@@ -1720,7 +1650,7 @@ pub fn write_prompt_log(
 ) -> Result<PathBuf, CoreError> {
     let prompts_dir = repo_root.join(".lf/prompts");
     fs::create_dir_all(&prompts_dir)?;
-    ensure_gitignore_entry(repo_root, ".lf/prompts/")?;
+    crate::git::exclude(repo_root, ".lf/prompts/")?;
 
     let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
     // Replace / with . so namespaced skills (e.g., garden/scan) don't create subdirectories.
@@ -1801,7 +1731,7 @@ mod tests {
         let warnings = scratch_plan_warnings(
             "Jack selected local kickoff in this conversation.\n\
              No worker launch is part of this\nstep.\n\
-             Its current chapter is unavailable in the selected Machine.\n\
+             Its current project is unavailable in the selected Machine.\n\
              > $kickoff\n",
         );
         assert_eq!(
@@ -2000,7 +1930,6 @@ mod tests {
             .expect("assemble customer skill in a neutral repository");
             let prompt = render_full_prompt(components);
             assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
-            assert!(!prompt.contains("<lf:work-guidance>"));
             assert!(!prompt.contains("scripts/dev-lf"));
             assert!(!prompt.contains("LOO-267"));
 
@@ -2039,13 +1968,6 @@ mod tests {
                 loopflow_definitions::builtins::get_builtin_skill(&format!("{scope}/session"))
                     .expect("session skill");
             assert_eq!(session.matches(procedure).count(), 1, "{scope}");
-            let between_turns = match scope {
-                "task" => {
-                    "Do not apply the operating procedure merely because a progress post arrived."
-                }
-                _ => "nothing schedules your next one",
-            };
-            assert!(session.contains(between_turns), "{scope}");
         }
     }
 
@@ -2797,17 +2719,15 @@ mod tests {
     }
 
     #[test]
-    fn write_prompt_log_adds_to_repo_gitignore() {
-        let repo = init_repo();
-        let gitignore_path = repo.path().join(".gitignore");
-
-        assert!(!gitignore_path.exists());
-
+    fn write_prompt_log_stays_out_of_git_without_editing_gitignore() {
+        let repo = init_git_repo();
         write_prompt_log(repo.path(), "test", "skill", None).unwrap();
+        write_prompt_log(repo.path(), "again", "skill", None).unwrap();
 
-        assert!(gitignore_path.exists());
-        let content = fs::read_to_string(&gitignore_path).unwrap();
-        assert!(content.contains(".lf/prompts/"));
+        assert!(!repo.path().join(".gitignore").exists());
+        assert!(crate::git::is_clean(repo.path()).unwrap());
+        let exclude = fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap();
+        assert_eq!(exclude.matches(".lf/prompts/").count(), 1);
     }
 
     #[test]
@@ -2822,33 +2742,6 @@ mod tests {
         .unwrap();
 
         assert!(path.to_string_lossy().contains("ship.grind.implement.md"));
-    }
-
-    #[test]
-    fn write_prompt_log_preserves_existing_gitignore() {
-        let repo = init_repo();
-        let gitignore_path = repo.path().join(".gitignore");
-        fs::write(&gitignore_path, "target/\n.lf/prompts/\n").unwrap();
-
-        write_prompt_log(repo.path(), "test", "skill", None).unwrap();
-
-        let content = fs::read_to_string(&gitignore_path).unwrap();
-        // Should not duplicate the entry
-        assert_eq!(content, "target/\n.lf/prompts/\n");
-    }
-
-    #[test]
-    fn write_prompt_log_appends_to_existing_gitignore() {
-        let repo = init_repo();
-        let gitignore_path = repo.path().join(".gitignore");
-        fs::write(&gitignore_path, "target/\nnode_modules/\n").unwrap();
-
-        write_prompt_log(repo.path(), "test", "skill", None).unwrap();
-
-        let content = fs::read_to_string(&gitignore_path).unwrap();
-        assert!(content.contains("target/"));
-        assert!(content.contains("node_modules/"));
-        assert!(content.contains(".lf/prompts/"));
     }
 
     // ==========================================================================

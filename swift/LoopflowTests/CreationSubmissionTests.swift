@@ -10,7 +10,7 @@ struct CreationSubmissionTests {
         private var receipts: [String: String] = [:]
         private(set) var creations = 0
         private(set) var submissions = 0
-        func lookup(_ id: String) -> String { receipts[id] ?? "null" }
+        func lookup(_ id: String) -> ReadOutput { ReadOutput(receipts[id] ?? "null") }
         func send(_ payload: Data) throws -> String {
             let fields = try #require(JSONSerialization.jsonObject(with: payload) as? [String: Any])
             let id = try #require(fields["request_id"] as? String)
@@ -141,7 +141,7 @@ struct CreationSubmissionTests {
         actor Sends { var count = 0; func add() { count += 1 } }
         let sent = Sends()
         let client = CreationSubmissions(directory: root, machine: { "machine" },
-            lookup: { _ in other }, send: { _ in await sent.add(); return "{}" })
+            lookup: { _ in ReadOutput(other) }, send: { _ in await sent.add(); return "{}" })
         let record = try await client.record(.taskCreate(directory: "/repo", requestID: "not-the-fixture", title: nil,
             request: "work", wave: nil, graph: nil, session: nil, run: true), requestID: "not-the-fixture")
         await #expect(throws: (any Error).self) { try await client.reconcile(record) }
@@ -208,10 +208,17 @@ struct CreationSubmissionTests {
         _ = try await client.submit(.taskCreate(directory: "/repo", requestID: "same", title: nil,
             request: nil, wave: nil, graph: nil, session: nil, run: false), requestID: "same")
         let recovery = CreationRecovery(submissions: client)
+        let notices = NoticeCenter()
+        recovery.report(to: notices)
         await recovery.refresh()
         let item = try #require(recovery.items.first)
         #expect(item.complete)
         #expect(item.text == "Server explanation")
+        // The window's Notice stands for the saved creation; its action opens the result.
+        #expect(notices.current?.text == "Server explanation")
+        #expect(notices.current?.kind == .condition)
+        notices.current?.action?.perform()
+        #expect(recovery.inspecting?.id == item.id)
         // An immutable file fails actual removal on macOS, without mocking storage.
         let file = try #require(FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first)
         try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: file.path)
@@ -223,6 +230,7 @@ struct CreationSubmissionTests {
         #expect(await server.submissions == 1)
         await recovery.presented([item.id])
         #expect(try await client.pending().isEmpty)
+        #expect(notices.current == nil)
     }
 
 }
@@ -236,8 +244,8 @@ struct ProviderTransitionTests {
         let transition = try JSONDecoder().decode(ProviderTransition.self, from: Data(contentsOf: path))
         let row = ProviderTransitionRow(transition: transition)
         #expect(try row.inspect().find(text: "Forked from earlier; original was running at fork").string() == transition.explanation)
-        let reading = ServerConnectionReading(generation: 2, state: .connected, input: false, nativeReady: true, message: nil, transition: transition)
-        #expect(reading.title?.contains("Read-only") == true)
-        #expect(!reading.acceptsInput)
+        let reading = ServerConnectionReading(generation: 2, state: .connected, nativeReady: true, message: nil, transition: transition)
+        #expect(reading.title == transition.explanation)
+        #expect(reading.acceptsInput)
     }
 }

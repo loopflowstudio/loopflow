@@ -8,9 +8,21 @@ The installer shows its security assessments and asks before installing.
 PromptScript reads skills only per project: inside a PromptScript project, run
 the same command without `-g`.
 
-Teaches the coding agent you already use (Claude Code, Codex, OpenCode, Pi) to
-work through `lf`. You keep talking to your agent; it hands work off, keeps track
-of it and brings back pull requests.
+Teaches the coding agent you already use (Claude Code, Codex, OpenCode, Pi,
+Antigravity) to work the Loopflow way and drive `lf`. You keep talking to your
+agent; it runs focused subagents here, hands PR-sized work off as Tasks, keeps
+track of runs, and brings back pull requests.
+
+## Run a one-off subagent here
+
+> *"Ask Codex to audit this branch for race conditions without editing anything."*
+
+```bash
+lf -b -a codex research 'audit this branch for race conditions; edit nothing'
+```
+
+`lf -b` runs headless in the current checkout on any harness or model, records
+a Session, prints the result, and exits — no new worktree or PR required.
 
 ## Ask for work, get pull requests
 
@@ -28,8 +40,8 @@ lf task run LOO-42                                    # returns once it's runnin
 and comes back with a link per Task. Each ends as its own pull request, so you
 review them one at a time while your agent stays free to talk.
 
-A change that should end in a PR becomes a Task. A question, a quick look or a
-one-line fix happens right here, in your checkout.
+A change that should end in a PR becomes a Task. A question, a quick look, or a
+small fix happens right here, in your checkout.
 
 ## Ask where things stand
 
@@ -37,7 +49,7 @@ one-line fix happens right here, in your checkout.
 
 ```bash
 lf task list                  # open Tasks, with what each is doing
-lf task status LOO-41         # one Task: its run, its PR, what it needs
+lf task status LOO-41 --json  # one Task: its run, its PR, what it needs
 ```
 
 ## Steer it while it runs
@@ -45,7 +57,7 @@ lf task status LOO-41         # one Task: its run, its PR, what it needs
 > *"Tell the token one to keep the retry budget at 3."*
 
 ```bash
-lf task steer LOO-41 'keep the retry budget at 3' # reaches the run before its next step
+lf steer LOO-41 'keep the retry budget at 3'          # reaches running Sessions on the Task
 ```
 
 ## Get back into it
@@ -61,7 +73,7 @@ lf resume --task LOO-41
 > *"Land LOO-41 when checks pass."*
 
 ```bash
-lf land --wait-and-fix        # merges when checks pass; repairs them if not
+lf pr land --wait-and-fix     # merges when checks pass; repairs them if not
 ```
 
 ## Run your Skills and Graphs
@@ -73,18 +85,18 @@ lf audit
 lf -b task run LOO-41 ship-api
 ```
 
-Your agent finds what exists with `lf list` and reads any command, Skill or Graph
-with `lf help <name>` before using it.
+Your agent discovers commands, Skills, and Graphs with `lf list` and
+`lf help <name>`, and reads full embedded guides offline with `lf docs <topic>`.
 
 ## What it won't do
 
 - Start Tasks for work you asked it to do here, or for a question.
-- Pick a different agent, account or machine than you asked for.
-- Run more than one agent on the same Task.
+- Pick a different agent, account, or machine than you asked for.
+- Run more than one Graph on the same Task.
 - Merge anything you didn't ask it to land.
 
 ## Inside a Task
 
-Agents that `lf` launches for a Task get the same guidance from Loopflow itself:
-do that Task's work in its checkout, follow its Graph, and report back. They
-don't start new Tasks unless the step asks for it.
+Agents that `lf` launches carry [LOOPFLOW.md](../../rust/loopflow-definitions/src/builtins/LOOPFLOW.md)
+automatically — the same `How to work` principles and `lf` mental model, scoped
+to working inside that Session and Task checkout.

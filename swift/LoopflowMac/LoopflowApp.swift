@@ -61,8 +61,8 @@ struct LoopflowApp: App {
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
-        Perf.begin(Perf.coldStart, "launch", id: "launch",
-                   detail: "pre_main_ms=\(Int(PerfClock.millisecondsSinceProcessStart() ?? -1))")
+        if AppTestMode.current() == nil { Perf.startRecording() }
+        Perf.begin(.coldStart, "process_start_to_typing", id: "launch")
         Perf.begin(Perf.workspaceCurrent, "launch", id: "launch")
         if AppTestMode.current() == nil {
             DesktopLog.home.begin()
@@ -95,7 +95,8 @@ struct LoopflowApp: App {
                 // A capture opens its target window from a window that stays:
                 // the launch view hands off to a repository window, and opening
                 // another window during that hand-off aborts in AttributeGraph.
-                if let workspace {
+                // A window restored from another Machine takes the launch path.
+                if let workspace = workspace?.opened() {
                     RepositoryWorkspaceView(workspace: workspace, portfolioService: portfolioService,
                                             workspaces: workspaces,
                                             query: registryQuery, router: taskLinks,
@@ -135,6 +136,7 @@ struct LoopflowApp: App {
                     .keyboardShortcut("o", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .help) {
+                Button("Enable Visual Timing…") { InteractionFrame.requestAccess() }
                 Button("Keyboard Shortcuts") { openWindow(id: "keyboard-shortcuts") }
                 Button("Snapshot for Review") {
                     snapshotCurrentWindow()
@@ -202,7 +204,7 @@ struct LoopflowApp: App {
             TabView {
                 ThemeChooser(appearance: appearance).tabItem { Label("Appearance", systemImage: "paintpalette") }
                 Form { Toggle("Autosave Task Files", isOn: $taskFilesAutosave) }
-                    .padding(24).tabItem { Label("Editing", systemImage: "pencil") }
+                    .padding(Spacing.xxl).tabItem { Label("Editing", systemImage: "pencil") }
                 ConfigurationSettingsView().tabItem { Label("Configuration", systemImage: "slider.horizontal.3") }
                 KeyboardShortcutsView().tabItem { Label("Keyboard Shortcuts", systemImage: "keyboard") }
                 MobileSettings().tabItem { Label("Mobile", systemImage: "iphone") }
@@ -337,15 +339,18 @@ struct AppAppearance: ViewModifier {
             .foregroundStyle(theme.palette.text)
             .background(theme.palette.background)
             .safeAreaInset(edge: .top) {
-                if let notice = appearance.notice, !appearance.chooserOpen {
+                if !appearance.chooserOpen, let notice = appearance.readFailure ?? appearance.notice {
                     HStack {
-                        Text(notice).font(.caption)
-                        Button("Choose Theme…") {
-                            appearance.beginPreview()
-                            openSettings()
+                        Text(notice).font(Typography.meta)
+                        // After a failed read, choosing again would send the request that just failed.
+                        if appearance.readFailure == nil {
+                            Button("Choose Theme…") {
+                                appearance.beginPreview()
+                                openSettings()
+                            }
                         }
                     }
-                    .padding(8).foregroundStyle(theme.palette.text)
+                    .padding(Spacing.sm).foregroundStyle(theme.palette.text)
                     .background(theme.palette.surface)
                 }
             }

@@ -61,6 +61,58 @@ impl Paste {
     }
 }
 
+/// Input from a view that does not size the terminal, without its terminal's
+/// answers to the agent's queries. Every view's terminal answers them; the
+/// agent hears one answer, from the view that sizes it. Keys pass unchanged.
+pub(super) fn keys(mut bytes: &[u8]) -> impl Iterator<Item = u8> + '_ {
+    std::iter::from_fn(move || {
+        while let Some(length) = report_length(bytes) {
+            bytes = &bytes[length..];
+        }
+        let (&key, rest) = bytes.split_first()?;
+        bytes = rest;
+        Some(key)
+    })
+}
+
+/// The length of the terminal report `bytes` starts with: an OSC or DCS
+/// string, a cursor position, status, device attributes, mode or window
+/// report, or a focus event.
+fn report_length(bytes: &[u8]) -> Option<usize> {
+    match bytes {
+        [0x1b, b']' | b'P', body @ ..] => {
+            body.iter().enumerate().find_map(|(at, byte)| match byte {
+                0x07 => Some(at + 3),
+                0x1b if body.get(at + 1) == Some(&b'\\') => Some(at + 4),
+                _ => None,
+            })
+        }
+        [0x1b, b'[', body @ ..] => {
+            let private = matches!(body.first(), Some(b'?' | b'>' | b'='));
+            let mut at = usize::from(private);
+            while body
+                .get(at)
+                .is_some_and(|byte| byte.is_ascii_digit() || *byte == b';')
+            {
+                at += 1;
+            }
+            let dollar = body.get(at) == Some(&b'$');
+            at += usize::from(dollar);
+            let report = match *body.get(at)? {
+                b'y' => dollar,
+                _ if dollar => false,
+                b'R' | b'n' | b't' => true,
+                b'c' => private,
+                b'u' => body[0] == b'?',
+                b'I' | b'O' => at == 0,
+                _ => false,
+            };
+            report.then_some(at + 3)
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug, Default)]
 pub(super) struct PendingInput {
     bytes: VecDeque<u8>,
@@ -104,7 +156,41 @@ impl PendingInput {
 mod tests {
     use std::io::{self, Write};
 
-    use super::{Paste, PendingInput};
+    use super::{keys, Paste, PendingInput};
+
+    #[test]
+    fn a_second_views_terminal_answers_never_reach_the_agent_but_its_keys_do() {
+        let answers: &[&[u8]] = &[
+            b"\x1b[12;40R",
+            b"\x1b[0n",
+            b"\x1b[?62;22c",
+            b"\x1b[>1;10;0c",
+            b"\x1b[?2026;2$y",
+            b"\x1b[8;40;120t",
+            b"\x1b[?1u",
+            b"\x1b]11;rgb:1e1e/1e1e/2e2e\x07",
+            b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
+            b"\x1bP>|ghostty 1.2\x1b\\",
+            b"\x1b[I",
+        ];
+        for answer in answers {
+            let typed = [b"a".as_slice(), answer, b"b"].concat();
+            assert!(keys(&typed).eq(*b"ab"), "{answer:?}");
+        }
+        let sequences: &[&[u8]] = &[
+            b"\x1b[A",
+            b"\x1b[1;5D",
+            b"\x1b[3~",
+            b"\x1b[97;5u",
+            b"\x1b[Z",
+            b"\x1bOP",
+            b"\x1b[200~pasted\x1b[201~",
+            b"plain\r",
+        ];
+        for sequence in sequences {
+            assert!(keys(sequence).eq(sequence.iter().copied()), "{sequence:?}");
+        }
+    }
 
     fn drain(pending: &mut PendingInput, output: &mut Vec<u8>) {
         while !pending.is_empty() {

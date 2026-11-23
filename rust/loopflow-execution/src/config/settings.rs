@@ -8,7 +8,6 @@ use serde_yaml_ng::Value;
 use super::{Config, ConfigDeclarations, ConfigSource};
 use crate::error::LoadError;
 use crate::graph::Skill;
-use loopflow_storage::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
@@ -233,16 +232,6 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             return Err(invalid("stream must be stable, preview or dev"));
         }
     }
-    // The same check a launch makes, so an unusable layout fails where it is written.
-    if let Some(template) = &parsed.task_layout {
-        template
-            .instantiate(WorkWorkspaceKey {
-                repository: String::new(),
-                kind: WorkWorkspaceKind::Task,
-                id: String::new(),
-            })
-            .map_err(|error| invalid(format!("task_layout: {error}")))?;
-    }
     if !["gh", "local"].contains(&parsed.land.as_str()) {
         return Err(invalid("land must be gh or local"));
     }
@@ -250,11 +239,6 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
         return Err(invalid(
             "choose machine.tasks or machine.capacity in one declaration",
         ));
-    }
-    for provider in parsed.account.keys() {
-        if !["claude", "codex"].contains(&provider.as_str()) {
-            return Err(invalid("account routes require claude or codex"));
-        }
     }
     for (provider, browsers) in &parsed.auth_browsers {
         provider
@@ -287,13 +271,6 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             .offer(&template.hardware)
             .map_err(invalid)?;
     }
-    for accounts in parsed.accounts.values() {
-        for declaration in accounts.values() {
-            if let Some(date) = &declaration.paid_through {
-                super::placement::parse_date(date).map_err(|error| invalid(error.to_string()))?;
-            }
-        }
-    }
     if path[0] == "context" {
         crate::prompt::context_budget::ContextBudgets::resolve(&parsed)
             .map_err(|error| invalid(error.to_string()))?;
@@ -307,43 +284,17 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
 
 fn validate_agent_policy(agent: &str) -> Result<(), LoadError> {
     let (harness, variant) = super::parse_agent(agent);
-    match harness.as_str() {
-        "claude" | "codex" | "pi" => return Ok(()),
-        "opencode" => {}
-        _ => {
-            return Err(invalid(format!(
-                "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', or 'pi'"
-            )));
-        }
+    let kind = loopflow_harness::HarnessKind::parse(&harness).ok_or_else(|| {
+        invalid(format!(
+            "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', 'pi', or 'agy'"
+        ))
+    })?;
+    if let Some(model) = variant {
+        kind.harness()
+            .validate_model(&model)
+            .map_err(|error| invalid(error.to_string()))?;
     }
-
-    let Some(variant) = variant else {
-        return Ok(());
-    };
-    if is_supported_opencode_model_variant(&variant) {
-        return Ok(());
-    }
-
-    Err(invalid(format!(
-        "unsupported OpenCode model '{}': supported variants are 'opencode/*' (excluding claude/codex families) and 'moonshotai/kimi*'",
-        variant
-    )))
-}
-
-fn is_supported_opencode_model_variant(variant: &str) -> bool {
-    let variant = variant.trim().to_ascii_lowercase();
-    let Some((provider, model_id)) = variant.split_once('/') else {
-        return false;
-    };
-    if model_id.is_empty() {
-        return false;
-    }
-
-    match provider {
-        "moonshotai" => model_id.starts_with("kimi"),
-        "opencode" => !model_id.contains("claude") && !model_id.contains("codex"),
-        _ => false,
-    }
+    Ok(())
 }
 
 pub fn insert(root: &mut Value, path: &[&str], value: Value) {
@@ -535,6 +486,10 @@ fn _normalize_preferences(value: &mut Value) {
     }
 }
 
+/// Account routing preferences the released lf still reads from personal
+/// files. This lf ignores them without a warning; LOO-919 deletes this list.
+const RETIRED_SETTINGS: &[&[&str]] = &[&["account"], &["accounts"]];
+
 fn _filter_file_settings(
     value: &mut Value,
     path: &mut Vec<String>,
@@ -575,6 +530,10 @@ fn _filter_file_settings(
                 definition.accepts(&preference.iter().map(String::as_str).collect::<Vec<_>>())
             });
         if known && !selector && value.is_null() {
+            path.pop();
+            return false;
+        }
+        if !known && RETIRED_SETTINGS.contains(&parts.as_slice()) {
             path.pop();
             return false;
         }
@@ -647,26 +606,67 @@ fn _split_agent_list(values: &mut serde_yaml_ng::Mapping, locator: &str) {
     }
 }
 
+/// What settings resolution reads that is not a file. It is the argument of
+/// [`resolve_with`] and part of a shared value's key, so the key cannot drift
+/// from what the resolution read.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Outside {
+    environment: Value,
+    invocation: Value,
+    sole_harness: Option<&'static str>,
+    pub(super) home: PathBuf,
+    pub(super) remote: Option<String>,
+}
+
+impl Outside {
+    /// `compute`'s result, shared by served readings under `key`. A
+    /// `--setting` override belongs to the command that carries it, so with
+    /// one the value is computed here and never shared.
+    pub(crate) fn shared<T: Clone + Send + Sync + 'static>(
+        &self,
+        key: crate::observe::Derived,
+        compute: impl FnOnce() -> T,
+    ) -> T {
+        if !self.invocation.is_null() {
+            return compute();
+        }
+        (*crate::observe::derived(key, compute)).clone()
+    }
+}
+
+pub fn outside() -> Result<Outside, LoadError> {
+    Ok(Outside {
+        environment: environment()?,
+        invocation: invocation_values(),
+        sole_harness: super::default_agent(),
+        home: crate::store::lf_home_dir(),
+        remote: super::remote::incoming_text(),
+    })
+}
+
 /// Resolve agent choices before fallbacks; within each key use source, scope, target.
 pub fn resolve_layers(
     layers: &[ConfigDeclarations],
     skill: Option<&Skill>,
 ) -> Result<ResolvedSettings, LoadError> {
+    resolve_with(layers, skill, &outside()?)
+}
+
+pub(crate) fn resolve_with(
+    layers: &[ConfigDeclarations],
+    skill: Option<&Skill>,
+    outside: &Outside,
+) -> Result<ResolvedSettings, LoadError> {
     // Each block shares provenance; specificity orders blocks within a source/scope.
     let mut candidates = Vec::new();
     let mut defaults = serde_yaml_ng::to_value(Config::default()).expect("Config serializes");
-    if let Some(agent) = super::default_agent() {
+    if let Some(agent) = outside.sole_harness {
         insert(&mut defaults, &["default_agent"], agent.into());
     }
     insert(
         &mut defaults,
         &["graph"],
         crate::ops::task::DEFAULT_TASK_GRAPH.into(),
-    );
-    insert(
-        &mut defaults,
-        &["planning"],
-        serde_yaml_ng::to_value(super::PlanningConfig::default()).expect("planning serializes"),
     );
     for key in crate::prompt::context_budget::BudgetKey::ALL {
         insert(
@@ -694,13 +694,13 @@ pub fn resolve_layers(
             source: ConfigSource::Environment,
             scope: SettingScope::Global,
             path: "environment".into(),
-            value: environment()?,
+            value: outside.environment.clone(),
         },
         ConfigDeclarations {
             source: ConfigSource::CommandLine,
             scope: SettingScope::Global,
             path: "CLI".into(),
-            value: invocation_values(),
+            value: outside.invocation.clone(),
         },
     ];
     for layer in layers.iter().chain(&invocation) {
@@ -784,15 +784,6 @@ pub fn resolve_layers(
             if let Some(value) = map.get_mut("machine") {
                 super::placement::expand_shorthand(value)
                     .map_err(|error| invalid(error.to_string()))?;
-            }
-            if let Some(accounts) = map.get_mut("account").and_then(Value::as_mapping_mut) {
-                for value in accounts.values_mut() {
-                    *value = serde_yaml_ng::to_value(
-                        serde_yaml_ng::from_value::<super::placement::AccountOrder>(value.clone())
-                            .map_err(|error| invalid(error.to_string()))?,
-                    )
-                    .expect("account order serializes");
-                }
             }
             map.retain(|key, _| {
                 key.as_str().is_some_and(|key| {
@@ -1332,7 +1323,8 @@ mod tests {
                 None,
             )
             .unwrap();
-            assert!(!resolved.config.yolo);
+            // An unreadable `yolo` falls to the default, which is on.
+            assert!(resolved.config.yolo);
             assert!(resolved.config.claude.model.is_none());
             if values.starts_with("context:") {
                 assert_eq!(resolved.config.context.docs, ["README.md"]);
@@ -1780,12 +1772,12 @@ mod tests {
                 layer(
                     ConfigSource::Repository,
                     SettingScope::Repository,
-                    "docs: [a.md]\ncontext_budgets: {scratch_tokens: 100, scratch_bytes: 200}",
+                    "docs: [a.md]\ncontext_budgets: {memory_tokens: 100, memory_bytes: 200}",
                 ),
                 layer(
                     ConfigSource::Personal,
                     SettingScope::Global,
-                    "docs: [b.md]\ncontext_budgets: {scratch_tokens: 50}",
+                    "docs: [b.md]\ncontext_budgets: {memory_tokens: 50}",
                 ),
             ],
             None,
@@ -1793,11 +1785,11 @@ mod tests {
         .unwrap();
         assert_eq!(resolved.config.context.docs, ["a.md", "b.md"]);
         assert_eq!(
-            resolved.settings["context.budgets.scratch_tokens"].value,
+            resolved.settings["context.budgets.memory_tokens"].value,
             Value::from(50)
         );
         assert_eq!(
-            resolved.settings["context.budgets.scratch_bytes"].value,
+            resolved.settings["context.budgets.memory_bytes"].value,
             Value::from(200)
         );
         let mut layers = resolved.config.setting_layers.unwrap();
@@ -1812,6 +1804,66 @@ mod tests {
             .context
             .docs
             .is_empty());
+    }
+    #[test]
+    fn diff_hidden_adds_every_layer_and_diff_groups_take_the_nearest_list_whole() {
+        use super::super::catalog::{DiffGroup, DiffPathGroup, DiffRestGroup};
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let builtin = resolve_layers(&[], None).unwrap().config;
+        assert_eq!(builtin.diff_hidden, ["scratch/"]);
+        let titles = |groups: &[DiffGroup]| -> Vec<String> {
+            groups
+                .iter()
+                .map(|group| match group {
+                    DiffGroup::Paths(group) => group.title.clone(),
+                    DiffGroup::Rest(group) => format!("rest: {:?}", group.rest),
+                })
+                .collect()
+        };
+        assert_eq!(
+            titles(&builtin.diff_groups),
+            [
+                "Docs",
+                "Data model",
+                "rest: Some(\"Everything else\")",
+                "Tests",
+                "Generated and lock files"
+            ]
+        );
+
+        let resolved = resolve_layers(
+            &[
+                layer(
+                    ConfigSource::Repository,
+                    SettingScope::Repository,
+                    "diff_hidden: [vendor/]\ndiff_groups: [{title: Model, paths: [model/]}, {rest: null}]",
+                ),
+                layer(
+                    ConfigSource::Personal,
+                    SettingScope::Repository,
+                    "diff_hidden: [tests/]\ndiff_groups: [{rest: Rest}, {title: Mine, paths: [\"*.rs\"]}]",
+                ),
+            ],
+            None,
+        )
+        .unwrap()
+        .config;
+        assert_eq!(resolved.diff_hidden, ["scratch/", "vendor/", "tests/"]);
+        assert_eq!(
+            resolved.diff_groups,
+            [
+                DiffGroup::Rest(DiffRestGroup {
+                    rest: Some("Rest".into())
+                }),
+                DiffGroup::Paths(DiffPathGroup {
+                    title: "Mine".into(),
+                    paths: vec!["*.rs".into()]
+                }),
+            ]
+        );
+        assert!(super::parse_value("diff_groups", "[{rest: null}]").is_ok());
+        assert!(super::parse_value("diff_groups", "[{}]").is_err());
+        assert!(super::parse_value("diff_groups", "[{title: A, paths: [a/], rest: x}]").is_err());
     }
     #[test]
     fn typed_values_reject_unknown_keys_and_wrong_types() {
@@ -1831,39 +1883,11 @@ mod tests {
             ("agent", "Explore"),
             ("default_agent", "Explore"),
             ("missing", "false"),
-            ("context.budgets.scratch_tokens", "0"),
+            ("context.budgets.memory_tokens", "0"),
             ("session", "{unknown: true}"),
         ] {
             assert!(super::parse_value(key, value).is_err(), "{key}");
         }
-    }
-    #[test]
-    fn task_layout_is_validated_where_it_is_set() {
-        let pane =
-            |id: &str, content: &str| format!("{{kind: pane, id: {id}, content: {content}}}");
-        let layout = |session: &str| {
-            format!(
-                "{{tree: {{kind: split, axis: vertical, ratio: 0.5, first: {{kind: split, axis: horizontal, ratio: 0.5, first: {}, second: {}}}, second: {}}}}}",
-                pane("conversation", &format!("{{kind: session, session_id: {session}, location: null}}")),
-                pane("changes", "{kind: browser, location: null, tabs: [{kind: changes, id: changes, comparison: {kind: working_tree, base: parent}}], selected: changes}"),
-                pane("shell", "{kind: shell, tabs: [{id: s, location: null, lf_process_id: null}], selected: s}"),
-            )
-        };
-        assert!(super::parse_value("task_layout", &layout("null")).is_ok());
-        let captured = super::parse_value("task_layout", &layout("abc")).unwrap_err();
-        assert!(
-            captured.to_string().contains("cannot capture a Session"),
-            "{captured}"
-        );
-        // A tree without Desktop's three Task panes is unusable at launch.
-        let partial = format!(
-            "{{tree: {}}}",
-            pane(
-                "shell",
-                "{kind: shell, tabs: [{id: s, location: null, lf_process_id: null}], selected: s}"
-            )
-        );
-        assert!(super::parse_value("task_layout", &partial).is_err());
     }
     #[test]
     fn composed_occurrences_keep_their_settings_and_match_launch_preparation() {
@@ -1911,7 +1935,7 @@ mod tests {
                 },
             )
             .unwrap();
-            assert_eq!(prepared.config.agent().unwrap(), expected);
+            assert_eq!(prepared.config.agent.to_string(), expected);
             assert_eq!(prepared.config.chrome, Some(index % 2 != 0));
         }
         repo.create_file(

@@ -1,5 +1,5 @@
 //! File locations for domain operations that name a retained repository or Wave.
-use anyhow::{Context, Result};
+use anyhow::Result;
 use loopflow_model::durable::DefaultScope;
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
@@ -52,50 +52,6 @@ pub(crate) fn expand_shorthand(value: &mut Value) -> Result<()> {
     Ok(())
 }
 
-/// Ordered account references; exact IDs, login emails and unambiguous prefixes
-/// are resolved against the executor's account observations at launch.
-#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
-#[serde(try_from = "AccountOrderInput", into = "Vec<String>")]
-pub struct AccountOrder(pub Vec<String>);
-
-#[derive(schemars::JsonSchema, Debug, Deserialize)]
-#[serde(untagged)]
-enum AccountOrderInput {
-    List(Vec<String>),
-    CommaSeparated(String),
-}
-impl TryFrom<AccountOrderInput> for AccountOrder {
-    type Error = String;
-    fn try_from(value: AccountOrderInput) -> Result<Self, Self::Error> {
-        let values = match value {
-            AccountOrderInput::List(values) => values,
-            AccountOrderInput::CommaSeparated(value) => value
-                .split(',')
-                .map(|value| value.trim().to_owned())
-                .collect(),
-        };
-        let mut seen = std::collections::HashSet::new();
-        if values
-            .iter()
-            .any(|value| value.is_empty() || !seen.insert(value.clone()))
-        {
-            return Err("account references must be nonempty and unique".into());
-        }
-        Ok(Self(values))
-    }
-}
-impl From<AccountOrder> for Vec<String> {
-    fn from(value: AccountOrder) -> Self {
-        value.0
-    }
-}
-impl std::ops::Deref for AccountOrder {
-    type Target = [String];
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MachineDeclaration {
@@ -124,30 +80,16 @@ pub fn read_at(
 ) -> Result<Value> {
     let (path, prefix) = location_at(home, scope)?;
     let mut value = super::files::read(&path)?;
-    super::remote::apply_document(&path, &mut value)?;
+    super::remote::apply_document(
+        super::remote::incoming_text().as_deref(),
+        home,
+        &path,
+        &mut value,
+    )?;
     for part in prefix {
         value = value.get(part).cloned().unwrap_or(Value::Null);
     }
     Ok(value)
-}
-
-pub(crate) fn route_location(
-    store: &loopflow_storage::sqlite::SqliteStore,
-    scope: &crate::profile::RouteScope,
-) -> Result<(PathBuf, Vec<String>)> {
-    match scope {
-        crate::profile::RouteScope::Default => Ok((store.home_dir()?.join("config.yaml"), vec![])),
-        crate::profile::RouteScope::Wave(id) => {
-            let wave = store.get_wave(id)?.context("Wave not found")?;
-            Ok((
-                super::files::private_path(Path::new(wave.repo()))?,
-                vec!["waves".into(), id.to_string()],
-            ))
-        }
-        crate::profile::RouteScope::Repo(repo) => {
-            Ok((super::files::private_path(repo.as_path())?, vec![]))
-        }
-    }
 }
 
 pub(crate) fn write_global(home: &Path, key: &[&str], value: Option<Value>) -> Result<bool> {
@@ -159,97 +101,54 @@ pub(crate) fn write_global(home: &Path, key: &[&str], value: Option<Value>) -> R
     )
 }
 
+/// What your `config.yaml` under `home` declares alone, for the Machine facts
+/// no checkout overrides. Served readings share one value until it changes.
 pub(crate) fn global_settings_at(home: &Path) -> Result<super::Config> {
-    let path = home.join("config.yaml");
+    // A store's home is the one read, whatever `LF_HOME` says.
+    let mut outside = super::settings::outside()?;
+    outside.home = home.to_owned();
+    let key = crate::observe::Derived::GlobalSettings {
+        outside: outside.clone(),
+    };
+    outside
+        .shared(key, || {
+            resolve_global_settings(&outside).map_err(|error| error.to_string())
+        })
+        .map_err(anyhow::Error::msg)
+}
+
+fn resolve_global_settings(outside: &super::settings::Outside) -> Result<super::Config> {
+    let path = outside.home.join("config.yaml");
     let mut value = super::files::read(&path)?;
-    super::remote::apply_document(&path, &mut value)?;
+    super::remote::apply_document(outside.remote.as_deref(), &outside.home, &path, &mut value)?;
     let declarations = [super::ConfigDeclarations {
         source: super::ConfigSource::Personal,
         scope: super::settings::SettingScope::Global,
         path,
         value,
     }];
-    Ok(super::settings::resolve_layers(&declarations, None)?.config)
+    Ok(super::settings::resolve_with(&declarations, None, outside)?.config)
 }
 
-#[derive(schemars::JsonSchema, Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AccountDeclaration {
-    pub login_email: Option<crate::profile::EmailAddress>,
-    pub routing_state: Option<crate::store::RoutingState>,
-    pub plan: Option<String>,
-    pub paid_through: Option<String>,
+pub(crate) fn historical_account_labels(home: &Path) -> Result<Value> {
+    super::files::read(&home.join("config.yaml"))
 }
 
-pub(crate) fn account_preferences(
-    config: &super::Config,
+/// Read old labels for history, without interpreting routing preferences.
+pub(crate) fn historical_account(
+    document: &Value,
     mut account: crate::store::ProviderAccount,
 ) -> Result<crate::store::ProviderAccount> {
-    if let Some(declaration) = config
-        .accounts
-        .get(&account.provider)
+    account.login_email = document
+        .get("accounts")
+        .and_then(|providers| providers.get(&account.provider))
         .and_then(|accounts| accounts.get(account.account_id.as_str()))
-    {
-        account.login_email = declaration.login_email.clone();
-        account.routing_state = declaration
-            .routing_state
-            .unwrap_or(crate::store::RoutingState::Automatic);
-        account.plan = declaration.plan.clone();
-        account.paid_through = declaration
-            .paid_through
-            .as_deref()
-            .map(parse_date)
-            .transpose()?;
-    }
+        .and_then(|account| account.get("login_email"))
+        .and_then(Value::as_str)
+        .map(crate::profile::EmailAddress::parse)
+        .transpose()
+        .map_err(anyhow::Error::msg)?;
     Ok(account)
-}
-
-pub(crate) fn parse_date(value: &str) -> Result<time::Date> {
-    let format = time::format_description::parse_borrowed::<2>("[year]-[month]-[day]")?;
-    Ok(time::Date::parse(value, &format)?)
-}
-
-pub(crate) fn write_account_preferences(
-    home: &Path,
-    account: &crate::store::ProviderAccount,
-) -> Result<()> {
-    let declaration = AccountDeclaration {
-        login_email: account.login_email.clone(),
-        routing_state: Some(account.routing_state),
-        plan: account.plan.clone(),
-        paid_through: account.paid_through.map(|date| date.to_string()),
-    };
-    let path = home.join("config.yaml");
-    super::files::update(&path, |document| {
-        if let Some(accounts) = document
-            .get("accounts")
-            .and_then(|accounts| accounts.get(&account.provider))
-            .and_then(Value::as_mapping)
-        {
-            for (id, value) in accounts {
-                if id.as_str() == Some(account.account_id.as_str()) {
-                    continue;
-                }
-                let existing: AccountDeclaration = serde_yaml_ng::from_value(value.clone())?;
-                anyhow::ensure!(
-                    account.login_email.is_none() || existing.login_email != account.login_email,
-                    "{} login {} already belongs to account {}",
-                    account.provider,
-                    account
-                        .login_email
-                        .as_ref()
-                        .expect("duplicate login is present"),
-                    id.as_str().unwrap_or_default()
-                );
-            }
-        }
-        super::settings::insert(
-            document,
-            &["accounts", &account.provider, account.account_id.as_str()],
-            serde_yaml_ng::to_value(declaration)?,
-        );
-        Ok(())
-    })
 }
 
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
@@ -291,4 +190,41 @@ impl Default for OnDemandDeclaration {
 pub struct AuthBrowsers {
     pub default: Vec<String>,
     pub accounts: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::global_settings_at;
+    use crate::observe::{Cache, Derived};
+
+    #[test]
+    fn readings_share_global_settings_until_the_file_changes() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let file = home.path().join("config.yaml");
+        std::fs::write(&file, "default_agent: claude\n").unwrap();
+        let cache = Arc::new(Cache::default());
+        let read = || {
+            global_settings_at(home.path())
+                .unwrap()
+                .agent()
+                .unwrap()
+                .to_owned()
+        };
+        let global = |computed: &Derived| matches!(computed, Derived::GlobalSettings { .. });
+        let (first, dependencies) = cache.capture(read);
+        assert_eq!(first, "claude");
+        assert_eq!(cache.capture(read).0, "claude");
+        assert_eq!(cache.computations(global), 1);
+
+        std::fs::write(&file, "default_agent: codex\n").unwrap();
+        cache.refresh_all();
+        assert!(dependencies.changed());
+        assert_eq!(cache.capture(read).0, "codex");
+        assert_eq!(cache.computations(global), 2);
+    }
 }

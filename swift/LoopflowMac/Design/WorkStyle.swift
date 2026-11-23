@@ -4,7 +4,7 @@
 import Loopflow
 import SwiftUI
 
-/// Every workspace section heading: small tracked caps, one system.
+/// Every workspace section heading: sentence case in the strong step.
 struct WorkSectionHeading<Trailing: View>: View {
     let title: String
     var count: Int?
@@ -13,17 +13,18 @@ struct WorkSectionHeading<Trailing: View>: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-            Text(title)
-                .textCase(.uppercase)
-                .font(Typography.label)
-                .tracking(0.66)
-                .foregroundStyle(palette.textTertiary)
-            if let count {
-                Text("\(count)")
-                    .font(Typography.meta)
-                    .monospacedDigit()
+        // A trailing control has no text baseline, so it centers on the title's line.
+        HStack(spacing: Spacing.sm) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Text(title)
+                    .font(Typography.textStrong)
                     .foregroundStyle(palette.textTertiary)
+                if let count {
+                    Text("\(count)")
+                        .font(Typography.meta)
+                        .monospacedDigit()
+                        .foregroundStyle(palette.textTertiary)
+                }
             }
             Spacer(minLength: Spacing.sm)
             trailing
@@ -59,16 +60,15 @@ struct WorkChip: View {
 
     var body: some View {
         Text(text)
-            .font(Typography.strong(10.5))
-            .tracking(0.2)
+            .font(Typography.textStrong)
             .foregroundStyle(tone == .neutral ? tone.ink(in: palette) : tone.text(in: palette))
             .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 1)
-            .background(tone.fill(in: palette), in: RoundedRectangle(cornerRadius: 4))
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xxs)
+            .background(tone.fill(in: palette), in: RoundedRectangle(cornerRadius: CornerRadius.control))
             .overlay {
                 if tone == .neutral {
-                    RoundedRectangle(cornerRadius: 4).strokeBorder(tone.stroke(in: palette), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: CornerRadius.control).strokeBorder(tone.stroke(in: palette), lineWidth: 1)
                 }
             }
     }
@@ -89,77 +89,31 @@ private struct WorkPanel: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(padding)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.lg))
-            .overlay(RoundedRectangle(cornerRadius: CornerRadius.lg).strokeBorder(palette.border))
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.pane))
+            .overlay(RoundedRectangle(cornerRadius: CornerRadius.pane).strokeBorder(palette.border))
     }
 }
 
-/// Ordinary actions stay neutral; a deliberately emphasized action uses the theme accent.
-struct WorkOutlineButtonStyle: ButtonStyle {
-    var emphasized = false
-    /// Red, for an action that ends the work.
-    var destructive = false
-    @Environment(\.palette) private var palette
-    @Environment(\.isEnabled) private var isEnabled
-
-    @State private var hovering = false
-
-    private var ink: Color { destructive ? palette.failure : (emphasized ? palette.accentInk : palette.actionInk) }
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Typography.body(12.5))
-            .foregroundStyle(isEnabled ? ink : palette.textTertiary)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(configuration.isPressed ? palette.surfaceElement : (hovering ? palette.surfaceMuted : palette.surface))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(isEnabled && (emphasized || destructive) ? ink : palette.borderStrong, lineWidth: 1)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 6))
-            .onHover { hovering = $0 }
-            .workFocusRing()
-    }
-}
-
-/// Auto-Ship, the one green action: it hands the Task off to land on its own.
-struct WorkShipButtonStyle: ButtonStyle {
-    @Environment(\.palette) private var palette
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Typography.body(12.5).weight(.semibold))
-            .foregroundStyle(isEnabled ? palette.surface : palette.textTertiary)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isEnabled ? palette.success.opacity(configuration.isPressed ? 0.85 : 1) : palette.surfaceMuted)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 6))
-            .workFocusRing()
+/// Marks a Task whose auto setting is on, on its board card and sidebar row.
+struct AutoBadge: View {
+    var body: some View {
+        WorkChip(text: "Auto", tone: .done)
+            .help("Auto is on: the run takes the interactive steps and lands the Task")
+            .accessibilityLabel("Auto on")
     }
 }
 
 /// Collapsed heading for a demand-read Task section (Comments, Session history):
-/// chevron, caps title, optional count, and the read's progress or failure.
+/// chevron, title, optional count, and the read's progress.
 struct WorkDisclosureHeading: View {
     let title: String
     let count: Int?
     let expanded: Bool
     let inFlight: Bool
-    /// Present when the latest read failed; true when an earlier value remains.
-    let failure: Bool?
     let identifier: String
     let accessibilityLabel: String
     let help: String
     let toggle: () -> Void
-    let retry: () -> Void
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -167,12 +121,10 @@ struct WorkDisclosureHeading: View {
             Button(action: toggle) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(Typography.meta).fontWeight(.bold)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                     Text(title)
-                        .textCase(.uppercase)
-                        .font(Typography.label)
-                        .tracking(0.66)
+                        .font(Typography.textStrong)
                     if let count {
                         Text("\(count)")
                             .font(Typography.meta)
@@ -188,18 +140,6 @@ struct WorkDisclosureHeading: View {
             .accessibilityIdentifier("\(identifier)-toggle")
             if inFlight {
                 ProgressView().controlSize(.mini)
-            } else if let hasLastGood = failure {
-                Text(hasLastGood ? "May be out of date" : "Unavailable")
-                    .font(Typography.strong(10.5))
-                    .foregroundStyle(WorkTone.warning.text(in: palette))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 1)
-                    .background(WorkTone.warning.fill(in: palette), in: RoundedRectangle(cornerRadius: 4))
-                    .accessibilityIdentifier("\(identifier)-stale")
-                Button("Retry", action: retry)
-                    .buttonStyle(WorkOutlineButtonStyle())
-                    .controlSize(.small)
-                    .accessibilityIdentifier("\(identifier)-retry")
             }
         }
     }
@@ -209,7 +149,7 @@ struct WorkDisclosureHeading: View {
 private struct WorkFocusRing: ViewModifier {
     @Environment(\.isFocused) private var focused
     func body(content: Content) -> some View {
-        content.keyboardFocusRing(focused, cornerRadius: 4)
+        content.keyboardFocusRing(focused, cornerRadius: CornerRadius.control)
     }
 }
 
@@ -227,11 +167,11 @@ private struct WorkSelection: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(selected ? palette.selectionFill : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .background(selected ? palette.selectionFill : .clear, in: RoundedRectangle(cornerRadius: CornerRadius.row))
             .overlay(alignment: .leading) {
                 if selected {
-                    RoundedRectangle(cornerRadius: 1).fill(palette.selectionEdge)
-                        .frame(width: 2).padding(.vertical, 4)
+                    Capsule().fill(palette.selectionEdge)
+                        .frame(width: Spacing.xxs).padding(.vertical, Spacing.xs)
                 }
             }
     }
@@ -240,52 +180,5 @@ private struct WorkSelection: ViewModifier {
 struct WorkPlainButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.workFocusRing()
-    }
-}
-
-struct WorkLinkStyle: ButtonStyle {
-    @Environment(\.palette) private var palette
-    @Environment(\.isFocused) private var focused
-    @State private var hovering = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(hovering || focused ? palette.linkHover : palette.linkInk)
-            .underline(hovering || focused)
-            .workFocusRing()
-            .onHover { hovering = $0 }
-    }
-}
-
-extension ProgramStatusState {
-    var workTone: WorkTone {
-        switch self {
-        case .working: .running
-        case .blocked: .warning
-        case .error: .failure
-        case .done: .done
-        case .idle: .available
-        case .clear: .neutral
-        }
-    }
-}
-
-extension View {
-    func workDestinationSelection(_ selected: Bool) -> some View {
-        modifier(WorkDestinationSelection(selected: selected))
-    }
-}
-
-private struct WorkDestinationSelection: ViewModifier {
-    let selected: Bool
-    @Environment(\.palette) private var palette
-    @State private var hovering = false
-    func body(content: Content) -> some View {
-        content
-            .background(selected ? palette.workSelectedFill : (hovering ? palette.actionHover : .clear),
-                        in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(selected ? palette.selectionEdge : .clear))
-            .onHover { hovering = $0 }
-            .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }

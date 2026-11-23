@@ -1,10 +1,4 @@
-- kickoff
-- write-docs
-- implement
-- concept-review
-- graph: refresh
-- loop: implement
-- compress
-- qa
-- loop: implement
-- pr-publish
+description: Plan, then build, from a direction to a published PR with no person.
+steps:
+- graph: plan
+- graph: build

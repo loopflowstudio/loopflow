@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use loopflow_model::durable::TaskId;
-use loopflow_model::id::{AgentProcessId, LfProcessId, LfSessionId, TraceId, WaveId};
+use loopflow_model::id::{AgentProcessId, LfProcessId, LfSessionId, TraceId};
 
 /// One recorded lf process. Unknown historical caller and exit evidence stays absent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -25,10 +25,11 @@ pub struct LfProcess {
     pub error: Option<String>,
 }
 
-/// A process start receipt with its terminal placement, supplied before SQL.
+/// The lf taking a Session's attachment: what attaching records of it.
 #[derive(Debug, Clone)]
-pub struct LfProcessStart {
-    pub process: LfProcess,
+pub struct AttachingLf {
+    pub lf_process_id: LfProcessId,
+    pub holder: AttachmentHolder,
     pub terminal: Option<loopflow_model::id::TerminalId>,
 }
 
@@ -47,7 +48,6 @@ pub struct AgentProcess {
     pub cwd: Option<String>,
     pub started_at: i64,
     pub completed_at: Option<i64>,
-    pub outcome: Option<String>,
     pub exit_code: Option<i32>,
     pub signal: Option<String>,
     pub error: Option<String>,
@@ -132,10 +132,12 @@ impl ProcessEntry {
         }
     }
 
+    /// How an lf process ended. A provider process records its exit code and
+    /// signal, and no outcome.
     pub fn outcome(&self) -> Option<&str> {
         match self {
             Self::Lf(process) => process.outcome.as_deref(),
-            Self::Agent(process) => process.outcome.as_deref(),
+            Self::Agent(_) => None,
         }
     }
 
@@ -169,6 +171,30 @@ pub enum Starter {
         name: Option<String>,
         requester: Option<String>,
     },
+    /// A configured default set it: `auto: on`. Only an auto mark names one.
+    Config { layer: ConfigLayer },
+}
+
+/// The configuration a default came from, as `lf task status` names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigLayer {
+    /// The Task's Wave's `config.yaml`, or a personal setting for that Wave.
+    Wave,
+    /// The repository's `.lf/config.yaml`.
+    Repository,
+    /// Personal configuration.
+    Personal,
+}
+
+impl ConfigLayer {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Wave => "wave",
+            Self::Repository => "repository",
+            Self::Personal => "personal",
+        }
+    }
 }
 
 impl std::fmt::Display for Starter {
@@ -190,58 +216,9 @@ impl std::fmt::Display for Starter {
                     None => Ok(()),
                 }
             }
+            Self::Config { layer } => write!(f, "{} config", layer.as_str()),
         }
     }
-}
-
-/// Command discovery filters. Work means recorded work, never today's caller binding.
-/// Contains searches are literal; command case folding follows SQLite lower().
-#[derive(Debug, Clone, Default)]
-pub struct ProcessFilter {
-    pub id: Option<String>,
-    pub repo: Option<String>,
-    pub parent_lf_process_id: Option<LfProcessId>,
-    pub caller_agent_process_id: Option<AgentProcessId>,
-    pub caller_session_id: Option<LfSessionId>,
-    pub command_contains: Option<String>,
-    pub identity_contains: Option<String>,
-    pub outcome: Option<ProcessOutcomeFilter>,
-    pub performed_work: Option<ProcessWorkFilter>,
-}
-
-/// Unknown means no terminal observation, not an OS liveness judgment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ProcessOutcomeFilter {
-    Succeeded,
-    Failed,
-    Interrupted,
-    Unknown,
-}
-
-/// IDs are already resolved by the caller, independently of launch eligibility.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ProcessWorkFilter {
-    Task(TaskId),
-    Wave(WaveId),
-}
-
-/// Exclusive continuation in started_at DESC, id ASC order. Reuse the same filters.
-/// A cursor is not a cross-request snapshot: late observations or changed outcomes may
-/// change membership. Refresh from the first page to observe those changes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProcessCursor {
-    pub started_at: i64,
-    /// The row's `processes.id` position, an opaque continuation for either kind.
-    pub id: String,
-}
-
-/// At most the requested number of command rows; no Session or Graph payloads.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProcessPage {
-    pub entries: Vec<ProcessEntry>,
-    pub next: Option<ProcessCursor>,
 }
 
 /// Stable provenance installed in one provider conversation's tool environment.
@@ -253,24 +230,31 @@ pub struct AgentCaller {
     pub agent_process_id: Option<AgentProcessId>,
     #[serde(rename = "origin_exec_id")] // Retained provider environments use this format.
     pub origin_lf_process_id: LfProcessId,
+    /// The launcher's trace; the agent's commands join it under the launcher.
+    /// Absent in a retained environment: such a caller starts a fresh trace.
+    pub trace_id: Option<TraceId>,
 }
 
 /// An exact attachment capability, not another process or lifecycle owner.
-/// Every claim gets a new token, even when the same lf process reattaches.
+/// Every claim starts a new agent with a new token, even when the same lf reattaches.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionAttachment {
     pub agent_process_id: AgentProcessId,
     pub lf_process_id: Option<LfProcessId>,
     pub token: loopflow_model::id::AttachmentToken,
-    pub provider_lf_process_id: LfProcessId,
+    /// The lf that attached this agent; it stays after the attachment is released.
+    #[serde(rename = "provider_lf_process_id")]
+    // Kept exit records and held hosts use this name.
+    pub launcher_lf_process_id: LfProcessId,
 }
 
 impl SessionAttachment {
-    pub fn caller(&self, session_id: LfSessionId) -> AgentCaller {
+    pub fn caller(&self, session_id: LfSessionId, trace_id: Option<TraceId>) -> AgentCaller {
         AgentCaller {
             session_id,
             agent_process_id: Some(self.agent_process_id.clone()),
-            origin_lf_process_id: self.provider_lf_process_id.clone(),
+            origin_lf_process_id: self.launcher_lf_process_id.clone(),
+            trace_id,
         }
     }
 }
@@ -283,22 +267,36 @@ pub enum Departure {
     /// Another terminal on this Machine, on the same login, named as people
     /// see it (`Desktop`, `tmux %3`, `ttys004`) when the mover knew.
     Terminal { to: Option<String> },
-    /// This Machine, relaunched on another login: a running Codex keeps the
-    /// login it started with, so naming another one restarts it.
-    Account { account: crate::ProviderAccountId },
     Machine {
         machine: loopflow_model::durable::MachineId,
         task: Option<TaskId>,
     },
 }
 
-/// The provider OS process, including its current attachment. History survives
-/// release and replacement; attachment and parent are independent identities.
+/// The OS process of the lf holding a Session's attachment, as it recorded
+/// itself when it attached. A holder that recorded none cannot be confirmed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AttachmentHolder {
+    pub pid: Option<u32>,
+    pub os_started_at: Option<i64>,
+}
+
+/// A Session's agent: the provider OS process it runs as, the lf that
+/// launched it, and the attachment holding it now with that holder's OS
+/// process. Released and replaced attachments leave the agent its launcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentProcessState {
-    pub process: AgentProcess,
+    pub id: AgentProcessId,
+    pub session_id: String,
+    pub started_at: Option<i64>,
+    pub ended_at: Option<i64>,
+    pub pid: Option<u32>,
+    pub os_started_at: Option<i64>,
+    pub launcher_lf_process_id: Option<LfProcessId>,
     pub attached_lf_process_id: Option<LfProcessId>,
     pub attachment_token: Option<loopflow_model::id::AttachmentToken>,
+    /// `None` when no lf holds the attachment.
+    pub holder: Option<AttachmentHolder>,
     pub provider: Option<String>,
     pub interactive: bool,
     pub spawn_reserved: bool,

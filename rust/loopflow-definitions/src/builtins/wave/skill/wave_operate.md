@@ -2,188 +2,121 @@
 description: Operate one Wave; keep your started Tasks moving, leave other people's work alone, and judge the existing work.
 action_style: procedural
 ---
-Operate one Wave once: read, judge, act, check, and exit. A started Task you own
-with no live Graph has nobody else to take its next step, so that step is
-yours. The pass is done when every started Task you own has a disposition and
-every other Task is listed. Work the Wave's existing Tasks; the plan, key
-results, metric targets, new Tasks and backlog are not this
-skill's to change. Another conversation or scheduled pass may be operating this
-Wave too; work it is driving is moving, so leave it alone.
+Operate one Wave once: read, judge, act, check, and exit.
 
-Edit `.lf/wave/` only when the running Graph says to; otherwise put proposed
-Wave changes in `scratch/`.
+A started Task you own with no live Graph has nobody else to take its next
+step, so that step is yours. The pass is done when every started Task you own
+has a disposition and every other Task is listed. Work the Wave's existing
+Tasks; its plan, key results, targets, new Tasks and backlog are not this
+skill's to change. Another conversation or scheduled pass may be operating
+this Wave too: work it is driving is moving, so leave it alone.
 
 ## Read the Wave
 
-Operate the Wave the invocation names or the conversation is bound to; never
-guess from a GOAL file. If the Wave is missing or ambiguous, say so and stop.
-Read its goal, memory, and the current Project's Tasks with their outcomes and
-open concerns.
+Operate the Wave the invocation names or the conversation is bound to; if it is
+missing or ambiguous, say so and stop. Read its goal and memory, then
+`lf wave status <wave> --json` and `lf wave show <wave> --json`, then
+`lf task status <issue> --json` for the Tasks that need a closer look. Follow a
+summary to its source only where a claim, conflict or missing fact matters.
 
-Start with `lf wave status <exact-wave> --json` and
-`lf wave show <exact-wave> --json`, then `lf task status <issue> --json` for the
-Tasks that need a closer look. Follow a summary to its source only where a
-claim, conflict or missing fact matters; don't read every transcript.
+A failed read, a stale plan or unknown liveness never means an empty backlog,
+a healthy Wave or a finished outcome. Keep going on what you can read; don't
+stop to fix auth.
 
-Keep links, paths and dates with each finding that drives an action, and keep
-observations, guesses and proposals apart. Rereading a cache doesn't refresh
-it. A failed read, stale plan, missing outcome or unknown liveness never means
-an empty backlog, a healthy Wave or a finished outcome. Keep going on what you
-can read; don't stop to fix auth or wait indefinitely.
+## Whose Task is it
 
-## Keep started work moving
+Ownership is `runtime.owner` in `lf wave show --json`, compared with
+`lf config user`:
 
-Ownership is `runtime.owner` in `lf wave show --json`, whether or not a Graph
-is running. Compare its `person` with `lf config user`:
+- **Yours:** the person is you, or the owner names no person. Each unfinished
+  one gets exactly one disposition. If its Machine is not this one
+  (`lf machine self`), operate it there with
+  `lf --machine <machine> task-operate <issue>` or report it unknown; never
+  run, repair or complete it from here.
+- **Theirs:** list it with its person and Machine as "theirs · left alone".
+  Don't run, repair, complete, move, interrupt or comment on it, and don't
+  judge its liveness; their processes aren't visible here.
+- **Unowned:** backlog. List it; starting it is a person's selection.
 
-- **Yours:** the person is you, or the owner names no person. Give every
-  unfinished Task you own exactly one disposition: the first row below that
-  fits. If its `runtime.owner.machine` is not this Machine (`lf id`), its
-  liveness is unknown here: operate it on its Machine with
-  `lf --machine <machine> task-operate <issue>` and file the disposition it
-  returns, or report it unknown and name the Machine. Never run, repair or
-  complete it from this Machine.
-- **Theirs:** another person owns it. List it with that person and Machine as
-  “theirs · left alone”. Don't run, repair, complete, claim, move, interrupt or
-  comment on it, and don't judge its liveness: their Processes aren't visible
-  here, so idle-looking means nothing.
-- **Unowned:** backlog. List it and leave it; starting it is a selection for
-  the person.
-
-An unreadable owner or unset `lf config user` makes ownership unknown: report
-the Task unknown and leave it. Tasks under `unavailable_tasks` are unknown
-until read.
+An unreadable owner makes the Task unknown: report it and leave it.
 
 | Disposition | When, and what to do |
 | --- | --- |
-| moving | A live Graph process is running. Leave it alone. A connected conversation or review Session is not a Graph process. |
+| moving | A live Graph run. Leave it alone. An open conversation is not a Graph run. |
 | acted | This pass continued, repaired or delivered it with an `lf` command, then reread status and saw the change. |
-| available | A review, demo, concrete choice or merge click is ready, with its conversation link or PR. Never complete or approve it for them. |
+| available | A review, demo, choice or merge click is ready, with its conversation link or PR. Never complete or approve it for them. |
 | dependency or capacity | Waiting on a named Task, PR, running check, account or limit. |
-| unassigned | Stopped by instruction, or a started Task nobody owns (`lf task unassign <issue>`); nothing moves it until someone claims it. |
-| unknown | Name the read or liveness check that is missing. Unknown is not idle and never a reason to start a second Graph. |
+| unassigned | Stopped by instruction, or started and owned by nobody. |
+| unknown | Name the missing read or liveness check. Unknown is not idle, and never a reason to start a second Graph. |
 
-“Ready”, “needs reconciliation” and “the Wave owns this” are not dispositions.
-Judge ownership first. When status gives `next_move.owner` as `wave` on a Task
-you own, settling its disposition is your job, not a handoff; another person's
-Task stays “theirs · left alone” whatever `next_move` says. Treat its
-recommended action as a suggestion to check against the rules below. No action
-is a valid result only when every started Task you own already has a
-disposition.
+"Ready" and "needs reconciliation" are not dispositions. Take the first row
+that fits:
 
-- **Look for a live Graph first.** In `lf task status <issue> --json`, check
-  every Graph in `execution.work.graphs` and every unfinished Process in
-  `execution.work.processes` against `lf ps --json`. A live process makes the
-  Task moving, whoever launched it.
-- **Repair before reporting a blocker.** Read the failed step's log and look at
-  what it changed. Fix the cause if you can, then relaunch the remaining work
-  with `lf task run <issue> <graph> --reason "<what changed>"`. A stopped Graph
-  is history and can't be resumed. Retry only when something changed; report
-  an unchanged failure instead of repeating it.
-- **A Graph ends where it was written to.** A finished Graph or published PR
-  doesn't complete the Task. Name what remains and the PR or Task conversation
-  waiting on a decision. A Task at an interactive step (`work.graph` in status)
-  is available to the person there. Start a stopped or failed run again with
-  `lf task run <issue>`; never continue past their step, pick a new direction
-  or arm an unapproved merge.
-- **Retry completion alone.** A recorded completion request at `end` retries
-  with `lf task complete <issue>`, never `task run` or gate. Completion, graph
-  position and Process liveness are independent. A newer reopening wins; `end`
-  alone can't re-complete it.
-- **Finish merged work.** Merging doesn't complete a Task. Check its Graphs and
-  unfinished Processes and let a live ship Graph finish. Otherwise, when the
-  accepted outcome holds, run `lf task complete <issue>` and reread status.
-  Don't replay gate or re-arm a merged PR.
-- **Reviews stay in the Task conversation.** Point to the Session from
-  `lf session list --available --json` and discuss feedback there. Closing a
-  Session approves nothing. In a headless run, a judgment call leaves the Task
-  available for the person.
+- **Look for a live Graph first.** In `lf task status <issue> --json`, a
+  position with `running` true is a live run, read from its own pid. A live
+  run makes the Task moving, whoever launched it.
+- **Repair before reporting a blocker.** Read the failed step's log and what
+  it changed, fix the cause if you can, and relaunch what remains with
+  `lf task run <issue-id> --reason "<what changed>"`. A stopped Graph is
+  history and can't be resumed. Report an unchanged failure; don't repeat it.
+- **A Graph ends where it was written to.** A finished Graph or a published PR
+  doesn't complete the Task. A Task at an interactive step is available to the
+  person there: never continue past their step, pick a new direction or arm a
+  merge they didn't approve.
+- **Finish merged work.** Let a live Graph finish. Otherwise, when the
+  outcome holds, run `lf task complete <issue>` and reread status. Retry
+  completion alone, never by rerunning gate or re-arming a merged PR.
 
-Start remaining work on your Tasks without asking. Don't approve reviews, arm a
-merge, cancel or abandon Tasks, or change direction.
+Tasks progress independently of this pass; their Graphs do the work, so don't
+perform a Graph's steps here. `lf task run <issue-id>` continues a Task you
+own to its next interactive step, and `lf task status` follows it. `lf task
+auto on` turns auto on, so the run stands in at interactive steps and may
+merge the PR; `lf -b task run` stands in for its own run, and a run with no
+interactive step left ahead may merge it too. Use them only when asked to ship or land. Start
+remaining work on your Tasks without asking. Don't approve reviews, cancel
+Tasks or change direction.
 
-## Due follow-ups
+Unstarted Tasks that are due or overdue are listed apart from other backlog,
+for selection. A due date is a day, not an alarm: time passing never runs or
+completes a Task.
 
-Read due dates and briefs in the plan. List unstarted Tasks that are due or
-overdue apart from other backlog, for selection; they are unowned backlog, so
-don't start one. Time passing never runs or completes a Task. A started Task you
-own whose date has arrived takes its ordinary disposition; before that date it
-is a dependency naming the date. Honor any timezone, release or environment
-prerequisite in the brief; a due date is a day, not an alarm. A missing date
-stays unknown. This pass installs no schedule, and an open conversation doesn't
-schedule its next turn.
+## Judge the Wave's work
 
-## Judge the Wave's existing work
-
-Ask these together over the Wave's Tasks and dig into the tension that matters;
-they are not five required reports or five agents. Put findings and proposals
-in the reply.
+Ask these together and dig into the tension that matters. They are not five
+required reports.
 
 | Function | Question |
 | --- | --- |
-| S1 · Delivery | What useful outcome did a Task deliver, compared with who it was for? |
-| S2 · Coordination | Where do Tasks collide or depend on each other? Name the interface or ordering without serializing unrelated work. |
-| S3 · Present capacity | Is effort advancing outcomes? Tell apart active work, review waits, repeated failures and unused capacity. |
+| S1 · Delivery | What useful outcome did a Task deliver, for the people it was for? |
+| S2 · Coordination | Where do Tasks collide or depend on each other? Name the interface or ordering. |
+| S3 · Present capacity | Is effort advancing outcomes? Tell active work, review waits, repeated failures and idle capacity apart. |
 | S4 · Adaptation | What changed in user needs, code or the outside world that could undo a Task's direction? |
-| S5 · Identity | Does what a Task found challenge the Wave's objective or scope? Name the finding, the premise and the decision needed. |
+| S5 · Identity | Does what a Task found challenge the Wave's objective or scope? Name the finding and the decision needed. |
 
-Follow the signal to its source: PR and path overlap and repeated conflicts for
-coordination; retries, CI waits, resource use and real outcomes for capacity;
-dated dependency, advisory or API changes for adaptation. Quiet chat, a finished
-agent turn or a green PR doesn't show an outcome. Don't change policy just to
-have something to do.
-
-## Tasks run themselves
-
-Tasks progress independently of Wave and repository passes; neither pass gates
-them. A Task's Graphs do its work, so don't perform a Graph's steps here. Keep
-Graph history, review conversations, worktrees and ownership intact.
-
-- Continue a Task you own with `lf task run <issue-id>`; it runs the Task's
-  graph to the next interactive step. Each run is a fresh Graph process and
-  returns once it is running; `lf task status <issue-id>` follows it. Leave a
-  live one running instead of duplicating it. `lf -b task run`, `lf ship` and
-  an `lf task run` with no interactive step left ahead approve Auto-Ship, which
-  may merge the PR; use them only when asked to ship or land.
-- Use `lf` Task commands, not raw stores, signals to processes you don't own,
-  or a competing worker on this Machine. A missing Machine is a blocker to
-  report.
-
-Tell apart writes that landed, writes that failed and writes you couldn't read
-back; settle the uncertain ones before retrying. Start no long-running process.
+Follow the signal to its source: path overlap and repeated conflicts for
+coordination; retries, CI waits and real outcomes for capacity; dated
+dependency or API changes for adaptation. Quiet chat, a finished agent turn or
+a green PR doesn't show an outcome. Don't change policy just to have something
+to do.
 
 ## Finish
 
-Reply with each started Task once, under these headings in this order, skipping
-empty ones:
+Reply with each started Task once, under these headings, skipping empty ones:
 
-1. **Available** — each review, demo, choice or merge ready to take up, with its link.
+1. **Available** — each review, demo, choice or merge to take up, with its link.
 2. **Moving** — live work left alone, and what this pass did with its result.
-3. **Stuck** — dependency or capacity, unassigned, or unknown, with the cause
-   or the missing read.
-4. **Others' work** — each Task another person owns, with that person and
-   Machine, “left alone”.
+3. **Stuck** — dependency or capacity, unassigned or unknown, with the cause.
+4. **Others' work** — each Task another person owns, with person and Machine.
 
-Then list due unstarted follow-ups for selection, other backlog, and any
-judgment, proposals, open decisions and gaps. Keep each row to its disposition
-and the fact that decides it. If nothing needed action, say why in a line.
-Record only what can't be worked out again later — changed decisions with their
-status, what a run showed, open concerns — where they already live. Report a post to a channel only after it went through; this skill
-doesn't send the reply anywhere.
+Then due follow-ups, other backlog, and any judgment, proposals and gaps. If
+nothing needed action, say why in a line.
 
-For lists of Tasks, use the status and show reads above and render each row as
+Render each row as
 `[identifier · Task title](Work URL) — status; next action/owner · [PR #n](PR URL)`.
-`lf open --task <issue> --link --format markdown` prints that label with its
-Work URL, which opens the Task's conversation; the provider issue
-(`reference.issue_url`) is a separate link when the issue itself is the point.
-Where links may not activate, add the `lf open '<url>'` it prints. In prose,
-shorten later references when unambiguous.
-
-Take the identifier from `task.identifier` and the title from `task.name`. Give
-the disposition as status, not `runtime.status` alone, and the next owner from
-`next_move.owner`, read as described under ownership. Link the Task's `pr` by
-its recorded number and URL, or omit it. State a next action only when current
-status supports it; leave unknowns unknown. Include `reference.workspace.slug`
-only when opening that workspace is the job.
-A Task can have a checkout without a PR. Never guess a URL, branch or slug from a title or identifier; without a
-link, keep the title and status.
+`lf open --task <issue> --link --format markdown` prints the label and Work
+URL; `reference.issue_url` is the provider issue when that is the point. Take
+the identifier from `task.identifier`, the title from `task.name` and the next
+owner from `next_move.owner`; give the disposition as status, not
+`runtime.status` alone. A Task can have a checkout without a PR. Never guess a
+URL, branch or `reference.workspace.slug` from a title; without a link, keep
+the title and status.

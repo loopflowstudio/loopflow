@@ -21,23 +21,12 @@ const CLEAR: NativeBoundary<'static> = NativeBoundary::Select { source: "clear" 
 
 /// The retention of a held terminal after `setup` changes its store.
 fn retention_after(
-    setup: impl FnOnce(&rusqlite::Connection, &LfProcessId),
+    setup: impl FnOnce(&rusqlite::Connection, &loopflow_model::id::TerminalId),
 ) -> Option<crate::sqlite::sessions::TerminalRetention> {
     let (_home, store, _adapter, terminal) = native_fixture();
-    let owner = store
-        .session_attachment("session")
-        .unwrap()
-        .unwrap()
-        .lf_process_id
-        .unwrap();
     {
         let conn = store.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE processes SET held_terminal_id=?1 WHERE id=?2",
-            params![terminal, owner],
-        )
-        .unwrap();
-        setup(&conn, &owner);
+        setup(&conn, &terminal);
     }
     store.terminal_retention(&terminal).unwrap()
 }
@@ -71,8 +60,13 @@ fn terminal_retention_names_the_graph_run_or_absence_that_holds_an_idle_terminal
     use crate::sqlite::sessions::TerminalRetention::{HeadlessRun, NoOpenSession, RunningGraph};
     assert_eq!(retention_after(|_, _| {}), None);
     assert_eq!(
-        retention_after(|conn, owner| {
-            insert_process(conn, Some(owner), true);
+        retention_after(|conn, terminal| {
+            let graph = insert_process(conn, None, true);
+            conn.execute(
+                "UPDATE graph_processes SET held_terminal_id=?1 WHERE lf_process_id=?2",
+                params![terminal, graph],
+            )
+            .unwrap();
         }),
         Some(RunningGraph)
     );
@@ -148,10 +142,36 @@ fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
         .unwrap();
     assert_eq!(yielded(&store), None, "headless: lf's stream reports");
     interactive(true);
+    let attempts = |store: &SqliteStore| -> (u32, Option<i64>) {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT starts_since_turn,last_started_at FROM agent_sessions WHERE id='session'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+    };
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET starts_since_turn=3,last_started_at=7 WHERE id='session'",
+            [],
+        )
+        .unwrap();
     store
         .record_native_turn(&adapter, "native", false, None)
         .unwrap();
     assert_eq!(yielded(&store), Some(false));
+    assert_eq!(
+        attempts(&store),
+        (3, Some(7)),
+        "a started turn has not finished"
+    );
     store
         .record_native_turn(&adapter, "native", true, Some(0))
         .unwrap();
@@ -159,6 +179,11 @@ fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
         yielded(&store),
         Some(true),
         "idle, so the server can wake it"
+    );
+    assert_eq!(
+        attempts(&store),
+        (0, None),
+        "a finished turn resets recovery; its next death starts at once"
     );
 }
 
@@ -418,10 +443,21 @@ fn a_session_anywhere_inside_a_task_checkout_gets_its_steers() {
             .unwrap();
         store.session_steers("session", 0, 32).unwrap().pending
     };
-    assert_eq!(pending("/work/task/rust/src/"), 1);
-    assert_eq!(pending("/work/task"), 1);
-    assert_eq!(pending("/work/task-other"), 0);
-    assert_eq!(pending("/work"), 0);
+    for source in ["declared", "checkout", "inherited", "bound"] {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET work_source=?1 WHERE id='session'",
+                [source],
+            )
+            .unwrap();
+        assert_eq!(pending("/work/task/rust/src/"), 1, "{source}");
+        assert_eq!(pending("/work/task"), 1, "{source}");
+        assert_eq!(pending("/work/task-other"), 0, "{source}");
+        assert_eq!(pending("/work"), 0, "{source}");
+    }
 }
 
 #[test]
@@ -552,7 +588,7 @@ fn selections(store: &SqliteStore) -> Vec<(Option<String>, String, String)> {
         .unwrap()
         .prepare(
             "SELECT json_extract(payload,'$.transition.from_provider_session'),json_extract(payload,'$.transition.to_provider_session'),
-             json_extract(payload,'$.source') FROM session_events
+             json_extract(payload,'$.source') FROM history.session_history
              WHERE json_extract(payload,'$.type')='provider_transition' ORDER BY seq",
         )
         .unwrap()
@@ -612,6 +648,26 @@ fn a_cleared_conversation_is_what_reconnect_resumes_on_the_same_account() {
     let resumed = store.input_provider_session(&input).unwrap().unwrap();
     assert_eq!(resumed.agent_session.as_str(), "cleared");
     assert_eq!(resumed.account_id, Some(account));
+}
+
+/// Antigravity names its conversation at its first start, and a held terminal
+/// leaves no launcher to publish it afterwards.
+#[test]
+fn a_start_names_what_reconnect_resumes_when_the_launch_named_nothing() {
+    let (_home, store, adapter) = fixture();
+    let session = store.session("session").unwrap().unwrap();
+    let input = session.artifact_key.unwrap();
+    assert!(store.input_provider_session(&input).unwrap().is_none());
+    store
+        .with_provider_context(
+            &adapter,
+            "reported",
+            NativeBoundary::Select { source: "startup" },
+            || Ok(()),
+        )
+        .unwrap();
+    let resumed = store.input_provider_session(&input).unwrap().unwrap();
+    assert_eq!(resumed.agent_session.as_str(), "reported");
 }
 
 #[test]

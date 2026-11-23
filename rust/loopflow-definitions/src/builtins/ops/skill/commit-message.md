@@ -1,21 +1,14 @@
-Generate a commit message for the staged changes.
+Write the commit message for the staged changes.
 
-Read the diff and write a short message. Don't ask questions; assume and proceed.
+Read the diff and say what changed. Don't ask questions; assume and proceed.
+
+The message describes the change, not the step that made it: "Read stored
+outputs as inputs to later jobs", not "implement pass 3". Follow the
+repository's own commit conventions where its agent guide gives them. No
+attribution lines.
 
 ## Output format
 
-Return a structured response with:
-- **title**: lowercase, with optional area prefix (e.g. `llm_http: add structured output`)
-- **body**: brief explanation if needed, otherwise empty string
-
-## Title
-
-Lowercase and short. Add an area prefix when the change sits in one module or feature.
-
-- `llm_http: add structured output for pr messages`
-- `pr workflow: add -a flag to commit and push`
-- `fix typo in readme`
-
-## Body
-
-Most commits need none. Add one sentence or a few bullets only when the title doesn't explain why.
+- **title**: one line someone scanning history would understand.
+- **body**: a sentence to a paragraph on why, and what to know before touching
+  this again. An empty string when the title says it all.

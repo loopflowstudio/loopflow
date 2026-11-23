@@ -14,32 +14,34 @@ use std::sync::{Arc, Weak};
 
 use notify::{RecursiveMode, Watcher};
 
-use crate::harness::HarnessKind;
 use crate::observe::Cache;
+use loopflow_harness::HarnessKind;
 
 /// Watch each harness's shared home until the returned watchers drop. A home
 /// that is missing or cannot be watched is logged and left to the reconcile
 /// interval.
 pub fn watch(cache: &Arc<Cache>) -> Vec<notify::RecommendedWatcher> {
-    let opencode = super::home(HarnessKind::OpenCode);
-    [
-        (super::home(HarnessKind::Claude).join("projects"), None),
-        (super::home(HarnessKind::Codex).join("sessions"), None),
-        (super::home(HarnessKind::Pi).join("sessions"), None),
-        (opencode.clone(), Some(super::opencode::store(&opencode))),
-    ]
-    .into_iter()
-    .filter(|(root, _)| root.is_dir())
-    .filter_map(
-        |(root, store)| match watch_root(&root, store, Arc::downgrade(cache)) {
-            Ok(watcher) => Some(watcher),
-            Err(error) => {
-                tracing::warn!(root = %root.display(), %error, "Could not watch transcripts");
-                None
-            }
-        },
-    )
-    .collect()
+    HarnessKind::ALL
+        .into_iter()
+        .map(|kind| {
+            let harness = kind.harness();
+            let home = harness.transcript_home();
+            (
+                harness.transcript_root(&home).0,
+                harness.transcript_watch_store(&home),
+            )
+        })
+        .filter(|(root, _)| root.is_dir())
+        .filter_map(
+            |(root, store)| match watch_root(&root, store, Arc::downgrade(cache)) {
+                Ok(watcher) => Some(watcher),
+                Err(error) => {
+                    tracing::warn!(root = %root.display(), %error, "Could not watch transcripts");
+                    None
+                }
+            },
+        )
+        .collect()
 }
 
 /// Watch `root`; every event under it hints `store` when one is given, else
@@ -102,8 +104,8 @@ mod tests {
     use std::io::Write;
 
     use super::*;
-    use crate::harness::HarnessKind;
-    use crate::transcript::live::TurnState;
+    use loopflow_harness::transcript::live::TurnState;
+    use loopflow_harness::HarnessKind;
 
     const RUNNING: &str = r#"{"type":"user","userType":"external","timestamp":"2026-11-10T16:25:37Z","message":{"content":"Explain the build"}}"#;
     const ENDED: &str = r#"{"type":"assistant","timestamp":"2026-11-10T16:27:51Z","message":{"id":"m","model":"claude-opus-5-5","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":7}}}"#;
@@ -115,7 +117,7 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, format!("{RUNNING}\n")).unwrap();
         let cache = Arc::new(Cache::default());
-        let source = crate::transcript::Source::File(path.clone());
+        let source = loopflow_harness::transcript::Source::File(path.clone());
         let read = || crate::observe::transcript_turn(HarnessKind::Claude, &source);
 
         let subscribers = (0..8).map(|_| cache.capture(read)).collect::<Vec<_>>();

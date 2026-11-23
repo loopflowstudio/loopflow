@@ -47,12 +47,6 @@ prefixed_uuid_id!(
     DurableDataError,
     DurableDataError::InvalidId
 );
-prefixed_uuid_id!(
-    ToolResponseId,
-    "response_",
-    DurableDataError,
-    DurableDataError::InvalidId
-);
 
 impl TaskId {
     /// Linear UUIDs are also the creation UUID used by locally authored Tasks.
@@ -181,16 +175,23 @@ pub struct TaskOwnershipEntry {
     pub person: Option<String>,
     /// The person's stable key; names are display only.
     pub person_key: Option<String>,
-    /// The person's `people` id, their planning provider's identity for them.
+    /// The person's `people` id, their tracker's identity for them.
     /// Absent from entries released lf wrote and where the writer knew none.
     pub person_id: Option<String>,
     pub machine_id: Option<MachineId>,
     /// The Machine's label when written, or as best known on this Machine.
     pub machine_label: Option<String>,
-    /// Absent from entries released lf wrote, which name no writer (Task 538340
-    /// drops `written_here`, after which every entry names one).
+    /// Absent from entries lf before `task_machine_local` wrote, which name no writer.
     pub writer_machine_id: Option<MachineId>,
     pub at: i64,
+    /// Where the entry sorts in the Task's log on every Machine, from its
+    /// writer's plan clock. Absent with Linear or Asana, whose comment order
+    /// decides, and from entries written before claims were first-wins.
+    pub order: Option<i64>,
+    /// The entry in effect when this one was written, or this entry itself
+    /// when there was none. Present exactly when `order` is. A claim whose
+    /// writer had not seen the claim holding the Task loses to it.
+    pub seen: Option<OwnershipEntryId>,
 }
 
 /// A Machine for display; a missing id reads as "Machine unknown".
@@ -328,22 +329,6 @@ impl std::fmt::Display for Author {
             Self::Imported(selector) => write!(f, "imported {selector}"),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolResponseWrite {
-    pub request_id: String,
-    pub choice: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolResponseReceipt {
-    pub id: ToolResponseId,
-    pub work: WorkRef,
-    pub request_id: String,
-    pub choice: String,
-    #[serde(with = "time::serde::rfc3339")]
-    pub responded_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

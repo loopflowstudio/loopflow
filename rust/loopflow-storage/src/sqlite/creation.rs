@@ -39,6 +39,26 @@ pub struct CreationIdentity {
     pub run: bool,
 }
 
+/// A Task creation's receipt, written in the transaction that files the Task.
+#[derive(Debug, Clone)]
+pub struct TaskCreationRecord {
+    pub identity: CreationIdentity,
+    /// A started creation's Graph and conversation commit with the Task, so
+    /// no reading shows it unstarted; its receipt is `admitted`, never `filed`.
+    pub admission: Option<TaskAdmission>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskAdmission {
+    /// The serialized Graph to take up at its first step; `None` keeps the
+    /// one an adopted Task already has.
+    pub graph: Option<String>,
+    /// The conversation made primary when the Task has none: new, or one of
+    /// the Task's own.
+    pub session: crate::session::LfSession,
+    pub caller: Option<loopflow_model::id::LfProcessId>,
+}
+
 pub(crate) fn insert_in(
     conn: &Connection,
     identity: &CreationIdentity,
@@ -90,6 +110,13 @@ impl SqliteStore {
         }).optional()?;
         row.map(|(mut receipt, result, launch)| {
             receipt.result = result.map(|text| serde_json::from_str(&text)).transpose()?;
+            if receipt.kind == "task.create" {
+                if let Some(result) = &mut receipt.result {
+                    for (stored, wire) in TASK_RECEIPT_FIELDS {
+                        rename_task_field(result, stored, wire);
+                    }
+                }
+            }
             receipt.launch = launch.map(|text| serde_json::from_str(&text)).transpose()?;
             let (disposition, explanation) = recovery_in(&conn, &receipt)?;
             receipt.disposition = disposition;
@@ -133,6 +160,7 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// `-b` creation's launch reported by its carrier.
     pub fn record_creation_launch(&self, id: &str, result: &serde_json::Value) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute("UPDATE creation_receipts SET milestone='started',launch=?2,updated_at=?3 WHERE request_id=?1 AND milestone='run_requested'",
@@ -209,4 +237,32 @@ pub struct TaskCreateReceipt {
     pub graph: Option<String>,
     pub session_id: Option<loopflow_model::id::LfSessionId>,
     pub milestone: String,
+}
+
+// The released CLI shares the receipt store and replays its original Task snapshot.
+const TASK_RECEIPT_FIELDS: [(&str, &str); 3] = [
+    ("linear_id", "tracker_id"),
+    ("pm_snapshot_synced_at", "tracker_synced_at"),
+    ("pm_writeback", "tracker_writeback"),
+];
+
+impl TaskCreateReceipt {
+    pub fn stored_result(&self) -> serde_json::Result<serde_json::Value> {
+        let mut result = serde_json::to_value(self)?;
+        for (stored, wire) in TASK_RECEIPT_FIELDS {
+            rename_task_field(&mut result, wire, stored);
+        }
+        Ok(result)
+    }
+}
+
+fn rename_task_field(result: &mut serde_json::Value, from: &str, to: &str) {
+    if let Some(task) = result
+        .get_mut("task")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        if let Some(value) = task.remove(from) {
+            task.insert(to.into(), value);
+        }
+    }
 }

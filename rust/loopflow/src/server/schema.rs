@@ -52,7 +52,7 @@ fn add_examples(schema: &mut Value) {
             .entry(kind)
             .or_insert_with(|| parse(text)["result"].clone());
     }
-    for group in ["Read", "Write", "ServerOperation"] {
+    for group in ["Read", "Write", "ServerOperation", "MeasuredOperation"] {
         let Some(arms) = schema["$defs"][group]["oneOf"].as_array_mut() else {
             continue;
         };
@@ -76,15 +76,12 @@ fn add_examples(schema: &mut Value) {
 /// Recorded requests, embedded so `describe` needs no source tree. Each
 /// names its operation; a test fails when a request fixture is missing here.
 const REQUESTS: &[&str] = &[
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_write.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_read.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_read.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_connect.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_disconnect.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_list.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_redeem_reset.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_next_request.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_set.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_use.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_pause.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_unpause.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/attach.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/session_start.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/checkout_commit.json"),
@@ -110,11 +107,12 @@ const REQUESTS: &[&str] = &[
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/skill_list.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/skill_run.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_from_session.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_hold.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_auto_off.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/machine_request.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_interrupt.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_report.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_run.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_ship.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_steer.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/view_plan.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/wave_plan_bind.json"),
@@ -139,19 +137,9 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account.json"),
     ),
     (
-        "account_redeemed",
-        "account.redeem_reset",
-        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_redeemed.json"),
-    ),
-    (
         "account_report",
         "account.list",
         include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_report.json"),
-    ),
-    (
-        "account_next",
-        "account.next",
-        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_next.json"),
     ),
     (
         "checkout_committed",
@@ -261,9 +249,11 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         include_str!("../../../loopflow-execution/tests/fixtures/dto/server/skill_entries.json"),
     ),
     (
-        "task_held",
-        "task.hold",
-        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_held.json"),
+        "task_auto_off_answer",
+        "task.auto.off",
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/task_auto_off_answer.json"
+        ),
     ),
     (
         "task_running",
@@ -271,9 +261,11 @@ const RESPONSES: &[(&str, &str, &str)] = &[
         include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_running.json"),
     ),
     (
-        "task_shipping",
-        "task.ship",
-        include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_shipping.json"),
+        "task_auto_on_answer",
+        "task.auto.on",
+        include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/task_auto_on_answer.json"
+        ),
     ),
     (
         "wave_plan_connected",
@@ -396,7 +388,7 @@ mod tests {
     }
 
     fn operations(schema: &Value) -> BTreeMap<String, Value> {
-        ["ServerOperation", "Read", "Write"]
+        ["ServerOperation", "Read", "Write", "MeasuredOperation"]
             .into_iter()
             .flat_map(|definition| arms(schema, definition, "kind"))
             .collect()

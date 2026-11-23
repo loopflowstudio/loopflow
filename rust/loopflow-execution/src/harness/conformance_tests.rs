@@ -1,25 +1,19 @@
 use crate::process::attachment;
-use std::fs;
-use std::path::Path;
 
-use serde_json::{json, Value};
+use serde_json::Value;
 
-use super::claude_decode::ClaudeDecoder;
-use super::codex_decode::{rpc_error, CodexDecoder};
-use super::fact::{Decoded, ProviderFact};
 use super::fact_writer::FactWriter;
-use super::opencode_decode::{OpenCodeDecoder, Snapshot};
+use loopflow_harness::claude_decode::ClaudeDecoder;
+use loopflow_harness::codex_decode::{rpc_error, CodexDecoder};
+use loopflow_harness::fact::{self, Decoded, ProviderFact, ProviderTurn};
+use loopflow_harness::opencode_decode::Turn;
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use loopflow_model::id::AgentSessionId;
 
 fn read_trace_lines(file_name: &str) -> Vec<String> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src/harness/testdata")
-        .join(file_name);
-    fs::read_to_string(path)
-        .expect("trace file should exist")
-        .lines()
-        .map(ToString::to_string)
+    fact::trace(file_name)
+        .iter()
+        .map(Value::to_string)
         .collect()
 }
 
@@ -348,32 +342,10 @@ fn codex_rpc_error_response_maps_to_error_event() {
     ));
 }
 
-/// Display events from one OpenCode snapshot, recording its facts.
-fn opencode_display(
-    decoder: &mut OpenCodeDecoder,
-    writer: &mut FactWriter,
-    messages: &[Value],
-) -> Vec<ConversationEvent> {
-    let Snapshot { decoded, .. } = decoder.messages(messages);
-    tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap()
-        .block_on(writer.write(&decoded))
-        .unwrap();
-    decoded
-        .into_iter()
-        .filter_map(|decoded| match decoded {
-            Decoded::Display(event) => Some(event),
-            Decoded::Fact(_) => None,
-        })
-        .collect()
-}
-
-// Synthetic native message shapes follow the isolated OpenCode 2.0.32 proof.
-// Status/SSE alone supplies no native completion. Usage rows come from the
-// transcript reader (`transcript::opencode`), so the stream writes none.
+// A recorded `opencode run` (2.2.1). Usage rows come from the transcript
+// reader (`transcript::opencode`), so the stream writes none.
 #[test]
-fn opencode_native_history_preserves_output_and_tools_and_leaves_usage_to_the_transcript() {
+fn opencode_run_preserves_output_and_tools_and_leaves_usage_to_the_transcript() {
     use loopflow_model::id::LfProcessId;
 
     let home = tempfile::tempdir().unwrap();
@@ -390,88 +362,130 @@ fn opencode_native_history_preserves_output_and_tools_and_leaves_usage_to_the_tr
     let session = "session".to_owned();
     store.test_session(&session, &input);
     let attachment =
-        attachment::claim_session_attachment(&store, &session, None, &process, false).unwrap();
+        attachment::claim_session_attachment(&store, &session, None, &process).unwrap();
     let mut writer = FactWriter::new(
         store.clone(),
         session.clone(),
         Some(attachment),
-        None,
         Default::default(),
     );
-    let agent_session = AgentSessionId::from(session.as_str());
-    let mut decoder = OpenCodeDecoder::new(agent_session.clone(), None);
-    let request = decoder.request(false);
-    writer.outbound(&request).unwrap();
-    let user = json!({"id":request,"type":"user","text":"request","time":{"created":0}});
-    let mut message = json!({"id":"assistant","type":"assistant","time":{"created":1},
-        "content":[{"id":"tool","type":"tool","name":"shell",
-            "state":{"status":"running","input":{"command":"echo ok"}}}]});
-    let started = opencode_display(&mut decoder, &mut writer, &[user.clone(), message.clone()]);
-    assert!(matches!(&started[..], [
-            ConversationEvent::TurnStarted { turn_id },
-            ConversationEvent::ItemStarted {turn_id: tool_turn, item: ConversationItem::Command {status: Lifecycle::Running, ..}},
-        ] if turn_id == &request && tool_turn == &request));
+    let turn = ProviderTurn {
+        thread: "ses_e0fc53b6cffe5Hj2VueBVr1q78".into(),
+        turn: "request".into(),
+    };
+    let mut decoded: Vec<Decoded> = vec![
+        ProviderFact::SessionObserved(turn.thread.clone()).into(),
+        ProviderFact::TurnAnswered {
+            turn: turn.clone(),
+            request: "request".into(),
+        }
+        .into(),
+    ];
+    let mut run = Turn::new(turn);
+    for line in fact::trace("opencode_run.jsonl") {
+        decoded.extend(run.event(&line));
+    }
+    decoded.extend(run.finish(true, false));
+    writer.write(&decoded).unwrap();
 
-    assert!(store
-        .session_history(&session, 0, 0)
-        .unwrap()
+    let display: Vec<_> = decoded
         .iter()
-        .all(|row| row.kind != crate::session::SessionEventKind::Completed));
-
-    message["content"][0]["state"] = json!({"status":"completed","input":{"command":"echo ok"},"content":[{"type":"text","text":"ok"}],"metadata":{"exit":0},"time":{"start":1,"end":2}});
-    message["content"].as_array_mut().unwrap().push(json!({"id":"answer","sessionID":session,"messageID":"assistant","type":"text","text":"Final answer"}));
-    message["finish"] = json!("stop");
-    message["time"]["completed"] = json!(3);
-    message["tokens"] = json!({"input":40,"output":5,"reasoning":0,"cache":{"read":0,"write":0}});
-    message["cost"] = json!(0.5);
-    let messages = [user.clone(), message.clone()];
-    let output = opencode_display(&mut decoder, &mut writer, &messages);
-    assert!(output.iter().any(|event| matches!(event, ConversationEvent::ItemCompleted {turn_id,item:ConversationItem::Command {output:Some(text),exit_code:Some(0),..}} if turn_id == &request && text == "ok")));
-    assert!(output.iter().any(|event| matches!(event, ConversationEvent::TextDelta {turn_id,content} if turn_id == &request && content == "Final answer")));
-    assert!(opencode_display(&mut decoder, &mut writer, &messages).is_empty());
-    let idle = json!({"id":"idle","type":"idle","outcome":"succeeded","time":{"created":4}});
-    let completion = opencode_display(
-        &mut decoder,
-        &mut writer,
-        &[user.clone(), message.clone(), idle.clone()],
-    );
-    assert!(
-        matches!(&completion[..], [ConversationEvent::TurnCompleted {turn_id,status:Lifecycle::Completed}] if turn_id == &request)
-    );
-    assert!(opencode_display(&mut decoder, &mut writer, &[user, message, idle]).is_empty());
-    assert!(store
-        .session_history(&session, 0, 0)
-        .unwrap()
-        .iter()
-        .all(|row| row.kind != crate::session::SessionEventKind::Usage));
+        .filter_map(|decoded| match decoded {
+            Decoded::Display(event) => Some(event),
+            Decoded::Fact(_) => None,
+        })
+        .collect();
+    assert!(display.iter().any(|event| matches!(event, ConversationEvent::ItemCompleted {item:ConversationItem::Command {output:Some(text),exit_code:Some(0),..},..} if text == "probe\n")));
+    assert!(display.iter().any(
+        |event| matches!(event, ConversationEvent::TextDelta {content,..} if content == "done")
+    ));
+    assert!(matches!(
+        display.last(),
+        Some(ConversationEvent::TurnCompleted {
+            status: Lifecycle::Completed,
+            ..
+        })
+    ));
+    let turns = store.session_turns(&session).unwrap();
+    assert!(turns.iter().any(|turn| turn.ended_at.is_some()));
+    assert!(turns.iter().all(|turn| turn.usage.is_none()));
     let usage = crate::store::sessions::input_history(&store, input.as_str())
         .unwrap()
         .usage;
     assert_eq!(usage.input_tokens, None);
 }
 
+/// Each harness reads its own provider's refusal, as the provider worded it.
 #[test]
-fn opencode_native_error_completes_only_its_request() {
-    let mut decoder = OpenCodeDecoder::new("session".into(), None);
-    let request = decoder.request(false);
-    let user = json!({"id":request,"type":"user","text":"request"});
-    let message = json!({"id":"assistant","type":"assistant","time":{"created":1,"completed":2},
-        "error":{"message":"provider rejected request"},"content":[]});
-    let idle = json!({"id":"idle","type":"idle","outcome":"failed","time":{"created":3},"error":{"message":"provider rejected request"}});
-    let display = |decoder: &mut OpenCodeDecoder, messages: &[Value]| -> Vec<ConversationEvent> {
-        decoder
-            .messages(messages)
-            .decoded
-            .into_iter()
-            .filter_map(|decoded| match decoded {
-                Decoded::Display(event) => Some(event),
-                Decoded::Fact(_) => None,
-            })
-            .collect()
-    };
-    let events = display(&mut decoder, &[user.clone(), message.clone(), idle.clone()]);
-    assert!(
-        matches!(&events[..], [ConversationEvent::TurnStarted {turn_id}, ConversationEvent::Error {message,..}, ConversationEvent::TurnCompleted {turn_id:completed,status:Lifecycle::Failed}] if turn_id == &request && completed == &request && message == "provider rejected request")
-    );
-    assert!(display(&mut decoder, &[user, message, idle]).is_empty());
+fn each_harness_classifies_its_own_refusals() {
+    use super::HarnessKind::{Antigravity, Claude, Codex, OpenCode, Pi};
+    use crate::agent::AgentFailure::{CredentialInvalidated, ModelUnavailable, UsageLimit};
+    for (harness, code, message, failure) in [
+        // `~/.lf/runs/6c/6c7c…/opencode.stderr.log`.
+        (
+            OpenCode,
+            "opencode_error",
+            "Insufficient balance. This request is pay-as-you-go, billed to OpenCode Models credits. Top up at https://opencode.ai/console/billing?credits=1.",
+            UsageLimit,
+        ),
+        // `opencode run -m opencode/no-such-model-xyz`, 2.0.32.
+        (
+            OpenCode,
+            "opencode_error",
+            "Model unavailable: opencode/no-such-model-xyz",
+            ModelUnavailable,
+        ),
+        (Pi, "pi_error", "Your refresh token was revoked", CredentialInvalidated),
+        // `agy` 1.5.13, signed out and with an unknown `--model`.
+        (
+            Antigravity,
+            "agy_error",
+            "authentication failed or timed out",
+            CredentialInvalidated,
+        ),
+        (
+            Antigravity,
+            "agy_error",
+            "Error: authentication required. Run 'agy' to log in, then retry.",
+            CredentialInvalidated,
+        ),
+        (
+            Antigravity,
+            "agy_error",
+            "invalid model selection (--model \"no-such-model-xyz\" --effort \"\"): model no-such-model-xyz is not recognized as a known model or custom model in settings",
+            ModelUnavailable,
+        ),
+        // From the binary's strings; no quota refusal has been seen live.
+        (
+            Antigravity,
+            "agy_error",
+            "You have exhausted your quota on this model.",
+            UsageLimit,
+        ),
+        (Antigravity, "agy_error", "RESOURCE_EXHAUSTED", UsageLimit),
+        (Claude, "provider_rate_limited", "rejected: seven_day", UsageLimit),
+        (Codex, "provider_model_unavailable", "", ModelUnavailable),
+    ] {
+        assert_eq!(
+            super::launcher(harness).classify_failure(code, message),
+            Some(failure),
+            "{harness:?}: {message}"
+        );
+    }
+}
+
+/// Claude and Codex leave a transient failure to lf; the others retry their own.
+#[test]
+fn a_transient_failure_is_lfs_to_retry_only_where_the_provider_does_not() {
+    use loopflow_harness::HarnessKind;
+    for harness in HarnessKind::ALL {
+        let retried = super::launcher(harness)
+            .classify_failure("fixture_error", "connection reset")
+            .is_some();
+        assert_eq!(
+            retried,
+            matches!(harness, HarnessKind::Claude | HarnessKind::Codex),
+            "{harness:?}"
+        );
+    }
 }

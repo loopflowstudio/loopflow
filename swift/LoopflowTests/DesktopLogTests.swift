@@ -42,7 +42,7 @@ struct DesktopLogTests {
         #expect(journal.takeTally() == LaunchJournal.Tally())
 
         var storm = LaunchJournal.Tally()
-        storm.reads = ["task diff": 1000, "plan list": 3, "session list": 2, "process list": 1]
+        storm.reads = ["task diff": 1000, "plan list": 3, "session list": 2, "graph list": 1]
         storm.killed = ["task diff": DesktopVitals.stormKills + 1]
         DesktopVitals.beat(sample, storm, log: log)
         log.flush()

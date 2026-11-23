@@ -166,30 +166,16 @@ struct SessionBindingDraft: Equatable {
     var error: String?
 }
 
-/// An in-place Session name edit. It belongs to exactly one Session; a
-/// completion for another Session can never touch it.
+/// An in-place Session name edit for exactly one Session. Saving it makes a
+/// pending change and closes it.
 struct SessionRenameDraft: Equatable {
-    let id = UUID()
     let sessionId: String
     var text: String
-    var error: String?
-    var submitting = false
-}
-
-/// One Task's in-flight `lf task run` or `lf task move` and its refusal.
-struct TaskRunDraft: Equatable {
-    enum Phase { case runningCommand, awaitingObservation }
-    var phase: Phase?
-    var acting: Bool { phase != nil }
-    var progress: String {
-        phase == .awaitingObservation ? "Task updated; refreshing…" : "Updating Task…"
-    }
-    var error: String?
 }
 
 /// A Wave view's named parts, as `lf desktop -p` names them.
 enum WaveViewPart: String, CaseIterable, Hashable {
-    case board, session, tiles
+    case backlog, session, tiles
 
     /// The Tasks strip distracts more than it helps for now (Jack Heart, LOO-673);
     /// Show… or `lf desktop show -p tiles` brings it back.
@@ -198,24 +184,18 @@ enum WaveViewPart: String, CaseIterable, Hashable {
     /// How the view's `Show…` menu names it.
     var title: String {
         switch self {
-        case .board: "Board"
+        case .backlog: "Backlog"
         case .session: "Session"
         case .tiles: "Tasks"
         }
     }
 }
 
-/// The section a Wave board shows, one at a time; Backlog by default.
-enum WaveBoardSection: String, CaseIterable, Hashable {
-    case backlog, working, autonomous, done
-
-    var title: String { rawValue.capitalized }
-}
-
 /// A Wave view's dividers: the conversation's share of the top band's width, and
-/// the top band's share of the view's height, golden by default.
+/// the top band's share of the view's height. The backlog takes the golden share
+/// of the band and the conversation the golden share of what remains.
 struct WaveViewRatios: Equatable {
-    var session = 1 - FocusSizing.golden
+    var session = (1 - FocusSizing.golden) * FocusSizing.golden
     var band = FocusSizing.golden
 }
 
@@ -223,6 +203,9 @@ struct WaveViewRatios: Equatable {
 @MainActor
 @Observable
 final class WorkNavigation {
+    let performanceOwner = UUID()
+    @ObservationIgnored var liveSessionCount: Int?
+
     enum SidebarFilter: String, CaseIterable {
         case working = "Working tasks"
         case available = "Available"
@@ -243,16 +226,20 @@ final class WorkNavigation {
     }
     /// Each board's page; it outlives entering a tile and coming back. Nil is the unsaved view.
     var boardPages: [Board?: Int] = [:]
-    /// Each Wave view's hidden board and strip; its conversation hides as its session pane.
+    /// Each Wave view's hidden backlog and strip; its conversation hides as its session pane.
     var hiddenViewParts: [Board: Set<WaveViewPart>] = [:]
-    /// Each Wave view's zoomed board or strip; its conversation zooms as its session pane.
+    /// Each Wave view's zoomed backlog or strip; its conversation zooms as its session pane.
     var zoomedViewParts: [Board: WaveViewPart] = [:]
     var waveRatios: [Board: WaveViewRatios] = [:]
-    var boardSections: [Board: WaveBoardSection] = [:]
+    /// Each Wave view's backlog selection, filter, search and draft; it outlives entering a Task.
+    var backlogs: [Board: BacklogState] = [:]
     var showsSlotHints = false
     var sidebarFilter: SidebarFilter = .working {
         willSet {
-            if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline") }
+            if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline:\(newValue.rawValue)", liveSessions: liveSessionCount, owner: performanceOwner) }
+        }
+        didSet {
+            if oldValue != sidebarFilter { Perf.acknowledged(Perf.hierarchyInteraction, id: "outline:\(sidebarFilter.rawValue)", owner: performanceOwner) }
         }
     }
     var sidebarFocusRequested = false
@@ -292,8 +279,8 @@ final class WorkNavigation {
         set {
             workspacePresentation.selectedSessionId = newValue
             // Leaving a Session abandons an unsubmitted edit; a submitted one
-            // still settles against its own Session.
-            if let renaming, renaming.sessionId != selectedSessionId, !renaming.submitting {
+            // is already a pending change.
+            if let renaming, renaming.sessionId != selectedSessionId {
                 self.renaming = nil
             }
             if let binding, binding.sessionId != selectedSessionId, !binding.submitting {
@@ -303,20 +290,21 @@ final class WorkNavigation {
     }
     var renaming: SessionRenameDraft?
     var binding: SessionBindingDraft?
-    /// Graph drafts by planning Task id; they survive Task and Session navigation.
-    var taskRunDrafts: [String: TaskRunDraft] = [:]
-    /// What the last Auto-Ship or Stop Auto-Ship on the window heading did.
-    var shipNotice: ShipNotice?
+    /// The Task whose Abandon… waits for its confirmation.
+    var abandoning: String?
+    /// The window's one Notice: refusals, requested changes and failed reads.
+    let notices = NoticeCenter()
     var startingTaskSessions: Set<String> = []
-    var taskSessionErrors: [String: String] = [:]
+    /// The New Task request this window submitted and has not opened yet. Its
+    /// words stand in for the Task's conversation from the click until the
+    /// answer installs it.
+    var startingTask: StartingTask?
     /// Successful `task prepare` receipts, available before the next roadmap read.
     var preparedTaskWorktrees: [String: WorkspaceIdentity] = [:]
     /// Tasks whose Comments are expanded; a presentation fact, not a reading.
     var expandedComments: Set<String> = []
     /// Tasks whose Session history is disclosed; history is read only then.
     var expandedHistory: Set<String> = []
-    /// Wave planning notices whose Details are open, keyed by Task ID.
-    var expandedNotices: Set<String> = []
     /// Graph processes whose graph and steps are open, keyed by Graph process.
     var expandedGraphProcesses: Set<String> = []
     enum Destination: Equatable {

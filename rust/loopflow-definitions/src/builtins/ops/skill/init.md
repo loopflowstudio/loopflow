@@ -4,202 +4,125 @@ produces: a working Loopflow path and one next command
 Set up the part of Loopflow that is wanted here, check it works, and hand back one next command.
 
 The launcher, Skills, Graphs, worktrees and PR tools need no Task, Wave or
-Linear. Set up only what the request needs.
+Linear. Set up only what the request needs; with no direction, make a plain
+agent launch work. Ask one question at a time, and only when the answer
+changes the setup. Headless, make only repository-scoped, reversible changes:
+logins, personal config, Machines and anything created in an outside service
+wait for a person, so report the command that would do it.
 
-## Reviewer mode
-
-The launch prompt names the reviewer.
-
-- **Interactive reviewer:** ask one question at a time, only when the answer
-  changes the setup. Connect accounts or edit personal config only once chosen.
-- **Parent reviewer:** inspect the same state, but make only repo-scoped,
-  reversible changes, through the review protocol with the Task. Never guess a
-  preference. OAuth, personal config, Wave Machines and anything created in an
-  external service wait for a person; report the blocker and the commands that
-  would clear it.
-
-Never show credential values or read tokens from dotfiles or environment
-variables; use `lf account`.
-
-## Start from the request
-
-Infer what needs setup from the request, the installed tools and any existing
-Task or Wave. With no direction, make a plain agent launch work. Ask only when a
-choice can't be inferred. Existing work continues without another opt-in.
-
-For the launcher, Skills, Graphs, worktrees or PRs: check `lf --version`, the
-installed agents and the accounts that operation needs. Run its read-only help
-or status, offer one next command such as `lf : "fix the failing test"` or
-`lf graph pursue`, and stop. No Task, Linear or Wave, and no coding job as a test.
-
-For managed work, read `lf help skill work` and continue below.
+Never show credential values or read tokens from dotfiles or the environment;
+use `lf account` for services. Claude and Codex own native sign-in.
 
 ## 1. Look at what is there
 
-Read-only. A missing optional command is a fact, not a failure.
+Read-only. A missing optional command is a fact, not a failure, and no
+`.lf/config.yaml` doesn't mean uninitialized; the defaults need none.
 
 ```bash
 git rev-parse --show-toplevel
 lf --version
-lf account --cached          # last known state; no provider request
-lf account --json            # managed account status
-lf account next
+lf account --json            # service authentication status; no provider request
 lf machine self --json
 lf wave list --json
-command -v claude codex opencode
-test -f .lf/config.yaml && echo "repo config: present"
-test -f ~/.lf/config.yaml && echo "user config: present"
-find .lf/wave -mindepth 2 -maxdepth 2 -name GOAL.md -print 2>/dev/null
+command -v claude codex opencode pi agy
 ```
 
-Read Waves from `lf wave list`, `lf wave status` and `lf wave show`, not from
-processes or worktrees. If `lf id` says the store is not initialized, say so and
-continue. Show one compact picture:
+Show one compact picture:
 
 ```text
 Repository  /path/to/repo
-Machine     home_... on this machine | not initialized
+Machine     home_... on this machine
 Agents      codex, claude
 Accounts    GitHub connected; Linear missing
 Waves       designer running here; infrastructure stopped on home_...
 Planning    bound to Linear | not connected
-Config      repo present; personal present
 ```
 
-No `.lf/config.yaml` does not mean "uninitialized"; defaults need none.
+For the launcher, Skills, Graphs, worktrees or PRs, that is nearly all: check
+the accounts that operation needs, offer one next command such as
+`lf : "fix the failing test"` or `lf graph pursue`, and stop. Don't run a
+coding job as a test.
 
 ## 2. Name and agent
 
-`lf user --json` gives the name used in saved work: personal `user.name`, else
-Git's. If neither exists in an interactive Session, ask and save it as
-`user.name` in `$LF_HOME/config.yaml` (default `~/.lf/config.yaml`). Never take
-a name from an account, directory or commit author, never put one in repo
-config, and over SSH leave the remote Machine's name alone. Headless, leave it
-unknown.
+`lf config user` gives the name used in saved work. If there is none and
+someone is here, ask and save it as `user.name` in `~/.lf/config.yaml`. Never
+take a name from an account, directory or commit author, and never put one in
+repository config.
 
-One agent must be installed: Claude Code, Codex, OpenCode or Pi. If none is,
-stop with install commands and `lf init` as the retry; don't run a package
-manager. Installed agents belong to this Machine, so never rewrite repo config
-to match `command -v`.
+One agent must be installed: Claude Code, Codex, OpenCode, Pi or Antigravity
+(`agy`). With none,
+stop with install commands; don't run a package manager. Keep a valid existing
+`agent` setting. With one installed, use it; with several and no preference,
+ask, then `lf set --global default_agent <harness>`. Set `agent` in
+`.lf/config.yaml` only for a team-wide policy someone chose. Don't add
+exclusions, permission bypasses or model pins the repository hasn't shown it
+needs.
 
-- Keep a valid existing `agent` setting.
-- One agent installed: use it. Several and no preference: ask, then
-  `lf set --global default_agent <harness>`; a repository or step `agent`
-  overrides it. Don't guess from install order or from the agent running
-  setup. Headless, report `lf -a <harness> init` and leave it open.
-- Set `agent` or `supported_harnesses` in `.lf/config.yaml` only for a chosen
-  team-wide policy, keeping every existing field. Ask repo-wide or
-  Machine-local first.
+## 3. Connect what the path needs
 
-Don't add exclusions, permission bypasses, model pins or release policy the
-repository hasn't shown it needs.
-
-## 3. Pick the path and connect accounts
-
-Use the path the request chose; ask only if it is missing: an existing Wave, a
-new Wave, an existing Linear Task, or Skills and Graphs only. That decides which
-accounts are needed. Offer only the missing ones:
+The path is an existing Wave, a new Wave, an existing Task, or Skills and
+Graphs only. Offer only the missing accounts:
 
 ```bash
 lf account connect github
 lf account connect linear
-lf account connect claude
+claude                         # native sign-in; codex login for Codex
 ```
 
-OAuth client credentials come from the environment, then Doppler. In a Doppler
-repository with them missing, use `doppler run -- lf account connect linear`;
-otherwise name the missing variables. A connection counts only after it is
-chosen and the provider flow completes.
+A connection counts only after the provider flow completes.
 
 ## 4. Make the path real
 
-**Existing Wave.** Read `.lf/wave/<name>/GOAL.md`, `lf wave status <wave> --json`
-and `lf wave show <wave> --json`. If Linear is connected and the Wave isn't
-bound, offer `lf wave plan connect <wave>`. The first Wave picks the repository's
-Linear Team (key from the repository name, `--team-key <KEY>` to override), and
-that choice needs a person; later Waves reuse it. Never create another Team,
-Initiative, Project or KR.
+**Existing Wave.** Read `.lf/wave/<name>/GOAL.md` and
+`lf wave status <wave> --json`. If Linear is connected and the Wave isn't
+bound, offer `lf wave plan connect <wave>`. The first Wave picks the
+repository's Linear Team, and that choice needs a person. Never create another
+Team, Initiative or Project.
 
-**New Wave.** Ask for one outcome and a short name:
+**New Wave.** Ask for one outcome and a short name, then
+`lf wave create <name> --objective "<outcome>"`. It commits
+`.lf/wave/<name>/` on the main checkout. Edit `GOAL.md` there: the objective,
+what success looks like, what is out of scope, and when to stop or ask.
 
-```bash
-lf wave create <name> --objective "<outcome>"
-```
-
-This starts the first chapter and commits `.lf/wave/<name>/` on the main
-checkout. Edit `GOAL.md` there: the objective, what success looks like, what is
-out of scope, and when to stop or ask. KRs and Tasks go in the chapter plan;
-lasting decisions go in `MEMORY.md`. Then offer Linear binding as above; it
-links the Initiative and creates no Project.
-
-With no current (In Progress) Project, say so: `lf wave sync <wave>` adopts an
-existing Linear Project, and `lf wave plan bind <wave> <Project UUID>` picks
-one explicitly. A new plan needs accepted direction for the whole repository;
-start-chapter writes each Wave's plan in place. For an
-existing current Project, `lf update-plan --wave <wave> --plan <plan.json>`
-replaces its content, e.g. `{"metric_targets":[],"krs":[]}`. Write future plans
-in the Planned Linear Project. Never guess a plan from the newest name.
-
-**Existing Linear Task.** Get the exact issue ID, then:
-
-```bash
-lf task run <ISSUE-ID>
-lf task status <ISSUE-ID> --json
-```
-
-Don't make a separate worktree or turn it into a local prompt.
+**Existing Task.** Get the exact issue ID, then `lf task run <ISSUE-ID>` and
+`lf task status <ISSUE-ID> --json`. Don't make a separate worktree for it.
 
 **Skills and Graphs only.** Offer, don't run: `lf debug -c`, `lf design`,
-`lf list`. Mention `.lf/skills/` and `.lf/graphs/` only if reusable ones are wanted.
+`lf list`.
 
-## 5. Choose where work runs
+## 5. Where work runs
 
 Work runs on this Machine by default; one Machine needs no setup. For a remote
-one, use the ids the commands print:
+one:
 
 ```bash
 lf machine add <ssh-target> --label <label>
-lf --machine <machine-id> account --cached
-lf --machine <machine-id> account next
+lf --machine <machine-id> account --json
 lf --wave <wave> set machine <machine-label>   # this Wave's new Tasks
 lf --repo <repo> set machine <machine-label>   # this repository's new Tasks
-lf task move <issue> --machine <machine-label> # one Task, with its Session
-lf machine list
+lf task move <issue> --machine <machine-label> # one existing Task
 ```
 
-The Machine choice is personal and never committed. Existing Tasks stay put
-until `lf task move`. Before setting a Wave Machine, check remotely that it has
-`lf`, the repository and the accounts. `lf --machine` runs the remote `lf`; use
-`ssh` for anything else, and `lf machine connect` in a foreground terminal for
-logins.
-
-On macOS, a scheduled job that runs an agent or reads Keychain credentials needs
-a gui-domain LaunchAgent (`StartCalendarInterval`); cron can't reach the
-Keychain.
+The Machine choice is personal and never committed. Check the remote has `lf`,
+the repository, service access and native agent authentication before
+pointing work at it, and run logins in
+a foreground terminal with `lf machine connect`.
 
 ## 6. Check it works
 
-Run the smallest reads that show the chosen path works: `lf account --cached`,
-`lf machine self --json`, plus `lf wave status <wave> --json` for a Wave or
-`lf task status <ISSUE-ID> --json` for a Task. Skip the roadmap and doctor; both
-are large and doctor reports old, unrelated problems. Don't start work as a test.
+Run the smallest reads that show the chosen path works: `lf account --json`,
+`lf machine self --json`, plus `lf wave status <wave> --json` or
+`lf task status <ISSUE-ID> --json`. Don't start work as a test.
 
-Finish with what you saw and one next command:
+Finish with what you saw and one next command. Name anything still missing and
+the command that fixes it; never hide a gap behind "setup complete".
 
 ```text
-Loopflow is connected for this repository.
+Machine   home_... (local)
+Agents    Codex + Claude installed
+Accounts  GitHub + Linear connected
+Wave      designer, bound to Linear; 7 open Tasks
 
-Machine         home_... (local)
-Machine agents  Codex + Claude installed
-Repo policy     inherited defaults
-Accounts        GitHub + Linear connected
-Wave            designer placed on home_...
-Planning        Linear bound; 1 current chapter / 7 open Tasks
-
-Next            lf --wave designer wave-operate
-Also            lf wave show designer | lf task run DES-123 | lf debug -c
+Next      lf --wave designer wave-operate
 ```
-
-Name anything still missing and the command that fixes it; never hide a gap
-behind "setup complete." On macOS, offer `lf open --host desktop` (this repository
-in Loopflow Desktop) without launching it.

@@ -6,7 +6,6 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use base64::prelude::*;
 use loopflow::id::WaveId;
 use loopflow::linear::{LinearIssueId, LinearProjectId};
 use loopflow::store::{StorageConfig, Store};
@@ -133,6 +132,20 @@ else:
     run(sys.argv[1], sys.argv[2:])
 "#;
 
+/// A Python Claude stand-in that can call
+/// `keep_claude_turn(request, answer, structured=None)` to keep each turn in
+/// Claude's transcript, where lf reads final answers.
+#[allow(dead_code)] // Shared native provider fixture compiled into multiple test crates.
+pub fn claude_stand_in(script: &str) -> String {
+    let (shebang, body) = script
+        .split_once('\n')
+        .expect("a stand-in script starts with its shebang line");
+    format!(
+        "{shebang}\n{}\n{body}",
+        include_str!("claude_transcript.py")
+    )
+}
+
 #[cfg(unix)]
 #[allow(dead_code)] // Shared native provider fixture compiled into multiple test crates.
 pub fn install_native_codex(bin: &Path) {
@@ -234,24 +247,52 @@ pub fn codex_app_server_script(output: &str, setup: &str) -> String {
     let output = serde_json::to_string(output)
         .expect("encode mock Codex output")
         .replace('\'', r#"'"'"'"#);
+    let rollout = codex_rollout_script();
+    // Codex names threads and turns with UUIDs; a resumed thread keeps its id.
     codex_socket_script(&r#"#!/bin/sh
 __SETUP__
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
 read -r initialized
 read -r thread_start
-echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thread-test"}}}'
+thread=$(printf '%s' "$thread_start" | python3 -c 'import json, sys, uuid; print(json.load(sys.stdin).get("params", {}).get("threadId") or uuid.uuid4())')
+turn=$(python3 -c 'import uuid; print(uuid.uuid4())')
+echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"'"$thread"'"}}}'
 read -r turn_start
-echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
-echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"inProgress"}}}'
-printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"turn-test","itemId":"message-test","delta":__OUTPUT__}}'
-printf '%s\n' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-test","turnId":"turn-test","item":{"type":"agentMessage","id":"message-test","text":__OUTPUT__,"phase":"final_answer"}}}'
-echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"completed"}}}'
+echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"'"$turn"'"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"inProgress"}}}'
+# A fixture that left `tool_turn.py` gets the hooks lf declared, run around a tool.
+if [ -f "$LF_HOME/tool_turn.py" ]; then
+    hooks=$(printf '%s' "$thread_start" | python3 -c 'import json, sys; print(json.dumps(json.load(sys.stdin)["params"]["config"]["hooks"]))')
+    python3 "$LF_HOME/tool_turn.py" "$thread" "$hooks" || exit 1
+fi
+# A fixture that left `hold-turn` holds the turn open until it is removed.
+if [ -f "$LF_HOME/hold-turn" ]; then
+    printf '%s' "$thread" > "$LF_HOME/holding"
+    while [ -f "$LF_HOME/hold-turn" ]; do sleep 0.05; done
+fi
+printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","itemId":"message-test","delta":__OUTPUT__}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","item":{"type":"agentMessage","id":"message-test","text":__OUTPUT__,"phase":"final_answer"}}}'
+python3 '__ROLLOUT__' "$thread" "$turn" '__OUTPUT__' || exit 1
+echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"completed"}}}'
 if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
 while read -r line; do :; done
 "#
     .replace("__SETUP__", setup)
+    .replace("__ROLLOUT__", &rollout)
     .replace("__OUTPUT__", &output))
+}
+
+/// The script that appends a completed turn to the rollout Codex keeps,
+/// where lf reads final answers, quoted for a single-quoted shell word:
+/// `python3 '<script>' THREAD TURN ANSWER_JSON`.
+#[allow(dead_code)] // Shared provider mock compiled into multiple test crates.
+pub fn codex_rollout_script() -> String {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/codex_rollout.py"
+    )
+    .replace('\'', r#"'"'"'"#)
 }
 
 #[allow(dead_code)] // Shared provider transport compiled into multiple test crates.
@@ -271,56 +312,64 @@ fi
     )
 }
 
-#[allow(dead_code)] // Shared synthetic account for provider-backed CLI proofs.
-pub fn register_codex_account(home: &Path) {
-    register_codex_login(home, "fixture");
+/// A Codex whose first turn the provider refuses, in the words Codex sends:
+/// the rollout holds the thread and nothing the agent said.
+#[allow(dead_code)] // Shared provider mock compiled into multiple test crates.
+pub fn refused_codex_script() -> String {
+    codex_socket_script(
+        r#"#!/bin/sh
+read -r initialize
+echo '{"jsonrpc":"2.0","id":1,"result":{}}'
+read -r initialized
+read -r thread_start
+thread=$(python3 -c 'import uuid; print(uuid.uuid4())')
+turn=$(python3 -c 'import uuid; print(uuid.uuid4())')
+echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"'"$thread"'"}}}'
+read -r turn_start
+echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"'"$turn"'"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"inProgress"}}}'
+day="$CODEX_HOME/sessions/$(date -u +%Y/%m/%d)"
+mkdir -p "$day"
+printf '%s\n' \
+  '{"type":"session_meta","payload":{"id":"'"$thread"'","cwd":"'"$PWD"'"}}' \
+  '{"type":"response_item","payload":{"type":"reasoning","id":"thought","summary":[{"type":"summary_text","text":"Checking the task."}]}}' \
+  > "$day/rollout-$(date -u +%Y-%m-%dT%H-%M-%S)-$thread.jsonl"
+echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","willRetry":false,"error":{"message":"You’ve hit your usage limit. Upgrade to Pro, or try again at 9:41 PM.","codexErrorInfo":null,"additionalDetails":null}}}'
+echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"failed","error":{"message":"You’ve hit your usage limit. Upgrade to Pro, or try again at 9:41 PM.","codexErrorInfo":null,"additionalDetails":null}}}}'
+if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
+while read -r line; do :; done
+"#,
+    )
 }
 
-/// A connected synthetic Codex login `<name>@example.com`, account id `<name>`.
-#[allow(dead_code)]
-pub fn register_codex_login(home: &Path, name: &str) {
-    let account_home = home.join("accounts/codex").join(name);
-    fs::create_dir_all(&account_home).unwrap();
-    let email = format!("{name}@example.com");
-    let email = email.as_str();
-    let claims =
-        BASE64_URL_SAFE_NO_PAD.encode(serde_json::json!({"email": email, "sub": name}).to_string());
-    fs::write(
-        account_home.join("auth.json"),
-        serde_json::json!({"tokens": {
-            "access_token": "synthetic-fixture-token",
-            "id_token": format!("h.{claims}.s")
-        }})
-        .to_string(),
+/// A Claude that answers one turn with `answer` and keeps the prompt it was
+/// sent in `received`.
+#[allow(dead_code)] // Shared provider mock compiled into multiple test crates.
+pub fn answering_claude_script(answer: &str, received: &Path) -> String {
+    r#"#!/usr/bin/python3
+import json, sys
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+message = json.loads(sys.stdin.readline())
+open(__RECEIVED__, 'w').write(message['message']['content'][0]['text'])
+message['session_id'] = 'fixture-thread'
+print(json.dumps(message), flush=True)
+print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'fixture-thread'}), flush=True)
+answer = __ANSWER__
+print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': answer}]}}), flush=True)
+print(json.dumps({'type': 'result', 'uuid': 'fixture-result', 'session_id': 'fixture-thread', 'subtype': 'success', 'is_error': False, 'result': answer}), flush=True)
+for line in sys.stdin:
+    pass
+"#
+    .replace(
+        "__RECEIVED__",
+        &serde_json::to_string(&received.display().to_string()).expect("encode path"),
     )
-    .unwrap();
-    seed_store(home);
-    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    loopflow::provider_account::catalog::upsert_provider_account(
-        &store,
-        &loopflow::store::ProviderAccount {
-            provider: "codex".into(),
-            account_id: loopflow::store::ProviderAccountId::parse(name).unwrap(),
-            home: Some(account_home),
-            login_email: Some(loopflow::profile::EmailAddress::parse(email).unwrap()),
-            observed_email: None,
-            observed_subject: None,
-            observed_credential_digest: None,
-            observed_plan: None,
-            credential_state: loopflow::store::CredentialState::Connected,
-            routing_state: loopflow::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: now,
-            updated_at: now,
-        },
+    .replace(
+        "__ANSWER__",
+        &serde_json::to_string(answer).expect("encode answer"),
     )
-    .unwrap();
 }
 
 /// A launch routes by the process directory: the checkout it runs in, never
@@ -341,52 +390,6 @@ impl Drop for InDirectory {
     fn drop(&mut self) {
         env::set_current_dir(&self.0).unwrap();
     }
-}
-
-/// A connected synthetic Claude login `<name>@example.com`, account id `<name>`.
-/// Its token is `<name>-token`, so a stand-in Keychain shows who is signed in.
-/// Signing in on macOS needs `FAKE_SECURITY` first on PATH and `USER` set.
-#[allow(dead_code)]
-pub fn register_claude_login(home: &Path, name: &str) {
-    let account_home = home.join("accounts/claude").join(name);
-    fs::create_dir_all(&account_home).unwrap();
-    let credential = serde_json::json!({"claudeAiOauth": {
-        "accessToken": format!("{name}-token"),
-        "expiresAt": 4102444800000i64
-    }})
-    .to_string();
-    fs::write(account_home.join(".credentials.json"), &credential).unwrap();
-    let email = format!("{name}@example.com");
-    seed_store(home);
-    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    loopflow::provider_account::catalog::upsert_provider_account(
-        &store,
-        &loopflow::store::ProviderAccount {
-            provider: "claude".into(),
-            account_id: loopflow::store::ProviderAccountId::parse(name).unwrap(),
-            home: Some(account_home),
-            login_email: Some(loopflow::profile::EmailAddress::parse(&email).unwrap()),
-            observed_email: Some(email),
-            observed_subject: Some(name.into()),
-            observed_credential_digest: Some({
-                use sha2::Digest;
-                format!("{:x}", sha2::Sha256::digest(credential.as_bytes()))
-            }),
-            observed_plan: None,
-            credential_state: loopflow::store::CredentialState::Connected,
-            routing_state: loopflow::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: now,
-            updated_at: now,
-        },
-    )
-    .unwrap();
 }
 
 pub struct EnvGuard {
@@ -454,8 +457,7 @@ impl EnvGuard {
         } else {
             env::set_var("LF_HOME", lf_home.path());
         }
-        // A shared launch signs its provider's native home in as the routed
-        // account; that home must never be the developer's own.
+        // Native provider homes must never reach the developer's own credentials.
         env::set_var("CODEX_HOME", lf_home.path().join("native-codex"));
         env::set_var("CLAUDE_CONFIG_DIR", lf_home.path().join("native-claude"));
         Self {
@@ -527,15 +529,41 @@ pub fn select_wave_graph(
     wave: &WaveId,
     name: &str,
 ) {
+    set_wave_setting(repo, store, wave, "graph", name);
+}
+
+/// Set `key` in a Wave's committed `config.yaml` in `repo`.
+#[allow(dead_code)] // Shared helper compiled into integration tests without Wave settings.
+pub fn set_wave_setting(
+    repo: &Path,
+    store: &loopflow::store::sqlite::SqliteStore,
+    wave: &WaveId,
+    key: &str,
+    value: &str,
+) {
     let wave = store.get_wave(wave).unwrap().unwrap();
     let path = repo.join(".lf/wave").join(wave.slug()).join("config.yaml");
     let mut config: serde_yaml_ng::Mapping = fs::read_to_string(&path)
         .ok()
         .and_then(|content| serde_yaml_ng::from_str(&content).ok())
         .unwrap_or_default();
-    config.insert("graph".into(), name.into());
+    config.insert(key.into(), value.into());
     fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(path, serde_yaml_ng::to_string(&config).unwrap()).unwrap();
+    fs::write(&path, serde_yaml_ng::to_string(&config).unwrap()).unwrap();
+    for args in [
+        vec!["add", "--", path.to_str().unwrap()],
+        vec!["commit", "--quiet", "-m", "Set the Wave's configuration"],
+    ] {
+        let status = std::process::Command::new("git")
+            .current_dir(repo)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(
+            status.success(),
+            "git could not commit the Wave's configuration"
+        );
+    }
 }
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
@@ -596,7 +624,7 @@ fn register_task_fixture(
 
         summary: String::new(),
         status: loopflow::work::project::ProjectStatus::Started,
-        linear_id: Some(
+        tracker_id: Some(
             LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
         ),
         slug: "task-pr-tests".to_string(),
@@ -604,7 +632,7 @@ fn register_task_fixture(
         description: "Keep Task PR transitions durable.".to_string(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
         created_at: now,
@@ -619,13 +647,13 @@ fn register_task_fixture(
         id: TaskId::new(),
 
         revision: 0,
-        linear_id: Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id")),
+        tracker_id: Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id")),
         identifier: "INF-123".to_string(),
         title: "Prove Task PR transitions".to_string(),
         description: "Exercise the persisted lifecycle.".to_string(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
-        pm_writeback: LinearWritebackState::Current,
+        tracker_writeback: LinearWritebackState::Current,
         wave_id: Some(wave.id().clone()),
         project_id: Some(project.id.clone()),
         worktree: Some(worktree.to_path_buf()),
@@ -721,7 +749,7 @@ pub fn register_sibling_task(
     let now = OffsetDateTime::now_utc();
     let mut task = registered.task.clone();
     task.id = TaskId::new();
-    task.linear_id =
+    task.tracker_id =
         Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"));
     task.identifier = identifier.to_string();
     task.title = format!("Sibling {identifier}");
@@ -792,7 +820,7 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
     }
 }
 
-/// Record a Graph the way `lf graph` leaves one: a Graph process, its GraphProcess row
+/// Record a Graph the way `lf graph` leaves one: a Graph process, its GraphExecution row
 /// and one step Process in `cwd`, both exited. Returns the Graph process's id, which
 /// names the Graph.
 #[allow(dead_code)] // Shared helper compiled into integration tests that record no Graph.
@@ -848,7 +876,7 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
             cwd.to_string_lossy()
         ],
     )
-    .expect("record GraphProcess");
+    .expect("record GraphExecution");
     db.execute(
         "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations) VALUES(?1,?2,0,'[[]]')",
         rusqlite::params![graph_process.as_str(), step.as_str()],
@@ -857,15 +885,18 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
     graph_process.to_string()
 }
 
-/// Every Graph in launch order: its process's outcome and each recorded step as
-/// `{graph, label, key, iterations, argv}`, `argv` without the binary path.
+/// Every Graph in launch order: how it ended (`succeeded`, `interrupted`,
+/// `failed`, or `None` while it runs or when nobody saw it end) and each
+/// recorded step as `{graph, label, key, iterations}`.
 #[allow(dead_code)] // Shared helper compiled into integration tests that read no Graph.
 pub fn recorded_graphs(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value>)> {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
     let mut graph_processes = db
         .prepare(
-            "SELECT d.id,d.outcome,g.graph,g.compiled FROM graph_processes g JOIN processes d ON d.id=g.lf_process_id
-             ORDER BY d.rowid",
+            "SELECT lf_process_id,CASE WHEN ended_at IS NULL OR exit_code IS NULL THEN NULL
+                 WHEN exit_code=0 THEN 'succeeded'
+                 WHEN exit_code=130 AND error IS NULL THEN 'interrupted' ELSE 'failed' END,
+                 graph,compiled FROM graph_processes ORDER BY rowid",
         )
         .expect("select Graph processes");
     let rows = graph_processes
@@ -889,29 +920,23 @@ pub fn recorded_graphs(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Valu
             }
             let mut steps = db
                 .prepare(
-                    "SELECT e.command,s.node,s.iterations FROM graph_process_steps s
-                     JOIN processes e ON e.id=s.lf_process_id WHERE s.graph_lf_process_id=?1 ORDER BY s.seq",
+                    "SELECT node,iterations FROM graph_process_steps
+                     WHERE graph_lf_process_id=?1 ORDER BY seq",
                 )
                 .expect("select Graph steps");
             let steps = steps
                 .query_map([graph_process], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, u32>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
+                    Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?))
                 })
                 .expect("read Graph steps")
                 .map(|row| {
-                    let (argv, key, iterations) = row.expect("a Graph step");
-                    let argv: Vec<String> = serde_json::from_str(&argv).expect("a JSON argv");
+                    let (key, iterations) = row.expect("a Graph step");
                     serde_json::json!({
                         "graph": graph,
                         "label": label(&compiled.steps, key).expect("a compiled node"),
                         "key": key,
                         "iterations": serde_json::from_str::<serde_json::Value>(&iterations)
                             .expect("iteration counts"),
-                        "argv": argv[1..],
                     })
                 })
                 .collect();
@@ -920,65 +945,72 @@ pub fn recorded_graphs(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Valu
         .collect()
 }
 
-/// Managed skill execution in a Task checkout needs a connected agent account.
-#[allow(dead_code)] // Shared fixture compiled into multiple test crates.
-pub fn managed_codex_account(home: &Path) {
-    let account_home = home.join("fixture-codex");
-    std::fs::create_dir(&account_home).unwrap();
-    let claims =
-        BASE64_URL_SAFE_NO_PAD.encode(r#"{"email":"fixture@example.com","sub":"fixture"}"#);
-    std::fs::write(
-        account_home.join("auth.json"),
-        serde_json::json!({"tokens":{"access_token":"fixture","id_token":format!("h.{claims}.s")}})
-            .to_string(),
-    )
-    .unwrap();
-    seed_store(home);
-    let store = loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap();
-    let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
-    loopflow::provider_account::catalog::upsert_provider_account(
-        &store,
-        &loopflow::store::ProviderAccount {
-            provider: "codex".into(),
-            account_id: account_id.clone(),
-            home: Some(account_home),
-            login_email: Some(
-                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
-            ),
-            observed_email: None,
-            observed_subject: None,
-            observed_credential_digest: None,
-            observed_plan: None,
-            credential_state: loopflow::store::CredentialState::Connected,
-            routing_state: loopflow::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        },
-    )
-    .unwrap();
-    loopflow::provider_account::catalog::set_provider_route(
-        &store,
-        &loopflow::profile::ProviderRoute {
-            scope: loopflow::profile::RouteScope::Default,
-            provider: loopflow::provider_auth::Provider::Codex,
-            accounts: vec![account_id],
-            created_at: 1,
-            updated_at: 1,
-        },
-    )
-    .unwrap();
-}
-
 pub mod human_session;
 
-pub mod identity;
 pub mod planning_tasks;
-pub mod subscription;
 
 pub mod task_graph;
+
+/// Prepare a Task-bound conversation with its first input for a Managed resume.
+#[allow(dead_code)] // Shared support is compiled by every application test binary.
+pub fn prepare_native_conversation(
+    database: &std::path::Path,
+    cwd: &std::path::Path,
+    agent: &str,
+    skill: Option<&str>,
+    request: &str,
+) -> String {
+    let store = crate::store::open_sqlite(database).unwrap();
+    let agent = crate::config::Agent::parse(agent).unwrap();
+    let mut session = loopflow_storage::test_fixture::unpublished_conversation(
+        None,
+        None,
+        loopflow_storage::rows::now_unix(),
+    );
+    session.artifact_key = None;
+    session.cwd = cwd.into();
+    session.provider = Some(agent.harness.as_str().into());
+    session.model = agent.model;
+    session.skill = skill.map(str::to_owned);
+    session.request = Some(request.into());
+    session.interactive = true;
+    let session = crate::store::sessions::create_session(&store, session, None).unwrap();
+    let cwd = cwd.canonicalize().unwrap();
+    let task = store
+        .task_checkouts()
+        .unwrap()
+        .into_iter()
+        .find(|checkout| checkout.worktree.canonicalize().unwrap() == cwd)
+        .map(|checkout| checkout.task_id)
+        .unwrap_or_else(|| {
+            store
+                .create_task(&loopflow_storage::work::task::NewTask {
+                    id: loopflow_model::durable::TaskId::new(),
+                    repository_id: crate::repository::location::ensure_repository(
+                        &store,
+                        &crate::repository::discover(&cwd).unwrap().to_string(),
+                    )
+                    .unwrap(),
+                    project_id: None,
+                    title: "Native conversation".into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap()
+                .id
+        });
+    store
+        .bind_session_prepared(
+            &session.id,
+            session.captured,
+            &task,
+            &session.cwd,
+            &loopflow_storage::sqlite::SessionCaller {
+                agent: None,
+                capture_key: None,
+            },
+        )
+        .unwrap()
+        .id
+        .to_string()
+}

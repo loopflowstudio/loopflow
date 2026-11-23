@@ -11,6 +11,42 @@ use loopflow_model::id::TraceId;
 thread_local! {
     static ACTIVE: Cell<bool> = const { Cell::new(false) };
     static DIAGNOSTICS: RefCell<Option<Diagnostics>> = const { RefCell::new(None) };
+    static AFTER_REPLY: RefCell<Option<Vec<AfterReply>>> = const { RefCell::new(None) };
+}
+
+type AfterReply = Box<dyn FnOnce() + Send>;
+
+/// Hold `job` until the command running under [`answer_first`] has returned,
+/// then start it on a blocking worker. Outside that scope nothing is waiting
+/// for an answer, so `job` comes back for the caller to run now.
+pub fn after_reply<F: FnOnce() + Send + 'static>(job: F) -> Option<F> {
+    AFTER_REPLY.with(|list| match list.borrow_mut().as_mut() {
+        Some(list) => {
+            list.push(Box::new(job));
+            None
+        }
+        None => Some(job),
+    })
+}
+
+/// Run a served command so that work it hands to [`after_reply`] (a planning
+/// sync, a Linear assignee) starts once it returns instead of delaying its
+/// answer. The jobs keep the request's attribution; their failures are logged.
+pub fn answer_first<T>(run: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Vec<AfterReply>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let jobs = AFTER_REPLY.with(|list| list.replace(self.0.take()));
+            for job in jobs.into_iter().flatten() {
+                match tokio::runtime::Handle::try_current() {
+                    Ok(_) => drop(spawn_blocking(job)),
+                    Err(_) => job(),
+                }
+            }
+        }
+    }
+    let _restore = Restore(AFTER_REPLY.with(|list| list.replace(Some(Vec::new()))));
+    run()
 }
 
 pub fn active() -> bool {
@@ -112,8 +148,30 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{active, diagnostic, diagnostics, run, spawn_blocking};
+    use super::{active, after_reply, answer_first, diagnostic, diagnostics, run, spawn_blocking};
     use loopflow_model::id::TraceId;
+
+    #[test]
+    fn work_after_the_reply_starts_once_the_command_returns() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let _entered = runtime.enter();
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let (finished, done) = std::sync::mpsc::channel();
+        let answer = answer_first(|| {
+            assert!(after_reply(move || {
+                held.recv().unwrap();
+                finished.send(active()).unwrap();
+            })
+            .is_none());
+            "answered"
+        });
+        // The command answered while its planning sync is still held.
+        assert_eq!(answer, "answered");
+        release.send(()).unwrap();
+        assert!(!done.recv().unwrap());
+        // Nothing waits outside a served command: the caller runs the job.
+        assert!(after_reply(|| {}).is_some());
+    }
 
     #[test]
     fn observations_follow_nested_workers_without_leaking_into_writes() {

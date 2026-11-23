@@ -14,7 +14,7 @@ use serde_yaml_ng::Value;
 use crate::definition::{resolve_definition, DefinitionKind, Target};
 use crate::error::LoadError;
 use crate::skills::catalog::{SkillCatalog, SkillOrigin};
-use loopflow_definitions::name::{portable_name, resolve_name};
+use loopflow_definitions::name::resolve_name;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Skill {
@@ -49,6 +49,13 @@ impl Skill {
         }
     }
 
+    /// Which text this is: the SHA-256 of the resolved source, so runs of one
+    /// skill group by the version they ran.
+    pub fn version(&self) -> String {
+        use sha2::{Digest, Sha256};
+        hex::encode(Sha256::digest(self.source_text()))
+    }
+
     pub fn named(name: &str) -> Self {
         Self {
             name: name.to_string(),
@@ -63,9 +70,6 @@ impl Skill {
     }
 }
 
-/// The skill a `loop:` item runs when it names none.
-const DEFAULT_DECIDER: &str = "loop-or-next";
-
 fn validate_step_settings(id: Option<&str>) -> Result<(), LoadError> {
     if id.is_some_and(|id| id.trim().is_empty()) {
         return Err(LoadError::InvalidGraph(
@@ -76,7 +80,7 @@ fn validate_step_settings(id: Option<&str>) -> Result<(), LoadError> {
 }
 
 /// An executable occurrence. Template names resolve to Target during loading;
-/// interactive and loop settings belong to this occurrence, not to the definition.
+/// interactive settings belong to this occurrence, not to the definition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Step {
     pub target: Target,
@@ -86,10 +90,6 @@ pub struct Step {
     /// `interactive: <skill>`.
     #[serde(default, alias = "human", skip_serializing_if = "std::ops::Not::not")]
     pub interactive: bool,
-    /// A deciding occurrence's authored target: the occurrence name or skill
-    /// of an earlier step it can return to.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub returns: Option<String>,
 }
 
 impl Step {
@@ -98,7 +98,6 @@ impl Step {
             target,
             id: None,
             interactive: false,
-            returns: None,
         }
     }
 }
@@ -153,7 +152,7 @@ impl Command {
             && self
                 .args
                 .first()
-                .is_some_and(|name| matches!(name.as_str(), "list" | "show" | "usage" | "activity"))
+                .is_some_and(|name| matches!(name.as_str(), "show" | "usage" | "activity"))
         {
             self.command = "history".into();
             if self.args.first().is_some_and(|name| name == "activity") {
@@ -162,23 +161,9 @@ impl Command {
         } else if self.command == "activity" {
             self.command = "history".into();
         }
-        if self.command == "monitor" && self.args.first().is_some_and(|name| name == "ps") {
-            self.args[0] = "list".into();
-        }
-        if self.command == "monitor"
-            && self
-                .args
-                .first()
-                .is_some_and(|name| matches!(name.as_str(), "list" | "top"))
-        {
-            self.command = "process".into();
-        } else if self.command == "ps" {
-            self.command = "list".into();
-        }
         let owner = match self.command.as_str() {
             "doctor" => Some("machine"),
             "install" => Some("self"),
-            "list" | "top" => Some("process"),
             "usage" => Some("session"),
             "replay" => Some("history"),
             "release" | "ci" | "tokens" => Some("repo"),
@@ -236,6 +221,8 @@ pub struct XorPath {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GraphDefinition {
     pub name: String,
+    /// One line saying what running the Graph gets you; `description:` beside `steps:`.
+    pub description: Option<String>,
     pub items: Vec<Step>,
 }
 
@@ -483,6 +470,8 @@ impl<'a> DefinitionLoader<'a> {
         };
         let value: Value = serde_yaml_ng::from_str(&content)
             .map_err(|err| LoadError::InvalidGraph(err.to_string()))?;
+        let description = graph_description(&value)
+            .map_err(|error| LoadError::InvalidGraph(format!("{name}: {error}")))?;
         validate_graph_nesting(&self.sources, &name)?;
         self.sources.push(name.clone());
         let items = parse_graph_items(&value, self);
@@ -513,6 +502,9 @@ impl<'a> DefinitionLoader<'a> {
                             Some(occurrence_address(step.id.as_deref(), &position));
                         skill.occurrence = Some(Box::new(occurrence));
                     }
+                    Target::Loop(block) => {
+                        retain_origin(block, graph, layer, source_path, &position)?;
+                    }
                     Target::Xor(branch) => {
                         for (name, path) in &mut branch.paths {
                             retain_origin(
@@ -533,7 +525,11 @@ impl<'a> DefinitionLoader<'a> {
             Ok(())
         }
         retain_origin(&mut items, &name, source, source_path.as_deref(), "")?;
-        Ok(GraphDefinition { name, items })
+        Ok(GraphDefinition {
+            name,
+            description,
+            items,
+        })
     }
 }
 
@@ -641,62 +637,6 @@ fn validate_interactive_steps(items: &[ConcreteStep]) -> Result<(), LoadError> {
     Ok(())
 }
 
-/// Steps back from the end of `preceding` to the one occurrence `target`
-/// names: an occurrence id, else the only step running that skill, else the
-/// first step of the one composed graph with that name.
-fn resolve_loop_target(preceding: &[ConcreteStep], target: &str) -> Result<usize, LoadError> {
-    let positions = |names: &dyn Fn(&ConcreteSkill) -> bool| -> Vec<usize> {
-        preceding
-            .iter()
-            .enumerate()
-            .filter(|(_, step)| matches!(step, ConcreteStep::Skill(skill) if names(skill)))
-            .map(|(index, _)| index)
-            .collect()
-    };
-    let mut found = positions(&|skill| skill.id.as_deref() == Some(target));
-    if found.is_empty() {
-        found = positions(&|skill| skill.skill.name == target);
-    }
-    if found.is_empty() {
-        let target_key = portable_name(target);
-        found = positions(&|skill| portable_name(&skill.skill.name) == target_key);
-    }
-    if found.is_empty() {
-        // A composed graph begins where its name first appears among a step's sources.
-        let composed = |step: &ConcreteStep| {
-            let sources = match step {
-                ConcreteStep::Skill(skill) => &skill.sources,
-                ConcreteStep::Command(command) => &command.sources,
-                ConcreteStep::Xor(branch) => &branch.sources,
-            };
-            sources.iter().skip(1).any(|source| source == target)
-        };
-        found = preceding
-            .iter()
-            .enumerate()
-            .filter(|(index, step)| {
-                composed(step) && (*index == 0 || !composed(&preceding[index - 1]))
-            })
-            .map(|(index, _)| index)
-            .collect();
-    }
-    match found[..] {
-        [index] => Ok(preceding.len() - index),
-        [] => Err(LoadError::InvalidGraph(format!(
-            "loop target {target:?} must name a preceding step"
-        ))),
-        _ => Err(LoadError::InvalidGraph(format!(
-            "loop target {target:?} is ambiguous: steps {} of {} preceding all run it; give one an id and name that",
-            found
-                .iter()
-                .map(|index| (index + 1).to_string())
-                .collect::<Vec<_>>()
-                .join(", "),
-            preceding.len()
-        ))),
-    }
-}
-
 /// Index of the earlier step the deciding skill at `index` returns to.
 pub fn return_target(steps: &[ConcreteStep], index: usize) -> Option<usize> {
     let ConcreteStep::Skill(skill) = steps.get(index)? else {
@@ -797,6 +737,9 @@ pub(crate) fn visit_preferences(
             let address = occurrence_address(item.get("id").and_then(Value::as_str), &position);
             visit(&address, item)?;
         }
+        if let Some(block) = item.get_mut("loop").filter(|block| block.is_sequence()) {
+            visit_preferences(block, &position, visit)?;
+        }
         if let Some(paths) = item
             .get_mut("xor")
             .and_then(|xor| xor.get_mut("paths"))
@@ -848,6 +791,20 @@ fn key(s: &str) -> Value {
     Value::String(s.to_string())
 }
 
+/// A Graph file is a bare list of steps, or `steps:` with an optional `description:`.
+fn graph_description(value: &Value) -> Result<Option<String>, LoadError> {
+    let Value::Mapping(map) = value else {
+        return Ok(None);
+    };
+    match map.get(key("description")) {
+        None => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text.trim().to_string())),
+        Some(_) => Err(LoadError::InvalidGraph(
+            "description must be one line of text".to_string(),
+        )),
+    }
+}
+
 fn parse_graph_items(
     value: &Value,
     loader: &mut DefinitionLoader<'_>,
@@ -885,8 +842,9 @@ fn parse_graph_mapping(
     map: &serde_yaml_ng::Mapping,
     loader: &mut DefinitionLoader<'_>,
 ) -> Result<Step, LoadError> {
-    if let Some(target) = map.get(key("loop")) {
-        return parse_loop(map, target);
+    if let Some(body) = map.get(key("loop")) {
+        loop_block(map, body)?;
+        return Ok(Step::new(Target::Loop(parse_graph_items(body, loader)?)));
     }
     if let Some(skill_value) = map.get(key("step")) {
         if map.len() != 1 {
@@ -945,35 +903,20 @@ fn parse_command_value(value: &Value) -> Result<Step, LoadError> {
     )))
 }
 
-/// `loop: <target>` runs a deciding skill last, `step`, `interactive` or
-/// `loop-or-next`, which advances, returns to the target or stops blocked. An
-/// interactive decider is an interactive step: the person there decides.
-fn parse_loop(map: &serde_yaml_ng::Mapping, target: &Value) -> Result<Step, LoadError> {
-    let target = target
-        .as_str()
-        .map(str::trim)
-        .filter(|target| !target.is_empty())
-        .ok_or_else(|| LoadError::InvalidGraph("loop must name a preceding step".to_string()))?;
-    if map
-        .keys()
-        .any(|field| *field != key("loop") && *field != key("step") && *field != key("interactive"))
-    {
+/// A `loop:` item is a block: a list of steps and nothing beside it.
+fn loop_block(map: &serde_yaml_ng::Mapping, body: &Value) -> Result<(), LoadError> {
+    if !body.is_sequence() {
         return Err(LoadError::InvalidGraph(
-            "a loop item takes only loop and step or interactive".to_string(),
+            "`loop: <step>` is retired; write a `loop:` block of the steps to repeat, whose last step decides whether it runs again"
+                .to_string(),
         ));
     }
-    let mut step = match (map.get(key("step")), map.get(key("interactive"))) {
-        (Some(_), Some(_)) => {
-            return Err(LoadError::InvalidGraph(
-                "a loop decides through step or interactive, not both".to_string(),
-            ))
-        }
-        (Some(decider), None) => parse_skill_value(decider, false)?,
-        (None, Some(decider)) => parse_skill_value(decider, true)?,
-        (None, None) => Step::new(Target::Skill(Skill::named(DEFAULT_DECIDER))),
-    };
-    step.returns = Some(target.to_string());
-    Ok(step)
+    if map.len() != 1 {
+        return Err(LoadError::InvalidGraph(
+            "a loop block takes only its steps; its last step decides".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// The authored `step:` or `interactive:` mapping flattens skill options and
@@ -994,7 +937,7 @@ fn parse_skill_value(value: &Value, interactive: bool) -> Result<Step, LoadError
         Value::Mapping(map) => {
             if map.contains_key(key("repeat")) {
                 return Err(LoadError::InvalidGraph(
-                    "step repeat is retired; follow the work with `- loop: <target>`".to_string(),
+                    "step repeat is retired; put the work in a `loop:` block whose last step decides".to_string(),
                 ));
             }
             if map.contains_key(key("human")) {
@@ -1018,7 +961,6 @@ fn parse_skill_value(value: &Value, interactive: bool) -> Result<Step, LoadError
                 target: Target::Skill(step.skill),
                 id: step.id,
                 interactive,
-                returns: None,
             })
         }
         _ => Err(LoadError::InvalidGraph(
@@ -1139,10 +1081,13 @@ fn parse_xor_path_skills(
     map: &serde_yaml_ng::Mapping,
     path_name: &str,
 ) -> Result<Vec<Step>, LoadError> {
-    let Some(value) = map.get(key("steps")) else {
-        return Ok(Vec::new());
-    };
+    match map.get(key("steps")) {
+        Some(value) => parse_path_steps(value, path_name),
+        None => Ok(Vec::new()),
+    }
+}
 
+fn parse_path_steps(value: &Value, path_name: &str) -> Result<Vec<Step>, LoadError> {
     let Value::Sequence(items) = value else {
         return Err(LoadError::InvalidGraph(format!(
             "xor path '{path_name}' skills must be a list"
@@ -1154,8 +1099,9 @@ fn parse_xor_path_skills(
         .map(|item| match item {
             Value::String(_) => parse_skill_value(item, false),
             Value::Mapping(skill_map) => {
-                if let Some(target) = skill_map.get(key("loop")) {
-                    return parse_loop(skill_map, target);
+                if let Some(body) = skill_map.get(key("loop")) {
+                    loop_block(skill_map, body)?;
+                    return Ok(Step::new(Target::Loop(parse_path_steps(body, path_name)?)));
                 }
                 if let Some(skill_value) = skill_map.get(key("step")) {
                     return parse_skill_value(skill_value, false);
@@ -1232,10 +1178,14 @@ fn compile_with_sources(
                     )));
                 }
             }
-            if let Target::Xor(branch) = &step.target {
-                for path in branch.paths.values() {
-                    validate_ids(&path.steps, ids, name)?;
+            match &step.target {
+                Target::Xor(branch) => {
+                    for path in branch.paths.values() {
+                        validate_ids(&path.steps, ids, name)?;
+                    }
                 }
+                Target::Loop(block) => validate_ids(block, ids, name)?,
+                _ => {}
             }
         }
         Ok(())
@@ -1253,9 +1203,7 @@ fn compile_steps(
 ) -> Result<Vec<ResolvedGraphItem>, LoadError> {
     let mut items = Vec::new();
     for step in steps {
-        if !matches!(step.target, Target::Skill(_))
-            && (step.id.is_some() || step.interactive || step.returns.is_some())
-        {
+        if !matches!(step.target, Target::Skill(_)) && (step.id.is_some() || step.interactive) {
             return Err(LoadError::InvalidGraph(
                 "occurrence metadata are valid only on skill nodes".into(),
             ));
@@ -1297,14 +1245,25 @@ fn compile_steps(
                 id: step.id.clone(),
                 interactive: step.interactive,
                 interactive_name: None,
-                returns: step
-                    .returns
-                    .as_deref()
-                    .map(|target| resolve_loop_target(&flatten_resolved(&items), target))
-                    .transpose()?,
+                returns: None,
                 sources: sources.to_vec(),
             })),
             Target::Xor(branch) => items.push(compile_branch(branch, catalog, sources)?),
+            Target::Loop(block) => {
+                let mut body = compile_steps(block, catalog, sources)?;
+                let back = flatten_resolved(&body).len().saturating_sub(1);
+                match body.last_mut() {
+                    Some(ResolvedGraphItem::Skill(decider)) if back > 0 => {
+                        decider.returns = Some(back);
+                    }
+                    _ => {
+                        return Err(LoadError::InvalidGraph(
+                            "a loop's last step decides whether to run it again: end the block with a skill, after the work it repeats".into(),
+                        ))
+                    }
+                }
+                items.extend(body);
+            }
         }
     }
     Ok(items)
@@ -1342,6 +1301,48 @@ mod tests {
                 &super::SkillCatalog::discover(Some(tmp.path())).unwrap(),
             ),
         )
+    }
+
+    #[test]
+    fn every_builtin_graph_has_a_description() {
+        let repo = TempDir::new().unwrap();
+        for name in crate::builtins::builtin_graph_names() {
+            let graph = load_graph(name, repo.path()).unwrap();
+            let description = graph.description.unwrap_or_default();
+            assert!(
+                !description.is_empty() && !description.contains('\n'),
+                "{name} needs a one-line description"
+            );
+        }
+    }
+
+    #[test]
+    fn a_graph_file_reads_its_description_beside_its_steps() {
+        let repo = TempDir::new().unwrap();
+        let graphs = repo.path().join(".lf/graphs");
+        fs::create_dir_all(&graphs).unwrap();
+        fs::write(
+            graphs.join("ship-api.yaml"),
+            "description: Build the endpoint, then deliver.\nsteps:\n- implement\n- interactive: demo\n",
+        )
+        .unwrap();
+        fs::write(graphs.join("bare.yaml"), "- implement\n").unwrap();
+        fs::write(
+            graphs.join("odd.yaml"),
+            "description: [a]\nsteps: [implement]\n",
+        )
+        .unwrap();
+
+        let described = load_graph("ship-api", repo.path()).unwrap();
+        assert_eq!(
+            described.description.as_deref(),
+            Some("Build the endpoint, then deliver.")
+        );
+        assert_eq!(described.items.len(), 2);
+        assert!(described.items[1].interactive);
+        assert_eq!(load_graph("bare", repo.path()).unwrap().description, None);
+        let error = load_graph("odd", repo.path()).unwrap_err().to_string();
+        assert!(error.contains("description must be one line"), "{error}");
     }
 
     #[test]
@@ -1464,27 +1465,6 @@ mod tests {
     }
 
     #[test]
-    fn portable_loop_targets_prefer_ids_then_literal_names_then_fallback() {
-        let repo = TempDir::new().unwrap();
-        fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
-        fs::create_dir_all(repo.path().join(".lf/skills/team")).unwrap();
-        for name in ["team/check", "team-check"] {
-            fs::write(repo.path().join(format!(".lf/skills/{name}.md")), name).unwrap();
-        }
-        let path = repo.path().join(".lf/graphs/proof.yaml");
-        for (body, target) in [
-            ("- step: {name: team/check, id: team-check}\n- step: team-check\n- loop: team-check\n", 0),
-            ("- step: team/check\n- step: team-check\n- loop: team-check\n", 1),
-            ("- step: team/check\n- step: team-check\n- loop: team/check\n", 0),
-            ("- step: team/check\n- loop: team-check\n", 0),
-        ] {
-            fs::write(&path, body).unwrap();
-            let steps = compile_graph(&super::load_authored_graph("proof", repo.path()).unwrap(), repo.path()).unwrap();
-            assert_eq!(super::return_target(&steps, steps.len() - 1), Some(target));
-        }
-    }
-
-    #[test]
     fn load_skill_finds_repo_local_skill() {
         let tmp = TempDir::new().unwrap();
         let skills_dir = tmp.path().join(".lf/skills");
@@ -1544,7 +1524,7 @@ mod tests {
     }
 
     #[test]
-    fn loops_resolve_one_preceding_occurrence() {
+    fn loop_blocks_return_to_their_first_step() {
         let tmp = TempDir::new().unwrap();
         let graphs = tmp.path().join(".lf/graphs");
         fs::create_dir_all(&graphs).unwrap();
@@ -1565,38 +1545,41 @@ mod tests {
         assert_eq!(
             edges(&pursue),
             [
-                ("loop-or-next".to_string(), 4),
-                ("loop-or-next".to_string(), 7)
+                ("realign".to_string(), 2),
+                ("concept-review".to_string(), 5)
             ]
         );
 
-        // A unique skill name is enough; repeated skills need one occurrence name.
-        let named = compile(
-            "- implement\n- step: {name: implement, id: second}\n- loop: second\n- loop: second\n  step: gate\n",
+        // A block's last step returns to its first; nesting needs no names.
+        let nested = compile(
+            "- kickoff\n- loop:\n    - loop:\n        - implement\n        - cmd: sync\n        - realign\n    - qa\n    - concept-review\n- pr-publish\n",
         )
         .unwrap();
         assert_eq!(
-            edges(&named),
-            [("loop-or-next".to_string(), 1), ("gate".to_string(), 2)]
+            edges(&nested),
+            [
+                ("realign".to_string(), 2),
+                ("concept-review".to_string(), 4)
+            ]
         );
+        for body in [
+            "- loop:\n    - implement\n",
+            "- loop:\n    - implement\n    - cmd: sync\n",
+        ] {
+            let error = compile(body).unwrap_err().to_string();
+            assert!(error.contains("last step decides"), "{body}: {error}");
+        }
+
+        // The released `loop: <step>` after the work names its replacement.
         for (body, expected) in [
-            ("- implement\n- loop: missing\n", "preceding step"),
-            ("- loop: implement\n- implement\n", "preceding step"),
+            ("- implement\n- loop: implement\n", "write a `loop:` block"),
             (
-                "- implement\n- implement\n- loop: implement\n",
-                "ambiguous: steps 1, 2 of 2",
+                "- implement\n- loop: implement\n  step: gate\n",
+                "write a `loop:` block",
             ),
             (
-                "- implement\n- loop: implement\n  id: decide\n",
-                "only loop and step",
-            ),
-            (
-                "- implement\n- loop: implement\n  step: {name: demo, id: demo, human: true}\n",
-                "retired",
-            ),
-            (
-                "- implement\n- loop: implement\n  step: demo\n  interactive: demo\n",
-                "not both",
+                "- loop:\n    - implement\n    - gate\n  step: gate\n",
+                "takes only its steps",
             ),
             (
                 "- implement\n- step: {name: gate, repeat: {from: implement}}\n",
@@ -1606,6 +1589,21 @@ mod tests {
             let error = compile(body).unwrap_err().to_string();
             assert!(error.contains(expected), "{error}");
         }
+    }
+
+    #[test]
+    fn step_settings_inside_a_loop_block_have_addresses() {
+        let mut document: Value = serde_yaml_ng::from_str(
+            "- loop:\n    - step: {name: implement, agent: codex}\n    - loop:\n        - step: {name: qa, id: check}\n        - gate\n    - gate\n",
+        )
+        .unwrap();
+        let mut seen = Vec::new();
+        super::visit_preferences(&mut document, "", &mut |address, _| {
+            seen.push(address.to_string());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(seen, ["position:/0/0", "id:check"]);
     }
 
     #[test]
@@ -2002,9 +2000,7 @@ Design the feature.
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let error = parse_graph_items(&value).expect_err("generic loops are retired");
-        assert!(error
-            .to_string()
-            .contains("loop must name a preceding step"));
+        assert!(error.to_string().contains("write a `loop:` block"));
     }
 
     #[test]
@@ -2252,6 +2248,7 @@ Design the feature.
         let tmp = TempDir::new().unwrap();
         let graph = GraphDefinition {
             name: "test-or".to_string(),
+            description: None,
             items: vec![
                 Step::new(Target::Skill(Skill::named("gate"))),
                 Step::new(Target::Xor(XorDef {
@@ -2363,12 +2360,12 @@ Design the feature.
       nested:
         description: Nested description
         steps:
-          - step:
-              name: pin-other
-              id: nested-work
-              agent: claude
-          - loop: nested-work
-            step: pin-other
+          - loop:
+              - step:
+                  name: pin-other
+                  id: nested-work
+                  agent: claude
+              - pin-other
           - interactive:
               name: pin-other
               id: nested-stage
@@ -2435,6 +2432,7 @@ Design the feature.
         for (name, expected) in [("deep-1", "max depth"), ("deep-2", "cycle detected")] {
             let composed = GraphDefinition {
                 name: name.into(),
+                description: None,
                 items: vec![Step::new(Target::Graph(deepest.clone()))],
             };
             let error = compile_graph(&composed, tmp.path())
@@ -2453,7 +2451,7 @@ Design the feature.
         fs::create_dir_all(&graphs).unwrap();
         fs::write(graphs.join("pin-validation.yaml"), "- step:\n    name: implement\n    id: outside\n- xor:\n    paths:\n      nested:\n        description: Nested\n        graph: pin-invalid\n").unwrap();
         for (body, expected) in [
-            ("- xor:\n    paths:\n      inline:\n        description: Invalid edge\n        steps:\n          - loop: outside\n", "preceding step"),
+            ("- xor:\n    paths:\n      inline:\n        description: Invalid edge\n        steps:\n          - loop:\n              - implement\n", "last step decides"),
             ("- xor:\n    paths:\n      inline:\n        description: Invalid gate\n        steps:\n          - step:\n              name: demo\n              human: true\n", "retired"),
         ] {
             fs::write(graphs.join("pin-invalid.yaml"), body).unwrap();
@@ -2483,6 +2481,7 @@ Design the feature.
                 compile_graph(
                     &GraphDefinition {
                         name: "pin-missing".into(),
+                        description: None,
                         items,
                     },
                     tmp.path(),
@@ -2497,13 +2496,11 @@ Design the feature.
         let tmp = TempDir::new().unwrap();
         let graph = load_graph("deliver", tmp.path()).unwrap();
         let items = compile_graph(&graph, tmp.path()).unwrap();
-        assert_eq!(items.len(), 2);
+        assert_eq!(items.len(), 3);
         assert!(
-            matches!(&items[1], ConcreteStep::Command(command) if command.item.display_name() == "land --wait-and-fix")
+            matches!(&items[2], ConcreteStep::Command(command) if command.item.display_name() == "land --wait-and-fix")
         );
         assert!(load_graph("deploy", tmp.path()).is_err());
         assert!(load_graph("ship", tmp.path()).is_err());
     }
 }
-
-pub mod process;

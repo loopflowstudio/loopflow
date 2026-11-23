@@ -19,7 +19,7 @@ struct SessionRefreshTests {
         await model.refreshSessions()
         await source.fail()
         await model.refreshSessions()
-        #expect(model.sessions.errorMessage == "offline")
+        #expect(model.sessions.failure == "offline")
 
         let invalidations = OSAllocatedUnfairLock(initialState: 0)
         withObservationTracking {
@@ -32,7 +32,7 @@ struct SessionRefreshTests {
         await source.fail(reason: "connection refused")
         await model.refreshSessions()
         #expect(invalidations.withLock { $0 } == 1)
-        #expect(model.sessions.errorMessage == "connection refused")
+        #expect(model.sessions.failure == "connection refused")
 
         withObservationTracking {
             _ = model.sessions
@@ -75,7 +75,7 @@ struct SessionRefreshTests {
         await source.fail()
         await model.refreshSessions()
         #expect(model.sessions.value?.map(\.id) == [record.id])
-        #expect(model.sessions.errorMessage == "offline")
+        #expect(model.sessions.failure == "offline")
     }
 }
 

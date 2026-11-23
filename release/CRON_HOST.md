@@ -28,7 +28,7 @@ placed on another Machine.
   jobs run its entry gate, `~/.lf-machine/install/gates/1/lf`, whatever `lf`
   comes first on your shell's PATH; promotion replaces the binary behind it.
 - Keep the repository's authoritative checkout on the placed Machine.
-- Configure at least one managed Claude or Codex account in the Machine store.
+- Sign in with the native Claude or Codex client on the placed Machine.
 - Install `uv`, `gh`, `cargo`, `flyctl`, `security`, `swift`, `xcrun`, and
   `jq` on the host path.
 - Install an executable named `loopflow-release-publisher` on the Machine's PATH.
@@ -40,8 +40,8 @@ placed on another Machine.
   by the release publisher.
 
 The bootstrap reconstructs a minimal environment containing only host paths,
-Machine/store paths, and basic locale/temp settings. It verifies a managed provider
-account live, then runs the publisher's read-only check through:
+Machine/store paths, and basic locale/temp settings. It uses native provider
+authentication and runs the publisher's read-only check through:
 
 ```bash
 loopflow-release-publisher \

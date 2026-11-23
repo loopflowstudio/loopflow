@@ -259,6 +259,7 @@ impl Delivery {
                         id: id.into(),
                         trace_id: loopflow_model::id::TraceId::default(),
                         result: Value::Null,
+                        revisions: None,
                     },
                 )
                 .await?;
@@ -454,13 +455,15 @@ impl Producer {
             if let Some(pause) = &mut pause {
                 pause.wait();
             }
-            loopflow_execution::journal::request::isolate(|| {
-                query.subscribe(select, move || notify.notify_one())
-            })
-            .map(|subscription| Some(Arc::new(Held(Some(subscription)))))
+            let (subscription, work) = loopflow_storage::instrumentation::capture(|| {
+                loopflow_execution::journal::request::isolate(|| {
+                    query.subscribe(select, move || notify.notify_one())
+                })
+            });
+            subscription.map(|subscription| Some((Arc::new(Held(Some(subscription))), work)))
         });
         let queued = Queued(setup.abort_handle());
-        let Some(subscription) = setup.await?? else {
+        let Some((subscription, mut pending_work)) = setup.await?? else {
             return Ok(());
         };
         drop(queued);
@@ -482,30 +485,56 @@ impl Producer {
             let headroom = Materializing::reserve().await?;
             let job = tokio::task::spawn_blocking(move || {
                 if cancel.load(Ordering::Acquire) {
-                    return (Default::default(), headroom);
+                    return (
+                        Default::default(),
+                        headroom,
+                        loopflow_storage::instrumentation::SqlWork {
+                            statements: 0,
+                            rows: 0,
+                        },
+                    );
                 }
                 #[cfg(test)]
                 if let Some(pause) = &mut pause {
                     pause.wait();
                 }
-                let update = loopflow_execution::journal::request::isolate(|| {
-                    if force {
-                        pull.checkpoint(generation);
-                    }
-                    pull.pull()
+                let (update, work) = loopflow_storage::instrumentation::capture(|| {
+                    loopflow_execution::journal::request::isolate(|| {
+                        if force {
+                            pull.checkpoint(generation);
+                        }
+                        pull.pull()
+                    })
                 });
-                (update, headroom)
+                (update, headroom, work)
             });
             let queued = Queued(job.abort_handle());
-            let (update, headroom) = job.await?;
+            let (update, headroom, work) = job.await?;
             drop(queued);
+            pending_work.statements += work.statements;
+            pending_work.rows += work.rows;
             applied = generation;
             if cancelled.load(Ordering::Acquire) {
                 return Ok(());
             }
             let mut reason = None;
             let mut last = false;
-            let mut bytes = update.frame.as_ref().map_or(0, Vec::len);
+            let mut frame = update
+                .frame
+                .map(|bytes| serde_json::from_slice::<Value>(&bytes))
+                .transpose()?;
+            if let Some(frame) = &mut frame {
+                frame["work"] = serde_json::to_value(pending_work.receipt())?;
+                pending_work = loopflow_storage::instrumentation::SqlWork {
+                    statements: 0,
+                    rows: 0,
+                };
+            }
+            let mut bytes = frame
+                .as_ref()
+                .map(serde_json::to_vec)
+                .transpose()?
+                .map_or(0, |bytes| bytes.len());
             for event in &update.events {
                 bytes += serde_json::to_vec(event)?.len() + 1024;
                 anyhow::ensure!(
@@ -515,8 +544,7 @@ impl Producer {
             }
             let retained = Arc::new(headroom.retain(bytes)?);
             let mut reading = None;
-            if let Some(frame) = update.frame {
-                let mut frame: Value = serde_json::from_slice(&frame)?;
+            if let Some(mut frame) = frame {
                 reason = frame["unavailable"].as_str().map(str::to_owned);
                 last = ends.ends_after(&frame["body"]);
                 // Internal generations never appear in a consumer's envelope.
@@ -575,6 +603,17 @@ mod tests {
     use crate::server::wire::ServerMessage;
     use loopflow_execution::performance::subscription_measurement as meter;
     use loopflow_storage::sqlite::SqliteStore;
+
+    /// A subscription that needs no directory and reads an empty home.
+    fn history() -> Read {
+        Read::SessionHistory(crate::lf::commands::activity::HistoryWindow {
+            since: "7d".into(),
+            limit: 50,
+            wave: None,
+            project: None,
+            task: None,
+        })
+    }
 
     async fn receive(messages: &mut mpsc::Receiver<crate::server::outbox::Frame>) -> ServerMessage {
         let frame = messages.recv().await.unwrap();
@@ -1010,10 +1049,10 @@ mod tests {
                 let registry = Arc::new(Subscriptions::default());
                 let setup = pause("first", "setup");
                 let before = meter::snapshot();
-                let mut first = Consumer::new(&registry, "first", Read::ProcessList, None);
+                let mut first = Consumer::new(&registry, "first", history(), None);
                 setup.entered.await.unwrap();
-                let mut second = Consumer::new(&registry, "second", Read::ProcessList, None);
-                let mut quiet = Consumer::new(&registry, "quiet", Read::ProcessList, None);
+                let mut second = Consumer::new(&registry, "second", history(), None);
+                let mut quiet = Consumer::new(&registry, "quiet", history(), None);
                 setup.release.send(()).unwrap();
                 first.initial().await;
                 second.initial().await;

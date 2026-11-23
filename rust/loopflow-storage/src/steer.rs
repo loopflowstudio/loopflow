@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Survives attachment-only handoff; replacement creates another capability.
+/// Belongs to one agent; replacement creates another capability.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SteerAdapter {

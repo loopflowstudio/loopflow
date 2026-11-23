@@ -1,7 +1,7 @@
 use loopflow_model::chat::types::TurnUsage;
 use loopflow_model::id::AgentSessionId;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -20,7 +20,6 @@ pub fn parse_artifact_key(
 }
 
 pub const CAPTURE_KEY_ENV: &str = "LF_CAPTURE_KEY";
-pub const PROVIDER_ACCOUNT_ID_ENV: &str = "LF_PROVIDER_ACCOUNT_ID";
 pub const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -33,6 +32,17 @@ pub struct ProviderSessionRef {
 }
 
 impl ProviderSessionRef {
+    pub fn new(
+        agent_session: AgentSessionId,
+        account_id: Option<crate::ProviderAccountId>,
+    ) -> Self {
+        Self {
+            schema_version: SCHEMA_VERSION,
+            agent_session,
+            account_id,
+        }
+    }
+
     pub fn validate(&self) -> std::io::Result<()> {
         if self.schema_version != SCHEMA_VERSION || self.agent_session.as_str().is_empty() {
             return Err(std::io::Error::new(
@@ -44,8 +54,8 @@ impl ProviderSessionRef {
     }
 }
 
-/// What SQLite history keeps of a capture: its provider attempts, accounts and
-/// sessions, how each turn ended, and each silence longer than
+/// What SQLite history keeps of a capture: its provider attempts, how each
+/// turn ended, and each silence longer than
 /// [`SILENCE_SECONDS`]. Provider text and usage have no variant: the provider's
 /// transcript holds the conversation and native rows hold usage. Facts keep the
 /// `events.jsonl:{seq}` source their receipt keys and migrations already index.
@@ -61,15 +71,6 @@ pub enum CaptureFact {
     ProviderAttemptFinished {
         attempt_key: String,
         outcome: String,
-    },
-    ProviderAccountSelected {
-        attempt_key: String,
-        account_id: Option<crate::ProviderAccountId>,
-    },
-    ProviderSessionObserved {
-        attempt_key: String,
-        #[serde(rename = "provider_session_id")]
-        agent_session: AgentSessionId,
     },
     Conversation {
         event: TurnEnd,
@@ -174,6 +175,8 @@ pub struct SessionHistory {
     pub work_source: Option<crate::session::WorkSource>,
     pub wave_name: Option<String>,
     pub skill: Option<String>,
+    /// SHA-256 of the resolved skill text the run launched with; `null` when unrecorded.
+    pub skill_version: Option<String>,
     pub observed_at: i64,
     pub first_provider_attempt_at: Option<i64>,
     pub recorded_outcome: Option<String>,
@@ -284,197 +287,73 @@ impl SessionHistory {
 /// A gap between consecutive provider events long enough to count as a silence.
 pub const SILENCE_SECONDS: i64 = 600;
 
-/// The key of a native usage receipt within its turn. OpenCode reports one
-/// counter per assistant message; every other provider one per turn.
-pub fn native_usage_key(payload: &serde_json::Value) -> String {
-    match payload["provider"].as_str() {
-        Some("opencode") => payload["message"]["id"].as_str().unwrap_or_default().into(),
-        _ => String::new(),
+/// One turn's usage from a provider's reading of it, observed at `at`. A
+/// `usage` object is already the turn's; Codex's `total`/`last` counts the
+/// whole thread, so the turn's share is `total` less the thread's count when
+/// the turn began (its `baseline`, else `prior`, else `total` less `last`); an
+/// OpenCode `message.tokens` is one model call. `None` for a shape it cannot
+/// read.
+pub fn resolve_usage(
+    reading: &serde_json::Value,
+    prior: Option<&serde_json::Value>,
+    at: i64,
+) -> Option<crate::session::RecordedUsage> {
+    let recorded = |usage, final_reading, partial| crate::session::RecordedUsage {
+        observed_at: at,
+        final_reading,
+        partial,
+        usage,
+    };
+    if reading["usage"].is_object() {
+        let usage = serde_json::from_value(reading["usage"].clone()).ok()?;
+        return Some(recorded(usage, reading["final"] == true, false));
     }
-}
-
-/// Codex counters before the turn's first request.
-pub fn native_baseline(receipt: &serde_json::Value) -> serde_json::Value {
-    if receipt["baseline"].is_object() {
-        return receipt["baseline"].clone();
-    }
-    let total = receipt["total"].as_object().into_iter().flatten();
-    total
-        .filter_map(|(key, value)| {
-            let before = value
-                .as_u64()?
-                .checked_sub(receipt["last"][key].as_u64()?)?;
-            Some((key.clone(), serde_json::json!(before)))
-        })
-        .collect::<serde_json::Map<_, _>>()
-        .into()
-}
-
-/// The largest single Codex request in the turn.
-pub fn native_peak(receipt: &serde_json::Value) -> Option<u64> {
-    receipt["peakInputTokens"]
-        .as_u64()
-        .or(receipt["last"]["inputTokens"].as_u64())
-}
-
-/// One reading of a native usage counter: a provider turn's cumulative usage so
-/// far, or an OpenCode message's.
-#[derive(Debug)]
-pub struct UsageReading {
-    thread: AgentSessionId,
-    turn: String,
-    /// The counter this reading belongs to; later readings of it supersede it.
-    counter: String,
-    seq: u64,
-    start_known: bool,
-    final_receipt: bool,
-    usage: TurnUsage,
-}
-
-/// Every native usage row in `history`, as readings of its counters, and the
-/// rows that could not be read. A row is read by its shape: a `usage` object is
-/// a turn's [`TurnUsage`]; `total`/`last` is Codex's thread-cumulative counter;
-/// `message.tokens` is an OpenCode message.
-pub fn native_usage(history: &[crate::session::SessionEvent]) -> (Vec<UsageReading>, usize) {
-    use crate::session::SessionEventKind;
-
-    let mut turns = BTreeMap::<(&AgentSessionId, &str), Vec<&crate::session::SessionEvent>>::new();
-    for event in history {
-        if event.kind != SessionEventKind::Observed {
-            if let (Some(thread), Some(turn)) =
-                (event.agent_session.as_ref(), event.provider_turn.as_deref())
-            {
-                turns.entry((thread, turn)).or_default().push(event);
-            }
-        }
-    }
-    let mut readings = Vec::new();
-    let mut gaps = 0;
-    for ((thread, turn), native) in turns {
-        let receipts: Vec<_> = native
-            .iter()
-            .filter(|event| event.kind == SessionEventKind::Usage)
-            .collect();
-        let Some(first) = receipts.first() else {
-            continue;
+    if reading["message"]["tokens"].is_object() {
+        let info = &reading["message"];
+        let tokens = &info["tokens"];
+        let input = tokens["input"].as_u64();
+        let cached = tokens["cache"]["read"].as_u64();
+        let written = tokens["cache"]["write"].as_u64();
+        let total = input
+            .zip(cached)
+            .zip(written)
+            .and_then(|((a, b), c)| a.checked_add(b)?.checked_add(c));
+        let usage = TurnUsage {
+            input_tokens: input,
+            output_tokens: tokens["output"].as_u64(),
+            total_input_tokens: total,
+            peak_input_tokens: total,
+            context_window_tokens: None,
+            reasoning_tokens: tokens["reasoning"].as_u64(),
+            cache_read_tokens: cached,
+            cache_write_tokens: written,
+            model: info["model"]["id"]
+                .as_str()
+                .or_else(|| info["modelID"].as_str())
+                .map(str::to_owned),
+            cost_usd: info["cost"].as_f64(),
         };
-        let start_known = native.iter().any(|e| e.kind == SessionEventKind::Started);
-        let reading =
-            |counter: String, seq: i64, final_receipt: bool, usage: TurnUsage| UsageReading {
-                thread: thread.clone(),
-                turn: turn.into(),
-                counter,
-                seq: seq as u64,
-                start_known,
-                final_receipt,
-                usage,
-            };
-        if first.payload["usage"].is_object() {
-            for receipt in receipts {
-                match serde_json::from_value::<TurnUsage>(receipt.payload["usage"].clone()) {
-                    Ok(usage) => readings.push(reading(
-                        format!("native:{thread}:{turn}"),
-                        receipt.seq,
-                        receipt.payload["final"] == true,
-                        usage,
-                    )),
-                    Err(_) => gaps += 1,
-                }
-            }
-            continue;
+        return Some(recorded(usage, true, false));
+    }
+    reading.get("total")?;
+    let count = |value: &serde_json::Value, part: &str, key: &str| value[part][key].as_u64();
+    let first_request = |key: &str| {
+        count(reading, "total", key)?.checked_sub(count(reading, "last", key).unwrap_or(0))
+    };
+    let baseline = |key: &str| {
+        if reading["baseline"].is_object() {
+            return count(reading, "baseline", key);
         }
-        if first.payload["message"]["tokens"].is_object() {
-            // Each completed assistant message owns a native usage counter;
-            // tool-call and terminal assistants are distinct model calls.
-            for receipt in receipts {
-                let info = &receipt.payload["message"];
-                let Some(message) = info["id"].as_str() else {
-                    gaps += 1;
-                    continue;
-                };
-                let tokens = &info["tokens"];
-                let input = tokens["input"].as_u64();
-                let cached = tokens["cache"]["read"].as_u64();
-                let written = tokens["cache"]["write"].as_u64();
-                let total = input
-                    .zip(cached)
-                    .zip(written)
-                    .and_then(|((a, b), c)| a.checked_add(b)?.checked_add(c));
-                let usage = TurnUsage {
-                    input_tokens: input,
-                    output_tokens: tokens["output"].as_u64(),
-                    total_input_tokens: total,
-                    peak_input_tokens: total,
-                    context_window_tokens: None,
-                    reasoning_tokens: tokens["reasoning"].as_u64(),
-                    cache_read_tokens: cached,
-                    cache_write_tokens: written,
-                    model: info["model"]["id"]
-                        .as_str()
-                        .or_else(|| info["modelID"].as_str())
-                        .map(str::to_owned),
-                    cost_usd: info["cost"].as_f64(),
-                };
-                readings.push(reading(
-                    format!("native:{thread}:{turn}:{message}"),
-                    receipt.seq,
-                    true,
-                    usage,
-                ));
-            }
-            continue;
-        }
-        if first.payload.get("total").is_none() {
-            gaps += receipts.len();
-            continue;
-        }
-        let field = |value: &serde_json::Value, part: &str, key: &str| value[part][key].as_u64();
-        // `last` is one request, not a complete turn. Without earlier snapshots,
-        // retain that lower bound and its following deltas, explicitly partial.
-        let start = native
-            .iter()
-            .find(|event| event.kind == SessionEventKind::Started);
-        let previous = start
-            .and_then(|start| {
-                history
-                    .iter()
-                    .filter(|event| {
-                        event.kind != SessionEventKind::Observed
-                            && event.agent_session.as_ref() == Some(thread)
-                            && event.provider_turn.as_deref() != Some(turn)
-                            && event.seq < start.seq
-                    })
-                    .max_by_key(|event| event.seq)
-            })
-            .filter(|previous| {
-                history.iter().any(|event| {
-                    event.kind == SessionEventKind::Completed
-                        && event.agent_session == previous.agent_session
-                        && event.provider_turn == previous.provider_turn
-                        && event.seq < start.expect("previous turn requires a start").seq
-                })
-            });
-        // Only the immediately preceding turn can supply a baseline. A missing
-        // usage notification cannot make an older turn stand in for it.
-        // A retained predecessor receipt supplies the baseline when reconnect
-        // misses the first request. Otherwise only the observed suffix is known.
-        let prior_total = |key: &str| {
-            previous.and_then(|previous| {
-                history
-                    .iter()
-                    .filter(|event| {
-                        event.kind == SessionEventKind::Usage
-                            && event.agent_session == previous.agent_session
-                            && event.provider_turn == previous.provider_turn
-                            && event.seq <= previous.seq
-                    })
-                    .filter_map(|event| field(&event.payload, "total", key))
-                    .max()
-            })
-        };
-        let baseline =
-            |key: &str| prior_total(key).or_else(|| native_baseline(&first.payload)[key].as_u64());
-        let known = start.is_some()
+        prior
+            .and_then(|prior| prior[key].as_u64())
+            .or_else(|| first_request(key))
+    };
+    // Without the turn's start, `last` is one request: the turn's share is
+    // known only when that request was the thread's first.
+    let partial = reading["partial"] == true
+        || reading["regressed"] == true
+        || (!reading["baseline"].is_object()
+            && prior.is_none()
             && [
                 "inputTokens",
                 "outputTokens",
@@ -482,105 +361,75 @@ pub fn native_usage(history: &[crate::session::SessionEvent]) -> (Vec<UsageReadi
                 "reasoningOutputTokens",
             ]
             .iter()
-            .all(|key| prior_total(key).is_some() || baseline(key) == Some(0));
-        for last in receipts {
-            if last.payload["regressed"] == true {
-                gaps += 1;
-            }
-            let delta = |key: &str| field(&last.payload, "total", key)?.checked_sub(baseline(key)?);
-            let gross = delta("inputTokens");
-            let cached = delta("cachedInputTokens");
-            let usage = TurnUsage {
-                input_tokens: gross
-                    .zip(cached)
-                    .and_then(|(gross, cached)| gross.checked_sub(cached)),
-                output_tokens: delta("outputTokens"),
-                total_input_tokens: gross,
-                peak_input_tokens: native_peak(&last.payload),
-                context_window_tokens: last.payload["modelContextWindow"].as_u64(),
-                reasoning_tokens: delta("reasoningOutputTokens"),
-                cache_read_tokens: cached,
-                cache_write_tokens: delta("cacheWriteInputTokens"),
-                model: None,
-                cost_usd: None,
-            };
-            // Completion does not include a final usage receipt in the native schema.
-            let mut reading = reading(format!("native:{thread}:{turn}"), last.seq, false, usage);
-            reading.start_known = known;
-            readings.push(reading);
-        }
-    }
-    (readings, gaps)
+            .any(|key| first_request(key).is_some_and(|before| before > 0)));
+    let delta = |key: &str| count(reading, "total", key)?.checked_sub(baseline(key)?);
+    let gross = delta("inputTokens");
+    let cached = delta("cachedInputTokens");
+    let usage = TurnUsage {
+        input_tokens: gross
+            .zip(cached)
+            .and_then(|(gross, cached)| gross.checked_sub(cached)),
+        output_tokens: delta("outputTokens"),
+        total_input_tokens: gross,
+        peak_input_tokens: reading["peakInputTokens"].as_u64().or(count(
+            reading,
+            "last",
+            "inputTokens",
+        )),
+        context_window_tokens: reading["modelContextWindow"].as_u64(),
+        reasoning_tokens: delta("reasoningOutputTokens"),
+        cache_read_tokens: cached,
+        cache_write_tokens: delta("cacheWriteInputTokens"),
+        model: None,
+        cost_usd: None,
+    };
+    Some(recorded(usage, false, partial))
 }
 
-pub fn providers_first_start(history: &[crate::session::SessionEvent]) -> Option<i64> {
-    history
-        .iter()
-        .filter(|event| event.kind == crate::session::SessionEventKind::Started)
-        .map(|event| event.observed_at)
-        .min()
+/// When the first of `turns` started.
+pub fn providers_first_start(turns: &[crate::session::Turn]) -> Option<i64> {
+    turns.iter().filter_map(|turn| turn.started_at).min()
 }
 
 pub fn project_provider_history(
     captured: Option<i64>,
     input: Option<&str>,
     facts: &[FactEnvelope],
-    readings: &[UsageReading],
+    turns: &[crate::session::Turn],
     history: &[crate::session::SessionEvent],
 ) -> std::io::Result<Vec<ProviderHistory>> {
     use crate::session::SessionEventKind;
-    let mut native = BTreeMap::<(&AgentSessionId, &str), Vec<&crate::session::SessionEvent>>::new();
-    for event in history
-        .iter()
-        .filter(|event| event.kind != SessionEventKind::Observed)
-    {
-        if let (Some(thread), Some(turn)) =
-            (event.agent_session.as_ref(), event.provider_turn.as_deref())
-        {
-            native.entry((thread, turn)).or_default().push(event);
-        }
-    }
     let mut records = Vec::new();
-    for ((thread, turn), events) in &native {
-        let start = events
-            .iter()
-            .find(|event| event.kind == SessionEventKind::Started);
-        let completed = events
-            .iter()
-            .find(|event| event.kind == SessionEventKind::Completed);
-        let usage = reduce_usage(
-            readings
-                .iter()
-                .filter(|reading| &reading.thread == *thread && reading.turn == *turn),
-        );
+    for turn in turns {
         records.push(ProviderHistory {
             reference: ProviderHistoryReference::NativeTurn {
-                thread: (*thread).clone(),
-                turn: (*turn).into(),
-                start_seq: start.map(|event| event.seq),
-                completion_seq: completed.map(|event| event.seq),
+                thread: turn.thread.clone(),
+                turn: turn.turn.clone(),
+                start_seq: turn.started_at.map(|_| turn.id),
+                completion_seq: turn.ended_at.map(|_| turn.id),
             },
-            lf_process_id: start
-                .and_then(|event| event.lf_process_id.as_deref())
+            lf_process_id: turn
+                .lf_process_id
+                .as_deref()
                 .map(loopflow_model::id::LfProcessId::parse)
                 .transpose()
                 .map_err(std::io::Error::other)?,
-            task_id: start
-                .and_then(|event| event.task_id.as_deref())
+            task_id: turn
+                .task_id
+                .as_deref()
                 .map(loopflow_model::durable::TaskId::parse)
                 .transpose()
                 .map_err(std::io::Error::other)?,
-            wave_id: start
-                .and_then(|event| event.wave_id.as_deref())
+            wave_id: turn
+                .wave_id
+                .as_deref()
                 .map(loopflow_model::id::WaveId::parse)
                 .transpose()
                 .map_err(std::io::Error::other)?,
-            started_at: start.map(|event| event.observed_at),
-            completed_at: completed.map(|event| event.observed_at),
-            outcome: completed
-                .and_then(|event| event.payload["status"].as_str())
-                .map(str::to_owned),
-            usage,
+            started_at: turn.started_at,
+            completed_at: turn.ended_at,
+            outcome: turn.status.clone(),
+            usage: reduce_usage(std::slice::from_ref(turn)),
         });
     }
     // Provider attempts have no reliable Process or native-turn identity. Keep
@@ -635,75 +484,11 @@ pub fn project_provider_history(
             started_at: start.map(|event| event.observed_at.unix_timestamp()),
             completed_at: finished.as_ref().map(|(at, _)| *at),
             outcome: finished.map(|(_, outcome)| outcome),
-            usage: reduce_usage(std::iter::empty()),
+            usage: reduce_usage(&[]),
         });
     }
     records.sort_by_key(|record| record.started_at.or(record.completed_at));
     Ok(records)
-}
-
-/// Project typed input and provider history from the existing Session owner.
-/// No current assignment, provider or completion can rewrite an earlier input.
-/// Read the current conversation’s published provider identity.
-pub fn provider_session_from_history(
-    history: impl IntoIterator<Item = serde_json::Value>,
-) -> std::io::Result<Option<ProviderSessionRef>> {
-    let mut published = None;
-    let mut events = Vec::new();
-    for observation in history {
-        let Some(source) = observation["source"].as_str() else {
-            continue;
-        };
-        let evidence = &observation["evidence"];
-        if source.starts_with("provider-session:") {
-            published = Some(evidence.clone());
-        } else if let Some(ordinal) = source.strip_prefix("events.jsonl:") {
-            let ordinal = ordinal.parse::<u64>().map_err(std::io::Error::other)?;
-            events.push((ordinal, evidence.clone()));
-        }
-    }
-    if let Some(reference) = published {
-        let reference: ProviderSessionRef =
-            serde_json::from_value(reference).map_err(std::io::Error::other)?;
-        reference.validate()?;
-        return Ok(Some(reference));
-    }
-    events.sort_by_key(|(ordinal, _)| *ordinal);
-    provider_session_from_events(events.into_iter().map(|(_, event)| event).collect())
-}
-
-pub fn provider_session_from_events(
-    events: Vec<serde_json::Value>,
-) -> std::io::Result<Option<ProviderSessionRef>> {
-    let mut provider_session = None;
-    let mut accounts = HashMap::new();
-    for envelope in events.iter().filter_map(read_fact) {
-        match envelope.fact {
-            CaptureFact::ProviderAttemptStarted {
-                attempt_key,
-                account_id,
-                ..
-            }
-            | CaptureFact::ProviderAccountSelected {
-                attempt_key,
-                account_id,
-            } => {
-                accounts.insert(attempt_key, account_id);
-            }
-            CaptureFact::ProviderSessionObserved {
-                attempt_key,
-                agent_session,
-            } => {
-                provider_session = Some(ProviderSessionRef {
-                    schema_version: SCHEMA_VERSION,
-                    agent_session,
-                    account_id: accounts.get(&attempt_key).cloned().flatten(),
-                });
-            }
-            _ => {}
-        }
-    }
-    Ok(provider_session)
 }
 
 /// The resume reference: the newest one names the native conversation and
@@ -739,154 +524,46 @@ pub enum SessionTitleSource {
     Unavailable,
 }
 
-#[derive(Debug, Default)]
-struct UsageStream {
-    observation_seq: Option<u64>,
-    final_receipt: bool,
-    input_tokens: Option<u64>,
-    output_tokens: Option<u64>,
-    total_input_tokens: Option<u64>,
-    peak_input_tokens: Option<u64>,
-    context_window_tokens: Option<u64>,
-    reasoning_tokens: Option<u64>,
-    cache_read_tokens: Option<u64>,
-    cache_write_tokens: Option<u64>,
-    cost_usd: Option<f64>,
-}
-
-/// Reduce usage readings once per counter: each counter's largest values,
-/// summed across counters.
-pub fn reduce_usage<'a>(readings: impl IntoIterator<Item = &'a UsageReading>) -> SessionUsage {
-    let mut streams = BTreeMap::<&str, UsageStream>::new();
-    let mut gaps = 0;
-    for reading in readings {
-        if !reading.start_known {
-            gaps += 1;
-        }
-        let stream = streams.entry(reading.counter.as_str()).or_default();
-        if stream
-            .observation_seq
-            .is_some_and(|previous| reading.seq <= previous)
-        {
-            gaps += 1;
-        }
-        stream.observation_seq = Some(
-            stream
-                .observation_seq
-                .map_or(reading.seq, |seen| seen.max(reading.seq)),
-        );
-        stream.final_receipt |= reading.final_receipt;
-        let usage = &reading.usage;
-        observe_u64(&mut stream.input_tokens, usage.input_tokens, &mut gaps);
-        observe_u64(&mut stream.output_tokens, usage.output_tokens, &mut gaps);
-        observe_u64(
-            &mut stream.total_input_tokens,
-            usage.total_input_tokens,
-            &mut gaps,
-        );
-        observe_u64(
-            &mut stream.peak_input_tokens,
-            usage.peak_input_tokens,
-            &mut gaps,
-        );
-        observe_u64(
-            &mut stream.context_window_tokens,
-            usage.context_window_tokens,
-            &mut gaps,
-        );
-        observe_u64(
-            &mut stream.reasoning_tokens,
-            usage.reasoning_tokens,
-            &mut gaps,
-        );
-        observe_u64(
-            &mut stream.cache_read_tokens,
-            usage.cache_read_tokens,
-            &mut gaps,
-        );
-        observe_u64(
-            &mut stream.cache_write_tokens,
-            usage.cache_write_tokens,
-            &mut gaps,
-        );
-        observe_f64(&mut stream.cost_usd, usage.cost_usd, &mut gaps);
-    }
-
-    let input_tokens = sum_u64(
-        streams.values().map(|stream| stream.input_tokens),
-        &mut gaps,
-    );
-    let output_tokens = sum_u64(
-        streams.values().map(|stream| stream.output_tokens),
-        &mut gaps,
-    );
-    let total_input_tokens = sum_u64(
-        streams.values().map(|stream| stream.total_input_tokens),
-        &mut gaps,
-    );
-    let peak_input_tokens = max_u64(
-        streams.values().map(|stream| stream.peak_input_tokens),
-        &mut gaps,
-    );
-    let context_window_tokens = max_u64(
-        streams.values().map(|stream| stream.context_window_tokens),
-        &mut gaps,
-    );
-    let reasoning_tokens = sum_u64(
-        streams.values().map(|stream| stream.reasoning_tokens),
-        &mut gaps,
-    );
-    let cache_read_tokens = sum_u64(
-        streams.values().map(|stream| stream.cache_read_tokens),
-        &mut gaps,
-    );
-    let cache_write_tokens = sum_u64(
-        streams.values().map(|stream| stream.cache_write_tokens),
-        &mut gaps,
-    );
-    let cost_usd = sum_f64(streams.values().map(|stream| stream.cost_usd));
-    let usage = SessionUsage {
-        streams: streams.len(),
-        final_streams: streams
-            .values()
-            .filter(|stream| stream.final_receipt)
+/// Sum the usage `turns` kept. A turn whose start is unknown, or whose
+/// usage was counted part way, is a gap.
+pub fn reduce_usage(turns: &[crate::session::Turn]) -> SessionUsage {
+    let readings: Vec<_> = turns
+        .iter()
+        .filter_map(|turn| Some((turn, turn.usage.as_ref()?)))
+        .collect();
+    let mut gaps = readings
+        .iter()
+        .filter(|(turn, usage)| turn.started_at.is_none() || usage.partial)
+        .count();
+    let values = |field: fn(&TurnUsage) -> Option<u64>| {
+        readings
+            .iter()
+            .map(move |(_, usage)| field(&usage.usage))
+            .collect::<Vec<_>>()
+    };
+    let sum = |field: fn(&TurnUsage) -> Option<u64>, gaps: &mut usize| {
+        sum_u64(values(field).into_iter(), gaps)
+    };
+    let max = |field: fn(&TurnUsage) -> Option<u64>, gaps: &mut usize| {
+        max_u64(values(field).into_iter(), gaps)
+    };
+    SessionUsage {
+        streams: readings.len(),
+        final_streams: readings
+            .iter()
+            .filter(|(_, usage)| usage.final_reading)
             .count(),
+        input_tokens: sum(|usage| usage.input_tokens, &mut gaps),
+        output_tokens: sum(|usage| usage.output_tokens, &mut gaps),
+        total_input_tokens: sum(|usage| usage.total_input_tokens, &mut gaps),
+        peak_input_tokens: max(|usage| usage.peak_input_tokens, &mut gaps),
+        context_window_tokens: max(|usage| usage.context_window_tokens, &mut gaps),
+        reasoning_tokens: sum(|usage| usage.reasoning_tokens, &mut gaps),
+        cache_read_tokens: sum(|usage| usage.cache_read_tokens, &mut gaps),
+        cache_write_tokens: sum(|usage| usage.cache_write_tokens, &mut gaps),
+        cost_usd: sum_f64(readings.iter().map(|(_, usage)| usage.usage.cost_usd)),
         gaps,
-        input_tokens,
-        output_tokens,
-        total_input_tokens,
-        peak_input_tokens,
-        context_window_tokens,
-        reasoning_tokens,
-        cache_read_tokens,
-        cache_write_tokens,
-        cost_usd,
-    };
-    usage
-}
-
-fn observe_u64(current: &mut Option<u64>, observed: Option<u64>, gaps: &mut usize) {
-    let Some(observed) = observed else {
-        return;
-    };
-    if current.is_some_and(|previous| observed < previous) {
-        *gaps += 1;
     }
-    *current = Some(current.map_or(observed, |previous| previous.max(observed)));
-}
-
-fn observe_f64(current: &mut Option<f64>, observed: Option<f64>, gaps: &mut usize) {
-    let Some(observed) = observed else {
-        return;
-    };
-    if !observed.is_finite() {
-        *gaps += 1;
-        return;
-    }
-    if current.is_some_and(|previous| observed < previous) {
-        *gaps += 1;
-    }
-    *current = Some(current.map_or(observed, |previous| previous.max(observed)));
 }
 
 fn sum_u64(values: impl Iterator<Item = Option<u64>>, gaps: &mut usize) -> Option<i64> {

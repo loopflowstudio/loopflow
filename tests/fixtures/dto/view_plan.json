@@ -147,9 +147,7 @@
       "unavailable": [
         "No primary Session is recorded",
         "Recorded execution location is unavailable"
-      ],
-      "face": null,
-      "pane_revision": null
+      ]
     }
   ],
   "name": null,
@@ -172,6 +170,15 @@
           "slot": 0
         }
       ]
+    }
+  },
+  "viewer": {
+    "person": "Ada",
+    "person_key": "ada@example.com",
+    "person_id": "git:ada@example.com",
+    "machine": {
+      "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
+      "label": "laptop"
     }
   }
 }

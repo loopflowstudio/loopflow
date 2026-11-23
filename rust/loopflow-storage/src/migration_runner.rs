@@ -384,11 +384,6 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
             "dashboard_id",
             "arrangement_json",
         )?);
-        failures.extend(validate_json_column::<
-            crate::work::selection::WorkPaneLayout,
-        >(
-            conn, "work_pane_layouts", "work_id", "layout_json"
-        )?);
         failures.extend(validate_json_column::<crate::work::selection::SlotLayout>(
             conn,
             "dashboards",
@@ -786,13 +781,11 @@ pub(crate) fn convert_released_data(conn: &rusqlite::Connection, sql: &str) -> S
     if sql.contains("CREATE TABLE planning_peer_changes (") {
         convert_project_content(conn)?;
         let mut query = conn.prepare(
-            "SELECT export_json FROM project_transitions WHERE export_json IS NOT NULL
-            UNION ALL SELECT export_json FROM task_creation_intents WHERE export_json IS NOT NULL",
+            "SELECT json_extract(export_json,'$.baseline') FROM project_transitions WHERE export_json IS NOT NULL
+            UNION ALL SELECT json_extract(export_json,'$.baseline') FROM task_creation_intents WHERE export_json IS NOT NULL",
         )?;
         for row in query.query_map([], |row| row.get::<_, String>(0))? {
-            let export: super::sqlite::planning_export::PlanningExport =
-                serde_json::from_str(&row?)?;
-            for value in export.baseline {
+            for value in serde_json::from_str::<Vec<crate::work::edit::WorkValue>>(&row?)? {
                 value.validate()?;
             }
         }
@@ -816,12 +809,6 @@ pub(crate) fn convert_released_data(conn: &rusqlite::Connection, sql: &str) -> S
             }
         }
     }
-    if sql.contains("CREATE TABLE planning_peer_changes (")
-        || sql.contains("CREATE TABLE delegated_placements (")
-        || sql.contains("ALTER TABLE waves ADD COLUMN workflow TEXT;")
-    {
-        super::sqlite::planning_write::seed(conn)?;
-    }
     Ok(())
 }
 
@@ -834,7 +821,7 @@ fn convert_project_content(conn: &rusqlite::Connection) -> StoreResult<()> {
         })?
         .collect::<Result<Vec<_>, _>>()?;
     for (id, body) in rows {
-        let document = crate::linear_records::project_document::parse_project_document(&body)
+        let document = crate::planning::project_document::parse_project_document(&body)
             .map_err(|error| StoreError::InvalidData(format!("Project {id}: {error}")))?;
         conn.execute(
             "UPDATE projects SET description=?2,krs=?3,metric_targets=?4 WHERE id=?1",
@@ -1946,6 +1933,319 @@ mod tests {
     }
 
     #[test]
+    fn run_owners_carry_their_process_lifecycle_after_upgrade() {
+        let conn = open();
+        apply_before_migration(&observers(), &build(), &conn, "process_rows_on_owners");
+        conn.execute_batch(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/migrations/process_rows_on_owners_released.sql"
+        )))
+        .unwrap();
+        apply_pending_migrations(&observers(), &build(), &conn);
+
+        type Run = (
+            String,
+            i64,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<String>,
+        );
+        let runs = |sql: &str| -> Vec<Run> {
+            conn.prepare(sql)
+                .unwrap()
+                .query_map([], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let select = "SELECT lf_process_id,started_at,ended_at,pid,exit_code,error FROM";
+        assert_eq!(
+            runs(&format!("{select} graph_processes ORDER BY lf_process_id")),
+            [
+                (
+                    "graph-done".into(),
+                    10,
+                    Some(30),
+                    None,
+                    Some(1),
+                    Some("the run failed".into())
+                ),
+                ("graph-live".into(), 40, None, Some(4001), None, None),
+            ]
+        );
+        assert_eq!(
+            runs(&format!(
+                "{select} graph_process_steps ORDER BY lf_process_id"
+            )),
+            [
+                (
+                    "step-done".into(),
+                    11,
+                    Some(29),
+                    None,
+                    Some(1),
+                    Some("gate: tests failed".into())
+                ),
+                ("step-live".into(), 41, None, Some(4002), None, None),
+            ]
+        );
+        let wait: i64 = conn
+            .query_row("SELECT count(*) FROM agent_limit_recoveries", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(wait, 1);
+
+        // A released runner still alive after install: its step's end reaches
+        // the step row, and a step it records after the Process row is filled.
+        conn.execute_batch(
+            "INSERT INTO processes(id,trace_id,parent_lf_process_id,started_at,completed_at,outcome,exit_code)
+                 VALUES('step-next','trace','graph-live',50,51,'succeeded',0);
+             INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations)
+                 VALUES('graph-live','step-next',0,'[[1]]');
+             UPDATE processes SET completed_at=60,outcome='failed',exit_code=1,error='boom' WHERE id='step-live';",
+        )
+        .unwrap();
+        assert_eq!(
+            runs(&format!(
+                "{select} graph_process_steps WHERE graph_lf_process_id='graph-live' ORDER BY seq"
+            )),
+            [
+                (
+                    "step-live".into(),
+                    41,
+                    Some(60),
+                    None,
+                    Some(1),
+                    Some("boom".into())
+                ),
+                ("step-next".into(), 50, Some(51), None, Some(0), None),
+            ]
+        );
+        // What a run launched with stays fixed.
+        assert!(conn
+            .execute("UPDATE graph_processes SET task_id=NULL,graph='other'", [])
+            .is_err());
+
+        // A Project activation's run is on its Wave, backfilled and bridged
+        // from a released activating lf.
+        type Activation = (
+            String,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<String>,
+        );
+        let activations = || -> Vec<Activation> {
+            conn.prepare(
+                "SELECT id,project_activation_started_at,project_activation_pid,
+                    project_activation_os_started_at,project_activation_ended_at,
+                    project_activation_exit_code,project_activation_error
+                 FROM waves WHERE id LIKE 'wave-%' ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+        };
+        let failed: Activation = (
+            "wave-done".into(),
+            Some(20),
+            None,
+            None,
+            Some(25),
+            Some(1),
+            Some("provider unavailable".into()),
+        );
+        assert_eq!(
+            activations(),
+            [
+                failed.clone(),
+                (
+                    "wave-live".into(),
+                    Some(42),
+                    Some(4003),
+                    Some(41),
+                    None,
+                    None,
+                    None
+                ),
+            ]
+        );
+        conn.execute(
+            "UPDATE processes SET completed_at=45,outcome='succeeded',exit_code=0 WHERE id='activation-live'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            activations()[1],
+            (
+                "wave-live".into(),
+                Some(42),
+                None,
+                None,
+                Some(45),
+                Some(0),
+                None
+            )
+        );
+        // A released lf activating again brings the new run's start, not the
+        // last one's end.
+        conn.execute(
+            "UPDATE waves SET project_activation_lf_process_id='activation-next' WHERE id='wave-done'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            activations()[0],
+            (
+                "wave-done".into(),
+                Some(46),
+                Some(4004),
+                Some(45),
+                None,
+                None,
+                None
+            )
+        );
+
+        // A repair's run is on its incident; a released launcher's handoff
+        // brings the worker's start and pid from its Process row.
+        type Repair = (String, Option<i64>, Option<i64>, Option<i64>);
+        let repairs = || -> Vec<Repair> {
+            conn.prepare(
+                "SELECT identity,repair_started_at,repair_pid,repair_os_started_at
+                 FROM ci_incidents ORDER BY identity",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+        };
+        assert_eq!(
+            repairs(),
+            [
+                ("incident-done".into(), Some(60), None, None),
+                ("incident-live".into(), Some(80), Some(5001), Some(79)),
+            ]
+        );
+        conn.execute(
+            "UPDATE ci_incidents SET repair_lf_process_id='repair-worker' WHERE identity='incident-live'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            repairs()[1],
+            ("incident-live".into(), Some(90), Some(5002), Some(89))
+        );
+
+        // A Task's carrier and its ship carrier record the OS process they
+        // run as; a released carrier's end clears both and ends the ship run.
+        let carrier = || -> (Option<String>, Option<i64>, Option<i64>) {
+            conn.query_row(
+                "SELECT lf_process_id,run_pid,run_os_started_at FROM task_graphs WHERE task_id='task-live'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap()
+        };
+        type ShipRun = (String, Option<i64>, Option<i64>, Option<i64>);
+        let ship = || -> Vec<ShipRun> {
+            conn.prepare(
+                "SELECT lf_process_id,pid,ended_at,exit_code FROM task_ship_events
+                 WHERE task_id='task-live' ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+        };
+        assert_eq!(
+            carrier(),
+            (Some("carrier-live".into()), Some(6001), Some(99))
+        );
+        assert_eq!(ship(), [("carrier-live".into(), Some(6001), None, None)]);
+        conn.execute(
+            "UPDATE processes SET completed_at=105,outcome='failed',exit_code=1 WHERE id='carrier-live'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(carrier(), (Some("carrier-live".into()), None, None));
+        assert_eq!(ship(), [("carrier-live".into(), None, Some(105), Some(1))]);
+        conn.execute_batch(
+            "UPDATE task_graphs SET lf_process_id='carrier-next' WHERE task_id='task-live';
+             INSERT INTO task_ship_events(task_id,kind,at,lf_process_id)
+                 VALUES('task-live','carried',110,'carrier-next');",
+        )
+        .unwrap();
+        assert_eq!(
+            carrier(),
+            (Some("carrier-next".into()), Some(6002), Some(109))
+        );
+        assert_eq!(ship()[1], ("carrier-next".into(), Some(6002), None, None));
+        // What an Auto-Ship event says stays as written.
+        assert!(conn
+            .execute("UPDATE task_ship_events SET kind='stopped'", [])
+            .is_err());
+
+        // A Session carries its current agent's lifetime, backfilled and
+        // bridged from the agent row a released launcher writes.
+        type Agent = (Option<i64>, Option<i64>, Option<i64>, Option<i64>);
+        let agent = |session: &str| -> Agent {
+            conn.query_row(
+                "SELECT agent_started_at,agent_pid,agent_ended_at,agent_exit_code
+                 FROM agent_sessions WHERE id=?1",
+                [session],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(agent("session-live"), (Some(120), Some(7001), None, None));
+        assert_eq!(agent("session-done"), (Some(121), None, Some(130), Some(0)));
+        conn.execute_batch(
+            "UPDATE processes SET completed_at=140,exit_code=1
+             WHERE id='00000000-0000-4000-8000-00000000a001';
+             INSERT INTO processes(id,trace_id,kind,started_at,spawn_state)
+             VALUES('00000000-0000-4000-8000-00000000a003','00000000-0000-4000-8000-00000000a003','agent',150,'reserved');
+             UPDATE agent_sessions SET agent_process_id='00000000-0000-4000-8000-00000000a003'
+             WHERE id='session-done';",
+        )
+        .unwrap();
+        assert_eq!(agent("session-live"), (Some(120), None, Some(140), Some(1)));
+        assert_eq!(agent("session-done"), (Some(150), None, None, None));
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn a_newer_tail_changes_nothing_this_build_validates() {
         for sql in [
             "CREATE TABLE newer_table (id TEXT);",
@@ -2210,70 +2510,6 @@ mod tests {
     }
 
     #[test]
-    fn typed_journal_seeding_preserves_released_relationships_authors_and_receipts() {
-        let conn = open();
-        apply_before_migration(&observers(), &build(), &conn, "planning_peers");
-        conn.execute_batch(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/migrations/planning_relationships.sql"
-        )))
-        .unwrap();
-        let receipt = |conn: &rusqlite::Connection| {
-            conn.query_row(
-                "SELECT json_array(comment_id,comment_json,acknowledged,error,conflicting_comment_json)
-                 FROM task_comment_deliveries WHERE comment_id='comment-proof'",
-                [], |row| row.get::<_, String>(0),
-            ).unwrap()
-        };
-        let before = receipt(&conn);
-        let sql = migration_section_sql("planning_peers");
-        conn.execute_batch(&sql).unwrap();
-        super::convert_released_data(&conn, &sql).unwrap();
-        for (id, field, expected) in [
-            (
-                "project-proof",
-                "project_teams",
-                serde_json::json!(["team-a", "team-b"]),
-            ),
-            (
-                "project-proof",
-                "project_initiatives",
-                serde_json::json!(["initiative-a"]),
-            ),
-            (
-                "comment-proof",
-                "comment_content",
-                serde_json::json!({
-                    "body":"Keep attribution", "author":{"kind":"person","name":"Maya"}, "created_at":null
-                }),
-            ),
-        ] {
-            let value: String = conn
-                .query_row(
-                    "SELECT mutation -> '$.edit.change.value' FROM planning_peer_changes WHERE object_id=?1 AND field=?2",
-                    [id, field],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(
-                serde_json::from_str::<serde_json::Value>(&value).unwrap(),
-                expected
-            );
-        }
-        assert_eq!(receipt(&conn), before);
-        assert_eq!(
-            conn.query_row(
-                "SELECT provider_revision FROM task_comments WHERE id='comment-proof'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .unwrap(),
-            "revision-before"
-        );
-        validate_foreign_keys(&conn).unwrap();
-    }
-
-    #[test]
     fn structured_project_content_preserves_released_work_and_pending_delivery() {
         let conn = open();
         apply_before_migration(&observers(), &build(), &conn, "planning_peers");
@@ -2352,11 +2588,6 @@ mod tests {
         assert!(conn
             .prepare("SELECT project_prompt_context FROM projects")
             .is_err());
-        let captured: String = conn.query_row("SELECT mutation -> '$.edit.change.value' FROM planning_peer_changes WHERE object_id='retained-project' AND field='krs'", [], |r| r.get(0)).unwrap();
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&captured).unwrap(),
-            serde_json::from_str::<serde_json::Value>(&krs).unwrap()
-        );
     }
 
     #[test]
@@ -2579,14 +2810,16 @@ mod tests {
             .unwrap(),
             1
         );
-        let pending: (String, i64, i64) = conn
+        // The pending completion reaches the tracker queue still unconfirmed.
+        let pending: (String, String) = conn
             .query_row(
-                "SELECT target,attempted,settled FROM task_state_deliveries WHERE task_id='single'",
+                "SELECT json_extract(value_json,'$.value.planning_state'),phase FROM tracker_actions
+                 WHERE task_id='single' AND kind='state'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(pending, ("completed".into(), 1, 0));
+        assert_eq!(pending, ("completed".into(), "sent".into()));
         // Released `ship_it` dropped positions short of `end`; their next run
         // takes up a Graph without retaining that earlier execution.
         let execution: i64 = conn
@@ -5920,8 +6153,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let content =
-            crate::linear_records::project_document::parse_project_document(&text).unwrap();
+        let content = crate::planning::project_document::parse_project_document(&text).unwrap();
         assert_eq!(serde_json::to_value(content.krs).unwrap(), project["krs"]);
         assert_eq!(
             serde_json::to_value(content.metric_targets).unwrap(),
@@ -6204,7 +6436,7 @@ mod tests {
             .find(|task| task.identifier == "INF-REOPEN")
             .unwrap();
         assert!(matches!(
-            reopen.pm_writeback,
+            reopen.tracker_writeback,
             crate::work::task::LinearWritebackState::Current
         ));
     }

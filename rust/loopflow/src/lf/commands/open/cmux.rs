@@ -8,8 +8,6 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
-use loopflow_storage::work::selection::SplitAxis;
-
 /// The app bundles its CLI without adding it to PATH.
 const BUNDLED: &str = "/Applications/cmux.app/Contents/Resources/bin/cmux";
 
@@ -122,13 +120,6 @@ pub(super) fn terminal(label: &str, cwd: &Path, argv: Vec<String>) -> Value {
             argv.iter().map(|word| shell_quote(word)).collect::<Vec<_>>().join(" "))}]}})
 }
 
-pub(super) fn split(axis: SplitAxis, ratio: f64, before: Value, after: Value) -> Value {
-    json!({
-        "direction": if axis == SplitAxis::Vertical { "horizontal" } else { "vertical" },
-        "split": ratio, "children": [before, after],
-    })
-}
-
 fn shell_quote(word: &str) -> String {
     format!("'{}'", word.replace('\'', r"'\''"))
 }
@@ -185,7 +176,7 @@ fn reference(output: &str, prefix: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{group_of, reference, split, terminal};
+    use super::{group_of, reference, terminal};
     use serde_json::json;
     use std::path::Path;
 
@@ -228,13 +219,5 @@ mod tests {
             pane["pane"]["surfaces"][0]["command"],
             r"cd '/repo/it'\''s' && 'lf' 'task' 'a b'"
         );
-        let split = split(
-            loopflow_storage::work::selection::SplitAxis::Vertical,
-            0.6,
-            pane.clone(),
-            pane,
-        );
-        assert_eq!(split["direction"], "horizontal");
-        assert_eq!(split["children"].as_array().unwrap().len(), 2);
     }
 }

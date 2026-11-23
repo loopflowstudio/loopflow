@@ -1,4 +1,5 @@
-# Someone is blocked now: restore first, then fix the cause, then prevent a repeat.
+description: Restore first, then fix the cause, then prevent a repeat.
+steps:
 - unbreak
 - debug
 - 5whys

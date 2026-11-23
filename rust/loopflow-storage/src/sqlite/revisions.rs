@@ -2,6 +2,8 @@
 //! the writer's own transaction whenever a displayed row changes, so a reader
 //! learns what changed without scanning history. No call site bumps one.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::StoreResult;
@@ -35,8 +37,41 @@ pub struct StoreRevisions {
     pub sessions: i64,
     pub graphs: i64,
     pub processes: i64,
-    /// Token counts. Moves every few seconds while agents work.
-    pub usage: i64,
+    /// Session history and turns in `history.db`. Moves at every turn's
+    /// start and end; only a read that names `history.*` waits on it.
+    pub history: i64,
+}
+
+/// Every domain's revision, by name, as clients see them: a write's answer
+/// carries the domains it advanced, a reading the domains it was read at. A
+/// domain added to `store_revisions` appears here without a type change.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(transparent)]
+pub struct Revisions(pub BTreeMap<String, i64>);
+
+impl Revisions {
+    /// The domains `self` advanced past `before`, at their value in `self`.
+    pub fn advanced_since(&self, before: &Self) -> Self {
+        Self(
+            self.0
+                .iter()
+                .filter(|(domain, revision)| before.0.get(*domain) < Some(revision))
+                .map(|(domain, revision)| (domain.clone(), *revision))
+                .collect(),
+        )
+    }
+
+    /// The wake test's fixed domains; a domain not yet created reads 0.
+    pub fn to_store_revisions(&self) -> StoreRevisions {
+        let domain = |name: &str| self.0.get(name).copied().unwrap_or(0);
+        StoreRevisions {
+            planning: domain("planning"),
+            sessions: domain("sessions"),
+            graphs: domain("graphs"),
+            processes: domain("processes"),
+            history: domain("history"),
+        }
+    }
 }
 
 impl SqliteStore {
@@ -67,35 +102,28 @@ impl SqliteStore {
     }
 
     pub fn revisions(&self) -> StoreResult<StoreRevisions> {
+        Ok(self.revision_map()?.to_store_revisions())
+    }
+
+    pub fn revision_map(&self) -> StoreResult<Revisions> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut revisions = StoreRevisions {
-            planning: 0,
-            sessions: 0,
-            graphs: 0,
-            processes: 0,
-            usage: 0,
-        };
         let mut query = conn.prepare("SELECT domain,revision FROM store_revisions")?;
-        let mut rows = query.query([])?;
-        while let Some(row) = rows.next()? {
-            let revision = row.get(1)?;
-            match row.get::<_, String>(0)?.as_str() {
-                "planning" => revisions.planning = revision,
-                "sessions" => revisions.sessions = revision,
-                "graphs" => revisions.graphs = revision,
-                "processes" => revisions.processes = revision,
-                "usage" => revisions.usage = revision,
-                _ => {}
-            }
-        }
-        Ok(revisions)
+        let mut revisions: BTreeMap<String, i64> = query
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let history =
+            conn.query_row("SELECT revision FROM history.history_revision", [], |row| {
+                row.get(0)
+            })?;
+        revisions.insert("history".to_owned(), history);
+        Ok(Revisions(revisions))
     }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use rusqlite::params;
+    use rusqlite::{params, OptionalExtension};
 
     use super::{SqliteStore, StoreRevisions};
     use loopflow_model::durable::TaskId;
@@ -104,24 +132,39 @@ mod tests {
     /// Tables no workspace surface reads. A new table belongs here or in a
     /// domain; `session_events` is covered except for transcript and usage rows.
     const NEVER_DISPLAYED: &[&str] = &[
+        // Request-ID memory for served commands; the commands' own rows move domains.
+        "command_answers",
         "creation_receipts",
         "access_profiles",
-        "pm_project_name_cutover",
         "planning_user",
+        "git_tracker_changes",
+        "git_tracker_seen",
+        // Released lf still writes the old tracker tables; mirror triggers copy
+        // each write into its tracker table, which counts it.
+        "pm_issue_changes",
+        "pm_items",
+        "pm_projects",
+        "pm_wave_projects",
+        "pm_wave_sync",
+        "planning_destinations",
         "planning_peer_changes",
+        "planning_peer_conflicts",
+        "planning_peer_imports",
         "planning_peer_observed",
-        "project_binding_imports",
+        "planning_peer_routes",
+        // A field's stamp decides which value is kept; views read the value.
+        "plan_stamps",
+        // Which commit of another Machine's plan ref was read; views read the plan.
+        "plan_refs",
         "blob_tokens",
-        // Desktop reads GitHub people once per repository through `lf repo people`.
+        // A lookup cache `lf repo people` fills; no Work projection reads it.
         "github_people",
-        // Acquisition attempts and watermarks do not change displayed Work.
+        // Refresh attempts and watermarks do not change displayed Work.
         "linear_team_checks",
         "machines",
         // Copies from rented Machines are read by explicit CLI listings only.
         "machine_records",
-        // Rental capacity is read by `lf pool`/`lf ondemand`, not workspace surfaces.
-        "ondemands",
-        "pools",
+        // Owned Machines' pools are read by `lf machine pool`, not workspace surfaces.
         "pool_machines",
         "provider_account_limits",
         "provider_account_switches",
@@ -133,18 +176,23 @@ mod tests {
         // Delivery diagnostics are explicit CLI reads, not workspace projections.
         // A busy Session's pending move; its Stop hook reads it, no view does.
         "session_moves",
-        "session_steers",
         "steer_adapters",
-        "steer_batches",
         "steer_delivered",
-        "steer_deliveries",
         "store_revisions",
         "task_linear_ingested_comments",
         // A Task's last reading is compared by the next reader; its news is the steers.
         "task_update_readings",
-        "tool_responses",
         // Wave retry receipts are read only by explicit lifecycle operations.
         "wave_lifecycle_operations",
+        // Leaving (LOO-954): nothing reads or writes these.
+        "ondemands",
+        "pm_project_name_cutover",
+        "pools",
+        "project_binding_imports",
+        "session_steers",
+        "steer_batches",
+        "steer_deliveries",
+        "tool_responses",
     ];
 
     fn store() -> (tempfile::TempDir, SqliteStore) {
@@ -156,15 +204,6 @@ mod tests {
     fn session(store: &SqliteStore, id: &str) {
         let conn = store.conn.lock().unwrap();
         conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES(?1,?1,'human',1,0,'/repo')", [id]).unwrap();
-    }
-
-    fn event(store: &SqliteStore, session: &str, kind: &str, receipt: &str, payload: &str) {
-        let conn = store.conn.lock().unwrap();
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,?2,?3,1,?4)", params![session, kind, receipt, payload]).unwrap();
-    }
-
-    fn evidence(kind: &str) -> String {
-        format!(r#"{{"evidence":{{"schema_version":1,"type":"{kind}"}}}}"#)
     }
 
     #[test]
@@ -186,10 +225,6 @@ mod tests {
             for operation in ["insert", "update", "delete"] {
                 // Ownership entries reject deletion; it can never commit.
                 if table == "task_ownership" && operation == "delete" {
-                    continue;
-                }
-                // Auto-Ship events reject updates; one can never commit.
-                if table == "task_ship_events" && operation == "update" {
                     continue;
                 }
                 let name = format!("store_revision_{table}_{operation}");
@@ -270,7 +305,6 @@ mod tests {
                 "conversation",
                 None,
                 &process,
-                true,
                 None,
                 &crate::sqlite::SessionCaller {
                     agent: None,
@@ -329,12 +363,13 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO pm_items(repo,provider,id,identifier,observed_at) VALUES('/repo','linear',?1,'LOO-1',1)",
+            "INSERT INTO tracker_items(repo,tracker,id,identifier,observed_at) VALUES('/repo','linear',?1,'LOO-1',1)",
             [&issue],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO task_state_deliveries(id,task_id,target,attempted,error) VALUES(?1,?2,'started',1,'rate limited')",
+            "INSERT INTO tracker_actions(id,task_id,kind,value_json,phase,tracker,error)
+             VALUES(?1,?2,'state','{}','sent','linear','rate limited')",
             params![delivery, task.as_str()],
         )
         .unwrap();
@@ -359,7 +394,7 @@ mod tests {
         assert_eq!(
             planning_moved(
                 &conn,
-                "UPDATE pm_items SET observed_at=30 WHERE id=?1",
+                "UPDATE tracker_items SET observed_at=30 WHERE id=?1",
                 &issue
             ),
             0,
@@ -368,7 +403,7 @@ mod tests {
         assert_eq!(
             planning_moved(
                 &conn,
-                "UPDATE pm_items SET observed_at=40,name='Renamed' WHERE id=?1",
+                "UPDATE tracker_items SET observed_at=40,name='Renamed' WHERE id=?1",
                 &issue
             ),
             1,
@@ -377,7 +412,7 @@ mod tests {
         assert_eq!(
             planning_moved(
                 &conn,
-                "UPDATE task_state_deliveries SET error='rate limited' WHERE id=?1",
+                "UPDATE tracker_actions SET error='rate limited' WHERE id=?1",
                 &delivery
             ),
             0,
@@ -386,12 +421,189 @@ mod tests {
         assert_eq!(
             planning_moved(
                 &conn,
-                "UPDATE task_state_deliveries SET error='denied' WHERE id=?1",
+                "UPDATE tracker_actions SET error='denied' WHERE id=?1",
                 &delivery
             ),
             1,
             "new error"
         );
+    }
+
+    /// A released lf writes the old table names while this one writes the
+    /// tracker names; each sees the other's writes, counted once.
+    #[test]
+    fn tracker_table_mirror_keeps_released_writers_and_readers_in_step() {
+        let (_dir, store) = store();
+        let conn = store.conn.lock().unwrap();
+        let issue = uuid::Uuid::new_v4().to_string();
+        let read = |sql: &str| -> Option<String> {
+            conn.query_row(sql, [&issue], |row| row.get(0))
+                .optional()
+                .unwrap()
+        };
+
+        // Released writers: plain insert, upsert, replace.
+        let moved = planning_moved(
+            &conn,
+            "INSERT INTO pm_items(repo,provider,id,identifier,observed_at) VALUES('/repo','linear',?1,'LOO-1',1)",
+            &issue,
+        );
+        assert_eq!(moved, 1, "one change, one revision");
+        assert_eq!(
+            read("SELECT tracker||' '||identifier FROM tracker_items WHERE id=?1").as_deref(),
+            Some("linear LOO-1")
+        );
+        conn.execute(
+            "INSERT INTO pm_items(repo,provider,id,identifier,observed_at) VALUES('/repo','linear',?1,'LOO-2',2)
+             ON CONFLICT(repo,provider,id) DO UPDATE SET identifier=excluded.identifier",
+            [&issue],
+        )
+        .unwrap();
+        assert_eq!(
+            read("SELECT identifier FROM tracker_items WHERE id=?1").as_deref(),
+            Some("LOO-2")
+        );
+        conn.execute(
+            "INSERT OR REPLACE INTO pm_items(repo,provider,id,identifier,observed_at) VALUES('/repo','linear',?1,'LOO-3',3)",
+            [&issue],
+        )
+        .unwrap();
+        assert_eq!(
+            read("SELECT identifier FROM tracker_items WHERE id=?1").as_deref(),
+            Some("LOO-3")
+        );
+
+        conn.execute(
+            "UPDATE pm_items SET identifier='Mixed' WHERE id=?1",
+            [&issue],
+        )
+        .unwrap();
+        assert_eq!(
+            planning_moved(
+                &conn,
+                "UPDATE tracker_items SET identifier='MIXED' WHERE id=?1",
+                &issue
+            ),
+            1
+        );
+        assert_eq!(
+            read("SELECT identifier FROM pm_items WHERE id=?1").as_deref(),
+            Some("MIXED")
+        );
+
+        // Current writers reach released readers, reading times included.
+        let moved = planning_moved(
+            &conn,
+            "UPDATE tracker_items SET name='Renamed' WHERE id=?1",
+            &issue,
+        );
+        assert_eq!(moved, 1);
+        assert_eq!(
+            planning_moved(
+                &conn,
+                "UPDATE tracker_items SET observed_at=9 WHERE id=?1",
+                &issue
+            ),
+            0,
+            "a restamp is not a change"
+        );
+        assert_eq!(
+            read("SELECT name||' '||observed_at FROM pm_items WHERE id=?1").as_deref(),
+            Some("Renamed 9")
+        );
+        conn.execute("DELETE FROM tracker_items WHERE id=?1", [&issue])
+            .unwrap();
+        assert_eq!(read("SELECT id FROM pm_items WHERE id=?1"), None);
+
+        // Git's journal keeps its references across both names.
+        conn.execute_batch(&format!(
+            "INSERT INTO planning_destinations(repo,id,endpoint,reference) VALUES('/repo','origin','/remote','refs/lf/plan');
+             INSERT INTO planning_peer_changes(id,record_table,mutation)
+             VALUES('{issue}','tasks','{{\"edit\":{{\"target\":\"t\",\"change\":{{\"field\":\"name\"}}}},\"clock\":1,\"parents\":[]}}');
+             INSERT INTO planning_peer_observed(id) VALUES('{issue}');
+             INSERT INTO planning_peer_routes(mutation_id,repo,destination) VALUES('{issue}','/repo','origin');
+             UPDATE git_tracker_destinations SET fetch_error='offline';"
+        ))
+        .unwrap();
+        assert_eq!(
+            read("SELECT field FROM git_tracker_changes WHERE id IN (SELECT id FROM git_tracker_seen) AND id IN (SELECT mutation_id FROM git_tracker_routes) AND id=?1").as_deref(),
+            Some("name")
+        );
+        let error: String = conn
+            .query_row(
+                "SELECT acquisition_error FROM planning_destinations",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(error, "offline");
+        conn.execute_batch(
+            "DELETE FROM git_tracker_routes; DELETE FROM git_tracker_seen; DELETE FROM git_tracker_changes;",
+        )
+        .unwrap();
+        assert_eq!(
+            read("SELECT id FROM planning_peer_changes WHERE id=?1"),
+            None
+        );
+    }
+
+    #[test]
+    fn tracker_table_mirror_carries_project_membership_events_and_git_conflicts() {
+        let (_dir, store) = store();
+        let conn = store.conn.lock().unwrap();
+        conn.execute_batch(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES('wave','work','/repo',1);
+             INSERT INTO pm_projects(repo,provider,id,observed_at) VALUES('/repo','linear','p',1);
+             INSERT INTO pm_wave_projects VALUES('wave','p',1);
+             INSERT INTO pm_wave_sync VALUES('wave','linear','initiative',1);
+             INSERT INTO pm_issue_changes VALUES('issue',1,0);
+             INSERT INTO planning_peer_imports VALUES('/repo','origin','a');
+             INSERT INTO planning_peer_conflicts VALUES('/repo','tasks','task','reason',1);",
+        )
+        .unwrap();
+        for (current, released, field, before, after) in [
+            ("tracker_projects", "pm_projects", "observed_at", "1", "2"),
+            (
+                "tracker_wave_projects",
+                "pm_wave_projects",
+                "position",
+                "1",
+                "2",
+            ),
+            ("tracker_wave_sync", "pm_wave_sync", "synced_at", "1", "2"),
+            ("tracker_events", "pm_issue_changes", "removed", "0", "1"),
+            (
+                "git_tracker_imports",
+                "planning_peer_imports",
+                "revision",
+                "a",
+                "b",
+            ),
+            (
+                "git_tracker_conflicts",
+                "planning_peer_conflicts",
+                "active",
+                "1",
+                "0",
+            ),
+        ] {
+            let read = |table| {
+                conn.query_row(
+                    &format!("SELECT CAST({field} AS TEXT) FROM {table}"),
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()
+                .unwrap()
+            };
+            assert_eq!(read(current).as_deref(), Some(before), "{current}");
+            conn.execute(&format!("UPDATE {current} SET {field}=?1"), [after])
+                .unwrap();
+            assert_eq!(read(released).as_deref(), Some(after), "{released}");
+            conn.execute(&format!("DELETE FROM {released}"), [])
+                .unwrap();
+            assert_eq!(read(current), None, "{current}");
+        }
     }
 
     fn planning_moved(conn: &rusqlite::Connection, sql: &str, id: &str) -> i64 {
@@ -415,12 +627,15 @@ mod tests {
         let (_dir, store) = store();
         let conn = store.conn.lock().unwrap();
         for table in [
-            "pm_items",
-            "pm_projects",
+            "tracker_items",
+            "tracker_projects",
             "projects",
             "tasks",
             "task_changes",
             "task_state_deliveries",
+            "tracker_actions",
+            "plan_carriers",
+            "plan_changes",
         ] {
             let trigger: String = conn
                 .query_row(
@@ -487,45 +702,35 @@ mod tests {
     }
 
     #[test]
-    fn usage_moves_only_its_own_revision_and_every_fact_moves_sessions() {
+    fn history_and_turns_move_only_the_history_revision() {
         let (_dir, store) = store();
         session(&store, "conversation");
         let before = store.revisions().unwrap();
-        event(&store, "conversation", "usage", "turn", "{}");
+        store.record_turn_start("conversation", &"thread".into(), "turn", 1);
+        store.record_turn_completion(
+            "conversation",
+            &"thread".into(),
+            "turn",
+            2,
+            &serde_json::json!({"status": "completed"}),
+        );
+        store.append_history(
+            "observation",
+            &[crate::history::Row::observed(
+                "conversation",
+                "store-gap:1:2".into(),
+                None,
+                1,
+                "{}".into(),
+            )],
+        );
+        let after = store.revisions().unwrap();
         assert_eq!(
-            store.revisions().unwrap(),
+            after,
             StoreRevisions {
-                usage: before.usage + 1,
+                history: before.history + 3,
                 ..before
             }
         );
-        // Facts share the `observed` kind and receipt keys; unreadable evidence counts.
-        for (kind, receipt, payload) in [
-            ("observed", "input:manifest.json", "{}".to_owned()),
-            ("observed", "input:terminal.json", "{}".to_owned()),
-            ("observed", "attachment:0:exit", "{}".to_owned()),
-            ("started", "turn", "{}".to_owned()),
-            ("completed", "turn", "{}".to_owned()),
-            (
-                "observed",
-                "input:events.jsonl:20",
-                evidence("provider_session_observed"),
-            ),
-            (
-                "observed",
-                "input:events.jsonl:21",
-                evidence("provider_attempt_finished"),
-            ),
-            ("observed", "input:events.jsonl:22", "{".to_owned()),
-            ("observed", "input:silence:23", "{}".to_owned()),
-        ] {
-            let sessions = store.revisions().unwrap().sessions;
-            event(&store, "conversation", kind, receipt, &payload);
-            assert_eq!(
-                store.revisions().unwrap().sessions,
-                sessions + 1,
-                "{kind} {receipt}"
-            );
-        }
     }
 }

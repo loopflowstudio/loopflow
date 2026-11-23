@@ -226,6 +226,7 @@ pub struct ReleaseStatusResult {
 #[non_exhaustive]
 pub enum ReleaseNotesDegradation {
     MissingCli,
+    /// Retained for archived release-note markers from managed account routing.
     Cooldown,
     Quota,
     Authentication,
@@ -1975,7 +1976,7 @@ fn wait_for_release_repair(landing: &loopflow_storage::pr_landing::PrLanding) ->
                     landing.pr_number
                 ),
                 continuation: format!(
-                    "observe landing {} and retry after its repair Process exits",
+                    "observe landing {} and retry after its repair run exits",
                     landing.id
                 ),
             });
@@ -2448,7 +2449,8 @@ fn read_bounded_revision_text(
 fn classify_release_notes_degradation(err: &CommandError) -> Option<ReleaseNotesDegradation> {
     let stderr = err.stderr.to_lowercase();
     let message = err.message.to_lowercase();
-    let combined = format!("{stderr}\n{message}");
+    // Codex writes `You’ve`.
+    let combined = format!("{stderr}\n{message}").replace('’', "'");
     let mentions_agent_cli = combined.contains("claude")
         || combined.contains("codex")
         || combined.contains("opencode")
@@ -2461,17 +2463,14 @@ fn classify_release_notes_degradation(err: &CommandError) -> Option<ReleaseNotes
     if mentions_agent_cli && missing_binary {
         return Some(ReleaseNotesDegradation::MissingCli);
     }
-    if combined.contains("account subscription limit")
-        || combined.contains("usage limit reached")
-        || combined.contains("usage limit has been reached")
-        || combined.contains("you've hit your usage limit")
-        || combined.contains("subscription quota")
-        || combined.contains("quota exceeded")
-        || combined.contains("insufficient_quota")
+    if combined.contains("provider usage limit")
+        || combined
+            .lines()
+            .any(|line| crate::agent::subscription_limit_text(line).is_some())
     {
         return Some(ReleaseNotesDegradation::Quota);
     }
-    if combined.contains("account credential invalidated")
+    if combined.contains("provider credential invalidated")
         || combined.contains("no authenticated")
         || combined.contains("not authenticated")
         || combined.contains("not logged in")
@@ -2482,12 +2481,6 @@ fn classify_release_notes_degradation(err: &CommandError) -> Option<ReleaseNotes
         || combined.contains("status 401")
     {
         return Some(ReleaseNotesDegradation::Authentication);
-    }
-    if combined.contains("no eligible managed")
-        || combined.contains("cooling down")
-        || combined.contains("cooldown")
-    {
-        return Some(ReleaseNotesDegradation::Cooldown);
     }
     if combined.contains("provider rate limit")
         || combined.contains("too many requests")
@@ -4747,6 +4740,16 @@ fn run_output(repo: &Path, command: &str, args: &[&str]) -> OpsResult<Output> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn archived_account_cooldown_notes_remain_readable() {
+        assert_eq!(
+            parse_release_notes_status(
+                "<!-- loopflow:release-notes=degraded;reason=cooldown;gate=safe -->"
+            ),
+            ReleaseNotesStatus::Degraded(ReleaseNotesDegradation::Cooldown)
+        );
+    }
 
     fn published(tag: &str, days_ago: i64, is_latest: bool) -> PublishedRelease {
         PublishedRelease {

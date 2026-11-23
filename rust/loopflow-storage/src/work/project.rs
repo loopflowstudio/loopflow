@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::linear_records::{LinearBindingError, LinearProjectId};
+use crate::planning::{LinearBindingError, LinearProjectId};
 use crate::work::task::{TaskEventKind, TaskId};
 pub use loopflow_model::durable::ProjectId;
 use loopflow_model::id::WaveId;
@@ -51,10 +51,12 @@ pub struct Project {
     pub krs: Vec<ProjectKR>,
     pub metric_targets: Vec<crate::metric::MetricTarget>,
     pub status: ProjectStatus,
-    /// Optional Linear binding, not a second owner of this record.
-    pub linear_id: Option<LinearProjectId>,
-    /// Acquisition time of the retained Linear observation, never a write clock.
-    pub pm_snapshot_synced_at: Option<i64>,
+    /// The record’s ID in the repository's tracker.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_id: Option<LinearProjectId>,
+    /// Time of the last successful tracker refresh.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_synced_at: Option<i64>,
     /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
     #[schemars(with = "String")]
@@ -138,8 +140,8 @@ impl HistoricalFailure {
 }
 
 impl Project {
-    pub fn linear_id(&self) -> Result<&LinearProjectId, LinearBindingError> {
-        self.linear_id
+    pub fn tracker_id(&self) -> Result<&LinearProjectId, LinearBindingError> {
+        self.tracker_id
             .as_ref()
             .ok_or(LinearBindingError::NoLinearMapping)
     }

@@ -1,0 +1,13 @@
+{
+  "type": "request",
+  "id": "measured",
+  "operation": {
+    "kind": "performance.read",
+    "query": {
+      "kind": "machine.self"
+    }
+  },
+  "select": null,
+  "sender": null,
+  "request_id": null
+}

@@ -1,13 +1,9 @@
-use crate::journal::{ProcessIdentityEvidence, ProcessReceipt, PROCESS_RECEIPT_ROOT};
-use crate::process::attachment;
 use crate::store::migrations::{apply_pending_migrations, apply_sqlite};
 use crate::work::wave::metrics::MetricObservation;
 use fs2::FileExt;
-use loopflow_model::id::LfProcessId;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::test_fixture::session_fence_file;
 use rusqlite::{params, Connection};
-use std::fs;
 const SESSION: &str = "SESSION_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const PROCESS: &str = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB";
 const TRACE: &str = "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC";
@@ -17,180 +13,13 @@ fn released() -> (tempfile::TempDir, Connection) {
         &crate::store::migrations::build(),
     )
 }
-fn receipt(
-    home: &std::path::Path,
-    process: &str,
-    trace: &str,
-    pid: u32,
-    started_at: i64,
-) -> std::path::PathBuf {
-    let root = home.join(PROCESS_RECEIPT_ROOT);
-    fs::create_dir_all(&root).unwrap();
-    let path = root.join(format!("{process}.json"));
-    fs::write(
-        &path,
-        serde_json::to_vec(&ProcessReceipt {
-            schema_version: 1,
-            lf_process_id: process.into(),
-            trace_id: trace.into(),
-            pid,
-            started_at,
-        })
-        .unwrap(),
-    )
-    .unwrap();
-    path
-}
-
-#[test]
-fn canonical_ids_receipt_failure_stays_unknown_until_repaired() {
-    let (home, conn) = released();
-    let path = receipt(home.path(), PROCESS, TRACE, std::process::id(), 1);
-    for bytes in [
-        b"{broken".as_slice(),
-        br#"{"schema_version":2,"exec_id":"x","trace_id":"y","pid":1,"started_at":1}"#,
-        br#"{"schema_version":1,"exec_id":"dddddddd-dddd-4ddd-8ddd-dddddddddddd","trace_id":"CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC","pid":1,"started_at":1}"#,
-        br#"{"schema_version":1,"exec_id":"BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB","trace_id":"dddddddd-dddd-4ddd-8ddd-dddddddddddd","pid":1,"started_at":1}"#,
-    ] {
-        fs::write(&path, bytes).unwrap();
-        let error = apply_sqlite(&conn).unwrap_err();
-        assert!(
-            error.to_string().contains("Unknown ownership evidence"),
-            "{error}"
-        );
-        assert!(conn
-            .prepare("SELECT receipt_locator FROM processes")
-            .is_err());
-        assert_eq!(fs::read(&path).unwrap(), bytes);
-    }
-    fs::remove_file(&path).unwrap();
-    fs::create_dir(&path).unwrap();
-    assert!(apply_sqlite(&conn)
-        .unwrap_err()
-        .to_string()
-        .contains("Unknown ownership evidence"));
-    fs::remove_dir(&path).unwrap();
-    receipt(home.path(), PROCESS, TRACE, std::process::id(), 1);
-    apply_sqlite(&conn).unwrap();
-}
-
-#[test]
-fn canonical_ids_live_receipt_defers_then_normal_settlement_allows_upgrade() {
-    let (home, conn) = released();
-    let pid = std::process::id();
-    let started_at = crate::journal::process_started_at(pid).unwrap().unwrap();
-    let path = receipt(home.path(), PROCESS, TRACE, pid, started_at);
-    conn.execute(
-        "UPDATE processes SET completed_at=NULL,started_at=?1",
-        [started_at],
-    )
-    .unwrap();
-    let error = apply_sqlite(&conn).unwrap_err();
-    assert!(
-        error.to_string().contains("Live ownership evidence"),
-        "{error}"
-    );
-    conn.execute("UPDATE processes SET completed_at=?1", [started_at + 1])
-        .unwrap();
-    // Normal process shutdown removes its receipt after recording completion.
-    fs::remove_file(path).unwrap();
-    apply_sqlite(&conn).unwrap();
-}
-
-#[test]
-fn canonical_ids_retained_receipt_and_trace_locator_survive_identity_change() {
-    let (home, conn) = released();
-    let path = receipt(home.path(), PROCESS, TRACE, std::process::id(), 1);
-    let original = fs::read(&path).unwrap();
-    apply_sqlite(&conn).unwrap();
-    let store = SqliteStore::open_processes_read_only(
-        &home.path().join("loopflow.db"),
-        crate::store::token_key::encryption_key,
-    )
-    .unwrap();
-    let id = LfProcessId::parse(&PROCESS.to_ascii_lowercase()).unwrap();
-    let record = store.lf_process(&id).unwrap().unwrap();
-    let retained_path = attachment::process_receipt_path(&store, &id)
-        .unwrap()
-        .unwrap();
-    assert_eq!(retained_path.file_name(), path.file_name());
-    assert_eq!(
-        retained_path.canonicalize().unwrap(),
-        path.canonicalize().unwrap()
-    );
-    let retained = crate::journal::read_process_receipt(&retained_path)
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        crate::journal::lf_process_evidence(&record, &Ok(Some(retained)), |pid, start| {
-            assert_eq!((pid, start), (std::process::id(), 1));
-            ProcessIdentityEvidence::Dead
-        }),
-        ProcessIdentityEvidence::Dead
-    );
-    assert_eq!(
-        store
-            .journal_trace_locator(&record.trace_id)
-            .unwrap()
-            .unwrap(),
-        TRACE
-    );
-    assert_eq!(fs::read(&path).unwrap(), original);
-    conn.execute(
-        "UPDATE processes SET started_at=?1,completed_at=NULL",
-        [time::OffsetDateTime::now_utc().unix_timestamp()],
-    )
-    .unwrap();
-    assert_eq!(
-        crate::journal::lf_evidence(&store, &id),
-        ProcessIdentityEvidence::Dead
-    );
-    assert!(conn
-        .execute("UPDATE processes SET receipt_locator='other'", [])
-        .is_err());
-    let child = LfProcessId::new();
-    conn.execute(
-        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?2,3)",
-        params![child, record.trace_id],
-    )
-    .unwrap();
-    assert_eq!(
-        conn.query_row(
-            "SELECT journal_trace_locator FROM processes WHERE id=?1",
-            [&child],
-            |r| r.get::<_, String>(0)
-        )
-        .unwrap(),
-        TRACE
-    );
-}
-
-#[test]
-fn canonical_ids_pruning_uses_retained_receipt_owner_and_requires_completion() {
-    let (home, conn) = released();
-    let path = receipt(home.path(), PROCESS, TRACE, std::process::id(), 1);
-    apply_sqlite(&conn).unwrap();
-    conn.execute("UPDATE processes SET completed_at=NULL", [])
-        .unwrap();
-    assert_eq!(
-        crate::journal::prune_process_receipts_at(home.path(), &[std::process::id()]).unwrap(),
-        0
-    );
-    assert!(path.exists());
-    conn.execute("UPDATE processes SET completed_at=2", [])
-        .unwrap();
-    assert_eq!(
-        crate::journal::prune_process_receipts_at(home.path(), &[std::process::id()]).unwrap(),
-        1
-    );
-    assert!(!path.exists());
-}
-
 #[test]
 fn canonical_ids_changed_claim_waits_for_canonical_live_caller() {
-    let (home, conn) = released();
+    let (_home, conn) = released();
     let pid = std::process::id();
-    let started_at = crate::journal::process_started_at(pid).unwrap().unwrap();
+    let started_at = crate::process::os_process::process_started_at(pid)
+        .unwrap()
+        .unwrap();
     let process = PROCESS.to_ascii_lowercase();
     let trace = TRACE.to_ascii_lowercase();
     let session = SESSION.to_ascii_lowercase();
@@ -198,15 +27,14 @@ fn canonical_ids_changed_claim_waits_for_canonical_live_caller() {
     conn.execute("UPDATE agent_sessions SET id=?1", [&session])
         .unwrap();
     conn.execute(
-        "UPDATE processes SET id=?1,trace_id=?2,started_at=?3,completed_at=NULL",
-        params![process, trace, started_at],
+        "UPDATE processes SET id=?1,trace_id=?2,started_at=?3,completed_at=NULL,pid=?4,os_started_at=?3",
+        params![process, trace, started_at, pid],
     )
     .unwrap();
     conn.execute("INSERT INTO processes(id,trace_id,kind,parent_lf_process_id,attached_lf_process_id,attachment_token,agent_session_id,started_at,completed_at)
         VALUES(?1,?2,'agent',?3,?3,'EEEEEEEE-EEEE-4EEE-8EEE-EEEEEEEEEEEE',?4,1,2)", params![agent,trace,process,session]).unwrap();
     conn.execute("UPDATE agent_sessions SET agent_process_id=?1", [agent])
         .unwrap();
-    let path = receipt(home.path(), &process, &trace, pid, started_at);
     let error = apply_sqlite(&conn).unwrap_err();
     assert!(
         error
@@ -219,7 +47,6 @@ fn canonical_ids_changed_claim_waits_for_canonical_live_caller() {
         params![started_at + 1, process],
     )
     .unwrap();
-    fs::remove_file(path).unwrap();
     apply_sqlite(&conn).unwrap();
 }
 
@@ -227,7 +54,9 @@ fn canonical_ids_changed_claim_waits_for_canonical_live_caller() {
 fn canonical_ids_canonical_live_claim_does_not_defer_upgrade() {
     let (home, conn) = released();
     let pid = std::process::id();
-    let started_at = crate::journal::process_started_at(pid).unwrap().unwrap();
+    let started_at = crate::process::os_process::process_started_at(pid)
+        .unwrap()
+        .unwrap();
     conn.execute("UPDATE agent_sessions SET id=lower(id)", [])
         .unwrap();
     conn.execute("UPDATE processes SET id=lower(id),trace_id=lower(trace_id),pid=?1,started_at=?2,completed_at=NULL", params![pid,started_at]).unwrap();
@@ -243,10 +72,14 @@ fn canonical_ids_canonical_live_claim_does_not_defer_upgrade() {
     )
     .unwrap();
     let store = home.path().join("loopflow.db");
-    let reader =
-        SqliteStore::open_processes_read_only(&store, crate::store::token_key::encryption_key)
-            .unwrap();
-    let original_claim = reader.session_attachment(&session).unwrap().unwrap();
+    // The released schema keeps this claim on the agent's Process row.
+    let holder = loopflow_model::id::LfProcessId::parse(&PROCESS.to_ascii_lowercase()).unwrap();
+    let original_claim = crate::process::SessionAttachment {
+        agent_process_id: loopflow_model::id::AgentProcessId::parse(agent).unwrap(),
+        lf_process_id: Some(holder.clone()),
+        token: loopflow_model::id::AttachmentToken::parse(token).unwrap(),
+        launcher_lf_process_id: holder,
+    };
     let fence = session_fence_file(&store, &SESSION.to_ascii_lowercase()).unwrap();
     FileExt::lock_shared(&fence).unwrap();
     apply_sqlite(&conn).unwrap();
@@ -261,8 +94,7 @@ fn canonical_ids_canonical_live_claim_does_not_defer_upgrade() {
         .try_lock_exclusive()
         .is_err());
     let store =
-        SqliteStore::open_processes_read_only(&store, crate::store::token_key::encryption_key)
-            .unwrap();
+        SqliteStore::open_read_only(&store, crate::store::token_key::encryption_key).unwrap();
     let claim = store.session_attachment(&session).unwrap().unwrap();
     assert_eq!(claim, original_claim);
     assert_eq!(claim.token.as_str(), token);
@@ -536,7 +368,6 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
         ],
         vec!["session", "history", SESSION, "--json"],
         vec!["history", "show", SESSION, "--json"],
-        vec!["history", "show", PROCESS, "--json"],
     ] {
         let output = lf(&args);
         assert!(

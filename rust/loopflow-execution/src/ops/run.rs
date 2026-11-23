@@ -36,7 +36,7 @@ pub fn render_task_context(
     );
     if let Some(project) = project {
         context.push_str(&format!(
-            "\n\nChapter plan: {} (source {})\n{}",
+            "\n\nProject: {} (source {})\n{}",
             project.name,
             project.id,
             render_project_context(project)
@@ -47,7 +47,7 @@ pub fn render_task_context(
     }
     context.push_str(&format!(
         "\nTask directive snapshot synced at: {}\nWorktree: {}\nBranch: {}\nBase commit: {}",
-        task.pm_snapshot_synced_at
+        task.tracker_synced_at
             .map(|at| at.to_string())
             .unwrap_or_else(|| "not observed".into()),
         task.worktree
@@ -229,15 +229,12 @@ async fn bind_selected_work(
         };
         let work = WorkRef::Task(task.id.clone());
         let pr = store.active_task_pr(&task.id).await.map_err(run_error)?;
-        let mut context = render_task_context(
+        let context = render_task_context(
             &task,
             project.as_ref(),
             pr.as_ref(),
             wave.as_ref().map(Wave::slug),
         );
-        if let Ok(Some(graph)) = crate::store::task_work::task_graph(&store.sqlite, &task.id) {
-            context.push_str(&format!("\n\n{}", graph.guidance(&task.identifier)));
-        }
         let cwd = task.worktree()?.clone();
         return Ok(WorkBinding {
             source: selected.source,
@@ -348,7 +345,6 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{resolve_work_binding, resolve_work_selection, WorkSelection};
-    use crate::linear::LinearProject;
     use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::store::SharedStore;
     use crate::store::StorageConfig;
@@ -356,6 +352,7 @@ mod tests {
     use crate::work::wave::Wave;
     use loopflow_model::durable::{ProjectId, TaskId, WorkRef};
     use loopflow_model::id::WaveId;
+    use loopflow_storage::planning::TrackerProject;
     use loopflow_storage::work::project::Project;
     use loopflow_storage::work::project::ProjectKR;
     use loopflow_storage::work::task::{LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
@@ -378,13 +375,13 @@ mod tests {
 
             summary: String::new(),
             status: loopflow_storage::work::project::ProjectStatus::Started,
-            linear_id: Some(LinearProjectId::new(planning_id).unwrap()),
+            tracker_id: Some(LinearProjectId::new(planning_id).unwrap()),
             slug: slug.to_string(),
             name: slug.to_string(),
             description: "Ship the requested behavior.".to_string(),
             krs: Vec::new(),
             metric_targets: Vec::new(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+            tracker_synced_at: Some(now.unix_timestamp()),
 
             wave_id: wave.id().clone(),
             created_at: now,
@@ -403,13 +400,13 @@ mod tests {
             id: TaskId::new(),
 
             revision: 0,
-            linear_id: Some(LinearIssueId::new("runtime-research").unwrap()),
+            tracker_id: Some(LinearIssueId::new("runtime-research").unwrap()),
             identifier: "LOO-267".to_string(),
             title: "Research the runtime".to_string(),
             description: "Compare independent findings.".to_string(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+            tracker_synced_at: Some(now.unix_timestamp()),
 
-            pm_writeback: LinearWritebackState::Current,
+            tracker_writeback: LinearWritebackState::Current,
             wave_id: Some(wave.id().clone()),
             project_id: Some(project.id.clone()),
             worktree: Some(worktree),
@@ -449,7 +446,7 @@ mod tests {
             &store.sqlite,
             wave.id(),
             None,
-            project.linear_id.as_ref().unwrap().as_str(),
+            project.tracker_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
@@ -473,7 +470,7 @@ mod tests {
             &store.sqlite,
             wave.id(),
             None,
-            project.linear_id.as_ref().unwrap().as_str(),
+            project.tracker_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
@@ -499,7 +496,6 @@ mod tests {
                 task: Some(task.id.as_str()),
                 wave: None,
             },
-            None,
             None,
         )
         .await;
@@ -543,8 +539,7 @@ mod tests {
         let project = project(&wave, "runtime", "project-runtime");
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, repo.path().to_path_buf()).await;
-        let inferred =
-            explain_context(&store, repo.path(), WorkSelection::default(), None, None).await;
+        let inferred = explain_context(&store, repo.path(), WorkSelection::default(), None).await;
         assert_eq!(
             inferred.task,
             ContextFact::Bound {
@@ -559,7 +554,6 @@ mod tests {
                 task: Some(task.identifier.as_str()),
                 wave: None,
             },
-            None,
             None,
         )
         .await;
@@ -599,8 +593,7 @@ mod tests {
                 .id,
             task.id
         );
-        let unbound =
-            explain_context(&store, other.path(), WorkSelection::default(), None, None).await;
+        let unbound = explain_context(&store, other.path(), WorkSelection::default(), None).await;
         assert_eq!(unbound.task, ContextFact::Unbound);
         // Explaining a plain clone does not mint a plan or associate by remote.
         assert_eq!(unbound.repository, ContextFact::Unbound);
@@ -624,7 +617,7 @@ mod tests {
             task: Some(task.id.as_str()),
             wave: None,
         };
-        let report = explain_context(&store, directory.path(), selection(), None, None).await;
+        let report = explain_context(&store, directory.path(), selection(), None).await;
         assert_eq!(
             report.checkout,
             ContextFact::Bound {
@@ -645,7 +638,7 @@ mod tests {
             [task.id.as_str()],
         )
         .unwrap();
-        let report = explain_context(&store, directory.path(), selection(), None, None).await;
+        let report = explain_context(&store, directory.path(), selection(), None).await;
         assert_eq!(
             report.execution_machine,
             ContextFact::Unavailable {
@@ -658,25 +651,17 @@ mod tests {
     async fn explanation_missing_subjects_are_unavailable_not_unbound() {
         use crate::ops::context::{explain_context, ContextFact};
         let (directory, store) = test_store().await;
-        for (task, session, process) in [
-            (Some("absent"), None, None),
-            (None, Some("absent"), None),
-            (None, None, Some("absent")),
-        ] {
+        for (task, session) in [(Some("absent"), None), (None, Some("absent"))] {
             let report = explain_context(
                 &store,
                 directory.path(),
                 WorkSelection { task, wave: None },
                 session,
-                process,
             )
             .await;
             assert!(matches!(report.task, ContextFact::Unavailable { .. }));
             if session.is_some() {
                 assert!(matches!(report.session, ContextFact::Unavailable { .. }));
-            }
-            if process.is_some() {
-                assert!(matches!(report.process, ContextFact::Unavailable { .. }));
             }
         }
     }
@@ -930,7 +915,7 @@ mod tests {
 
         let error = resolve_work_binding(&store, directory.path(), "project:shared")
             .await
-            .expect_err("chapters are not independent operators");
+            .expect_err("projects are not independent operators");
 
         assert!(error.to_string().contains("expected task or wave"));
     }
@@ -1009,14 +994,14 @@ mod tests {
         rusqlite::Connection::open(directory.path().join("loopflow.db"))
             .unwrap()
             .execute(
-                "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES (?1,?2,?3,1)",
-                rusqlite::params![wave.id().as_str(), task.linear_id.as_ref().unwrap().as_str(), task.identifier],
+                "UPDATE tasks SET planning_deleted_at=1 WHERE id=?1",
+                [task.id.as_str()],
             )
             .unwrap();
 
         for selector in [
             task.id.as_str(),
-            task.linear_id.as_ref().unwrap().as_str(),
+            task.tracker_id.as_ref().unwrap().as_str(),
             &task.identifier,
         ] {
             let binding = resolve_work_binding(&store, repo.path(), &format!("task:{selector}"))
@@ -1079,10 +1064,12 @@ mod tests {
             let resumed = crate::journal::with_test_ledger(
                 crate::store::database_path_from_env().unwrap(),
                 || {
-                    crate::harness::native_session::resume_session(
+                    crate::harness::native_session::resume_session_with_env(
                         &capture.artifact_key(),
-                        &history,
-                        false,
+                        Some(&history),
+                        &Default::default(),
+                        None,
+                        crate::harness::LaunchKind::Batch,
                     )
                 },
             );
@@ -1154,7 +1141,6 @@ mod tests {
                 title: "Investigation".into(),
                 title_source: crate::session::TitleSource::Generated,
                 request: None,
-                ready_summary: None,
                 completed_at: None,
                 created_at: 1,
             }
@@ -1181,7 +1167,7 @@ mod tests {
         for selector in [
             task.identifier.as_str(),
             task.id.as_str(),
-            task.linear_id.as_ref().unwrap().as_str(),
+            task.tracker_id.as_ref().unwrap().as_str(),
         ] {
             let rows = crate::store::sessions::conversation_history(
                 &store.sqlite,
@@ -1325,7 +1311,7 @@ mod tests {
             .await
             .unwrap();
         let snapshot = Inventory {
-            projects: vec![LinearProject {
+            projects: vec![TrackerProject {
                 description: None,
                 revision: None,
                 id: "project-api".to_string(),
@@ -1348,7 +1334,6 @@ mod tests {
             .seed_inventory(
                 InventoryFixture {
                     wave_id: wave.id().clone(),
-                    provider: "linear".to_string(),
                     initiative: "initiative-1".to_string(),
                     synced_at: OffsetDateTime::now_utc().unix_timestamp(),
                     snapshot,

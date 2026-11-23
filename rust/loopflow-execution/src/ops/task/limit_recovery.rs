@@ -6,8 +6,8 @@
 //! agent the waiting step was explicitly given, not the one of whoever's read
 //! happened to trigger it.
 
-use crate::journal::ProcessIdentityEvidence;
 use crate::ops::task_execution::task_execution_blockers;
+use crate::store::ProcessIdentityEvidence;
 use crate::store::StoreResult;
 use loopflow_model::durable::TaskId;
 use loopflow_storage::sqlite::{AgentLimitRecovery, SqliteStore};
@@ -48,11 +48,13 @@ pub fn ended_step_recovery(
     let Some(step) = graph.latest() else {
         return Ok(None);
     };
-    if crate::journal::lf_evidence(store, &step.process.id) != ProcessIdentityEvidence::Dead {
+    if crate::process::os_process::step_evidence(&step.run, &graph.run)
+        != ProcessIdentityEvidence::Dead
+    {
         return Ok(None);
     }
     Ok(store
-        .agent_limit_recovery(&step.process.id)?
+        .agent_limit_recovery(&step.run.id)?
         .map(|recovery| (graph.label(step), recovery)))
 }
 
@@ -66,7 +68,6 @@ pub(crate) fn restarts_by_itself(store: &SqliteStore, task: &TaskId) -> OpsResul
 }
 
 /// Start again every waiting run whose wait is over and that `restarts_by_itself`.
-/// A shipping Task's own restart does it, through the same `waiting_on_limit`.
 pub(crate) fn restart_waiting_runs() -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;
@@ -75,11 +76,8 @@ pub(crate) fn restart_waiting_runs() -> OpsResult<()> {
             .sqlite
             .tasks_past_a_limit_wait(now)
             .map_err(task_error)?;
-        let shipping = store.sqlite.local_shipping_tasks().map_err(task_error)?;
         for id in waited {
-            if shipping.iter().any(|(shipped, _)| *shipped == id)
-                || !restarts_by_itself(&store.sqlite, &id)?
-            {
+            if !restarts_by_itself(&store.sqlite, &id)? {
                 continue;
             }
             let Some(wait) = waiting_on_limit(&store.sqlite, &id).map_err(task_error)? else {
@@ -94,7 +92,7 @@ pub(crate) fn restart_waiting_runs() -> OpsResult<()> {
             let Some(worktree) = task.worktree.as_ref().filter(|path| path.is_dir()) else {
                 continue;
             };
-            super::ship::restart_lf_in(
+            super::run_recovery::restart_lf_in(
                 worktree,
                 wait.agent.as_deref(),
                 &["task", "run", &task.identifier],

@@ -41,6 +41,7 @@ pub fn list_children(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
                     .map(ToString::to_string)
                     .unwrap_or_default(),
                 invocation: format!("lf {}", child_path.join(" ")),
+                builtin: None,
             });
         }
     }
@@ -60,12 +61,15 @@ pub fn show(path: &[String], repo: &Path, json: bool) -> Result<()> {
                 kind = entry.kind;
                 output.push_str(&format!("\n{}\n", kind.to_uppercase()));
             }
+            let source = match entry.builtin {
+                Some(relation) => format!("{}, {}", entry.source, relation.describe()),
+                None => entry.source,
+            };
             output.push_str(&format!(
-                "  {:<26} {}\n    {} ({})\n",
+                "  {:<26} {}\n    {} ({source})\n",
                 entry.name,
                 entry.description.lines().next().unwrap_or_default(),
                 entry.invocation,
-                entry.source
             ));
         }
         output

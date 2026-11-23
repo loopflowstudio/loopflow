@@ -122,7 +122,7 @@ pub fn resolve_manifest(
         }
     }
     let database = database_in(lf_home).map_err(std::io::Error::other)?;
-    let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+    let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
         &database,
         crate::store::token_key::encryption_key,
     )
@@ -150,7 +150,7 @@ pub fn resolve_manifest(
 
 pub fn read_provider_session(dir: &Path) -> std::io::Result<Option<ProviderSessionRef>> {
     let input = input_id_from_dir(dir)?;
-    loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+    loopflow_storage::sqlite::SqliteStore::open_read_only(
         &row_database(dir).map_err(std::io::Error::other)?,
         crate::store::token_key::encryption_key,
     )
@@ -255,6 +255,9 @@ pub fn read_manifest(dir: &Path) -> std::io::Result<SessionCaptureManifest> {
     Ok(manifest)
 }
 
+/// An attempt that ended so says nothing its turn rows do not.
+const COMPLETED: &str = "completed";
+
 /// Append-only capture data. This value has no attachment or process authority.
 #[derive(Debug)]
 pub struct SessionRecorder {
@@ -264,9 +267,14 @@ pub struct SessionRecorder {
     provider_observation_pending: bool,
     attempt: u32,
     attempt_started: bool,
+    /// The current attempt's start, at its stream position: kept only when
+    /// the attempt is retried or does not complete, since an ordinary turn's
+    /// row in history already says when it ran.
+    attempt_start: Option<(u64, OffsetDateTime, CaptureFact)>,
     event_seq: u64,
-    /// Where facts are kept; none for a mechanical command's capture.
-    history: Option<(
+    /// The store the input's row and its history are kept in; none for a
+    /// mechanical command's capture.
+    store: Option<(
         loopflow_storage::sqlite::SqliteStore,
         crate::session::LfSession,
     )>,
@@ -279,7 +287,7 @@ pub struct SessionRecorder {
 
 impl SessionRecorder {
     fn from_manifest(manifest: SessionCaptureManifest, dir: PathBuf) -> Self {
-        let history = if manifest.harness == "loopflow" {
+        let store = if manifest.harness == "loopflow" {
             Ok(None)
         } else {
             row_store(&dir).and_then(|store| {
@@ -287,11 +295,11 @@ impl SessionRecorder {
                 Ok(session.map(|session| (store, session)))
             })
         };
-        let history = history.unwrap_or_else(|error| {
+        let store = store.unwrap_or_else(|error| {
             tracing::warn!(%error, "Session history unavailable");
             None
         });
-        if let Some((store, session)) = &history {
+        if let Some((store, session)) = &store {
             // Replay reads the prompt from the capture's own manifest file.
             let retained = SessionCaptureManifest {
                 process: None,
@@ -318,8 +326,9 @@ impl SessionRecorder {
             provider_observation_pending: false,
             attempt: 1,
             attempt_started: false,
+            attempt_start: None,
             event_seq: 0,
-            history,
+            store,
             previous_event: None,
             telemetry_warned: false,
             terminal_recorded: false,
@@ -327,30 +336,21 @@ impl SessionRecorder {
         }
     }
 
+    /// Publish the conversation `lf resume` reopens. A failed write is retried
+    /// at the next observation even when nothing changed.
     pub fn observe_provider(
         &mut self,
         session: Option<&AgentSessionId>,
-        account: Option<&crate::store::ProviderAccountId>,
-        account_changed: bool,
         thread_changed: bool,
     ) -> std::io::Result<()> {
-        let retry = self.provider_observation_pending;
+        if !(thread_changed || self.provider_observation_pending) {
+            return Ok(());
+        }
+        let Some(session) = session else {
+            return Ok(());
+        };
         self.provider_observation_pending = true;
-        if account_changed || retry {
-            self.record_fact(CaptureFact::ProviderAccountSelected {
-                attempt_key: self.attempt_key(),
-                account_id: account.cloned(),
-            })?;
-        }
-        if thread_changed || retry {
-            if let Some(session) = session {
-                write_provider_session(&self.dir, session, account.cloned())?;
-                self.record_fact(CaptureFact::ProviderSessionObserved {
-                    attempt_key: self.attempt_key(),
-                    agent_session: session.clone(),
-                })?;
-            }
-        }
+        write_provider_session(&self.dir, session, None)?;
         self.provider_observation_pending = false;
         Ok(())
     }
@@ -359,23 +359,37 @@ impl SessionRecorder {
         &mut self,
         provider: &str,
         model: Option<&str>,
-        account_id: Option<&crate::store::ProviderAccountId>,
     ) -> std::io::Result<()> {
         if self.attempt_started {
             return Ok(());
         }
         self.attempt_started = true;
-        self.record_fact(CaptureFact::ProviderAttemptStarted {
-            provider: provider.to_owned(),
-            model: model.map(str::to_owned),
-            account_id: account_id.cloned(),
-            attempt_key: self.attempt_key(),
-        })
+        let (seq, at) = self.next_position()?;
+        self.attempt_start = Some((
+            seq,
+            at,
+            CaptureFact::ProviderAttemptStarted {
+                provider: provider.to_owned(),
+                model: model.map(str::to_owned),
+                account_id: None,
+                attempt_key: self.attempt_key(),
+            },
+        ));
+        Ok(())
     }
 
+    /// Keep how the current attempt ended, with its start, unless it
+    /// completed: then history holds nothing the turn's row does not.
     fn finish_attempt(&mut self, outcome: &str) -> std::io::Result<()> {
         if !self.attempt_started {
             return Ok(());
+        }
+        let start = self.attempt_start.take();
+        if outcome == COMPLETED {
+            return Ok(());
+        }
+        if let Some((seq, at, fact)) = start {
+            self.keep_fact(seq, at, &fact)?;
         }
         self.record_fact(CaptureFact::ProviderAttemptFinished {
             attempt_key: self.attempt_key(),
@@ -387,13 +401,12 @@ impl SessionRecorder {
         &mut self,
         provider: &str,
         model: Option<&str>,
-        account_id: Option<&crate::store::ProviderAccountId>,
     ) -> std::io::Result<()> {
         let finish_error = self.finish_attempt("failed").err();
         self.provider_observation_pending = false;
         self.attempt += 1;
         self.attempt_started = false;
-        let start_error = self.start_attempt(provider, model, account_id).err();
+        let start_error = self.start_attempt(provider, model).err();
         match (finish_error, start_error) {
             (None, None) => Ok(()),
             (Some(error), None) | (None, Some(error)) => Err(error),
@@ -407,21 +420,38 @@ impl SessionRecorder {
         format!("attempt-{}", self.attempt)
     }
 
-    /// Keep how a turn ended; any other event only ticks the silence clock.
+    /// Keep a turn that did not complete and any error, the error also on
+    /// the input's row for the Graph; any other event only ticks the silence
+    /// clock.
     pub(crate) fn record_conversation(&mut self, event: ConversationEvent) -> std::io::Result<()> {
         let end = match event {
-            ConversationEvent::TurnCompleted { turn_id, status } => {
+            ConversationEvent::TurnCompleted { turn_id, status }
+                if status != loopflow_model::chat::types::Lifecycle::Completed =>
+            {
                 TurnEnd::TurnCompleted { turn_id, status }
             }
             ConversationEvent::Error {
                 code,
                 message,
                 evidence,
-            } => TurnEnd::Error {
-                code,
-                message,
-                evidence: evidence.map(Box::new),
-            },
+            } => {
+                let error = format!("{code}: {message}");
+                let kept = self.record_fact(CaptureFact::Conversation {
+                    event: TurnEnd::Error {
+                        code,
+                        message,
+                        evidence: evidence.map(Box::new),
+                    },
+                });
+                if let Some((store, _)) = &self.store {
+                    if let Err(error) =
+                        store.record_input_error(&self.manifest.artifact_key, &error)
+                    {
+                        self.warn_telemetry(std::io::Error::other(error));
+                    }
+                }
+                return kept;
+            }
             _ => return self.next_position().map(drop),
         };
         self.record_fact(CaptureFact::Conversation { event: end })
@@ -453,7 +483,7 @@ impl SessionRecorder {
     }
 
     fn keep_fact(&self, seq: u64, at: OffsetDateTime, fact: &CaptureFact) -> std::io::Result<()> {
-        let Some((store, session)) = &self.history else {
+        let Some((store, session)) = &self.store else {
             return Ok(());
         };
         store
@@ -486,8 +516,9 @@ impl SessionRecorder {
         };
         let terminal = write_terminal(&self.dir, terminal)?;
         self.terminal_recorded = true;
-        // The receipt file records settlement. A missed store observation
-        // must not fail the exit.
+        // The receipt file records settlement, which no turn row says: a
+        // completed turn is not the command's outcome. A missed store
+        // observation must not fail the exit.
         if self.manifest.harness != "loopflow" {
             let input = &self.manifest.artifact_key;
             let observed = row_store(&self.dir).and_then(|store| {
@@ -526,6 +557,15 @@ impl SessionRecorder {
 }
 
 /// The store that holds the conversation for the capture recorded at `dir`.
+/// The final answer of the input recorded at `dir`, from its provider's
+/// transcript.
+///
+/// # Errors
+/// When the store cannot be opened or the transcript cannot be read.
+pub fn final_answer(dir: &Path) -> anyhow::Result<Option<String>> {
+    crate::transcript::answer::input_final_answer(&row_store(dir)?, &input_id_from_dir(dir)?)
+}
+
 pub(crate) fn row_store(dir: &Path) -> StoreResult<loopflow_storage::sqlite::SqliteStore> {
     crate::store::open_sqlite(&row_database(dir)?)
 }
@@ -577,7 +617,7 @@ fn resolve_capture(key: &str) -> StoreResult<(PathBuf, crate::session::LfSession
     let home = crate::store::lf_home_dir();
     let dir = record_dir(&home, key)
         .ok_or_else(|| record_error(std::io::Error::other("invalid capture key")))?;
-    let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+    let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
         &database_in(&home)?,
         crate::store::token_key::encryption_key,
     )?;
@@ -872,8 +912,7 @@ pub struct AgentProcessRequest {
     pub agent: String,
     pub account_id: Option<crate::store::ProviderAccountId>,
     pub max_turns: Option<u32>,
-    pub write_scope: crate::agent::AgentWriteScope,
-    pub execution_boundary: Option<crate::agent::AgentExecutionBoundary>,
+    /// The launch's `yolo` setting, under the key recorded requests already carry.
     pub skip_permissions: bool,
     pub chrome: Option<bool>,
     pub codex_service_tier: Option<crate::config::CodexServiceTier>,
@@ -896,22 +935,13 @@ impl AgentProcessRequest {
             task_prompt: config.task_prompt.clone(),
             skill_invocation: config.skill_invocation.clone(),
             output_schema: config.output_schema.clone(),
-            agent: config.resolved_agent()?,
-            account_id: config.provider_account_id.clone(),
+            agent: config.agent.to_string(),
+            account_id: None,
             max_turns: config.max_turns,
-            write_scope: config.write_scope,
-            execution_boundary: config.execution_boundary.clone(),
-            skip_permissions: config.skip_permissions,
+            skip_permissions: config.yolo,
             chrome: config.chrome,
             codex_service_tier: config.codex_service_tier,
         })
-    }
-
-    pub fn replay_unavailable_reason(&self) -> Option<&'static str> {
-        let (harness, _) = crate::config::parse_agent(&self.agent);
-        matches!(harness.as_str(), "claude" | "codex")
-            .then_some("managed Claude/Codex replay requires a recorded account ID")
-            .filter(|_| self.account_id.is_none())
     }
 }
 
@@ -945,6 +975,7 @@ pub(crate) fn project_input_history(
     session: &loopflow_storage::session::HistoryCapture,
     artifact_key: Option<&str>,
     history: &[loopflow_storage::session::SessionEvent],
+    turns: &[loopflow_storage::session::Turn],
     names: (Option<String>, Option<String>),
 ) -> std::io::Result<SessionHistory> {
     let mut facts = Vec::new();
@@ -973,11 +1004,10 @@ pub(crate) fn project_input_history(
         }
     }
     facts.sort_by_key(|fact| fact.seq);
-    let (readings, unread) = native_usage(history);
     let providers =
-        project_provider_history(session.captured, artifact_key, &facts, &readings, history)?;
-    let usage = reduce_usage(&readings);
-    gaps += unread + usage.gaps + usize::from(manifest.is_none());
+        project_provider_history(session.captured, artifact_key, &facts, turns, history)?;
+    let usage = reduce_usage(turns);
+    gaps += usage.gaps + usize::from(manifest.is_none());
     let current = session.captured.is_some() && session.current_capture == session.captured;
     Ok(SessionHistory {
         session_id: session.id.clone(),
@@ -1008,12 +1038,13 @@ pub(crate) fn project_input_history(
             .as_ref()
             .map(|m| m.skill.clone())
             .unwrap_or_else(|| current.then(|| session.skill.clone()).flatten()),
+        skill_version: session.skill_version.clone(),
         recorded_outcome: terminal.as_ref().map(|receipt| receipt.outcome.clone()),
         recorded_at: terminal
             .as_ref()
             .map(|receipt| receipt.ended_at.unix_timestamp()),
         observed_at: session.observed_at,
-        first_provider_attempt_at: providers_first_start(history)
+        first_provider_attempt_at: providers_first_start(turns)
             .into_iter()
             .chain(facts.iter().find_map(|fact| {
                 matches!(fact.fact, CaptureFact::ProviderAttemptStarted { .. })

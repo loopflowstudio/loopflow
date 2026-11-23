@@ -73,14 +73,6 @@ step "unattended tool path"
   fi
   exit "$missing"
 '
-step "host-local provider authority"
-auth_status="$("${minimal_env[@]}" "$lf_bin" account --json)"
-printf '%s\n' "$auth_status"
-if ! jq -e 'any(.accounts[]; .scope == "managed" and .verification == "accepted")' >/dev/null <<<"$auth_status"; then
-  printf 'no managed provider account verified live from the Machine store\n' >&2
-  exit 1
-fi
-
 step "configured publisher authority"
 "${minimal_env[@]}" loopflow-release-publisher \
   uv run python scripts/publish_release.py check

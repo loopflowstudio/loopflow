@@ -3,8 +3,8 @@
 //! An address names Work, never a Session, provider, checkout path or
 //! presentation host. Opening resolves its conversation through the shared
 //! owners. `?repository=<id>` qualifies a short name shared by several
-//! registered repositories. `session` and `diff` are explicit CLI selectors
-//! carried to Desktop; ordinary emitted links never include them.
+//! registered repositories. `session` is an explicit CLI selector carried to
+//! Desktop; ordinary emitted links never include it.
 
 use anyhow::{bail, ensure, Result};
 
@@ -26,7 +26,6 @@ pub struct WorkUrl {
     pub qualifier: Option<RepositoryId>,
     pub target: WorkTarget,
     pub session: Option<String>,
-    pub diff: bool,
 }
 
 impl WorkUrl {
@@ -36,7 +35,6 @@ impl WorkUrl {
             qualifier: None,
             target,
             session: None,
-            diff: false,
         }
     }
 
@@ -84,19 +82,9 @@ impl WorkUrl {
             match name {
                 "repository" => url.qualifier = Some(RepositoryId::parse(&value)?),
                 "session" => url.session = Some(value),
-                "diff" => {
-                    ensure!(value == "true", "Work link `diff` accepts only true");
-                    url.diff = true;
-                }
-                _ => bail!(
-                    "Work links accept only repository, session and diff queries; got `{name}`"
-                ),
+                _ => bail!("Work links accept only repository and session queries; got `{name}`"),
             }
         }
-        ensure!(
-            matches!(url.target, WorkTarget::Task(_)) || !url.diff,
-            "Changes selectors need a Task link"
-        );
         Ok(url)
     }
 
@@ -104,7 +92,6 @@ impl WorkUrl {
     pub fn work(&self) -> Self {
         Self {
             session: None,
-            diff: false,
             ..self.clone()
         }
     }
@@ -129,9 +116,6 @@ impl std::fmt::Display for WorkUrl {
         }
         if let Some(session) = &self.session {
             query(f, "session", session)?;
-        }
-        if self.diff {
-            query(f, "diff", "true")?;
         }
         Ok(())
     }
@@ -213,7 +197,7 @@ mod tests {
             "loopflow://loopflow?session=s",
             "loopflow://loopflow/wave/product?session=s",
             &qualified,
-            "loopflow://loopflow/task/LOO-1?session=a%2Bb%26c&diff=true",
+            "loopflow://loopflow/task/LOO-1?session=a%2Bb%26c",
         ] {
             let url = WorkUrl::parse(text).unwrap();
             assert_eq!(url.to_string(), text);
@@ -246,8 +230,7 @@ mod tests {
             "loopflow://loopflow/task/A?repo=%2Fsrc",
             "loopflow://loopflow/task/A?session=x&session=y",
             "loopflow://loopflow/task/A?session=",
-            "loopflow://loopflow/task/A?diff=1",
-            "loopflow://loopflow/wave/product?diff=true",
+            "loopflow://loopflow/task/A?diff=true",
             "loopflow://loop graph",
         ] {
             assert!(WorkUrl::parse(text).is_err(), "{text} parsed");
@@ -256,7 +239,7 @@ mod tests {
 
     #[test]
     fn ordinary_address_drops_explicit_selectors() {
-        let url = WorkUrl::parse("loopflow://loopflow/task/A?session=s&diff=true").unwrap();
+        let url = WorkUrl::parse("loopflow://loopflow/task/A?session=s").unwrap();
         assert_eq!(url.work().to_string(), "loopflow://loopflow/task/A");
     }
 

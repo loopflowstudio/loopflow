@@ -1,4 +1,4 @@
-//! Measure authored context against size targets without changing launch input.
+//! Measure Wave memory against its size targets without changing launch input.
 
 use std::collections::BTreeMap;
 
@@ -24,24 +24,15 @@ use crate::prompt::{count_tokens, Document, DocumentSource};
 pub enum BudgetKey {
     MemoryTokens,
     MemoryBytes,
-    ScratchTokens,
-    ScratchBytes,
 }
 
 impl BudgetKey {
-    pub const ALL: [Self; 4] = [
-        Self::MemoryTokens,
-        Self::MemoryBytes,
-        Self::ScratchTokens,
-        Self::ScratchBytes,
-    ];
+    pub const ALL: [Self; 2] = [Self::MemoryTokens, Self::MemoryBytes];
 
     pub fn default_limit(self) -> usize {
         match self {
             Self::MemoryTokens => 16_000,
-            Self::ScratchTokens => 12_000,
             Self::MemoryBytes => 128 * 1024,
-            Self::ScratchBytes => 96 * 1024,
         }
     }
 
@@ -49,8 +40,6 @@ impl BudgetKey {
         match self {
             Self::MemoryTokens => "memory_tokens",
             Self::MemoryBytes => "memory_bytes",
-            Self::ScratchTokens => "scratch_tokens",
-            Self::ScratchBytes => "scratch_bytes",
         }
     }
 }
@@ -151,7 +140,7 @@ pub struct ContextBudgetReport {
 
 impl ContextBudgetReport {
     pub fn render(&self) -> String {
-        let mut lines = vec!["Context size targets (cl100k_base tokens; UTF-8 bytes). Query after edits: `lf context`. Targets do not truncate input or refuse launches.".into()];
+        let mut lines = vec!["Memory size targets (cl100k_base tokens; UTF-8 bytes). Query after edits: `lf context`. Targets do not truncate input or refuse launches.".into()];
         for (key, limit) in &self.budgets.0 {
             lines.push(format!(
                 "{}: {} ({})",
@@ -177,16 +166,6 @@ impl ContextBudgetReport {
 }
 
 pub fn measure_context(docs: &[Document], budgets: ContextBudgets) -> ContextBudgetReport {
-    let mut usage = Vec::new();
-    let mut measure = |source: &str, docs: Vec<&Document>, tokens, bytes| {
-        usage.push(ContextUsage {
-            source: source.into(),
-            tokens: docs.iter().map(|doc| tokens_in(&doc.content)).sum(),
-            bytes: docs.iter().map(|doc| doc.content.len()).sum(),
-            token_limit: budgets.limit(tokens),
-            byte_limit: budgets.limit(bytes),
-        });
-    };
     let memories: Vec<_> = docs
         .iter()
         .filter(|doc| {
@@ -194,29 +173,20 @@ pub fn measure_context(docs: &[Document], budgets: ContextBudgets) -> ContextBud
                 || (doc.source == DocumentSource::Wave && doc.path.ends_with("/MEMORY.md"))
         })
         .collect();
-    if !memories.is_empty() {
-        let paths = memories
-            .iter()
-            .map(|doc| doc.path.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        measure(
-            &paths,
-            memories,
-            BudgetKey::MemoryTokens,
-            BudgetKey::MemoryBytes,
-        );
-    }
-    let scratch = docs
-        .iter()
-        .filter(|doc| doc.source == DocumentSource::Scratch)
+    let usage = (!memories.is_empty())
+        .then(|| ContextUsage {
+            source: memories
+                .iter()
+                .map(|doc| doc.path.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            tokens: memories.iter().map(|doc| tokens_in(&doc.content)).sum(),
+            bytes: memories.iter().map(|doc| doc.content.len()).sum(),
+            token_limit: budgets.limit(BudgetKey::MemoryTokens),
+            byte_limit: budgets.limit(BudgetKey::MemoryBytes),
+        })
+        .into_iter()
         .collect();
-    measure(
-        "scratch/",
-        scratch,
-        BudgetKey::ScratchTokens,
-        BudgetKey::ScratchBytes,
-    );
     ContextBudgetReport { budgets, usage }
 }
 
@@ -231,15 +201,15 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         let config = Config {
             context: crate::config::ContextConfig {
-                budgets: [(BudgetKey::ScratchBytes, 1)].into(),
+                budgets: [(BudgetKey::MemoryBytes, 1)].into(),
                 ..Default::default()
             },
             ..Default::default()
         };
         let docs = vec![Document {
-            path: "scratch/plan.md".into(),
+            path: "MEMORY.md".into(),
             content: "😀 exact source\r\n".repeat(1000),
-            source: DocumentSource::Scratch,
+            source: DocumentSource::RepoMemory,
         }];
         let budgets = ContextBudgets::resolve(&config).unwrap();
         let report = measure_context(&docs, budgets);

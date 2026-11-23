@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>LOO-923 rebuild measurements</title>
+<style>
+body {font:16px/1.5 system-ui,sans-serif;max-width:1050px;margin:48px auto;
+padding:0 24px;color:#20252b}
+h1 {font-size:32px;letter-spacing:-.03em} h2 {margin-top:40px;font-size:22px}
+code,td {font-variant-numeric:tabular-nums} code {font-size:.9em}
+table {width:100%;border-collapse:collapse;margin:16px 0 28px}
+th,td {padding:10px;border-bottom:1px solid #ddd;text-align:left}
+thead {background:#f4f5f6} small {color:#626970;white-space:nowrap} a {color:#145b90}
+</style>
+<h1>LOO-923: what each edit rebuilds, and what it costs</h1>
+<p>3 alternating paired cohorts, one Cargo job. Values are
+<strong>median [minimum–maximum]</strong>; lower is better. Every case but the
+last builds <code>lf</code> and includes its link; the last builds the unit-test
+binary of the crate that owns the decoder, without running it.</p>
+<p>Baseline <code>7bb879aff4326ece68c05da760cb6e26312b4931</code><br>Candidate <code>7953d9a7c577c4aef9133ccedd804bb9c5be23a2</code></p>
+<p>The one-minute load average while samples ran was 10.9–133.4
+on 16 logical CPUs. Elapsed time moves with that load; client CPU
+seconds move less.</p>
+<h2>What the workspace compiled</h2>
+<table><thead><tr><th>Case</th><th>Baseline</th><th>Candidate</th></tr></thead>
+<tbody><tr><th>Fresh worktree, warm cache</th><td>loopflow</td><td>loopflow</td></tr><tr><th>Command help edit</th><td>loopflow</td><td>loopflow</td></tr><tr><th>Execution edit</th><td>loopflow_execution + loopflow</td><td>loopflow_execution + loopflow</td></tr><tr><th>Saved Task record edit</th><td>loopflow_storage + loopflow_execution + loopflow</td><td>loopflow_storage + loopflow_execution + loopflow</td></tr><tr><th>Decoder edit</th><td>loopflow_execution + loopflow</td><td>loopflow_harness + loopflow_execution + loopflow</td></tr><tr><th>Decoder edit, owner's test binary</th><td>loopflow_execution (tests)</td><td>loopflow_harness (tests)</td></tr></tbody></table>
+<p>Compiler misses and test binaries, from per-invocation receipts. A workspace
+library not named in a row was reused: Cargo-fresh, or in the fresh-worktree case
+a cache hit. The validator requires each edit to recompile exactly the libraries
+downstream of it in that revision.</p>
+<h2>Elapsed seconds</h2><table><thead><tr><th>Case</th><th>Baseline</th><th>Candidate</th><th>Change</th></tr></thead><tbody><tr><th>Fresh worktree, warm cache</th><td>123.66 <small>[121.13–182.05]</small></td><td>121.67 <small>[121.14–121.73]</small></td><td>-2.00 (-1.6%) <small>inside baseline range</small></td></tr><tr><th>Command help edit</th><td>15.72 <small>[15.62–16.12]</small></td><td>15.49 <small>[15.34–15.90]</small></td><td>-0.23 (-1.5%)</td></tr><tr><th>Execution edit</th><td>40.53 <small>[40.10–41.26]</small></td><td>39.74 <small>[38.99–41.95]</small></td><td>-0.79 (-1.9%)</td></tr><tr><th>Saved Task record edit</th><td>47.26 <small>[47.02–47.28]</small></td><td>47.09 <small>[47.09–48.90]</small></td><td>-0.17 (-0.4%) <small>inside baseline range</small></td></tr><tr><th>Decoder edit</th><td>39.51 <small>[39.17–40.19]</small></td><td>41.48 <small>[40.14–42.72]</small></td><td>+1.97 (+5.0%)</td></tr><tr><th>Decoder edit, owner's test binary</th><td>35.56 <small>[34.71–36.85]</small></td><td>1.17 <small>[1.15–1.22]</small></td><td>-34.40 (-96.7%)</td></tr></tbody></table>
+<h2>Client CPU seconds</h2><table><thead><tr><th>Case</th><th>Baseline</th><th>Candidate</th><th>Change</th></tr></thead><tbody><tr><th>Fresh worktree, warm cache</th><td>118.72 <small>[117.90–132.61]</small></td><td>119.14 <small>[118.21–120.84]</small></td><td>+0.42 (+0.4%) <small>inside baseline range</small></td></tr><tr><th>Command help edit</th><td>30.19 <small>[30.06–30.59]</small></td><td>29.72 <small>[29.64–30.51]</small></td><td>-0.47 (-1.6%)</td></tr><tr><th>Execution edit</th><td>72.67 <small>[72.49–73.39]</small></td><td>71.42 <small>[70.98–73.77]</small></td><td>-1.25 (-1.7%)</td></tr><tr><th>Saved Task record edit</th><td>84.18 <small>[84.10–85.08]</small></td><td>83.83 <small>[83.70–85.10]</small></td><td>-0.35 (-0.4%)</td></tr><tr><th>Decoder edit</th><td>72.02 <small>[71.75–72.66]</small></td><td>73.16 <small>[72.96–74.27]</small></td><td>+1.14 (+1.6%)</td></tr><tr><th>Decoder edit, owner's test binary</th><td>65.49 <small>[64.26–68.62]</small></td><td>2.02 <small>[2.02–2.07]</small></td><td>-63.47 (-96.9%)</td></tr></tbody></table>
+<h2>Largest process RSS, GiB</h2><table><thead><tr><th>Case</th><th>Baseline</th><th>Candidate</th><th>Change</th></tr></thead><tbody><tr><th>Fresh worktree, warm cache</th><td>2.08 <small>[2.08–2.09]</small></td><td>2.07 <small>[2.06–2.07]</small></td><td>-0.01 (-0.4%)</td></tr><tr><th>Command help edit</th><td>2.08 <small>[2.08–2.08]</small></td><td>2.06 <small>[2.06–2.08]</small></td><td>-0.01 (-0.6%)</td></tr><tr><th>Execution edit</th><td>3.30 <small>[3.28–3.32]</small></td><td>3.01 <small>[3.00–3.02]</small></td><td>-0.28 (-8.6%)</td></tr><tr><th>Saved Task record edit</th><td>3.30 <small>[3.28–3.30]</small></td><td>3.01 <small>[2.99–3.01]</small></td><td>-0.29 (-8.9%)</td></tr><tr><th>Decoder edit</th><td>3.29 <small>[3.27–3.29]</small></td><td>3.02 <small>[3.01–3.03]</small></td><td>-0.26 (-8.1%)</td></tr><tr><th>Decoder edit, owner's test binary</th><td>4.76 <small>[4.71–4.79]</small></td><td>0.32 <small>[0.32–0.32]</small></td><td>-4.44 (-93.4%)</td></tr></tbody></table>
+<h2>Method and limits</h2>
+<p>Independent targets and cold-seeded caches. Cohort order alternates
+candidate/base, base/candidate. Edits have unique cohort suffixes. Two cold seeds
+are calibration and are excluded from the medians. Before the test-binary case,
+the owner's test binary and its dev-dependencies are built once outside the
+timing, then a second decoder message is edited. Profiles match. The registry
+dependency delta is 0 removed and
+0 added version/checksum tuples.
+Machine: 16 logical CPUs, arm64,
+Darwin 25.0.0.
+Compiler: rustc 1.98.1 (48a229cea 2026-09-01) (Homebrew).</p>
+<p>The sccache binary is pinned by SHA-256
+<code>863da74d6ada53050d5f4a220e77a16777fb863a4aaf44ea0c17f5f0e9577871</code>; it needs Rust basedir and verbatim
+environment-dependency support, which 0.19.0 lacks. The root upkeep probe was not run for this comparison. No Machine cache
+configuration or shared daemon was changed.</p>
+<p>The wrapper adds two statistics RPCs per workspace compiler; that overhead is
+included. CPU covers the timed client process tree, excluding the cache daemon.
+RSS is its largest process, not concurrent Machine memory. These observations do
+not establish total Machine CPU savings or a safe concurrency budget.</p>
+<p>All 8 source copies passed runtime root/revision checks. Catalogue
+checks retained the canonical schema through Git reference and source-package changes.
+Retrieved rlibs can retain the seed checkout’s debug-source paths; use
+<code>scripts/dev-lf --isolated-build</code> when those paths no longer resolve.</p>
+<p><a href="loo-923.json">Compiler, resource and correctness receipts</a> ·
+<a href="loo-923-raw.json.gz">Full cache/resource receipts (compressed JSON)</a> ·
+<a href="../README.md">Reproduce the comparison</a></p></html>

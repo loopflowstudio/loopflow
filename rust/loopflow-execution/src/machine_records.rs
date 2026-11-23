@@ -1,7 +1,7 @@
 //! Records one Machine copies from another before the other is deleted.
 //!
-//! `lf history export` writes a Machine's Sessions, Processes, Graph rows,
-//! session events and capture files as JSON lines, origin first. The Machine
+//! `lf history export` writes a Machine's Sessions, session events and
+//! capture files as JSON lines, origin first. The Machine
 //! that rented it imports them into `machine_records` and
 //! `<home>/machines/<origin>/runs`, apart from its own rows and captures, so a
 //! copy is readable history and never local authority.
@@ -137,7 +137,15 @@ pub fn import(
     let mut records = Vec::new();
     let mut captures = Vec::new();
     for line in lines {
-        match serde_json::from_str::<ExportLine>(&line?).context("read an export line")? {
+        let line: serde_json::Value =
+            serde_json::from_str(&line?).context("read an export line")?;
+        // A released exporter also wrote Process and Graph rows; no copy keeps them.
+        if line["line"] == "row"
+            && !matches!(line["kind"].as_str(), Some("session" | "session_event"))
+        {
+            continue;
+        }
+        match serde_json::from_value::<ExportLine>(line).context("read an export line")? {
             ExportLine::Row(record) => records.push(record),
             ExportLine::Capture {
                 artifact_key,

@@ -84,14 +84,13 @@ applicability/lifecycle reason, not an adapter that advertises an omission.
 | Content | Authority |
 | --- | --- |
 | Personal global declarations | Personal config.yaml |
-| Private repository and Wave declarations | Main checkout's lf.config.local.yaml, shared across linked worktrees |
+| Private repository and Wave declarations | Main checkout's .lf/config.local.yaml, shared across linked worktrees |
 | Shared repository and Wave declarations | Committed repository/Wave files |
 | Skill and Graph occurrence declarations | Their authored definitions |
 | Explicit CLI and environment choices | The invocation; never persisted as preferences |
 | Account identity, credentials and observed availability | Existing account/secret domain owners |
 | Current machine identity and observed process/execution state | Runtime domain owners |
-| Reusable layout templates and selected defaults | Configuration |
-| Actual saved Task layout | Persisted live workspace state |
+| Desktop pane layouts | Desktop's per-Mac cache (`$LF_HOME/desktop-cache/pane-layouts/`) |
 | Remote delivery origin/version/last-applied evidence | Operational metadata, never a preference override |
 
 Ordinary edits carry one typed destination: personal global, personal/shared
@@ -176,7 +175,7 @@ covered by the complete profile and follows the same deletion/conflict rules.
 
 ## Migration and code parity
 
-A migration preserves authored declarations, account order and identity bindings.
+A migration preserves authored declarations and identity bindings.
 Exporting effective values destroys fallback and provenance. Before retiring DB
 values, inventory collisions with files and the behavior of a former DB-global
 override against a more specific file value. Coordinate database and file cutover
@@ -188,7 +187,7 @@ not every clone with the same remote. Jack Heart accepted this scope change on
 November 3. A canonical remote identifies the project but does not select a private
 file from an arbitrary checkout registry. Runtime reads use the addressed checkout.
 
-For migration, preserve the old origin-wide account policy as a recoverable export,
+For migration, preserve retired origin-wide preferences as a recoverable export,
 then materialize its declarations into explicitly identified existing clones after
 checking file collisions. Copies become independent clone policies at cutover. A
 route with no available checkout remains recoverable, not an active fallback.

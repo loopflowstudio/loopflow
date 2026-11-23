@@ -194,7 +194,7 @@ struct WorkspaceRetentionTests {
         #expect(registry.warmWork == [repository, wave] + keys.prefix(limit))
         // Primaries hold no checkout: `presented` belongs to Task viewers.
         let primary = registry.retained(wave)!
-        #expect(primary.conversationIntent == .start)
+        #expect(primary.opensConversationAutomatically)
         primary.multiplexer.load(sessionId: "wave-conversation")
         primary.closePane(primary.multiplexer.sessionPane!.id)
         #expect(primary.conversationClosed)
@@ -370,10 +370,10 @@ struct WorkspaceRetentionTests {
                 #expect(resolved.path == scene.path)
                 return repo
             }
-        #expect(throws: Never.self) { try failed.inspect().find(RepoView.self) }
-        let banner = try failed.body.inspect().vStack().hStack(1)
-        #expect(try banner.text(0).string() == reason)
-        try banner.button(1).tap()
+        let view = try failed.inspect()
+        _ = try view.find(RepoView.self)
+        _ = try view.find(text: reason)
+        try view.find(button: "Retry").tap()
         #expect(retries == 1)
         #expect(registry.inspect() == before)
         #expect(registry.openWork == layout)

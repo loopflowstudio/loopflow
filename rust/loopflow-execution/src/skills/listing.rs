@@ -14,6 +14,31 @@ pub struct Entry {
     pub source: String,
     pub description: String,
     pub invocation: String,
+    /// How a skill file relates to the builtin of the same name; none when
+    /// there is no such builtin or the entry is the builtin.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub builtin: Option<BuiltinRelation>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BuiltinRelation {
+    /// `extends: builtin`: the builtin's text with the file's appended.
+    Extends,
+    /// A whole skill in the builtin's place, drifting as the builtin changes.
+    Replaces,
+    /// A whole copy, identical to the builtin today.
+    Copies,
+}
+
+impl BuiltinRelation {
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::Extends => "extends builtin",
+            Self::Replaces => "replaces builtin",
+            Self::Copies => "replaces builtin, same as builtin",
+        }
+    }
 }
 
 pub fn definition_source(repo: &Path, path: Option<&Path>) -> String {
@@ -51,6 +76,7 @@ fn format_target(target: &Target) -> String {
         Target::Command(command) => command.to_string(),
         Target::Graph(graph) => format_written_steps(&graph.items),
         Target::Xor(xor) => format_xor(xor.router.as_deref(), &xor.paths),
+        Target::Loop(steps) => format!("loop({})", format_written_steps(steps)),
     }
 }
 
@@ -81,6 +107,7 @@ fn graph_entry(repo: &Path, name: String) -> Result<Entry> {
         name,
         kind: kind.as_str().to_string(),
         description,
+        builtin: None,
     })
 }
 
@@ -99,6 +126,7 @@ pub fn discover(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
                 } else {
                     summary
                 },
+                builtin: None,
             });
         }
         if !path.is_empty() {
@@ -128,6 +156,7 @@ pub fn discover(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
                 source: definition_source(repo, source.path.as_deref()),
                 description,
                 invocation: format!("lf skill -- {name}"),
+                builtin: source.builtin_relation(),
             });
         }
         if !path.is_empty() {

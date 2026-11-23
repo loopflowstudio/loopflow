@@ -47,11 +47,10 @@ struct TaskHistoryProofTests {
             renameFixtureRecord("design", title: "review-design", work: work)
         )) as? [String: Any])
         design["state"] = "unknown"
-        design["actions"] = sessionActionFixture(state: "unknown")
+        design["action"] = sessionActionFixture(state: "unknown")
         design["terminal_ids"] = [shells[0]]
         design["open_argv"] = ["must-not-launch"]
         design["provider"] = "claude"
-        design["ready_summary"] = "Design revised; ready for your review."
         var notes = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(
             renameFixtureRecord("notes", title: "notes", work: work)
         )) as? [String: Any])
@@ -102,20 +101,20 @@ struct TaskHistoryProofTests {
         #expect((try? find("task-history-input-run_a2:12").find(text: "Unknown")) != nil)
         try captureIfRequested(window, name: "task-history-expanded")
 
-        // A failed refresh keeps the last inputs and says they may be out of date.
+        // A failed refresh keeps the last inputs; the Notice says why.
         await source.reply("W2-131", with: .failure)
         try find("task-history-toggle").button().tap()
         try await settle(window)
         try find("task-history-toggle").button().tap()
-        try await waitFor { model.sessionHistory["issue-review"].errorMessage != nil }
+        try await waitFor { model.sessionHistory["issue-review"].failure != nil }
         try await settle(window)
-        #expect(try find("task-history-stale").text().string() == "May be out of date")
         _ = try find("task-history-input-run_a1:12")
-        #expect(try find("task-history-status").text().string().contains("Session history unavailable"))
+        #expect(model.navigation.notices.current?.text.hasPrefix("Session history couldn't be read") == true)
 
         // A late read of A cannot publish into B; B reads only when expanded.
         await source.reply("W2-131", with: .held(["run_a3"]))
-        try find("task-history-retry").button().tap()
+        try find("task-history-toggle").button().tap()
+        try find("task-history-toggle").button().tap()
         try await waitFor { await source.isHolding }
         let readsBeforeB = await source.reads.count
         model.select(.task(id: "issue-available"))

@@ -6,18 +6,13 @@
 //! consumed, including credential persistence failure. Stored tokens own durable
 //! credential state; they do not establish whether a new attempt succeeded.
 
-#[cfg(unix)]
-mod browser_handoff;
-pub mod codex;
 pub mod credential_socket;
+pub mod operations;
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::future::Future;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
-#[cfg(target_os = "macos")]
-use std::process::Command as ProcessCommand;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -27,14 +22,12 @@ use base64::prelude::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Url;
-use secrecy::ExposeSecret;
-use secrecy::SecretString;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::process::{ChildStdin, Command};
+use tokio::io::AsyncReadExt;
+use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
@@ -44,6 +37,7 @@ use crate::provider_auth::credential_socket::{
     AuthStartResponse, CredentialSocketClient, CredentialSocketError,
 };
 use crate::store::{CredentialType, ProviderToken, SharedStore};
+use loopflow_harness::HarnessKind;
 
 const AUTH_URL_TIMEOUT: Duration = Duration::from_secs(20);
 const AUTH_URL_POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -61,7 +55,6 @@ const LINEAR_OAUTH: PmOAuthSpec = PmOAuthSpec {
     client_secret_env: "LINEAR_CLIENT_SECRET",
     authorize_params: &[("scope", "read,write")],
     redirect_port: 19222,
-    basic_auth: false,
     rotates_refresh_token: true,
     refresh_requires_secret: false,
 };
@@ -73,27 +66,9 @@ const ASANA_OAUTH: PmOAuthSpec = PmOAuthSpec {
     client_secret_env: "ASANA_CLIENT_SECRET",
     authorize_params: &[("scope", "default")],
     redirect_port: 19222,
-    basic_auth: false,
     rotates_refresh_token: false,
     refresh_requires_secret: true,
 };
-/// The Notion integration's registered redirect is port 19223 (1c925c0c18).
-const NOTION_OAUTH: PmOAuthSpec = PmOAuthSpec {
-    provider: Provider::Notion,
-    authorize_url: "https://api.notion.com/v1/oauth/authorize",
-    token_url: "https://api.notion.com/v1/oauth/token",
-    client_id_env: "NOTION_CLIENT_ID",
-    client_secret_env: "NOTION_CLIENT_SECRET",
-    authorize_params: &[("owner", "user")],
-    redirect_port: 19223,
-    basic_auth: true,
-    rotates_refresh_token: false,
-    refresh_requires_secret: true,
-};
-#[cfg(target_os = "macos")]
-const CLAUDE_KEYCHAIN_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
-#[cfg(target_os = "macos")]
-const LEGACY_CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 pub(crate) const TOKEN_REFRESH_LEAD_SECONDS: i64 = 20 * 60;
 
 static USER_CODE_RE: Lazy<Regex> =
@@ -149,7 +124,6 @@ impl std::fmt::Debug for AuthFlowResponse {
 pub struct AuthFlowHandle {
     pub response: AuthFlowResponse,
     monitor: AuthMonitor,
-    authorization_code_input: Option<AuthorizationCodeInput>,
 }
 
 impl std::fmt::Debug for AuthFlowHandle {
@@ -165,84 +139,12 @@ impl AuthFlowHandle {
         Self {
             response,
             monitor: AuthMonitor::new(monitor),
-            authorization_code_input: None,
         }
-    }
-
-    fn with_authorization_code_input(
-        response: AuthFlowResponse,
-        monitor: JoinHandle<Result<(), AuthError>>,
-        authorization_code_input: AuthorizationCodeInput,
-    ) -> Self {
-        Self {
-            response,
-            monitor: AuthMonitor::new(monitor),
-            authorization_code_input: Some(authorization_code_input),
-        }
-    }
-
-    pub(crate) fn code_input(&self) -> Option<AuthorizationCodeInput> {
-        self.authorization_code_input.clone()
-    }
-
-    pub fn supports_authorization_code(&self) -> bool {
-        self.authorization_code_input.is_some()
-    }
-
-    pub async fn submit_authorization_code(&self, code: &str) -> Result<(), AuthError> {
-        let input = self
-            .authorization_code_input
-            .as_ref()
-            .ok_or(AuthError::CompletionUnavailable(self.response.provider))?;
-        input.submit(code).await
     }
 
     pub async fn wait(self) -> Result<(), AuthError> {
-        let Self {
-            response,
-            monitor,
-            authorization_code_input: _authorization_code_input,
-        } = self;
+        let Self { response, monitor } = self;
         monitor.wait(response.provider).await
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct AuthorizationCodeInput {
-    provider: Provider,
-    writer: Arc<Mutex<Option<ChildStdin>>>,
-}
-
-impl AuthorizationCodeInput {
-    fn new(provider: Provider, writer: ChildStdin) -> Self {
-        Self {
-            provider,
-            writer: Arc::new(Mutex::new(Some(writer))),
-        }
-    }
-
-    pub async fn submit(&self, code: &str) -> Result<(), AuthError> {
-        let code = code.trim();
-        if code.is_empty() {
-            return Err(AuthError::CommandFailed {
-                provider: self.provider,
-                message: "authorization code cannot be empty".to_string(),
-            });
-        }
-
-        let mut stdin = self
-            .writer
-            .lock()
-            .await
-            .take()
-            .ok_or(AuthError::CompletionUnavailable(self.provider))?;
-        let io = |source| AuthError::CommandIo {
-            provider: self.provider,
-            source,
-        };
-        stdin.write_all(code.as_bytes()).await.map_err(io)?;
-        stdin.write_all(b"\n").await.map_err(io)?;
-        stdin.shutdown().await.map_err(io)
     }
 }
 
@@ -357,17 +259,6 @@ impl PmRefreshError {
     }
 }
 
-/// Expiry for a Claude credential that cannot refresh itself.
-pub(crate) fn access_only_expiry(credential: &str) -> anyhow::Result<Option<i64>> {
-    let json: serde_json::Value = serde_json::from_str(credential)
-        .map_err(|_| anyhow::anyhow!("invalid Claude credential"))?;
-    let node = json.get("claudeAiOauth").unwrap_or(&json);
-    if node.get("refreshToken").is_some() {
-        return Ok(None);
-    }
-    Ok(Some(node["expiresAt"].as_i64().unwrap_or_default() / 1000))
-}
-
 /// OpenCode 2 on a private server; `home` isolates a staging login.
 pub(crate) fn opencode_command(home: Option<&Path>, args: &[&str]) -> std::process::Command {
     let mut command = std::process::Command::new("opencode");
@@ -466,9 +357,9 @@ struct OAuthErrorResponse {
     error_description: Option<String>,
 }
 
-// ── Planning provider OAuth ─────────────────────────────────────────
+// ── Tracker OAuth ─────────────────────────────────────────
 
-/// One planning provider's OAuth application. Every provider uses loopback
+/// One tracker's OAuth application. Every provider uses loopback
 /// consent; their registered ports, client authentication and refresh grants differ.
 #[derive(Debug)]
 pub(crate) struct PmOAuthSpec {
@@ -477,12 +368,10 @@ pub(crate) struct PmOAuthSpec {
     token_url: &'static str,
     client_id_env: &'static str,
     client_secret_env: &'static str,
-    /// Provider-specific authorization parameters: scope, or Notion's `owner`.
+    /// Provider-specific authorization parameters, such as scope.
     authorize_params: &'static [(&'static str, &'static str)],
     /// The loopback port registered as the application's redirect.
     redirect_port: u16,
-    /// Notion takes client credentials as HTTP Basic and a JSON body.
-    basic_auth: bool,
     /// Linear rotates refresh grants; Asana keeps one long-lived grant.
     rotates_refresh_token: bool,
     /// PKCE public clients refresh by client ID alone; Asana requires its secret.
@@ -493,7 +382,6 @@ fn pm_oauth(provider: Provider) -> Option<&'static PmOAuthSpec> {
     match provider {
         Provider::Linear => Some(&LINEAR_OAUTH),
         Provider::Asana => Some(&ASANA_OAUTH),
-        Provider::Notion => Some(&NOTION_OAUTH),
         _ => None,
     }
 }
@@ -503,8 +391,7 @@ impl PmOAuthSpec {
         format!("http://localhost:{}/oauth/callback", self.redirect_port)
     }
 
-    /// A token request: form fields with the client credentials, or for Basic
-    /// authentication the same grant as JSON.
+    /// A token request: form fields with the client credentials and the grant.
     fn token_request(
         &self,
         url: &str,
@@ -513,13 +400,6 @@ impl PmOAuthSpec {
         grant: &[(&str, &str)],
     ) -> reqwest::RequestBuilder {
         let client = reqwest::Client::new().post(url);
-        if self.basic_auth {
-            let body: serde_json::Map<String, serde_json::Value> = grant
-                .iter()
-                .map(|(key, value)| (key.to_string(), serde_json::json!(value)))
-                .collect();
-            return client.basic_auth(client_id, client_secret).json(&body);
-        }
         let mut form = vec![("client_id", client_id)];
         if let Some(secret) = client_secret {
             form.push(("client_secret", secret));
@@ -556,10 +436,10 @@ struct PmOAuthTokenResponse {
 
 impl PmOAuthBroker {
     /// # Panics
-    /// Panics when `provider` is not a planning provider.
+    /// Panics when `provider` is not a tracker.
     pub fn new(provider: Provider) -> Self {
         Self {
-            spec: pm_oauth(provider).expect("planning providers have an OAuth application"),
+            spec: pm_oauth(provider).expect("trackers have an OAuth application"),
             completed_token: Arc::new(Mutex::new(None)),
         }
     }
@@ -836,7 +716,6 @@ pub struct ProviderAuthService {
 struct PendingAuth {
     lifecycle: JoinHandle<()>,
     completion: Option<tokio::sync::oneshot::Receiver<Result<(), AuthError>>>,
-    authorization_code_input: Option<AuthorizationCodeInput>,
 }
 
 impl std::fmt::Debug for ProviderAuthService {
@@ -861,11 +740,6 @@ impl ProviderAuthService {
         Self::with_brokers_and_store(default_brokers(None), Some(store))
     }
 
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn with_brokers(brokers: Vec<Arc<dyn AuthBroker>>) -> Self {
-        Self::with_brokers_and_store(brokers, None)
-    }
-
     fn with_brokers_and_store(
         brokers: Vec<Arc<dyn AuthBroker>>,
         store: Option<SharedStore>,
@@ -885,7 +759,10 @@ impl ProviderAuthService {
         let pending_providers = self.pending_providers().await;
         let mut snapshots = Vec::with_capacity(Provider::all().len());
 
-        for provider in Provider::all() {
+        for provider in Provider::all()
+            .into_iter()
+            .filter(|p| !matches!(p, Provider::Claude | Provider::Codex))
+        {
             if pending_providers.contains(&provider) {
                 snapshots.push(ProviderAuthSnapshot {
                     provider,
@@ -1005,11 +882,7 @@ impl ProviderAuthService {
         }
 
         let broker = self.broker(provider)?;
-        let AuthFlowHandle {
-            response,
-            monitor,
-            authorization_code_input,
-        } = broker.start_auth().await?;
+        let AuthFlowHandle { response, monitor } = broker.start_auth().await?;
 
         let store_for_task = self.store.clone();
 
@@ -1051,7 +924,6 @@ impl ProviderAuthService {
             PendingAuth {
                 lifecycle,
                 completion: Some(completion_rx),
-                authorization_code_input,
             },
         );
         Ok(response)
@@ -1077,19 +949,6 @@ impl ProviderAuthService {
             provider,
             message: "authorization completion unavailable".to_string(),
         })?
-    }
-
-    pub async fn complete_auth(&self, provider: Provider, code: &str) -> Result<(), AuthError> {
-        let authorization_code_input = self
-            .pending
-            .lock()
-            .await
-            .get(&provider)
-            .and_then(|pending| pending.authorization_code_input.clone());
-        if let Some(input) = authorization_code_input {
-            return input.submit(code).await;
-        }
-        self.broker(provider)?.complete_auth(code).await
     }
 
     pub async fn disconnect(&self, provider: Provider) -> Result<(), AuthError> {
@@ -1123,14 +982,6 @@ impl ProviderAuthService {
             .is_some_and(|pending| !pending.lifecycle.is_finished())
     }
 
-    pub async fn pending_supports_authorization_code(&self, provider: Provider) -> bool {
-        self.pending
-            .lock()
-            .await
-            .get(&provider)
-            .is_some_and(|pending| pending.authorization_code_input.is_some())
-    }
-
     async fn pending_providers(&self) -> HashSet<Provider> {
         self.pending
             .lock()
@@ -1150,31 +1001,23 @@ impl ProviderAuthService {
 }
 
 fn default_brokers(client: Option<Arc<CredentialSocketClient>>) -> Vec<Arc<dyn AuthBroker>> {
-    let mut brokers = match client {
-        Some(client) => vec![
-            Arc::new(SocketAuthBroker::new(Provider::GitHub, client.clone()))
-                as Arc<dyn AuthBroker>,
-            Arc::new(SocketAuthBroker::new(Provider::Claude, client.clone()))
-                as Arc<dyn AuthBroker>,
-            Arc::new(SocketAuthBroker::new(Provider::Codex, client)) as Arc<dyn AuthBroker>,
-        ],
-        None => vec![
-            Arc::new(GhAuthBroker::default()) as Arc<dyn AuthBroker>,
-            Arc::new(ClaudeAuthBroker::default()) as Arc<dyn AuthBroker>,
-            Arc::new(CodexAuthBroker::default()) as Arc<dyn AuthBroker>,
-        ],
+    let github: Arc<dyn AuthBroker> = match client {
+        Some(client) => Arc::new(SocketAuthBroker::new(Provider::GitHub, client)),
+        None => Arc::new(GhAuthBroker::default()),
     };
-    brokers.push(Arc::new(OpenCodeZenBroker::default()));
-    brokers.push(Arc::new(DopplerAuthBroker));
+    let mut brokers = vec![
+        github,
+        Arc::new(OpenCodeZenBroker::default()),
+        Arc::new(DopplerAuthBroker),
+    ];
     brokers.extend(pm_auth_brokers());
     brokers
 }
 
-fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 3] {
+fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 2] {
     [
         Arc::new(PmOAuthBroker::new(Provider::Linear)) as Arc<dyn AuthBroker>,
         Arc::new(PmOAuthBroker::new(Provider::Asana)) as Arc<dyn AuthBroker>,
-        Arc::new(PmOAuthBroker::new(Provider::Notion)) as Arc<dyn AuthBroker>,
     ]
 }
 
@@ -1259,14 +1102,7 @@ impl AuthBroker for GhAuthBroker {
         ]);
         command.env("GH_BROWSER", "echo");
 
-        start_auth_command(
-            Provider::GitHub,
-            "gh",
-            command,
-            AuthCommandInput::None,
-            parse_github_auth_line,
-        )
-        .await
+        start_auth_command(Provider::GitHub, "gh", command, parse_github_auth_line).await
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
@@ -1330,323 +1166,6 @@ impl AuthBroker for GhAuthBroker {
 }
 
 #[derive(Debug, Clone)]
-pub struct ClaudeAuthBroker {
-    config_dir: PathBuf,
-    keychain_fallback: bool,
-    login_hint: Option<String>,
-}
-
-impl Default for ClaudeAuthBroker {
-    fn default() -> Self {
-        Self {
-            config_dir: home_dir_or_cwd().join(".claude"),
-            keychain_fallback: true,
-            login_hint: None,
-        }
-    }
-}
-
-impl ClaudeAuthBroker {
-    fn for_profile(config_dir: PathBuf, login_hint: Option<String>) -> Self {
-        Self {
-            config_dir,
-            keychain_fallback: false,
-            login_hint,
-        }
-    }
-
-    fn command(&self) -> Command {
-        let mut command = Command::new("claude");
-        command.env("CLAUDE_CONFIG_DIR", &self.config_dir);
-        command
-    }
-
-    fn login_command(&self) -> Command {
-        let mut command = self.command();
-        command.args(["auth", "login"]);
-        if let Some(login_hint) = self.login_hint.as_deref() {
-            command.args(["--email", login_hint]);
-        }
-        command
-    }
-}
-
-#[async_trait]
-impl AuthBroker for ClaudeAuthBroker {
-    fn provider(&self) -> Provider {
-        Provider::Claude
-    }
-
-    async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let command = self.login_command();
-
-        start_auth_command(
-            Provider::Claude,
-            "claude",
-            command,
-            AuthCommandInput::AuthorizationCode,
-            parse_generic_auth_line,
-        )
-        .await
-    }
-
-    async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-        let mut command = self.command();
-        command.args(["auth", "status"]);
-
-        match command.output().await {
-            Ok(output) if output.status.success() => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let login = parse_claude_status_login(&stdout);
-                Ok(AuthStatus::Active { login })
-            }
-            Ok(_) => Ok(AuthStatus::None),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(AuthStatus::None),
-            Err(err) => Err(AuthError::CommandIo {
-                provider: Provider::Claude,
-                source: err,
-            }),
-        }
-    }
-
-    async fn disconnect(&self) -> Result<(), AuthError> {
-        if self.keychain_fallback {
-            let mut command = self.command();
-            command.args(["auth", "logout"]);
-            // Ambient logout owns the global Keychain entry. A managed profile
-            // must only remove its copied credential file.
-            let _ = command.output().await;
-        }
-        self.remove_claude_auth_files()
-    }
-
-    async fn extract_token(&self) -> Option<ProviderToken> {
-        extract_claude_token_from_config_dir(&self.config_dir).or_else(|| {
-            if self.keychain_fallback {
-                read_claude_keychain_token(&self.config_dir)
-            } else {
-                None
-            }
-        })
-    }
-}
-
-impl ClaudeAuthBroker {
-    fn remove_claude_auth_files(&self) -> Result<(), AuthError> {
-        if !self.config_dir.exists() {
-            return Ok(());
-        }
-        for name in &[".credentials.json", "auth.json", "session-cache"] {
-            let path = self.config_dir.join(name);
-            if path.exists() {
-                remove_path(&path)?;
-            }
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct CodexAuthBroker {
-    codex_home: PathBuf,
-    force_file_store: bool,
-}
-
-impl Default for CodexAuthBroker {
-    fn default() -> Self {
-        Self {
-            codex_home: home_dir_or_cwd().join(".codex"),
-            force_file_store: false,
-        }
-    }
-}
-
-impl CodexAuthBroker {
-    fn for_profile(codex_home: PathBuf) -> Self {
-        Self {
-            codex_home,
-            force_file_store: true,
-        }
-    }
-
-    fn command(&self, subcommand: &str) -> Command {
-        let mut command = Command::new("codex");
-        command.env("CODEX_HOME", &self.codex_home);
-        command
-            .env_remove("CODEX_ACCESS_TOKEN")
-            .env_remove("OPENAI_API_KEY");
-        if self.force_file_store {
-            command.args(["-c", "cli_auth_credentials_store=\"file\""]);
-        }
-        command.arg(subcommand);
-        command
-    }
-
-    async fn refresh_access_token(&self) -> Result<(), AuthError> {
-        codex::refresh(&mut self.command("app-server"))
-            .await
-            .map(|_| ())
-    }
-}
-
-#[async_trait]
-impl AuthBroker for CodexAuthBroker {
-    fn provider(&self) -> Provider {
-        Provider::Codex
-    }
-
-    async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        codex::start_login(&mut self.command("app-server")).await
-    }
-
-    async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-        let Some(mut token) = extract_codex_token_from_home(&self.codex_home) else {
-            return Ok(AuthStatus::None);
-        };
-        if provider_token_refresh_due(&token, now_unix()) {
-            if self.refresh_access_token().await.is_err() {
-                return Ok(AuthStatus::None);
-            }
-            let Some(refreshed) = extract_codex_token_from_home(&self.codex_home) else {
-                return Ok(AuthStatus::None);
-            };
-            token = refreshed;
-            if provider_token_refresh_due(&token, now_unix()) {
-                return Ok(AuthStatus::None);
-            }
-        }
-        Ok(AuthStatus::Active { login: token.login })
-    }
-
-    async fn disconnect(&self) -> Result<(), AuthError> {
-        match self.command("logout").output().await {
-            Ok(output) if output.status.success() => Ok(()),
-            Ok(_) | Err(_) => {
-                let auth_path = self.codex_home.join("auth.json");
-                if auth_path.exists() {
-                    remove_path(&auth_path)?;
-                }
-                Ok(())
-            }
-        }
-    }
-
-    async fn extract_token(&self) -> Option<ProviderToken> {
-        extract_codex_token_from_home(&self.codex_home)
-    }
-}
-
-fn provider_account_broker(
-    provider: Provider,
-    provider_home: PathBuf,
-    login_hint: Option<&str>,
-) -> Result<Arc<dyn AuthBroker>, AuthError> {
-    match provider {
-        Provider::Claude => Ok(Arc::new(ClaudeAuthBroker::for_profile(
-            provider_home,
-            login_hint.map(String::from),
-        ))),
-        Provider::Codex => Ok(Arc::new(CodexAuthBroker::for_profile(provider_home))),
-        _ => Err(AuthError::UnsupportedProvider(provider.to_string())),
-    }
-}
-
-pub async fn start_provider_account_auth(
-    provider: Provider,
-    provider_home: PathBuf,
-    login_hint: Option<&str>,
-) -> Result<AuthFlowHandle, AuthError> {
-    provider_account_broker(provider, provider_home, login_hint)?
-        .start_auth()
-        .await
-}
-
-pub async fn provider_account_auth_status(
-    provider: Provider,
-    provider_home: PathBuf,
-) -> Result<AuthStatus, AuthError> {
-    provider_account_broker(provider, provider_home, None)?
-        .check_status()
-        .await
-}
-
-pub async fn disconnect_provider_account_auth(
-    provider: Provider,
-    provider_home: PathBuf,
-) -> Result<(), AuthError> {
-    provider_account_broker(provider, provider_home, None)?
-        .disconnect()
-        .await
-}
-
-/// Offline evidence from the managed provider's own credential format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CredentialPresence {
-    Present,
-    Missing,
-    Unreadable,
-    Uninspected,
-}
-
-pub(crate) fn provider_account_credential_presence(
-    provider: Provider,
-    home: &Path,
-) -> CredentialPresence {
-    let file = match provider {
-        Provider::Claude => ".credentials.json",
-        Provider::Codex => "auth.json",
-        _ => return CredentialPresence::Uninspected,
-    };
-    let raw = match fs::read_to_string(home.join(file)) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return CredentialPresence::Missing
-        }
-        Err(_) => return CredentialPresence::Unreadable,
-    };
-    let token = match provider {
-        Provider::Claude => claude_token_from_credentials_json(&raw),
-        Provider::Codex => serde_json::from_str(&raw)
-            .ok()
-            .and_then(|json| codex_token_from_credentials_json(&json)),
-        _ => None,
-    };
-    match token {
-        Some(token) if !token.access_token.is_empty() => CredentialPresence::Present,
-        _ => CredentialPresence::Unreadable,
-    }
-}
-
-pub(crate) async fn prepare_provider_account_access_token(
-    provider: Provider,
-    provider_home: &Path,
-) -> Result<Option<String>, AuthError> {
-    let token = match provider {
-        Provider::Claude => {
-            let broker = ClaudeAuthBroker::for_profile(provider_home.to_path_buf(), None);
-            broker.extract_token().await
-        }
-        Provider::Codex => {
-            let broker = CodexAuthBroker::for_profile(provider_home.to_path_buf());
-            broker.refresh_access_token().await?;
-            broker.extract_token().await
-        }
-        _ => return Err(AuthError::UnsupportedProvider(provider.to_string())),
-    };
-    let Some(token) = token else {
-        return Ok(None);
-    };
-    if provider_token_refresh_due(&token, now_unix()) {
-        return Err(AuthError::CommandFailed {
-            provider,
-            message: "provider CLI did not produce an access token valid for the forwarding lease"
-                .to_string(),
-        });
-    }
-    Ok(Some(token.access_token))
-}
-
-#[derive(Debug, Clone)]
 pub struct DopplerAuthBroker;
 
 #[async_trait]
@@ -1679,7 +1198,6 @@ impl AuthBroker for DopplerAuthBroker {
             Provider::Doppler,
             "doppler",
             command,
-            AuthCommandInput::None,
             parse_generic_auth_line,
         )
         .await
@@ -1821,38 +1339,13 @@ struct AuthFlowBuilder {
     expects_user_code: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AuthCommandInput {
-    None,
-    AuthorizationCode,
-}
-
-impl AuthCommandInput {
-    fn takes_code(self) -> bool {
-        self != Self::None
-    }
-}
-
 async fn start_auth_command(
     provider: Provider,
     command_name: &'static str,
     mut command: Command,
-    input: AuthCommandInput,
     mut parse_line: impl FnMut(&str, &mut AuthFlowBuilder) + Send + 'static,
 ) -> Result<AuthFlowHandle, AuthError> {
-    #[cfg(unix)]
-    let mut handoff = if provider == Provider::Claude && input.takes_code() {
-        Some(
-            browser_handoff::BrowserHandoff::new(&mut command)
-                .map_err(|source| AuthError::CommandIo { provider, source })?,
-        )
-    } else {
-        None
-    };
-    match input {
-        AuthCommandInput::None => command.stdin(Stdio::null()),
-        AuthCommandInput::AuthorizationCode => command.stdin(Stdio::piped()),
-    };
+    command.stdin(Stdio::null());
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     command.kill_on_drop(true);
     #[cfg(unix)]
@@ -1881,10 +1374,6 @@ async fn start_auth_command(
             .expect("newly spawned auth command should have a process id"),
     );
     let (line_tx, mut line_rx) = mpsc::channel::<String>(32);
-    let authorization_code_input = child
-        .stdin
-        .take()
-        .map(|stdin| AuthorizationCodeInput::new(provider, stdin));
     let stdout = child.stdout.take().expect("auth stdout is piped");
     let stderr = child.stderr.take().expect("auth stderr is piped");
     let readers = AuthReaders(vec![
@@ -1893,7 +1382,6 @@ async fn start_auth_command(
     ]);
     let started_at = Instant::now();
     let mut builder = AuthFlowBuilder::default();
-    let mut callback_url = None;
     let response = loop {
         // Read queued bytes before judging a fast-exiting provider. Closing both
         // pipes, not child exit alone, establishes that all output was received.
@@ -1903,34 +1391,13 @@ async fn start_auth_command(
             };
             parse_line(&strip_ansi_escape_codes(&line), &mut builder);
         }
-        #[cfg(unix)]
-        if let Some(handoff) = handoff.as_mut() {
-            callback_url = handoff
-                .read_url()
-                .map_err(|source| AuthError::CommandIo { provider, source })?;
-        }
         let expired = started_at.elapsed() >= AUTH_URL_TIMEOUT;
         let exited = child
             .try_wait()
             .map_err(|source| AuthError::CommandIo { provider, source })?;
         let drained = exited.is_some() && line_rx.is_closed() && line_rx.is_empty();
-        let capture_pending = cfg!(unix) && provider == Provider::Claude && input.takes_code();
-        if callback_url.is_some() || !capture_pending || expired || drained {
-            let manual = builder.verification_uri_complete.clone();
-            if let Some(url) = &callback_url {
-                builder.verification_uri = Some(strip_query(url).to_string());
-                builder.verification_uri_complete = Some(url.clone());
-            }
-            if let Some(mut response) = build_graph_response(provider, &builder) {
-                if input.takes_code() {
-                    response.completion = if callback_url.is_some() {
-                        AuthCompletion::Browser { manual_uri: manual }
-                    } else {
-                        AuthCompletion::Manual
-                    };
-                }
-                break response;
-            }
+        if let Some(response) = build_graph_response(provider, &builder) {
+            break response;
         }
         if drained {
             return Err(AuthError::CommandFailed {
@@ -1957,9 +1424,6 @@ async fn start_auth_command(
     };
     let monitor = tokio::spawn(async move {
         let _readers = readers;
-        // The private FIFO and helper live exactly as long as the provider.
-        #[cfg(unix)]
-        let _handoff = handoff;
         // Output after the URL still reaches the parser.
         let status = loop {
             tokio::select! {
@@ -1978,10 +1442,7 @@ async fn start_auth_command(
         }
         command_exit_result(provider, status)
     });
-    Ok(match authorization_code_input {
-        Some(input) => AuthFlowHandle::with_authorization_code_input(response, monitor, input),
-        None => AuthFlowHandle::new(response, monitor),
-    })
+    Ok(AuthFlowHandle::new(response, monitor))
 }
 
 struct AuthReaders(Vec<JoinHandle<()>>);
@@ -2194,17 +1655,6 @@ fn extract_expires_in(line: &str) -> Option<u64> {
         .and_then(|value| value.as_str().parse::<u64>().ok())
 }
 
-fn parse_claude_status_login(output: &str) -> Option<String> {
-    let json: serde_json::Value = serde_json::from_str(output).ok()?;
-    if json.get("loggedIn")?.as_bool()? {
-        json.get("email")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-    } else {
-        None
-    }
-}
-
 fn parse_github_login(output: &str) -> Option<String> {
     GH_LOGIN_RE
         .captures(output)
@@ -2235,16 +1685,6 @@ fn read_github_login(home_dir: &Path) -> Option<String> {
     }
 
     Some("github".to_string())
-}
-
-fn remove_path(path: &Path) -> Result<(), AuthError> {
-    if path.is_dir() {
-        fs::remove_dir_all(path)
-            .map_err(|err| AuthError::Filesystem(format!("remove {}: {err}", path.display())))
-    } else {
-        fs::remove_file(path)
-            .map_err(|err| AuthError::Filesystem(format!("remove {}: {err}", path.display())))
-    }
 }
 
 fn home_dir_or_cwd() -> PathBuf {
@@ -2283,585 +1723,6 @@ fn extract_github_token(home_dir: &Path) -> Option<ProviderToken> {
     })
 }
 
-pub(crate) fn extract_claude_token(home_dir: &Path) -> Option<ProviderToken> {
-    let config_dir = home_dir.join(".claude");
-    if let Some(token) = extract_claude_token_from_config_dir(&config_dir) {
-        return Some(token);
-    }
-    // The file is absent on machines where Claude Code stashed its OAuth blob in
-    // the macOS keychain (service "Claude Code-credentials", JSON under
-    // `.claudeAiOauth`). Fall back to reading it there.
-    read_claude_keychain_token(&config_dir)
-}
-
-fn extract_claude_token_from_config_dir(config_dir: &Path) -> Option<ProviderToken> {
-    let credential = read_claude_login(config_dir).ok().flatten()?;
-    claude_token_from_credentials_json(credential.expose_secret())
-}
-
-/// Claude's native homes keep their login in the Keychain on macOS; a stored
-/// account's own home keeps it in a file everywhere. Tests stay on files.
-#[cfg(all(target_os = "macos", not(test)))]
-fn claude_login_in_keychain(config_dir: &Path) -> bool {
-    !crate::provider_account::activation::is_account_home(config_dir)
-}
-
-/// The login a Claude started in `config_dir` would read: the Keychain item
-/// first where there is one, as Claude itself prefers it, then the file.
-///
-/// # Errors
-///
-/// Returns an error when a store exists but cannot be read.
-pub(crate) fn read_claude_login(config_dir: &Path) -> Result<Option<SecretString>, AuthError> {
-    #[cfg(all(target_os = "macos", not(test)))]
-    if claude_login_in_keychain(config_dir) {
-        if let Some(credential) = read_claude_keychain_credential_for_config(config_dir)? {
-            return Ok(Some(credential));
-        }
-    }
-    match fs::read_to_string(config_dir.join(".credentials.json")) {
-        Ok(content) => Ok(Some(SecretString::new(content))),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(AuthError::Filesystem(format!(
-            "read Claude credential file: {error}"
-        ))),
-    }
-}
-
-/// Install `credential` where a Claude started in `config_dir` reads it.
-///
-/// # Errors
-///
-/// Returns an error when the credential is not a Claude login or its store
-/// cannot be written.
-pub(crate) fn write_claude_login(
-    config_dir: &Path,
-    credential: &SecretString,
-) -> Result<(), AuthError> {
-    #[cfg(all(target_os = "macos", not(test)))]
-    if claude_login_in_keychain(config_dir) {
-        return write_claude_keychain_credential(config_dir, credential);
-    }
-    write_claude_profile_credentials(config_dir, credential)
-}
-
-/// Replace the Keychain item Claude reads for `config_dir`, as Claude writes
-/// it: `security add-generic-password -U`, fed on stdin so the login never
-/// appears in a process listing. Claude reads the item under its own account
-/// name (`claude_keychain_account`); a service can hold more than one item, so
-/// the first other item `security` finds gets the same login.
-#[cfg(target_os = "macos")]
-fn write_claude_keychain_credential(
-    config_dir: &Path,
-    credential: &SecretString,
-) -> Result<(), AuthError> {
-    if claude_token_from_credentials_json(credential.expose_secret()).is_none() {
-        return Err(AuthError::Filesystem(
-            "Claude credential has an unknown format".to_string(),
-        ));
-    }
-    let account = claude_keychain_account();
-    let scoped = claude_keychain_service(config_dir);
-    // The default home's item carries no suffix unless Claude already keeps a
-    // suffixed one for it.
-    let service = if config_dir == home_dir_or_cwd().join(".claude")
-        && read_claude_keychain_account_with_security(&scoped)?.is_none()
-    {
-        LEGACY_CLAUDE_KEYCHAIN_SERVICE.to_string()
-    } else {
-        scoped
-    };
-    let other = read_claude_keychain_account_with_security(&service)?
-        .filter(|other| *other != account && !other.contains(['"', '\\', '\n']));
-    let failed = |error: std::io::Error| {
-        AuthError::Filesystem(format!("write Claude Keychain credential: {error}"))
-    };
-    let mut security = ProcessCommand::new("security")
-        .arg("-i")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(failed)?;
-    let hex = hex::encode(credential.expose_secret().as_bytes());
-    let script: String = std::iter::once(account.as_str())
-        .chain(other.as_deref())
-        .map(|item| format!("add-generic-password -U -a \"{item}\" -s \"{service}\" -X {hex}\n"))
-        .collect();
-    security
-        .stdin
-        .take()
-        .expect("security stdin is piped")
-        .write_all(script.as_bytes())
-        .map_err(failed)?;
-    let status = security.wait().map_err(failed)?;
-    // `security -i` reports a failed command only through what it stored.
-    let stored = read_claude_keychain_blob_with_security(&service, &account).ok();
-    if !status.success()
-        || stored.as_ref().and_then(Option::as_deref) != Some(credential.expose_secret().as_bytes())
-    {
-        return Err(AuthError::Filesystem(format!(
-            "write Claude Keychain credential: the item for account \"{account}\" did not take the login"
-        )));
-    }
-    Ok(())
-}
-
-/// The account name Claude files its Keychain login under: `USER`, or
-/// `claude-code-user` when that is not a plain name (Claude 2.1.319).
-#[cfg(target_os = "macos")]
-fn claude_keychain_account() -> String {
-    std::env::var("USER")
-        .ok()
-        .filter(|user| {
-            !user.is_empty()
-                && user
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
-        })
-        .unwrap_or_else(|| "claude-code-user".to_string())
-}
-
-/// Parse a `.claude/.credentials.json` payload. The access token sits at the top
-/// level (`accessToken`); the keychain blob nests it under `claudeAiOauth`, so
-/// accept either shape.
-fn claude_token_from_credentials_json(content: &str) -> Option<ProviderToken> {
-    let json: serde_json::Value = serde_json::from_str(content).ok()?;
-    let node = json.get("claudeAiOauth").unwrap_or(&json);
-    let token = node.get("accessToken")?.as_str()?;
-    let expires_at = read_json_expires_at(
-        node,
-        &[
-            "expiresAt",
-            "expires_at",
-            "accessTokenExpiresAt",
-            "access_token_expires_at",
-        ],
-    );
-    Some(ProviderToken {
-        provider: "claude".to_string(),
-        access_token: token.to_string(),
-        refresh_token: None,
-        oauth_client_id: None,
-        expires_at,
-        login: None,
-        updated_at: now_unix(),
-        credential_type: CredentialType::OAuth,
-    })
-}
-
-/// Keep Claude's completed login in its stored profile.
-///
-/// Claude may write the native credentials file directly. On macOS versions
-/// that use Keychain instead, copy that credential into the stored profile.
-///
-/// # Errors
-///
-/// Returns an error when the Keychain credential is missing or the private
-/// profile file cannot be written atomically.
-pub fn capture_claude_profile_credentials(config_dir: &Path) -> Result<(), AuthError> {
-    let native = config_dir.join(".credentials.json");
-    if fs::read_to_string(native)
-        .ok()
-        .and_then(|content| claude_token_from_credentials_json(&content))
-        .is_some()
-    {
-        return Ok(());
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let service = claude_keychain_service(config_dir);
-        let deadline = Instant::now() + CLAUDE_KEYCHAIN_WRITE_TIMEOUT;
-        loop {
-            if let Some(credential) = read_claude_keychain_credential(&service)? {
-                write_claude_profile_credentials(config_dir, &credential)?;
-                return delete_claude_keychain_credential(&service, &claude_keychain_account());
-            }
-            if Instant::now() >= deadline {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        Err(AuthError::Filesystem(
-            "Claude completed login without a readable macOS Keychain credential".to_string(),
-        ))
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = config_dir;
-        Ok(())
-    }
-}
-
-/// Copy the ambient Claude login into a stored profile.
-///
-/// # Errors
-///
-/// Returns an error when the ambient credential is missing or cannot be copied.
-pub fn import_ambient_claude_profile_credentials(config_dir: &Path) -> Result<(), AuthError> {
-    let ambient = home_dir_or_cwd().join(".claude");
-    if let Ok(content) = fs::read_to_string(ambient.join(".credentials.json")) {
-        if claude_token_from_credentials_json(&content).is_some() {
-            return write_claude_profile_credentials(config_dir, &SecretString::new(content));
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let credential =
-            read_claude_keychain_credential_for_config(&ambient)?.ok_or_else(|| {
-                AuthError::Filesystem(
-                    "the ambient Claude login has no readable macOS Keychain credential"
-                        .to_string(),
-                )
-            })?;
-        write_claude_profile_credentials(config_dir, &credential)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Err(AuthError::Filesystem(
-            "the ambient Claude login has no native credential file".to_string(),
-        ))
-    }
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn claude_keychain_service(config_dir: &Path) -> String {
-    let digest = Sha256::digest(config_dir.to_string_lossy().as_bytes());
-    let suffix = format!("{digest:x}");
-    format!("Claude Code-credentials-{}", &suffix[..8])
-}
-
-pub(crate) fn write_claude_profile_credentials(
-    config_dir: &Path,
-    credential: &SecretString,
-) -> Result<(), AuthError> {
-    if claude_token_from_credentials_json(credential.expose_secret()).is_none() {
-        return Err(AuthError::Filesystem(
-            "Claude Keychain credential has an unknown format".to_string(),
-        ));
-    }
-    fs::create_dir_all(config_dir).map_err(|error| {
-        AuthError::Filesystem(format!("create {}: {error}", config_dir.display()))
-    })?;
-    let destination = config_dir.join(".credentials.json");
-    let mut temporary = tempfile::NamedTempFile::new_in(config_dir).map_err(|error| {
-        AuthError::Filesystem(format!("create private Claude credential file: {error}"))
-    })?;
-    temporary
-        .write_all(credential.expose_secret().as_bytes())
-        .map_err(|error| {
-            AuthError::Filesystem(format!("write private Claude credential file: {error}"))
-        })?;
-    temporary.as_file().sync_all().map_err(|error| {
-        AuthError::Filesystem(format!("sync private Claude credential file: {error}"))
-    })?;
-    temporary.persist(&destination).map_err(|error| {
-        AuthError::Filesystem(format!("install private Claude credential file: {error}"))
-    })?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-
-        fs::set_permissions(&destination, fs::Permissions::from_mode(0o600)).map_err(|error| {
-            AuthError::Filesystem(format!("protect {}: {error}", destination.display()))
-        })?;
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn read_claude_keychain_credential(service: &str) -> Result<Option<SecretString>, AuthError> {
-    let Some(blob) = read_claude_keychain_blob_with_security(service, &claude_keychain_account())
-        .map_err(|error| {
-        AuthError::Filesystem(format!("read Claude Keychain credential: {error}"))
-    })?
-    else {
-        return Ok(None);
-    };
-    let blob = String::from_utf8(blob).map_err(|_| {
-        AuthError::Filesystem("Claude Keychain credential is not valid UTF-8".to_string())
-    })?;
-    if claude_token_from_credentials_json(&blob).is_none() {
-        return Ok(None);
-    }
-    Ok(Some(SecretString::new(blob)))
-}
-
-#[cfg(target_os = "macos")]
-fn read_claude_keychain_credential_for_config(
-    config_dir: &Path,
-) -> Result<Option<SecretString>, AuthError> {
-    let scoped_service = claude_keychain_service(config_dir);
-    if let Some(credential) = read_claude_keychain_credential(&scoped_service)? {
-        return Ok(Some(credential));
-    }
-    let ambient = home_dir_or_cwd().join(".claude");
-    if config_dir == ambient {
-        return read_claude_keychain_credential(LEGACY_CLAUDE_KEYCHAIN_SERVICE);
-    }
-    Ok(None)
-}
-
-#[cfg(target_os = "macos")]
-fn read_claude_keychain_account_with_security(service: &str) -> Result<Option<String>, AuthError> {
-    let output = ProcessCommand::new("security")
-        .args(["find-generic-password", "-s", service])
-        .output()
-        .map_err(|error| {
-            AuthError::Filesystem(format!("read Claude Keychain metadata: {error}"))
-        })?;
-    if !output.status.success() {
-        if security_item_not_found(&output) {
-            return Ok(None);
-        }
-        return Err(AuthError::Filesystem(format!(
-            "read Claude Keychain metadata: security exited with {}",
-            output.status
-        )));
-    }
-    let metadata = String::from_utf8(output.stdout).map_err(|_| {
-        AuthError::Filesystem("Claude Keychain metadata is not valid UTF-8".to_string())
-    })?;
-    parse_security_keychain_account(&metadata)
-        .map(Some)
-        .ok_or_else(|| {
-            AuthError::Filesystem(
-                "Claude Keychain credential is missing its account metadata".to_string(),
-            )
-        })
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn parse_security_keychain_account(metadata: &str) -> Option<String> {
-    metadata.lines().find_map(|line| {
-        line.trim()
-            .strip_prefix("\"acct\"<blob>=\"")?
-            .strip_suffix('"')
-            .map(String::from)
-    })
-}
-
-#[cfg(target_os = "macos")]
-fn read_claude_keychain_blob_with_security(
-    service: &str,
-    account: &str,
-) -> Result<Option<Vec<u8>>, String> {
-    let output = ProcessCommand::new("security")
-        .args(["find-generic-password", "-a", account, "-s", service, "-w"])
-        .output()
-        .map_err(|error| error.to_string())?;
-    if !output.status.success() {
-        if security_item_not_found(&output) {
-            return Ok(None);
-        }
-        return Err(format!("security exited with {}", output.status));
-    }
-    Ok(Some(trim_security_password_output(output.stdout)))
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn trim_security_password_output(mut output: Vec<u8>) -> Vec<u8> {
-    if output.last() == Some(&b'\n') {
-        output.pop();
-        if output.last() == Some(&b'\r') {
-            output.pop();
-        }
-    }
-    output
-}
-
-#[cfg(target_os = "macos")]
-fn security_item_not_found(output: &std::process::Output) -> bool {
-    String::from_utf8_lossy(&output.stderr).contains("could not be found")
-}
-
-#[cfg(target_os = "macos")]
-fn delete_claude_keychain_credential(service: &str, account: &str) -> Result<(), AuthError> {
-    let output = ProcessCommand::new("security")
-        .args(["delete-generic-password", "-a", account, "-s", service])
-        .output()
-        .map_err(|error| {
-            AuthError::Filesystem(format!("clear Claude Keychain credential: {error}"))
-        })?;
-    if output.status.success() || security_item_not_found(&output) {
-        Ok(())
-    } else {
-        Err(AuthError::Filesystem(format!(
-            "clear Claude Keychain credential: security exited with {}",
-            output.status
-        )))
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn read_claude_keychain_token(config_dir: &Path) -> Option<ProviderToken> {
-    let credential = read_claude_keychain_credential_for_config(config_dir)
-        .ok()
-        .flatten()?;
-    claude_token_from_credentials_json(credential.expose_secret())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn read_claude_keychain_token(_config_dir: &Path) -> Option<ProviderToken> {
-    None
-}
-
-fn extract_codex_token(home_dir: &Path) -> Option<ProviderToken> {
-    extract_codex_token_from_home(&home_dir.join(".codex"))
-}
-
-pub(crate) fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
-    let auth_path = codex_home.join("auth.json");
-    let content = fs::read_to_string(auth_path).ok()?;
-    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-    codex_token_from_credentials_json(&json)
-}
-
-fn codex_token_from_credentials_json(json: &serde_json::Value) -> Option<ProviderToken> {
-    // Store OAuth access tokens only.
-    // Never capture manual API keys from Codex auth state.
-    let token = json
-        .get("access_token")
-        .and_then(|v| v.as_str())
-        .or_else(|| {
-            json.get("tokens")
-                .and_then(|value| value.get("access_token"))
-                .and_then(|v| v.as_str())
-        })?;
-    let expires_at = read_json_expires_at(
-        json,
-        &[
-            "expires_at",
-            "expiresAt",
-            "accessTokenExpiresAt",
-            "access_token_expires_at",
-        ],
-    )
-    .or_else(|| jwt_claims(token)?.get("exp")?.as_i64());
-    let login = codex_login_from_auth(json);
-    Some(ProviderToken {
-        provider: "codex".to_string(),
-        access_token: token.to_string(),
-        refresh_token: None,
-        oauth_client_id: None,
-        expires_at,
-        login,
-        updated_at: now_unix(),
-        credential_type: CredentialType::OAuth,
-    })
-}
-
-pub(crate) fn codex_identity_from_home(
-    home: &Path,
-) -> Option<crate::provider_account::identity::AccountIdentity> {
-    let raw = fs::read(home.join("auth.json")).ok()?;
-    codex_identity_from_credential(&raw)
-}
-
-pub(crate) fn codex_identity_from_credential(
-    raw: &[u8],
-) -> Option<crate::provider_account::identity::AccountIdentity> {
-    let json: serde_json::Value = serde_json::from_slice(raw).ok()?;
-    let id_token = json
-        .get("id_token")
-        .or_else(|| json.pointer("/tokens/id_token"))?
-        .as_str()?;
-    let claims = jwt_claims(id_token)?;
-    let email = claims.get("email")?.as_str()?.trim();
-    let subject = claims
-        .get("sub")
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            claims
-                .get("https://api.openai.com/auth")?
-                .get("chatgpt_user_id")?
-                .as_str()
-        })?
-        .trim();
-    if email.is_empty() || subject.is_empty() {
-        return None;
-    }
-    Some(crate::provider_account::identity::AccountIdentity {
-        email: email.into(),
-        subject: subject.into(),
-        credential_digest: None,
-    })
-}
-
-pub(crate) async fn verify_codex_identity(
-    home: &Path,
-) -> Result<
-    (
-        crate::provider_account::identity::AccountIdentity,
-        Option<String>,
-    ),
-    AuthError,
-> {
-    let broker = CodexAuthBroker::for_profile(home.to_path_buf());
-    let response = codex::refresh(&mut broker.command("app-server")).await?;
-    let identity = codex_identity_from_account(home, &response).map_err(|message| {
-        AuthError::CommandFailed {
-            provider: Provider::Codex,
-            message,
-        }
-    })?;
-    let plan = response
-        .pointer("/account/planType")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
-    Ok((identity, plan))
-}
-
-pub(crate) fn codex_identity_from_account(
-    home: &Path,
-    response: &serde_json::Value,
-) -> Result<crate::provider_account::identity::AccountIdentity, String> {
-    let identity = codex_identity_from_home(home).ok_or_else(|| {
-        "Codex credential has no email and per-user identity; reconnect".to_string()
-    })?;
-    let email = response
-        .pointer("/account/email")
-        .and_then(serde_json::Value::as_str);
-    if !email.is_some_and(|email| email.eq_ignore_ascii_case(&identity.email)) {
-        return Err(format!(
-            "Codex account/read reports {}; credential reports {}; reconnect",
-            email.unwrap_or("no login"),
-            identity.email
-        ));
-    }
-    Ok(identity)
-}
-
-fn codex_login_from_auth(json: &serde_json::Value) -> Option<String> {
-    let id_token = json
-        .get("id_token")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            json.get("tokens")
-                .and_then(|tokens| tokens.get("id_token"))
-                .and_then(serde_json::Value::as_str)
-        })?;
-    let claims = jwt_claims(id_token)?;
-    claims
-        .get("email")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-}
-
-pub(crate) fn jwt_claims(token: &str) -> Option<serde_json::Value> {
-    let payload = token.split('.').nth(1)?.trim_end_matches('=');
-    let claims = BASE64_URL_SAFE_NO_PAD.decode(payload).ok()?;
-    serde_json::from_slice(&claims).ok()
-}
-
-async fn refresh_codex_access_token(codex_home: &Path) -> Result<(), AuthError> {
-    let broker = CodexAuthBroker::for_profile(codex_home.to_path_buf());
-    broker.refresh_access_token().await
-}
-
-/// Canonical key under which OpenCode stores credentials in auth.json.
-/// Schema: `{"opencode": {"type": "api", "key": "...", "email": "..."}}`
 const OPENCODE_AUTH_KEY: &str = "opencode";
 
 fn opencode_auth_path(home_dir: &Path) -> PathBuf {
@@ -3022,13 +1883,6 @@ fn parse_expires_at_yaml_value(value: &serde_yaml_ng::Value) -> Option<i64> {
     )
 }
 
-fn read_json_expires_at(json: &serde_json::Value, keys: &[&str]) -> Option<i64> {
-    let object = json.as_object()?;
-    keys.iter()
-        .filter_map(|key| object.get(*key))
-        .find_map(parse_expires_at_json_value)
-}
-
 fn parse_expires_at_json_value(value: &serde_json::Value) -> Option<i64> {
     parse_expiry_from_parts(
         value.as_i64(),
@@ -3135,7 +1989,7 @@ pub async fn refresh_stored_provider_token(
     current_token: &ProviderToken,
 ) -> Result<ProviderToken, TokenRefreshError> {
     let mut refreshed = match provider {
-        Provider::Linear | Provider::Asana | Provider::Notion => {
+        Provider::Linear | Provider::Asana => {
             let refresh_token = current_token
                 .refresh_token
                 .as_deref()
@@ -3190,8 +2044,7 @@ async fn refresh_provider_token_with_runner(
 ) -> Result<ProviderToken, TokenRefreshError> {
     match provider {
         Provider::GitHub => refresh_github_token(home_dir, runner).await,
-        Provider::Claude => refresh_claude_token(home_dir),
-        Provider::Codex => refresh_codex_token(home_dir).await,
+        Provider::Claude | Provider::Codex => Err(TokenRefreshError::MissingToken { provider }),
         Provider::OpenCodeZen => {
             extract_opencode_zen_token(home_dir).ok_or(TokenRefreshError::MissingToken {
                 provider: Provider::OpenCodeZen,
@@ -3305,7 +2158,7 @@ struct OAuthRefreshResponse {
     expires_in: Option<i64>,
 }
 
-/// Exchange a planning provider's refresh grant without retaining provider error bodies.
+/// Exchange a tracker's refresh grant without retaining provider error bodies.
 ///
 /// # Errors
 /// Returns a sanitized protocol or configuration category. The caller owns retry
@@ -3456,39 +2309,6 @@ async fn refresh_github_token(
     })
 }
 
-fn refresh_claude_token(home_dir: &Path) -> Result<ProviderToken, TokenRefreshError> {
-    extract_claude_token(home_dir).ok_or(TokenRefreshError::MissingToken {
-        provider: Provider::Claude,
-    })
-}
-
-async fn refresh_codex_token(home_dir: &Path) -> Result<ProviderToken, TokenRefreshError> {
-    let codex_home = home_dir.join(".codex");
-    refresh_codex_access_token(&codex_home)
-        .await
-        .map_err(|error| match error {
-            AuthError::CommandUnavailable { command, .. } => {
-                TokenRefreshError::CommandUnavailable {
-                    provider: Provider::Codex,
-                    command,
-                }
-            }
-            AuthError::CommandIo { source, .. } | AuthError::CommandSpawn { source, .. } => {
-                TokenRefreshError::CommandIo {
-                    provider: Provider::Codex,
-                    source,
-                }
-            }
-            error => TokenRefreshError::CommandFailed {
-                provider: Provider::Codex,
-                message: error.to_string(),
-            },
-        })?;
-    extract_codex_token(home_dir).ok_or(TokenRefreshError::MissingToken {
-        provider: Provider::Codex,
-    })
-}
-
 async fn run_refresh_command(
     provider: Provider,
     program: &'static str,
@@ -3529,29 +2349,12 @@ fn summarize_command_output(output: &std::process::Output) -> String {
     format!("exit status {}", output.status)
 }
 
-fn normalize_program_name(program: &str) -> String {
-    std::path::Path::new(program)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(program)
-        .trim()
-        .to_ascii_lowercase()
-}
-
 fn normalize_env_name(name: &str) -> String {
     name.trim().to_ascii_uppercase()
 }
 
-pub fn provider_env_allowed_for_program(program: &str, env_name: &str) -> bool {
-    match env_name {
-        "GH_TOKEN" => true,
-        "CLAUDE_CODE_OAUTH_TOKEN" => normalize_program_name(program) == "claude",
-        "CODEX_ACCESS_TOKEN" => normalize_program_name(program) == "codex",
-        "ANTHROPIC_API_KEY" => normalize_program_name(program) == "claude",
-        "OPENAI_API_KEY" => normalize_program_name(program) == "codex",
-        "OPENCODE_API_KEY" => normalize_program_name(program) == "opencode",
-        _ => false,
-    }
+pub(crate) fn provider_env_allowed(harness: HarnessKind, env_name: &str) -> bool {
+    env_name == "GH_TOKEN" || harness.harness().provider_env().contains(&env_name)
 }
 
 const API_KEY_ENV_NAMES: &[&str] = &[
@@ -3568,19 +2371,14 @@ pub fn is_api_key_env_name(name: &str) -> bool {
     API_KEY_ENV_NAMES.iter().any(|item| *item == normalized)
 }
 
-pub fn api_key_env_allowed_for_program(program: &str, env_name: &str) -> bool {
+pub(crate) fn api_key_env_allowed(harness: HarnessKind, env_name: &str) -> bool {
     let env_name = normalize_env_name(env_name);
     if !is_api_key_env_name(&env_name) {
         return true;
     }
-    match normalize_program_name(program).as_str() {
-        "pi" => matches!(
-            env_name.as_str(),
-            "ANTHROPIC_API_KEY" | "OPENAI_API_KEY" | "GEMINI_API_KEY" | "MOONSHOT_API_KEY"
-        ),
-        "opencode" => matches!(env_name.as_str(), "OPENCODE_API_KEY" | "MOONSHOT_API_KEY"),
-        _ => false,
-    }
+    // An exported API key would bill Claude and Codex per token instead of
+    // their native login; only harnesses that take one see it.
+    harness.harness().api_key_env().contains(&env_name.as_str())
 }
 
 pub fn api_key_env_names() -> &'static [&'static str] {
@@ -3592,20 +2390,6 @@ pub fn api_key_env_names() -> &'static [&'static str] {
 pub fn env_var_for_token(token: &ProviderToken) -> Option<(String, String)> {
     match (token.provider.as_str(), token.credential_type) {
         ("github", _) => Some(("GH_TOKEN".to_string(), token.access_token.clone())),
-        ("claude", CredentialType::OAuth) => Some((
-            "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
-            token.access_token.clone(),
-        )),
-        ("claude", CredentialType::ApiKey) => {
-            Some(("ANTHROPIC_API_KEY".to_string(), token.access_token.clone()))
-        }
-        // Codex's native login owns ChatGPT OAuth. CODEX_ACCESS_TOKEN is an
-        // agent-identity credential, not a ChatGPT access token; injecting the
-        // latter overrides a working native login with invalid authentication.
-        ("codex", CredentialType::OAuth) => None,
-        ("codex", CredentialType::ApiKey) => {
-            Some(("OPENAI_API_KEY".to_string(), token.access_token.clone()))
-        }
         ("opencodezen", _) => Some(("OPENCODE_API_KEY".to_string(), token.access_token.clone())),
         _ => None,
     }
@@ -3631,18 +2415,20 @@ pub async fn provider_env_vars(store: &crate::store::Store) -> Vec<(String, Stri
     vars
 }
 
-/// Apply stored provider credentials that are valid for this executable.
+/// Apply stored provider credentials allowed for the selected harness.
 ///
 /// Agent launch is synchronous, while the credential store is async. Keep the
 /// runtime on a short-lived worker so callers remain safe inside Tokio too.
-pub(crate) fn apply_provider_env_to_command(program: &str, command: &mut std::process::Command) {
+pub(crate) fn apply_provider_env_to_command(
+    harness: HarnessKind,
+    command: &mut std::process::Command,
+) {
     for env_name in api_key_env_names() {
-        if !api_key_env_allowed_for_program(program, env_name) {
+        if !api_key_env_allowed(harness, env_name) {
             command.env_remove(env_name);
         }
     }
 
-    let program = program.to_string();
     let worker = match std::thread::Builder::new()
         .name("lf-provider-env".to_string())
         .spawn(move || {
@@ -3682,7 +2468,7 @@ pub(crate) fn apply_provider_env_to_command(program: &str, command: &mut std::pr
         }
     };
     for (name, value) in env_vars {
-        if provider_env_allowed_for_program(&program, &name) {
+        if provider_env_allowed(harness, &name) {
             command.env(name, value);
         }
     }
@@ -3692,7 +2478,6 @@ pub(crate) fn apply_provider_env_to_command(program: &str, command: &mut std::pr
 mod tests {
     use std::collections::VecDeque;
     use std::io::{Read, Write};
-    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
     use std::os::unix::process::ExitStatusExt;
     use std::sync::{Mutex as StdMutex, OnceLock};
@@ -3700,6 +2485,29 @@ mod tests {
 
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn api_key_env_filter_is_harness_specific() {
+        assert!(api_key_env_allowed(
+            HarnessKind::OpenCode,
+            "OPENCODE_API_KEY"
+        ));
+        assert!(api_key_env_allowed(
+            HarnessKind::OpenCode,
+            "MOONSHOT_API_KEY"
+        ));
+        assert!(api_key_env_allowed(HarnessKind::Pi, "ANTHROPIC_API_KEY"));
+        assert!(!api_key_env_allowed(
+            HarnessKind::OpenCode,
+            "ANTHROPIC_API_KEY"
+        ));
+        // Claude and Codex bill to their native login, never an exported key.
+        for name in API_KEY_ENV_NAMES {
+            assert!(!api_key_env_allowed(HarnessKind::Claude, name), "{name}");
+            assert!(!api_key_env_allowed(HarnessKind::Codex, name), "{name}");
+        }
+        assert!(api_key_env_allowed(HarnessKind::Claude, "GH_TOKEN"));
+    }
 
     #[derive(Debug)]
     struct FakeRefreshRunner {
@@ -3827,19 +2635,6 @@ mod tests {
     }
 
     #[test]
-    fn provider_parses_aliases() {
-        assert_eq!("github".parse::<Provider>(), Ok(Provider::GitHub));
-        assert_eq!("gh".parse::<Provider>(), Ok(Provider::GitHub));
-        assert_eq!("CLAUDE".parse::<Provider>(), Ok(Provider::Claude));
-        assert_eq!("codex".parse::<Provider>(), Ok(Provider::Codex));
-        assert_eq!("opencodezen".parse::<Provider>(), Ok(Provider::OpenCodeZen));
-        assert_eq!("zen".parse::<Provider>(), Ok(Provider::OpenCodeZen));
-        assert_eq!("oc".parse::<Provider>(), Ok(Provider::OpenCodeZen));
-        assert_eq!("linear".parse::<Provider>(), Ok(Provider::Linear));
-        assert_eq!("lin".parse::<Provider>(), Ok(Provider::Linear));
-    }
-
-    #[test]
     fn provider_api_key_billing_only_marks_metered_agent_providers() {
         assert!(!Provider::GitHub.api_key_bills_per_token());
         assert!(Provider::Claude.api_key_bills_per_token());
@@ -3912,22 +2707,6 @@ mod tests {
         assert!(is_loopback_url("http://127.0.0.1:1455/callback"));
     }
 
-    #[test]
-    fn claude_callback_url_does_not_invent_a_user_code() {
-        let mut builder = AuthFlowBuilder::default();
-        parse_generic_auth_line(
-            "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&code_challenge=challenge&state=state",
-            &mut builder,
-        );
-
-        let response = build_graph_response(Provider::Claude, &builder).expect("response");
-        assert_eq!(
-            response.verification_uri,
-            "https://claude.com/cai/oauth/authorize"
-        );
-        assert_eq!(response.user_code, None);
-    }
-
     #[tokio::test]
     async fn cancelling_auth_wait_kills_the_provider_process_group() {
         let tmp = tempdir().expect("tempdir");
@@ -3938,15 +2717,9 @@ mod tests {
             "echo $$ > \"$AUTH_PID_PATH\"; echo https://example.com/oauth/authorize; sleep 30",
         ]);
 
-        let handle = start_auth_command(
-            Provider::Claude,
-            "sh",
-            command,
-            AuthCommandInput::None,
-            parse_generic_auth_line,
-        )
-        .await
-        .expect("start fake auth command");
+        let handle = start_auth_command(Provider::Claude, "sh", command, parse_generic_auth_line)
+            .await
+            .expect("start fake auth command");
         let pid: i32 = fs::read_to_string(pid_path)
             .expect("read auth pid")
             .trim()
@@ -3970,79 +2743,6 @@ mod tests {
         .expect("auth process should exit when its handle is dropped");
     }
 
-    #[tokio::test]
-    async fn authorization_code_completes_command_auth() {
-        let mut command = Command::new("sh");
-        command.args([
-            "-c",
-            "echo https://example.com/oauth/authorize; IFS= read -r code; test \"$code\" = expected-code",
-        ]);
-
-        let handle = start_auth_command(
-            Provider::Claude,
-            "sh",
-            command,
-            AuthCommandInput::AuthorizationCode,
-            parse_generic_auth_line,
-        )
-        .await
-        .expect("start fake auth command");
-
-        assert!(handle.supports_authorization_code());
-        assert_eq!(handle.response.completion, AuthCompletion::Manual);
-        handle
-            .submit_authorization_code("expected-code")
-            .await
-            .expect("submit authorization code");
-        handle.wait().await.expect("auth command should complete");
-    }
-
-    #[tokio::test]
-    async fn discovery_timeout_kills_only_the_owned_provider_group() {
-        let tmp = tempdir().unwrap();
-        let pid_path = tmp.path().join("pid");
-        let mut unrelated = Command::new("sleep")
-            .arg("30")
-            .kill_on_drop(true)
-            .spawn()
-            .unwrap();
-        let mut command = Command::new("sh");
-        command
-            .env("AUTH_PID_PATH", &pid_path)
-            .args(["-c", "echo $$ > \"$AUTH_PID_PATH\"; sleep 30"]);
-        let result = tokio::time::timeout(
-            Duration::from_millis(200),
-            start_auth_command(
-                Provider::Claude,
-                "sh",
-                command,
-                AuthCommandInput::AuthorizationCode,
-                parse_generic_auth_line,
-            ),
-        )
-        .await;
-        assert!(result.is_err());
-        let pid: i32 = fs::read_to_string(pid_path)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                // SAFETY: signal zero probes only this recorded fixture pid.
-                if unsafe { libc::kill(pid, 0) } != 0 {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .unwrap();
-        assert!(unrelated.try_wait().unwrap().is_none());
-        unrelated.kill().await.unwrap();
-        unrelated.wait().await.unwrap();
-    }
-
     #[test]
     fn terminal_links_preserve_targets_without_escape_bytes() {
         let expected = "https://example.com/authorize?state=synthetic";
@@ -4060,46 +2760,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn native_browser_handoff_wins_over_earlier_manual_link_and_needs_no_input() {
-        let mut command = Command::new("sh");
-        command.args([
-            "-c",
-            r#"
-            printf '\033]8;;https://example.com/manual?state=synthetic\007Sign in\033]8;;\007\n'
-            sleep 0.05
-            "$BROWSER" 'https://example.com/native?redirect_uri=http%3A%2F%2Flocalhost%3A19222'
-        "#,
-        ]);
-        let handle = start_auth_command(
-            Provider::Claude,
-            "sh",
-            command,
-            AuthCommandInput::AuthorizationCode,
-            parse_generic_auth_line,
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            handle.response.completion,
-            AuthCompletion::Browser {
-                manual_uri: Some("https://example.com/manual?state=synthetic".to_string())
-            }
-        );
-        assert!(handle
-            .response
-            .verification_uri_complete
-            .as_ref()
-            .unwrap()
-            .contains("/native?"));
-        assert!(!format!("{handle:?}").contains("https://"));
-        tokio::time::timeout(Duration::from_secs(2), handle.wait())
-            .await
-            .unwrap()
-            .unwrap();
-    }
-
     #[tokio::test]
     async fn fragmented_hyperlink_survives_immediate_provider_exit() {
         let mut command = Command::new("sh");
@@ -4111,15 +2771,9 @@ mod tests {
             printf 'ize\033\\Sign in\033]8;;\033\\'
         "#,
         ]);
-        let handle = start_auth_command(
-            Provider::Codex,
-            "sh",
-            command,
-            AuthCommandInput::None,
-            parse_generic_auth_line,
-        )
-        .await
-        .unwrap();
+        let handle = start_auth_command(Provider::Codex, "sh", command, parse_generic_auth_line)
+            .await
+            .unwrap();
         assert_eq!(
             handle.response.verification_uri_complete.as_deref(),
             Some("https://example.com/authorize")
@@ -4131,124 +2785,12 @@ mod tests {
     async fn fast_provider_failure_drains_output_but_does_not_claim_success() {
         let mut command = Command::new("sh");
         command.args(["-c", "echo https://example.com/authorize; exit 7"]);
-        let handle = start_auth_command(
-            Provider::Codex,
-            "sh",
-            command,
-            AuthCommandInput::None,
-            parse_generic_auth_line,
-        )
-        .await
-        .unwrap();
+        let handle = start_auth_command(Provider::Codex, "sh", command, parse_generic_auth_line)
+            .await
+            .unwrap();
         let error = handle.wait().await.unwrap_err().to_string();
         assert!(error.contains('7'));
         assert!(!error.contains("https://"));
-    }
-
-    #[test]
-    fn claude_keychain_service_is_scoped_to_the_config_directory() {
-        assert_eq!(
-            claude_keychain_service(Path::new("/tmp/claude-profile")),
-            "Claude Code-credentials-7182514b"
-        );
-    }
-
-    #[test]
-    fn claude_profile_credentials_are_private_and_native() {
-        let temp = tempdir().expect("tempdir");
-        let payload =
-            r#"{"claudeAiOauth":{"accessToken":"test-access-token","expiresAt":4102444800000}}"#;
-        let credential = SecretString::new(payload.to_string());
-
-        write_claude_profile_credentials(temp.path(), &credential)
-            .expect("write profile credentials");
-
-        let path = temp.path().join(".credentials.json");
-        assert_eq!(fs::read_to_string(&path).expect("credential file"), payload);
-        assert_eq!(
-            fs::metadata(&path)
-                .expect("credential metadata")
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
-        );
-
-        let replacement = r#"{"claudeAiOauth":{"accessToken":"replacement-access-token","expiresAt":4102444800000}}"#;
-        write_claude_profile_credentials(temp.path(), &SecretString::new(replacement.to_string()))
-            .expect("replace profile credentials");
-        assert_eq!(
-            fs::read_to_string(&path).expect("replacement credential file"),
-            replacement
-        );
-    }
-
-    #[test]
-    fn completed_claude_login_accepts_a_native_profile_credential() {
-        let temp = tempdir().expect("tempdir");
-        let payload =
-            r#"{"claudeAiOauth":{"accessToken":"profile-token","expiresAt":4102444800000}}"#;
-        fs::write(temp.path().join(".credentials.json"), payload).expect("profile credential");
-
-        capture_claude_profile_credentials(temp.path()).expect("accept native credential");
-
-        assert_eq!(
-            fs::read_to_string(temp.path().join(".credentials.json")).unwrap(),
-            payload
-        );
-    }
-
-    #[tokio::test]
-    async fn managed_claude_access_token_does_not_depend_on_cli_status() {
-        let temp = tempdir().expect("tempdir");
-        let payload =
-            r#"{"claudeAiOauth":{"accessToken":"test-access-token","expiresAt":4102444800000}}"#;
-        write_claude_profile_credentials(temp.path(), &SecretString::new(payload.to_string()))
-            .expect("write profile credentials");
-
-        let token = prepare_provider_account_access_token(Provider::Claude, temp.path())
-            .await
-            .expect("read managed access token");
-
-        assert_eq!(token.as_deref(), Some("test-access-token"));
-    }
-
-    #[test]
-    fn generic_parser_handles_ansi_wrapped_url_and_variable_user_code() {
-        let mut builder = AuthFlowBuilder::default();
-        let code_line = "Enter this one-time code \u{1b}[90m(expires in 15 minutes)\u{1b}[0m\n\u{1b}[94m1XH6-DG19Y\u{1b}[0m";
-        parse_generic_auth_line(&strip_ansi_escape_codes(code_line), &mut builder);
-        parse_generic_auth_line(
-            &strip_ansi_escape_codes("\u{1b}[94mhttps://auth.openai.com/codex/device\u{1b}[0m"),
-            &mut builder,
-        );
-
-        let response = build_graph_response(Provider::Codex, &builder).expect("response");
-        assert_eq!(
-            response.verification_uri,
-            "https://auth.openai.com/codex/device"
-        );
-        assert_eq!(response.user_code, Some("1XH6-DG19Y".to_string()));
-    }
-
-    #[test]
-    fn generic_parser_accepts_native_codex_oauth_without_a_device_code() {
-        let mut builder = AuthFlowBuilder::default();
-        parse_generic_auth_line(
-            "https://auth.openai.com/oauth/authorize?client_id=test&state=test-state",
-            &mut builder,
-        );
-
-        let response = build_graph_response(Provider::Codex, &builder).expect("response");
-        assert_eq!(
-            response.verification_uri,
-            "https://auth.openai.com/oauth/authorize"
-        );
-        assert_eq!(response.user_code, None);
-        assert_eq!(
-            response.verification_uri_complete.as_deref(),
-            Some("https://auth.openai.com/oauth/authorize?client_id=test&state=test-state")
-        );
     }
 
     #[test]
@@ -4283,164 +2825,11 @@ mod tests {
     }
 
     #[test]
-    fn claude_status_parses_login_from_json() {
-        let output = r#"{"loggedIn":true,"authMethod":"claude.ai","email":"user@example.com"}"#;
-        assert_eq!(
-            parse_claude_status_login(output),
-            Some("user@example.com".to_string())
-        );
-
-        let not_logged_in = r#"{"loggedIn":false}"#;
-        assert_eq!(parse_claude_status_login(not_logged_in), None);
-
-        assert_eq!(parse_claude_status_login("not json"), None);
-    }
-
-    #[test]
     fn gh_logout_detects_already_disconnected_message() {
         assert!(gh_logout_is_already_disconnected(
             "not logged in to any hosts"
         ));
         assert!(!gh_logout_is_already_disconnected("fatal: unknown host"));
-    }
-
-    #[test]
-    fn managed_claude_login_preselects_the_profile_email() {
-        let broker = ClaudeAuthBroker::for_profile(
-            PathBuf::from("/tmp/managed-claude"),
-            Some("engineering@example.com".to_string()),
-        );
-        let command = broker.login_command();
-        let args: Vec<_> = command
-            .as_std()
-            .get_args()
-            .map(|value| value.to_string_lossy().into_owned())
-            .collect();
-
-        assert_eq!(
-            args,
-            ["auth", "login", "--email", "engineering@example.com"]
-        );
-    }
-
-    #[test]
-    fn keychain_metadata_parser_reads_the_account_without_the_password() {
-        let metadata = r#"keychain: "/Users/operator/Library/Keychains/login.keychain-db"
-attributes:
-    "acct"<blob>="operator"
-    "svce"<blob>="Claude Code-credentials""#;
-
-        assert_eq!(
-            parse_security_keychain_account(metadata).as_deref(),
-            Some("operator")
-        );
-    }
-
-    /// A `security` that keeps each item as `keychain/<service>/<account>`,
-    /// finding them by `-s` alone in `.order`, as the real one finds the oldest.
-    #[cfg(target_os = "macos")]
-    const FAKE_SECURITY: &str = r#"#!/bin/sh
-dir="$(dirname "$0")/../keychain"
-if [ "$1" = "-i" ]; then
-  while IFS= read -r line; do
-    acct=$(printf '%s' "$line" | sed -n 's/.* -a "\([^"]*\)" -s .*/\1/p')
-    svc=$(printf '%s' "$line" | sed -n 's/.* -s "\([^"]*\)" -X .*/\1/p')
-    mkdir -p "$dir/$svc"
-    printf '%s' "${line##* -X }" | xxd -r -p > "$dir/$svc/$acct"
-    grep -qx "$acct" "$dir/$svc/.order" 2>/dev/null || echo "$acct" >> "$dir/$svc/.order"
-  done
-  exit 0
-fi
-shift
-acct=; svc=; w=
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -a) acct=$2; shift ;;
-    -s) svc=$2; shift ;;
-    -w) w=1 ;;
-  esac
-  shift
-done
-[ -n "$acct" ] || acct=$(head -n 1 "$dir/$svc/.order" 2>/dev/null)
-if [ -z "$acct" ] || [ ! -f "$dir/$svc/$acct" ]; then
-  echo "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." >&2
-  exit 44
-fi
-if [ -n "$w" ]; then cat "$dir/$svc/$acct"; echo; else echo "    \"acct\"<blob>=\"$acct\""; fi
-"#;
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn a_keychain_write_lands_on_the_item_claude_reads_when_a_service_holds_two() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let _lock = crate::journal::test_env_lock();
-        let root = tempdir().unwrap();
-        let bin = root.path().join("bin");
-        fs::create_dir_all(&bin).unwrap();
-        fs::write(bin.join("security"), FAKE_SECURITY).unwrap();
-        fs::set_permissions(bin.join("security"), fs::Permissions::from_mode(0o755)).unwrap();
-        let config_dir = root.path().join("native");
-        let service = claude_keychain_service(&config_dir);
-        // An older item under another account name comes back first from `-s`.
-        let items = root.path().join("keychain").join(&service);
-        fs::create_dir_all(&items).unwrap();
-        let stale = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-stale"}}"#;
-        fs::write(items.join("unknown"), stale).unwrap();
-        fs::write(items.join("jack"), stale).unwrap();
-        fs::write(items.join(".order"), "unknown\njack\n").unwrap();
-        let path = std::env::var_os("PATH").unwrap_or_default();
-        let user = std::env::var_os("USER");
-        let mut search = std::ffi::OsString::from(&bin);
-        search.push(":");
-        search.push(&path);
-        std::env::set_var("PATH", search);
-        std::env::set_var("USER", "jack");
-
-        let fresh = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-fresh"}}"#;
-        let written =
-            write_claude_keychain_credential(&config_dir, &SecretString::new(fresh.to_string()));
-        let read = read_claude_keychain_credential(&service);
-
-        std::env::set_var("PATH", path);
-        match user {
-            Some(user) => std::env::set_var("USER", user),
-            None => std::env::remove_var("USER"),
-        }
-        written.unwrap();
-        assert_eq!(read.unwrap().unwrap().expose_secret(), fresh);
-        assert_eq!(fs::read_to_string(items.join("jack")).unwrap(), fresh);
-        assert_eq!(fs::read_to_string(items.join("unknown")).unwrap(), fresh);
-    }
-
-    #[test]
-    fn security_password_output_keeps_internal_newlines() {
-        assert_eq!(
-            trim_security_password_output(b"{\n  \"token\": \"value\"\n}\n".to_vec()),
-            b"{\n  \"token\": \"value\"\n}".to_vec()
-        );
-        assert_eq!(
-            trim_security_password_output(b"single-line\r\n".to_vec()),
-            b"single-line".to_vec()
-        );
-    }
-
-    #[tokio::test]
-    async fn claude_disconnect_keeps_settings_and_removes_auth_entries() {
-        let temp = tempdir().expect("tempdir");
-        let claude_dir = temp.path().join(".claude");
-        fs::create_dir_all(&claude_dir).expect("claude dir");
-        fs::write(claude_dir.join("settings.json"), "{\"theme\":\"dark\"}").expect("settings");
-        fs::write(claude_dir.join("auth.json"), "{\"token\":\"abc\"}").expect("auth file");
-        fs::create_dir_all(claude_dir.join("session-cache")).expect("session dir");
-        fs::write(claude_dir.join("session-cache").join("entry"), "cached").expect("session entry");
-
-        let broker = ClaudeAuthBroker::for_profile(temp.path().join(".claude"), None);
-        broker.disconnect().await.expect("disconnect");
-
-        assert!(claude_dir.join("settings.json").exists());
-        assert!(!claude_dir.join("auth.json").exists());
-        assert!(!claude_dir.join("session-cache").exists());
     }
 
     #[tokio::test]
@@ -4464,129 +2853,6 @@ if [ -n "$w" ]; then cat "$dir/$svc/$acct"; echo; else echo "    \"acct\"<blob>=
             .expect("credential should eventually be detected");
 
         server.join().expect("server join");
-    }
-
-    #[tokio::test]
-    async fn service_reports_pending_when_graph_running() {
-        #[derive(Debug)]
-        struct FakeBroker;
-
-        #[async_trait]
-        impl AuthBroker for FakeBroker {
-            fn provider(&self) -> Provider {
-                Provider::GitHub
-            }
-
-            async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-                let response = AuthFlowResponse {
-                    completion: AuthCompletion::Browser { manual_uri: None },
-                    provider: Provider::GitHub,
-                    verification_uri: "https://github.com/login/device".to_string(),
-                    verification_uri_complete: None,
-                    user_code: Some("ABCD-1234".to_string()),
-                    expires_in: Some(900),
-                };
-                let monitor = tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                    Ok(())
-                });
-                Ok(AuthFlowHandle::new(response, monitor))
-            }
-
-            async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-                Ok(AuthStatus::Active {
-                    login: Some("jackdanger".to_string()),
-                })
-            }
-
-            async fn disconnect(&self) -> Result<(), AuthError> {
-                Ok(())
-            }
-        }
-
-        let service = ProviderAuthService::with_brokers(vec![Arc::new(FakeBroker)]);
-        service
-            .start_auth(Provider::GitHub)
-            .await
-            .expect("start auth");
-
-        let status = service.status(Provider::GitHub).await.expect("status");
-        assert_eq!(status.status, AuthStatus::Pending);
-        assert!(
-            !service
-                .pending_supports_authorization_code(Provider::GitHub)
-                .await
-        );
-    }
-
-    #[tokio::test]
-    async fn service_completes_pending_command_with_authorization_code() {
-        #[derive(Debug)]
-        struct CommandBroker;
-
-        #[async_trait]
-        impl AuthBroker for CommandBroker {
-            fn provider(&self) -> Provider {
-                Provider::Claude
-            }
-
-            async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-                let mut command = Command::new("sh");
-                command.args([
-                    "-c",
-                    r#"echo https://example.com/oauth/authorize; "$BROWSER" https://example.com/native; IFS= read -r code; test "$code" = expected-code"#,
-                ]);
-                start_auth_command(
-                    Provider::Claude,
-                    "sh",
-                    command,
-                    AuthCommandInput::AuthorizationCode,
-                    parse_generic_auth_line,
-                )
-                .await
-            }
-
-            async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-                Ok(AuthStatus::Active { login: None })
-            }
-
-            async fn disconnect(&self) -> Result<(), AuthError> {
-                Ok(())
-            }
-        }
-
-        let service = ProviderAuthService::with_brokers(vec![Arc::new(CommandBroker)]);
-        service
-            .start_auth(Provider::Claude)
-            .await
-            .expect("start auth");
-        assert!(
-            service
-                .pending_supports_authorization_code(Provider::Claude)
-                .await
-        );
-        service
-            .complete_auth(Provider::Claude, "expected-code")
-            .await
-            .expect("complete auth");
-
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while service.is_pending(Provider::Claude).await {
-            assert!(Instant::now() < deadline, "auth lifecycle did not finish");
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        service.wait_for_auth(Provider::Claude).await.unwrap();
-        service.start_auth(Provider::Claude).await.unwrap();
-        service
-            .complete_auth(Provider::Claude, "rejected-code")
-            .await
-            .unwrap();
-        assert!(service.wait_for_auth(Provider::Claude).await.is_err());
-        // An independently active credential cannot turn this failed attempt green.
-        assert!(matches!(
-            service.status(Provider::Claude).await.unwrap().status,
-            AuthStatus::Active { .. }
-        ));
     }
 
     #[derive(Debug, Clone)]
@@ -4717,205 +2983,6 @@ if [ -n "$w" ]; then cat "$dir/$svc/$acct"; echo; else echo "    \"acct\"<blob>=
         assert_eq!(snapshot.credential_type, Some(CredentialType::OAuth));
     }
 
-    #[tokio::test]
-    async fn status_marks_stored_token_expired() {
-        let store = temp_sqlite_store().await;
-        store
-            .upsert_provider_token(&ProviderToken {
-                provider: "claude".to_string(),
-                access_token: "stale".to_string(),
-                refresh_token: None,
-                oauth_client_id: None,
-                expires_at: Some(now_unix() - 60),
-                login: None,
-                updated_at: now_unix(),
-                credential_type: CredentialType::OAuth,
-            })
-            .await
-            .expect("upsert token");
-        let service = ProviderAuthService::with_brokers_and_store(Vec::new(), Some(store));
-
-        let snapshot = service.status(Provider::Claude).await.expect("status");
-        assert_eq!(snapshot.status, AuthStatus::Expired);
-    }
-
-    #[test]
-    fn api_key_env_filter_is_harness_specific() {
-        assert!(api_key_env_allowed_for_program(
-            "opencode",
-            "OPENCODE_API_KEY"
-        ));
-        assert!(api_key_env_allowed_for_program(
-            "/usr/local/bin/opencode",
-            "MOONSHOT_API_KEY"
-        ));
-        assert!(!api_key_env_allowed_for_program(
-            "opencode",
-            "ANTHROPIC_API_KEY"
-        ));
-        assert!(!api_key_env_allowed_for_program(
-            "opencode",
-            "OPENAI_API_KEY"
-        ));
-        assert!(!api_key_env_allowed_for_program(
-            "claude",
-            "OPENCODE_API_KEY"
-        ));
-        assert!(!api_key_env_allowed_for_program(
-            "codex",
-            "MOONSHOT_API_KEY"
-        ));
-    }
-
-    #[test]
-    fn provider_env_allowed_is_harness_specific() {
-        assert!(provider_env_allowed_for_program("claude", "GH_TOKEN"));
-        assert!(provider_env_allowed_for_program("codex", "GH_TOKEN"));
-        assert!(provider_env_allowed_for_program(
-            "claude",
-            "CLAUDE_CODE_OAUTH_TOKEN"
-        ));
-        assert!(provider_env_allowed_for_program(
-            "codex",
-            "CODEX_ACCESS_TOKEN"
-        ));
-        assert!(provider_env_allowed_for_program(
-            "opencode",
-            "OPENCODE_API_KEY"
-        ));
-        assert!(!provider_env_allowed_for_program(
-            "codex",
-            "CLAUDE_CODE_OAUTH_TOKEN"
-        ));
-        assert!(!provider_env_allowed_for_program(
-            "claude",
-            "OPENCODE_API_KEY"
-        ));
-    }
-
-    #[test]
-    fn extract_codex_token_ignores_manual_api_keys() {
-        let tmp = tempdir().expect("tempdir");
-        let codex_dir = tmp.path().join(".codex");
-        fs::create_dir_all(&codex_dir).expect("create codex dir");
-        fs::write(
-            codex_dir.join("auth.json"),
-            r#"{"api_key":"sk-live-manual-key"}"#,
-        )
-        .expect("write auth json");
-
-        let token = extract_codex_token(tmp.path());
-        assert!(token.is_none());
-    }
-
-    #[test]
-    fn extract_codex_token_reads_oauth_access_token() {
-        let tmp = tempdir().expect("tempdir");
-        let codex_dir = tmp.path().join(".codex");
-        fs::create_dir_all(&codex_dir).expect("create codex dir");
-        fs::write(
-            codex_dir.join("auth.json"),
-            r#"{"access_token":"oauth-access-token"}"#,
-        )
-        .expect("write auth json");
-
-        let token = extract_codex_token(tmp.path()).expect("oauth token should load");
-        assert_eq!(token.provider, "codex");
-        assert_eq!(token.access_token, "oauth-access-token");
-    }
-
-    #[test]
-    fn extract_codex_token_reads_nested_chatgpt_access_token() {
-        let tmp = tempdir().expect("tempdir");
-        let codex_dir = tmp.path().join(".codex");
-        fs::create_dir_all(&codex_dir).expect("create codex dir");
-        fs::write(
-            codex_dir.join("auth.json"),
-            r#"{"auth_mode":"chatgpt","tokens":{"access_token":"nested-oauth-token"}}"#,
-        )
-        .expect("write auth json");
-
-        let token = extract_codex_token(tmp.path()).expect("oauth token should load");
-        assert_eq!(token.provider, "codex");
-        assert_eq!(token.access_token, "nested-oauth-token");
-    }
-
-    #[test]
-    fn extract_codex_token_reads_login_from_the_id_token() {
-        let tmp = tempdir().expect("tempdir");
-        let codex_dir = tmp.path().join(".codex");
-        fs::create_dir_all(&codex_dir).expect("create codex dir");
-        let claims = BASE64_URL_SAFE_NO_PAD.encode(r#"{"email":"engineering@example.com"}"#);
-        let id_token = format!("header.{claims}.signature");
-        fs::write(
-            codex_dir.join("auth.json"),
-            serde_json::json!({
-                "tokens": {
-                    "access_token": "nested-oauth-token",
-                    "id_token": id_token,
-                }
-            })
-            .to_string(),
-        )
-        .expect("write auth json");
-
-        let token = extract_codex_token(tmp.path()).expect("oauth token should load");
-        assert_eq!(token.login.as_deref(), Some("engineering@example.com"));
-    }
-
-    #[test]
-    fn extract_codex_token_reads_expiry_from_the_access_token() {
-        let tmp = tempdir().expect("tempdir");
-        let codex_dir = tmp.path().join(".codex");
-        fs::create_dir_all(&codex_dir).expect("create codex dir");
-        let claims = BASE64_URL_SAFE_NO_PAD.encode(r#"{"exp":4102444800}"#);
-        let access_token = format!("header.{claims}.signature");
-        fs::write(
-            codex_dir.join("auth.json"),
-            serde_json::json!({
-                "tokens": {
-                    "access_token": access_token,
-                }
-            })
-            .to_string(),
-        )
-        .expect("write auth json");
-
-        let token = extract_codex_token(tmp.path()).expect("oauth token should load");
-
-        assert_eq!(token.expires_at, Some(4_102_444_800));
-    }
-
-    #[test]
-    fn extract_codex_token_parses_rfc3339_expiry() {
-        let tmp = tempdir().expect("tempdir");
-        let codex_dir = tmp.path().join(".codex");
-        fs::create_dir_all(&codex_dir).expect("create codex dir");
-        fs::write(
-            codex_dir.join("auth.json"),
-            r#"{"access_token":"oauth-access-token","expires_at":"2030-01-01T00:00:00Z"}"#,
-        )
-        .expect("write auth json");
-
-        let token = extract_codex_token(tmp.path()).expect("oauth token should load");
-        assert_eq!(token.expires_at, Some(1_893_456_000));
-    }
-
-    #[test]
-    fn extract_claude_token_parses_epoch_millis_expiry() {
-        let tmp = tempdir().expect("tempdir");
-        let claude_dir = tmp.path().join(".claude");
-        fs::create_dir_all(&claude_dir).expect("create claude dir");
-        fs::write(
-            claude_dir.join(".credentials.json"),
-            r#"{"accessToken":"claude-token","expiresAt":"1893456000000"}"#,
-        )
-        .expect("write credentials");
-
-        let token = extract_claude_token(tmp.path()).expect("claude token should load");
-        assert_eq!(token.expires_at, Some(1_893_456_000));
-    }
-
     #[test]
     fn linear_oauth_authorization_url_uses_loopback_redirect_and_pkce() {
         let app = PmOAuthApp {
@@ -4970,7 +3037,7 @@ if [ -n "$w" ]; then cat "$dir/$svc/$acct"; echo; else echo "    \"acct\"<blob>=
 
     #[test]
     fn planning_brokers_registered_in_default_brokers() {
-        for provider in [Provider::Linear, Provider::Asana, Provider::Notion] {
+        for provider in [Provider::Linear, Provider::Asana] {
             assert!(
                 default_brokers(None)
                     .iter()
@@ -5144,27 +3211,6 @@ if [ -n "$w" ]; then cat "$dir/$svc/$acct"; echo; else echo "    \"acct\"<blob>=
     }
 
     #[test]
-    fn notion_token_requests_use_basic_auth_and_json() {
-        let (request, body) = token_request_body(NOTION_OAUTH.token_request(
-            NOTION_OAUTH.token_url,
-            "notion-client",
-            Some("notion-secret"),
-            &[("grant_type", "authorization_code"), ("code", "abc")],
-        ));
-        let authorization = request.headers()["authorization"].to_str().unwrap();
-        assert!(authorization.starts_with("Basic "));
-        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(
-            body,
-            serde_json::json!({"grant_type": "authorization_code", "code": "abc"})
-        );
-        assert_eq!(
-            NOTION_OAUTH.redirect_uri(),
-            "http://localhost:19223/oauth/callback"
-        );
-    }
-
-    #[test]
     fn callback_code_is_percent_decoded() {
         let request = "GET /oauth/callback?code=1%2F1213%3Aab%2Bc&state=s HTTP/1.1\r\n\r\n";
         assert_eq!(
@@ -5321,41 +3367,6 @@ if [ -n "$w" ]; then cat "$dir/$svc/$acct"; echo; else echo "    \"acct\"<blob>=
     }
 
     #[tokio::test]
-    async fn codex_refresh_uses_app_server_managed_auth_flow() {
-        let tmp = tempdir().expect("tempdir");
-        let script = tmp.path().join("codex-app-server");
-        fs::write(
-            &script,
-            r#"#!/bin/sh
-IFS= read -r initialize
-printf '{"id":1,"result":{}}\n'
-IFS= read -r initialized
-IFS= read -r request
-case "$request" in
-  *'"method":"account/read"'*'"refreshToken":true'*)
-    echo '{"id":2,"result":{"account":{"email":"operator@example.com"}}}';;
-  *) exit 90;;
-esac
-"#,
-        )
-        .expect("write fake app-server");
-        let response = codex::refresh(Command::new("/bin/sh").arg(script))
-            .await
-            .expect("refresh through fake app-server");
-        assert_eq!(response["account"]["email"], "operator@example.com");
-    }
-
-    #[tokio::test]
-    async fn codex_refresh_reports_missing_cli() {
-        let tmp = tempdir().expect("tempdir");
-        let mut command = Command::new(tmp.path().join("missing-codex"));
-        let error = codex::refresh(&mut command)
-            .await
-            .expect_err("missing app-server should fail");
-        assert!(matches!(error, AuthError::CommandUnavailable { .. }));
-    }
-
-    #[tokio::test]
     async fn refresh_github_token_requires_successful_refresh_command() {
         let tmp = tempdir().expect("tempdir");
         let hosts = tmp.path().join(".config/gh");
@@ -5426,33 +3437,6 @@ esac
     }
 
     #[test]
-    fn env_var_for_token_claude_oauth_returns_oauth_token() {
-        let token = make_token("claude", CredentialType::OAuth);
-        let (name, _) = env_var_for_token(&token).expect("should produce env var");
-        assert_eq!(name, "CLAUDE_CODE_OAUTH_TOKEN");
-    }
-
-    #[test]
-    fn env_var_for_token_claude_apikey_returns_api_key() {
-        let token = make_token("claude", CredentialType::ApiKey);
-        let (name, _) = env_var_for_token(&token).expect("should produce env var");
-        assert_eq!(name, "ANTHROPIC_API_KEY");
-    }
-
-    #[test]
-    fn codex_oauth_does_not_override_native_login_with_agent_identity() {
-        let token = make_token("codex", CredentialType::OAuth);
-        assert!(env_var_for_token(&token).is_none());
-    }
-
-    #[test]
-    fn env_var_for_token_codex_apikey_returns_openai_key() {
-        let token = make_token("codex", CredentialType::ApiKey);
-        let (name, _) = env_var_for_token(&token).expect("should produce env var");
-        assert_eq!(name, "OPENAI_API_KEY");
-    }
-
-    #[test]
     fn env_var_for_token_github_always_returns_gh_token() {
         for ct in [CredentialType::OAuth, CredentialType::ApiKey] {
             let token = make_token("github", ct);
@@ -5468,42 +3452,6 @@ esac
             let (name, _) = env_var_for_token(&token).expect("should produce env var");
             assert_eq!(name, "OPENCODE_API_KEY");
         }
-    }
-
-    #[tokio::test]
-    async fn provider_env_vars_returns_correct_vars_for_mixed_credential_types() {
-        let tmp = tempdir().expect("tempdir");
-        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
-            tmp.path().join("loopflow.db"),
-        ))
-        .await
-        .expect("open sqlite store");
-
-        // Claude with API key
-        store
-            .upsert_provider_token(&make_token("claude", CredentialType::ApiKey))
-            .await
-            .expect("upsert claude apikey");
-
-        // GitHub with OAuth
-        store
-            .upsert_provider_token(&make_token("github", CredentialType::OAuth))
-            .await
-            .expect("upsert github oauth");
-
-        // Codex OAuth stays in its native login, never an agent-identity env var.
-        store
-            .upsert_provider_token(&make_token("codex", CredentialType::OAuth))
-            .await
-            .expect("upsert codex oauth");
-
-        let vars = provider_env_vars(&store).await;
-
-        assert!(vars.iter().any(|(n, _)| n == "ANTHROPIC_API_KEY"));
-        assert!(vars.iter().any(|(n, _)| n == "GH_TOKEN"));
-        assert!(!vars.iter().any(|(n, _)| n == "CLAUDE_CODE_OAUTH_TOKEN"));
-        assert!(!vars.iter().any(|(n, _)| n == "CODEX_ACCESS_TOKEN"));
-        assert!(!vars.iter().any(|(n, _)| n == "OPENAI_API_KEY"));
     }
 }
 
@@ -5539,46 +3487,5 @@ mod linear_oauth_config_tests {
             pm_refresh_secret_output(Err(std::io::ErrorKind::PermissionDenied.into())).unwrap_err(),
             PmRefreshError::ConfigurationLookupFailed
         );
-    }
-}
-
-#[cfg(test)]
-mod credential_presence_tests {
-    use super::{provider_account_credential_presence, CredentialPresence, Provider};
-
-    #[test]
-    fn managed_credential_presence_distinguishes_missing_unreadable_and_present() {
-        for (provider, filename, contents) in [
-            (
-                Provider::Claude,
-                ".credentials.json",
-                r#"{"claudeAiOauth":{"accessToken":"fixture"}}"#,
-            ),
-            (
-                Provider::Codex,
-                "auth.json",
-                r#"{"tokens":{"access_token":"fixture"}}"#,
-            ),
-        ] {
-            let home = tempfile::tempdir().unwrap();
-            assert_eq!(
-                provider_account_credential_presence(provider, home.path()),
-                CredentialPresence::Missing
-            );
-            std::fs::write(home.path().join(filename), "malformed fixture").unwrap();
-            assert_eq!(
-                provider_account_credential_presence(provider, home.path()),
-                CredentialPresence::Unreadable
-            );
-            std::fs::write(home.path().join(filename), contents).unwrap();
-            assert_eq!(
-                provider_account_credential_presence(provider, home.path()),
-                CredentialPresence::Present
-            );
-            assert_eq!(
-                std::fs::read_to_string(home.path().join(filename)).unwrap(),
-                contents
-            );
-        }
     }
 }

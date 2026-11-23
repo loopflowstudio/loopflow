@@ -15,11 +15,10 @@ struct WorkObservationRetry {
         case .planning(let body): hasReading = body != nil
         case .selections(let body): hasReading = body != nil
         case .taskList(let body): hasReading = body != nil
-        case .peerPlanning(let body): hasReading = body != nil
+        case .planHome(let body): hasReading = body != nil
         case .sessions(let body): hasReading = body != nil
         case .task(let body): hasReading = body != nil
         case .workActivity(let body): hasReading = body != nil
-        case .activity(let body): hasReading = body != nil
         case .checkpoint: return
         }
         if hasReading && frame.unavailable == nil {

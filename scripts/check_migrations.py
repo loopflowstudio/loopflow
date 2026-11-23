@@ -17,6 +17,10 @@ forward migration.
   expand migration merged at least `STAGING_DAYS` ago left behind and exports
   the data it drops. A rebuild that keeps every column and a trigger or index
   change are additive. This is a CI measurement; nothing at runtime refuses.
+- A member the product stopped using carries `-- leaving: <table>[.<column>]
+  <Task ID>` in the migration that stopped using it. The mark names a current
+  member, and a contract whose expand step carries marks drops only marked
+  members.
 
     uv run python scripts/check_migrations.py
 
@@ -48,10 +52,45 @@ DRAFT_MARKER = re.compile(r"^--[ \t]*draft:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.M
 # exported the data it drops before the SQL ran.
 EXPAND_MARKER = re.compile(r"^--[ \t]*expand:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
 EXPORTS_MARKER = re.compile(r"^--[ \t]*exports:[ \t]*(\S.*?)[ \t]*$", re.MULTILINE)
+# A member the product stopped using, and the Task that drops it.
+LEAVING_LINE = re.compile(r"^--[ \t]*leaving:(.*)$", re.MULTILINE)
+LEAVING_MARK = re.compile(
+    r"[ \t]*([a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)[ \t]+([A-Z][A-Z0-9]*-\d+)[ \t]*"
+)
 # How long an expand migration has been on origin/main before its contract may
 # drop what it left behind: the window in which lf processes on older builds
 # exit. The one place this number lives.
 STAGING_DAYS = 30
+
+
+@dataclass(frozen=True)
+class Leaving:
+    """`-- leaving: tasks.worktree LOO-877`: `member` is `table` or `table.column`."""
+
+    member: str
+    task: str
+
+    def covers(self, drop: str) -> bool:
+        """Whether this mark lets a contract drop `drop` (`table t` or `column t.c`)."""
+        kind, name = drop.split(" ", 1)
+        if kind == "column":
+            return self.member in (name, name.split(".", 1)[0])
+        return self.member == name
+
+
+def leaving_marks(name: str, sql: str) -> list[Leaving]:
+    marks = []
+    for line in LEAVING_LINE.findall(sql):
+        mark = LEAVING_MARK.fullmatch(line)
+        if mark is None:
+            _fail(f"{name}: `-- leaving:{line}` is not `-- leaving: <table>[.<column>] <Task ID>`")
+        marks.append(Leaving(member=mark.group(1), task=mark.group(2)))
+    return marks
+
+
+def drop_after(merged_at: dt.datetime) -> dt.date:
+    """The first day a contract may drop what a migration merged at `merged_at` left behind."""
+    return (merged_at + dt.timedelta(days=STAGING_DAYS)).date()
 
 
 def _fail(message: str) -> None:
@@ -146,7 +185,7 @@ def _check_runtime_sql() -> None:
     wildcard = re.compile(r"\bSELECT\s+(?:\w+\.)?\*", re.IGNORECASE)
     sources = (
         path
-        for crate in ("loopflow", "loopflow-execution", "loopflow-storage")
+        for crate in ("loopflow", "loopflow-execution", "loopflow-harness", "loopflow-storage")
         for path in (REPO_ROOT / "rust" / crate / "src").rglob("*.rs")
     )
     for path in sorted(sources):
@@ -216,6 +255,12 @@ class Schema:
     tables: dict[str, dict[str, Column]]
     views: dict[str, dict[str, Column]]
     unique_indexes: dict[str, UniqueIndex]
+
+    def has(self, member: str) -> bool:
+        """Whether `table` or `table.column` exists as a table or view."""
+        relation, _, column = member.partition(".")
+        columns = self.tables.get(relation, self.views.get(relation))
+        return columns is not None and (not column or column in columns)
 
     def members(self) -> set[str]:
         """`table waves`, `column waves.id`, `view wave_health`: what a drop names."""
@@ -411,7 +456,11 @@ def _check_staging(local: dict[str, bytes], main: dict[str, bytes], unmerged: li
         sql = local[name].decode()
         before = _schema(conn)
         _apply(conn, name, sql)
-        drops, breaks = _compare(before, _schema(conn))
+        after = _schema(conn)
+        for mark in leaving_marks(name, sql):
+            if not after.has(mark.member):
+                _fail(f"{name} marks {mark.member} leaving, but no such table or column exists")
+        drops, breaks = _compare(before, after)
         if breaks:
             _fail(
                 f"{name} is not additive: {'; '.join(breaks)}. Stage it: add the new shape now"
@@ -448,8 +497,16 @@ def _check_contract(name: str, sql: str, drops: list[str], catalog: Catalog) -> 
     if age < dt.timedelta(days=STAGING_DAYS):
         _fail(
             f"{name} contracts {step}, which merged {age.days} days ago; its contract clears on"
-            f" {merged_at + dt.timedelta(days=STAGING_DAYS):%Y-%m-%d} ({STAGING_DAYS} days)"
+            f" {drop_after(merged_at):%Y-%m-%d} ({STAGING_DAYS} days)"
         )
+    marks = leaving_marks(expand_file, catalog.files[expand_file].decode())
+    if marks:
+        for item in drops:
+            if not any(mark.covers(item) for mark in marks):
+                _fail(
+                    f"{name} drops {item}, which {step} does not mark leaving;"
+                    " a contract of a marking migration drops only marked members"
+                )
     left_behind = _schema(catalog.replay(before=expand_file)).members()
     for item in drops:
         if item not in left_behind:

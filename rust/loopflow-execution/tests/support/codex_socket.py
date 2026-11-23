@@ -89,7 +89,11 @@ def main() -> None:
                 except (EOFError, OSError):
                     pass
                 finally:
-                    child.stdin.close()
+                    try:
+                        child.stdin.close()
+                    except BrokenPipeError:
+                        # Early provider exits can leave the failed write buffered.
+                        pass
                     try:
                         child.wait(timeout=5)
                     except subprocess.TimeoutExpired:

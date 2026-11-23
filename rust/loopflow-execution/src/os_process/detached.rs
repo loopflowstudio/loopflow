@@ -125,10 +125,36 @@ pub fn spawn(mut command: Command, inherit: &dyn Fn(&mut Command)) -> Result<Lau
     })
 }
 
+/// A detached lf that acknowledged its start: the id it records itself under
+/// and the OS process it runs as.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Started {
+    pub id: LfProcessId,
+    pub pid: u32,
+    pub os_started_at: Option<i64>,
+}
+
+impl Started {
+    /// Whether it still runs: one OS lookup against its pid and start.
+    pub fn evidence(&self) -> crate::store::ProcessIdentityEvidence {
+        match self.os_started_at {
+            Some(at) => crate::process::os_process::process_identity_evidence(self.pid, at),
+            None => crate::store::ProcessIdentityEvidence::Unknown,
+        }
+    }
+}
+
 impl Launched {
-    /// The child's LfProcess, once it is admitted. Its child is reaped in the
-    /// background; this process no longer waits on it.
-    pub fn acknowledged(mut self) -> Result<LfProcessId> {
+    /// The child, once it is admitted. Its child is reaped in the background;
+    /// this process no longer waits on it.
+    pub fn acknowledged(mut self) -> Result<Started> {
+        let pid = self.child.id();
+        // Read before anything can reap the child: a run that exits right
+        // after acknowledging keeps an identity its watchers can call dead.
+        // The shell execs lf, so the start stays lf's.
+        let os_started_at = crate::process::os_process::process_started_at(pid)
+            .ok()
+            .flatten();
         let mut line = String::new();
         let read = self.lines.read_line(&mut line);
         let mut child = self.child;
@@ -140,8 +166,14 @@ impl Launched {
                 "The process exited before acknowledging execution; delivery is unknown, do not replay"
             );
         }
-        LfProcessId::parse(line.trim())
-            .with_context(|| format!("The process acknowledged {:?}, not a Process", line.trim()))
+        let id = LfProcessId::parse(line.trim()).with_context(|| {
+            format!("The process acknowledged {:?}, not a Process", line.trim())
+        })?;
+        Ok(Started {
+            id,
+            pid,
+            os_started_at,
+        })
     }
 }
 
@@ -255,7 +287,7 @@ pub(crate) fn start_lf(
     argv: &[String],
     env: &[(&str, &str)],
     inherit: &dyn Fn(&mut std::process::Command),
-) -> Result<LfProcessId> {
+) -> Result<Started> {
     let context = execution_context()?;
     let environment = launch_environment(env, &context);
     let environment = environment
@@ -278,9 +310,7 @@ pub(crate) fn start_lf(
         .stdout(log.try_clone()?)
         .stderr(log)
         .env_remove("LF_SERVER_STATUS")
-        .env_remove(crate::transport::STREAM_ENV)
-        // It names a descriptor the child does not inherit.
-        .env_remove(crate::ops::human_session::LAUNCH_LOCK_ENV);
+        .env_remove(crate::transport::STREAM_ENV);
     spawn(command, inherit)?.acknowledged()
 }
 
@@ -340,18 +370,16 @@ fn shell_command(cwd: &Path, argv: &[String], env: &[(&str, &str)]) -> String {
 const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::config::AGENT_OVERRIDE_ENV,
     crate::ops::WORK_DECLARATION_ENV,
-    crate::ops::human_session::HUMAN_SESSION_ENV,
-    crate::ops::human_session::PREPARED_CAPTURE_ENV,
     "LF_RUN_DIR",
-    "LF_RUN_ID",
-    "LF_HUMAN_SESSION_RUN",
+    "LF_EXECUTION_ID",
     "LF_REVIEW_RUN_RESERVATION",
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,
+    crate::journal::LF_CALLER_SESSION_ENV,
+    crate::transport::WITHIN_ENV,
     crate::work::wave::context::WAVE_ID_ENV,
     crate::session_record::CAPTURE_KEY_ENV,
     crate::process::AGENT_CALLER_ENV,
-    crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
     crate::ops::graph_process::GRAPH_ID_ENV,
     crate::installation::INSTALL_SWITCH_ENV,
     crate::machine::ssh::EXPECTED_MACHINE_ID_ENV,
@@ -363,17 +391,9 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     "LF_HOME",
 ];
 
-/// Credentials and account choices a new Session must receive explicitly.
-const SESSION_AUTH_ENV: &[&str] = &[
-    crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
-    DISCORD_TOKEN_ENV,
-    "GH_TOKEN",
-    "OPENCODE_API_KEY",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "ANTHROPIC_API_KEY",
-    "CODEX_ACCESS_TOKEN",
-    "OPENAI_API_KEY",
-];
+/// Service credentials a new Session must receive explicitly. Native agent
+/// configuration and credentials follow the caller's environment.
+const SESSION_AUTH_ENV: &[&str] = &[DISCORD_TOKEN_ENV, "GH_TOKEN", "OPENCODE_API_KEY"];
 
 #[cfg(test)]
 mod tests {
@@ -393,7 +413,7 @@ mod tests {
             &|_| {},
         )
         .unwrap();
-        assert_eq!(launched.acknowledged().unwrap(), id);
+        assert_eq!(launched.acknowledged().unwrap().id, id);
     }
 
     #[test]
@@ -416,7 +436,7 @@ mod tests {
             &|_| {},
         )
         .unwrap();
-        assert_eq!(launched.acknowledged().unwrap(), id);
+        assert_eq!(launched.acknowledged().unwrap().id, id);
     }
 
     #[test]
@@ -456,7 +476,6 @@ mod tests {
         let command = shell_command(std::path::Path::new("."), &argv, &[("LF_WAVE_ID", "infra")]);
 
         assert!(command.contains("unset "));
-        assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));
         assert!(command.contains("LF_DISCORD_TOKEN"));
         assert!(command.contains("GH_TOKEN OPENCODE_API_KEY"));
         assert!(command
@@ -468,13 +487,13 @@ mod tests {
         let argv = vec![
             "sh".into(),
             "-c".into(),
-            "printf '%s' \"${LF_RUN_ID-}${LF_RUN_DIR-}${LF_GRAPH_ID-}${LF_BIN-}${LF_HOME-unset}\""
+            "printf '%s' \"${LF_EXECUTION_ID-}${LF_RUN_DIR-}${LF_GRAPH_ID-}${LF_BIN-}${LF_HOME-unset}\""
                 .into(),
         ];
         let command = shell_command(std::path::Path::new("."), &argv, &[]);
         let output = std::process::Command::new("sh")
             .args(["-c", &command])
-            .env("LF_RUN_ID", "run_dead")
+            .env("LF_EXECUTION_ID", "run_dead")
             .env("LF_RUN_DIR", "/dead/run")
             .env("LF_GRAPH_ID", "stale-graph")
             .env("LF_BIN", "/stale/lf")
@@ -492,7 +511,6 @@ mod tests {
         let command = shell_command(std::path::Path::new("."), &argv, &[]);
 
         assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
-        assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));
         assert!(command.ends_with("exec 'lf' 'wave' 'child'"));
     }
 
@@ -522,13 +540,31 @@ mod tests {
     }
 
     #[test]
-    fn detached_lf_drops_parent_credentials_and_account_choices() {
+    fn detached_lf_keeps_native_authentication_environment() {
+        let command = shell_command(std::path::Path::new("."), &[
+            "/bin/sh".into(), "-c".into(),
+            "test \"$CODEX_HOME\" = /native/codex && test \"$CLAUDE_CONFIG_DIR\" = /native/claude && test \"$ANTHROPIC_API_KEY\" = native-claude && test \"$OPENAI_API_KEY\" = native-codex".into(),
+        ], &[]);
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .env("CODEX_HOME", "/native/codex")
+            .env("CLAUDE_CONFIG_DIR", "/native/claude")
+            .env("ANTHROPIC_API_KEY", "native-claude")
+            .env("OPENAI_API_KEY", "native-codex")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(output.stdout.is_empty());
+    }
+
+    #[test]
+    fn detached_lf_drops_parent_service_credentials() {
         let command = shell_command(
             std::path::Path::new("."),
             &[
                 "/bin/sh".into(),
                 "-c".into(),
-                "printf '%s' \"${LF_AGENT_OVERRIDE-}${LF_DISCORD_TOKEN-}${GH_TOKEN-}${LF_ACCOUNT_SELECTION-}\"".into(),
+                "printf '%s' \"${LF_AGENT_OVERRIDE-}${LF_DISCORD_TOKEN-}${GH_TOKEN-}\"".into(),
             ],
             &[],
         );
@@ -537,7 +573,6 @@ mod tests {
             .env("LF_AGENT_OVERRIDE", "claude")
             .env("LF_DISCORD_TOKEN", "fixture-chat-token")
             .env("GH_TOKEN", "fixture-github-token")
-            .env("LF_ACCOUNT_SELECTION", "parent-selection")
             .output()
             .unwrap();
         assert!(output.status.success());
@@ -564,7 +599,6 @@ mod tests {
         );
 
         assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
-        assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));
         assert!(command.ends_with(
             "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"
         ));

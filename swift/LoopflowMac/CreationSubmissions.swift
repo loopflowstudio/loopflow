@@ -12,8 +12,7 @@ extension CreationSubmissions {
         send: { try await ServerClient.submittedCreation($0) })
 
     static func localMachine() async throws -> String {
-        struct Identity: Decodable { let id: String }
-        return try JSONDecoder().decode(Identity.self, from: Data(try await ServerClient.read(.machineSelf).utf8)).id
+        try await RegistryQueryLocal.shared.localMachineId()
     }
 }
 
@@ -39,9 +38,40 @@ final class CreationRecovery {
     }
     private let submissions: CreationSubmissions
     private(set) var presentations: [String: Presentation] = [:]
-    private(set) var items: [Item] = []
+    /// Saved creations still waiting for someone to see them; each stands as a
+    /// condition Notice in every window that reports them.
+    private(set) var items: [Item] = [] {
+        didSet { postNotices(replacing: oldValue) }
+    }
+    /// The recovered creation whose inspector is open.
+    var inspecting: Item?
+    @ObservationIgnored private var centers: [WeakCenter] = []
+
+    private struct WeakCenter { weak var center: NoticeCenter? }
 
     init(submissions: CreationSubmissions = .shared) { self.submissions = submissions }
+
+    /// `notices` shows each recovered creation until it is presented.
+    func report(to notices: NoticeCenter) {
+        centers.removeAll { $0.center == nil || $0.center === notices }
+        centers.append(WeakCenter(center: notices))
+        for item in items { notices.post(notice(item)) }
+    }
+
+    private func notice(_ item: Item) -> Notice {
+        let action = item.resource.map { _ in
+            Notice.Action(item.complete ? "Show result" : "Inspect") { [weak self] in self?.inspecting = item }
+        }
+        return Notice(item.text, key: "creation-\(item.id)", action: action, kind: .condition)
+    }
+
+    private func postNotices(replacing old: [Item]) {
+        let current = Set(items.map(\.id))
+        for center in centers.compactMap(\.center) {
+            for gone in old where !current.contains(gone.id) { center.clear(key: "creation-\(gone.id)") }
+            for item in items { center.post(notice(item)) }
+        }
+    }
 
     func awaitingPresentation(_ id: String, of resource: Presentation) {
         presentations[id] = resource
@@ -112,25 +142,22 @@ final class CreationRecovery {
     }
 }
 
-struct CreationRecoveryView: View {
-    private let recovery = CreationRecovery.shared
-    @State private var inspecting: CreationRecovery.Item?
-    var body: some View {
-        VStack(alignment: .leading) {
-            ForEach(recovery.items) { item in
-                HStack {
-                    Text(item.text).textSelection(.enabled)
-                    if item.resource != nil { Button(item.complete ? "Show result" : "Inspect") { inspecting = item } }
-                }
+/// A window's Notice reports recovered creations; their action opens the inspector.
+struct CreationNotices: ViewModifier {
+    let notices: NoticeCenter
+    @Bindable private var recovery = CreationRecovery.shared
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $recovery.inspecting) { item in
+                if let resource = item.resource { RecoveredCreationInspector(resource: resource, presented: {
+                    if item.complete { await recovery.presented([item.id]) }
+                }) }
             }
-        }
-        .padding(recovery.items.isEmpty ? 0 : 12)
-        .sheet(item: $inspecting) { item in
-            if let resource = item.resource { RecoveredCreationInspector(resource: resource, presented: {
-                if item.complete { await recovery.presented([item.id]) }
-            }) }
-        }
-        .task { recovery.start() }
+            .task(id: ObjectIdentifier(notices)) {
+                recovery.report(to: notices)
+                recovery.start()
+            }
     }
 }
 
@@ -141,25 +168,25 @@ private struct RecoveredCreationInspector: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(resource.task == nil ? "Recovered Session" : "Recovered Task").font(.headline)
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            Text(resource.task == nil ? "Recovered Session" : "Recovered Task").font(Typography.textStrong)
             ScrollView {
                 Group {
                     switch detail {
                     case .success(let text): Text(text).task { await presented() }
-                    case .failure(let error): Text(error.localizedDescription)
+                    case .failure(let error): FailureLine("Current work not read.", machine: error.localizedDescription)
                     case nil: Text("Reading current work…")
                     }
                 }
-                .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                .font(Typography.mono).textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             DisclosureGroup("Receipt") {
-                ScrollView { Text(resource.receipt).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+                ScrollView { Text(resource.receipt).font(Typography.mono).textSelection(.enabled) }
             }
-            Button("Done") { dismiss() }
+            Button("Done") { dismiss() }.buttonStyle(LoopflowButtonStyle())
         }
-        .padding(20).frame(minWidth: 600, minHeight: 400)
+        .padding(Spacing.xl).frame(minWidth: 600, minHeight: 400)
         .task {
             do {
                 guard try await CreationSubmissions.localMachine() == resource.destination else {
@@ -167,7 +194,7 @@ private struct RecoveredCreationInspector: View {
                 }
                 if let task = resource.task {
                     let value = try await ServerClient.read(.taskGet(directory: resource.directory, issue: task))
-                    let reading = try JSONDecoder().decode(WorkFrame.TaskStatusReading.self, from: Data(value.utf8))
+                    let reading = try value.decode(WorkFrame.TaskStatusReading.self)
                     guard let row = reading.row else {
                         throw RegistryQueryError("The recovered Task is no longer available on its original Machine.")
                     }
@@ -181,7 +208,7 @@ private struct RecoveredCreationInspector: View {
                     }
                     detail = .success(lines.filter { !$0.isEmpty }.joined(separator: "\n\n"))
                 } else if let session = resource.session {
-                    detail = .success(try JSONDecoder().decode(String.self, from: Data(try await ServerClient.read(.processHistory(id: session)).utf8)))
+                    detail = .success(try await RegistryQueryLocal.shared.sessionHistoryText(id: session))
                 }
             } catch { detail = .failure(error) }
         }

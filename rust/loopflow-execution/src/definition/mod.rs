@@ -35,6 +35,8 @@ pub enum Target {
     Skill(Skill),
     Graph(GraphDefinition),
     Xor(XorDef),
+    /// A block that runs again while its last step, a skill, says iterate.
+    Loop(Vec<Step>),
 }
 
 impl Target {
@@ -45,11 +47,13 @@ impl Target {
             Self::Command(command) => command.display_name(),
             Self::Skill(skill) => skill.name.clone(),
             Self::Xor(_) => "xor".to_string(),
+            Self::Loop(_) => "loop".to_string(),
         };
         match self {
             Self::Graph(graph) => graph,
             target => GraphDefinition {
                 name,
+                description: None,
                 items: vec![Step::new(target)],
             },
         }
@@ -68,46 +72,9 @@ pub fn resolve_definition(
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_definition, DefinitionKind, Target};
+    use super::{resolve_definition, Target};
     use std::fs;
     use tempfile::TempDir;
-
-    #[test]
-    fn ordinary_skill_discovery_ignores_legacy_review_instructions() {
-        let _lock = crate::journal::test_env_lock();
-        let _environment = crate::test_ambient::EnvGuard::clear(&["LF_HUMAN_SESSION"]);
-        let repo = TempDir::new().unwrap();
-        fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
-        fs::write(
-            repo.path().join(".lf/skills/review.md"),
-            "Current instructions",
-        )
-        .unwrap();
-        let mut captured = crate::graph::Skill::named("review");
-        captured.content = Some("Retired captured instructions".into());
-        std::env::set_var(
-            "LF_HUMAN_SESSION",
-            serde_json::json!({
-                "kind": "graph",
-                "token": {
-                    "task_id": loopflow_storage::work::task::TaskId::new(),
-                    "invocation_id": "legacy",
-                    "graph": "legacy",
-                    "node_id": "review",
-                    "skill": captured,
-                    "iteration": 0
-                }
-            })
-            .to_string(),
-        );
-
-        let Target::Skill(skill) =
-            resolve_definition(repo.path(), "review", Some(DefinitionKind::Skill)).unwrap()
-        else {
-            panic!("explicit skill must resolve to a skill");
-        };
-        assert_eq!(skill.content.as_deref(), Some("Current instructions"));
-    }
 
     #[test]
     fn operate_resolves_to_repo_and_wave_operate_stays_explicit() {

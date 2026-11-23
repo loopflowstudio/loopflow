@@ -1,10 +1,13 @@
-//! Held provider and login fixtures shared by Graph and Task lifecycle checks.
-use crate::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
-use sha2::{Digest, Sha256};
-use std::fs;
-use std::path::Path;
-pub const HOLDING_CLAUDE: &str = r#"#!/usr/bin/python3
-import json, os, sys, time
+//! Held provider fixtures shared by Graph and Task lifecycle checks.
+/// A Claude stand-in that announces `ready` in LF_HOME, then waits there for
+/// `release` before it answers. While `hold-turn` is there it writes `holding`
+/// and keeps its turn open.
+pub fn holding_claude() -> String {
+    super::claude_stand_in(HOLDING_CLAUDE)
+}
+
+const HOLDING_CLAUDE: &str = r#"#!/usr/bin/python3
+import json, os, subprocess, sys, time
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
@@ -16,11 +19,26 @@ with open(os.path.join(home, 'ready'), 'w') as ready:
 if streamed:
     with open(os.path.join(home, 'stream-ready'), 'w') as ready:
         ready.write('ready')
+# A fixture that left `tool_turn.py` gets the hooks lf declared, run around a tool.
+turn = os.path.join(home, 'tool_turn.py')
+if streamed and os.path.exists(turn):
+    hooks = json.load(open(sys.argv[sys.argv.index('--settings') + 1]))['hooks']
+    subprocess.run([sys.executable, turn, 'stand-in', json.dumps(hooks)], check=True)
+# A fixture that left `hold-turn` holds a headless turn open until it is removed.
+if streamed and os.path.exists(os.path.join(home, 'hold-turn')):
+    # Claude echoes the request and names its conversation before it works.
+    print(json.dumps(message | {'session_id': 'stand-in'}), flush=True)
+    print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'stand-in'}), flush=True)
+    with open(os.path.join(home, 'holding'), 'w') as holding:
+        holding.write('stand-in')
+    while os.path.exists(os.path.join(home, 'hold-turn')):
+        time.sleep(0.02)
 while not os.path.exists(os.path.join(home, 'release')):
     time.sleep(0.02)
 if not streamed:
     sys.exit(0)
 message['session_id'] = 'stand-in'
+keep_claude_turn(message, 'Held.')
 print(json.dumps(message), flush=True)
 print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'stand-in'}), flush=True)
 print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Held.'}]}}), flush=True)
@@ -28,45 +46,3 @@ print(json.dumps({'type': 'result', 'uuid': 'stand-in-result', 'session_id': 'st
 for line in sys.stdin:
     pass
 "#;
-
-pub fn connect_fixture_claude(home: &Path, store: &crate::store::Store) {
-    connect_claude_account(home, store, "fixture");
-}
-
-/// Connect a managed Claude account `name`, signed in as `name@example.com`.
-pub fn connect_claude_account(home: &Path, store: &crate::store::Store, name: &str) {
-    let account_home = home.join("accounts/claude").join(name);
-    fs::create_dir_all(&account_home).unwrap();
-    let credential = format!(
-        r#"{{"claudeAiOauth":{{"accessToken":"fixture-{name}","expiresAt":4102444800000}}}}"#
-    );
-    fs::write(account_home.join(".credentials.json"), &credential).unwrap();
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(store.upsert_provider_account(&ProviderAccount {
-            provider: "claude".into(),
-            account_id: ProviderAccountId::parse(name).unwrap(),
-            home: Some(account_home),
-            login_email: Some(
-                crate::profile::EmailAddress::parse(&format!("{name}@example.com")).unwrap(),
-            ),
-            observed_email: Some(format!("{name}@example.com")),
-            observed_subject: Some(name.into()),
-            observed_credential_digest: Some(format!(
-                "{:x}",
-                Sha256::digest(credential.as_bytes())
-            )),
-            observed_plan: None,
-            credential_state: CredentialState::Connected,
-            routing_state: RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        }))
-        .unwrap();
-}

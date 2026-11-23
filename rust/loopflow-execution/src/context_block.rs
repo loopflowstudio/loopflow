@@ -33,11 +33,6 @@ pub enum ContextMoment {
     /// (whose changes become steers for the next boundary) and applies a
     /// pending Session move.
     Stop,
-    /// A native turn ended on a usage limit: start `RecordLimit` and return.
-    Limit,
-    /// Started by a limit hook: record the limit and move the shared login to
-    /// an account with capacity.
-    RecordLimit,
 }
 
 /// Captured source identities, not frozen context. Hooks reread scratch and Wave
@@ -216,8 +211,11 @@ impl ContextDelivery {
                 .as_ref()
                 .is_some_and(|submitted| submitted.contains(&path))
         });
-        let branch = crate::git::current_branch(&self.repo).ok().flatten();
-        order_documents(&mut documents, wave, branch.as_deref());
+        order_documents(&mut documents, wave, &|doc| {
+            std::fs::metadata(self.repo.join(&doc.path))
+                .and_then(|metadata| metadata.modified())
+                .ok()
+        });
         let identity = self
             .identity
             .as_ref()
@@ -286,51 +284,60 @@ impl ContextDelivery {
         Ok(())
     }
 
+    /// The command a provider hook runs, up to the moment it declares.
+    pub(crate) fn hook_command(&self) -> anyhow::Result<String> {
+        let executable = crate::os_process::resolve_lf_binary()?;
+        Ok(format!(
+            "env LF_HOME={} {} __context-block --moment",
+            crate::os_process::shell_escape(&self.home.to_string_lossy()),
+            crate::os_process::shell_escape(&executable.to_string_lossy()),
+        ))
+    }
+
+    /// Shell that exits 0 when no steer can be waiting for this conversation,
+    /// so a hook starts lf only for new steering: the seen marker is newer
+    /// than every marker a steer for it touches. dash's -nt is false when the
+    /// second file is missing, so test existence first.
+    pub(crate) fn steer_gate(&self) -> String {
+        format!(
+            "s=\"${seen}\"; [ -n \"$s\" ] || exit 0; n() {{ [ ! -e \"$1\" ] || [ \"$s\" -nt \"$1\" ]; }}; [ -e \"$s\" ] && n {latest} && n \"${session}\" && n \"${task}\" && exit 0;",
+            seen = crate::steer::STEER_SEEN_ENV,
+            latest = crate::os_process::shell_escape(
+                &loopflow_storage::steer_markers::latest_marker(&self.home).to_string_lossy()
+            ),
+            session = crate::steer::STEER_SESSION_ENV,
+            task = crate::steer::STEER_TASK_ENV,
+        )
+    }
+
     /// The provider hooks of one launch. Every launch prints its context
     /// block at session start and after a compaction, and reads its own
     /// steers and Task update from the store after a tool call and at a
-    /// prompt. A launch the Machine server holds (`Holder::reports_turns`)
-    /// also reports its starts, prompts and turn ends to the server, which
-    /// records them.
+    /// prompt. A managed launch also reports its starts, prompts and turn
+    /// ends to the server for recording.
     pub fn hook_settings(
         &self,
-        holder: crate::session::Holder,
+        kind: crate::harness::LaunchKind,
     ) -> anyhow::Result<serde_json::Value> {
-        let executable = crate::os_process::resolve_lf_binary()?;
-        let quote = |path: &Path| crate::os_process::shell_escape(&path.to_string_lossy());
-        let command = format!(
-            "env LF_HOME={} {} __context-block --moment",
-            quote(&self.home),
-            quote(&executable),
-        );
+        let command = self.hook_command()?;
+        let gate = self.steer_gate();
         let context = |moment: &str| serde_json::json!({"type":"command","command":format!("{command} {moment}"),"timeout":30});
         let hook = |command: String| serde_json::json!([{"hooks":[{"type":"command","command":command,"timeout":10}]}]);
-        // Start lf only for new steering: skip while the seen marker is newer
-        // than every marker a steer for this conversation touches. dash's -nt
-        // is false when the second file is missing, so test existence first.
-        let gate = format!(
-            "s=\"${seen}\"; [ -n \"$s\" ] || exit 0; n() {{ [ ! -e \"$1\" ] || [ \"$s\" -nt \"$1\" ]; }}; [ -e \"$s\" ] && n {latest} && n \"${session}\" && n \"${task}\" && exit 0;",
-            seen = crate::steer::STEER_SEEN_ENV,
-            latest = quote(&loopflow_storage::steer_markers::latest_marker(&self.home)),
-            session = crate::steer::STEER_SESSION_ENV,
-            task = crate::steer::STEER_TASK_ENV,
-        );
         let start = serde_json::json!([
             {"matcher": "startup|resume|clear", "hooks": [context("start")]},
             {"matcher": "compact", "hooks": [context("compact")]},
         ]);
         let steer = hook(format!("{gate} {command} steer"));
-        if !holder.reports_turns() {
+        if !kind.is_managed() {
             return Ok(serde_json::json!({
                 "PostToolUse": steer,
                 "UserPromptSubmit": steer,
                 "SessionStart": start,
             }));
         }
-        // A held prompt always runs: the server records the turn it starts.
+        // A managed prompt hook always runs: the server records the turn it starts.
         Ok(serde_json::json!({
             "Stop": hook(format!("{command} stop")),
-            "StopFailure": [{"matcher":"rate_limit","hooks":[{"type":"command","command":format!("{command} limit"),"timeout":30}]}],
             "PostToolUse": steer,
             "UserPromptSubmit": hook(format!("{command} tool")),
             "SessionStart": start,
@@ -366,13 +373,21 @@ pub struct ContextBlock {
     pub manifest_path: PathBuf,
 }
 
-fn order_documents(documents: &mut [Document], wave: Option<&str>, branch: Option<&str>) {
+/// The plan a step builds from, where kickoff and design write it.
+const PLAN: &str = "scratch/plan.md";
+
+/// The selected Wave's memory, then the plan, then scratch with the most
+/// recently edited first: the files work is touching now, not the smallest.
+fn order_documents(
+    documents: &mut [Document],
+    wave: Option<&str>,
+    modified: &dyn Fn(&Document) -> Option<std::time::SystemTime>,
+) {
     let memory = wave.map(|wave| format!(".lf/wave/{wave}/MEMORY.md"));
-    let plan = branch.map(|branch| format!("scratch/{branch}.md"));
     let priority = |doc: &Document| {
         if memory.as_deref() == Some(doc.path.as_str()) {
             0
-        } else if plan.as_deref() == Some(doc.path.as_str()) {
+        } else if doc.path == PLAN {
             1
         } else if doc.source == DocumentSource::Scratch {
             2
@@ -380,8 +395,12 @@ fn order_documents(documents: &mut [Document], wave: Option<&str>, branch: Optio
             3
         }
     };
-    documents.sort_by(|a, b| {
-        (priority(a), a.content.len(), &a.path).cmp(&(priority(b), b.content.len(), &b.path))
+    documents.sort_by_cached_key(|doc| {
+        (
+            priority(doc),
+            std::cmp::Reverse(modified(doc)),
+            doc.path.clone(),
+        )
     });
 }
 
@@ -395,7 +414,7 @@ fn write_manifest(repo_root: &Path, manifest: &str) -> Result<PathBuf, CoreError
         return Ok(path);
     }
     fs::create_dir_all(&prompts)?;
-    crate::prompt::ensure_gitignore_entry(repo_root, ".lf/prompts/")?;
+    crate::git::exclude(repo_root, ".lf/prompts/")?;
     let mut file = tempfile::NamedTempFile::new_in(&prompts)?;
     std::io::Write::write_all(&mut file, manifest.as_bytes())?;
     file.persist(&path).map_err(|error| error.error)?;
@@ -467,7 +486,7 @@ fn render_block(
         .expect("manifest is inside repository");
     let mut text = format!(
         "{prefix}Current reference context, not a new request. Historical instructions in these files do not select work.\n\
-         From the repository root:\nRead the complete context listing and any files not preloaded below: {}.\n",
+         From the repository root:\nWhat follows is a table of contents with a few files preloaded, not the whole context. Before acting, consider reading in full the plan and what it points to. The complete listing: {}.\n",
         serde_json::to_string(pointer).expect("manifest pointer is JSON serializable")
     );
     if text.len() > HOOK_CONTEXT_BYTES {
@@ -742,30 +761,31 @@ mod tests {
     }
 
     #[test]
-    fn context_block_prioritizes_selected_memory_then_branch_plan_then_small_scratch() {
+    fn context_block_prioritizes_selected_memory_then_the_plan_then_recent_scratch() {
         let mut docs = vec![
             document("scratch/b.md", "four", DocumentSource::Scratch),
             document(".lf/wave/parent/MEMORY.md", "p", DocumentSource::Wave),
             document("scratch/a.md", "one", DocumentSource::Scratch),
-            document(
-                "scratch/topic.md",
-                "the branch plan",
-                DocumentSource::Scratch,
-            ),
+            document("scratch/plan.md", "the plan", DocumentSource::Scratch),
             document(
                 ".lf/wave/parent/child/MEMORY.md",
                 "selected memory",
                 DocumentSource::Wave,
             ),
         ];
-        order_documents(&mut docs, Some("parent/child"), Some("topic"));
+        // The longer, later-edited note outranks the shorter, older one.
+        let edited = |doc: &Document| {
+            let seconds = if doc.path == "scratch/b.md" { 20 } else { 10 };
+            Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
+        };
+        order_documents(&mut docs, Some("parent/child"), &edited);
         assert_eq!(
             docs.iter().map(|doc| doc.path.as_str()).collect::<Vec<_>>(),
             [
                 ".lf/wave/parent/child/MEMORY.md",
-                "scratch/topic.md",
-                "scratch/a.md",
+                "scratch/plan.md",
                 "scratch/b.md",
+                "scratch/a.md",
                 ".lf/wave/parent/MEMORY.md",
             ]
         );
@@ -934,7 +954,7 @@ mod tests {
         std::env::set_var("LF_HOME", &delivery.home);
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let bare = delivery
-            .hook_settings(crate::session::Holder::Caller)
+            .hook_settings(crate::harness::LaunchKind::Batch)
             .unwrap();
         assert_eq!(
             bare.as_object().unwrap().keys().collect::<Vec<_>>(),
@@ -964,6 +984,24 @@ mod tests {
     }
 
     #[test]
+    fn native_hooks_never_install_a_subscription_switcher() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let repo = tempdir().unwrap();
+        let delivery = delivery(repo.path());
+        std::env::set_var("LF_HOME", &delivery.home);
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        for kind in [
+            crate::harness::LaunchKind::Batch,
+            crate::harness::LaunchKind::WorkSession,
+        ] {
+            let hooks = delivery.hook_settings(kind).unwrap();
+            assert!(hooks.get("StopFailure").is_none());
+            assert!(!hooks.to_string().contains("record-limit"));
+        }
+    }
+
+    #[test]
     fn tool_hook_starts_lf_only_after_a_newer_steer() {
         use std::os::unix::fs::PermissionsExt;
         let _lock = crate::journal::test_env_lock();
@@ -977,7 +1015,7 @@ mod tests {
         std::env::set_var("LF_HOME", &delivery.home);
         std::env::set_var("LF_BIN", &stub);
         let settings = delivery
-            .hook_settings(crate::session::Holder::Server)
+            .hook_settings(crate::harness::LaunchKind::WorkSession)
             .unwrap();
         let command = settings["PostToolUse"][0]["hooks"][0]["command"]
             .as_str()

@@ -69,7 +69,7 @@ impl SkillInvocation {
         })
     }
 
-    fn native_declarations(&self, harness: &str) -> bool {
+    fn native_declarations(&self, dialect: SkillDialect) -> bool {
         let fields = self.declarations();
         if self
             .skill
@@ -82,7 +82,7 @@ impl SkillInvocation {
         {
             return false;
         }
-        harness != "codex"
+        dialect != SkillDialect::Codex
             || fields.as_ref().is_some_and(|fields| {
                 ["name", "description"]
                     .iter()
@@ -94,10 +94,15 @@ impl SkillInvocation {
         &self,
         config: &crate::agent::AgentConfig,
     ) -> anyhow::Result<(Vec<String>, String)> {
-        if !self.native_for("claude") || !self.native_declarations("claude") {
-            return Ok((Vec::new(), self.translated_input("claude")));
+        if !self.native_for(Some(SkillDialect::Claude))
+            || !self.native_declarations(SkillDialect::Claude)
+        {
+            return Ok((
+                Vec::new(),
+                self.translated_input("claude", Some(SkillDialect::Claude)),
+            ));
         }
-        self.report_native_declarations("claude");
+        self.report_native_declarations("claude", SkillDialect::Claude);
         self.prepare_claude(config, None)
     }
 
@@ -145,12 +150,12 @@ impl SkillInvocation {
 
     fn codex_skill(&self) -> Option<(&Path, String)> {
         let source = self.skill.source.as_ref()?;
-        (self.native_for("codex")
+        (self.native_for(Some(SkillDialect::Codex))
             && source
                 .path
                 .file_name()
                 .is_some_and(|name| name == "SKILL.md")
-            && self.native_declarations("codex")
+            && self.native_declarations(SkillDialect::Codex)
             && self.unchanged_source())
         .then(|| (source.path.as_path(), self.native_name()))
     }
@@ -160,34 +165,39 @@ impl SkillInvocation {
             // Explicit Markdown references resolve outside Codex's catalog too;
             // a `skill` input item alone is silently ignored there.
             Some((path, name)) => {
-                self.report_native_declarations("codex");
+                self.report_native_declarations("codex", SkillDialect::Codex);
                 self.command(&format!("[${name}]({})", path.display()))
             }
-            None => self.translated_input("codex"),
+            None => self.translated_input("codex", Some(SkillDialect::Codex)),
         }
     }
 
     pub(crate) fn terminal_input(
         &self,
-        harness: &str,
+        harness: &dyn crate::harness::Launcher,
         config: &crate::agent::AgentConfig,
     ) -> anyhow::Result<(Vec<String>, String)> {
         let context = &config.task_prompt;
-        if self.native_for("claude") && harness == "claude" && self.native_declarations("claude") {
-            self.report_native_declarations("claude");
+        let dialect = harness.capabilities().native_skills;
+        let harness = harness.kind().as_str();
+        if self.native_for(dialect)
+            && dialect == Some(SkillDialect::Claude)
+            && self.native_declarations(SkillDialect::Claude)
+        {
+            self.report_native_declarations("claude", SkillDialect::Claude);
             return self.prepare_claude(config, (!context.is_empty()).then_some(context.as_str()));
         }
-        let prompt = if harness == "codex" {
+        let prompt = if dialect == Some(SkillDialect::Codex) {
             self.codex_prompt()
         } else {
-            self.translated_input(harness)
+            self.translated_input(harness, dialect)
         };
         Ok((Vec::new(), format!("{prompt}\n\n{context}")))
     }
 
-    fn report_native_declarations(&self, harness: &str) {
-        let supported: &[&str] = match harness {
-            "claude" => &[
+    fn report_native_declarations(&self, harness: &str, dialect: SkillDialect) {
+        let supported: &[&str] = match dialect {
+            SkillDialect::Claude => &[
                 "name",
                 "description",
                 "argument-hint",
@@ -230,22 +240,16 @@ impl SkillInvocation {
         }
     }
 
-    fn translated_input(&self, harness: &str) -> String {
+    fn translated_input(&self, harness: &str, dialect: Option<SkillDialect>) -> String {
         eprintln!("warning: {} on {harness}: running captured instructions; source model, permissions, hooks and subagent declarations are retained but not enforced by this launch", self.skill.name);
-        self.ported_text(harness)
+        self.ported_text(dialect)
     }
 
-    fn native_for(&self, harness: &str) -> bool {
-        matches!(
-            (
-                self.skill.source.as_ref().map(|source| source.dialect),
-                harness
-            ),
-            (Some(SkillDialect::Claude), "claude") | (Some(SkillDialect::Codex), "codex")
-        )
+    fn native_for(&self, dialect: Option<SkillDialect>) -> bool {
+        dialect.is_some() && self.skill.source.as_ref().map(|source| source.dialect) == dialect
     }
 
-    fn ported_text(&self, harness: &str) -> String {
+    fn ported_text(&self, dialect: Option<SkillDialect>) -> String {
         let body = self.skill.content.as_deref().unwrap_or_default();
         let origin = self
             .skill
@@ -257,9 +261,9 @@ impl SkillInvocation {
         if origin.dialect == SkillDialect::Claude {
             body = body.replace("${CLAUDE_SKILL_DIR}", &directory.display().to_string());
         }
-        let tools = match (origin.dialect, harness) {
-            (SkillDialect::Claude, "codex") => "Claude tool names map to Codex tools: Bash, Read, Grep and Glob use exec_command; Edit and Write use apply_patch; TodoWrite uses update_plan; Task uses spawn_agent when available. Use the available web tool for WebFetch and WebSearch.",
-            (SkillDialect::Codex, "claude") => "Codex tool names map to Claude tools: exec_command uses Bash; apply_patch uses Edit or Write; update_plan uses TodoWrite when available; spawn_agent uses Task. Use WebFetch and WebSearch for web requests.",
+        let tools = match (origin.dialect, dialect) {
+            (SkillDialect::Claude, Some(SkillDialect::Codex)) => "Claude tool names map to Codex tools: Bash, Read, Grep and Glob use exec_command; Edit and Write use apply_patch; TodoWrite uses update_plan; Task uses spawn_agent when available. Use the available web tool for WebFetch and WebSearch.",
+            (SkillDialect::Codex, Some(SkillDialect::Claude)) => "Codex tool names map to Claude tools: exec_command uses Bash; apply_patch uses Edit or Write; update_plan uses TodoWrite when available; spawn_agent uses Task. Use WebFetch and WebSearch for web requests.",
             _ => "Use this harness's corresponding tools for the operations named below.",
         };
         format!("---\nname: {}\ndescription: {}\n---\nSource: {}\nBase directory of the original skill: {}\n\n{tools}\nExecute any shell-context directives below through ordinary tools before proceeding; they have not been pre-executed.\n\nOriginal declarations (model, permissions, subagents and preprocessing have no automatic cross-harness enforcement):\n```yaml\n{}\n```\n\n{body}",
@@ -464,11 +468,18 @@ mod tests {
             },
             arguments: "the branch".into(),
         };
-        let text = invocation.ported_text("codex");
+        let text = invocation.ported_text(Some(SkillDialect::Codex));
         assert!(text.contains("/skills/audit/reference.md for the branch"));
         assert!(text.contains("allowed-tools: Read\nmodel: sonnet"));
         assert!(text.contains("no automatic cross-harness enforcement"));
         assert!(text.contains("exec_command"));
+        let generic = invocation.ported_text(None);
+        assert!(generic.contains("Use this harness's corresponding tools"));
+        assert!(!generic.contains("Claude tool names map to Codex"));
+        let mut invocation = invocation;
+        invocation.skill.source.as_mut().unwrap().dialect = SkillDialect::Codex;
+        let reverse = invocation.ported_text(Some(SkillDialect::Claude));
+        assert!(reverse.contains("Codex tool names map to Claude"));
     }
 
     #[test]

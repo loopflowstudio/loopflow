@@ -4,14 +4,36 @@ import Loopflow
 import Observation
 import OSLog
 
-/// The initial plan identifies the scene; the path is only its local opening locator.
-/// The router retains that scene key across explicitly associated plan identities.
+/// The initial plan identifies the scene on its Machine; the path is only its local
+/// opening locator. The router retains that scene key across explicitly associated
+/// plan identities.
 struct RepositoryWorkspace: Codable, Hashable, Sendable {
     let id: String
     let path: String
+    /// The home directory of the Machine this window was opened on.
+    /// A window saved before windows named their Machine has none.
+    let machine: String?
 
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
-    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    /// The Machine this process is on.
+    static let thisMachine = WorkCache.machineHome.standardizedFileURL.path
+
+    init(id: String, path: String, machine: String = thisMachine) {
+        self.id = id
+        self.path = path
+        self.machine = machine
+    }
+
+    /// This window when it was opened on `machine`. macOS restores a bundle's saved
+    /// windows whatever Machine the launch is on; one from another Machine is not shown.
+    func opened(on machine: String = thisMachine) -> Self? {
+        self.machine == machine ? self : nil
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id && lhs.machine == rhs.machine }
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(machine)
+    }
 }
 
 /// Application lifetime, keyed by the stable repository scene resolved by WorkLinkRouter.

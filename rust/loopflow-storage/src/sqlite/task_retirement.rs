@@ -66,8 +66,8 @@ impl SqliteStore {
                  AND (CASE WHEN tw.planning_completed_at IS NULL THEN tw.updated_at
                      ELSE unixepoch(tw.planning_completed_at) END)+?3<=?2
                  AND {viewed}+?3<=?2
-                 AND NOT EXISTS(SELECT 1 FROM task_graphs tg JOIN processes g ON g.id=tg.lf_process_id
-                     WHERE tg.task_id=tw.id AND g.completed_at IS NULL)))"
+                 AND NOT EXISTS(SELECT 1 FROM task_graphs tg
+                     WHERE tg.task_id=tw.id AND tg.run_pid IS NOT NULL)))"
             )
         };
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -531,6 +531,53 @@ mod tests {
             )
             .unwrap();
         assert!(held(&store, &task).is_empty());
+    }
+
+    #[test]
+    fn a_viewer_heartbeat_wakes_no_subscription() {
+        let (_home, store, task) = fixture();
+        let viewer = session_terminal(&store, &task, "viewed");
+        let processes = || store.revisions().unwrap().processes;
+        let before = processes();
+        store
+            .record_viewer_hold(&viewer, Some(ViewerHold::Viewed(100)))
+            .unwrap();
+        assert_eq!(processes(), before + 1, "a viewer arriving is a change");
+        for beat in 1..=10 {
+            store
+                .record_viewer_hold(&viewer, Some(ViewerHold::Viewed(100 + 10 * beat)))
+                .unwrap();
+        }
+        assert_eq!(processes(), before + 1, "heartbeats are reading times");
+        store
+            .record_viewer_hold(&viewer, Some(ViewerHold::Absent(300)))
+            .unwrap();
+        assert_eq!(processes(), before + 2, "a viewer leaving is a change");
+        store.record_viewer_hold(&viewer, None).unwrap();
+        assert_eq!(processes(), before + 3, "an exited holder is a change");
+        // Every other column still counts, so a column added later must be
+        // named in the trigger.
+        let conn = store.conn.lock().unwrap();
+        let trigger: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name='store_revision_held_terminals_update'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let columns: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_table_info('held_terminals')")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        for column in columns {
+            assert!(
+                trigger.contains(&format!("NEW.{column} IS")),
+                "held_terminals.{column} missing from its trigger"
+            );
+        }
     }
 
     #[test]

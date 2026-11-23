@@ -57,10 +57,12 @@ struct TaskGraphTests {
     @Test("Separate catalogs retain invalid entries and compiled composition")
     func graphFixtures() throws {
         let catalog = try JSONDecoder().decode([GraphCatalogEntry].self, from: fixture("graph_catalog.json"))
-        let workflows = catalog.map(WorkflowCatalogEntry.init)
         #expect(catalog.map(\.id) == ["feature", "broken"])
-        #expect(workflows[0].workflow?.steps.isEmpty == false)
-        #expect(workflows[1].source == ".lf/graphs/broken.yaml" && workflows[1].unavailable != nil && workflows[1].workflow == nil)
+        let outline = try #require(catalog[0].workflow)
+        #expect(outline.steps.map(\.name) == ["design", "pursue", "xor-route", "queue"])
+        #expect(outline.steps.map(\.interactive) == [false, true, false, false])
+        #expect(outline.interactiveSteps.map(\.name) == ["demo"] && outline.sentence == "You take part at demo.")
+        #expect(catalog[1].source == ".lf/graphs/broken.yaml" && catalog[1].unavailable != nil && catalog[1].workflow == nil)
         #expect(catalog[0].compiled?.steps.count == 8 && catalog[1].unavailable != nil)
         let compiled = try #require(catalog[0].compiled)
         let composition = try #require(catalog[0].composition)
@@ -87,6 +89,11 @@ struct TaskGraphTests {
         #expect(all.compiled.node(3)?.label == "implement")
 
         var missing = try #require(JSONSerialization.jsonObject(with: fixture("graph_composition.json")) as? [String: Any])
+        var absent = missing
+        absent.removeValue(forKey: "workflow")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(GraphCatalogEntry.self, from: JSONSerialization.data(withJSONObject: absent))
+        }
         var body = try #require(missing["composition"] as? [String: Any])
         body.removeValue(forKey: "items")
         missing["composition"] = body
@@ -116,10 +123,15 @@ struct TaskGraphTests {
 
         let blocked = snapshots[2]
         #expect(graphNodeStates(blocked.compiled, latest: blocked)[3] == .blocked)
+        #expect(blocked.steps.last?.error == "check exited 1: 2 tests failed")
         let evidence = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_stalled.json"))
         #expect(evidence.state == .stalled)
         let held = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_waiting.json"))
         #expect(held.state == .waiting)
+        let died = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_died.json"))
+        #expect(died.died?.atStep == "implement")
+        #expect(died.outlook?.kind == .waitingForYou && died.outlook?.command == "lf task run LOO-12")
+        #expect(held.died == nil && held.outlook == nil)
         // A preview only marks stages.
         let preview = graphNodeStates(review.compiled, latest: nil)
         #expect(preview[4] == .pendingHuman && preview[1] == .pending)
@@ -385,7 +397,7 @@ private final class ScriptedReader {
 
     private func send(_ part: WorkPart, answers: Int, body: Any) {
         sequence += 1
-        let line: [String: Any] = ["answers": answers, "unavailable": NSNull(), "body": body]
+        let line: [String: Any] = ["answers": answers, "unavailable": NSNull(), "body": body, "read_at": NSNull()]
         let scope = WorkScope(repo: repo, headless: false, task: task, activity: nil, taskListWave: nil)
         guard let data = try? JSONSerialization.data(withJSONObject: line),
               let frame = try? WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: data) else { return }
@@ -426,7 +438,7 @@ struct TaskGraphProofTests {
             renameFixtureRecord("design", title: "review-design", work: reviewed)
         )) as? [String: Any])
         session["state"] = "active"
-        session["actions"] = sessionActionFixture(state: "active")
+        session["action"] = sessionActionFixture(state: "active")
         session["terminal_ids"] = [shells[0]]
         session["open_argv"] = ["must-not-launch"]
         let source = try GraphSource(session: JSONSerialization.data(withJSONObject: [session]))
@@ -515,7 +527,7 @@ struct TaskGraphProofTests {
             try press("\r", keyCode: 36, in: window)
             try await settle(window)
             #expect(expanded("empty"))
-            #expect(try find("composition-group-\(prefix)empty").find(text: "No steps").string() == "No steps")
+            #expect(try find("composition-group-\(prefix)empty").find(text: "No steps.").string() == "No steps.")
             try press("\u{f702}", keyCode: 123, in: window)
             try await settle(window)
             #expect(!expanded("empty"))

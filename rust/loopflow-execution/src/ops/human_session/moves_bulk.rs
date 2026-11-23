@@ -1,9 +1,6 @@
 //! Bulk moves over the Session selector: `lf session move`. Interactive
 //! Sessions only. Each selected Session continues on another agent through a
-//! fresh seeded thread, now when idle, after its turn when busy. A login is
-//! not a Session's to move: every open Claude follows the Machine's login,
-//! which `lf account use` switches, and a running Codex keeps its own until
-//! `lf --account codex=<login> resume`. Nothing here writes preferences.
+//! fresh seeded thread, now when idle, after its turn when busy.
 
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
@@ -18,8 +15,7 @@ pub fn parse_target(agent: Option<&str>) -> Result<String> {
     let Some(agent) = agent else {
         bail!("a Session move needs a target: -a harness[:model]");
     };
-    let (harness, _) = crate::config::parse_agent(agent);
-    if crate::harness::HarnessKind::parse(&harness).is_none() {
+    if crate::config::Agent::parse(agent).is_err() {
         bail!("unknown agent {agent}: name harness[:model], such as claude:opus or codex");
     }
     Ok(agent.to_owned())
@@ -91,14 +87,14 @@ impl Moved {
 }
 
 /// Move the interactive Sessions `filter` selects to `agent`. The filter
-/// must select by `blocked` or `on`.
+/// must select by `on`.
 pub async fn move_sessions(
     store: &SharedStore,
     filter: &SessionFilter,
     agent: &str,
 ) -> Result<MoveReport> {
-    if !filter.blocked && filter.on.is_none() {
-        bail!("a Session move needs a selector: --blocked or --on <account|harness[:model]>");
+    if filter.on.is_none() {
+        bail!("a Session move needs a selector: --on <harness[:model]>");
     }
     let mut selection = filter.clone();
     selection.headless = false;
@@ -132,7 +128,7 @@ async fn move_agent(
         session.id.as_str(),
         Some(agent),
         false,
-        false,
+        Default::default(),
         &uuid::Uuid::new_v4().to_string(),
     )
     .await
@@ -155,7 +151,7 @@ pub async fn apply_pending_move(store: &SharedStore, session: &str) -> Result<()
         session,
         Some(&agent),
         false,
-        false,
+        Default::default(),
         &uuid::Uuid::new_v4().to_string(),
     )
     .await?;

@@ -114,8 +114,7 @@ mod tests {
             )
             .unwrap();
         let attachment =
-            attachment::claim_session_attachment(&store, "conversation", None, &process, false)
-                .unwrap();
+            attachment::claim_session_attachment(&store, "conversation", None, &process).unwrap();
         (store, attachment)
     }
 
@@ -186,7 +185,6 @@ mod tests {
                 "conversation",
                 Some(&former),
                 &LfProcessId::new(),
-                false,
             )
             .unwrap();
             transferred.send(next).unwrap();

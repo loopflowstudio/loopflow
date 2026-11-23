@@ -757,7 +757,7 @@ def test_pytest_garbage_and_known_temp_only(cleaner) -> None:
     old = root / "pytest-of-test/pytest-12"
     current = root / "pytest-of-test/pytest-13"
     unknown = root / "unknown-demo"
-    known = root / "lf-worlds-test"
+    known = root / "swift-test-cleanup"
     for path in (garbage, old, current, unknown, known):
         _write(path / "data", 3)
         (path / ".cleanup-evidence.json").write_text('{"outcome": "passed"}')

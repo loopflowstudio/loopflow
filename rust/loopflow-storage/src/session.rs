@@ -13,6 +13,57 @@ pub struct SessionTurnOrigin {
     pub captured_event: Option<i64>,
     pub task_id: Option<String>,
     pub wave_id: Option<String>,
+    pub project_id: Option<String>,
+    pub repository: Option<String>,
+    pub skill: Option<String>,
+    pub provider: Option<String>,
+    /// The Graph and step the input was dispatched for.
+    pub graph: Option<String>,
+    pub step: Option<String>,
+}
+
+/// One provider turn as `history.turns` keeps it: inserted when it starts,
+/// completed in place when it ends. Its grouping is what it was dispatched
+/// for; a bind made while it ran does not move it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Turn {
+    pub id: i64,
+    pub session_id: LfSessionId,
+    pub thread: AgentSessionId,
+    pub turn: String,
+    pub captured_event: Option<i64>,
+    pub lf_process_id: Option<String>,
+    pub agent_process_id: Option<String>,
+    pub task_id: Option<String>,
+    pub wave_id: Option<String>,
+    pub project_id: Option<String>,
+    pub repository: Option<String>,
+    pub skill: Option<String>,
+    pub graph: Option<String>,
+    pub step: Option<String>,
+    pub started_at: Option<i64>,
+    pub ended_at: Option<i64>,
+    /// How the provider says it ended: `completed`, `failed`, `interrupted`.
+    pub status: Option<String>,
+    pub duration_ms: Option<i64>,
+    /// The provider's error or errors, as it reported them.
+    pub error: Option<serde_json::Value>,
+    pub provider: Option<String>,
+    pub usage: Option<RecordedUsage>,
+    pub context: Option<TurnContext>,
+}
+
+/// One turn's tokens, resolved from its provider's reading before they are
+/// kept: a sum over turns needs no counter logic.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecordedUsage {
+    pub observed_at: i64,
+    /// The provider marked the reading as its last for the turn.
+    #[serde(rename = "final")]
+    pub final_reading: bool,
+    /// Counted from the first report seen, not from the turn's start.
+    pub partial: bool,
+    pub usage: loopflow_model::chat::types::TurnUsage,
 }
 
 /// Immutable native evidence. Missing start, attribution or usage stays missing.
@@ -36,13 +87,9 @@ pub struct SessionEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionEventKind {
+    /// An input, kept in the store as Session state.
     Captured,
-    Started,
-    Usage,
-    Completed,
-    /// Final provider output for an exact native turn; completion is separate.
-    Output,
-    /// Evidence without an exact native turn; cannot settle a Graph.
+    /// Session history; provider turns are in `history.turns`.
     Observed,
 }
 
@@ -61,10 +108,6 @@ impl SessionEventKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Captured => "captured",
-            Self::Started => "started",
-            Self::Usage => "usage",
-            Self::Completed => "completed",
-            Self::Output => "output",
             Self::Observed => "observed",
         }
     }
@@ -100,7 +143,6 @@ pub struct LfSession {
     pub title_source: TitleSource,
     /// Retained request context from historical conversations.
     pub request: Option<String>,
-    pub ready_summary: Option<String>,
     pub completed_at: Option<i64>,
     pub created_at: i64,
 }
@@ -236,50 +278,6 @@ pub enum WorkSource {
     Bound,
 }
 
-impl WorkSource {
-    /// A launch is managed when a Task or Wave command named its Work (a
-    /// selector, a Task's run, a Task or Wave conversation, a binding); a bare
-    /// `lf` in a Task's checkout, or a child run a Session's agent started,
-    /// only counts toward the Task. What each kind gets is in
-    /// `server/README.md` ("Turn and tool boundaries").
-    pub fn is_managed(self) -> bool {
-        matches!(self, Self::Declared | Self::Bound)
-    }
-}
-
-/// Who holds a launch's provider process. It decides the launch's hooks,
-/// whether it needs the Machine server and whether it takes steers, and is
-/// decided once, where the launch is configured.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Holder {
-    /// A bare launch: the terminal it runs in, or the caller waiting on a
-    /// headless run. It behaves as the harness alone would, with no server:
-    /// two context hooks, and a steer check that reads the store itself.
-    #[default]
-    Caller,
-    /// Task, Wave or repository work: every hook and steers, beside a
-    /// Machine server that must be up before the agent starts.
-    Server,
-}
-
-impl Holder {
-    /// `work`: the launch's Work was selected with `--task` or `--wave`, or
-    /// the Session it reopens is not bare (`SqliteStore::is_bare`).
-    pub fn of(work: bool) -> Self {
-        if work {
-            Self::Server
-        } else {
-            Self::Caller
-        }
-    }
-
-    /// Whether the provider reports its turn boundaries to the Machine server.
-    pub fn reports_turns(self) -> bool {
-        self != Self::Caller
-    }
-}
-
-/// Which scopes' current primary conversations to list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum SessionPrimary {
     All,
@@ -307,17 +305,13 @@ pub struct SessionFilter {
     pub limit: usize,
     /// Present for stable-ID pages; empty starts the first page.
     pub after: Option<String>,
-    /// Only Sessions whose next message would fail: their login cannot take
-    /// their model now.
-    pub blocked: bool,
-    /// Only Sessions using this login (`work@`, `claude=work@`) or on `harness[:model]`.
+    /// Only Sessions on `harness[:model]`.
     pub on: Option<String>,
 }
 
 impl Default for SessionFilter {
     fn default() -> Self {
         Self {
-            blocked: false,
             on: None,
             orphan: false,
             repo: None,
@@ -347,6 +341,15 @@ pub struct SessionSummary {
     pub held: bool,
     pub primary_scope: Option<String>,
     pub agent_process_evidence: crate::ProcessIdentityEvidence,
+    /// When its current agent's end was recorded, and how; `None` while it
+    /// runs, before the first, or when nobody recorded the end.
+    pub agent_end: Option<AgentEnd>,
+    /// Starts by the server's recovery pass since it last finished a turn.
+    pub starts_since_turn: u32,
+    /// When the pass last started it.
+    pub last_started_at: Option<i64>,
+    /// Why the pass's last start failed; `None` once one succeeded.
+    pub start_failure: Option<String>,
     /// Available for a person, as of the read's clock.
     pub available: bool,
     pub program_status: Option<loopflow_model::program_status::Records>,
@@ -355,6 +358,14 @@ pub struct SessionSummary {
     pub task_terminal: bool,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,
+    /// It is an open Task's conversation in the Task's checkout on this
+    /// Machine: one the server's recovery pass reads. A Task checked out
+    /// elsewhere, a completed conversation, or one moved to another Machine,
+    /// is not.
+    pub in_task_checkout: bool,
+    /// Its held terminal is open and its agent's pid is not recorded yet: a
+    /// start under way, which has no liveness to read.
+    pub launching: bool,
     pub task_ids: Vec<TaskId>,
     pub captured: Option<i64>,
     pub id: LfSessionId,
@@ -363,7 +374,6 @@ pub struct SessionSummary {
     pub has_provider_history: bool,
     pub title: String,
     pub title_source: TitleSource,
-    pub ready_summary: Option<String>,
     pub completed_at: Option<i64>,
     pub interactive: bool,
     pub task_id: Option<TaskId>,
@@ -372,7 +382,7 @@ pub struct SessionSummary {
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
     pub provider: Option<String>,
-    /// The login its current conversation last ran on.
+    /// Historical attribution: the saved login its conversation last recorded; never the current native login.
     pub account: Option<crate::ProviderAccountId>,
     pub model: Option<String>,
     pub node: Option<u32>,
@@ -383,6 +393,21 @@ pub struct SessionSummary {
     pub independent: bool,
     pub wave_name: Option<String>,
     pub task_identifier: Option<String>,
+}
+
+/// An agent's recorded end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentEnd {
+    pub at: i64,
+    /// The provider's exit, as its launcher saw it; `None` when nobody
+    /// saw it: the holder died, or the Machine restarted.
+    pub exit_code: Option<i32>,
+}
+
+/// The person quit: `/exit` or Ctrl+D (0), or Ctrl+C at the prompt (130).
+/// Every other exit, and an end nobody saw, is a death.
+pub fn quit_by_person(exit_code: Option<i32>) -> bool {
+    matches!(exit_code, Some(0 | 130))
 }
 
 /// A Graph as its Graph process records it; Current says nothing about a live process.
@@ -409,12 +434,15 @@ pub enum GraphProcessSummaryState {
 }
 
 impl GraphProcessSummaryState {
-    /// What a Graph process's recorded outcome and exit time say of its Graph.
-    pub fn of_process(outcome: Option<&str>, completed_at: Option<i64>) -> Self {
-        match (outcome, completed_at) {
-            (Some("succeeded"), _) => Self::Completed,
-            (None, None) => Self::Current,
-            _ => Self::Stopped,
+    /// What a Graph run's result says of its Graph.
+    pub fn of_run(result: crate::graph_process::ExecutionResult) -> Self {
+        use crate::graph_process::ExecutionResult;
+        match result {
+            ExecutionResult::Succeeded => Self::Completed,
+            ExecutionResult::Running => Self::Current,
+            ExecutionResult::Interrupted | ExecutionResult::Failed | ExecutionResult::Unknown => {
+                Self::Stopped
+            }
         }
     }
 }
@@ -434,6 +462,8 @@ pub struct HistoryCapture {
     pub cwd: std::path::PathBuf,
     pub repo: Option<String>,
     pub skill: Option<String>,
+    /// SHA-256 of the skill text this input launched with; absent for another input's.
+    pub skill_version: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub interactive: bool,

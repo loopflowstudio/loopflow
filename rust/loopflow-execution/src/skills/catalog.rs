@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
@@ -106,14 +107,84 @@ impl SkillSource {
         })
     }
 
+    /// How this file stands to the builtin of the same name, if there is one.
+    pub fn builtin_relation(&self) -> Option<crate::skills::listing::BuiltinRelation> {
+        use crate::skills::listing::BuiltinRelation;
+        let path = self.path.as_ref()?;
+        let builtin = self.builtin_text()?;
+        let content = crate::observe::read_to_string(path).ok()?;
+        let extends = self.dialect == SkillDialect::Loopflow
+            && split_frontmatter(&content)
+                .and_then(|(frontmatter, _)| extends_key(frontmatter))
+                .is_some_and(|value| value.as_str() == Some("builtin"));
+        Some(if extends {
+            BuiltinRelation::Extends
+        } else if content.trim() == builtin.trim() {
+            BuiltinRelation::Copies
+        } else {
+            BuiltinRelation::Replaces
+        })
+    }
+
+    /// The skill's text. A Loopflow file whose frontmatter says
+    /// `extends: builtin` is the builtin of the same name with the file's body
+    /// appended, so a repository adds its own section and keeps following the
+    /// builtin as it changes. The builtin's frontmatter stands under the
+    /// file's: a key the file sets wins.
     pub fn read(&self) -> Result<String, LoadError> {
-        match &self.path {
-            Some(path) => Ok(crate::observe::read_to_string(path)?),
-            None => Ok(builtins::get_builtin_skill(&self.name)
+        let Some(path) = &self.path else {
+            return Ok(builtins::get_builtin_skill(&self.name)
                 .expect("embedded catalog entry names a builtin")
-                .to_string()),
+                .to_string());
+        };
+        let content = crate::observe::read_to_string(path)?;
+        if self.dialect != SkillDialect::Loopflow {
+            return Ok(content);
+        }
+        let Some((frontmatter, addition)) = split_frontmatter(&content) else {
+            return Ok(content);
+        };
+        match extends_key(frontmatter).as_ref().map(Value::as_str) {
+            None => Ok(content),
+            Some(Some("builtin")) => {
+                let base = self.builtin_text().ok_or_else(|| {
+                    LoadError::InvalidSkill(format!(
+                        "{} extends a builtin, but no builtin skill is named {:?}",
+                        path.display(),
+                        self.name
+                    ))
+                })?;
+                let (inherited, base) = split_frontmatter(base).unwrap_or(("", base));
+                let mut merged = serde_yaml_ng::from_str::<serde_yaml_ng::Mapping>(inherited)
+                    .unwrap_or_default();
+                if let Ok(own) = serde_yaml_ng::from_str::<serde_yaml_ng::Mapping>(frontmatter) {
+                    merged.extend(own);
+                }
+                let frontmatter = serde_yaml_ng::to_string(&merged)
+                    .map_err(|error| LoadError::InvalidSkill(error.to_string()))?;
+                Ok(format!(
+                    "---\n{frontmatter}---\n{}\n\n{}",
+                    base.trim_end(),
+                    addition.trim_start()
+                ))
+            }
+            Some(_) => Err(LoadError::InvalidSkill(format!(
+                "{}: `extends` takes only `builtin`",
+                path.display()
+            ))),
         }
     }
+
+    fn builtin_text(&self) -> Option<&'static str> {
+        builtins::resolve_builtin_skill(&self.name).and_then(builtins::get_builtin_skill)
+    }
+}
+
+fn extends_key(frontmatter: &str) -> Option<Value> {
+    serde_yaml_ng::from_str::<Value>(frontmatter)
+        .ok()?
+        .get("extends")
+        .cloned()
 }
 
 #[derive(Debug)]
@@ -123,24 +194,55 @@ pub struct SkillCatalog {
 }
 
 impl SkillCatalog {
-    pub fn discover(repo: Option<&Path>) -> Result<Self, LoadError> {
+    pub fn discover(repo: Option<&Path>) -> Result<Arc<Self>, LoadError> {
         Self::load(repo, dirs::home_dir().as_deref(), true)
     }
 
+    /// The skills under `repo` and `home`. Served readings share one catalog
+    /// per set of directories until a file under them changes.
     pub fn load(
         repo: Option<&Path>,
         home: Option<&Path>,
         provider_overrides: bool,
+    ) -> Result<Arc<Self>, LoadError> {
+        // Where a provider keeps its own skills is read here, so the shared
+        // catalog is kept under the directories it walked.
+        let provider_home = |variable: &str| {
+            provider_overrides
+                .then(|| std::env::var_os(variable))
+                .flatten()
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+        };
+        let claude = provider_home("CLAUDE_CONFIG_DIR");
+        let codex = provider_home("CODEX_HOME");
+        let key = crate::observe::Derived::SkillCatalog {
+            repo: repo.map(Path::to_path_buf),
+            home: home.map(Path::to_path_buf),
+            claude: claude.clone(),
+            codex: codex.clone(),
+        };
+        (*crate::observe::derived(key, || {
+            Self::walk(repo, home, claude.as_deref(), codex.as_deref()).map(Arc::new)
+        }))
+        .clone()
+    }
+
+    fn walk(
+        repo: Option<&Path>,
+        home: Option<&Path>,
+        claude: Option<&Path>,
+        codex: Option<&Path>,
     ) -> Result<Self, LoadError> {
         let mut catalog = Self {
             repo: repo.map(Path::to_path_buf),
             sources: BTreeMap::new(),
         };
         if let Some(repo) = repo {
-            catalog.collect_scope(repo, false)?;
+            catalog.collect_scope(repo, None, None)?;
         }
         if let Some(home) = home {
-            catalog.collect_scope(home, provider_overrides)?;
+            catalog.collect_scope(home, claude, codex)?;
         }
         for name in builtins::builtin_skill_names() {
             catalog
@@ -181,17 +283,14 @@ impl SkillCatalog {
             }))
     }
 
-    fn collect_scope(&mut self, base: &Path, overrides: bool) -> Result<(), LoadError> {
-        let provider_home = |variable: &str, folder: &str| {
-            overrides
-                .then(|| std::env::var_os(variable))
-                .flatten()
-                .filter(|value| !value.is_empty())
-                .map(PathBuf::from)
-                .unwrap_or_else(|| base.join(folder))
-        };
-        let claude = provider_home("CLAUDE_CONFIG_DIR", ".claude");
-        let codex = provider_home("CODEX_HOME", ".codex");
+    fn collect_scope(
+        &mut self,
+        base: &Path,
+        claude: Option<&Path>,
+        codex: Option<&Path>,
+    ) -> Result<(), LoadError> {
+        let claude = claude.map_or_else(|| base.join(".claude"), Path::to_path_buf);
+        let codex = codex.map_or_else(|| base.join(".codex"), Path::to_path_buf);
         for (root, dialect, files) in [
             (base.join(".lf/skills"), SkillDialect::Loopflow, true),
             (claude.join("skills"), SkillDialect::Claude, false),
@@ -312,10 +411,96 @@ mod tests {
     use std::{fs, path::Path};
     use tempfile::TempDir;
 
+    #[test]
+    fn readings_share_one_catalog_until_a_skill_file_changes() {
+        use crate::observe::{Cache, Derived};
+        let repo = TempDir::new().unwrap();
+        write(repo.path(), ".lf/skills/mine.md", "Mine.\n");
+        let cache = std::sync::Arc::new(Cache::default());
+        let load = || SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        let walks = || {
+            cache.computations(
+                |key| matches!(key, Derived::SkillCatalog { repo: Some(path), .. } if path == repo.path()),
+            )
+        };
+        let (first, dependencies) = cache.capture(load);
+        let (second, _) = cache.capture(load);
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+        assert_eq!(walks(), 1);
+
+        write(repo.path(), ".lf/skills/group/other/SKILL.md", "Other.\n");
+        assert!(
+            load().exact("group/other").is_some(),
+            "a bare command walks"
+        );
+        assert!(cache.capture(load).0.exact("group/other").is_none());
+        cache.refresh_all();
+        assert!(dependencies.changed());
+        assert!(cache.capture(load).0.exact("group/other").is_some());
+        assert_eq!(walks(), 2);
+    }
+
     fn write(root: &Path, relative: &str, content: &str) {
         let path = root.join(relative);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn a_repository_skill_can_append_to_the_builtin_it_names() {
+        let repo = TempDir::new().unwrap();
+        write(
+            repo.path(),
+            ".lf/skills/gate.md",
+            "---\nextends: builtin\n---\n## Here\n\nRun the local suite first.\n",
+        );
+        write(
+            repo.path(),
+            ".lf/skills/mine.md",
+            "---\nextends: builtin\n---\nNothing to extend.\n",
+        );
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        let builtin = SkillCatalog::load(None, None, false)
+            .unwrap()
+            .load_skill("gate")
+            .unwrap()
+            .content
+            .unwrap();
+        let extended = catalog.load_skill("gate").unwrap().content.unwrap();
+        assert_eq!(
+            extended,
+            format!(
+                "{}\n\n## Here\n\nRun the local suite first.\n",
+                builtin.trim_end()
+            )
+        );
+        let error = catalog.load_skill("mine").unwrap_err().to_string();
+        assert!(error.contains("no builtin skill is named"), "{error}");
+    }
+
+    #[test]
+    fn a_listing_tells_extensions_from_replacements_and_copies() {
+        use crate::skills::listing::BuiltinRelation;
+        let repo = TempDir::new().unwrap();
+        write(
+            repo.path(),
+            ".lf/skills/gate.md",
+            "---\nextends: builtin\n---\n## Here\n",
+        );
+        write(repo.path(), ".lf/skills/qa.md", "Our own QA.\n");
+        write(
+            repo.path(),
+            ".lf/skills/debug.md",
+            loopflow_definitions::builtins::get_builtin_skill("debug").unwrap(),
+        );
+        write(repo.path(), ".lf/skills/mine.md", "Ours alone.\n");
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        let relation = |name: &str| catalog.resolve(name).unwrap().unwrap().builtin_relation();
+        assert_eq!(relation("gate"), Some(BuiltinRelation::Extends));
+        assert_eq!(relation("qa"), Some(BuiltinRelation::Replaces));
+        assert_eq!(relation("debug"), Some(BuiltinRelation::Copies));
+        assert_eq!(relation("mine"), None);
+        assert_eq!(relation("polish"), None);
     }
 
     #[test]

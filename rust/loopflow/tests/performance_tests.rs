@@ -44,6 +44,10 @@ fn cli_volume_records_real_reads_without_contents() {
     assert!(end["connections"].as_u64().unwrap() > 0);
     assert!(end["statements"].as_u64().unwrap() > 0);
     assert!(end["rows"].as_u64().unwrap() > 0);
+    // SQLite's profiler rounds to milliseconds; fast statements may legitimately
+    // report zero. Prove profile callbacks happened independently of duration.
+    assert!(end["sql_profiles"].as_u64().unwrap() > 0);
+    assert!(end["sql_ms"].as_f64().unwrap() >= 0.0);
     assert!(!text.contains(home.path().to_str().unwrap()));
     assert!(!text.contains("SELECT"));
     assert!(!text.contains("session"));

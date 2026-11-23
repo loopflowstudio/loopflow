@@ -119,7 +119,7 @@ struct DesktopPerformanceTests {
         }
         let template = listed.task.task
         let scenarios = ["task_renamed", "task_created"]
-        try journal.write(["event": "plan", "population_version": "home-copy-v2",
+        try journal.write(["event": "plan", "population_version": "home-copy-v3-task-rows",
                            "populations": ["home": current.count], "samples": samples,
                            "scenarios": scenarios, "endpoint": "store_commit_to_native_capture_ocr",
                            "poll_interval_ms": 5, "frame_hitches": NSNull(),
@@ -133,7 +133,7 @@ struct DesktopPerformanceTests {
         model.select(.task(id: listed.task.id))
         let run = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         let shows = { (text: String) in window.outlineText.contains { $0.contains(text) } }
-        let restore = "UPDATE pm_items SET body=json_set(body,'$.name','\(template.name.sqlQuoted)') WHERE id='\(template.id.sqlQuoted)';"
+        let restore = "UPDATE tasks SET issue_title='\(template.name.sqlQuoted)' WHERE id='\(template.id.sqlQuoted)';"
 
         do {
             for attempt in 0..<samples {
@@ -143,24 +143,23 @@ struct DesktopPerformanceTests {
                 model.select(.task(id: listed.task.id))
                 await model.refresh()
                 try await written("task_renamed", attempt, journal, window, store, sql: """
-                    UPDATE pm_items SET body=json_set(body,'$.name','\(label) moved') WHERE id='\(template.id.sqlQuoted)';
+                    UPDATE tasks SET issue_title='\(label) moved' WHERE id='\(template.id.sqlQuoted)';
                     """, ready: { shows("\(label) moved") })
                 model.select(.wave(id: wave))
                 await model.refresh()
                 let fresh = String(format: "Fresh %03d", attempt)
                 try await written("task_created", attempt, journal, window, store, sql: """
-                    INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,needs_refresh,body)
-                    SELECT repo,provider,'\(task)','BENCH-\(attempt)',project_id,unixepoch(),0,
-                        json_set(body,'$.id','\(task)','$.identifier','BENCH-\(attempt)','$.name','\(fresh)','$.rank',0)
-                    FROM pm_items WHERE id='\(template.id.sqlQuoted)';
+                    INSERT INTO tasks(id,repository_id,project_id,issue_identifier,created_at,issue_title,planning_rank,planning_state)
+                    SELECT '\(task)',repository_id,project_id,'BENCH-\(attempt)',unixepoch(),'\(fresh)',0,'unstarted'
+                    FROM tasks WHERE id='\(template.id.sqlQuoted)';
                     """, ready: { window.contentText.contains { $0.contains(fresh) } })
 
                 // Outside every interval: the next attempt starts from the same Tasks.
-                try store.write("DELETE FROM pm_items WHERE id='\(task)'; \(restore)")
+                try store.write("DELETE FROM tasks WHERE id='\(task)'; \(restore)")
                 try await wait(window, render: true, for: .seconds(60)) { !shows(label) }
             }
         } catch {
-            try? store.write("DELETE FROM pm_items WHERE id LIKE 'bench-\(run)-%'; \(restore)")
+            try? store.write("DELETE FROM tasks WHERE id LIKE 'bench-\(run)-%'; \(restore)")
             try journal.write(["event": "setup_or_journey", "population": "home",
                                "outcome": (error as? PerformanceFailure)?.outcome ?? "failed",
                                "reason": String(describing: error)])
@@ -546,7 +545,7 @@ struct DesktopPerformanceTests {
                     && hasRendered(window, "task-work-perf-graph-0")
             })
             try await sample("task_overview", population, attempt, journal, window, action: {
-                files.page = .task
+                files.page = .brief
                 let pane = try #require(multiplexer.layout.pane(for: sessionPane))
                 try workspace.showBrowser(.files, from: pane)
             }, ready: { hasRendered(window, "browser-task-overview") })
@@ -566,8 +565,9 @@ struct DesktopPerformanceTests {
             try await sample("file_edit_refresh", population, attempt, journal, window, action: {
                 files.page = .files
                 multiplexer.showBrowser(.files, location: workspace.location)
-                try await wait(window) { files.changedPaths.first == "notes.txt" }
+                try await wait(window) { files.changes?.files.first?.path == "notes.txt" }
                 files.navigator = .dropdown
+                try await wait(window) { files.treeRows.contains { $0.entry?.path == "notes.txt" } }
                 try pressElement("notes.txt", in: window, property: "Label")
                 files.mode = .edit
                 try await wait(window) { files.selectedDocument?.snapshot != nil }
@@ -661,14 +661,16 @@ struct DesktopPerformanceTests {
         try journal.write(["event": "memory_phase", "phase": "owned_setup_begin"])
         let model = view.model
         let registry = view.workspaces
-        let record = try #require(try await fixture.records().first)
+        let work = WorkReference.task(id: fixture.taskId)
+        let record = try await query.prepareSession(id: fixture.sessionId, work: work, cwd: fixture.repo)
         try #require(record.taskIds.contains(fixture.taskId))
-        let identity = TerminalIdentity.session(fixture.sessionId, machineId: try #require(record.workspace).machineId)
-        let workspace = fixtureWork(registry, try #require(record.workspace).identity)
-        let store = fixtureWork(registry, WorkspaceIdentity(machineId: try #require(record.workspace).machineId, worktree: fixture.repo))
-            .sessionStore(repoPath: fixture.repo, query: query)
+        let location = try #require(record.workspace).identity
+        let identity = TerminalIdentity.session(fixture.sessionId, machineId: location.machineId)
+        let key = model.workspaceKey(for: work, repository: "fixture-plan")
+        let workspace = registry.workspace(for: key, title: record.title, location: location)
+        let store = workspace.sessionStore(repoPath: fixture.repo, query: query)
         let multiplexer = workspace.multiplexer
-        multiplexer.load(sessionId: fixture.sessionId, location: record.workspace?.identity)
+        multiplexer.load(sessionId: fixture.sessionId, location: location)
         let sessionPane = multiplexer.focusedPaneId
         multiplexer.newShell(location: workspace.location)
         let companion = multiplexer.focusedPaneId
@@ -715,7 +717,7 @@ struct DesktopPerformanceTests {
                 try journal.write(["event": "reopen_request", "round": round,
                                    "selected_session": model.navigation.selectedSessionId as Any? ?? NSNull(),
                                    "state": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.state),
-                                   "actions": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.record.actions)])
+                                   "action": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.record.action)])
             }, ready: {
                 let terminal = registry.surfaces.view(for: identity)
                 let hasHistory = terminal.surface.map {
@@ -735,7 +737,7 @@ struct DesktopPerformanceTests {
                 return selected && focused && hasHistory
             }, observation: {
                 ["session_id": fixture.sessionId, "task_id": fixture.taskId, "native_id": fixture.nativeId,
-                 "provider": "lf-world stub claude", "history_preserved": (try? fixture.historyIsPreserved()) == true]
+                 "provider": "benchmark stand-in claude", "history_preserved": (try? fixture.historyIsPreserved()) == true]
             }, input: {
                 let surface = try #require(registry.surfaces.view(for: identity).surface)
                 let message = "reopened-\(round)"
@@ -763,8 +765,13 @@ struct DesktopPerformanceTests {
             }
             try journal.write(["event": "memory_phase", "phase": "navigation_files_complete", "round": round])
             try send(window, "quit\n")
-            try await wait(window) { !registry.surfaces.hasSurface(identity) }
-            registry.surfaces.release(identity)
+            // The provider can quit while its attached viewer still shows the last screen.
+            let deadline = ContinuousClock.now + .seconds(5)
+            while try await fixture.records().first?.state != .closed {
+                try #require(ContinuousClock.now < deadline, "The owned Session did not close")
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            await registry.surfaces.release(identity)?.value
             store.noteSurfaceClosed(identity)
             try journal.write(["event": "memory_phase", "phase": "native_surface_released", "round": round])
             let retained = try await fixture.records()
@@ -997,9 +1004,9 @@ struct DesktopPerformanceTests {
              "workspace": ["machine_id": fixtureMachineId, "worktree": checkout,
                            "task_id": "perf-task-\(index)", "unavailable": NSNull()],
              "title": String(format: "Conversation %03d", index), "detail": "Benchmark fixture",
-             "cwd": checkout, "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
-             "actions": sessionActionFixture(state: "active"),
-             "blocked": false, "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": ["perf-task-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
+             "cwd": checkout, "wave_id": "wave-1", "state": "active", "work_path": NSNull(),
+             "action": sessionActionFixture(state: "active"),
+             "blocked": false, "title_source": "generated", "ended": NSNull(), "start": NSNull(), "outlook": NSNull(), "status_line": NSNull(), "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": ["perf-task-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
         })
         let historyTemplate = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             root.appendingPathComponent("tests/fixtures/dto/session_history_summary.json"))) as? [String: Any])
@@ -1029,7 +1036,9 @@ struct DesktopPerformanceTests {
             case "task" where args.dropFirst().first == "show":
                 return #"{"overview":\#(workJSON),"graph_processes":[],"comments":\#(commentsJSON),"execution":null,"row":null}"#
             case "task" where args.dropFirst().first == "changes":
-                return #"{"issue_identifier":"PERF-0","task_id":"perf-task-0","base_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","files":[{"path":"notes.txt","old_path":null,"committed":true,"staged":false,"unstaged":false,"untracked":false}],"scratch":[],"scratch_truncated":false,"recovery_directory":null}"#
+                return #"{"issue_identifier":"PERF-0","task_id":"perf-task-0","base_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","commits":[],"files":[{"path":"notes.txt","old_path":null,"committed":true,"staged":false,"unstaged":false,"untracked":false,"changes":1}],"scratch":[],"scratch_truncated":false,"recovery_directory":null}"#
+            case "task" where args.dropFirst().first == "files":
+                return #"{"path":"","entries":[{"path":"notes.txt","kind":"file"}],"next_cursor":null}"#
             case "task" where args.dropFirst().first == "file":
                 return #"{"issue_identifier":"PERF-0","task_id":"perf-task-0","path":"notes.txt","content":"Original notes","state":"text","revision":"fixed","size_bytes":14,"recoveries":[],"read_only_reason":null}"#
             case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
@@ -1066,12 +1075,12 @@ struct DesktopPerformanceFixtureTests {
             try await Task.sleep(for: .milliseconds(5))
         }
         await model.loadTaskContext(task: task.task)
-        #expect(model.graphCatalog.errorMessage == nil)
-        #expect(model.taskWork[task.task.id].errorMessage == nil)
-        #expect(model.taskContext[task.task.id].errorMessage == nil)
+        #expect(model.graphCatalog.failure == nil)
+        #expect(model.taskWork[task.task.id].failure == nil)
+        #expect(model.taskContext[task.task.id].failure == nil)
         await model.loadSessionHistory(task: task.task)
         #expect(model.sessionHistory[task.task.id].value?.count == 256)
-        #expect(model.sessionHistory[task.task.id].errorMessage == nil)
+        #expect(model.sessionHistory[task.task.id].failure == nil)
         let store = TaskFilesStore(issue: "PERF-0", cwd: NSTemporaryDirectory(), query: query)
         store.autosave = false
         store.selection = "notes.txt"
@@ -1083,7 +1092,7 @@ struct DesktopPerformanceFixtureTests {
         await store.refresh()
         await store.loadFile()
         #expect(document.text == "Preserved draft")
-        #expect(store.changedPaths == ["notes.txt"])
+        #expect(store.changes?.files.map(\.path) == ["notes.txt"])
         await #expect(throws: RegistryQueryError.self) {
             try await query.updateTaskDirective(id: "PERF-0", text: "denied", cwd: "/src/loopflow")
         }
@@ -1137,7 +1146,7 @@ private final class PerformanceReader {
             }
         }
         send(.task, request.id, #"""
-            {"overview":{"sessions":[],"graph_processes":\#(graphs),"processes":[],"graph":null},"graph_processes":\#(runs),"comments":{"identifier":"\#(task)","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null},"execution":null}
+            {"overview":{"sessions":[],"graph_processes":\#(graphs),"graph":null},"graph_processes":\#(runs),"comments":{"identifier":"\#(task)","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null},"execution":null}
             """#)
     }
 
@@ -1145,7 +1154,7 @@ private final class PerformanceReader {
     private func send(_ part: WorkPart, _ answers: Int, _ body: String) {
         let scope = scope ?? WorkScope(repo: nil, headless: false, task: nil, activity: nil, taskListWave: nil)
         sequence += 1
-        let line = #"{"answers":\#(answers),"unavailable":null,"body":\#(body)}"#
+        let line = #"{"answers":\#(answers),"unavailable":null,"body":\#(body),"read_at":null}"#
         // A frame this file wrote; one that does not decode fails the wait on it.
         if let frame = try? WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: Data(line.utf8)) {
             continuation?.yield(frame)
@@ -1471,7 +1480,10 @@ actor SnapshotReads {
                 let owned = try await fixture.read(["plan", "list", "--all", "--json"])
                 var page = try #require(value as? [String: Any])
                 let extra = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [String: Any])
-                page["waves"] = (try #require(page["waves"] as? [Any])) + (try #require(extra["waves"] as? [Any]))
+                var tasks = try #require(page["tasks"] as? [String: Any])
+                let ownedTasks = try #require(extra["tasks"] as? [String: Any])
+                tasks["items"] = (try #require(tasks["items"] as? [Any])) + (try #require(ownedTasks["items"] as? [Any]))
+                page["tasks"] = tasks
                 value = page
             } else if verb == "wave list" {
                 let owned = try await fixture.read(args)
@@ -1535,7 +1547,7 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     // Copied launch authority is never exercised. This transport permits only local
     // reads; no network, Session connection, watcher, worker or provider can start.
     let verb = args.prefix(2).joined(separator: " ")
-    guard ["wave show", "wave list", "wave status", "session list", "session card", "session history", "machine self", "task status", "task files", "task diff", "graph list"].contains(verb) else {
+    guard ["plan list", "task show", "task detail", "task changes", "task file", "wave show", "wave list", "wave status", "session list", "session card", "session history", "machine self", "task status", "task files", "task diff", "graph list"].contains(verb) else {
         throw RegistryQueryError("Snapshot does not execute \(verb)")
     }
     let process = Process()

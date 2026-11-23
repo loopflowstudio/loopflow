@@ -1,11 +1,14 @@
 //! A Task's append-only ownership log and this Machine's reading of it.
 //!
-//! The later entry wins, in provider order. Writes stay within one person's
-//! Machines: your Task's next entry is written on its Machine when that is one
-//! of yours, otherwise on your Machine for its Wave. Each entry names the
-//! Machine that wrote it. An entry another Machine wrote never ends this
-//! Machine's own open claim; only a later entry this Machine wrote does.
-use std::collections::HashMap;
+//! The later entry wins, in the order every Machine reads: the tracker's, or
+//! without one the order each entry's writer gave it. There a claim is
+//! first-wins: one whose writer had not seen the claim holding the Task loses
+//! to it. Writes stay within one person's Machines: your Task's next entry is
+//! written on its Machine when that is one of yours, otherwise on your Machine
+//! for its Wave. Each entry names the Machine that wrote it. An entry another
+//! Machine wrote never ends this Machine's own open claim; only a later entry
+//! this Machine wrote does.
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, Connection, TransactionBehavior};
 
@@ -35,14 +38,17 @@ fn logs_in(
     conn: &Connection,
     tasks: &[TaskId],
 ) -> StoreResult<HashMap<TaskId, Vec<TaskOwnershipEntry>>> {
-    // Entries the provider has not stamped yet share whole-second `at` values;
+    // Entries the tracker has not stamped yet share whole-second `at` values;
     // insertion order keeps a claim and the move after it in the order they happened.
+    // Two Machines that gave their entries one order settle it by machine id.
     let mut statement = conn.prepare(
         "SELECT o.id,o.kind,coalesce(p.name,o.person),o.person_key,o.machine_id,o.machine_label,
-             o.at,o.writer_machine_id,o.task_id,o.person_id
+             o.at,o.writer_machine_id,o.task_id,o.person_id,o.seen,
+             CASE WHEN o.seen IS NOT NULL THEN o.ordered_at END
          FROM task_ownership o LEFT JOIN people p ON p.id=o.person_id
          WHERE o.task_id IN (SELECT value FROM json_each(?1))
-         ORDER BY o.ordered_at IS NULL,o.ordered_at,o.at,o.rowid",
+         ORDER BY o.ordered_at IS NULL,o.ordered_at,
+             CASE WHEN o.seen IS NOT NULL THEN o.writer_machine_id END,o.at,o.rowid",
     )?;
     let rows = statement.query_map(
         [super::children::ids_json(tasks.iter().map(TaskId::as_str))],
@@ -58,13 +64,27 @@ fn logs_in(
                 row.get::<_, Option<String>>(7)?,
                 row.get::<_, String>(8)?,
                 row.get::<_, Option<String>>(9)?,
+                row.get::<_, Option<String>>(10)?,
+                row.get::<_, Option<i64>>(11)?,
             ))
         },
     )?;
     let mut logs = HashMap::<TaskId, Vec<TaskOwnershipEntry>>::new();
     for row in rows {
-        let (id, kind, person, person_key, machine, machine_label, at, writer, task, person_id) =
-            row?;
+        let (
+            id,
+            kind,
+            person,
+            person_key,
+            machine,
+            machine_label,
+            at,
+            writer,
+            task,
+            person_id,
+            seen,
+            order,
+        ) = row?;
         let task = TaskId::from_raw(task);
         logs.entry(task.clone())
             .or_default()
@@ -79,6 +99,8 @@ fn logs_in(
                 machine_label,
                 writer_machine_id: writer.as_deref().map(MachineId::from_raw),
                 at,
+                order,
+                seen: seen.map(OwnershipEntryId::from_raw),
             });
     }
     Ok(logs)
@@ -111,13 +133,32 @@ fn holder_after(entry: &TaskOwnershipEntry) -> Option<TaskOwner> {
 struct Reading {
     owner: Option<TaskOwner>,
     superseded_by: Option<TaskOwner>,
-    /// This Machine holds an open claim that the provider order no longer shows,
+    /// This Machine holds an open claim that the tracker order no longer shows,
     /// for a reason other than a later claim.
     reassert: bool,
 }
 
+/// The entries in effect, in order. A claim loses to the claim holding the
+/// Task when its writer had not seen that claim; nothing later builds on it.
+fn standing(rows: &[TaskOwnershipEntry]) -> Vec<&TaskOwnershipEntry> {
+    let mut standing = Vec::<&TaskOwnershipEntry>::with_capacity(rows.len());
+    for row in rows {
+        let lost = match (standing.last(), &row.seen) {
+            (Some(held), Some(seen)) => {
+                row.kind == OwnershipKind::Claim && holder_after(held).is_some() && *seen != held.id
+            }
+            _ => false,
+        };
+        if !lost {
+            standing.push(row);
+        }
+    }
+    standing
+}
+
 fn read_log(rows: &[TaskOwnershipEntry], local: &MachineId) -> Reading {
-    let global = rows.iter().fold(None, |_, row| holder_after(row));
+    let rows = standing(rows);
+    let global = rows.last().and_then(|row| holder_after(row));
     let written_here = |row: &TaskOwnershipEntry| row.writer_machine_id.as_ref() == Some(local);
     let mut local_claim = None;
     for (index, row) in rows.iter().enumerate() {
@@ -139,7 +180,7 @@ fn read_log(rows: &[TaskOwnershipEntry], local: &MachineId) -> Reading {
             reassert: false,
         };
     };
-    let owner = holder_after(&rows[index]);
+    let owner = holder_after(rows[index]);
     let global_is_local = global
         .as_ref()
         .and_then(|holder| holder.machine.id.as_ref())
@@ -177,7 +218,7 @@ fn local_person_in(conn: &Connection) -> StoreResult<Option<String>> {
 }
 
 /// Know `id` as a person, named `name` when one is given. An id outside
-/// the planning providers' forms is not a person and is skipped.
+/// the trackers' forms is not a person and is skipped.
 fn name_person_in(conn: &Connection, id: &str, name: Option<&str>) -> StoreResult<()> {
     conn.execute(
         "INSERT OR IGNORE INTO people(id,name) VALUES(?1,?2)",
@@ -258,6 +299,14 @@ pub(super) fn owned_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
     Ok(reading_in(conn, task)?.1.owner.is_some())
 }
 
+/// Whether this Machine holds the Task by a claim nobody has claimed after.
+fn claimed_here_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
+    let local = local_machine_in(conn)?;
+    let (_, reading) = reading_in(conn, task)?;
+    Ok(reading.superseded_by.is_none()
+        && reading.owner.and_then(|holder| holder.machine.id) == Some(local))
+}
+
 /// This Machine, or one registered with `lf machine add`.
 fn is_my_machine_in(
     conn: &Connection,
@@ -267,28 +316,50 @@ fn is_my_machine_in(
     Ok(machine == &local_machine_in(conn)? || me.declared_machines.contains_key(machine))
 }
 
+fn is_mine_in(conn: &Connection, me: &OwnershipFacts, holder: &TaskOwner) -> StoreResult<bool> {
+    let local = local_machine_in(conn)?;
+    Ok(holds(&me.person, holder, |machine| {
+        machine == &local || me.declared_machines.contains_key(machine)
+    }))
+}
+
 /// Whether a holder is you, checked in order: your `people` id; else your
 /// person key (Git `user.email`), even on a Machine you registered; else, for
 /// a keyless entry written before keys, one of your Machines. A different id
 /// alone doesn't mean someone else: connecting Linear moves this Machine from
 /// `journal:<key>` to `linear:<viewer>`, and earlier claims keep the journal
 /// id. Names are display only.
-fn is_mine_in(conn: &Connection, me: &OwnershipFacts, holder: &TaskOwner) -> StoreResult<bool> {
-    if holder.person_id.is_some() && holder.person_id == me.person.id {
-        return Ok(true);
+fn holds(person: &Person, holder: &TaskOwner, is_mine: impl Fn(&MachineId) -> bool) -> bool {
+    if holder.person_id.is_some() && holder.person_id == person.id {
+        return true;
     }
     if let Some(key) = &holder.person_key {
-        return Ok(me.person.key.as_ref() == Some(key));
+        return person.key.as_ref() == Some(key);
     }
-    match &holder.machine.id {
-        Some(machine) => is_my_machine_in(conn, me, machine),
-        None => Ok(false),
+    holder.machine.id.as_ref().is_some_and(is_mine)
+}
+
+/// You, as an ownership reading recognizes you: your person and your
+/// Machines, this one and those registered with `lf machine add`. Read once
+/// per repository, then [`You::holds`] recognizes your claims without a
+/// statement each.
+#[derive(Debug, Clone)]
+pub struct You {
+    pub person: Person,
+    pub machines: HashSet<MachineId>,
+}
+
+impl You {
+    pub fn holds(&self, holder: &TaskOwner) -> bool {
+        holds(&self.person, holder, |machine| {
+            self.machines.contains(machine)
+        })
     }
 }
 
 /// What an ownership write needs from outside the store: you in the Task's
 /// repository (Git `user.email` is your person key), whether the repository
-/// has a remote planning provider, the Machines you registered and your Machine
+/// has a remote tracker, the Machines you registered and your Machine
 /// for the Task's Wave or repository. Reading them spawns `git` and loads
 /// configuration files, so callers read them before they take the write lock.
 #[derive(Debug, Clone)]
@@ -446,7 +517,7 @@ pub fn marker(entry: &TaskOwnershipEntry) -> StoreResult<String> {
 }
 
 /// Append a local entry and deliver it as a marked Task comment. The comment
-/// travels through the existing Linear delivery and the Git planning journal.
+/// travels through the existing Linear delivery or to the hub.
 fn append_in(
     conn: &Connection,
     task: &TaskId,
@@ -459,8 +530,18 @@ fn append_in(
     if let Some(id) = &person.id {
         name_person_in(conn, id, person.name.as_deref())?;
     }
+    // With a tracker its comment order decides, and no claim loses.
+    let id = OwnershipEntryId::new();
+    let (order, seen) = if planning_connected {
+        (None, None)
+    } else {
+        let seen = standing(&log_in(conn, task)?)
+            .last()
+            .map_or_else(|| id.clone(), |held| held.id.clone());
+        (Some(next_order_in(conn, task)?), Some(seen))
+    };
     let entry = TaskOwnershipEntry {
-        id: OwnershipEntryId::new(),
+        id,
         task_id: task.clone(),
         kind,
         person: person.name,
@@ -475,12 +556,13 @@ fn append_in(
         },
         writer_machine_id: Some(local.clone()),
         at: time::OffsetDateTime::now_utc().unix_timestamp(),
+        order,
+        seen,
     };
-    let ordered_at = journal_order_in(conn, task, planning_connected)?;
     conn.execute(
         "INSERT INTO task_ownership(id,task_id,kind,person,person_key,machine_id,machine_label,
-             at,ordered_at,writer_machine_id,written_here,person_id)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,1,?11)",
+             at,ordered_at,writer_machine_id,written_here,person_id,seen)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,1,?11,?12)",
         params![
             entry.id.as_str(),
             task.as_str(),
@@ -490,13 +572,13 @@ fn append_in(
             machine.as_str(),
             entry.machine_label,
             entry.at,
-            ordered_at,
+            entry.order,
             local.as_str(),
-            entry.person_id
+            entry.person_id,
+            entry.seen.as_ref().map(OwnershipEntryId::as_str)
         ],
     )?;
-    // Peers order the entry by its comment's time; in the journal that is our order.
-    let created_at = match ordered_at {
+    let created_at = match entry.order {
         Some(ms) => time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000)
             .map_err(|error| StoreError::InvalidData(error.to_string()))?,
         None => time::OffsetDateTime::now_utc(),
@@ -526,12 +608,18 @@ fn append_in(
                     state.as_deref(),
                     None | Some("unstarted" | "backlog" | "triage")
                 ) {
-                    super::task_state_delivery::queue_in(conn, task, "started")?;
+                    super::task_state::decide_in(conn, task, "started")?;
                 }
             }
             OwnershipKind::Unassign => {
-                super::planning_changes::PlanningChanges::Task(task)
-                    .save(conn, &[crate::work::edit::WorkValue::TaskAssignee(None)])?;
+                super::planning_write::local(
+                    conn,
+                    &crate::work::edit::WorkEdit::for_target(
+                        task.as_str(),
+                        &[crate::work::edit::WorkValue::TaskAssignee(None)],
+                    ),
+                )
+                .map(|_| ())?;
             }
             OwnershipKind::Claim => {}
         }
@@ -547,14 +635,7 @@ pub(super) fn claim_in(
     me: &OwnershipFacts,
 ) -> StoreResult<Option<TaskOwnershipEntry>> {
     let local = require_writer_in(conn, task, me)?;
-    let (_, reading) = reading_in(conn, task)?;
-    let owned_here = reading.superseded_by.is_none()
-        && reading
-            .owner
-            .as_ref()
-            .and_then(|owner| owner.machine.id.as_ref())
-            == Some(&local);
-    if owned_here {
+    if claimed_here_in(conn, task)? {
         return Ok(None);
     }
     let key = me.person.key.clone().ok_or_else(|| {
@@ -578,22 +659,19 @@ pub(super) fn claim_in(
     .map(Some)
 }
 
-/// Without a remote provider, the planning journal is the provider and an
-/// entry this Machine takes in is ordered when it does: after every entry it
-/// has seen, whatever their clocks said.
-fn journal_order_in(conn: &Connection, task: &TaskId, remote: bool) -> StoreResult<Option<i64>> {
-    if remote {
-        return Ok(None);
-    }
-    Ok(Some(conn.query_row(
-        "SELECT max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE(max(ordered_at)+1,0))
-         FROM task_ownership WHERE task_id=?1",
+/// The order an entry written here carries to every Machine: this Machine's
+/// plan clock, and after every entry it holds for the Task, whatever their
+/// writers' clocks said.
+fn next_order_in(conn: &Connection, task: &TaskId) -> StoreResult<i64> {
+    let latest: i64 = conn.query_row(
+        "SELECT COALESCE(max(ordered_at)+1,0) FROM task_ownership WHERE task_id=?1",
         [task.as_str()],
         |row| row.get(0),
-    )?))
+    )?;
+    Ok(super::planning_write::next_at(conn)?.max(latest))
 }
 
-/// The provider's order for an entry its comment carries: the comment's time.
+/// The tracker's order for an entry its comment carries: the comment's time.
 pub(super) fn provider_order(created_at: Option<&str>) -> Option<i64> {
     created_at
         .and_then(|at| {
@@ -602,8 +680,9 @@ pub(super) fn provider_order(created_at: Option<&str>) -> Option<i64> {
         .map(|at| (at.unix_timestamp_nanos() / 1_000_000) as i64)
 }
 
-/// Parse a marked ownership comment into the log. Repeats are ignored; the
-/// provider's order is stamped once, the first time it is reported.
+/// Parse a marked ownership comment into the log. Repeats are ignored. An
+/// entry's own order is the one every Machine keeps; without one the
+/// tracker's (`ordered_at`) is stamped once, the first time it is reported.
 pub(super) fn ingest_marker_in(
     conn: &Connection,
     task: &TaskId,
@@ -621,13 +700,18 @@ pub(super) fn ingest_marker_in(
     let Ok(entry) = serde_json::from_str::<TaskOwnershipEntry>(rest[..end].trim()) else {
         return Ok(false);
     };
-    if entry.task_id != *task || entry.machine_id.is_none() {
+    if entry.task_id != *task
+        || entry.machine_id.is_none()
+        || entry.order.is_none() != entry.seen.is_none()
+    {
         return Ok(false);
     }
+    let ordered_at = entry.order.or(ordered_at);
+    let held = claimed_here_in(conn, task)?;
     let inserted = conn.execute(
         "INSERT OR IGNORE INTO task_ownership(id,task_id,kind,person,person_key,machine_id,
-             machine_label,at,ordered_at,writer_machine_id,written_here,person_id)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0,?11)",
+             machine_label,at,ordered_at,writer_machine_id,written_here,person_id,seen)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0,?11,?12)",
         params![
             entry.id.as_str(),
             task.as_str(),
@@ -639,7 +723,8 @@ pub(super) fn ingest_marker_in(
             entry.at,
             ordered_at,
             entry.writer_machine_id.as_ref().map(MachineId::as_str),
-            entry.person_id
+            entry.person_id,
+            entry.seen.as_ref().map(OwnershipEntryId::as_str)
         ],
     )? > 0;
     if let (true, Some(id)) = (inserted, &entry.person_id) {
@@ -654,31 +739,48 @@ pub(super) fn ingest_marker_in(
         }
     }
     if inserted && entry.kind == OwnershipKind::Claim {
-        notify_superseded_in(conn, task, &entry, machine_names)?;
+        notify_superseded_in(conn, task, &entry, held, machine_names)?;
     }
     Ok(inserted)
 }
 
-/// A later claim that this Machine's open claim outlives reaches live Sessions
-/// as direction. Nothing is cancelled; the claimant decides what to do.
+/// What an arriving claim means for this Machine's own, told to live Sessions
+/// as direction. A later claim that this Machine's open claim outlives cancels
+/// nothing; the claimant decides what to do. A claim made first, which this
+/// Machine's claim (`held` before the arrival) was written without seeing,
+/// holds the Task: the run here is interrupted and its work stays where it is.
 /// `machine_names` is observed above SQL, read before the write.
 fn notify_superseded_in(
     conn: &Connection,
     task: &TaskId,
     entry: &TaskOwnershipEntry,
+    held: bool,
     machine_names: &HashMap<MachineId, String>,
 ) -> StoreResult<()> {
     let (_, reading) = reading_in(conn, task)?;
-    let (Some(mut owner), Some(mut later)) = (reading.owner, reading.superseded_by) else {
-        return Ok(());
+    let local = local_machine_in(conn)?;
+    let (text, lost) = match (reading.owner, reading.superseded_by) {
+        (Some(mut owner), Some(mut later)) => {
+            label_owner(&mut owner, machine_names);
+            label_owner(&mut later, machine_names);
+            let text = format!(
+                "Also claimed later by {later}. {owner} still owns this Task on this Machine and \
+                 nothing was cancelled. Keep going, or run `lf task unassign` or \
+                 `lf task move <task> --machine <machine>` to end this claim."
+            );
+            (text, false)
+        }
+        (Some(mut first), None) if held && first.machine.id.as_ref() != Some(&local) => {
+            label_owner(&mut first, machine_names);
+            let text = format!(
+                "{first} claimed this Task first, before this Machine had seen it, so the \
+                 claim made here did not hold. The run here was stopped and its work stays \
+                 in this checkout. Run `lf task claim <task>` to take the Task over."
+            );
+            (text, true)
+        }
+        _ => return Ok(()),
     };
-    label_owner(&mut owner, machine_names);
-    label_owner(&mut later, machine_names);
-    let text = format!(
-        "Also claimed later by {later}. {owner} still owns this Task on this Machine and \
-         nothing was cancelled. Keep going, or run `lf task unassign` or \
-         `lf task move <task> --machine <machine>` to end this claim."
-    );
     let steer = super::steers::save_in(
         conn,
         ("task", task.as_str()),
@@ -692,10 +794,17 @@ fn notify_superseded_in(
         task,
         &crate::work::task::TaskEventKind::Steer { steer_id: steer.id },
     )?;
+    if lost {
+        super::children::insert_task_event_in(
+            conn,
+            task,
+            &crate::work::task::TaskEventKind::Interrupt,
+        )?;
+    }
     Ok(())
 }
 
-/// After an inbound observation: an open local claim that the provider order no
+/// After an inbound observation: an open local claim that the tracker order no
 /// longer shows, for a reason other than a later claim, is claimed again.
 pub(super) fn reassert_in(
     conn: &Connection,
@@ -800,7 +909,7 @@ pub(super) fn hand_back_in(
 
 impl SqliteStore {
     /// This Machine belongs to the person `id` names, as their planning
-    /// provider knows them; `name` is how they are shown.
+    /// tracker knows them; `name` is how they are shown.
     pub fn record_local_person(&self, id: &str, name: Option<&str>) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -830,10 +939,7 @@ impl SqliteStore {
     pub fn task_claimed_here(&self, task: &TaskId) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        let local = local_machine_in(&snapshot)?;
-        let (_, reading) = reading_in(&snapshot, task)?;
-        Ok(reading.superseded_by.is_none()
-            && reading.owner.and_then(|holder| holder.machine.id) == Some(local))
+        claimed_here_in(&snapshot, task)
     }
 
     pub fn claim_task_prepared(
@@ -952,8 +1058,8 @@ impl SqliteStore {
     }
 
     /// Take in an entry another Machine wrote, before planning delivers its
-    /// comment. In the planning journal it follows every entry seen here, so
-    /// the claim that arrives with a move outranks this Machine's earlier ones.
+    /// comment. Without a tracker it carries its own order, which its writer
+    /// gave it after every entry it held for the Task.
     pub fn ingest_ownership_marker_prepared(
         &self,
         task: &TaskId,
@@ -965,13 +1071,12 @@ impl SqliteStore {
         if !me.matches_task_in(&tx, task)? {
             return Ok(None);
         }
-        let order = journal_order_in(&tx, task, me.planning_connected)?;
         let mut names = me.declared_machines.clone();
         names.insert(
             me.scope.placement.local_machine.clone(),
             me.local_label.clone(),
         );
-        let inserted = ingest_marker_in(&tx, task, marker, order, &names)?;
+        let inserted = ingest_marker_in(&tx, task, marker, None, &names)?;
         tx.commit()?;
         Ok(Some(inserted))
     }
@@ -1017,12 +1122,16 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         if current.as_deref() != assignee {
-            super::planning_changes::PlanningChanges::Task(task).save(
+            super::planning_write::local(
                 &tx,
-                &[crate::work::edit::WorkValue::TaskAssignee(
-                    assignee.map(str::to_owned),
-                )],
-            )?;
+                &crate::work::edit::WorkEdit::for_target(
+                    task.as_str(),
+                    &[crate::work::edit::WorkValue::TaskAssignee(
+                        assignee.map(str::to_owned),
+                    )],
+                ),
+            )
+            .map(|_| ())?;
         }
         tx.commit()?;
         Ok(())
@@ -1055,6 +1164,8 @@ mod tests {
             machine_label: None,
             writer_machine_id: Some(writer.clone()),
             at: 1,
+            order: None,
+            seen: None,
         }
     }
 
@@ -1112,7 +1223,7 @@ mod tests {
     fn unstamped_entries_in_one_second_keep_their_written_order() {
         let (_dir, store, task) = store_with_unowned_task();
         let conn = store.conn.lock().unwrap();
-        // Linear stamps provider order later; until then a claim and the move
+        // Linear stamps tracker order later; until then a claim and the move
         // after it share a whole-second `at`, and the move's id may sort first.
         // An earlier lf wrote the move as `handoff`, which reads as a claim.
         for (id, kind) in [("own_zzzz", "claim"), ("own_aaaa", "handoff")] {

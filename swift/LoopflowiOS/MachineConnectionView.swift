@@ -22,16 +22,20 @@ func machineConnectionMessage(_ error: any Error) -> String {
     return "Couldn’t connect. Check that both devices use the same Tailscale account and mobile access is enabled on the Machine."
 }
 
+/// The app's root: the paired Machine's Tasks in that Machine's theme, or pairing in Loopflow's.
 struct MachineConnectionView: View {
     @State private var savedMachine: SavedMachine?
     @State private var changingAddress = false
     @State private var error: String?
+    @State private var machineTheme = MachineTheme()
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        let theme = machineTheme.theme(dark: colorScheme == .dark)
         Group {
             if let savedMachine {
-                TaskListView(client: RemoteMobileClient(savedMachine: savedMachine), onForget: forget,
-                    onChangeAddress: { changingAddress = true })
+                TaskListView(client: RemoteMobileClient(savedMachine: savedMachine, endpoint: .machine(savedMachine.endpoint)),
+                    machineTheme: machineTheme, onForget: forget, onChangeAddress: { changingAddress = true })
                     .id(savedMachine.endpoint)
             } else {
                 MachineAddressView(replacing: nil) { savedMachine = $0 }
@@ -49,12 +53,16 @@ struct MachineConnectionView: View {
             do { savedMachine = try MachineKeychain.load() }
             catch { self.error = error.localizedDescription }
         }
+        .onChange(of: savedMachine?.machineID, initial: true) { _, id in machineTheme.show(machineID: id) }
         .alert("Machine connection", isPresented: Binding(
             get: { error != nil },
             set: { if !$0 { error = nil } }
         )) {
             Button("OK") { error = nil }
         } message: { Text(error ?? "") }
+        .environment(\.theme, theme)
+        .environment(\.palette, theme.palette)
+        .environment(\.colorScheme, theme.colorScheme)
     }
 
     private func forget() {
@@ -77,51 +85,42 @@ struct MachineAddressView: View {
     @State private var error: String?
     @State private var operation: Task<Void, Never>?
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
-    private var theme: ThemeDefinition { colorScheme == .dark ? .dark : .light }
+    @Environment(\.theme) private var theme
 
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: Spacing.xxl) {
                         if replacing == nil && !enteringAddress {
-                            HStack(spacing: 12) {
-                                Image(systemName: "desktopcomputer")
-                                Image(systemName: "arrow.left.arrow.right").font(.system(size: 16))
-                                Image(systemName: "iphone")
-                            }
-                            .font(.system(size: 34, weight: .light))
-                            .foregroundStyle(theme.palette.accentInk)
-                            .accessibilityHidden(true)
                             Text("Your work,\nwithin reach.")
-                                .font(Typography.display)
+                                .serif(.display)
                         }
                         Text(enteringAddress
                             ? "Enter or paste the Tailscale address shown in Desktop’s Mobile settings."
                             : replacing == nil
                             ? "Connect to your Loopflow Machine to open Tasks and continue their Sessions."
                             : "Scan the new code in Desktop’s Mobile settings. Your saved connection stays until the new address is verified.")
-                            .font(Typography.body(17))
+                            .font(Typography.text)
                             .foregroundStyle(theme.palette.textSecondary)
                         if let replacing {
                             Text(replacing.endpoint.absoluteString)
-                                .font(Typography.caption(13))
+                                .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textSelection(.enabled)
                         } else if !enteringAddress {
-                            VStack(alignment: .leading, spacing: 14) {
+                            VStack(alignment: .leading, spacing: Spacing.md) {
                                 Label("Sign in to the same Tailscale account on both devices.", systemImage: "1.circle")
                                 Label("On your Mac, open Loopflow → Settings → Mobile.", systemImage: "2.circle")
                                 Label("Enable mobile access, then scan its code here.", systemImage: "3.circle")
                             }
-                            .font(Typography.body(15))
+                            .font(Typography.text)
                         }
                         if let endpoint, !enteringAddress {
                             Label(endpoint.host ?? "Machine", systemImage: "desktopcomputer")
-                                .font(Typography.strong(16))
+                                .font(Typography.textStrong)
                             Text(endpoint.absoluteString)
-                                .font(Typography.caption(13))
+                                .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textSelection(.enabled)
                             Button {
@@ -130,21 +129,16 @@ struct MachineAddressView: View {
                                 HStack {
                                     if connecting { ProgressView() }
                                     Text(connecting ? "Connecting…" : (replacing == nil ? "Connect Machine" : "Update address"))
-                                }.frame(maxWidth: .infinity, minHeight: 44)
+                                }
                             }
-                            .buttonStyle(.borderedProminent)
-                            .tint(theme.palette.accent)
-                            .foregroundStyle(theme.palette.accentText)
+                            .buttonStyle(LoopflowButtonStyle(.accent))
                             .disabled(connecting)
-                            Button("Scan another code") { scanning = true }.disabled(connecting)
+                            Button("Scan another code") { scanning = true }.buttonStyle(LoopflowButtonStyle()).disabled(connecting)
                         } else if !enteringAddress {
                             Button { scanning = true } label: {
                                 Label("Scan QR code", systemImage: "qrcode.viewfinder")
-                                    .frame(maxWidth: .infinity, minHeight: 44)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .tint(theme.palette.accent)
-                            .foregroundStyle(theme.palette.accentText)
+                            .buttonStyle(LoopflowButtonStyle(.accent))
                         }
                         if enteringAddress {
                             TextField("machine.tailnet.ts.net", text: $address)
@@ -152,7 +146,11 @@ struct MachineAddressView: View {
                                 .keyboardType(.URL)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
-                                .textFieldStyle(.roundedBorder)
+                                .font(Typography.text)
+                                .padding(.horizontal, Spacing.md)
+                                .frame(minHeight: HitTarget.touch)
+                                .background(theme.palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.pane))
+                                .overlay(RoundedRectangle(cornerRadius: CornerRadius.pane).stroke(theme.palette.border))
                                 .focused($addressFocused)
                                 .submitLabel(.continue)
                                 .onSubmit { accept(address) }
@@ -163,39 +161,35 @@ struct MachineAddressView: View {
                                 enteringAddress = true
                                 addressFocused = true
                             }
-                                .frame(minHeight: 44)
-                                .disabled(connecting)
+                            .buttonStyle(LoopflowButtonStyle())
+                            .disabled(connecting)
                         }
                         if let error {
                             Text(error)
-                                .font(Typography.body(14))
+                                .font(Typography.text)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .accessibilityLabel("Connection issue: \(error)")
                                 .id("machine-connection-error")
                         }
                         Text("Your Sessions run on your Machine. This phone connects through your private Tailscale network.")
-                            .font(Typography.caption(13))
+                            .font(Typography.meta)
                             .foregroundStyle(theme.palette.textSecondary)
                     }
-                    .padding(28)
+                    .padding(Spacing.xxl)
                 }
                 .background(theme.palette.background)
                 .safeAreaInset(edge: .bottom) {
                     if enteringAddress {
-                        VStack(spacing: 8) {
-                            Button { accept(address) } label: {
-                                Text("Continue").frame(maxWidth: .infinity, minHeight: 44)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(theme.palette.accent)
-                            .foregroundStyle(theme.palette.accentText)
+                        VStack(spacing: Spacing.sm) {
+                            Button("Continue") { accept(address) }
+                            .buttonStyle(LoopflowButtonStyle(.accent))
                             .disabled(connecting || address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             .accessibilityIdentifier("machine-address-continue")
                             Button("Scan QR code instead") { scanning = true }
-                                .frame(minHeight: 44)
+                                .buttonStyle(LoopflowButtonStyle())
                                 .disabled(connecting)
                         }
-                        .padding(16)
+                        .padding(Spacing.lg)
                         .background(theme.palette.background)
                     }
                 }

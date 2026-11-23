@@ -10,77 +10,36 @@ use crate::rows::{map_wave_row, now_unix};
 use crate::token_crypto;
 use crate::work::wave::{Wave, WaveLocator};
 use crate::{
-    AccountLimitRow, CredentialState, ProviderAccount, ProviderAccountId, ProviderTokenReplacement,
-    RoutingState, StoreError, StoreResult, WaveLocatorUpdate,
+    CredentialState, ProviderAccount, ProviderAccountId, ProviderTokenReplacement, StoreError,
+    StoreResult, WaveLocatorUpdate,
 };
 use loopflow_model::durable::{ProjectId, TaskId, WorkRef};
 use loopflow_model::id::{AgentSessionId, WaveId};
 
-fn write_account_windows(
-    transaction: &Connection,
-    provider: &str,
-    account_id: &ProviderAccountId,
-    windows: &[crate::AccountLimitWindow],
-    source: &str,
-) -> StoreResult<()> {
-    let now = now_unix();
-    for window in windows {
-        transaction.execute(
-            "INSERT INTO provider_account_limits
-                 (provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-             ON CONFLICT(provider, account_id, window) DO UPDATE SET
-                 used_percent = excluded.used_percent,
-                 resets_at = excluded.resets_at,
-                 plan = excluded.plan,
-                 observed_at = excluded.observed_at,
-                 source = excluded.source,
-                 model = excluded.model,
-                 limited_until = excluded.limited_until",
-            params![
-                provider,
-                account_id.as_str(),
-                window.window,
-                window.used_percent,
-                window.resets_at,
-                window.plan,
-                now,
-                source,
-                window.model,
-                window.limited_until,
-            ],
-        )?;
-    }
-    Ok(())
-}
-
-mod account_selection;
 mod admission;
 pub mod children;
 pub mod ci_incidents;
+pub mod command_answers;
 pub mod creation;
 pub mod desktop_shells;
 pub mod durable;
 mod github_people;
 mod graph_inventory;
-pub mod linear_acceptance;
-mod linear_observations;
-mod project_adoption;
+pub mod linear_events;
+mod linear_issue_state;
 mod subscription_events;
+mod task_started;
 
 mod linear_team_checks;
 mod machine_records;
 mod metrics;
-pub mod planning_changes;
-pub mod planning_export;
+pub mod plan_carriers;
 pub mod planning_order;
-mod planning_peers;
-pub use planning_peers::PeerImport;
 mod planning_sync;
 pub mod planning_write;
 mod pr_landings;
 mod processes;
-pub use processes::{PreviousAgentDisposition, SessionTransfer, UnrecordedAncestry};
+pub use processes::{PreviousAgentDisposition, SessionTransfer};
 mod program_status;
 pub mod project_content;
 pub mod project_selection;
@@ -92,7 +51,9 @@ mod revisions;
 pub mod scope_defaults;
 pub mod selections;
 mod session_events;
+pub mod session_recovery;
 pub mod sessions;
+mod turns;
 pub use sessions::SessionCaller;
 pub mod task_ownership;
 
@@ -105,19 +66,20 @@ pub mod task_moves;
 mod task_retirement;
 mod transport;
 pub use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};
-pub mod task_history;
-pub mod task_state_delivery;
+mod task_state;
+pub mod task_summaries;
 pub mod task_work;
+pub mod tracker_actions;
 pub mod wave_definitions;
 mod wave_lifecycle;
 
 pub use children::ClosedTaskPage;
-pub use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts};
+pub use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts, UnrunGraph};
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
-pub use revisions::StoreRevisions;
-pub use session_events::CurrentConversation;
+pub use revisions::{Revisions, StoreRevisions};
+pub use session_events::{AnsweredTurn, CurrentConversation, TurnSpan};
 pub use task_details::TaskDetailFacts;
-pub use task_work::TaskShipping;
+pub use task_work::{Auto, AutoState, OpenWork};
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
 /// default while every process opens and records its first receipt. Durable
@@ -183,6 +145,11 @@ pub struct SqliteStore {
     pub token_key: token_crypto::TokenKeySource,
     #[cfg(not(feature = "test-support"))]
     pub(crate) token_key: token_crypto::TokenKeySource,
+    /// This connection's writer of `history.db`, opened at its first write.
+    #[cfg(feature = "test-support")]
+    pub history: Arc<crate::history::HistoryFile>,
+    #[cfg(not(feature = "test-support"))]
+    pub(crate) history: Arc<crate::history::HistoryFile>,
 }
 
 fn waves_in(conn: &Connection, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
@@ -212,20 +179,88 @@ impl SqliteStore {
     }
 
     /// Refresh `sqlite_stat1` for tables whose size changed enough to move a
-    /// plan. Bounded by `analysis_limit`, it holds the write lock under a
-    /// second on a store of 770 MB. The Machine server runs it at start and
-    /// about once a day; nothing else does.
+    /// plan, in the store and in `history.db`. Bounded by `analysis_limit`,
+    /// it holds the write lock under a second on a store of 770 MB. The
+    /// Machine server runs it at start and about once a day; nothing else
+    /// does. A history that cannot be measured is a gap.
     pub fn refresh_statistics(&self) -> StoreResult<()> {
+        const OPTIMIZE: &str = "PRAGMA analysis_limit=400; PRAGMA main.optimize=0x10002;";
         self.conn
             .lock()
             .expect("store mutex poisoned")
-            .execute_batch("PRAGMA analysis_limit=400; PRAGMA optimize=0x10002;")?;
+            .execute_batch(OPTIMIZE)?;
+        self.history
+            .write("statistics", |tx| Ok(tx.execute_batch(OPTIMIZE)?));
         Ok(())
     }
 
     pub fn home_dir(&self) -> StoreResult<PathBuf> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         home_dir_in(&conn)
+    }
+
+    /// A store over a fixture's own connection, with its history attached as
+    /// an opened store's is.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn from_fixture_connection(
+        conn: Connection,
+        token_key: token_crypto::TokenKeySource,
+    ) -> Self {
+        let path = conn
+            .path()
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from);
+        match &path {
+            Some(path) => crate::history::attach(&conn, path),
+            None => crate::history::attach_empty(&conn),
+        }
+        Self::with_history(conn, token_key, path.as_deref())
+    }
+
+    /// A store over `conn`, whose history lives beside `path` and is already
+    /// attached.
+    fn with_history(
+        conn: Connection,
+        token_key: token_crypto::TokenKeySource,
+        path: Option<&Path>,
+    ) -> Self {
+        Self {
+            conn: Arc::new(Mutex::new(conn)),
+            token_key,
+            history: crate::history::HistoryFile::beside(path),
+        }
+    }
+
+    /// Run `write` on this store's `history.db`, never under the store's write
+    /// lock. A failure is a recording gap for `what`, and `None`.
+    pub(crate) fn write_history<T>(
+        &self,
+        what: &str,
+        write: impl FnOnce(&rusqlite::Transaction<'_>) -> StoreResult<T>,
+    ) -> Option<T> {
+        self.history.write(what, write)
+    }
+
+    /// Run `sql` on this store's history file, with the store attached as
+    /// `store`, for fixtures that seed history and turn rows directly.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn execute_history(&self, sql: &str, params: impl rusqlite::Params) -> StoreResult<usize> {
+        self.write_history("fixture", |tx| Ok(tx.execute(sql, params)?))
+            .ok_or_else(|| StoreError::InvalidData("fixture history write failed".into()))
+    }
+
+    /// Append `rows` to Session history in one transaction, after the state
+    /// they describe has committed; a failure is a recording gap.
+    pub(crate) fn append_history(&self, what: &str, rows: &[crate::history::Row]) {
+        if rows.is_empty() {
+            return;
+        }
+        self.write_history(what, |tx| {
+            for row in rows {
+                crate::history::append_in(tx, row)?;
+            }
+            Ok(())
+        });
     }
 }
 
@@ -236,7 +271,7 @@ fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
         .ok_or_else(|| StoreError::InvalidData("store has no owning Machine path".into()))
 }
 
-/// A Task's checkout on this Machine, usable without chapter metadata.
+/// A Task's checkout on this Machine, usable without project metadata.
 #[derive(Debug, Clone)]
 pub struct TaskCheckout {
     pub task_id: TaskId,
@@ -251,15 +286,6 @@ pub struct WorkIdentity {
     pub parent: Option<WorkRef>,
     pub subject: String,
     pub external_id: Option<String>,
-}
-
-fn deleted_task_issues_in(
-    conn: &Connection,
-    wave_id: &WaveId,
-) -> StoreResult<std::collections::HashSet<String>> {
-    let mut statement = conn.prepare("SELECT issue_id FROM task_deletions WHERE wave_id=?1")?;
-    let rows = statement.query_map([wave_id.as_str()], |row| row.get::<_, String>(0))?;
-    rows.map(|row| row.map_err(StoreError::from)).collect()
 }
 
 pub fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
@@ -289,7 +315,9 @@ fn copy_test_store(path: &Path) -> StoreResult<()> {
 fn open_unmigrated(path: &Path) -> StoreResult<Connection> {
     let conn = Connection::open_with_flags(
         path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | rusqlite::OpenFlags::SQLITE_OPEN_URI,
     )?;
     crate::instrumentation::observe_sqlite(&conn);
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
@@ -535,32 +563,9 @@ fn read_provider_account(row: &rusqlite::Row) -> StoreResult<ProviderAccount> {
         observed_subject: row.get(11)?,
         observed_plan: row.get(12)?,
         observed_credential_digest: row.get(13)?,
-        // Authored preferences are applied from one configuration read per operation.
+        // Historical labels are applied from one configuration read per operation.
         login_email: None,
-        routing_state: RoutingState::Automatic,
-        plan: None,
-        paid_through: None,
     })
-}
-
-fn read_account_limit_row(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<AccountLimitRow>> {
-    let account_id = row.get::<_, String>(1)?;
-    let account_id = match ProviderAccountId::parse(&account_id) {
-        Ok(account_id) => account_id,
-        Err(error) => return Ok(Err(StoreError::InvalidData(error))),
-    };
-    Ok(Ok(AccountLimitRow {
-        provider: row.get(0)?,
-        account_id,
-        window: row.get(2)?,
-        used_percent: row.get(3)?,
-        resets_at: row.get(4)?,
-        plan: row.get(5)?,
-        observed_at: row.get(6)?,
-        source: row.get(7)?,
-        model: row.get(8)?,
-        limited_until: row.get(9)?,
-    }))
 }
 
 fn read_access_profile(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<AccessProfile>> {
@@ -637,10 +642,8 @@ impl SqliteStore {
         crate::instrumentation::observe_sqlite(&conn);
         configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
         super::migration_runner::apply_sqlite(build, &conn, observers)?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            token_key,
-        })
+        crate::history::attach(&conn, path);
+        Ok(Self::with_history(conn, token_key, Some(path)))
     }
 
     /// Open with the application's selected frontier authority and upgrade observations.
@@ -708,66 +711,26 @@ impl SqliteStore {
         if may_apply_migrations {
             migrate_plaintext_provider_tokens(&mut conn, token_key)?;
         }
-
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            token_key,
-        })
+        crate::history::attach(&conn, path);
+        Ok(Self::with_history(conn, token_key, Some(path)))
     }
 
-    /// Open only the Process rows without schema or token writes.
-    /// Observability commands use this when a source build may be older than
-    /// the machine's release-owned database.
-    pub fn open_processes_read_only(
-        path: &Path,
-        token_key: token_crypto::TokenKeySource,
-    ) -> StoreResult<Self> {
-        let store = Self::open_read_only(path, token_key)?;
-        {
-            let conn = store.conn.lock().expect("store mutex poisoned");
-            validate_process_schema(&conn)?;
-        }
-        Ok(store)
-    }
-
-    /// Append process evidence to an existing compatible store, never initialize it.
-    pub fn open_existing_processes(
-        path: &Path,
-        wait: Duration,
-        token_key: token_crypto::TokenKeySource,
-    ) -> StoreResult<Self> {
-        let conn = Connection::open_with_flags(
-            path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
-        crate::instrumentation::observe_sqlite(&conn);
-        conn.busy_timeout(wait.min(Duration::from_secs(5)))?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        // An older ledger without the current process owner is not a writable
-        // observation destination. Leave upgrade decisions to ordinary admission.
-        conn.prepare(
-            "SELECT id, trace_id, parent_lf_process_id, started_at, completed_at, outcome, exit_code, pid FROM processes LIMIT 0",
-        )?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            token_key,
-        })
-    }
-
+    /// Open without schema or token writes: readers use this when a source
+    /// build may be older or newer than the Machine's database.
     pub fn open_read_only(
         path: &Path,
         token_key: token_crypto::TokenKeySource,
     ) -> StoreResult<Self> {
         let conn = Connection::open_with_flags(
             path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_URI,
         )?;
         crate::instrumentation::observe_sqlite(&conn);
         conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            token_key,
-        })
+        crate::history::attach(&conn, path);
+        Ok(Self::with_history(conn, token_key, Some(path)))
     }
 
     pub fn work_identities(&self) -> StoreResult<Vec<WorkIdentity>> {
@@ -823,14 +786,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn deleted_task_issues(
-        &self,
-        wave_id: &WaveId,
-    ) -> StoreResult<std::collections::HashSet<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        deleted_task_issues_in(&conn, wave_id)
-    }
-
     pub fn upsert_wave_prepared(
         &self,
         wave: &Wave,
@@ -884,6 +839,7 @@ impl SqliteStore {
             &tx,
             wave.repo(),
             &crate::work::edit::WorkEdit::for_target(wave.id().as_str(), &edits),
+            crate::sqlite::planning_write::WriteOrigin::Local,
         )?;
         if !saved {
             tx.execute("UPDATE waves SET created_at=?2,retired_at=?3,superseded_by_wave_id=?4,retirement_reason=?5 WHERE id=?1",params![wave.id(),created_at,wave.retired_at().map(|at|at.unix_timestamp()),wave.superseded_by_wave_id(),wave.retirement_reason()])?;
@@ -936,13 +892,6 @@ fn validate_wave_parent(
             ));
         }
     }
-    Ok(())
-}
-
-fn validate_process_schema(conn: &Connection) -> StoreResult<()> {
-    conn.prepare(
-        "SELECT id,trace_id,parent_lf_process_id,started_at,completed_at,outcome,pid FROM processes LIMIT 0",
-    )?;
     Ok(())
 }
 
@@ -1147,32 +1096,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn record_provider_account_identity(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        email: &str,
-        subject: &str,
-        plan: Option<&str>,
-        credential_digest: Option<&str>,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE provider_accounts SET observed_email = ?3, observed_subject = ?4,
-            observed_plan = ?5, observed_credential_digest = ?7, updated_at = ?6 WHERE provider = ?1 AND account_id = ?2",
-            params![
-                provider,
-                account_id.as_str(),
-                email,
-                subject,
-                plan,
-                now_unix(),
-                credential_digest
-            ],
-        )?;
-        Ok(())
-    }
-
     pub fn provider_account_row(
         &self,
         provider: &str,
@@ -1201,264 +1124,6 @@ impl SqliteStore {
         ))?;
         let accounts = statement.query_map([provider], |row| Ok(read_provider_account(row)))?;
         accounts.map(|row| row?).collect()
-    }
-
-    pub fn clear_provider_account_cooldown(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = transaction.execute(
-            "UPDATE provider_accounts SET cooldown_until = NULL, cooldown_reason = NULL,
-             capacity_revision = capacity_revision + 1, updated_at = ?3 WHERE provider = ?1 AND account_id = ?2",
-            params![provider, account_id.as_str(), now_unix()],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        transaction.execute(
-            "UPDATE provider_account_limits SET limited_until=NULL WHERE provider=?1 AND account_id=?2",
-            params![provider, account_id.as_str()],
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn reset_provider_account_health(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<()> {
-        self.record_provider_account_health(provider, account_id, None, None, None)
-    }
-
-    /// Verification changes credential evidence, never routing or cooldown policy.
-    pub fn update_provider_account_credential_state(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        state: CredentialState,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE provider_accounts SET credential_state = ?3, updated_at = ?4
-             WHERE provider = ?1 AND account_id = ?2",
-            params![provider, account_id.as_str(), state.as_str(), now_unix()],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
-
-    pub fn record_provider_account_credential_invalidated(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        reason: &str,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE provider_accounts
-             SET capacity_revision = capacity_revision + 1, credential_state = 'missing',
-                 cooldown_until = NULL,
-                 cooldown_reason = ?3,
-                 updated_at = ?4
-             WHERE provider = ?1 AND account_id = ?2",
-            params![
-                provider,
-                account_id.as_str(),
-                reason,
-                time::OffsetDateTime::now_utc().unix_timestamp(),
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
-
-    pub fn record_provider_account_health(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        utilization_percent: Option<u8>,
-        cooldown_until: Option<i64>,
-        cooldown_reason: Option<&str>,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE provider_accounts SET utilization_percent=?3, cooldown_until=?4,
-             cooldown_reason=?5, capacity_revision=capacity_revision+1, updated_at=?6
-             WHERE provider=?1 AND account_id=?2",
-            params![
-                provider,
-                account_id.as_str(),
-                utilization_percent,
-                cooldown_until,
-                cooldown_reason,
-                now_unix()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
-
-    pub fn provider_account_capacity_revision(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<i64> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT capacity_revision FROM provider_accounts WHERE provider=?1 AND account_id=?2",
-            params![provider, account_id.as_str()],
-            |row| row.get(0),
-        )?)
-    }
-
-    pub fn record_provider_account_capacity(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        capacity: &crate::AccountCapacity,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        // A warning or a scoped rejection cannot erase an account-wide rejection.
-        let changed = transaction.execute(
-            "UPDATE provider_accounts SET utilization_percent=?3,
-             cooldown_until=CASE WHEN ?4 IS NOT NULL THEN ?4 ELSE cooldown_until END,
-             cooldown_reason=CASE WHEN ?4 IS NOT NULL THEN ?5 ELSE cooldown_reason END,
-             capacity_revision=capacity_revision+1, updated_at=?6
-             WHERE provider=?1 AND account_id=?2",
-            params![
-                provider,
-                account_id.as_str(),
-                capacity.utilization_percent,
-                capacity.cooldown_until,
-                capacity.cooldown_reason,
-                now_unix()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        write_account_windows(
-            &transaction,
-            provider,
-            account_id,
-            &capacity.windows,
-            "stream",
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn provider_account_capacity(
-        &self,
-        provider: &str,
-        account: &ProviderAccountId,
-    ) -> StoreResult<crate::capacity::ProviderCapacityReading> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.savepoint()?;
-        let (revision, cooldown_reason, cooldown_until) = tx.query_row(
-            "SELECT capacity_revision,cooldown_reason,cooldown_until FROM provider_accounts WHERE provider=?1 AND account_id=?2",
-            params![provider, account.as_str()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?;
-        let limits = {
-            let mut statement = tx.prepare("SELECT provider,account_id,window,used_percent,resets_at,plan,observed_at,source,model,limited_until FROM provider_account_limits WHERE provider=?1 AND account_id=?2")?;
-            let rows =
-                statement.query_map(params![provider, account.as_str()], read_account_limit_row)?;
-            let mut limits = Vec::new();
-            for row in rows {
-                limits.push(row??);
-            }
-            limits
-        };
-        tx.commit()?;
-        Ok(crate::capacity::ProviderCapacityReading {
-            revision,
-            cooldown_reason,
-            cooldown_until,
-            limits,
-        })
-    }
-
-    pub fn apply_provider_account_capacity(
-        &self,
-        provider: &str,
-        account: &ProviderAccountId,
-        revision: i64,
-        update: &crate::capacity::ProviderCapacityUpdate,
-    ) -> StoreResult<bool> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = tx.execute(
-            "UPDATE provider_accounts SET capacity_revision=capacity_revision+1,
-             cooldown_until=CASE WHEN ?4 THEN NULL ELSE cooldown_until END,
-             cooldown_reason=CASE WHEN ?4 THEN NULL ELSE cooldown_reason END, updated_at=?5
-             WHERE provider=?1 AND account_id=?2 AND capacity_revision=?3",
-            params![
-                provider,
-                account.as_str(),
-                revision,
-                update.recovered,
-                now_unix()
-            ],
-        )?;
-        if changed == 0 {
-            return Ok(false);
-        }
-        for window in &update.superseded_windows {
-            tx.execute("DELETE FROM provider_account_limits WHERE provider=?1 AND account_id=?2 AND window=?3", params![provider, account.as_str(), window])?;
-        }
-        write_account_windows(&tx, provider, account, &update.windows, "poll")?;
-        tx.commit()?;
-        Ok(true)
-    }
-
-    /// Record observed subscription window state for one account, replacing
-    /// each window's previous observation.
-    pub fn upsert_provider_account_limits(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        windows: &[crate::AccountLimitWindow],
-        source: &str,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
-        transaction.execute(
-            "UPDATE provider_accounts SET capacity_revision=capacity_revision+1 WHERE provider=?1 AND account_id=?2",
-            params![provider, account_id.as_str()],
-        )?;
-        write_account_windows(&transaction, provider, account_id, windows, source)?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn provider_account_limit_rows(
-        &self,
-        provider: Option<&str>,
-    ) -> StoreResult<Vec<crate::AccountLimitRow>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until
-             FROM provider_account_limits
-             WHERE ?1 IS NULL OR provider = ?1
-             ORDER BY provider, account_id, window",
-        )?;
-        let rows = statement.query_map([provider], read_account_limit_row)?;
-        let mut limits = Vec::new();
-        for row in rows {
-            limits.push(row??);
-        }
-        Ok(limits)
     }
 
     // -- Session moves --------------------------------------------------------
@@ -1543,29 +1208,16 @@ impl SqliteStore {
         rows.map(|row| row?).collect()
     }
 
-    pub fn pin_provider_session_route(
+    /// Transcript adoption changes its location, never its historical account.
+    pub fn record_native_conversation_home(
         &self,
         provider: Provider,
-        agent_session: &AgentSessionId,
-        account_id: &ProviderAccountId,
+        thread: &AgentSessionId,
     ) -> StoreResult<()> {
-        // Every launch runs in the shared home, so the conversation lives
-        // there from now on, wherever it ran before.
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO provider_session_accounts (
-                provider, provider_session_id, account_id, created_at, isolated
-             ) VALUES (?1, ?2, ?3, ?4, 0)
-             ON CONFLICT(provider, provider_session_id) DO UPDATE SET
-                account_id = excluded.account_id,
-                created_at = excluded.created_at,
-                isolated = 0",
-            params![
-                provider.as_str(),
-                agent_session,
-                account_id.as_str(),
-                now_unix(),
-            ],
+            "UPDATE provider_session_accounts SET isolated = 0 WHERE provider = ?1 AND provider_session_id = ?2",
+            params![provider.as_str(), thread],
         )?;
         Ok(())
     }
@@ -1581,44 +1233,6 @@ impl SqliteStore {
             "SELECT account_id FROM provider_session_accounts
              WHERE provider = ?1 AND provider_session_id = ?2",
             params![provider.as_str(), agent_session],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .as_deref()
-        .map(ProviderAccountId::parse)
-        .transpose()
-        .map_err(StoreError::InvalidData)
-    }
-
-    pub fn record_provider_account_switch(
-        &self,
-        provider: Provider,
-        account_id: &ProviderAccountId,
-        cause: &str,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO provider_account_switches (
-                provider, account_id, switched_at, cause
-             ) VALUES (?1, ?2, ?3, ?4)",
-            params![provider.as_str(), account_id.as_str(), now_unix(), cause],
-        )?;
-        Ok(())
-    }
-
-    /// The account the provider's native home was last switched to at or
-    /// after `since`; `None` when it has not changed account since then.
-    pub fn provider_account_switched_since(
-        &self,
-        provider: Provider,
-        since: i64,
-    ) -> StoreResult<Option<ProviderAccountId>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            "SELECT account_id FROM provider_account_switches
-             WHERE provider = ?1 AND switched_at >= ?2
-             ORDER BY switched_at DESC, id DESC LIMIT 1",
-            params![provider.as_str(), since],
             |row| row.get::<_, String>(0),
         )
         .optional()?
@@ -1849,92 +1463,25 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Record a Process start or exit. An exit forgets this Process and the
-    /// finished children it was keeping when nothing else needs them
-    /// ([`processes::FORGETTABLE`]). Each statement commits on its own so a
-    /// writer holds the lock only briefly; a row an interrupted exit leaves is
-    /// forgotten by the retention prune.
+    /// Write a Process row the way a released lf does; fixtures for the
+    /// upgrade bridge and the released-lf readers LOO-965 deletes seed with it.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn record_process(&self, process: &crate::process::LfProcess) -> StoreResult<()> {
-        self.record_hosted_process(process, None)
-    }
-
-    /// Record a Process start or exit; a start inside a held terminal names it.
-    fn record_hosted_process(
-        &self,
-        process: &crate::process::LfProcess,
-        held_terminal: Option<&loopflow_model::id::TerminalId>,
-    ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        record_process_in(&conn, process, held_terminal)?;
-        if process.completed_at.is_some() {
-            let forget = |scope: &str| {
-                conn.execute(
-                    &format!(
-                        "DELETE FROM processes WHERE id IN (SELECT p.id FROM processes p
-                         WHERE {scope} AND {})",
-                        processes::FORGETTABLE
-                    ),
-                    [&process.id],
-                )
-            };
-            // Children first: any child left would keep this Process.
-            forget("p.parent_lf_process_id=?1")?;
-            forget("p.id=?1")?;
-        }
+        conn.execute(
+            "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
+                via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
+             ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
+                outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
+             WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
+            params![process.id,process.trace_id,process.parent_lf_process_id,process.command,process.repo,process.cwd,
+                process.started_at,process.via_agent,process.caller_session_id,process.caller_agent_process_id,
+                process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid,
+                process.os_started_at],
+        )?;
         Ok(())
     }
-
-    /// Record a process, waiting at most `wait` for another writer; a zero wait
-    /// is one attempt.
-    pub fn record_process_within(
-        &self,
-        process: &crate::process::LfProcess,
-        held_terminal: Option<&loopflow_model::id::TerminalId>,
-        wait: Duration,
-    ) -> StoreResult<()> {
-        let previous: u32 = {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            let previous = conn.pragma_query_value(None, "busy_timeout", |row| row.get(0))?;
-            conn.busy_timeout(wait)?;
-            previous
-        };
-        let result = self.record_hosted_process(process, held_terminal);
-        self.conn
-            .lock()
-            .expect("store mutex poisoned")
-            .busy_timeout(Duration::from_millis(u64::from(previous)))?;
-        result
-    }
-
-    pub fn process_is_recorded(&self, lf_process_id: &str) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT 1 FROM processes WHERE id=?1")?;
-        Ok(query.exists([lf_process_id])?)
-    }
-}
-
-/// A start record never overwrites an existing row; a terminal record completes
-/// the row it started. `held_terminal` is the terminal a held lf process runs
-/// in, so rules scoped to that terminal find the work started inside it.
-pub(super) fn record_process_in(
-    conn: &rusqlite::Connection,
-    process: &crate::process::LfProcess,
-    held_terminal: Option<&loopflow_model::id::TerminalId>,
-) -> StoreResult<()> {
-    conn.execute(
-        "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
-            via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at,
-            held_terminal_id)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
-         ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
-            outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
-         WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
-        params![process.id,process.trace_id,process.parent_lf_process_id,process.command,process.repo,process.cwd,
-            process.started_at,process.via_agent,process.caller_session_id,process.caller_agent_process_id,
-            process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid,
-            process.os_started_at,held_terminal],
-    )?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -2062,10 +1609,7 @@ mod fixture_tests {
             .unwrap();
         conn.execute_batch(&view).unwrap();
         conn.execute_batch("PRAGMA query_only = ON").unwrap();
-        let store = SqliteStore {
-            token_key: crate::test_fixture::key,
-            conn: std::sync::Arc::new(std::sync::Mutex::new(conn)),
-        };
+        let store = SqliteStore::with_history(conn, crate::test_fixture::key, None);
         let identities = store.work_identities().unwrap();
         assert_eq!(identities.len(), 4);
         assert_eq!(identities[3].subject, "abcdef");

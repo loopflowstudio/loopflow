@@ -1,6 +1,5 @@
 import importlib.util
 import plistlib
-import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -19,86 +18,44 @@ finally:
 
 
 @pytest.mark.parametrize("debug", [False, True])
-@pytest.mark.parametrize("private_home,supported", [(False, False), (False, True), (True, True)])
-def test_demo_launch_requires_work_opening_on_selected_runtime(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    debug: bool,
-    private_home: bool,
-    supported: bool,
+def test_run_opens_the_machine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], debug: bool
 ) -> None:
-    app = tmp_path / "Loopflow Dev.app"
-    cli = app / "Contents/MacOS/lf"
-    cli.parent.mkdir(parents=True)
-    selected_home = str(tmp_path / "private-machine") if private_home else ""
-    # Source help succeeds even when main-Machine dispatch cannot open Work.
-    cli.write_text(
+    repo = tmp_path / "checkout"
+    repo.mkdir()
+    receipt = tmp_path / "open.txt"
+    opener = tmp_path / "open"
+    opener.write_text(
         "#!/bin/sh\n"
-        'case "$*" in *--help*) exit 0;; esac\n'
-        'if [ -n "$LF_AGENT_CALLER$LF_TASK" ]; then exit 9; fi\n'
-        'test "$LF_BIN" = "$0" || exit 9\n'
-        f'test "$LF_HOME" = {shlex.quote(selected_home)} || exit 9\n'
-        f'if [ "{supported}" = "True" ]; then printf \'{{}}\\n\'; exit 0; fi\n'
-        "echo \"error: unrecognized subcommand 'identity'\" >&2\n"
-        "exit 2\n"
+        f'{{ /usr/bin/env | /usr/bin/grep "^LF_" ; /usr/bin/printf "%s\\n" "$@"; }} > "{receipt}"\n'
     )
-    cli.chmod(0o755)
-    assert subprocess.run([str(cli), "config", "repository", "--help"]).returncode == 0
-
-    monkeypatch.setattr(loopflow_dev, "DEV_APP", app)
-    monkeypatch.setattr(loopflow_dev, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(loopflow_dev, "_install_dev_app", lambda: None)
-    monkeypatch.setattr(loopflow_dev, "_stop_loopflow_app", lambda _: None)
-    monkeypatch.setenv("LF_AGENT_CALLER", "enclosing-agent")
-    monkeypatch.setenv("LF_TASK", "enclosing-task")
+    opener.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
     monkeypatch.setenv("LF_BIN", "/unrelated/lf")
-    if private_home:
-        monkeypatch.setenv("LF_HOME", str(tmp_path / "private-machine"))
-    else:
-        monkeypatch.delenv("LF_HOME", raising=False)
+    monkeypatch.setenv("LF_HOME", "/private/machine")
+    monkeypatch.setenv("LF_CAPTURE_KEY", "enclosing-agent")
+    monkeypatch.setattr(loopflow_dev, "LOOPFLOW_STREAM_LOG", tmp_path / "stream.log")
+    swift = tmp_path / "swift"
+    swift.write_text('#!/bin/sh\n[ "$*" = build ]\n')
+    swift.chmod(0o755)
+    monkeypatch.setattr(loopflow_dev, "_stop_loopflow_app", lambda _: None)
+    monkeypatch.setattr(loopflow_dev, "_install_dev_app", lambda: None)
 
-    launched = tmp_path / "launched"
-
-    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess:
-        if command[0] == "open":
-            launched.touch()
-        return subprocess.CompletedProcess(command, 0)
-
-    def launch(*args: object, **kwargs: object) -> int:
-        launched.touch()
-        return 0
-
-    monkeypatch.setattr(loopflow_dev, "run", run)
-    monkeypatch.setattr(loopflow_dev, "run_app_bundle_with_log", launch)
-    result = loopflow_dev.cmd_run_debug(tmp_path) if debug else loopflow_dev.cmd_run()
-
-    assert result == (0 if supported else 1)
-    assert launched.exists() == supported
-    if not supported:
-        error = capsys.readouterr().err
-        assert "unrecognized subcommand 'identity'" in error
-        assert "bundled CLI" in error
+    assert loopflow_dev.cmd_run(repo=repo, debug=debug) == 0
+    assert "Opening the Machine." in capsys.readouterr().out
+    args = receipt.read_text().splitlines()
+    assert not any(arg.startswith("LF_") for arg in args)
+    assert args[-6:] == [
+        "--env",
+        f"LOOPFLOW_DEV_WAVE_REPO={repo}",
+        str(loopflow_dev.DEV_APP),
+        "--args",
+        "--repo",
+        str(repo),
+    ]
+    assert ("-W" in args) == debug
 
 
-@pytest.mark.parametrize(
-    "failure", [FileNotFoundError("missing helper"), subprocess.TimeoutExpired("lf", 30)]
-)
-def test_repository_opening_reports_unavailable_helper(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    failure: Exception,
-) -> None:
-    def fail(*args: object, **kwargs: object) -> None:
-        raise failure
-
-    monkeypatch.setattr(loopflow_dev.subprocess, "run", fail)
-    assert not loopflow_dev._check_repository_opening(tmp_path)
-    assert str(failure) in capsys.readouterr().err
-
-
-@pytest.mark.skipif(sys.platform != "darwin", reason="plutil rewrites the bundle plist")
 def test_dev_app_runs_under_its_own_executable_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -114,20 +71,20 @@ def test_dev_app_runs_under_its_own_executable_name(
     app = tmp_path / "Loopflow Dev.app"
     macos = app / "Contents/MacOS"
     macos.mkdir(parents=True)
-    for stale in ("Loopflow", "LoopflowMac"):
+    for stale in ("Loopflow", "LoopflowMac", "lf"):
         (macos / stale).write_bytes(b"stale")
 
-    real_run = loopflow_dev.run
+    agents = app / "Contents/Library/LaunchAgents"
+    agents.mkdir(parents=True)
+    (agents / "server.plist").touch()
 
     def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess:
-        if command[0] == "plutil":
-            return real_run(command, **kwargs)
+        assert "cargo" not in command
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(loopflow_dev, "SWIFT_DIR", swift)
     monkeypatch.setattr(loopflow_dev, "DEV_APP", app)
     monkeypatch.setattr(loopflow_dev, "run", run)
-    monkeypatch.setattr(loopflow_dev, "_copy_bundled_tools", lambda _: None)
     monkeypatch.setattr(loopflow_dev, "_ensure_dev_signing_identity", lambda: "identity")
     # Sparkle embedding needs a real Mach-O build; test_app_bundle covers it.
     monkeypatch.setattr(sys.modules["app_bundle"], "_embed_frameworks", lambda *_: None)
@@ -136,6 +93,7 @@ def test_dev_app_runs_under_its_own_executable_name(
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     assert info["CFBundleExecutable"] == "Loopflow Dev"
     assert info["CFBundleIdentifier"] == "com.loopflow.mac.dev"
+    assert not agents.exists()
     assert sorted(path.name for path in macos.iterdir()) == ["Loopflow Dev"]
     assert (macos / "Loopflow Dev").read_bytes() == b"fresh"
     # The release app is untouched: its plist still names `Loopflow`.

@@ -1,4 +1,4 @@
-//! Saved acquisition and ownership facts shared by storage commands.
+//! Saved tracker and ownership state shared by storage commands.
 
 use crate::work::wave::WaveLocator;
 use loopflow_model::id::WaveId;
@@ -24,18 +24,19 @@ pub enum PlanningState {
     Unavailable,
 }
 
-/// Acquisition evidence is independent of saved Work and outbound delivery.
+/// The tracker's last known state for a Task and when it was synced.
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
-pub struct TaskAcquisition {
+pub struct TrackerState {
     pub state: PlanningState,
-    pub observed_at: Option<i64>,
+    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
+    pub synced_at: Option<i64>,
 }
 
-/// Retained Linear acquisition facts, including observations without owned Work.
+/// Last known state of a Linear issue, including issues without locally owned Work.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinearIssueEvidence {
+pub struct LinearIssueState {
     pub issue_id: Option<String>,
     pub revision: Option<String>,
     pub observed_at: Option<i64>,

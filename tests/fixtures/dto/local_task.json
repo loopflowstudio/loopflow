@@ -38,6 +38,8 @@
     },
     "execution": {
       "captured": null,
+      "died": null,
+      "outlook": null,
       "reason": "No Task Graph has run; independent Sessions may still be active",
       "state": "idle",
       "step": null
@@ -55,10 +57,6 @@
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "runtime": {
       "completion_pending": null,
       "provider": "codex",
@@ -69,6 +67,7 @@
       "work_id": "task_0123456789ab40008000000000000001"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "task": {
       "assignee": null,
       "completed_at": null,
@@ -80,13 +79,12 @@
       "rank": 0,
       "state": "unstarted",
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",

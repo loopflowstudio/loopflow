@@ -48,8 +48,8 @@ cleanup when reusing an otherwise idle output root.
 
 Disposable test evidence retains **six hours after success**, **two days after
 failure or an unknown outcome**. This covers pytest runs/garbage, gate artifacts
-under `.lf/tmp/gate/run-*`, and `lf-worlds-`, `ghostty-shaders-`, `swift-test-`
-fixture directories. Pytest and the gate write `.cleanup-evidence.json` with the
+under `.lf/tmp/gate/run-*`, and fixture directories prefixed with
+`ghostty-shaders-` or `swift-test-`. Pytest and the gate write `.cleanup-evidence.json` with the
 observed `outcome` (`passed` or `failed`). `.cleanup-keep` anywhere in an evidence
 tree, or `"saved": true` in its root outcome record, preserves it.
 

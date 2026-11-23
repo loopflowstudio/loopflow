@@ -19,7 +19,6 @@ pub struct TurnFacts {
     pub started_at: Option<i64>,
     pub settled_at: Option<i64>,
     pub status: Option<String>,
-    pub final_answer: Option<String>,
 }
 
 impl ThreadFacts {

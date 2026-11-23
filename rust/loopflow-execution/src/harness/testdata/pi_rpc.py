@@ -17,6 +17,10 @@ file = (
     if "--session" in args
     else Path.cwd() / "pi-conversation.jsonl"
 )
+# A fixture leaves this marker to make any prompt open a dialog.
+ASK = Path(os.environ.get("LF_HOME", ".")) / "ask-question"
+# And this one to make any prompt start a turn that never ends on its own.
+HOLD = Path(os.environ.get("LF_HOME", ".")) / "hold-turn"
 if not file.exists():
     file.write_text('{"type":"session","id":"fixture","version":3}\n')
 
@@ -42,6 +46,14 @@ def _message(text):
             },
         },
     }
+
+
+def _append(entry_id, parent, message):
+    # Pi appends each message to its session file, where lf reads usage and answers.
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    entry = dict(type="message", id=entry_id, parentId=parent, timestamp=stamp)
+    with file.open("a") as transcript:
+        transcript.write(json.dumps(entry | {"message": message}) + "\n")
 
 
 def _record(text):
@@ -79,6 +91,26 @@ def _record(text):
     Path(os.environ["PI_FIXTURE_RECORD"]).write_text(json.dumps(record))
 
 
+def _tool_turn():
+    """The extension's calls to lf around a tool, for a fixture that left `tool_turn.py`."""
+    script = HOLD.with_name("tool_turn.py")
+    if not script.exists():
+        return
+    extension = Path(args[args.index("--extension") + 1]).read_text()
+    spec = json.loads(extension.split("\n", 1)[0].removeprefix("const spec = ").removesuffix(";"))
+    block = [spec["executable"], "__context-block", "--moment"]
+    hooks = {
+        # The block is rendered without the launch's capability.
+        "start": {
+            "argv": [*block, "start"],
+            "event": "PiContext",
+            "without": ["LF_PROVIDER_CONTEXT", "LF_BARE_STEER"],
+        },
+        "steer": {"argv": [*block, "steer"], "event": "PiSteer"},
+    }
+    subprocess.run([sys.executable, str(script), str(file), json.dumps(hooks)], check=True)
+
+
 if "--mode" not in args:
     # The extension's one Machine server connection, opened with the address
     # its launch spec (the source's first line) carries.
@@ -105,13 +137,6 @@ if "--mode" not in args:
         }
     )
 
-    def _append(entry_id, parent, message):
-        # Pi appends each message to its session file, the usage source.
-        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        entry = dict(type="message", id=entry_id, parentId=parent, timestamp=stamp)
-        with file.open("a") as transcript:
-            transcript.write(json.dumps(entry | {"message": message}) + "\n")
-
     def _callback(event):
         event = (
             dict(sessionFile=str(file), turn="native-fixture-turn", openTools=0, pendingInput=0)
@@ -132,6 +157,8 @@ if "--mode" not in args:
                     "inbox": None,
                 },
                 "select": None,
+                "sender": None,
+                "request_id": None,
             }
         )
 
@@ -160,19 +187,6 @@ for line in sys.stdin:
     response = {"type": "response", "command": command, "id": request.get("id"), "success": True}
     if command == "get_state":
         response["data"] = {"sessionFile": str(file), "sessionId": "fixture"}
-    elif command == "steer":
-        text = request["message"]
-        if text == "reject":
-            response.update(success=False, error="Steer rejected")
-        elif text == "malformed":
-            del response["success"]
-            response["data"] = {"disposition": "queued"}
-        elif text == "disconnect":
-            sys.exit(9)
-        else:
-            if text == "late":
-                _emit({"type": "agent_settled", "aborted": True})
-            response["data"] = {"disposition": "handled" if text == "handled" else "queued"}
     elif command == "prompt":
         text = request["message"]
         _record(text)
@@ -181,9 +195,6 @@ for line in sys.stdin:
         else:
             response["data"] = {"disposition": "started"}
     _emit(response)
-    if command == "steer" and text == "finish":
-        _emit(_message("steering incorporated"))
-        _emit({"type": "agent_settled", "aborted": False})
     if command == "abort":
         _emit({"type": "agent_settled", "aborted": True})
     if command != "prompt" or not response["success"]:
@@ -201,14 +212,23 @@ for line in sys.stdin:
     if text == "invalid":
         print("not-json", flush=True)
         continue
-    if text == "dialog":
-        _emit({"type": "extension_ui_request", "method": "confirm", "id": "dialog"})
+    if text == "dialog" or ASK.exists():
+        _emit(
+            {
+                "type": "extension_ui_request",
+                "method": "confirm",
+                "id": "dialog",
+                "title": "Use the fixture?",
+            }
+        )
         continue
     if text == "extension error":
         _emit({"type": "extension_error", "error": "fixture context delivery failed"})
         continue
-    if text == "wait":
+    if text == "wait" or HOLD.exists():
         _emit({"type": "agent_start"})
+        if HOLD.exists():
+            HOLD.with_name("holding").write_text(str(file))
         continue
     if text == "auth":
         _emit(
@@ -243,10 +263,14 @@ for line in sys.stdin:
                 "isError": False,
             }
         )
-    with file.open("a") as saved:
-        saved.write(json.dumps({"prompt": text}) + "\n")
-    count = len(file.read_text().splitlines()) - 1
+    _tool_turn()
+    entries = [json.loads(line) for line in file.read_text().splitlines()]
+    count = sum(entry.get("message", {}).get("role") == "user" for entry in entries) + 1
     answer = '{"path":"alpha"}' if "PI_ROUTE_SENTINEL" in text else f"answer {count}: {text}"
+    parent = entries[-1].get("id") if entries[-1]["type"] == "message" else None
+    user = {"role": "user", "content": [{"type": "text", "text": text}]}
+    _append(f"rpc-user-{count}", parent, user)
+    _append(f"rpc-answer-{count}", f"rpc-user-{count}", _message(answer)["message"])
     _emit(_message(answer))
     _emit({"type": "agent_end", "messages": [], "willRetry": False})
     _emit({"type": "agent_settled", "aborted": False})

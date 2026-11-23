@@ -1,86 +1,105 @@
 ---
 requires: the intended experience, the current product design, and a person when a product choice must be made
-produces: the product design, what people said about it, and open choices in the working design
+produces: a page showing whether product and code concepts line up; in a Graph, also a plan the next step can build from
 action_style: exploratory
 ---
-Step back and decide what the product's concepts and interactions should be,
-then follow that answer through the data model, APIs and infrastructure.
+Step back and decide what the product's concepts and interactions should be, then follow that answer through the data model, APIs and infrastructure.
 
-## With a person
+Start from the experience people want and the constraints they stated. The
+current implementation informs the design; it doesn't bind it.
 
-Start from the experience they want and the constraints they've stated. The
-current implementation informs the design; it doesn't bind it. Walk through one
-concrete interaction, including recovery. Draft the affected usage docs and
-skill instructions so the proposed experience is tangible before designing
-code. Leave clear guidance alone and mark unbuilt behavior as proposed.
+Step back first. Everything in front of you, the request, the Task, the
+plan, the diff, the conversation so far, points at an area of the product.
+Review that whole area, not the last thing that was said and not only the
+lines that changed. Find the part of the product it all touches, widen to the
+whole it belongs to, the concepts, the actions and the records behind them,
+and review that as it would stand with the work in it. A change can be right
+in every line and still be a patch on a concept that is wrong.
 
-Show, in one screen, the actions people take, the few concepts behind them and
-the APIs that change their state. Explore the biggest mismatch together before
-presenting a full redesign. Ask about choices that change what the product
-should be, never about cosmetic refactors. Update the working design as
-answers come, keeping proposals apart from stated requirements and built
-behavior. Record what people say word for word, with the speaker's name, never a
-verdict like "accepted" or "chose".
+Open by naming the area you took and why, so a wrong reading is caught in one
+line. A request that names a narrower area is followed.
 
-Write that screen as `scratch/concept-review.html`: actions → concepts → APIs,
-before and after, with the biggest mismatch called out. The conversation is
-about the page; the decisions live in the working design.
+## The review
 
-- One self-contained `.html` in `scratch/`: inline CSS and script, no network,
-  escaped code, readable in light, dark and narrow widths.
-- Lead with the decision needed. End with numbered questions so "2b" is a
-  complete answer.
-- Show the thing, not a description of it. Mark proposed against existing
-  behavior visibly.
-- One reading column, no dashboard chrome or badges, no fixed template.
-- Header: Task, step, date, and the files it is built from.
-- Say its path. Loopflow Desktop shows `scratch/` pages beside the
-  conversation; in a bare terminal, open it in a browser. Regenerate the same
-  path as things change, after the Markdown.
-
-## Follow the experience through
-
-Find distinctions people must learn for no benefit, awkward actions, and names
+Walk one concrete interaction, including its failure and recovery. Find the
+distinctions people must learn for no benefit, the awkward actions, the names
 that hide what happens. Describe the simpler interaction first, then trace it
 through types, APIs, persistence, execution and recovery. Look for a whole
 lifecycle that could become a record, derived state, or nothing at all.
 
-Test the proposal on a normal path, a failure and recovery. What must survive?
-What changes on purpose? What counterexample would break it? Keep
-counterexamples and revise when the proposal fails. Never trade away required
+Test the proposal on a normal path, a failure and a recovery. What must
+survive? What changes on purpose? What counterexample would break it? Keep the
+counterexamples and revise when the proposal fails. Never trade required
 behavior or recoverable data for a deletion count; a clearer interaction is
 worth it even when the code grows.
 
-Use history only to answer a specific design question. Read the patch, its
-rationale and later repairs before treating a past deletion as precedent. When
-recording alternatives, keep the stated requirements in full so a proposal
-can't pass for one of them.
+A finding earns its place by making the design smaller, more direct or more
+true to the experience. A model that is wrong in the area this work touches
+is this work, however large the fix: take another big pass to get it right.
+What this work should do differently goes in the plan, when the review is
+updating one. Only a separate outcome goes on the page as outside this work,
+stated plainly with what it would take. More behavior is scope, not review.
 
-## Record the decision
+Show it. Write `scratch/concept-review.html`, built around one question: do
+the product's concepts and the code's concepts line up?
 
-Keep a short account in the existing working design: the experience and model
-it will build, consequences across layers, open product choices, and what to show
-next. Write down only what can't be worked out again from the code, git
-history or a fresh run: what people said, word for word, what a run showed at
-the time, and facts from outside the repo. Quality per word, not
-volume. Don't write a per-slice review; realign reconciles plan and code. Don't
-rewrite code or restart execution unless asked.
+- the product concepts: what a person knows about and the actions they take;
+- the code concepts: the types, records and APIs behind them;
+- each pairing marked yes or no, with what is wrong where it is no: a concept
+  the code has and the person never sees, one idea under two names, one name
+  for two ideas, an action with no single owner in the code;
+- the biggest mismatch called out, and the recommendation explained, before
+  and after.
 
-## In a Graph without a person
+One self-contained file, readable in light and dark, that shows the thing
+instead of describing it, marks proposed apart from existing, and ends with
+numbered questions so "2b" is a complete answer. Say its path. Don't change
+code.
 
-Run the same review against the working design and the implemented change.
-Settle what the design already implies (clearer names, merged concepts,
-machinery a clearer design makes unnecessary) and write it into the working
-design as the next implement direction. Don't change code here.
+## With a person
 
-A real product choice changes what the product should be and isn't settled by
-the design. Write each one into the working design as an open question, with
-why it matters. Don't write an answer into the design as settled unless someone
-said so; quote what they said.
+The page is the review. This is often what stands in for code review: the
+work is built, and the question is whether its concepts are right. When a
+page already exists for the work exactly as it stands, open with that one
+instead of reviewing again. Change nothing else. Don't update the plan or the design unless asked; the person
+reads the page and decides what happens next.
 
-Then report one outcome for loop-or-next:
-- nothing to change and no open choice: say so; it advances.
-- the design changed: name the change; it iterates to implement.
-- an open product choice: state the question; it returns Blocked with it.
+When they want to go further, explore the biggest mismatch together before
+presenting a full redesign, draft the affected usage docs, and regenerate the
+page as answers come. Ask about choices that change what the product should
+be, never about cosmetic refactors, and keep what they say word for word.
 
-Don't create a Task, publish or merge. Loop-or-next decides.
+## In a Graph, with nobody there
+
+The plan leads straight into more work, so here the review writes its result
+into it. Record in `scratch/plan.md` the experience and model to build, what
+follows from it across layers, and the recommended way to pursue it, starting
+with the slice that would show soonest whether it holds. The plan must stand
+without this conversation. The page is the record someone reads afterwards.
+
+Question the premise the way you would with a person in the room; the plan
+was written by the same pipeline and is not the standard.
+
+Before anything is built, a redesign costs nothing, so this is where to be
+boldest. Review the whole thing the plan is building, not its first slice
+and not its details. Then make sure the first slice is the right one for
+that whole, and leave the plan ready for implement to succeed: one design
+with nothing left over from the one it replaced, and no contradiction
+between old and new sections.
+
+After the change is built, review the area with the whole change in it,
+against its base and not only the last pass, as someone seeing it for the
+first time.
+A model that is still wrong then means another full pass through the plan
+and the build, not a follow-up.
+
+When the review turns on a product choice, make the bold one and write it into
+the plan and the page as a choice made for review: what you chose, what you
+passed over and why. The person reviews it as built. Stop for an answer only
+when the choice can't be undone once shipped.
+
+Then report one outcome:
+
+- nothing to change;
+- the plan changed, and how;
+- a choice that can't be undone needs a person, with the question.

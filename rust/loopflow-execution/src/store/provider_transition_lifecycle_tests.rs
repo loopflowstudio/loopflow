@@ -20,11 +20,10 @@ fn reservations_do_not_report_success_and_observed_replacements_keep_lineage() {
             [&owner],
         )
         .unwrap();
-    let first =
-        attachment::claim_session_attachment(&store, "conversation", None, &owner, false).unwrap();
-    store.conn.lock().unwrap().execute(
-        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-         SELECT id,'observed','unreadable',1,'not JSON',current_capture FROM agent_sessions WHERE id='conversation'",
+    let first = attachment::claim_session_attachment(&store, "conversation", None, &owner).unwrap();
+    store.execute_history(
+"INSERT INTO session_history(session_id,receipt_key,observed_at,payload,captured_event)
+         SELECT id,'unreadable',1,'not JSON',current_capture FROM agent_sessions WHERE id='conversation'",
         [],
     ).unwrap();
     store

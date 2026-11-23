@@ -3,7 +3,6 @@
 use anyhow::{anyhow, Context, Result};
 use std::io::Write;
 
-use loopflow_execution::agent::check_cli_available;
 use loopflow_execution::agent::run_agent;
 use loopflow_execution::agent::AgentConfig;
 use loopflow_execution::agent::ProcessConfig;
@@ -30,14 +29,8 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
             source.artifact_key
         )
     })?;
-    if let Some(reason) = request.replay_unavailable_reason() {
-        return Err(anyhow!(
-            "capture {} cannot be replayed: {reason}",
-            source.artifact_key
-        ));
-    }
-    let (harness, model) = loopflow_execution::config::parse_agent(&request.agent);
-    if harness != source.harness || model != source.model {
+    let agent = loopflow_execution::config::Agent::parse(&request.agent)?;
+    if agent.harness.as_str() != source.harness || agent.model != source.model {
         return Err(anyhow!(
             "capture {} has inconsistent provider identity",
             source.artifact_key
@@ -49,33 +42,23 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         task_prompt: request.task_prompt.clone(),
         skill_invocation: request.skill_invocation.clone(),
         output_schema: request.output_schema.clone(),
-        agent: Some(request.agent.clone()),
-        provider_account_id: request.account_id.clone(),
-        provider_account_authority_home: request.account_id.as_ref().map(|_| home.to_path_buf()),
         max_turns: request.max_turns,
         cwd: Some(source.cwd.clone()),
-        write_scope: request.write_scope,
-        execution_boundary: request.execution_boundary.clone(),
-        skip_permissions: request.skip_permissions,
+        yolo: request.skip_permissions,
         chrome: request.chrome,
         codex_service_tier: request.codex_service_tier,
-        ..AgentConfig::default()
+        ..AgentConfig::new(agent)
     };
-    config.apply_agent_override();
-    let (selected_harness, model) = loopflow_execution::config::parse_agent(config.agent()?);
-    if selected_harness != harness {
-        config.provider_account_id = None;
-        config.provider_account_authority_home = None;
-    }
-    if !check_cli_available(&selected_harness) {
+    config.apply_agent_override()?;
+    let selected_harness = config.agent.harness.as_str().to_owned();
+    let model = config.agent.model.clone();
+    if !loopflow_execution::harness::launcher(config.agent.harness).installed() {
         return Err(anyhow!(
             "'{selected_harness}' CLI is unavailable on this Machine"
         ));
     }
-    loopflow_execution::agent::pin_provider_account_id_blocking(&mut config)
-        .map_err(anyhow::Error::from)?;
-    request.agent = config.agent()?.to_owned();
-    request.account_id = config.provider_account_id.clone();
+    request.agent = config.agent.to_string();
+    request.account_id = None;
     let spec = SessionCaptureSpec {
         harness: selected_harness,
         model,
@@ -115,13 +98,16 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         Some(file)
     };
     let process = ProcessConfig {
-        auto: true,
         stream: true,
         runtime: Some(capture.clone()),
         context_file: context_file.as_ref().map(|file| file.path().to_path_buf()),
         ..ProcessConfig::default()
     };
-    let result = run_agent(&config, &process);
+    let result = run_agent(
+        &config,
+        &process,
+        loopflow_execution::harness::LaunchKind::Batch,
+    );
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",
@@ -175,6 +161,7 @@ for line in sys.stdin:
     with open(os.environ['LF_TEST_REPLAY_EVIDENCE'], 'w') as evidence:
         json.dump({'capture': os.environ['LF_CAPTURE_KEY'], 'context': context, 'message': message, 'schema': schema}, evidence)
     message['session_id'] = 'replay-thread'
+    keep_claude_turn(message, 'not the answer', {'decision': 'advance'})
     print(json.dumps(message), flush=True)
     print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'replay-thread'}), flush=True)
     print(json.dumps({'type': 'result', 'uuid': 'replay-result', 'session_id': 'replay-thread', 'subtype': 'success', 'is_error': False, 'result': 'not the answer', 'structured_output': {'decision': 'advance'}}), flush=True)
@@ -182,10 +169,15 @@ for line in sys.stdin:
         // Replay can switch providers; both the source and override must use
         // stand-ins, never a provider installed on the test host.
         for (name, source) in [
-            ("claude", claude_source.to_string()),
+            (
+                "claude",
+                crate::test_support::claude_stand_in(claude_source),
+            ),
+            // Signing the shared Claude home in goes through the Keychain on macOS.
+            ("security", crate::test_support::FAKE_SECURITY.to_string()),
             (
                 "opencode",
-                include_str!("../../../../loopflow-execution/tests/support/opencode_server.py")
+                include_str!("../../../../loopflow-execution/tests/support/opencode_cli.py")
                     .replace("__WAIT__", "False"),
             ),
         ] {
@@ -211,29 +203,8 @@ for line in sys.stdin:
         std::fs::create_dir(&decoy_home).unwrap();
         let registry = home.path().join("loopflow.db");
 
-        let account_id = if harness == "claude" {
-            let mut account = loopflow_execution::provider_account::new_account(
-                loopflow_execution::provider_auth::Provider::Claude,
-                loopflow_execution::store::ProviderAccountId::parse("replay-fixture").unwrap(),
-                home.path().join("accounts/claude/replay-fixture"),
-                Some(
-                    loopflow_execution::profile::EmailAddress::parse("replay@example.com").unwrap(),
-                ),
-            );
-            loopflow_execution::test_support::identity::write_claude_identity(&mut account);
-            tokio::runtime::Runtime::new().unwrap().block_on(async {
-                let store = loopflow_execution::store::open_ephemeral_store(
-                    &loopflow_execution::store::StorageConfig::sqlite(registry.clone()),
-                )
-                .await
-                .unwrap();
-                store.upsert_provider_account(&account).await.unwrap();
-            });
-            Some(account.account_id)
-        } else {
-            None
-        };
-
+        let account_id =
+            Some(loopflow_execution::store::ProviderAccountId::parse("historical-login").unwrap());
         let request = AgentProcessRequest {
             conversation_context: None,
             system_prompt: "recorded system".to_string(),
@@ -255,8 +226,6 @@ for line in sys.stdin:
             account_id,
             max_turns: Some(3),
             codex_service_tier: None,
-            write_scope: loopflow_execution::agent::AgentWriteScope::Worktree,
-            execution_boundary: None,
             skip_permissions: true,
             chrome: None,
         };
@@ -280,7 +249,7 @@ for line in sys.stdin:
         let source_id = source.artifact_key();
         source.finish("completed").unwrap();
 
-        let session = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+        let session = loopflow_storage::sqlite::SqliteStore::open_read_only(
             &registry,
             loopflow_execution::store::token_key::encryption_key,
         )
@@ -303,7 +272,9 @@ for line in sys.stdin:
             loopflow_execution::session_record::resolve_manifest(home.path(), child_id.as_str())
                 .unwrap();
         assert_eq!(child.caller_artifact_key.as_ref(), Some(&source_id));
-        assert_eq!(child.process.as_ref(), Some(&request));
+        let mut expected = request.clone();
+        expected.account_id = None;
+        assert_eq!(child.process.as_ref(), Some(&expected));
         assert!(child_dir.join("terminal.json").is_file());
         assert!(!child_dir.join("owner.json").exists());
         assert!(!decoy_home.join("runs").exists());
@@ -326,10 +297,7 @@ for line in sys.stdin:
             loopflow_execution::session_record::resolve_manifest(home.path(), &overridden_id)
                 .unwrap();
         assert_eq!(overridden.model.as_deref(), Some("opencode/other"));
-        let mut expected = request.clone();
         expected.agent = "opencode:opencode/other".into();
-        // Claude's selected account cannot transfer to an OpenCode replay.
-        expected.account_id = None;
         assert_eq!(overridden.process, Some(expected));
         let (_, retained) =
             loopflow_execution::session_record::resolve_manifest(home.path(), &source_id).unwrap();

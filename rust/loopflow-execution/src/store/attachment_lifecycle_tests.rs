@@ -2,7 +2,6 @@ use crate::process::attachment;
 use crate::store::StoreError;
 use loopflow_model::id::LfProcessId;
 use loopflow_storage::session::SessionActivity;
-use rusqlite::params;
 
 use loopflow_storage::test_fixture::process as insert_process;
 
@@ -14,14 +13,9 @@ fn ended_agent_socket_cannot_be_adopted() {
         "session",
         &loopflow_storage::session_record::new_artifact_key(),
     );
-    let attachment = attachment::claim_session_attachment(
-        &store,
-        "session",
-        None,
-        &store.test_lf_process(),
-        true,
-    )
-    .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, "session", None, &store.test_lf_process())
+            .unwrap();
     let path = home.path().join("answering.sock");
     let _listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
     store
@@ -39,7 +33,7 @@ fn ended_agent_socket_cannot_be_adopted() {
             "session",
             &attachment,
             std::process::id(),
-            crate::journal::process_started_at(std::process::id())
+            crate::process::os_process::process_started_at(std::process::id())
                 .unwrap()
                 .unwrap(),
         )
@@ -67,7 +61,7 @@ fn losing_input_claim_rolls_back_capture_and_provider_reservation() {
     let first = insert_process(&store, 1, 1);
     let second = insert_process(&store, 2, 2);
     let attachment =
-        attachment::claim_session_attachment(&store, &session.id, None, &first, true).unwrap();
+        attachment::claim_session_attachment(&store, &session.id, None, &first).unwrap();
     let mut next = session.clone();
     next.artifact_key = Some(loopflow_storage::session_record::new_artifact_key());
     next.input_published = false;
@@ -113,21 +107,10 @@ fn losing_input_claim_rolls_back_capture_and_provider_reservation() {
         Some(attachment.clone())
     );
     next.completed_at = Some(10);
-    store
-        .conn
-        .lock()
+    let birth = crate::process::os_process::process_started_at(std::process::id())
         .unwrap()
-        .execute(
-            "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
-            params![
-                first,
-                std::process::id(),
-                crate::journal::process_started_at(std::process::id())
-                    .unwrap()
-                    .unwrap()
-            ],
-        )
         .unwrap();
+    store.test_set_holder(&session.id, std::process::id(), birth);
     // Completion does not permit taking input from a still-attached owner.
     assert!(attachment::claim_session_input(
         &store,
@@ -142,9 +125,8 @@ fn losing_input_claim_rolls_back_capture_and_provider_reservation() {
         store.session(&session.id).unwrap().unwrap().completed_at,
         Some(10)
     );
-    let mut owner = store.lf_process(&first).unwrap().unwrap();
-    owner.completed_at = Some(11);
-    store.record_process(&owner).unwrap();
+    // The holder exits: this pid no longer runs the process that started then.
+    store.test_set_holder(&session.id, std::process::id(), birth - 3600);
     let (admitted, claimed) =
         attachment::claim_session_input(&store, next.clone(), Some(&attachment), &second, || {
             panic!("reserved process needs no close")
@@ -176,48 +158,60 @@ fn losing_input_claim_rolls_back_capture_and_provider_reservation() {
 }
 
 #[test]
-fn process_starter_names_the_nearest_session_else_the_root_person() {
+fn a_graph_run_names_the_session_whose_agent_started_it_else_the_person() {
     use crate::process::Starter;
+    use loopflow_storage::graph_process::ExecutionStart;
     let dir = tempfile::tempdir().unwrap();
     let store = crate::store::opening::open_ephemeral(&dir.path().join("store.db")).unwrap();
-    let root = insert_process(&store, 1, 1);
-    let agent = insert_process(&store, 2, 2);
-    let step = insert_process(&store, 3, 3);
-    let orphan = insert_process(&store, 4, 4);
-    {
-        let conn = store.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE processes SET parent_lf_process_id=?2,caller_session_id='session-a' WHERE id=?1",
-            params![agent, root],
-        )
-        .unwrap();
-        conn.execute(
-            "UPDATE processes SET parent_lf_process_id=?2 WHERE id=?1",
-            params![step, agent],
-        )
-        .unwrap();
-        conn.execute(
-            "UPDATE processes SET parent_lf_process_id='00000000-0000-0000-0000-0000000000ff' WHERE id=?1",
-            [&orphan],
-        )
-        .unwrap();
+    store.test_session(
+        "session-a",
+        &loopflow_storage::session_record::new_artifact_key(),
+    );
+    let compiled = loopflow_storage::graph::CompiledGraph {
+        name: "proof".into(),
+        steps: vec![],
+    };
+    for (cwd, session) in [("/by-agent", Some("session-a")), ("/by-person", None)] {
+        let start = ExecutionStart {
+            caller_session: session.map(Into::into),
+            ..ExecutionStart::reserved(1)
+        };
+        store
+            .record_graph(
+                &LfProcessId::new(),
+                &compiled,
+                None,
+                &start,
+                None,
+                Some(cwd),
+                None,
+            )
+            .unwrap();
     }
-    let starter = |id| store.process_starter(id, Some("Jack Heart")).unwrap();
+    let starter = |cwd: &str| {
+        let graph = store
+            .graphs_at(std::path::Path::new(cwd))
+            .unwrap()
+            .remove(0);
+        store
+            .starter(graph.caller_session.as_ref(), Some("Jack Heart"))
+            .unwrap()
+    };
     assert_eq!(
-        starter(&step),
+        starter("/by-agent"),
         Starter::Session {
             id: "session-a".into(),
-            name: None,
+            name: Some(store.session("session-a").unwrap().unwrap().title)
+                .filter(|title| !title.is_empty()),
             requester: Some("Jack Heart".into()),
         }
     );
     assert_eq!(
-        starter(&root),
+        starter("/by-person"),
         Starter::Person {
             name: Some("Jack Heart".into())
         }
     );
-    assert_eq!(starter(&orphan), Starter::Person { name: None });
 }
 
 #[test]
@@ -237,7 +231,7 @@ fn attachment_close_keeps_transfer_fenced_without_blocking_store_writes() {
     );
     let parent = insert_process(&store, 1, 1);
     let attachment =
-        attachment::claim_session_attachment(&store, "conversation", None, &parent, true).unwrap();
+        attachment::claim_session_attachment(&store, "conversation", None, &parent).unwrap();
     let history = store.session_history("conversation", 0, 0).unwrap();
     let lock_path = std::fs::read_dir(path.with_extension("session-locks"))
         .unwrap()
@@ -331,7 +325,7 @@ fn invocation_retry_retains_history_and_refuses_failed_close_or_stale_authority(
     store.test_session("conversation", "run_00000000000000000000000000000001");
     let parent = insert_process(&store, 1, 1);
     let first =
-        attachment::claim_session_attachment(&store, "conversation", None, &parent, true).unwrap();
+        attachment::claim_session_attachment(&store, "conversation", None, &parent).unwrap();
     store
         .record_agent_process_launch(
             "conversation",
@@ -399,16 +393,6 @@ fn invocation_retry_retains_history_and_refuses_failed_close_or_stale_authority(
         || panic!("stale retry must never close the replacement")
     )
     .is_err());
-    let conn = store.conn.lock().unwrap();
-    let retained: String = conn
-        .query_row(
-            "SELECT json_extract(payload,'$.provider_thread') FROM session_events
-         WHERE json_extract(payload,'$.type')='agent_process_replaced'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(retained, "original-thread");
 }
 
 #[test]
@@ -418,7 +402,7 @@ fn respawn_requires_positive_exit_and_preserves_uncertain_attempts() {
     store.test_session("conversation", "run_00000000000000000000000000000001");
     let parent = insert_process(&store, 1, 1);
     let first =
-        attachment::claim_session_attachment(&store, "conversation", None, &parent, true).unwrap();
+        attachment::claim_session_attachment(&store, "conversation", None, &parent).unwrap();
     assert_eq!(
         attachment::prepare_session_agent_process(&store, "conversation", &first).unwrap(),
         first
@@ -478,36 +462,30 @@ fn returning_to_the_same_lf_process_does_not_revive_its_previous_attachment() {
             )
             .unwrap();
     }
-    let first =
-        attachment::claim_session_attachment(&store, "conversation", None, &a, true).unwrap();
-    store
-        .record_agent_process_identity(
-            "conversation",
-            &first,
-            std::process::id(),
-            crate::journal::process_started_at(std::process::id())
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
-    store
-        .record_session_connection("conversation", &first, "endpoint", &"native-history".into())
-        .unwrap();
+    let first = attachment::claim_session_attachment(&store, "conversation", None, &a).unwrap();
     let second =
-        attachment::claim_session_attachment(&store, "conversation", Some(&first), &b, false)
-            .unwrap();
+        attachment::claim_session_attachment(&store, "conversation", Some(&first), &b).unwrap();
     let third =
-        attachment::claim_session_attachment(&store, "conversation", Some(&second), &a, false)
-            .unwrap();
+        attachment::claim_session_attachment(&store, "conversation", Some(&second), &a).unwrap();
     assert_eq!(first.lf_process_id, third.lf_process_id);
-    assert_eq!(first.provider_lf_process_id, third.provider_lf_process_id);
-    assert_eq!(first.agent_process_id, third.agent_process_id);
+    assert_eq!(first.launcher_lf_process_id, third.launcher_lf_process_id);
+    assert_ne!(first.agent_process_id, third.agent_process_id);
     assert_ne!(first.token, third.token);
     assert!(store
         .record_session_agent_session("conversation", &first, &"stale-history".into())
         .is_err());
     store
-        .record_session_agent_session("conversation", &third, &"native-history".into())
+        .record_agent_process_identity(
+            "conversation",
+            &third,
+            std::process::id(),
+            crate::process::os_process::process_started_at(std::process::id())
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+    store
+        .record_session_connection("conversation", &third, "endpoint", &"native-history".into())
         .unwrap();
     assert_eq!(
         attachment::session_connection(&store, "conversation").unwrap(),
@@ -567,12 +545,14 @@ fn returning_to_the_same_lf_process_does_not_revive_its_previous_attachment() {
     store
         .with_session_attachment("conversation", &third, || Ok(()))
         .unwrap();
+    store
+        .record_agent_process_exit("conversation", &third, true)
+        .unwrap();
     let released = store
         .release_session_attachment("conversation", &third)
         .unwrap();
     let fourth =
-        attachment::claim_session_attachment(&store, "conversation", Some(&released), &a, false)
-            .unwrap();
+        attachment::claim_session_attachment(&store, "conversation", Some(&released), &a).unwrap();
     assert_ne!(third.token, fourth.token);
     assert!(matches!(
         store.with_session_attachment::<()>("conversation", &third, || panic!(

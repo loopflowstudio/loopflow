@@ -491,7 +491,7 @@ fn ssh_shell_lifecycles_reconnect_and_settle_processes_ptys_and_sockets() {
         assert!(!pane.exit().success(), "connection loss must be reported");
         assert!(fixture.destination.held_running(&owner));
         let mut returning = Pane::spawn(fixture.command(&id, "--create"));
-        fixture.destination.wait_held_controlled(&owner);
+        fixture.destination.wait_held_viewed(&owner);
         returning.input("printf 'retained:%s:%s\\n' \"$RETAINED\" $$\r");
         returning.until(&format!("retained:destination:{shell}"));
         assert_eq!(fixture.destination.wait_shell_terminal(&id), owner);
@@ -631,7 +631,7 @@ fn ssh_prepared_viewer_reuses_held_terminal_without_an_extra_pty_and_releases_on
     let mut pane = Pane::spawn(fixture.source_command(&argv[1..]));
     pane.until("provider-ready");
     let terminal = fixture.destination.terminal_of(session);
-    fixture.destination.wait_held_controlled(&terminal);
+    fixture.destination.wait_held_viewed(&terminal);
     pane.input("export RETAINED=original; printf '%s' $$ > \"$HOME/shell-pid\"; printf 'ready:%s\\n' \"$RETAINED\"\r");
     pane.until("ready:original");
     let shell_pid: i32 = fixture.destination.wait_file("shell-pid").parse().unwrap();
@@ -704,7 +704,7 @@ fn ssh_prepared_viewer_reuses_held_terminal_without_an_extra_pty_and_releases_on
         session,
         "--json",
     ]));
-    fixture.destination.wait_held_controlled(&terminal);
+    fixture.destination.wait_held_viewed(&terminal);
     returning.input("printf 'retained:%s:%s\\n' \"$RETAINED\" $$\r");
     returning.until(&format!("retained:original:{shell_pid}"));
     owned.extend(fixture.descendants(&[fixture.daemon.id() as i32, returning.child.id() as i32]));

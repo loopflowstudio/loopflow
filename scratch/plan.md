@@ -70,6 +70,9 @@ App-wide Shift-menu matching outside focused terminals (Sidebar, Brief, Files), 
 
 **Antigravity and color.** The installed `agy` 1.5.14 requested modifyOtherKeys level 2 and Kitty flags 5. The focused Swift run with the live QA probe passed 17 tests and skipped one display diagnostic. The unsent draft read `q?Ax`, then `q?Axq?Ax` after reattachment. The provider received `xterm-256color:truecolor`. The permanent fixtures cover both modes and reattachment without an installed provider. [QA report](qa.html)
 
+- `cargo test -p loopflow-execution --lib held_children_get_terminal_colors_when_the_caller_leaves_them_unset` passed with missing, empty, custom and partial environments.
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and the four `documented_commands::` checks passed.
+
 **Remaining.** Gate and unlocked-Mac QA for physical key delivery, live menus, palette focus, input-source switching and IME composition.
 
 ### Previous checks

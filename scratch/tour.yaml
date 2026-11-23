@@ -1,7 +1,11 @@
-at: df0a77582e7ba30ed8b3ae05c419910f62e39dc6
+at: d9dfa86938d963421a0c5ef761f5e950e5f8f83b
 first:
   - path: swift/README.md
     why: Keyboard behavior in a focused Session or Shell
+  - path: scratch/qa.html
+    why: Live Antigravity draft before and after reattachment
+  - path: rust/loopflow-execution/src/transport/registry.rs
+    why: Color capabilities passed to each new held terminal
   - path: swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift
     why: Terminal bindings and precedence for personal settings
   - path: swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift
@@ -12,7 +16,9 @@ first:
   - path: swift/LoopflowTests/GhosttyModifierInputTests.swift
     why: Terminal bytes, menu ownership and command dispatch
   - path: swift/LoopflowTests/SessionModifierInputTests.swift
-    why: Provider reports before and after reopening
+    why: Shifted text under the keyboard modes Antigravity requests
+  - path: rust/loopflow-execution/src/transport/registry_tests.rs
+    why: PTY reads missing, empty and caller-provided color settings
   - path: swift/LoopflowTests/DesktopTerminalFixtures.swift
     why: Keyboard events and the private Session fixture
   - path: swift/LoopflowTests/SessionConnectionProofTests.swift

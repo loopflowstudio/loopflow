@@ -60,6 +60,8 @@ then queried the active flags (<code>CSI ?u</code>).</p>
 Desktop terminal view. The launch wrapper opened the installed TUI on an empty
 workspace without an initial prompt. The terminal passed
 <code>TERM=xterm-256color</code> and <code>COLORTERM=truecolor</code> to the provider.</p>
+<p>In a separate PTY with those two values, the installed TUI emitted 26 distinct
+RGB foreground or background colors during startup and draft editing.</p>
 <table>
 <tr><th>Desktop input</th><th>Visible, unsent agy draft</th></tr>
 <tr><td>q, Shift-/, Shift-A, x</td><td><code>q?Ax</code></td></tr>

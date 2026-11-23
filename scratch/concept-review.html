@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-937 Concept Review (f07ab065)</title>
+<title>LOO-937 Concept Review (9169ff2c)</title>
 <style>
 :root{--bg:#fbfaf7;--fg:#1d1c1a;--mute:#6b675f;--line:#e2ded5;--card:#fff;--yes:#2f7d4f;--no:#b3412e;--new:#7a5bc4;--code:#f1eee7}
 @media (prefers-color-scheme:dark){:root{--bg:#171614;--fg:#ece9e2;--mute:#a19c92;--line:#34312c;--card:#1f1e1b;--yes:#6cc28f;--no:#ec8a76;--new:#b9a2f0;--code:#2a2824}}
@@ -22,61 +22,38 @@ th{font-weight:600;color:var(--mute)}
 ol li{margin:.5rem 0}
 .wrap{overflow-x:auto}
 </style></head><body><main>
-<h1>LOO-937 as built, at f07ab065</h1>
-<p class="mute">The area: which record holds each Task fact, how a directory, a Session or a Graph run finds its Task, and, new since the last page (<code>39ac96a0</code>), what a checkout builds on: <code>lf wt create --stack</code>, which this Task took on from the answer "put the stack flag in here and the instructions as well". Read against the branch base <code>43e03187</code>.</p>
-
+<h1>LOO-937 as built, at 9169ff2c</h1>
+<p class="mute">The area: which record holds each Task fact, how a directory, a Session or a Graph run finds its Task, and what a checkout builds on. Read against the branch base 2656258a, with the checkout-base slice (9cf46a0d, compress f05b4f0d, QA 9169ff2c) in it. The page on f07ab065 is in this file's history.</p>
 <h2>Product concepts and code concepts</h2>
 <div class="wrap"><table>
 <tr><th>What a person knows</th><th>What the code has</th><th></th><th>Note</th></tr>
 <tr><td>A Task's title, state, rank, URL, branch</td><td><code>tasks</code> (desired), <code>pm_items</code> (observed)</td><td class="yes">yes</td><td>Two records on purpose: the conflict merge base.</td></tr>
 <tr><td>Is it done?</td><td><code>planning_state</code>; the boolean is leaving</td><td class="yes">yes</td><td></td></tr>
 <tr><td>Task order, the drag on the Working board</td><td><code>tasks.planning_rank</code>, <code>reorder_task</code></td><td class="yes">yes</td><td><code>task_orders</code> is leaving.</td></tr>
-<tr><td>A Task's conversation</td><td><code>task_primary_sessions</code>, read through <code>primary_scope_sql</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>A Task's conversation</td><td><code>task_primary_sessions</code>, read through <code>primary_scope_sql</code></td><td class="yes">yes</td><td>LOO-877 moves it onto <code>agent_sessions</code>.</td></tr>
 <tr><td>"This directory is this Task's"</td><td><code>task_checkout_owner(dir)</code></td><td class="yes">yes</td><td>One answer for launch, resume, status, commit, land and provider conversations.</td></tr>
-<tr><td>A Session's or a run's Task</td><td><code>agent_sessions.task_id</code>, <code>graph_processes.task_id</code></td><td class="yes">yes</td><td>Stays put through a move and a reused path; the Session list reads it.</td></tr>
+<tr><td>A Session's or a run's Task</td><td><code>agent_sessions.task_id</code>, <code>graph_processes.task_id</code></td><td class="yes">yes</td><td>Stays put through a move and a reused path.</td></tr>
+<tr><td>"What this checkout builds on" (what <code>lf sync</code> pulls, what its PR targets)</td><td><code>checkout_base(repo, default)</code> &rarr; <code>CheckoutBase::{Stacked, Branch}</code></td><td class="yes">yes <span class="tag">since f07ab065</span></td><td>Both actions ask it. Two records behind one reader: a Task's stack (store) and a branch's <code>loopflow-base</code> (Git config), because a taskless checkout has no store row.</td></tr>
 <tr><td>Is a run alive?</td><td><code>task_graphs.run_pid</code>, <code>graph_processes.pid</code></td><td class="no">no</td><td>Two processes behind one concept. LOO-1075, outside this Task.</td></tr>
-<tr><td>"What this checkout builds on" (where <code>lf sync</code> pulls from, what its PR targets)</td><td>three records: a Task's stack (<code>task_checkouts.parent_pr_id</code>, <code>task_stack</code>); <code>branch.&lt;b&gt;.loopflow-base</code> (<code>stacked_base</code>); the branch's Git upstream when it names another branch (<code>WorktreeState.base_branch</code>)</td><td class="no">no <span class="tag">new</span></td><td>One idea under three homes, and the two actions read different subsets. Below.</td></tr>
 </table></div>
-
-<h2>The biggest mismatch: a checkout's base</h2>
-<p>A person knows one thing: "this checkout builds on that branch." <code>lf sync</code> and <code>lf pr open</code> should agree on it. They don't:</p>
-<div class="wrap"><table>
-<tr><th>Asked in order</th><th><code>lf sync</code> (<code>run_sync_in</code>)</th><th><code>lf pr open</code> (<code>publication_base</code> &rarr; <code>pr_target</code>)</th></tr>
-<tr><td>Task stack</td><td>yes</td><td>yes</td></tr>
-<tr><td><code>loopflow-base</code></td><td>yes, unless its PR merged</td><td>yes, unless its PR merged</td></tr>
-<tr><td>upstream naming another branch</td><td class="no">no</td><td class="no">yes</td></tr>
-<tr><td>else</td><td>main</td><td>main</td></tr>
-</table></div>
-<p>The upstream clause is the earlier attempt at <code>--stack</code>, and the plan already rejected the upstream as a record ("a branch upstream is overwritten by every <code>push -u</code>"). It is worse than stale: lf's push (<code>push_with_upstream_if_needed</code>) sees an upstream set and runs a bare <code>git push</code>, which with an upstream of <code>origin/parent</code> either refuses (Git's default <code>push.default=simple</code>, names differ) or, with <code>push.default=upstream</code>, pushes the child's commits onto the parent. Its only production reader is <code>pr_target</code>; <code>WorktreeState</code>'s <code>Serialize</code> is used by one test.</p>
+<h2>What changed since the last page</h2>
 <div class="cols">
-<div class="card"><b>Now (f07ab065)</b><pre>git branch --set-upstream-to origin/parent
-lf sync        &rarr; merges main
-lf pr open     &rarr; PR targets parent;
-                 push goes to origin/parent
-                 or is refused</pre></div>
-<div class="card prop"><b>Proposed</b><pre>one answer, checkout_base(repo):
+<div class="card"><b>Before (f07ab065)</b><pre>lf sync     : stack, loopflow-base, main
+lf pr open  : stack, loopflow-base,
+              Git upstream if another branch,
+              main</pre></div>
+<div class="card"><b>Now (9169ff2c)</b><pre>checkout_base:
   Task stack's live parent
-  else loopflow-base, unless merged
-  else main
-lf sync and lf pr open both ask it;
-the upstream clause and
-WorktreeState.base_branch go</pre></div>
+  else loopflow-base unless its PR merged
+  else the repository's default branch
+lf sync and lf pr open both ask it</pre></div>
 </div>
-<p>Counterexample checked: someone stacking by hand with <code>--set-upstream-to</code> (only <code>worktree_list_preserves_namespaced_upstream_branch</code> does) loses a publish target whose push was already broken. <code>lf wt create --stack</code> is the way to say it now, and LOOPFLOW.md names it.</p>
-<p>Not proposed: putting the taskless base in the store. The checkout has no Task, so <code>task_checkouts</code> can't carry it, and Git config travels with the branch on this Machine, the same as <code>loopflow-persistent</code>. Two records for "a Task's base" and "a branch's base" stay, under one reader.</p>
-
-<h2>What holds</h2>
-<p>Every Task fact has one home, and the leaving guard covers each slice. Membership keeps three path matches, each about what occupies a directory now. <code>--stack</code> writes one Git config key and nothing in the store.</p>
-
+<p>QA walked it through four shapes (scratch/qa.html): a stacked Task whose parent goes unpushed, pushed, merged; a parent closed unmerged; a plain checkout with a stray upstream; <code>--stack</code> in a <code>trunk</code> repository. Sync and publish named the same base at every stage.</p>
+<h2>The biggest mismatch left</h2>
+<p>Inside this Task: none. Outside it, as before: run liveness (LOO-1075), and launch and store each defining "the checkout holding this directory" (<code>WorkspaceResolver</code>, fits LOO-934).</p>
 <h2>Questions</h2>
 <ol>
-<li>A checkout's base, chosen for review:
- <br>a) one reader, <code>checkout_base</code>; the upstream clause goes <span class="tag">chosen</span>
- <br>b) keep the upstream clause and teach <code>lf sync</code> to read it too
- <br>c) leave the two readers as they are</li>
-<li><code>lf sync main</code> in a <code>--stack</code> checkout merges main and keeps the record (questions.md):
- <br>a) keep <span class="tag">current</span>
- <br>b) clear the record, as a stacked Task detaches</li>
-<li>Run liveness: LOO-1075 holds it. Nothing changes here.</li>
+<li><code>lf sync main</code> in a <code>--stack</code> checkout merges main and keeps the record (questions.md):<br>a) keep current <span class="tag">as built</span><br>b) clear the record, as a stacked Task detaches</li>
+<li>Next step:<br>a) gate <span class="tag">chosen</span><br>b) another slice</li>
 </ol>
 </main></body></html>

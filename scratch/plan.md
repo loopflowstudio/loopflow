@@ -440,7 +440,7 @@ detach `sync_tests::`, `git::worktrees::`, `ops::pr::`, `ops::checkout::`,
 Compress (`f05b4f0dfe`): `branch_pr_merged` lives beside `checkout_base`;
 `CheckoutBase::Stacked` is boxed (clippy `large_enum_variant` had failed
 `loopflow-execution`). Clippy clean; `ops::pr:: ops::checkout::` 52 and
-`sync_tests::` 60 passed. Next: gate.
+`sync_tests::` 60 passed. QA on `9169ff2c24` (scratch/qa.html) found sync and publish naming one base in every shape tried. Concept review on `9169ff2c24`: no mismatch left inside this Task. Next: gate.
 
 ## Built: one Git-root rule (human review of the ownership split, 2026-11-23)
 

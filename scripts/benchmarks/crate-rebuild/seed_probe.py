@@ -3,21 +3,28 @@
 import json
 import os
 import re
-import shutil
 import stat
 import sys
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from run import _timing
-from test_loop import FILTERS, _require_disk, _run, _time_command, _write, measurement_run
+from test_loop import (
+    FILTERS,
+    ROOT,
+    _require_disk,
+    _run,
+    _time_command,
+    _write,
+    add_worktree,
+    measurement_run,
+    remove_worktree,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from build_cache import seed_record  # noqa: E402
 from resource_envelope import load_policy  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[3]
 ARMS = ("seeded", "cold")
 PACKAGE, TEST = FILTERS["app"]
 COMMANDS = {
@@ -35,31 +42,14 @@ def _env() -> dict:
     return {k: v for k, v in os.environ.items() if not k.startswith("LF_")}
 
 
-@dataclass(frozen=True)
-class TargetFile:
-    path: Path
-    inode: int
-    mtime_ns: int
-    allocated_bytes: int = field(compare=False)
-
-
-def _files(debug: Path) -> set[TargetFile]:
-    files = set()
+def _allocations(debug: Path) -> dict[tuple[int, int], int]:
+    """Allocated bytes by inode and mtime. Cargo's hard links share one allocation."""
+    files = {}
     for path in debug.rglob("*"):
         info = path.lstat()
         if stat.S_ISREG(info.st_mode):
-            files.add(TargetFile(path, info.st_ino, info.st_mtime_ns, info.st_blocks * 512))
+            files[info.st_ino, info.st_mtime_ns] = info.st_blocks * 512
     return files
-
-
-def _allocated(files: set[TargetFile]) -> int:
-    # Uplifted files are hard links to their deps/ originals; count each inode once.
-    return sum({file.inode: file.allocated_bytes for file in files}.values())
-
-
-def _remove_tree(tree: Path) -> None:
-    if tree.exists():
-        _run(["git", "worktree", "remove", "--force", str(tree)], ROOT, _env())
 
 
 def validate(receipts: list[dict], cohorts: int) -> None:
@@ -76,14 +66,12 @@ def validate(receipts: list[dict], cohorts: int) -> None:
 
 def _sample(output: Path, root: Path, revision: str, cohort: int, arm: str, reserve: int) -> dict:
     tree = root / f"{cohort}-{arm}"
-    _remove_tree(tree)  # An interrupted attempt's checkout.
+    env = _env()
+    remove_worktree(tree, env)  # An interrupted attempt's checkout.
     start = time.monotonic()
     # The installed post-checkout hook seeds and registers, as for any new worktree.
-    env = _env()
-    _run(["git", "worktree", "add", "--detach", str(tree), revision], ROOT, env)
     try:
-        if arm == "cold" and (tree / "target").exists():
-            shutil.rmtree(tree / "target")
+        add_worktree(tree, revision, env, cold=arm == "cold")
         add_seconds = time.monotonic() - start
         seed = seed_record(tree)
         if arm == "seeded" and seed is None:
@@ -96,13 +84,13 @@ def _sample(output: Path, root: Path, revision: str, cohort: int, arm: str, rese
                 else None
             )
         debug = tree / "target/debug"
-        seeded_files = _files(debug)
+        seeded_files = _allocations(debug)
         receipt = {
             "cohort": cohort,
             "arm": arm,
             "seed": seed,
             "add": {"wall_seconds": add_seconds},
-            "seed_bytes": _allocated(seeded_files),
+            "seed_bytes": sum(seeded_files.values()),
         }
         before = seeded_files
         for step, command in COMMANDS.items():
@@ -113,7 +101,7 @@ def _sample(output: Path, root: Path, revision: str, cohort: int, arm: str, rese
             wall = time.monotonic() - begin
             log = (output / f"{stem}.log").read_text()
             stdout = (output / f"{stem}.jsonl").read_text()
-            after = _files(debug)
+            after = _allocations(debug)
             receipt[step] = {
                 "command": command,
                 "exit_code": exit_code,
@@ -126,7 +114,7 @@ def _sample(output: Path, root: Path, revision: str, cohort: int, arm: str, rese
                 "tests_passed": sum(
                     int(n) for n in re.findall(r"test result: ok\. (\d+) passed", stdout)
                 ),
-                "written_bytes": _allocated(after - before),
+                "written_bytes": sum(size for key, size in after.items() if key not in before),
                 "load_before": load_before,
                 "load_after": os.getloadavg(),
             }
@@ -134,11 +122,13 @@ def _sample(output: Path, root: Path, revision: str, cohort: int, arm: str, rese
             print(f"{stem}: exit {exit_code}, {wall:.1f}s", flush=True)
             if exit_code:
                 raise RuntimeError(f"{step} failed: {output / (stem + '.log')}")
-        receipt["target_bytes"] = _allocated(after)
-        receipt["still_seeded_bytes"] = _allocated({file for file in after if file in seeded_files})
+        receipt["target_bytes"] = sum(after.values())
+        receipt["still_seeded_bytes"] = sum(
+            size for key, size in after.items() if key in seeded_files
+        )
         return receipt
     finally:
-        _remove_tree(tree)
+        remove_worktree(tree, env)
 
 
 def _measure(output: Path, cohorts: int, resume: bool) -> None:

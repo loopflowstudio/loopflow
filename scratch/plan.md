@@ -234,7 +234,9 @@ and build scripts" becomes the seeded behaviour plus what still compiles.
    `uv run pytest -q python/tests/test_build_cache.py python/tests/test_crate_test_loop.py`
    passed all 41 tests, including Cargo's lock wait and the cold benchmark checkout.
 
-Next: gate and CI.
+Compress check: `uv run pytest -q python/tests/test_crate_test_loop.py` passed 17 tests.
+Both seed-probe arms built and passed one focused test in a disposable Cargo
+repository, then removed their worktrees. Gate and CI run the suites.
 
 The delivery instruction is “ok lg2m ship it when it works”.
 

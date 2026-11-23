@@ -84,8 +84,10 @@ Each sample records wall seconds, CPU-seconds, peak RSS, units compiled and
 fresh from `cargo -v`, and the seed source with its distance in commits. It also
 records the bytes each command wrote into the target: the allocated size of files
 it created or replaced, found by comparing inode and mtime with a walk of
-`target/debug` before the command, counting hard links once. Every other file in a
-seeded target still shares its blocks with the source. Unlike APFS private-size
+`target/debug` before the command. Adding a hard link to an unchanged inode
+adds no bytes. The archived LOO-922 run included an inode's allocated size
+if Cargo gave it a new path during a command. The probe counts surviving seed
+allocations by inode and mtime as well. Unlike APFS private-size
 counters, this doesn't change when the source rebuilds. The probe removes each
 worktree after its sample, so its own targets never seed a later one. Shared-cache
 counters include other agents' compiles and are not recorded. The report gives

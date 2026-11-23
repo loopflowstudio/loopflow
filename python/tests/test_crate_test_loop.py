@@ -20,7 +20,10 @@ def probe(monkeypatch):
     return importlib.import_module("test_loop")
 
 
-def test_measurement_worktree_starts_cold_after_the_checkout_hook(probe, tmp_path, monkeypatch):
+@pytest.mark.parametrize("cold", [False, True])
+def test_measurement_worktree_keeps_the_hook_seed_only_when_warm(
+    probe, tmp_path, monkeypatch, cold
+):
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", "--quiet", repo], check=True)
     subprocess.run(
@@ -43,9 +46,23 @@ def test_measurement_worktree_starts_cold_after_the_checkout_hook(probe, tmp_pat
     hook.chmod(0o755)
     monkeypatch.setattr(probe, "ROOT", repo)
     tree = tmp_path / "measurement"
-    probe._add_cold_worktree(tree, "HEAD", os.environ.copy())
+    probe.add_worktree(tree, "HEAD", os.environ.copy(), cold=cold)
     assert (tree / "hook-ran").exists()
-    assert not (tree / "target").exists()
+    assert (tree / "target").exists() == (not cold)
+
+
+def test_seed_probe_counts_a_relinked_cargo_artifact_once(probe, tmp_path):
+    seed_probe = importlib.import_module("seed_probe")
+    deps = tmp_path / "deps"
+    deps.mkdir()
+    artifact = deps / "lf-hash"
+    artifact.write_bytes(b"old build")
+    before = seed_probe._allocations(tmp_path)
+    assert list(before.values()) == [artifact.stat().st_blocks * 512]
+
+    (tmp_path / "lf").hardlink_to(artifact)
+    artifact.rename(deps / "another-name")
+    assert seed_probe._allocations(tmp_path) == before
 
 
 def test_consecutive_edits_replace_the_committed_message_in_each_crate(probe, tmp_path):

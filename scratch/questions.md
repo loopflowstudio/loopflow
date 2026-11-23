@@ -29,3 +29,7 @@
 - The edit-to-test driver follows the cold arm of `seed_probe.py`: a missing
   target is already cold. If removing a target fails, the benchmark stops
   before recording a sample.
+
+- Kept the six recorded LOO-922 samples as measured. Their disk totals used
+  path, inode and mtime. Future samples count each inode and mtime once,
+  including when Cargo creates a new name for an existing artifact.

@@ -111,8 +111,7 @@ prompt once and hears the steer once.
     endpoint (`codex_app_server` stand-in).
 - `lf::commands::context::tests::a_wakeable_start_leaves_waiting_steers_to_the_wake`.
 - `tests/e2e/idle_wake.py` by hand on OpenCode and Pi (reopen leg), plus the
-  same reopen by hand on real Claude and Codex. Pi is not installed on this
-  Machine: `npm install -g` it at Machine level for the run.
+  same reopen by hand on real Claude and Codex.
 
 ## Surfaces
 

@@ -289,6 +289,15 @@ them. Nothing here needs WindowServer focus.
   to the window, which drives a SwiftUI `DragGesture`: sidebar Task rows
   reorder this way. A system drag (`.draggable`/`.dropDestination`, the
   Working Tasks grid) starts no dragging session from synthesized events.
+  What a drop sent is in the private home's `logs/lf.log`: grep
+  `desktop.dashboard.move` for its `member`, `destination` and `side`, and
+  `ok=` for the answer. To drop from a stale order, start a CLI
+  `lf desktop dashboard move working-tasks/task:<id> --destination task:<id>`
+  in the background and send the hook `drag` in the same command; the tiles
+  take full `task_…` IDs.
+- The hook directory is the one passed in `LOOPFLOW_QA_HOOK_DIR`; a leftover
+  `open` can start a second instance polling it, so check `pgrep -f` for one
+  app PID before sending commands.
 - Sidebar row clicks did not select a Task; `open -g -b <bundle id>
   'loopflow://<repo>/task/<id>'` does.
 - `osascript` quit hung with the screen locked; stop the app by PID.

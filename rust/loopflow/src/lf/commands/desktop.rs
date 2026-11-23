@@ -447,6 +447,20 @@ pub enum DesktopError {
 }
 
 impl DesktopError {
+    /// The served code for a refusal that changed nothing; an unreachable app
+    /// may have acted, so it stays with the caller's default.
+    pub(crate) fn refusal(error: &anyhow::Error) -> Option<loopflow_execution::engine::ErrorCode> {
+        use loopflow_execution::engine::ErrorCode;
+        match error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<Self>())?
+        {
+            Self::Argument(_) => Some(ErrorCode::Invalid),
+            Self::Target(_) => Some(ErrorCode::NotFound),
+            Self::Unreachable(_) => None,
+        }
+    }
+
     fn target(error: anyhow::Error) -> anyhow::Error {
         Self::Target(format!("{error:#}")).into()
     }
@@ -2085,14 +2099,14 @@ fn edit_tiles(
                 )
                 .into());
             }
-            return Ok(DesktopTileRecord::Tasks(
-                selections::reorder_task(&store, repository, &member.id, &to.id, *side).map_err(
-                    |error| match error {
-                        loopflow_execution::store::StoreError::NotFound => absent(member),
-                        error => error.into(),
-                    },
-                )?,
-            ));
+            return selections::reorder_task(&store, repository, &member.id, &to.id, *side)?
+                .map(DesktopTileRecord::Tasks)
+                .map_err(|id| {
+                    DesktopError::Target(format!(
+                        "{id} is not a Working Task here; nothing changed."
+                    ))
+                    .into()
+                });
         }
         TileBoard::Dashboard(id) => id,
     };

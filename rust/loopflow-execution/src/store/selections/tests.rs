@@ -275,7 +275,9 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
         [one, two]
     );
     assert_eq!(
-        selections::reorder_task(&store, &repo, two, one, None).unwrap(),
+        selections::reorder_task(&store, &repo, two, one, None)
+            .unwrap()
+            .unwrap(),
         [two, one]
     );
     assert_eq!(
@@ -311,20 +313,22 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
         [two, one, three]
     );
     assert_eq!(
-        selections::reorder_task(&store, &repo, three, two, None).unwrap(),
+        selections::reorder_task(&store, &repo, three, two, None)
+            .unwrap()
+            .unwrap(),
         [three, two, one]
     );
 
     let revisions = store.revisions().unwrap();
-    // A done Task is not a Working Tasks member; nothing is written.
-    assert!(selections::reorder_task(
-        &store,
-        &repo,
-        "task_44444444444444444444444444444444",
-        one,
-        None
-    )
-    .is_err());
+    // A done Task is not a Working Tasks member, as either side of a drop; the
+    // refusal names it and nothing is written.
+    let done = "task_44444444444444444444444444444444";
+    for (task, to) in [(done, one), (one, done)] {
+        assert_eq!(
+            selections::reorder_task(&store, &repo, task, to, None).unwrap(),
+            Err(done)
+        );
+    }
     assert_eq!(store.revisions().unwrap(), revisions);
     assert_eq!(
         selections::view_plan(&store, &repo, None)

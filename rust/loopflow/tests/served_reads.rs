@@ -211,6 +211,28 @@ fn working_task_drop_keeps_its_side_after_another_window_reorders() {
         assert_eq!(working(), expected);
     }
 
+    // A drop onto a Task that has left Working is refused by name, and the
+    // client hears that nothing happened.
+    let gone = "task_00000000000000000000000000000000";
+    let refused = loopflow_execution::machine::client::Connection::open()
+        .unwrap()
+        .request(loopflow::server::wire::Operation::Write(move_tile(
+            &b,
+            gone,
+            Some(DropSide::Before),
+        )))
+        .unwrap_err()
+        .downcast::<loopflow_execution::engine::Error>()
+        .unwrap();
+    assert_eq!(
+        (refused.code, refused.message.as_str()),
+        (
+            loopflow_execution::engine::ErrorCode::NotFound,
+            "task_00000000000000000000000000000000 is not a Working Task here; nothing changed."
+        )
+    );
+    assert_eq!(working(), [c.as_str(), a.as_str(), b.as_str()]);
+
     // A saved board can move the same Tasks without changing their shared order.
     server_write(Write::DesktopDashboardQuery {
         directory: repo.path().to_owned(),

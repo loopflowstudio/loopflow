@@ -1607,7 +1607,12 @@ async fn effect(
                 tracing::info!(request = %id, %trace_id, diagnostic = line, "Server command diagnostic");
             }
             tracing::info!(request = %id, %instance, %trace_id, ok = result.is_ok(), "Server command finished");
-            result.map_err(|error| Error::written(&error))
+            result.map_err(|error| {
+                match crate::lf::commands::desktop::DesktopError::refusal(&error) {
+                    Some(code) => Error::new(code, format!("{error:#}")),
+                    None => Error::written(&error),
+                }
+            })
         })
     })
     .await

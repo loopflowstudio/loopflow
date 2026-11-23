@@ -278,13 +278,15 @@ pub fn save_dashboard(
     }
 }
 
-pub fn reorder_task(
+/// Moves `task` beside `to` in the shared Working order. The inner `Err` names
+/// whichever of the two is not a Working Task here; nothing is written then.
+pub fn reorder_task<'a>(
     store: &SqliteStore,
     repository: &RepositoryId,
-    task: &str,
-    to: &str,
+    task: &'a str,
+    to: &'a str,
     side: Option<DropSide>,
-) -> StoreResult<Vec<String>> {
+) -> StoreResult<Result<Vec<String>, &'a str>> {
     for _ in 0..3 {
         let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
         let Some((read, work)) =
@@ -300,17 +302,14 @@ pub fn reorder_task(
             )
             .map_err(StoreError::from)?;
         let mut order = resolution.task_ids();
-        let from = order
-            .iter()
-            .position(|id| id == task)
-            .ok_or(StoreError::NotFound)?;
-        let target = order
-            .iter()
-            .position(|id| id == to)
-            .ok_or(StoreError::NotFound)?;
+        let position = |id: &'a str| order.iter().position(|working| working == id).ok_or(id);
+        let (from, target) = match (position(task), position(to)) {
+            (Ok(from), Ok(target)) => (from, target),
+            (Err(absent), _) | (_, Err(absent)) => return Ok(Err(absent)),
+        };
         move_into_place(&mut order, from, target, side);
         if store.commit_task_order(repository, &read, &order)? {
-            return Ok(order);
+            return Ok(Ok(order));
         }
     }
     Err(StoreError::Stale(

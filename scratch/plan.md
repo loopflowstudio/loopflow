@@ -114,6 +114,10 @@ navigation and the key-window sidebar filters. [Pre-implementation review](conce
 - `scripts/test_desktop.sh --filter 'workingTaskDropAcrossReceipt|refusedWorkingTaskDrop|sidebarAndGridShareTheOrderTheRustWriterReturns|draggedRowLandsOnRelease|droppingTileCOnAMovesItThroughTheSharedOrderCommand'`
   passed all five tests, including the grid drop with an absent source and the
   destination-only saved Dashboard move.
+- QA round 2 ([QA](qa.html) §6): a stale sidebar drag in the hooked app sent
+  `D before A` and the Machine saved C, B, D, A over the newer order. A
+  refused drop now names the absent Task and returns `not_found` over the
+  socket instead of `outcome_unknown`. `served_reads` checks it.
 
 ## Gate
 

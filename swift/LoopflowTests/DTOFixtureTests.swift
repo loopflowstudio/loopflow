@@ -24,6 +24,15 @@ struct DTOFixtureTests {
         #expect(card.session.raw == false)
     }
 
+    @Test func providerTransitionRoundTrips() throws {
+        let data = try loadFixtureData("provider_transition.json")
+        let transition = try JSONDecoder().decode(ProviderTransition.self, from: data)
+        #expect(transition.kind == .forked)
+        let encoded = try JSONEncoder().encode(transition)
+        let wire = try #require(JSONSerialization.jsonObject(with: data) as? NSDictionary)
+        #expect(try JSONSerialization.jsonObject(with: encoded) as? NSDictionary == wire)
+    }
+
     @Test func sessionEncodingKeepsRequiredNullableTurnFields() throws {
         let session = try JSONDecoder().decode(SessionRecord.self, from: loadFixtureData("session.json"))
         let encoded = try JSONEncoder().encode(session)

@@ -38,13 +38,13 @@ struct ServerConnectionTests {
         let connection = ServerConnection()
         defer { connection.stop() }
         try connection.start { _ in }
-        #expect(connection.reading.title == "Opening… Input paused.")
+        #expect(connection.reading.title == nil)
         #expect(!connection.reading.acceptsInput)
         let relay = try Relay(connection)
         try relay.publish(generation: 1, state: "connected", nativeReady: false)
         try await wait { connection.reading.state == .connected }
         #expect(!connection.reading.acceptsInput)
-        #expect(connection.reading.title == ServerConnectionReading.openingTitle)
+        #expect(connection.reading.title == nil)
         #expect(connection.reading.attachment == .opening)
         try relay.publish(generation: 1, state: "connected")
         try await wait { connection.reading.acceptsInput }
@@ -60,28 +60,29 @@ struct ServerConnectionTests {
         #expect(connection.reading.attachment == .usable)
     }
 
-    @Test func providerTransitionSurvivesTheStatusStreamAndWaitsForNativeReadiness() async throws {
+    @Test func resumedRelayPayloadKeepsHeaderHiddenAcrossNativeReadiness() async throws {
         let connection = ServerConnection()
         defer { connection.stop() }
         try connection.start { _ in }
         let relay = try Relay(connection)
-        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/provider_transition.json")
-        let transition = try JSONSerialization.jsonObject(with: Data(contentsOf: fixture))
-        var reading: [String: Any] = ["generation": 1, "state": "connected",
-                                    "native_ready": false, "message": NSNull(), "transition": transition]
-        var bytes = try JSONSerialization.data(withJSONObject: reading)
-        bytes.append(10)
-        try relay.write(bytes)
-        try await wait { connection.reading.transition != nil }
-        #expect(!connection.reading.acceptsInput)
-        #expect(connection.reading.title == ServerConnectionReading.openingTitle)
-        reading["native_ready"] = true
-        bytes = try JSONSerialization.data(withJSONObject: reading)
-        bytes.append(10)
-        try relay.write(bytes)
-        try await wait { connection.reading.acceptsInput }
-        #expect(connection.reading.title == "Forked from earlier; original was running at fork")
+        let transition: [String: Any] = [
+            "kind": "resumed", "from_provider_session": "thread", "to_provider_session": "thread",
+            "from_agent_process": "44444444-4444-4444-8444-444444444444",
+            "to_agent_process": "55555555-5555-4555-8555-555555555555",
+            "original_running": NSNull(), "seed": NSNull(), "observed_at": 1794100000,
+        ]
+        for ready in [false, true] {
+            var bytes = try JSONSerialization.data(withJSONObject: [
+                "generation": 1, "state": "connected", "native_ready": ready,
+                "message": NSNull(), "transition": transition,
+            ])
+            bytes.append(10)
+            try relay.write(bytes)
+            try await wait { connection.reading.state == .connected && connection.reading.nativeReady == ready }
+            #expect(connection.reading.title == nil)
+            #expect(connection.reading.acceptsInput == ready)
+            #expect(connection.reading.attachment == (ready ? .usable : .opening))
+        }
     }
 
     @Test func brokenStatusStreamPausesInputAndFreshStreamRestoresIt() async throws {
@@ -94,6 +95,7 @@ struct ServerConnectionTests {
         relay = nil
         try await wait { connection.reading.state == .unavailable }
         #expect(!connection.reading.acceptsInput)
+        #expect(connection.reading.title == "Connection status unavailable. Input paused.")
         #expect(!connection.canRetry)
         relay = try Relay(connection)
         try relay?.publish(generation: 2, state: "connected")
@@ -124,6 +126,8 @@ struct ServerConnectionTests {
         let relay = try Relay(connection)
         try relay.publish(generation: 3, state: "unavailable")
         try await wait { connection.reading.generation == 3 }
+        #expect(connection.reading.title == "Session unavailable. Input paused; last screen may be stale.")
+        #expect(connection.canRetry)
         connection.retry()
         #expect(try relay.action() as? [String: String] == ["kind": "retry"])
         try relay.publish(generation: 3, state: "connected")

@@ -6,27 +6,17 @@
 
 Open a Task’s conversation and continue when the pane accepts input. The terminal starts immediately below the provider and program status strip during initial opening and after a resume, fork, reattach or fresh start. While preparing before the terminal mounts, `SessionOpeningView` shows a quiet spinner (or retained screen) with no `"Opening… Input paused."` header. Input stays paused until attachment and native input readiness arrive, without rendering `connectionBar`. `connectionBar` appears only for disconnection, unavailability, or end states (`.reconnecting`, `.unavailable`, `.ended`). **Retry connection** is available when the relay can receive it. **Refresh session** can reopen the viewer if the status connection is gone. Recorded provider changes are available in `lf session history <session>`.
 
-## Design
+## Implementation
 
-The Session is the conversation. Its provider thread can run in another process while the Session keeps its identity. The pane is a view of that conversation and can reconnect independently of the provider. Today `ProviderTransitionRow` describes the last recorded provider change, `GhosttyTerminalView.connectionBar` overlays `"Opening… Input paused."` during initial connection and repeats the transition text once ready, and `SessionOpeningView` also renders `"Opening… Input paused."`. After another relay reconnect to the same process, the two transition messages can even describe different moments. [Concept review](concept-review.html)
+The provider and status strip leads straight into pane content. During preparation the spinner has a VoiceOver label and any retained output stays readable. Once the terminal mounts, only reconnecting, unavailable and ended readings have a title. Native readiness still controls attachment, keyboard input and focus restoration.
 
-Keep input gating (`acceptsInput` / `toggle_readonly`), `attachment == .opening`, retained screen, and focus restoration intact, and return `nil` from `ServerConnectionReading.title` for both `.connecting` and `.connected`. That keeps `connectionBar` hidden (zero height) during normal opening and connected operation, showing it only for `.reconnecting`, `.unavailable`, and `.ended` (with their existing messages, fallbacks, controls, and retirement reasons from LOO-774). Drop the `"Opening… Input paused."` text label from `SessionOpeningView`, keeping only the quiet spinner over any retained screen. The strip continues to report provider and program status.
+Desktop ignores the relay’s transition field. Older clients still receive it, and the Session DTO still carries recorded transitions. The recovery controls and close reasons follow the existing status channel. [Original concept review](concept-review.html)
 
-Remove `ProviderTransitionRow`, its Swift explanation formatter, `ServerConnectionReading.openingTitle`, and the unused `transition` member of Desktop’s `ServerConnectionReading`. Swift can decode the older relay payload by ignoring that key. Keep the Rust relay publisher and the Session DTO wire shape for existing clients. Storage continues to record observed provider changes, including fresh threads when native history cannot be restored. The existing launch diagnostics and failure paths still report what happened during opening.
+## Checks
 
-## Build and check
+`scripts/test_desktop.sh --skip-build --filter 'ServerConnectionTests|providerTransitionRoundTrips|openingSessionShowsProgressOverItsRetainedScreen|sessionStripShowsProviderWithoutTransitionHeader|queuedWorkingTaskShowsOpening|visibleTilesOpenWithoutSavedVisits|primaryPaneNeverOffersAnOpenGate'` passed all 13 tests headlessly after `swift build --build-tests --package-path swift`.
 
-1. Remove `ProviderTransitionRow`, the `"Opening… Input paused."` label in `SessionOpeningView`, `ServerConnectionReading.title` for `.connecting`/`.connected`, and the unused relay decoder member in one slice:
-   - In `WorkspacePanesTests.swift`, check that a resumed or new-conversation `SessionRecord` shows the provider strip without transition text, and that `SessionOpeningView` shows no `"Opening… Input paused."` text.
-   - In `WorkCacheTests.swift`, update any opening-view assertion expecting `"Opening… Input paused."`.
-   - In `ServerConnectionTests.swift`, send the old relay payload including a resumed transition. Wait for the connection reading, assert `title == nil`, `attachment == .opening`, and input paused (`!acceptsInput`). Publish native readiness for the same generation and payload and assert `title == nil`, `attachment == .usable`, and input enabled (`acceptsInput`). Keep the existing reconnect, unavailable/Retry, and orderly-close cases verifying that `connectionBar` still appears for `.reconnecting`, `.unavailable`, and `.ended`.
-   - Move the shared `provider_transition.json` fixture check from the deleted presentation test in `CreationSubmissionTests.swift` to `DTOFixtureTests.swift` as a `ProviderTransition` round trip.
-2. Docs written in place:
-   - `docs/sessions.md`
-   - `swift/README.md`
-   - `docs/troubleshooting.md`
-   - `rust/loopflow-execution/src/transport/README.md`
-   - `docs/server.md`
+Gate owns the wider Desktop suites and the `documented_commands::` check. The live Desktop demo remains.
 
 **Gate.** `scripts/test_desktop.sh --filter 'WorkspacePanesTests|CreationSubmissionTests|ServerConnectionTests|DTOFixtureTests|WorkCacheTests' </dev/null` exercises all consumers and the wire fixture headlessly. Resumed and fresh Sessions keep their strip with no transition or opening headers, input stays paused until native readiness arrives, and `.reconnecting`, `.unavailable`/Retry, and `.ended` close reasons still render and pass.
 

@@ -377,8 +377,9 @@ surface cancels recovery. Ordinary explicit Open remains separate.
 The native surface listens on a private Unix socket and passes its path through
 `LF_SERVER_STATUS` to its relay. Newline-delimited JSON readings carry
 generation, state (`connecting`, `reconnecting`, `connected`, `unavailable`,
-`ended`), native readiness and optional explanation; Desktop takes input while
-the state is `connected`. The one action on the same stream is
+`ended`), native readiness, an optional message and the provider transition
+for older clients. Desktop accepts input when the state is `connected` and
+`native_ready` is true. The one action on the same stream is
 `{"kind":"retry"}`, honored only while `unavailable`; lost actions are never
 replayed. Closing the surface removes its private directory and cancels recovery. A
 broken status stream pauses Desktop input immediately; the relay records the

@@ -272,9 +272,11 @@ pub struct SessionWork {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkSource {
+    // History before 2026-10-08 says "inherited" for a Task declared through
+    // the Session that started this one.
+    #[serde(alias = "inherited")]
     Declared,
     Checkout,
-    Inherited,
     Bound,
 }
 
@@ -496,4 +498,16 @@ pub fn task_session_title(
         .chars()
         .take(80)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WorkSource;
+
+    #[test]
+    fn history_that_says_inherited_reads_as_declared() {
+        let source: WorkSource = serde_json::from_str("\"inherited\"").unwrap();
+        assert_eq!(source, WorkSource::Declared);
+        assert_eq!(serde_json::to_string(&source).unwrap(), "\"declared\"");
+    }
 }

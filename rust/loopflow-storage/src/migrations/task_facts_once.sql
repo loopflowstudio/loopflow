@@ -87,6 +87,9 @@ BEGIN UPDATE tasks SET planning_completed=(NEW.planning_state IS 'completed') WH
 -- and a Wave's are: `primary_scope='task'`, and the row's `task_id` names the
 -- Task, so "which Task" is written once. SQLite cannot alter a CHECK, so the
 -- table is rebuilt with its column order, indexes and triggers.
+-- The same rebuild drops `work_source='inherited'`, unwritten since
+-- 2026-10-07: those rows declared their Task through the Session that started
+-- them, which is `declared`.
 PRAGMA legacy_alter_table = ON;
 CREATE TABLE agent_sessions_task_primary (
     id TEXT PRIMARY KEY NOT NULL,
@@ -101,7 +104,7 @@ CREATE TABLE agent_sessions_task_primary (
     provider_thread TEXT,
     task_id TEXT REFERENCES tasks(id),
     wave_id TEXT REFERENCES waves(id),
-    work_source TEXT CHECK (work_source IN ('declared', 'checkout', 'inherited', 'bound')),
+    work_source TEXT CHECK (work_source IN ('declared', 'checkout', 'bound')),
     bound_at INTEGER,
     input_published INTEGER NOT NULL CHECK(input_published IN (0,1)),
     cwd TEXT NOT NULL,
@@ -116,7 +119,7 @@ CREATE TABLE agent_sessions_task_primary (
     CHECK (primary_scope IS NOT 'task' OR task_id IS NOT NULL)
 );
 INSERT INTO agent_sessions_task_primary(id,current_capture,title,title_source,completed_at,created_at,request,interactive,repo,provider_thread,task_id,wave_id,work_source,bound_at,input_published,cwd,skill,provider,model,primary_scope,agent_process_id,transport_lf_process_id,fence_locator,moved_to_machine_id,held_terminal_id,skill_version,opened_at,transition,departed_attachment,departure,agent_started_at,agent_pid,agent_os_started_at,agent_ended_at,agent_exit_code,agent_launcher_lf_process_id,agent_spawn_state,agent_command,agent_interactive,agent_endpoint,agent_inbox,attachment_token,attached_lf_process_id,attached_pid,attached_os_started_at,attached_terminal_id,starts_since_turn,last_started_at,start_failure)
-SELECT s.id,s.current_capture,s.title,s.title_source,s.completed_at,s.created_at,s.request,s.interactive,s.repo,s.provider_thread,s.task_id,s.wave_id,s.work_source,s.bound_at,s.input_published,s.cwd,s.skill,s.provider,s.model,CASE WHEN s.primary_scope IS NULL AND EXISTS(SELECT 1 FROM task_primary_sessions tps
+SELECT s.id,s.current_capture,s.title,s.title_source,s.completed_at,s.created_at,s.request,s.interactive,s.repo,s.provider_thread,s.task_id,s.wave_id,CASE s.work_source WHEN 'inherited' THEN 'declared' ELSE s.work_source END,s.bound_at,s.input_published,s.cwd,s.skill,s.provider,s.model,CASE WHEN s.primary_scope IS NULL AND EXISTS(SELECT 1 FROM task_primary_sessions tps
         WHERE tps.session_id=s.id AND tps.task_id IS s.task_id) THEN 'task' ELSE s.primary_scope END,s.agent_process_id,s.transport_lf_process_id,s.fence_locator,s.moved_to_machine_id,s.held_terminal_id,s.skill_version,s.opened_at,s.transition,s.departed_attachment,s.departure,s.agent_started_at,s.agent_pid,s.agent_os_started_at,s.agent_ended_at,s.agent_exit_code,s.agent_launcher_lf_process_id,s.agent_spawn_state,s.agent_command,s.agent_interactive,s.agent_endpoint,s.agent_inbox,s.attachment_token,s.attached_lf_process_id,s.attached_pid,s.attached_os_started_at,s.attached_terminal_id,s.starts_since_turn,s.last_started_at,s.start_failure
 FROM agent_sessions s;
 DROP TABLE agent_sessions;

@@ -18,7 +18,7 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::session::{LfSession, WorkSource};
+use crate::session::LfSession;
 use crate::session_record::SessionTitleSource;
 use crate::store::SharedStore;
 use loopflow_model::durable::WorkRef;
@@ -1152,11 +1152,7 @@ pub(crate) fn capture_subjects(
     work_selector(session)
         .map(|selector| crate::session_record::SubjectAttribution {
             selector,
-            source: if session.work_source == Some(WorkSource::Inherited) {
-                crate::session_record::AttributionSource::Inherited
-            } else {
-                crate::session_record::AttributionSource::Declared
-            },
+            source: crate::session_record::AttributionSource::Declared,
         })
         .into_iter()
         .collect()

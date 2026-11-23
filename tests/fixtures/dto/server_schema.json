@@ -15884,7 +15884,6 @@
       "enum": [
         "declared",
         "checkout",
-        "inherited",
         "bound"
       ],
       "type": "string"

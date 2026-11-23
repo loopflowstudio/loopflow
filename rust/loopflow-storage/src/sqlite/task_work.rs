@@ -1265,6 +1265,8 @@ mod tests {
                 (SELECT id FROM machines WHERE is_local=1),1 FROM n;
              INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
              VALUES('bound','Bound','human',1,0,'/repo/999','task_00000000000000000000000000000001');
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,work_source)
+             VALUES('inherited','Inherited','human',1,0,'/tmp','task_00000000000000000000000000000002','inherited');
              INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES
                 ('helper','Helper','human',1,0,'/repo/99/sub'),
                 ('nested','Nested','human',1,0,'/repo/1/x'),
@@ -1295,6 +1297,8 @@ mod tests {
             [
                 ("bound".into(), task(1), None),
                 ("helper".into(), task(99), checkout.clone()),
+                // A Task declared through the starting Session is declared.
+                ("inherited".into(), task(2), Some("declared".into())),
                 ("nested".into(), task(1), checkout),
                 ("outside".into(), None, None),
                 ("primary".into(), task(5), None),

@@ -144,3 +144,22 @@ def test_low_disk_stops_before_cache_or_worktree_setup(probe, tmp_path, monkeypa
     with pytest.raises(SystemExit, match="repository reserve"):
         probe.main()
     assert not list(output.iterdir())
+
+
+@pytest.mark.parametrize("complete", [True, False])
+def test_resume_after_worktree_loss_uses_only_complete_receipts(
+    probe, tmp_path, monkeypatch, complete
+):
+    state = tmp_path / "configuration.json"
+    original = json.dumps({"cohorts": 3, "temporary": str(tmp_path / "gone")})
+    state.write_text(original)
+    rows = _receipts(probe)
+    (tmp_path / "receipts.json").write_text(json.dumps(rows if complete else rows[:-1]))
+    monkeypatch.setattr("sys.argv", ["test_loop.py", "--output", str(tmp_path), "--resume"])
+    if complete:
+        probe.main()
+    else:
+        with pytest.raises(SystemExit, match="cache and worktrees missing"):
+            probe.main()
+    assert (tmp_path / "passed.json").exists() == complete
+    assert state.read_text() == original

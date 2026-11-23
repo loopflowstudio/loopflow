@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -17,7 +18,7 @@ import build_cache  # noqa: E402
 from resource_envelope import load_policy  # noqa: E402
 
 
-def _compiler(group: int) -> tuple[int, str] | None:
+def _execution_compiler(group: int) -> int | None:
     rows = subprocess.check_output(["ps", "-ww", "-axo", "pgid=,pid=,command="], text=True)
     for row in rows.splitlines():
         fields = row.split(None, 3)
@@ -28,9 +29,20 @@ def _compiler(group: int) -> tuple[int, str] | None:
             continue
         name = args[args.index("--crate-name") + 1]
         emits = args[args.index("--emit") + 1].split(",")
-        if name in {"tokio", "rustls", "loopflow_storage"} and "link" in emits:
-            return int(fields[1]), name
+        if name == "loopflow_execution" and "link" in emits:
+            return int(fields[1])
     return None
+
+
+def _wait_for_exit(pid: int) -> None:
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.1)
+    raise RuntimeError("original cache daemon still alive after its ten-second drain")
 
 
 def main() -> None:
@@ -80,7 +92,9 @@ def main() -> None:
             stderr=subprocess.DEVNULL,
         )
         old_pid = build_cache.daemon_pid(env["SCCACHE_SERVER_UDS"])
-        package, selected = FILTERS["execution"]
+        if old_pid is None:
+            raise RuntimeError("private daemon failed to start")
+        package, selected = FILTERS["app"]
         command = ["cargo", "test", "--locked", "-p", package, "--lib", selected, "--", "--exact"]
         observation = {"command": command, "wrapper": str(wrapper), "original_daemon": old_pid}
         with (output / "cargo.log").open("w") as log:
@@ -96,12 +110,15 @@ def main() -> None:
             try:
                 while build.poll() is None:
                     _require_disk(root, reserve)
-                    if not b.exists() and (compiler := _compiler(build.pid)):
+                    if not b.exists() and (pid := _execution_compiler(build.pid)):
+                        started = time.monotonic()
                         add(b)
+                        _wait_for_exit(old_pid)
                         observation.update(
-                            compiler_pid=compiler[0],
-                            compiler=compiler[1],
-                            compiler_still_running=_compiler(build.pid) == compiler,
+                            compiler_pid=pid,
+                            compiler="loopflow_execution",
+                            registration_and_drain_seconds=round(time.monotonic() - started, 3),
+                            compiler_outlived_daemon=_execution_compiler(build.pid) == pid,
                         )
                     try:
                         build.wait(timeout=1 if b.exists() else 0.2)
@@ -124,8 +141,7 @@ def main() -> None:
         if build.returncode or not observation["test_passed"]:
             raise RuntimeError(f"focused test failed; see {output / 'cargo.log'}")
         if not (
-            observation.get("compiler_still_running")
-            and old_pid
+            observation.get("compiler_outlived_daemon")
             and new_pid
             and old_pid != new_pid
             and observation["new_root_loaded"]

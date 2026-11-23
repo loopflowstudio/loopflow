@@ -350,7 +350,7 @@ connections on the socket, the loaded roots and cache counters.
 
 | `status` exit | Meaning | Next command |
 |---|---|---|
-| 0 | The root is loaded, or listed for the next daemon start | `cargo build` |
+| 0 | The root is loaded, or listed for the next daemon start | Run the focused Cargo command |
 | 3 | The serving daemon lacks this root | `uv run python scripts/build_cache.py register` |
 | 1 | Check the wrapper, socket owner or reported configuration error | `uv run python scripts/build_cache.py install` |
 

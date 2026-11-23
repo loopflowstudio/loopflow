@@ -1,6 +1,7 @@
 """Measure serial edits through passing focused tests in linked worktrees."""
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -164,24 +165,51 @@ def main() -> None:
         parser.error("at least three cohorts are required")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    directory = os.open(output, os.O_RDONLY)
+    try:
+        try:
+            fcntl.flock(directory, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            parser.error(f"measurement already running in {output}")
+        # Only the Unix socket needs a short, temporary pathname.
+        with tempfile.TemporaryDirectory(prefix="lf921-", dir="/tmp") as short:
+            _measure(output, args.cohorts, args.resume, Path(short) / "cache.sock")
+    finally:
+        os.close(directory)
+
+
+def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
     state = output / "configuration.json"
     receipts_path = output / "receipts.json"
-    if state.exists() and not args.resume:
-        parser.error("output already exists; use --resume")
-    if args.resume and (output / "passed.json").exists():
+    if state.exists() and not resume:
+        raise SystemExit("output already exists; use --resume")
+    if resume and not state.exists():
+        raise SystemExit(f"no measurement configuration to resume in {output}")
+    if resume:
         config = json.loads(state.read_text())
-        validate(
-            json.loads(receipts_path.read_text()),
-            config["cohorts"],
-            config.get("calibration_cohorts", []),
-        )
-        print(f"Measurement already complete: {output}")
-        return
+        passed = output / "passed.json"
+        if passed.exists() or not Path(config["temporary"]).is_dir():
+            try:
+                validate(
+                    json.loads(receipts_path.read_text()),
+                    config["cohorts"],
+                    config.get("calibration_cohorts", []),
+                )
+            except (FileNotFoundError, ValueError) as error:
+                if passed.exists():
+                    raise
+                raise SystemExit(
+                    f"incomplete measurement; cache and worktrees missing: {config['temporary']}"
+                ) from error
+            if not passed.exists():
+                _write(passed, {"passed": True})
+            print(f"Measurement already complete: {output}")
+            return
     reserve = load_policy().minimum_free_disk_bytes
     _require_disk(output, reserve)
     cache, cargo_env = configured_cache()
     if not cache or not cache.exists():
-        parser.error("run scripts/build_cache.py install first")
+        raise SystemExit("run scripts/build_cache.py install first")
     env = {
         k: v
         for k, v in os.environ.items()
@@ -190,24 +218,23 @@ def main() -> None:
     }
     env.update(cargo_env)
     revision = _run(["git", "rev-parse", "HEAD"], ROOT, env)
-    if args.resume:
-        config = json.loads(state.read_text())
-        args.cohorts = max(config["cohorts"], args.cohorts)
-        config["cohorts"] = args.cohorts
+    if resume:
+        cohorts = max(config["cohorts"], cohorts)
+        config["cohorts"] = cohorts
         revision = config["revision"]
         config.setdefault("drivers", []).append(
             hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
         )
-        _write(state, config)
         root = Path(config["temporary"])
         if config["cache_sha256"] != hashlib.sha256(cache.read_bytes()).hexdigest():
             raise ValueError("resume cache binary differs")
+        _write(state, config)
     else:
-        root = Path(tempfile.mkdtemp(prefix="lf921-", dir="/tmp")).resolve()
+        root = Path(tempfile.mkdtemp(prefix="worktrees-", dir=output))
         config = {
             "revision": revision,
             "drivers": [hashlib.sha256(Path(__file__).read_bytes()).hexdigest()],
-            "cohorts": args.cohorts,
+            "cohorts": cohorts,
             "temporary": str(root),
             "cache": str(cache),
             "cache_sha256": hashlib.sha256(cache.read_bytes()).hexdigest(),
@@ -227,17 +254,17 @@ def main() -> None:
     # Give the hook the same private inventory and socket as the compilers.
     env.update(
         SCCACHE_DIR=str(root / "cache"),
-        SCCACHE_SERVER_UDS=str(root / "cache.sock"),
+        SCCACHE_SERVER_UDS=str(socket),
         SCCACHE_CONF=str(root / "roots.json"),
     )
     receipts = json.loads(receipts_path.read_text()) if receipts_path.exists() else []
     # Register every measured root before starting the private daemon. Creating a
     # worktree is timed separately and included in its first sample's wall time.
     specs = [(0, mode, "seed") for mode in ("cache", "incremental")] + [
-        (c, m, "mixed") for c in range(1, args.cohorts + 1) for m in ("cache", "incremental")
+        (c, m, "mixed") for c in range(1, cohorts + 1) for m in ("cache", "incremental")
     ]
-    specs += [(c, "cache", "execution") for c in range(1, args.cohorts + 1)]
-    if args.resume:
+    specs += [(c, "cache", "execution") for c in range(1, cohorts + 1)]
+    if resume:
         for cohort, mode, group in specs:
             key = f"{cohort}_{mode}_{group}"
             item = config["trees"].get(key)
@@ -459,7 +486,7 @@ def main() -> None:
             if child.returncode or receipt["tests_passed"] != 1:
                 raise RuntimeError(f"focused test failed: {output / (stem + '.log')}")
 
-        for cohort in range(args.cohorts + 1):
+        for cohort in range(cohorts + 1):
             if cohort in config.get("calibration_cohorts", []):
                 continue
             modes = (
@@ -481,8 +508,7 @@ def main() -> None:
                 sample(cohort, "cache", "execution", "execution_new", "execution", True)
                 tree = Path(config["trees"][f"{cohort}_cache_execution"]["path"])
                 shutil.rmtree(tree / "target", ignore_errors=True)
-        validate(receipts, args.cohorts, config.get("calibration_cohorts", []))
-        _write(output / "passed.json", {"passed": True})
+        validate(receipts, cohorts, config.get("calibration_cohorts", []))
         for item in config["trees"].values():
             tree = Path(item["path"])
             if tree.exists():
@@ -490,8 +516,8 @@ def main() -> None:
     finally:
         _run([str(cache), "--stop-server"], ROOT, env)
         print(f"Receipts: {output}; experiment state: {root}", flush=True)
-    if (output / "passed.json").exists():
-        shutil.rmtree(root)
+    shutil.rmtree(root)
+    _write(output / "passed.json", {"passed": True})
 
 
 if __name__ == "__main__":

@@ -6,8 +6,8 @@ uv run python scripts/benchmarks/crate-rebuild/probe.py --sccache /path/to/sccac
 uv run python scripts/benchmarks/crate-rebuild/cochange.py --revision HEAD --count 80
 uv run python scripts/benchmarks/crate-rebuild/run.py --base 3fbf3d2ca3 --candidate HEAD --sccache /path/to/sccache --output /tmp/lf-build-comparison
 uv run python scripts/benchmarks/crate-rebuild/report.py --input /tmp/lf-build-comparison --cache-validation /tmp/lf-root-proof --output scripts/benchmarks/crate-rebuild/results
-uv run python scripts/benchmarks/crate-rebuild/test_loop.py --output /tmp/lf-test-loop
-uv run python scripts/benchmarks/crate-rebuild/report.py --test-loop /tmp/lf-test-loop --output scripts/benchmarks/crate-rebuild/results
+uv run python scripts/benchmarks/crate-rebuild/test_loop.py --output ~/.cache/loopflow/measurements/loo-921
+uv run python scripts/benchmarks/crate-rebuild/report.py --test-loop ~/.cache/loopflow/measurements/loo-921 --output scripts/benchmarks/crate-rebuild/results
 ```
 
 [LOO-650 results](results/loo-650.html) include all five pairs and their raw receipts.
@@ -35,13 +35,14 @@ only one mode leaves the other cold. Seeds are excluded from the samples.
 Each cohort runs every row once, alternating which mode goes first; three
 cohorts is the minimum. Edits are unique to their cohort, so none can retrieve
 an earlier edited artifact. Worktrees and targets are removed after their
-samples. Cargo commands run one at a time. The existing repository disk reserve
-is
-checked before and during builds; crossing it stops only the experiment
-process group and retains its receipts. No Machine cache or other checkout is
-cleaned. After an exited run, `--resume` with the same output directory retains completed groups. An interrupted group starts
-again with distinct edits and a fresh target; its earlier raw attempts move to
-`abandoned-attempts/` so partially compiled artifacts cannot bias its samples.
+samples. Cargo commands run one at a time. The driver checks the repository
+disk reserve before and during each build. Crossing it stops the experiment's
+process group. The private cache and worktrees stay beside the receipts until
+the run passes. Only the Unix socket needs a short path under `/tmp`.
+
+After an interruption, `--resume` with the same output directory retains
+completed groups. An incomplete group starts with distinct edits and a fresh
+target. Earlier attempts move to `abandoned-attempts/`.
 
 Each sample records wall seconds, client CPU-seconds, the largest single
 process RSS, the peak summed RSS of the Cargo process tree, and the daemon's
@@ -69,9 +70,11 @@ uv run python scripts/build_cache.py install
 uv run python scripts/benchmarks/crate-rebuild/stop_probe.py --output /tmp/lf-stop-proof
 ```
 
-The probe runs a focused execution test in one linked Loopflow worktree. While
-a cacheable library is compiling, it adds another worktree through Git. Both
-use the installed registration hook and pin with a private inventory, socket
+The probe runs a focused application test in one linked Loopflow worktree.
+While rustc compiles the execution library, it adds a second worktree through
+Git. It checks that the same compiler is still running after the original
+daemon exits, so its cache write arrives after the shutdown grace period.
+Both worktrees use the installed hook and pin with a private inventory, socket
 and cache. Idle exit is disabled for this experiment. `stop.json` records the
 compiler PID observed across registration, the original and replacement daemon
 PIDs, whether the replacement loaded the second root, and the Cargo and test

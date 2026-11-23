@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-1067 · Concept Review — Task Inspector &amp; File Browser</title>
+<title>LOO-1067 · Post-Build Concept Review — Task Inspector &amp; File Browser</title>
 <style>
   :root {
     --bg: #ffffff;
@@ -61,7 +61,7 @@
   header {
     border-bottom: 1px solid var(--border);
     padding-bottom: 20px;
-    margin-bottom: 28px;
+    margin-bottom: 24px;
   }
   .eyebrow {
     font: 600 11px/1.2 var(--mono);
@@ -85,7 +85,7 @@
     border-top: 1px solid var(--border);
   }
   h3 {
-    margin: 20px 0 8px;
+    margin: 22px 0 8px;
     font-size: 14px;
     font-weight: 600;
   }
@@ -106,7 +106,13 @@
     padding: 14px 16px;
     margin: 14px 0 0;
   }
-  .scope-box strong { color: var(--text); }
+  .verdict-box {
+    background: var(--warn-bg);
+    border: 1px solid rgba(180, 83, 9, 0.35);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 14px 0 0;
+  }
   .legend {
     display: flex;
     flex-wrap: wrap;
@@ -126,11 +132,10 @@
   }
   .badge-yes { background: var(--ok-bg); color: var(--ok); }
   .badge-no { background: var(--no-bg); color: var(--no); }
-  .badge-existing { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border); }
+  .badge-built { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border); }
   .badge-proposed { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-border); }
   .badge-choice { background: var(--warn-bg); color: var(--warn); }
 
-  /* Table */
   .table-wrap {
     overflow-x: auto;
     border: 1px solid var(--border);
@@ -157,11 +162,10 @@
     color: var(--text-2);
   }
   td.status { width: 58px; white-space: nowrap; }
-  td.prod { width: 20%; font-weight: 600; }
+  td.prod { width: 21%; font-weight: 600; }
   td.code-col { width: 28%; color: var(--text-2); }
   .sub { display: block; margin-top: 4px; font-weight: 400; font-size: 12px; color: var(--text-2); }
 
-  /* Before / After comparisons */
   .compare {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -205,13 +209,12 @@
   .diagram .good { color: var(--ok); font-weight: 600; }
   .diagram .hi { color: var(--accent); font-weight: 600; }
 
-  /* UI Mockup Strip */
   .ui-mock {
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--bg);
     overflow: hidden;
-    margin: 12px 0 20px;
+    margin: 12px 0 18px;
     font-size: 12.5px;
   }
   .mock-tabs {
@@ -235,18 +238,6 @@
     font-size: 11.5px;
     flex-wrap: wrap;
   }
-  .mock-crumb { display: flex; align-items: center; gap: 4px; }
-  .mock-crumb .sym { color: var(--accent); }
-  .mock-actions { display: flex; gap: 6px; align-items: center; }
-  .pill {
-    padding: 1px 7px;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    background: var(--surface);
-    font: 500 11px/1.4 var(--sans);
-    color: var(--text-2);
-  }
-  .pill.on { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent); }
   .mock-banner {
     display: flex;
     align-items: center;
@@ -256,10 +247,24 @@
     border-bottom: 1px solid var(--accent-border);
     font-size: 12px;
   }
+  .mock-banner.bad {
+    background: var(--no-bg);
+    border-top: 1px solid rgba(185, 28, 28, 0.35);
+    border-bottom: none;
+  }
+  .pill {
+    padding: 1px 7px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface);
+    font: 500 11px/1.4 var(--sans);
+    color: var(--text-2);
+  }
+  .pill.on { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent); }
   .mock-body {
     display: grid;
-    grid-template-columns: 200px 1fr;
-    min-height: 155px;
+    grid-template-columns: 205px 1fr;
+    min-height: 150px;
   }
   @media (max-width: 640px) {
     .mock-body { grid-template-columns: 1fr; }
@@ -288,27 +293,22 @@
     color: var(--text-2);
   }
   .rail-row.sel { background: var(--surface-2); color: var(--text); font-weight: 600; }
-  .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-left: 5px; vertical-align: middle; }
-  .dot-draft { background: var(--warn); }
-  .dot-upd { background: var(--accent); }
+  .rail-row.gone { color: var(--no); text-decoration: line-through; opacity: 0.75; }
   .mock-code {
     padding: 8px 12px;
     font: 12px/1.6 var(--mono);
   }
   .code-ln { display: flex; gap: 10px; }
-  .ln-num { width: 24px; text-align: right; color: var(--text-3); user-select: none; }
-  .ln-bar { width: 3px; border-radius: 2px; background: transparent; }
-  .ln-bar.add { background: var(--ok); }
-  .inline-comment {
-    margin: 4px 0 6px 36px;
-    padding: 6px 10px;
-    border-radius: 6px;
+  .ln-num { width: 22px; text-align: right; color: var(--text-3); user-select: none; }
+  .target-word {
+    text-decoration: underline;
+    text-decoration-color: var(--accent);
+    text-underline-offset: 2px;
     background: var(--accent-bg);
-    border: 1px solid var(--accent-border);
-    font: 12px/1.4 var(--sans);
+    border-radius: 3px;
+    padding: 0 2px;
   }
 
-  /* Walkthrough */
   .steps {
     list-style: none;
     padding: 0;
@@ -331,7 +331,6 @@
   .step-tag.fail { color: var(--no); }
   .step-tag.rec { color: var(--ok); }
 
-  /* Questions */
   .questions {
     display: grid;
     gap: 12px;
@@ -363,92 +362,95 @@
 <body>
 <main>
   <header>
-    <div class="eyebrow">LOO-1067 · Pre-Implementation Concept Review</div>
-    <h1>Do the Task inspector’s concepts and the code’s concepts line up?</h1>
-    <p class="muted">Reviewing the proposed redesign before writing code. No code was changed; findings below were written into <code>scratch/plan.md</code>.</p>
+    <div class="eyebrow">LOO-1067 · Post-Build Concept Review (against origin/main)</div>
+    <h1>Do the built file browser’s concepts and the code’s concepts line up?</h1>
+    <p class="muted">Reviewing the built branch (<code>881d5bd081</code>, 116 files vs. <code>origin/main</code>) and live QA results (<code>scratch/qa.html</code>) from scratch. No code was changed; findings below were written into <code>scratch/plan.md</code> for one focused follow-up implementation pass.</p>
     <div class="scope-box">
-      <strong>Area reviewed:</strong> The Task inspector pane (<code>Brief | Diff | Files</code>), its checkout-reading RPCs (<code>lf task files|file|changes|diff</code>), file presentation (<code>lf open --file</code> &amp; watchers), focus/key routing (<code>DesktopActions</code>), and line review (<code>ReviewDiff</code>).<br>
-      <span class="muted"><strong>Why this whole area:</strong> <code>Files</code>, <code>Diff</code>, and <code>Brief</code> share one 1,811-line store (<code>TaskFilesStore</code>), one comparison slot, one comment queue, one watcher, and one shortcut layer. Redesigning <code>Files</code> without fixing those shared seams would bolt new features onto broken ownership.</span>
+      <strong>Area reviewed:</strong> The Task inspector (<code>Brief | Diff | Files</code>), checkout-reading commands (<code>lf task find|grep|symbols|files|file|changes|diff</code>), presentation (<code>lf desktop files</code> and legacy <code>lf open --file</code>), local/remote watchers, focus &amp; key routing (<code>DesktopActions</code>, <code>PaneFocusTarget</code>, <code>TaskCodeReader</code>), and unified line review (<code>ReviewDiff</code>).<br>
+      <span class="muted"><strong>Why this whole area:</strong> The core data split (<code>workingTree</code> vs. <code>DiffReviewState</code>, one Tree-sitter runtime + pure-Rust Machine reads, lazy <code>NSTextView</code>, typed <code>ReviewSelection.Source</code>) landed cleanly, so the remaining mismatches live at the seams where input ownership, pane visibility, CLI presentation, and SwiftUI identity cross those components.</span>
+    </div>
+    <div class="verdict-box">
+      <strong>Outcome:</strong> The architectural spine aligns (6 of 10 concepts are <strong>Yes</strong>), but <strong>4 built seams still disagree with the product model</strong> — breaking two headline “Done when” flows (<code>gd</code>/<code>gr</code> after clicking a word in Read, and presenting/updating pages calmly beside a zoomed or reading pane) and leaving the old <code>lf open --file</code> command behind. Plan updated for one focused pass; no irreversible product choices blocked.
     </div>
   </header>
 
   <div class="legend">
-    <span><span class="badge badge-existing">Existing</span> Current code on branch base</span>
-    <span><span class="badge badge-proposed">Proposed</span> Revised design now in <code>scratch/plan.md</code></span>
-    <span><span class="badge badge-choice">Choice for review</span> Bold call made for headless Graph; reversible before/after build</span>
+    <span><span class="badge badge-built">Built</span> Current code on branch HEAD</span>
+    <span><span class="badge badge-proposed">Proposed</span> Fix written into <code>scratch/plan.md</code></span>
+    <span><span class="badge badge-choice">Choice for review</span> Reversible decision recorded for headless Graph</span>
   </div>
 
-  <h2>1. Product concepts vs. code concepts</h2>
+  <h2>1. Product concepts vs. built code concepts</h2>
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
           <th>Product concept</th>
-          <th>Code concept (existing / prior plan)</th>
+          <th>Built code concept</th>
           <th>Aligned?</th>
-          <th>What is wrong &amp; the fix</th>
+          <th>Assessment &amp; fix where No</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td class="prod">Working tree vs. Diff comparison<span class="sub">Live files, scratch pages, and whole-Task changes stay stable when Diff inspects one Graph step</span></td>
-          <td class="code-col"><code>store.comparison</code> + <code>store.changes</code> in <code>TaskFilesStore</code>; <code>scratch</code> stuffed inside <code>TaskChangesSnapshot</code></td>
-          <td class="status"><span class="badge badge-no">No</span></td>
-          <td><strong>One slot for two ideas.</strong> Calling <code>showStep()</code> in Diff replaces <code>store.changes</code> with that step, wiping <code>scratch</code> (Rust returns <code>[]</code> when <code>head != nil</code>) and shrinking Files’ Changed list. A broken git base clears <code>changes = nil</code> and hides <code>scratch/</code>.<br><strong>Fix:</strong> Separate <code>workingChanges</code> (always <code>workingTree(base: "parent")</code>) from Diff’s <code>comparison</code>, and return <code>scratch</code> + <code>latest_scratch_page</code> from checkout inventory (<code>task.files.find</code>) so scratch never depends on <code>git diff</code>.</td>
-        </tr>
-        <tr>
-          <td class="prod">Symbol outline &amp; jump-to-definition<span class="sub"><code>⇧⌘O</code> outline, sticky breadcrumb, <code>⌘-click</code>/<code>gd</code> defs, <code>gr</code> refs — local &amp; remote</span></td>
-          <td class="code-col">Prior plan: compile 7–8 C/C++ <code>tree-sitter-*</code> crates into Rust <code>lf</code> + whole-repo AST cache <em>plus</em> Swift <code>TreeSitterGrammars.xcframework</code></td>
-          <td class="status"><span class="badge badge-no">No</span></td>
-          <td><strong>Two Tree-sitter stacks + <code>lf</code> binary bloat.</strong> <code>rust/</code> has zero tree-sitter deps today. Linking 8 C/C++ grammars adds ~15–25 MB to <code>lf</code> (which SHA-256 hashes itself on ARM startup, <code>loopflow-execution/Cargo.toml:60</code>), slows non-incremental worktree builds across 4 OS/arch targets, and splits 28 Mac grammars vs 7 Rust grammars.<br><strong>Fix:</strong> Keep <strong>one</strong> Tree-sitter runtime: Desktop’s bundled 28-grammar XCFramework owns open-file outline, enclosing breadcrumb, and same-file defs (0 RPC, dirty-buffer live, local &amp; remote). Machine-side <code>task.files.symbols</code> runs <code>grep-searcher</code> pre-filter + pure-Rust comment/string-aware declaration matcher over only the few matching files.</td>
-        </tr>
-        <tr>
-          <td class="prod">Checkout search commands<span class="sub">Fuzzy files <code>⌘P</code>, grep <code>⇧⌘F</code>, defs <code>gd</code>, refs <code>gr</code></span></td>
-          <td class="code-col">Prior plan: overload <code>lf task files</code> with <code>--index</code>, <code>--grep</code>, <code>--symbols</code>; 500-item cursor pagination on fuzzy path index</td>
-          <td class="status"><span class="badge badge-no">No</span></td>
-          <td><strong>One verb returning 4 JSON schemas + contradictory paging.</strong> Cursor-paging 500 paths per reply cannot fuzzy-match the whole repo without N sequential SSH round trips, and <code>gr</code> needs <code>whole_word</code>.<br><strong>Fix:</strong> Peer verbs matching <code>task file|files|changes|diff</code>: <code>lf task find</code> (<code>task.files.find</code>: returns full inventory in 1 reply up to 2,000 paths for 0ms local fuzzy filter, or Machine-side fuzzy top-N over full cached inventory for larger repos, plus <code>scratch</code>), <code>lf task grep</code> (<code>task.files.grep</code> + <code>whole_word</code>), <code>lf task symbols</code> (<code>task.files.symbols</code>).</td>
-        </tr>
-        <tr>
-          <td class="prod">Read-only by default, easy Edit, quick per-file Diff<span class="sub">Toggle <code>⌃⌘E</code> without losing drafts or flipping other files</span></td>
-          <td class="code-col">Global <code>store.mode</code>; eager <code>NSTextView</code> + <code>NSScrollView</code> + <code>UndoManager</code> in <code>TaskFileDocument.init</code>; <code>usesFindBar = true</code></td>
-          <td class="status"><span class="badge badge-no">No</span></td>
-          <td><strong>Global mode &amp; eager editor weight.</strong> Opening 25 files via <code>gd</code> allocates 25 hidden <code>NSTextView</code>s and colors them. Global <code>mode</code> kicks you out of Edit when you peek at another file. Files’ Diff stepper <code>]</code> silently switches your open file.<br><strong>Fix:</strong> Per-file view mode (default <code>.read</code>); <code>Read</code> shows <code>document.text</code> (draft included); create <code>NSTextView</code> lazily on first <code>Edit</code> (with <code>usesFindBar = false</code>) and retain it; Files’ Diff steps only within that file.</td>
-        </tr>
-        <tr>
-          <td class="prod">Open files vs. Jump history vs. Drafts<span class="sub">Breadcrumb menu, Open &amp; Scratch rail, <code>⌘[</code>/<code>⌘]</code> back/forward</span></td>
-          <td class="code-col">Unbounded <code>tabs</code> auto-grown in <code>selection.didSet</code>; <code>documents</code> never cleared on <code>closeTab</code></td>
-          <td class="status"><span class="badge badge-no">No</span></td>
-          <td><strong>Hidden phantom buffers + tab pileup.</strong> Every 2-second <code>gd</code> jump permanently adds to <code>tabs</code> with no visible tab strip. Closing a dirty file drops it from <code>tabs</code> while leaving an invisible autosaving buffer in <code>documents</code>.<br><strong>Fix:</strong> Cap clean auto-added open files (MRU, e.g. 12) while keeping Jump History independent; closing a clean file drops its document; dirty drafts always stay listed under Open &amp; Scratch until saved or discarded.</td>
-        </tr>
-        <tr>
-          <td class="prod">Unified line comments<span class="sub">Click/Shift-click lines in Read or Diff; send one batch to conversation</span></td>
-          <td class="code-col"><code>ReviewSelection</code> (only <code>old | new</code>); <code>ReviewComment</code> formats every batch as <code>"on the diff"</code> with <code>store.revision</code></td>
-          <td class="status"><span class="badge badge-no">No</span></td>
-          <td><strong>Diff-only anchor leaks across surfaces.</strong> <code>loadReview</code> detaches any comment whose file isn’t in Diff; <code>ReviewStream</code> dumps non-diff comments at the top of Diff; comments on working files get mislabeled with Diff’s step revision.<br><strong>Fix:</strong> Give <code>ReviewSelection</code> a typed <code>Source</code>: <code>.file(draft: Bool)</code> vs <code>.diff(side: Side, revision: String)</code>. Each surface renders and re-anchors only its own source; the shared strip sends both cleanly in one message.</td>
-        </tr>
-        <tr>
-          <td class="prod">Calm updates vs. explicit presentation<span class="sub">Passive writes never steal place; <code>lf open --file</code> presents finished pages</span></td>
-          <td class="code-col"><code>TaskFilesStore.follow()</code> + 120s timer; <code>git check-ignore</code> drops gitignored <code>scratch/</code> locally &amp; remotely; unkeyed <code>TaskHTMLView</code></td>
-          <td class="status"><span class="badge badge-no">No</span></td>
-          <td><strong>Two bugs hide behind removing <code>follow()</code>.</strong> First, both local and peer watchers drop gitignored <code>scratch/</code> writes, so deleting passive document creation makes new scratch files invisible in the rail. Second, <code>TaskHTMLView</code> lacks <code>.id(document.path)</code>, so switching HTML files shares scroll offset and would inherit the 800ms reload delay.<br><strong>Fix:</strong> Pass eligible <code>scratch/</code> writes through both watchers to update scratch/badges without running <code>git diff</code>. Key <code>TaskHTMLView</code> by <code>.id(document.path)</code>. Explicit <code>lf open --file</code> opens in Read without stealing terminal focus — or shows a calm presentation bar if you are actively typing/composing in Files’ editor.</td>
-        </tr>
-        <tr>
-          <td class="prod">Pane focus &amp; shortcuts<span class="sub"><code>⌘F</code>, <code>⌘P</code>, <code>⇧⌘F</code>, <code>⇧⌘O</code>, <code>⌃⌘E</code>, <code>⌘[</code>/<code>⌘]</code> belong to the focused pane</span></td>
-          <td class="code-col">4 routers: <code>DesktopActionMonitor</code> (<code>⌘[</code>/<code>⌘]</code>), <code>LoopflowApp</code> menu (<code>⇧⌘O</code>), SwiftUI hidden buttons (<code>⌘P</code>), <code>Ghostty</code> (<code>⌘F</code>); no <code>PaneFocusTarget</code> on Files</td>
-          <td class="status"><span class="badge badge-no">No</span></td>
-          <td><strong>No single owner + focus trap.</strong> Attaching <code>PaneFocusTarget</code> naively to <code>TaskFilesView</code> would steal <code>firstResponder</code> from <code>NSTextView</code> / <code>TextField</code> when clicking directly into them from a terminal.<br><strong>Fix:</strong> Descendant-aware <code>PaneFocusTarget</code> (only claims responder when current responder is outside the pane). Register Files’ shortcuts as pane-scoped <code>DesktopAction</code>s — one owner, automatic IME safety, scriptable, clean fallthrough to Desktop Back/Forward and Open Repo when outside Files or jump stack is empty.</td>
-        </tr>
-        <tr>
-          <td class="prod">Task inspector state<span class="sub">Brief, Diff, Files share checkout &amp; comments without tangling</span></td>
-          <td class="code-col">One 1,811-line <code>TaskFilesStore</code> owning Brief, Diff, Tour, Windowing, Files, Tree, Watch, Comments</td>
-          <td class="status"><span class="badge badge-no">No</span></td>
-          <td><strong>God object about to cross 3,000 lines.</strong> Adding picker, grep, find, jump stack, and update banners onto <code>TaskFilesStore</code> tangles unrelated observation invalidations.<br><strong>Fix:</strong> Keep <code>TaskFilesStore</code> as the thin coordinator (transport, watcher, <code>workingChanges</code>, shared <code>comments</code>) delegating to focused collaborators: <code>FilesBrowserState</code>, <code>DiffReviewState</code>, and <code>CheckoutTree</code>.</td>
-        </tr>
-        <tr>
-          <td class="prod">Brief | Diff | Files pane strip &amp; remote ownership<span class="sub">Recorded Machine owns checkout reads and writes</span></td>
-          <td class="code-col"><code>WorkspacePanesView.browserTabs</code>, <code>TaskLocationObservation</code>, <code>RegistryQuery</code></td>
+          <td class="prod">Working tree vs. Diff comparison<span class="sub">Whole-Task counts &amp; scratch stay intact when Diff inspects one Graph step</span></td>
+          <td class="code-col"><code>TaskFilesStore.workingTree</code> (<code>ComparisonReading</code>), <code>DiffReviewState.taskReading</code>/<code>stepReading</code>, <code>scratchPaths</code> from <code>task.files.find</code></td>
           <td class="status"><span class="badge badge-yes">Yes</span></td>
-          <td>Clean 1:1 mapping already in place. New reads (<code>task.files.find</code>, <code>grep</code>, <code>symbols</code>) plug straight into <code>ops/task → Read → RegistryQuery</code>.</td>
+          <td>Clean 1:1 split. <code>showStep()</code> never overwrites <code>workingChanges</code>, Files’ <code>Changed in Task</code>, Brief’s head, or <code>scratch/</code>.</td>
+        </tr>
+        <tr>
+          <td class="prod">Checkout search &amp; symbols (local + remote)<span class="sub"><code>⌘P</code> find, <code>⇧⌘F</code> grep, <code>gd</code>/<code>gr</code>, <code>⇧⌘O</code> outline</span></td>
+          <td class="code-col">Peer Machine reads <code>task.files.find|grep|symbols</code> over shared <code>observe::checkout_files</code> + <code>scan_checkout</code>; single Swift Tree-sitter parse in <code>TaskCodeReader</code> → <code>FileOutline</code></td>
+          <td class="status"><span class="badge badge-yes">Yes</span></td>
+          <td>One Tree-sitter runtime, pure-Rust Machine reads, clean DTOs with no defaults. (Minor UX polish: highlight the matched span inside Grep row excerpts and reveal long-line hits horizontally.)</td>
+        </tr>
+        <tr>
+          <td class="prod">Per-file Read / Edit / Diff &amp; lazy editor<span class="sub">Read by default, draft visible in Read, lazy <code>NSTextView</code> on Edit</span></td>
+          <td class="code-col"><code>FilesBrowserState.modes</code>, lazy <code>TaskFileDocument.retainedEditor</code> (<code>usesFindBar = false</code>), <code>DiffReviewState.step</code> bounded per file</td>
+          <td class="status"><span class="badge badge-yes">Yes</span></td>
+          <td>Clean ownership. (Delete stale doc comment in <code>ReviewStreamView.swift:809</code> that still claims Files’ Diff crosses into neighbouring files.)</td>
+        </tr>
+        <tr>
+          <td class="prod">Unified line comments<span class="sub">Comment on Read or Diff lines; send one batch to conversation</span></td>
+          <td class="code-col"><code>ReviewSelection.Source</code> (<code>.file(draft:)</code> vs. <code>.diff(side:revision:)</code>), separate <code>reconcile</code> paths, shared <code>ReviewCommentsStrip</code></td>
+          <td class="status"><span class="badge badge-yes">Yes</span></td>
+          <td>Each surface owns and re-anchors only its own comments; one <code>⌘↩</code> message carries true sources.</td>
+        </tr>
+        <tr>
+          <td class="prod">Open files vs. Jump history vs. Drafts<span class="sub">Bounded auto-opens, independent <code>⌘[</code>/<code>⌘]</code>, visible drafts</span></td>
+          <td class="code-col"><code>FilesBrowserState</code> (<code>tabs</code>, MRU 12 <code>automatic</code> cap, clean document drop on close) + <code>FileJumps</code></td>
+          <td class="status"><span class="badge badge-yes">Yes</span></td>
+          <td>Clean separation; jump history falls through to Desktop window Back/Forward when empty.</td>
+        </tr>
+        <tr>
+          <td class="prod">Unified in-file Find (<code>⌘F</code>)<span class="sub">Search Read, Edit, Markdown, HTML, Diff; promote to Grep</span></td>
+          <td class="code-col"><code>FileFind</code> + <code>DesktopAction("files-find-text")</code> across <code>TaskCodeReader</code>, <code>NSTextView</code>, <code>MarkdownBlocks</code>, <code>TaskHTMLView</code>, <code>ReviewStream</code></td>
+          <td class="status"><span class="badge badge-yes">Yes</span></td>
+          <td>One find model across all five renderers; leaves <code>⌘F</code> free for the terminal when Files is unfocused.</td>
+        </tr>
+        <tr>
+          <td class="prod">Code reader word targeting &amp; chords (<code>gd</code>, <code>gr</code>)<span class="sub">Click an identifier, see it targeted, press <code>gd</code> or <code>gr</code></span></td>
+          <td class="code-col">3 competing responders: <code>PaneFocusTarget</code>, <code>TaskCodeReader</code> <code>@FocusState</code>/<code>onKeyPress</code>, and per-line <code>Text.textSelection(.enabled)</code>; invisible <code>@State selectedWord</code></td>
+          <td class="status"><span class="badge badge-no">No</span></td>
+          <td><strong>No single input owner.</strong> Clicking a selectable code line makes the line’s non-editable <code>NSTextView</code> AppKit first responder, so <code>g</code> <code>d</code> never reaches <code>TaskCodeReader.onKeyPress</code> (confirmed in <code>scratch/qa.html</code>), and the targeted word has zero visual mark.<br><strong>Fix:</strong> Store <code>FileJumps.Target(path, line, word, range)</code> with visible underline/tint, remove <code>TaskCodeReader</code>’s competing <code>.focusable</code>/<code>.onKeyPress</code>, and route <code>gd</code>/<code>gr</code> through <code>DesktopActionMonitor</code> when Files is in <code>.read</code> and <code>firstResponder</code> is not an editable <code>NSTextView</code>.</td>
+        </tr>
+        <tr>
+          <td class="prod">Deliberate presentation (<code>lf desktop files</code>)<span class="sub">One command shows a file beside the conversation without stealing focus</span></td>
+          <td class="code-col">Two commands (<code>lf desktop files</code> AND legacy <code>lf open --file</code> / <code>desktop::present_files</code>); <code>showBrowser(focus: false)</code> ignores <code>zoomedPaneId</code>; <code>holdsPresentation</code> checks <code>!collapsed</code> instead of <code>isVisible</code></td>
+          <td class="status"><span class="badge badge-no">No</span></td>
+          <td><strong>Two commands + visibility ignores zoom.</strong> <code>lf open --file</code> has zero non-test callers left and diverges in flags and exit codes. Worse, when Session is zoomed, <code>lf desktop files</code> exits 0 while Session stays zoomed full-screen and hides the presented page (confirmed in QA).<br><strong>Fix:</strong> Delete <code>open/files.rs</code> &amp; <code>desktop::present_files</code>; unzoom another zoomed pane on <code>showBrowser(..., focus: false)</code> while keeping terminal <code>focusedPaneId</code>; gate <code>holdsPresentation</code> on <code>isVisible(pane)</code>.</td>
+        </tr>
+        <tr>
+          <td class="prod">Calm update &amp; presentation banners<span class="sub">Quiet, dismissible offers for other files; silent in-place reload for the visible file</span></td>
+          <td class="code-col"><code>TaskFilesView.notice</code> overlaid on the whole <code>Brief|Diff|Files</code> <code>VStack</code> with no <code>×</code> button; <code>noteWrites</code> appends even the file already open in Read</td>
+          <td class="status"><span class="badge badge-no">No</span></td>
+          <td><strong>Banner lifecycle conflated with persistent rail state.</strong> No way to dismiss a banner without opening that file; overlays bottom content across Brief, Diff, and Files; nags <code>Updated explore.html · Open</code> even while you are already reading <code>explore.html</code>; stale <code>Presented</code> banner survives leaving Edit and opening other files.<br><strong>Fix:</strong> Separate persistent rail badges from ephemeral <code>FilesBrowserState.Notice</code> with <code>×</code> dismiss, suppress updates for the currently visible Read file, clear stale presentation offers on file switch/Edit exit, and place the banner in layout (not <code>.overlay</code>).</td>
+        </tr>
+        <tr>
+          <td class="prod">Rail sections &amp; narrow pane strip<span class="sub">Open &amp; Scratch + Changed in Task + Checkout; active Files tab visible at 240 pt</span></td>
+          <td class="code-col"><code>Open &amp; Scratch</code> and <code>Changed in Task</code> share one <code>LazyVStack</code> with identical path <code>String</code> IDs; <code>browserTabs</code> horizontal <code>ScrollView</code> never scrolls to selected</td>
+          <td class="status"><span class="badge badge-no">No</span></td>
+          <td><strong>Identity collision drops changed files.</strong> Opening any changed file gives SwiftUI two identical IDs in one <code>LazyVStack</code>, silently vanishing it from <code>Changed in Task</code> (confirmed in QA). At ~240 pt the pane strip clips away the active <code>Files</code> tab.<br><strong>Fix:</strong> Prefix rail IDs by section (<code>open:</code> / <code>changed:</code> / <code>entry:</code>); wrap <code>browserTabs</code> in <code>ScrollViewReader</code> scrolling to the selected tab.</td>
         </tr>
       </tbody>
     </table>
@@ -456,183 +458,156 @@
 
   <h2>2. Biggest mismatches — before &amp; after</h2>
 
-  <h3>A. Biggest infrastructure mismatch: Dual Tree-sitter stacks in Rust &amp; Swift</h3>
+  <h3>A. Biggest mismatch: Three competing responders fighting over <code>gd</code> / <code>gr</code></h3>
   <div class="compare">
     <div class="card">
       <div class="card-head">
-        <span class="card-title">Before (prior plan)</span>
-        <span class="badge badge-existing">Prior plan</span>
+        <span class="card-title">Before (built)</span>
+        <span class="badge badge-built">Built</span>
       </div>
-      <div class="diagram"><span class="dim">Mac Desktop (Swift)</span>
-  TreeSitterGrammars.xcframework <span class="dim">(28 grammars)</span>
-    ├─ Syntax colors
-    └─ Open-file outline &amp; live defs
+      <div class="diagram"><span class="dim">Click "render_total" on line 6</span>
+  ├─ Text.textSelection(.enabled)
+  │    └─ <span class="bad">Line's non-editable NSTextView grabs firstResponder</span>
+  ├─ SpatialTapGesture
+  │    ├─ sets invisible @State selectedWord
+  │    └─ sets SwiftUI @FocusState focused = true <span class="bad">(loses!)</span>
+  └─ User types <span class="bad">g</span> <span class="bad">d</span>
+       └─ <span class="bad">goes to NSTextView → beep; onKeyPress never fires</span>
 
-<span class="dim">Owning Machine (Rust lf CLI — 4 OS/arch targets)</span>
-  <span class="bad">+ tree-sitter + 7–8 C/C++ grammar crates</span>
-  <span class="bad">+ ~15–25 MB binary bloat (slows ARM self-hash)</span>
-  <span class="bad">+ whole-repo AST cache &amp; invalidation</span>
-  <span class="bad">+ regex fallback for the other 20 languages</span>
-    └─ task.files.symbols (name OR path)</div>
-      <p class="muted">Every non-incremental worktree build and every <code>lf</code> launch pays for 8 C/C++ parsers that duplicate Desktop’s XCFramework, while still falling back to regex for 20 languages.</p>
+<span class="dim">Meanwhile:</span>
+  DesktopActionMonitor handles ⌘F, ⌘P, ⇧⌘F, ⇧⌘O, ⌃⌘E, ⌘[, ⌘]
+  PaneFocusTarget holds FocusView on pane focus</div>
+      <p class="muted">The reader fights AppKit’s own text selection to receive two unmodified keys, and gives the person no visual sign of what word is targeted.</p>
     </div>
     <div class="card proposed">
       <div class="card-head">
-        <span class="card-title">After (one Tree-sitter + pure-Rust grep scanner)</span>
+        <span class="card-title">After (one key router + visible target)</span>
         <span class="badge badge-proposed">Proposed</span>
       </div>
-      <div class="diagram"><span class="dim">Mac Desktop (Swift) — ONE Tree-sitter runtime</span>
-  TreeSitterGrammars.xcframework <span class="good">(28 grammars)</span>
-    ├─ Syntax colors (Read, Edit, Diff, Preview)
-    ├─ Open-file Outline (⇧⌘O) &amp; Enclosing breadcrumb
-    └─ Live same-file defs <span class="good">(0 RPC, dirty buffer live)</span>
+      <div class="diagram"><span class="dim">Click "render_total" on line 6</span>
+  ├─ Text.textSelection(.enabled) <span class="good">(copy/drag still works)</span>
+  └─ SpatialTapGesture
+       └─ <span class="hi">FileJumps.target = Target(path, 6, "render_total", range)</span>
+            └─ <span class="good">TaskCodeReader underlines/tints that token</span>
 
-<span class="dim">Owning Machine (Rust lf CLI — pure Rust)</span>
-  grep-searcher <span class="good">(already needed for ⇧⌘F &amp; gr)</span>
-    ├─ Pre-filter checkout to ~2–20 files with name
-    └─ <span class="hi">Comment/string-aware declaration scanner</span>
-         └─ task.files.symbols <span class="good">(same wire DTO)</span></div>
-      <p class="muted">Zero C/C++ crates in <code>lf</code>, zero whole-repo AST cache, identical local &amp; remote behavior across all languages. Because <code>task.files.symbols</code> is a clean wire boundary, swapping to AST parsing later touches zero Swift code or DTOs.</p>
+<span class="dim">User types g d (or g r)</span>
+  └─ <span class="good">DesktopActionMonitor</span> (single AppKit key router)
+       ├─ checks: Files focused, mode == .read, no picker/find
+       ├─ checks: <span class="good">(firstResponder as? NSTextView)?.isEditable != true</span>
+       └─ <span class="good">runs chord against FileJumps.target → jump or peek!</span></div>
+      <p class="muted">Deletes <code>TaskCodeReader</code>’s competing <code>.focusable</code> and <code>.onKeyPress</code>. Works when a selectable line is first responder; never intercepts typing in Edit, Find, Comment editor, or Terminal.</p>
     </div>
   </div>
 
-  <h3>B. Biggest state mismatch: Shared <code>comparison</code> / <code>changes</code> slot &amp; diff-only comments</h3>
+  <h3>B. Presentation &amp; update banners: One command, zoom-aware visibility, dismissible layout bar</h3>
   <div class="compare">
     <div class="card">
       <div class="card-head">
-        <span class="card-title">Before (current code)</span>
-        <span class="badge badge-existing">Existing</span>
+        <span class="card-title">Before (built)</span>
+        <span class="badge badge-built">Built</span>
       </div>
-      <div class="diagram">TaskFilesStore
-  ├─ comparison <span class="bad">(shared by Diff steps &amp; Files!)</span>
-  ├─ changes: TaskChangesSnapshot?
-  │    ├─ files   <span class="bad">← overwritten by showStep()</span>
-  │    └─ scratch <span class="bad">← [] on step or nil on git err</span>
-  ├─ mode: .read | .edit | .diff <span class="bad">(global!)</span>
-  ├─ documents[path] <span class="bad">← eager NSTextView per open</span>
-  └─ comments: [ReviewComment]
-       └─ <span class="bad">only old|new side; detached on non-diff</span></div>
+      <div class="diagram"><span class="dim">CLI:</span>
+  lf desktop files PATH[:LINE] [--mode]
+  <span class="bad">lf open --file PATH</span>  <span class="dim">(leftover second command)</span>
+
+<span class="dim">When Session pane is zoomed:</span>
+  showBrowser(.files, focus: false)
+    └─ uncollapses browser, <span class="bad">keeps Session zoomed → invisible!</span>
+
+<span class="dim">Update / Presentation notice:</span>
+  TaskFilesView.<span class="bad">overlay(alignment: .bottom)</span>
+    ├─ covers Brief, Diff, and bottom line of Files
+    ├─ <span class="bad">no × dismiss button</span> (stuck until you open that path)
+    └─ <span class="bad">shows "Updated explore.html · Open" while viewing explore.html</span></div>
     </div>
     <div class="card proposed">
       <div class="card-head">
-        <span class="card-title">After (clean ownership split)</span>
+        <span class="card-title">After (one path, clear lifecycle)</span>
         <span class="badge badge-proposed">Proposed</span>
       </div>
-      <div class="diagram">TaskFilesStore <span class="dim">(thin coordinator)</span>
-  ├─ <span class="good">workingChanges</span> <span class="dim">(pinned workingTree vs parent)</span>
-  ├─ <span class="good">scratch</span> + <span class="good">latestScratchPage</span> <span class="dim">(checkout walk)</span>
-  ├─ <span class="good">comments</span> <span class="dim">(typed Source: .file vs .diff)</span>
-  ├─ <span class="hi">FilesBrowserState</span>
-  │    ├─ openFiles (MRU-capped) + jumpStack
-  │    ├─ per-file ViewMode (.read | .edit | .diff)
-  │    ├─ lazy NSTextView (created on first Edit)
-  │    └─ picker, inline find, calm update bar
-  └─ <span class="hi">DiffReviewState</span>
-       └─ comparison (whole Task or step), tour, stream</div>
+      <div class="diagram"><span class="dim">CLI:</span>
+  <span class="good">lf desktop files PATH[:LINE] [--mode]</span>  <span class="dim">(sole command)</span>
+  <span class="dim">(lf open stays purely for cross-host conversation opening)</span>
+
+<span class="dim">When Session pane is zoomed:</span>
+  showBrowser(.files, focus: false)
+    └─ <span class="good">unzooms Session, keeps terminal focused → Files appears beside it</span>
+  holdsPresentation checks <span class="good">isVisible(browserPane)</span>
+
+<span class="dim">Rail badges vs. ephemeral banner:</span>
+  Open &amp; Scratch rail  → <span class="hi">persistent unread dots</span>
+  FilesBrowserState.banner → <span class="good">layout row in VStack, × dismissible</span>
+    ├─ never raised for the file already visible in Read
+    └─ cleared on open, dismiss, or leaving Edit/switching files</div>
     </div>
   </div>
 
-  <h3>C. What the experience looks like <span class="badge badge-proposed">Proposed</span></h3>
-  <div class="ui-mock" aria-label="Proposed Files layout preview">
+  <h3>C. What the repaired Files view looks like <span class="badge badge-proposed">Proposed</span></h3>
+  <div class="ui-mock" aria-label="Repaired Files view with dismissible banner, intact Changed section, and visible target word">
     <div class="mock-tabs">
       <span class="mock-tab">Brief</span>
       <span class="mock-tab">Diff</span>
       <span class="mock-tab active">Files</span>
     </div>
     <div class="mock-header">
-      <div class="mock-crumb">
-        <span class="pill">◧</span>
-        <span class="pill">‹</span>
-        <span class="pill">›</span>
-        <span>swift / LoopflowMac / <strong>TaskFileDocument.swift ▾</strong> <span class="sym">› reconcile</span></span>
-      </div>
-      <div class="mock-actions">
-        <span class="pill">⌘F</span>
-        <span class="pill">⌘P</span>
-        <span class="pill">⇧⌘F</span>
-        <span class="pill">@</span>
-        <span class="pill on">Read</span>
-        <span class="pill">Edit</span>
-        <span class="pill">Diff</span>
-      </div>
+      <span>◧ &nbsp; ‹ › &nbsp; src / <strong>main.rs ▾</strong> › main</span>
+      <span><span class="pill on">Read</span> <span class="pill">Edit</span> <span class="pill">Diff</span> <span class="pill">⋯</span></span>
     </div>
     <div class="mock-banner">
-      <span>Updated <code>scratch/concept-review.html</code></span>
-      <span class="mock-actions"><span class="pill on">Open</span><span class="pill">×</span></span>
+      <span>Updated <code>scratch/notes.md</code> <span class="muted">(in-layout row; never covers lines; suppressed if already viewing notes.md)</span></span>
+      <span><span class="pill on">Open</span> <span class="pill">×</span></span>
     </div>
     <div class="mock-body">
       <div class="mock-rail">
         <div class="rail-sec">Open &amp; Scratch</div>
-        <div class="rail-row sel"><span>TaskFileDocument.swift</span><span class="dot dot-draft" title="Unsaved draft"></span></div>
-        <div class="rail-row"><span>concept-review.html</span><span class="dot dot-upd" title="Updated"></span></div>
-        <div class="rail-sec">Changed in Task</div>
-        <div class="rail-row"><span>TaskFilesView.swift</span><span>+42 −18</span></div>
-        <div class="rail-row"><span>ReviewDiff.swift</span><span>+31 −9</span></div>
+        <div class="rail-row sel"><span>src/main.rs</span><span></span></div>
+        <div class="rail-row"><span>scratch/notes.md</span><span>●</span></div>
+        <div class="rail-sec">Changed in Task <span class="badge badge-proposed">fixed IDs</span></div>
+        <div class="rail-row sel"><span>src/main.rs</span><span>+2 −1</span></div>
+        <div class="rail-row"><span>src/config.rs</span><span>+0 −1</span></div>
         <div class="rail-sec">Checkout</div>
-        <div class="rail-row"><span>▸ rust/loopflow-execution</span><span>•</span></div>
-        <div class="rail-row"><span>▾ swift/LoopflowMac</span><span>•</span></div>
+        <div class="rail-row"><span>▾ src/billing/…/render</span><span></span></div>
       </div>
       <div class="mock-code">
-        <div class="code-ln"><span class="ln-num">40</span><span class="ln-bar add"></span><span>func reconcile(_ next: TaskFileSnapshot) async {</span></div>
-        <div class="code-ln"><span class="ln-num">41</span><span class="ln-bar add"></span><span>    incomingGeneration += 1</span></div>
-        <div class="code-ln"><span class="ln-num">42</span><span class="ln-bar"></span><span>    updateAccess(next)</span></div>
-        <div class="inline-comment"><strong>TaskFileDocument.swift:L40-41 (working file)</strong> — keep draft text visible in Read too.<br><span class="muted">Queued with 1 Diff comment · ⌘↩ Send to conversation</span></div>
-        <div class="code-ln"><span class="ln-num">43</span><span class="ln-bar"></span><span>    guard !saving, editor?.hasMarkedText() != true else {</span></div>
+        <div class="code-ln"><span class="ln-num">5</span><span>fn main() {</span></div>
+        <div class="code-ln"><span class="ln-num">6</span><span>    let total = billing::invoices::render::<span class="target-word">render_total</span>(&amp;settings, 42);</span></div>
+        <div class="code-ln"><span class="ln-num">7</span><span>    println!("{total}");</span></div>
+        <div class="code-ln"><span class="ln-num">8</span><span>}</span></div>
       </div>
     </div>
   </div>
 
   <h2>3. Concrete interaction walkthrough (normal, failure &amp; recovery)</h2>
   <ol class="steps">
-    <li><span class="step-tag">1. Normal</span> <strong>Find &amp; jump on a remote Linux checkout:</strong> Press <code>⌘P</code> (handled by <code>DesktopAction</code>). Desktop calls <code>task.files.find</code> once; checkout has 1,400 files (&lt; 2,000), so Desktop caches paths and fuzzy-filters locally at 0ms. Arrow down previews an unopened Rust file without changing open files or jump stack. Press Return → opens in <code>Read</code> (zero <code>NSTextView</code> allocated). Local Tree-sitter builds outline and updates breadcrumb <code>› render</code>.</li>
-    <li><span class="step-tag">2. Normal</span> <strong>Cross-file <code>⌘-click</code> + comments across Read &amp; Diff:</strong> <code>⌘-click</code> <code>reconcile</code>. Desktop checks open-file AST + calls <code>task.files.symbols</code> (Machine pre-filters via <code>grep-searcher</code>, scans 4 matching files, returns 2 declarations with enclosing names). Inline peek shows both; pick #2 → pushes prior <code>(path, line)</code> onto jump stack, opens file #2 at line 40. Click line 40–41, write comment (<code>Source.file</code>). Switch to <code>Diff</code>, pick Step 2 (<code>DiffReviewState</code> updates; <code>workingChanges</code>, <code>scratch</code>, and the Read comment stay untouched!), comment on a removed line (<code>Source.diff</code>). Press <code>⌘↩</code> → one message inserts both with accurate sources into conversation input.</li>
-    <li><span class="step-tag">3. Normal</span> <strong>Edit + passive scratch burst + explicit presentation:</strong> Return to Files, press <code>⌃⌘E</code> to enter <code>Edit</code> (lazy <code>NSTextView</code> created), type 5 chars (unsaved draft). Agent rewrites <code>scratch/explore.html</code> 4 times during a turn. Both local/remote watchers pass the gitignored scratch event without running <code>git diff</code>; rail badges <code>explore.html</code> and shows <code>Updated scratch/explore.html · Open</code>; caret, draft, and focus stay untouched. Later, while focus is back in the conversation terminal, agent finishes and runs <code>lf open --host desktop --file scratch/explore.html</code> → opens immediately in Files <code>Read</code> (keyed by <code>.id(path)</code>), pushing prior file onto jump stack, leaving draft &amp; undo intact and terminal focused.</li>
-    <li><span class="step-tag fail">4. Failure</span> <strong>Broken git base or slow/disconnected remote peer:</strong>
-      <ul class="tight">
-        <li><em>Missing base commit:</em> <code>task.changes</code> fails with <code>changesError</code>, but <code>task.files.find</code> still returns checkout paths and <code>scratch/</code> — Files stays browsable and scratch pages remain visible.</li>
-        <li><em>Remote disconnect while editing:</em> Draft stays in <code>TaskFileDocument.text</code> and persists in <code>WorkFileDraft</code>; Files shows Refresh to reconnect without discarding edits or undo.</li>
-        <li><em>Stale out-of-order search/preview reply:</em> Generation + query + checkout guards discard late replies; typing stays responsive.</li>
-      </ul>
-    </li>
-    <li><span class="step-tag rec">5. Recovery</span> <strong>Reconnect &amp; return:</strong> Click Refresh → watcher reattaches, <code>reconcile</code> 3-way merges any disk changes into the retained draft (preserving caret if editor exists), and <code>⌘[</code> steps back through jump history — then falls through to Desktop window Back once the Files jump stack is empty.</li>
+    <li><span class="step-tag">1. Normal</span> <strong>Click identifier → <code>gd</code> → return:</strong> Open <code>src/main.rs</code> (it remains visible in both <em>Open &amp; Scratch</em> and <em>Changed in Task</em> with <code>+2 −1</code>). Click <code>render_total</code> on line 6: AppKit allows drag-select/copy as before, <code>FileJumps.target</code> records <code>("src/main.rs", 6, "render_total", range)</code>, and <code>render_total</code> shows a subtle accent underline. Type <code>g</code> then <code>d</code>: <code>DesktopActionMonitor</code> sees Files in <code>.read</code> with a non-editable responder, runs <code>task.files.symbols</code>, opens the 2-entry peek, jumps to line 9, and <code>⌘[</code> returns to line 6.</li>
+    <li><span class="step-tag">2. Normal</span> <strong>Present from a zoomed Session + in-place HTML rewrite:</strong> The conversation pane is zoomed full-screen. Agent finishes a report and runs <code>lf desktop files scratch/explore.html</code>. Desktop clears Session zoom while keeping keyboard focus in the terminal, opens <code>explore.html</code> rendered in Read beside the conversation. Agent rewrites <code>explore.html</code> twice: WebKit settles 800 ms, reloads once keeping scroll, and does <strong>not</strong> nag <code>Updated scratch/explore.html · Open</code> because it is already on screen.</li>
+    <li><span class="step-tag">3. Normal</span> <strong>Passive write to another scratch file while editing:</strong> Switch to <code>src/main.rs</code> in Edit (editable <code>NSTextView</code> is first responder — typing <code>gd</code> inserts the characters <code>gd</code> into code, never triggering jump!). Agent updates <code>scratch/notes.md</code>: a dismissible layout row <code>Updated scratch/notes.md · Open · ×</code> appears above the editor without covering code. Click <code>×</code> to dismiss it; the blue dot stays in Open &amp; Scratch until opened.</li>
+    <li><span class="step-tag fail">4. Failure</span> <strong>Narrow pane (240 pt) or duplicate hits on one line in Grep:</strong> Resize the pane to 240 pt: <code>browserTabs</code> scrolls the active <code>Files</code> tab into view instead of clipping it away. Search <code>total</code> in <code>⇧⌘F</code> Grep: two hits on <code>src/main.rs:6</code> highlight their distinct matched spans inside each excerpt, and selecting a hit at column 400 on a minified HTML line scrolls the preview to reveal it.</li>
+    <li><span class="step-tag rec">5. Recovery</span> <strong>Presented during Edit, then leaving Edit:</strong> While editing <code>src/main.rs</code>, agent runs <code>lf desktop files scratch/report.html</code>. Because the Files pane is visible and in Edit, Desktop adds <code>report.html</code> to Open &amp; Scratch and shows <code>Presented scratch/report.html · Open · ×</code>. When you switch back to Read and open another file (or click <code>×</code>), the banner clears instead of lingering at the bottom of the window, while <code>report.html</code> stays one click away in Open &amp; Scratch.</li>
   </ol>
 
   <h2>4. Choices made for review</h2>
-  <p class="muted">All five are reversible and recorded in <code>scratch/plan.md</code>. Reply with e.g. <code>1b</code> or <code>4b</code> to steer.</p>
+  <p class="muted">All three are reversible and recorded in <code>scratch/plan.md</code> and <code>scratch/questions.md</code>. Reply with e.g. <code>1b</code> or <code>2b</code> to steer.</p>
   <div class="questions">
     <div class="q">
-      <div class="q-title">1. Cross-file symbol declarations on the owning Machine</div>
+      <div class="q-title">1. Legacy <code>lf open --file</code> command</div>
       <ul class="opts">
-        <li class="chosen"><span class="opt-key">1a</span> <strong>Chosen:</strong> Keep one Tree-sitter runtime (Desktop’s 28-grammar XCFramework for open-file outline, enclosing symbol, and live same-file defs). Run cross-file <code>task.files.symbols</code> on the Machine with pure-Rust <code>grep-searcher</code> pre-filtering + comment/string-aware declaration scanner. Keeps <code>lf</code> lean and fast on ARM; wire DTO is identical if AST is ever swapped in later.</li>
-        <li><span class="opt-key">1b</span> Compile <code>tree-sitter</code> + 7–8 C/C++ grammar crates into Rust <code>lf</code> for AST-level cross-file lookup on remote Linux peers, accepting ~15–25 MB binary growth, longer non-incremental builds, and dual grammar pins.</li>
+        <li class="chosen"><span class="opt-key">1a</span> <strong>Chosen:</strong> Delete <code>lf open --file</code> (<code>open/files.rs</code>, <code>desktop::present_files</code>, old tests). Zero callers remain outside its own test file, every skill uses <code>lf desktop files</code>, and <code>lf open</code> returns to being strictly cross-host conversation opening.</li>
+        <li><span class="opt-key">1b</span> Keep <code>lf open --file</code> as a thin compatibility wrapper over <code>lf desktop files</code>.</li>
       </ul>
     </div>
     <div class="q">
-      <div class="q-title">2. CLI subcommands for checkout search</div>
+      <div class="q-title">2. <code>lf desktop files</code> when another pane (Session) is zoomed</div>
       <ul class="opts">
-        <li class="chosen"><span class="opt-key">2a</span> <strong>Chosen:</strong> Peer verbs matching <code>lf task file|files|changes|diff</code>: <code>lf task find</code> (<code>task.files.find</code>), <code>lf task grep</code> (<code>task.files.grep</code>), and <code>lf task symbols</code> (<code>task.files.symbols</code>) — one verb, one JSON schema.</li>
-        <li><span class="opt-key">2b</span> Overload <code>lf task files</code> with mutually exclusive <code>--index</code>, <code>--grep</code>, and <code>--symbols</code> flags.</li>
+        <li class="chosen"><span class="opt-key">2a</span> <strong>Chosen:</strong> Unzoom the other pane (<code>zoomedPaneId = nil</code>) while keeping <code>focusedPaneId</code> on the terminal so the presented file actually becomes visible beside the conversation without stealing keyboard focus.</li>
+        <li><span class="opt-key">2b</span> Leave Session zoomed and silently keep the presentation hidden behind it until the person manually exits zoom.</li>
       </ul>
     </div>
     <div class="q">
-      <div class="q-title">3. <code>Read</code> / <code>Edit</code> / <code>Diff</code> mode scope</div>
+      <div class="q-title">3. Update &amp; presentation banner lifecycle</div>
       <ul class="opts">
-        <li class="chosen"><span class="opt-key">3a</span> <strong>Chosen:</strong> Per-file view mode (every newly opened file starts in <code>Read</code>; toggling <code>Edit</code> on one file survives peeking at another file in <code>Read</code>; <code>Read</code> always renders current draft text if dirty; Files’ <code>Diff</code> steps only within that file).</li>
-        <li><span class="opt-key">3b</span> One global mode across all open files in Files, resetting to <code>Read</code> on every file switch.</li>
-      </ul>
-    </div>
-    <div class="q">
-      <div class="q-title">4. <code>⌘[</code> / <code>⌘]</code> when Files owns focus</div>
-      <ul class="opts">
-        <li class="chosen"><span class="opt-key">4a</span> <strong>Chosen:</strong> Register <code>files-back</code> / <code>files-forward</code> in <code>DesktopAction</code>: pop Files’ jump stack when non-empty, fall through to Desktop window Back/Forward when the jump stack is empty.</li>
-        <li><span class="opt-key">4b</span> Keep <code>⌘[</code> / <code>⌘]</code> strictly for Desktop window navigation (matching embedded web pages) and bind Files jump back/forward to <code>⌃-</code> / <code>⌃⇧-</code>.</li>
-      </ul>
-    </div>
-    <div class="q">
-      <div class="q-title">5. Explicit <code>lf open --host desktop --file</code> while actively typing in Files’ Edit editor</div>
-      <ul class="opts">
-        <li class="chosen"><span class="opt-key">5a</span> <strong>Chosen:</strong> When focus is in the terminal, Brief, Diff, or Files <code>Read</code>, present the file immediately (pushing prior file to jump stack, never stealing terminal focus). Only if the person is actively typing/composing in Files’ <code>Edit</code> editor, add it to Open &amp; Scratch and show a calm <code>Presented &lt;path&gt; · Open</code> bar so keystrokes are never interrupted.</li>
-        <li><span class="opt-key">5b</span> Always switch the Files pane immediately on explicit <code>lf open --file</code>, even while typing in Files’ <code>Edit</code> mode (relying on draft retention + <code>⌘[</code> to return).</li>
+        <li class="chosen"><span class="opt-key">3a</span> <strong>Chosen:</strong> Separate persistent rail dots in Open &amp; Scratch from one ephemeral, <code>×</code>-dismissible layout banner (never overlaid on bottom lines, suppressed for the file already visible in Files Read, cleared on file switch/Edit exit, shown on Diff only for deferred presentations).</li>
+        <li><span class="opt-key">3b</span> Keep the persistent bottom overlay bar without dismissal until the offered path is opened.</li>
       </ul>
     </div>
   </div>

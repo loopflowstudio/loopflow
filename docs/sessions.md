@@ -228,12 +228,25 @@ New Sessions take their title from the request, Skill, or Task (a name you set
 is never overwritten by `--suggest`). Titles propagate via OSC terminal titles
 and host-specific tabs (cmux, tmux).
 
-If Desktop restarts or loses its connection, selecting your Task reconnects to
-the same running provider with its draft intact. If a pane stays paused, click
-**Refresh session** in its toolbar (never resends input or restarts Graphs).
-The pane's connection row shows whether you reattached to the **Same process**,
-**Resumed in a new process**, **Forked**, or started a **New conversation**.
-See [Connect clients](server.md) for server recovery details.
+When you open a Task, an empty pane shows a centered spinner after a short delay
+so fast opens don't flash; refreshing over saved output keeps the scrollback
+clear and shows progress in the pane strip. The terminal opens directly below
+the provider and status strip. You can type once the terminal is attached and
+the provider is ready. After a Desktop restart, selecting the Task reattaches to
+its running provider with your draft intact.
+
+If the connection drops, the last screen stays visible. The message over the
+terminal tells you how to continue.
+
+| Message | What to do |
+|---|---|
+| **Reconnecting…** | Leave the pane open. If the provider is still running, your draft survives and buffered output catches up. |
+| **Session unavailable** or a relay error | Click **Retry connection** to reconnect through the relay. |
+| **Connection status unavailable** | Click **Refresh session** in the pane strip to reopen the viewer. |
+| **Session ended** or a specific close reason | Read the reason. Use **Refresh session** to reopen the conversation. |
+
+Retry and refresh leave Graphs running and never replay keystrokes.
+See [Connect clients](server.md) for server recovery.
 
 Interactive Sessions keep provider auth or capacity refusals visible and never
 auto-retry; resolve the login or switch harnesses with `-a` on `lf resume`.
@@ -247,8 +260,9 @@ See [Native authentication](subscriptions.md).
   attach command (SSH for remote Machines) without launching a provider.
 - **Headless sessions.** `lf resume` refuses headless Sessions and points you
   to `lf resume --task <ID>`.
-- **History.** `lf session history <session>` prints recorded starts, turns,
-  provider switches, and completions.
+- **History.** `lf session history <session>` prints recorded turns and events,
+  including starts, resumes in a new process, forks, provider switches, and
+  completions.
 
 Every flag: [`lf session`](lf-reference.md#lf-session).
 

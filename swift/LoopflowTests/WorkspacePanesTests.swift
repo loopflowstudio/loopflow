@@ -12,10 +12,7 @@ struct WorkspacePanesTests {
     private let location = WorkspaceIdentity(machineId: "fixture", worktree: "/fixture/task-a")
 
     private func session(_ id: String, _ fields: [String: Any] = [:]) throws -> SessionRecord {
-        let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto/session.json")
-        var wire = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        var wire = try loadFixture("session.json")
         wire["id"] = id
         wire["primary_scope"] = "task"
         wire["state"] = "unknown"
@@ -295,30 +292,69 @@ struct WorkspacePanesTests {
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "open-conversation") }
     }
 
-    @Test("The Session strip names its agent in words and the conversation notice sits above the terminal")
-    func sessionStripAndNotice() throws {
-        let query = RegistryQuery { _, _ in throw RegistryQueryError("Rendering cannot open work") }
-        let model = WorkModel(query: query, repoPath: location.worktree)
-        let workspace = SessionsWorkspace(key: .init(repository: "repo", kind: .task, id: "task-a"),
-            title: "Task A", location: location, localMachineId: location.machineId)
-        let sessions = workspace.sessionStore(repoPath: location.worktree, query: query)
-        let record = try session("primary", ["provider": "claude", "transition": ["kind": "started", "from_provider_session": "earlier", "to_provider_session": "next",
-                              "from_agent_process": NSNull(), "to_agent_process": "55555555-5555-4555-8555-555555555555",
-                              "original_running": NSNull(), "seed": NSNull(), "observed_at": 1794100000]])
-        sessions.reconcile([record])
+    @Test(arguments: [
+        ("started", "New conversation"),
+        ("resumed", "Resumed in a new process"),
+    ])
+    func sessionStripShowsProviderWithoutTransitionHeader(kind: String, header: String) throws {
+        let (workspace, view) = taskPanes()
+        let transition: [String: Any] = [
+            "kind": kind, "from_provider_session": kind == "resumed" ? "thread" as Any : NSNull(),
+            "to_provider_session": "thread", "from_agent_process": NSNull(),
+            "to_agent_process": "55555555-5555-4555-8555-555555555555",
+            "original_running": NSNull(), "seed": NSNull(), "observed_at": 1794100000,
+        ]
+        let record = try session("primary", ["provider": "claude", "transition": transition])
+        view.sessions.reconcile([record])
         workspace.multiplexer.load(sessionId: record.id, location: location)
         let pane = workspace.multiplexer.focusedPane
-        let view = SessionPaneView(pane: pane, isFocused: true, sessions: sessions, workspace: workspace,
-                                   model: model, onFocus: { _, _ in })
-        // The label is the word alone: Text, not a Label with the provider's symbol.
         let program = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-program-\(pane.id)")
             .find(ViewType.Menu.self).labelView()
         #expect(try program.text().string() == "Claude")
-        let notice = try view.inspect().find(ProviderTransitionRow.self)
-        _ = try notice.find(text: "New conversation; earlier one left behind")
-        #expect(throws: (any Error).self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "pane-strip-\(pane.id)").find(ProviderTransitionRow.self)
-        }
+        #expect(throws: (any Error).self) { try view.inspect().find(text: header) }
+    }
+
+    @Test func openingSessionShowsCenteredSpinnerWhenEmpty() throws {
+        let delayed = SessionOpeningView(screen: nil)
+        #expect(throws: (any Error).self) { try delayed.inspect().find(ViewType.ProgressView.self) }
+
+        let view = SessionOpeningView(screen: nil, spinnerDelay: .zero)
+        let spinner = try view.inspect().find(ViewType.ProgressView.self)
+        #expect(try spinner.accessibilityLabel().string() == "Opening session")
+        #expect(throws: (any Error).self) { try view.inspect().find(text: "Opening… Input paused.") }
+    }
+
+    @Test func openingSessionKeepsRetainedScreenClearOfSpinner() throws {
+        let view = SessionOpeningView(screen: "Last terminal line", spinnerDelay: .zero)
+        _ = try view.inspect().find(text: "Last terminal line")
+        #expect(throws: (any Error).self) { try view.inspect().find(ViewType.ProgressView.self) }
+        #expect(throws: (any Error).self) { try view.inspect().find(text: "Opening… Input paused.") }
+    }
+
+    @Test func openingSessionShowsOneSpinnerAtATime() throws {
+        let (workspace, view) = taskPanes()
+        let record = try session("primary", ["provider": "claude"])
+        view.sessions.reconcile([record])
+        workspace.multiplexer.load(sessionId: record.id, location: location)
+        workspace.conversationRequest = UUID()
+        // Empty pane: centered placeholder owns the spinner, strip keeps its Refresh icon.
+        let emptyRefresh = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-refresh-session")
+        #expect(throws: (any Error).self) { try emptyRefresh.find(ViewType.ProgressView.self) }
+
+        // Retained scrollback: placeholder stays clear, strip takes the spinner.
+        let terminal = try #require(workspace.multiplexer.focusedPane.terminal)
+        view.sessions.noteSurfaceClosed(terminal, output: "Previous output")
+        _ = view.sessions.release(record.id)
+        let retainedRefresh = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-refresh-session")
+        _ = try retainedRefresh.find(ViewType.ProgressView.self)
+        #expect(try retainedRefresh.accessibilityLabel().string() == "Refresh session")
+        #expect(try retainedRefresh.accessibilityValue().string() == "Opening session")
+
+        view.sessions.noteSurfaceClosed(terminal, output: "  \n")
+        let blankRefresh = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-refresh-session")
+        #expect(throws: (any Error).self) { try blankRefresh.find(ViewType.ProgressView.self) }
+        let opening = try view.inspect().find(SessionOpeningView.self).actualView()
+        #expect(opening.screen == nil)
     }
 
     @Test("Every Task pane hides on hover and the header's Show… restores it")

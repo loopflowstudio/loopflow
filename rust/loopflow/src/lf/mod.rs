@@ -3187,6 +3187,9 @@ pub enum OndemandCommand {
         /// the provider may end it early, losing unpushed work
         #[arg(long)]
         spot: bool,
+        /// Reserve the full CPU and memory limits on Modal
+        #[arg(long)]
+        reserved: bool,
         /// Hard deadline for each machine it rents, at most 24
         #[arg(long, default_value_t = loopflow_storage::rental::DEFAULT_HOURS)]
         hours: f64,

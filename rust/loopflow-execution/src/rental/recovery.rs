@@ -181,11 +181,9 @@ pub fn give_back(
             }
             let ended = sqlite.rental(&rental.id)?;
             println!(
-                "Gave back {label}{}{}",
-                ended
-                    .cost_usd
-                    .map_or_else(String::new, |cost| format!(" after {cost}")),
-                copied.map_or_else(String::new, |counts| format!("; {counts} copied here"))
+                "Returned {label} ({}{})",
+                copied.map_or_else(String::new, |counts| format!("{counts} copied; ")),
+                ended.cost
             );
             Ok(())
         }
@@ -416,6 +414,7 @@ mod tests {
                     disk_gb: 10,
                     gpu: None,
                     spot: false,
+                    modal_sizing: None,
                 },
                 max_machines: 1,
                 max_usd_per_hour: Usd::parse("0.40").unwrap(),

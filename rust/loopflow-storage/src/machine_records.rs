@@ -50,7 +50,12 @@ pub struct CopyCounts {
 
 impl std::fmt::Display for CopyCounts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} Session(s)", self.sessions)
+        let noun = if self.sessions == 1 {
+            "session"
+        } else {
+            "sessions"
+        };
+        write!(f, "{} {noun}", self.sessions)
     }
 }
 

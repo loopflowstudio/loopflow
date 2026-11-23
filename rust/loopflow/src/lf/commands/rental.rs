@@ -168,6 +168,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             disk_gb,
             gpu,
             spot,
+            reserved,
             hours,
             max,
             max_usd_per_hour,
@@ -181,6 +182,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                     disk_gb: *disk_gb,
                     gpu: gpu.clone(),
                     spot: *spot,
+                    modal_sizing: reserved.then_some(rental::ModalSizing::Reserved),
                 },
                 max_machines: *max,
                 max_usd_per_hour: *max_usd_per_hour,
@@ -188,10 +190,12 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             };
             let price = ondemand.usd_per_hour().map_err(|reason| anyhow!(reason))?;
             loopflow_execution::store::rentals::add_ondemand(sqlite, &ondemand)?;
+            let hardware = ondemand.rental_hardware();
             println!(
-                "Added on-demand {name}: {} on {} at {price}/h; at most {max} at once, {}h each",
-                ondemand.hardware,
+                "Added on-demand {name}: {} on {} at {}; at most {max} at once, {}h each",
+                hardware,
                 where_rented(*provider),
+                hardware.format_hourly_rate(price),
                 ondemand.hours
             );
             if *spot {
@@ -253,9 +257,9 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             } else {
                 let label = machine.label.as_deref().unwrap_or(machine.id.as_str());
                 println!(
-                    "Rented {label}: {} at {}/h, at most {} until {}",
+                    "Rented {label}: {} at {}, at most {} until {}",
                     rental.hardware,
-                    rental.usd_per_hour,
+                    rental.hardware.format_hourly_rate(rental.usd_per_hour),
                     rental.cap_usd,
                     clock(rental.deadline)
                 );
@@ -309,7 +313,8 @@ fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing
 
 fn print_ondemand(listing: &OndemandListing) {
     let ondemand = &listing.ondemand;
-    let shape = format!("{} on {}", ondemand.hardware, ondemand.provider);
+    let hardware = ondemand.rental_hardware();
+    let shape = format!("{hardware} on {}", ondemand.provider);
     let live = listing
         .rentals
         .iter()
@@ -317,10 +322,10 @@ fn print_ondemand(listing: &OndemandListing) {
         .count();
     let price = ondemand.usd_per_hour().map_or_else(
         |reason| format!("unpriced ({reason})"),
-        |usd| usd.to_string(),
+        |usd| hardware.format_hourly_rate(usd),
     );
     println!(
-        "{} · {shape} · {live}/{} · {price}/h ≤ {}/h · {}h",
+        "{} · {shape} · {live}/{} · {price} ≤ {}/h · {}h",
         ondemand.name, ondemand.max_machines, ondemand.max_usd_per_hour, ondemand.hours
     );
     print_defaults(&listing.defaults);
@@ -331,9 +336,7 @@ fn print_ondemand(listing: &OndemandListing) {
             Some(at) => format!("{} {}", rental.state, clock(at)),
             None => format!("{} until {}", rental.state, clock(rental.deadline)),
         };
-        let cost = rental
-            .cost_usd
-            .map_or_else(|| "cost unknown".into(), |cost| cost.to_string());
+        let cost = rental.cost;
         let tasks = entry
             .tasks
             .iter()
@@ -345,9 +348,9 @@ fn print_ondemand(listing: &OndemandListing) {
             .copied
             .map_or_else(String::new, |counts| format!(" · {counts} copied"));
         println!(
-            "  {name} · {when} · {} · {}/h · {cost}{how}{}{copied}",
+            "  {name} · {when} · {} · {} · {cost}{how}{}{copied}",
             rental.hardware,
-            rental.usd_per_hour,
+            rental.hardware.format_hourly_rate(rental.usd_per_hour),
             if tasks.is_empty() {
                 String::new()
             } else {
@@ -377,10 +380,10 @@ pub(crate) fn rent(
     let rental =
         loopflow_execution::store::rentals::admit_rental(sqlite, name, hours, max_usd, by_hand)?;
     eprintln!(
-        "Renting {} on {} at {}/h until {}",
+        "Renting {} on {} at {} until {}",
         rental.hardware,
         where_rented(ondemand.provider),
-        rental.usd_per_hour,
+        rental.hardware.format_hourly_rate(rental.usd_per_hour),
         clock(rental.deadline)
     );
     let sandbox = match api.create(&rental, &public_key) {
@@ -606,10 +609,12 @@ pub fn place(
         let live = sqlite.live_rentals(name)?;
         let admission = rental::admit(&ondemand, live, None, None, now())?;
         println!(
-            "would rent {} on {} at {}/h, ≤ {} until {}; runs nothing",
+            "would rent {} on {} at {}, ≤ {} until {}; runs nothing",
             admission.hardware,
             where_rented(ondemand.provider),
-            admission.usd_per_hour,
+            admission
+                .hardware
+                .format_hourly_rate(admission.usd_per_hour),
             admission.cap_usd,
             clock(admission.deadline)
         );

@@ -6,3 +6,5 @@
 - **Use Modal’s published minimum of `0.125` core and `128 MiB` as the burst floor.** Passed over `0.25` core / `256–512 MiB`; the floor can be raised later against measured workload.
 - **Resolve packaged Linux builds on the caller.** Passed over baking a moving stream into the shared Modal image, which would require rebuilding per release and fails before remote GitHub auth exists.
 - **Make overwriting forwarded files explicit (`lf machine forward <label>`) with opt-in targeted restart (`--task <id>` or `--session <id>`).** Passed over clobbering destination files on ordinary launch or restarting all provider Sessions automatically, so rotating one login does not interrupt unrelated work and targeting a Task’s primary Session does not require looking up a remote Session UUID.
+
+- **Record the Modal sizing mode at admission.** Old declarations live in personal YAML, while old rentals keep their hardware in SQLite. A missing mode on a declaration selects burst for the next create. A missing mode on a recorded rental retains its original full request and unbounded maximum. Only a recorded burst or reserved mode carries `ceiling_estimate_usd`.

@@ -238,11 +238,12 @@ Returned modal-1 (2 sessions copied; ceiling estimate $0.24)
   and memory floor to `--vcpus` and `--memory-gb` instead of bursting.
 - **Modal burst sizing and cost estimates:** By default, Modal sandboxes start
   at Modal's minimum floor (`0.125` physical core, `128 MiB`) and burst up to
-  `--vcpus` and `--memory-gb`, so an idle sandbox pays only the small floor.
+  `--vcpus` and `--memory-gb`, so charges follow usage above that floor.
   Pass `--reserved` to pin floor equal to ceiling. Quotes, hourly limits,
   dollar caps, and timeouts still price the full ceiling; uptime-derived cost
-  in `lf ondemand list` and `lf machine end` is labeled as a ceiling estimate
-  rather than a provider bill.
+  in `lf ondemand list` and `lf machine end` is labeled as a ceiling estimate.
+  In rental JSON, `ceiling_estimate_usd` gives that estimate. Rentals created
+  before Modal limits were recorded keep their original `cost_usd`.
 - **Credentials on rentals:** Owned SSH machines use their own native logins.
   For unattended rentals, forward explicitly named tokens or auth files via
   `forward.env` / `forward.files`, and push rotated files to a live Machine

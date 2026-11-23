@@ -26,6 +26,7 @@ fn box4() -> Hardware {
         disk_gb: 10,
         gpu: None,
         spot: false,
+        modal_sizing: None,
     }
 }
 
@@ -117,6 +118,21 @@ fn gpu_hardware_is_a_floor_the_shape_must_meet() {
         })
         .unwrap_err();
     assert_eq!(refused, "aws rents nothing with 32 vCPU 8 GB + A10G");
+}
+
+#[test]
+fn modal_reservations_include_the_gpu_and_only_apply_to_modal() {
+    let hardware = Hardware {
+        modal_sizing: Some(super::ModalSizing::Reserved),
+        ..gpu("L4")
+    };
+    assert_eq!(Provider::Modal.usd_per_hour(&hardware), Ok(usd("1.27592")));
+    for provider in [Provider::Aws, Provider::Runpod, Provider::Daytona] {
+        assert!(provider
+            .offer(&hardware)
+            .unwrap_err()
+            .contains("--reserved"));
+    }
 }
 
 #[test]
@@ -262,7 +278,7 @@ fn rented(by_hand: bool) -> Rental {
         state: RentalState::Running,
         created_at: now(),
         ended_at: None,
-        cost_usd: None,
+        cost: super::RentalCost::CostUsd(None),
     }
 }
 

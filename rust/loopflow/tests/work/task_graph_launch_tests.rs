@@ -646,11 +646,11 @@ fn task_run_open_successful_quote_launches_and_opens_nothing() {
         "add",
         "quote",
         "--provider",
-        "daytona",
+        "modal",
         "--vcpus",
-        "4",
-        "--memory-gb",
         "8",
+        "--memory-gb",
+        "16",
         "--max",
         "1",
         "--max-usd-per-hour",
@@ -671,7 +671,8 @@ fn task_run_open_successful_quote_launches_and_opens_nothing() {
     assert!(output.status.success(), "{output:?}");
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(
-        text.contains("would rent") && text.contains("runs nothing"),
+        text.contains("would rent 8 vCPU 16 GB burst on modal at $0.95184/h ceiling, ≤ $3.80736")
+            && text.contains("runs nothing"),
         "{text}"
     );
     assert!(!task.home.path().join("opened").exists());

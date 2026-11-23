@@ -433,10 +433,13 @@ left, its old checkout starts nothing.
 A **pool** names machines you own (`pool_machines`: pool, Machine, `cost_usd`
 and `expires_at`); it knows no provider. A `machines` row is only identity: id,
 public name and the person it belongs to. An **on-demand** declaration in personal configuration is a
-provider (Daytona, Modal, RunPod or AWS), hardware with at most one GPU
-(RunPod, AWS and Modal rent them; `--vcpus`/`--memory-gb` are floors its machine
-meets) and optionally spot (AWS and RunPod), and a budget: machines at once and the
-most per hour. They share one namespace. A **rental** (`rentals`, `rent_…` ids)
+provider, hardware and a budget limiting machines at once and dollars per hour.
+Pools and on-demand declarations share one namespace.
+RunPod, AWS and Modal offer a single GPU. RunPod and AWS also sell spot capacity.
+Modal treats `--vcpus` and `--memory-gb` as limits. `--reserved` requests the full
+limits for the sandbox’s lifetime.
+
+A **rental** (`rentals`, `rent_…` ids)
 is one paid window: hardware, price, cap, deadline, state and cost, separate
 from the Machine it becomes once reachable. Task execution never learns a
 Machine is rented.

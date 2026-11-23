@@ -106,7 +106,9 @@ For the installed demo, run `lf task run <demo-task> --rent modal --quote`, then
 
 ## Docs
 
-Updated user docs in place:
+The docs below were written ahead of the code (eb22482548) and describe unbuilt behavior: `lf machine forward`, `lf wave plan bind --replace`, server-routed remote Task views, container Linux without systemd/cron, `lf open --machine`. Only Modal burst sizing and `ceiling_estimate_usd` exist. `documented_commands` checks examples against Clap, so CI fails on `lf machine forward` until it ships. Each slice makes its passages true; before gate, cut any passage whose slice did not ship.
+
+Pages touched:
 
 - `docs/ops.md` (Modal burst vs. `--reserved` sizing, ceiling cost estimates, `--machine` exception for `lf open`, `lf machine forward`, container Linux without systemd/cron)
 - `docs/subscriptions.md` (Machine-aware harness fallback, quiescent recovery on missing executable/login, `lf machine forward <label> [--task | --session]`)

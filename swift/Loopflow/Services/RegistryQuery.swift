@@ -1241,7 +1241,7 @@ public struct RegistryQuery: Sendable {
         try await serve(.taskFilesSymbols(issue: issue, name: name, path: path)).decode(TaskSymbols.self)
     }
 
-    public func taskGrep(issue: String, query: String, wholeWord: Bool = false) async throws -> TaskGrepResults {
+    public func taskGrep(issue: String, query: String, wholeWord: Bool) async throws -> TaskGrepResults {
         try await serve(.taskFilesGrep(issue: issue, query: query, wholeWord: wholeWord)).decode(TaskGrepResults.self)
     }
 

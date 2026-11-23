@@ -29,9 +29,9 @@ final class FilesBrowserState {
 
     var selection: String? {
         didSet {
+            if oldValue != selection { visit = nil; jumps.readingLine = 1; jumps.dismiss() }
             guard let path = selection else { return }
             hasChosenInitialFile = true
-            if oldValue != path { visit = nil; jumps.readingLine = 1; jumps.dismiss() }
             if !tabs.contains(where: { $0.path == path }) {
                 tabs.append(WorkFileTab(id: UUID().uuidString, path: path))
             }

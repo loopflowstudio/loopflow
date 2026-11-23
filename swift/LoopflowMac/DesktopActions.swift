@@ -588,7 +588,7 @@ struct DesktopAction {
         DesktopAction("files-outline", "Show File Outline", scope: .pane,
             keys: [.init(.character("o"), [.command, .shift])], available: { $0.readingFiles?.selectedDocument != nil }) { context in
             guard let files = context.readingFiles, files.selectedDocument != nil else { throw DesktopTargetError("Open a file to see its outline.") }
-            files.jumps.search(nil, line: files.jumps.readingLine, in: files)
+            files.jumps.search(.outline, line: files.jumps.readingLine, in: files)
             return nil
         },
         DesktopAction("files-back", "Previous File Location", scope: .pane,

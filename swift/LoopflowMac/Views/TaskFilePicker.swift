@@ -118,7 +118,7 @@ final class TaskFilePicker {
                 results = ranked(result.paths).map(Result.file)
                 truncated = result.truncated
             case .grep:
-                let result = try await query.taskGrep(issue: issue, query: needle)
+                let result = try await query.taskGrep(issue: issue, query: needle, wholeWord: false)
                 guard !Task.isCancelled, remoteSearch == needle else { return }
                 results = result.hits.map(Result.match)
                 truncated = result.truncated

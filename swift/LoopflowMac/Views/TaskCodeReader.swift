@@ -19,7 +19,7 @@ struct TaskCodeReader: View {
     @FocusState private var focused: Bool
     @State private var selectedWord: String?
     @State private var selectedLine = 1
-    @State private var pendingG = false
+    @State private var chord = FileJumps.Chord()
     @State private var scrolling = false
 
     var body: some View {
@@ -49,16 +49,14 @@ struct TaskCodeReader: View {
                         if scrolling, let store, let first = visible.min() { store.jumps.readingLine = first + 1 }
                     }
                     .focusable(store != nil).focused($focused).focusEffectDisabled()
-                    .onChange(of: focused) { if !focused { pendingG = false } }
+                    .onChange(of: focused) { if !focused { chord = .init() } }
                     .onKeyPress { key in
-                        guard let store, key.modifiers.isEmpty, let selectedWord else { pendingG = false; return .ignored }
-                        if key.characters == "d", pendingG {
-                            pendingG = false
-                            store.jumps.search(selectedWord, line: selectedLine, in: store)
+                        guard let store, key.modifiers.isEmpty, let selectedWord else { chord = .init(); return .ignored }
+                        if let lookup = chord.press(key.characters, identifier: selectedWord) {
+                            store.jumps.search(lookup, line: selectedLine, in: store)
                             return .handled
                         }
-                        pendingG = key.characters == "g"
-                        return pendingG ? .handled : .ignored
+                        return chord.pending ? .handled : .ignored
                     }
                     .task(id: FileFind.Scan(query: store?.find?.query, revision: parsedVersion)) {
                         if let find = store?.find, !find.query.isEmpty {
@@ -83,7 +81,7 @@ struct TaskCodeReader: View {
         }
         .task(id: text) {
             selectedWord = nil
-            pendingG = false
+            chord = .init()
             let document = store?.selectedDocument
             let version = document?.editVersion
             let result = await Task.detached(priority: .userInitiated) { [text, path, needsOutline = document != nil] in
@@ -125,7 +123,7 @@ struct TaskCodeReader: View {
                     !$0.detached && $0.original.source.isFile && $0.original.path == path && $0.selection.last == index + 1
                 }) { ReviewCommentRow(store: store, comment: $0) }
             }
-            if let store, let peek = store.jumps.peek, peek.name != nil,
+            if let store, let peek = store.jumps.peek, peek.lookup != .outline,
                peek.origin.line == index + 1 {
                 FileSymbolPeek(store: store, peek: peek)
             }
@@ -154,9 +152,9 @@ struct TaskCodeReader: View {
                 store.jumps.readingLine = number
                 selectedLine = number
                 selectedWord = Self.word(in: line.text, at: tap.location)
-                pendingG = false
+                chord = .init()
                 if NSApp.currentEvent?.modifierFlags.contains(.command) == true, let selectedWord {
-                    store.jumps.search(selectedWord, line: number, in: store)
+                    store.jumps.search(.definition(selectedWord), line: number, in: store)
                 }
             })
         } else { label }

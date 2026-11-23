@@ -122,7 +122,7 @@ struct TaskFilesView: View {
             Menu {
                 Button("Find File…") { store.chooseFile() }
                 Button("Search Checkout…") { store.chooseFile(.grep) }
-                Button("File Outline") { store.jumps.search(nil, line: store.jumps.readingLine, in: store) }
+                Button("File Outline") { store.jumps.search(.outline, line: store.jumps.readingLine, in: store) }
                 if paneWidth < TaskFileChrome.dockedWidth {
                     Picker("View", selection: $store.mode) { modeChoices }
                     if let document = store.selectedDocument {
@@ -179,7 +179,7 @@ struct TaskFilesView: View {
 
     private var filesPage: some View {
         VStack(spacing: 0) {
-            if let peek = store.jumps.peek, peek.name == nil { FileSymbolPeek(store: store, peek: peek) }
+            if let peek = store.jumps.peek, peek.lookup == .outline { FileSymbolPeek(store: store, peek: peek) }
             HStack(spacing: 0) {
                 if docked && showsRail { navigator; Divider() }
                 documentPane

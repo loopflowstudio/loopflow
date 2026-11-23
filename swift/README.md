@@ -653,7 +653,8 @@ the picker returns to the file and its current match. **⇧⌘O** builds the ope
 methods, Markdown headings) locally from Desktop's bundled Tree-sitter grammars,
 including live unsaved edits. A definition in the current buffer resolves locally.
 Cross-file `⌘-click` / `gd` definitions and `gr` references query the owning
-Machine so remote checkouts work the same way.
+Machine. To find uses, click the identifier and press `gr`. The list shows whole-word
+matches with their source lines. Pick one to open it, then press **⌘[** to return.
 Sidebar selection switches the whole Task workspace; selections inside a Task
 can focus its companion. Resizing or closing the browser is remembered while the
 window stays open; layouts are not yet restored after quitting the app.

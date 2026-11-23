@@ -186,9 +186,9 @@ struct TaskFilesTests {
         store.selectFile("Calls.swift")
         let doc = store.document("Calls.swift")
         await doc.reconcile(snapshot("func run() {\n  read()\n}\n", path: doc.path))
-        await store.jumps.search("read", line: 2, in: store)?.value
+        await store.jumps.search(.definition("read"), line: 2, in: store)?.value
         let peek = try #require(store.jumps.peek)
-        #expect(peek.symbols.map(\.path) == ["src/A.swift", "src/B.swift"])
+        #expect(peek.candidates.map(\.position.path) == ["src/A.swift", "src/B.swift"])
         #expect(store.selection == doc.path && store.jumps.back.isEmpty)
         let list = FileSymbolPeek(store: store, peek: peek)
         #expect(try list.inspect().find(text: "A.read").string() == "A.read")
@@ -196,7 +196,7 @@ struct TaskFilesTests {
         #expect(try list.inspect().find(text: "src/B.swift:7").string() == "src/B.swift:7")
         store.jumps.dismiss()
         #expect(store.jumps.back.isEmpty)
-        await store.jumps.search("read", line: 2, in: store)?.value
+        await store.jumps.search(.definition("read"), line: 2, in: store)?.value
         let reopened = FileSymbolPeek(store: store, peek: try #require(store.jumps.peek))
         try reopened.inspect().find(ViewType.Button.self, where: { button in
             (try? button.labelView().find(text: "B.read")) != nil
@@ -206,6 +206,32 @@ struct TaskFilesTests {
         #expect(store.selection == doc.path && store.visit?.line == 2 && store.jumps.back.isEmpty)
         store.jumps.step(backwards: false, in: store)
         #expect(store.selection == "src/B.swift" && store.visit?.line == 7)
+    }
+
+    @Test func aSinglePeerReferenceWaitsForAPickAndOpensTheMatchedBytes() async throws {
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/peer/checkout", query: RegistryQuery { args, cwd in
+            guard cwd == nil, args == ["--machine", "peer", "--repo-id", "plan", "task", "grep", "TEST-1",
+                                      "--json", "--whole-word", "--", "read"] else {
+                throw RegistryQueryError("Expected whole-word grep on the peer")
+            }
+            return #"{"hits":[{"path":"Call.swift","line":2,"start":5,"end":9,"revision":"base","excerpt":"😀 read()"}],"truncated":false}"#
+        }.onMachine("peer", repository: "plan"))
+        store.selectFile("Call.swift")
+        let doc = store.document("Call.swift")
+        await doc.reconcile(snapshot("readMore()\n😀 read()\n", path: doc.path))
+        var chord = FileJumps.Chord()
+        #expect(chord.press("g", identifier: "read") == nil && chord.pending)
+        let lookup = chord.press("r", identifier: "read")
+        await store.jumps.search(try #require(lookup), line: 2, in: store)?.value
+        let peek = try #require(store.jumps.peek)
+        #expect(peek.lookup.title == "References to read" && peek.candidates.count == 1)
+        #expect(store.visit == nil && store.jumps.back.isEmpty)
+        let list = FileSymbolPeek(store: store, peek: peek)
+        try list.inspect().find(ViewType.Button.self, where: { button in
+            (try? button.labelView().find(text: "😀 read()")) != nil
+        }).tap()
+        #expect(store.jumps.peek == nil && store.visit?.line == 2)
+        #expect(store.visit?.hit?.range(in: "😀 read()") == NSRange(location: 3, length: 4))
     }
 
     @Test func anIncompleteLookupCannotTakeTheReaderToAUniqueDefinition() async throws {
@@ -221,7 +247,7 @@ struct TaskFilesTests {
         store.selectFile("a.py")
         await store.document("a.py").reconcile(snapshot("partial()\n", path: "a.py"))
         for (name, message) in [("partial", "Results truncated"), ("missing", "No declarations found"), ("offline", "Peer disconnected")] {
-            await store.jumps.search(name, line: 1, in: store)?.value
+            await store.jumps.search(.definition(name), line: 1, in: store)?.value
             #expect(store.jumps.peek?.message?.contains(message) == true)
             #expect(store.selection == "a.py" && store.jumps.back.isEmpty)
         }
@@ -245,10 +271,10 @@ struct TaskFilesTests {
         await doc.reconcile(snapshot("struct Reader {}", path: doc.path))
         let draft = "struct Reader {\n func lookup() {}\n}\nReader().lookup()"
         doc.editor.insertText(draft, replacementRange: NSRange(location: 0, length: doc.text.utf16.count))
-        await store.jumps.search(nil, line: 4, in: store)?.value
-        #expect(store.jumps.peek?.symbols.map(\.name) == ["Reader", "lookup"])
+        await store.jumps.search(.outline, line: 4, in: store)?.value
+        #expect(store.jumps.peek?.candidates.map(\.label) == ["Reader", "Reader.lookup"])
         #expect(doc.outline?.enclosing(2)?.container == "Reader")
-        await store.jumps.search("lookup", line: 4, in: store)?.value
+        await store.jumps.search(.definition("lookup"), line: 4, in: store)?.value
         #expect(store.visit?.line == 2 && store.jumps.peek == nil && doc.text == draft)
         store.jumps.step(backwards: true, in: store)
         #expect(store.visit?.line == 4)

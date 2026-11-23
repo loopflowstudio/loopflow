@@ -63,6 +63,9 @@ one-Project tail left 0 live Waves without a Project, 0 Waves with two, 1,071
 of 1,071 Tasks still in a Project (`coverage` 81 Tasks in its one Project),
 and a clean `foreign_key_check`.
 
+After merging main (55c12ad9c6, 544 files): `cargo check --workspace
+--all-targets` clean.
+
 Next: the Trackers section (connect links the Wave's Project; Initiative links
 go), then `lf wave status` showing the Project line, then tests outside
 storage that seeded a second Project in one Wave.

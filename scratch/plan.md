@@ -38,7 +38,7 @@ A toggle or picker commits immediately. Text commits on Return or focus loss and
 - Machines separates connection health from placement and other preferences. Reuse the identity-checked status probe and ended-rental handling from `lf machine status` in the served path. Use up to four in flight, the existing 20-second probe deadline, and refresh while the pane is visible. Distinguish checking, reachable, error and ended rental. [CLI status](../rust/loopflow/src/lf/commands/machine.rs), [connection probe](../rust/loopflow-execution/src/machine/connection.rs).
 - Delete the five-tab shell and `ConfigurationSettingsView` with its path text fields, raw explanation formatter and key-by-key loading. Move DTOs still used by `TaskChangesView` to their shared owner. Retain CLI, launch and iPhone behavior through their current owners. New wire request/results use required fields and Rust/Swift fixtures. Update the Desktop and server operation docs as the interfaces change.
 
-## Implementation order
+## Legacy Context shape
 
 The first CLI probe found a counterexample in a released configuration shape. With
 `diff: true` and `context: [README.md]`, `config get context.diff` returned null
@@ -47,6 +47,8 @@ the documents list. Unsetting it left `diff: true` active. Before building the
 Context toggle, give the file owner a lossless edit for both spellings. Its
 preview and inverse must cover the original document list and any flat key it
 moves. Exercise that fixture alongside the ordinary and linked checkout cases.
+
+## Built
 
 The split window now opens on General, with pane-name search, the autosave
 switch and Undo, a grouped Shortcuts reference shared with the separate window,

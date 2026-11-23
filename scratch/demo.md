@@ -8,3 +8,7 @@
 - Proposed for the Customize jump: move Customize and Delete/Revert into the bottom bar beside Cancel/Apply, acting on the chosen theme; no reply yet.
 - Jack Heart: "let's drop harbor also" (Harbor and Harbor Light leave; 12 families, 24 themes)
 - Jack Heart, on why: "to get down to 12"
+
+## Ship-review, 2026-11-22
+
+Run headless; nobody present, no words recorded. Page: `scratch/ship-review.html`. Filed LOO-1062 (imported Ghostty themes) from the plan's "Left outside this Task" and QA round 1's refusal finding.

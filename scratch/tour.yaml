@@ -1,4 +1,4 @@
-at: 828c1a5ddb876f4db2f448ecc5f7c77929717f79
+at: 6f1e7d572475ed61c573551895afb84f9740e464
 first:
   - path: swift/README.md
     why: What a person gets: families, cards, title bar role
@@ -32,7 +32,7 @@ first:
   - path: swift/Loopflow/Services/ServerLink.swift
     why: A refused parse names both builds
   - path: swift/LoopflowMac/Views/ThemeChooser.swift
-    why: Card grid; Customize and Delete in the bottom bar
+    why: Card grid (CardGrid); bar buttons that name their theme
   - path: swift/LoopflowiOS/README.md
     why: What the phone draws and when it asks
   - path: swift/LoopflowiOS/MachineTheme.swift

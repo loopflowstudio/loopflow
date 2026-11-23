@@ -272,31 +272,6 @@ last place the code says a Wave has several Projects is the wire.
 with `items` and `truncated`; every reader takes the first or loops over one.
 Passed over: keeping the list; a bare `Option` (loses "could not read").
 
-Build:
-
-- `waves.rs`: a generic `Reading<T>` beside `Evidence<T>`
-  (`Ok { value: T }` / `Unavailable { reason }`, same `state` tag, no
-  defaults). Both structs carry `project: Reading<Option<ProjectSummary>>`.
-  `project_planning` reads the Wave's one Project (no list);
-  `print_projects` becomes `print_project` (`Project   none` when absent).
-- Swift: `WorkReading<Value>` mirroring it; `WaveWorkMap.project`,
-  `WavePlan.project`, `RegistryQuery` decoder. Readers in `WorkModel.swift`
-  (queued-sync check, reference lookup, the "Project reading is incomplete"
-  line goes), `RoadmapView`, `WavesView`, `WaveDetailPane`,
-  `WaveProjectsView` read the one value.
-- Fixtures: `wave_detail.json`, `roadmap_snapshot.json`,
-  `work_first_entry.json`, `server_schema.json` (regenerate), each
-  language's fixture test. `task_history_planning.json`'s `projects` is the
-  Task history's own field; leave it unless it is this shape.
-- The test in `waves.rs` that seeds a completed "Current project" and a
-  "Next project" successor (around the `for project_id in ["current",
-  "next"]` loop) loses the successor case: it is rollover.
-
-Checks: CLI `dto_fixtures::`, `server::schema::tests::`, `status_tests::`,
-`wave_lifecycle::`, `lf::commands::waves::tests::`; Swift
-`DTOFixtureTests|WaveDetailReadingTests|WorkModelTests|RegistryQueryTests`
-(`scripts/test_desktop.sh`); clippy.
-
 Built (2026-11-23): `Reading<T>` / Swift `WorkReading<Value>` (with
 `present` for the Project) carry `project` on both structs; `print_project`
 prints `Project   none` for a Wave without one. Desktop's planning-failure
@@ -313,6 +288,7 @@ read the Project; Swift `DTOFixtureTests|WaveDetailReadingTests|WorkModelTests|R
 
 ## Remains
 
-After slice 5, gate: Swift DTO suites (`scripts/test_desktop.sh`), the full
+Nothing left to build here; `git grep` finds no list-shaped Project on the
+wire or in Swift. Next is gate: Swift DTO suites (`scripts/test_desktop.sh`), the full
 matrix in CI, the `oauth_tests` contention failure checked on the base. Open,
 not this Task: a queued create's field snapshot (page question 3).

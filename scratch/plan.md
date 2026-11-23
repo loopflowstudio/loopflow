@@ -102,3 +102,19 @@ uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/RemoteTaskWorks
 - Finish with ordinary `lf machine end <label>` (no `--force`), verifying remote records returned, cost labeled as a ceiling estimate, and `main` still at the starting commit.
 
 For the installed demo, run `lf task run <demo-task> --rent modal --quote`, then repeat without `--quote`. Open the Task with `lf open --task <demo-task> --tab`, Desktop, and the paired phone. Confirm all four viewers on the remote sandbox, then give it back with `lf machine end <label>`.
+
+## Docs
+
+Updated user docs in place:
+
+- `docs/ops.md` (Modal burst vs. `--reserved` sizing, ceiling cost estimates, `--machine` exception for `lf open`, `lf machine forward`, container Linux without systemd/cron)
+- `docs/subscriptions.md` (Machine-aware harness fallback, quiescent recovery on missing executable/login, `lf machine forward <label> [--task | --session]`)
+- `docs/workspaces.md` (`lf open` always presenting locally, remote Tasks, and `--machine <label> --session <id>`)
+- `docs/surfaces.md` (Desktop server-routed Files, Changes, Diff, Save, Shell, and Session for remote Tasks; unreachable and move handling)
+- `docs/server.md` (Mobile single-pairing access to Files, Changes, Shell, and Session on remote Tasks)
+- `docs/work.md` (read-only cold Wave acquisition on fresh clones, idempotent `lf wave plan connect`, and `lf wave plan bind --replace`)
+- `docs/lf-reference.md` (`--machine` note for `lf open`)
+
+Open product question from writing the docs:
+
+- When `lf machine forward <label> --task <id>` or `--session <id>` restarts a Session's provider after refreshing `forward.files`, should that restart also pass current `forward.env` values (for example, a rotated `CLAUDE_CODE_OAUTH_TOKEN`) ephemerally into the restarted provider launch, or should `lf machine forward` refresh `forward.files` only?

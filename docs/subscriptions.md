@@ -48,7 +48,8 @@ with a plain log of the work so far. See
 | Explicit agent (`-a` or `agent:`) | Keeps the harness (bare Claude still tries its other models; `claude:opus` pins the model) |
 | Graph step's order exhausted on a usage limit | Wait 5, 15, 30, then 60 minutes, retrying from the first entry after each; then stop with the error |
 | Revoked login | Skips that provider's remaining models; tries the next provider or stops with sign-in instructions |
-| Graph step's agent is not installed | Skips to the next entry and logs why; if none left, fails with the install command |
+| Configured harness missing or unsigned-in on this Machine | Falls back to the first usable configured fallback, then a usable installed native harness; explicit `-a` and established threads keep their harness |
+| No usable harness or login on this Machine | Reports which executables or logins are missing and stops recovery until inputs change (no backoff retry loop) |
 
 Each retry after a wait restarts at the first entry of `agents` using whatever
 native login is active on the Machine, so renewing usage or signing in picks up
@@ -78,8 +79,22 @@ lf set --global forward.files '[~/.codex/auth.json]'
 
 - Values and files travel over SSH stdin, never in command arguments, logs, or
   the store.
-- A destination that already has a named file keeps its own (and logs if it
-  differs). Missing local variables or files stop the launch before renting.
+- A destination that already has a named file keeps its own on ordinary
+  launches (and logs if it differs). Missing local variables or files stop the
+  launch before renting.
+- To push rotated `forward.files` onto a live Machine, run `lf machine forward`:
+
+  ```bash
+  lf machine forward modal-1                      # replace configured forward.files atomically on modal-1
+  lf machine forward modal-1 --task LOO-570       # refresh files, then restart LOO-570's primary Session
+  lf machine forward modal-1 --session session_…  # refresh files, then restart that Session only
+  ```
+
+  Each file is replaced atomically via a private temporary file over SSH stdin.
+  Passing `--task` or `--session` restarts only that Session's provider on its
+  owning Machine after delivery completes, preserving the Session and its
+  continuation; unrelated Sessions keep running, and a delivery failure
+  restarts nothing.
 - **Claude:** forward `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`.
   Loopflow strips ambient `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and
   `CODEX_API_KEY` from Claude/Codex launches so shell keys don't silently move

@@ -14,7 +14,8 @@ walkthrough examples.
 
 ## Selection, output, and exit codes
 
-- `--machine <label-or-id>` runs the command on a saved remote Machine;
+- `--machine <label-or-id>` runs the command on a saved remote Machine (except
+  `lf open`, which always presents here and attaches on that Machine);
   `--repo <name-or-path>` overrides its saved repository; `--forward-agent`
   opts into SSH agent forwarding.
 - `--task <ID>` selects a Task checkout; `--wt <name>` selects a worktree;

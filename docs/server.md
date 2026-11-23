@@ -88,9 +88,15 @@ lf server mobile --status   # check approval and live readiness
 lf server mobile --off      # disable remote access; local Sessions keep running
 ```
 
-A phone signed into the same Tailscale user can attach to running Sessions on
-this Machine. Enabling local server access or adding SSH Machines does not
-enable phone access. For local-only use, no network port is opened; keep the
-local Unix socket private.
+A phone signed into the same Tailscale user connects to this server with one
+pairing and opens Tasks owned by this Machine or any remote Machine this server
+reaches (SSH hosts, pools, and rentals). Each Task workspace shows **Files**
+(directory tree and file contents, including unchanged files), **Changes**,
+**Shell**, and **Session** against the Task's owning Machine — showing
+**Not started** before a checkout exists, and an explicit error naming the
+Machine when it is unreachable instead of an empty diff or local shell.
+Enabling local server access or adding SSH Machines does not enable phone
+access. For local-only use, no network port is opened; keep the local Unix
+socket private.
 
 Next: [Surfaces](surfaces.md) · [Connection troubleshooting](troubleshooting.md#desktop-cannot-connect).

@@ -200,10 +200,11 @@ lf --wave product set machine mini               # default new Tasks in `product
 lf machine hub mini                              # exchange this Machine's plan with mini, live
 ```
 
-`--machine` runs the entire command on the target host in its saved repository.
-`lf machine remove mini` forgets the connection without stopping work running
-there. Machines that clone the same repository share its plan through Git; a
-hub makes that take seconds. See
+`--machine` runs the entire command on the target host in its saved repository,
+except `lf open`, which always presents on this Machine and attaches to the
+remote Machine. `lf machine remove mini` forgets the connection without
+stopping work running there. Machines that clone the same repository share its
+plan through Git; a hub makes that take seconds. See
 [Share the plan](work.md#share-the-plan-with-your-team).
 
 Group owned machines into a pool and fall back to on-demand rentals when none
@@ -212,11 +213,20 @@ are free:
 ```bash
 lf pool add lab && lf machine add jack@mini --pool lab
 lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-usd-per-hour 0.40
+lf ondemand add modal --provider modal --vcpus 8 --memory-gb 16 --max 2 --max-usd-per-hour 1
 lf ondemand add gpu --provider runpod --vcpus 8 --memory-gb 32 --gpu A40 --max 1 --max-usd-per-hour 1
-lf task run LOO-570 --pool lab --rent code --quote   # preview placement and max cost
-lf task run LOO-570 --pool lab --rent code           # use a free lab machine, else rent one
-lf --wave infrastructure set machine.capacity code   # Wave Tasks rent from `code`
-lf machine end code-1                                # return a rented machine early
+lf task run LOO-570 --pool lab --rent modal --quote   # preview placement, burst ceiling, and max cost
+lf task run LOO-570 --pool lab --rent modal           # use a free lab machine, else rent one
+lf --wave infrastructure set machine.capacity modal   # Wave Tasks rent from `modal`
+lf machine end modal-1                                # copy records home and return early
+```
+
+```text
+$ lf task run LOO-570 --rent modal --quote
+would rent 8 vCPU 16 GB burst on modal at $0.95184/h ceiling, ≤ $3.80736 until 18:40; runs nothing
+
+$ lf machine end modal-1
+Returned modal-1 (2 sessions copied; ceiling estimate $0.24)
 ```
 
 - **Supported rental providers:** Daytona (`DAYTONA_API_KEY`), Modal
@@ -224,15 +234,25 @@ lf machine end code-1                                # return a rented machine e
   (`RUNPOD_API_KEY`), and AWS (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
   `AWS_REGION`). Pass keys via `doppler run -- lf …`.
 - **Options:** `--gpu` requests a GPU (RunPod, AWS, Modal); `--spot` rents
-  interruptible capacity (AWS, RunPod).
+  interruptible capacity (AWS, RunPod); `--reserved` (Modal only) pins the CPU
+  and memory floor to `--vcpus` and `--memory-gb` instead of bursting.
+- **Modal burst sizing and cost estimates:** By default, Modal sandboxes start
+  at Modal's minimum floor (`0.125` physical core, `128 MiB`) and burst up to
+  `--vcpus` and `--memory-gb`, so an idle sandbox pays only the small floor.
+  Pass `--reserved` to pin floor equal to ceiling. Quotes, hourly limits,
+  dollar caps, and timeouts still price the full ceiling; uptime-derived cost
+  in `lf ondemand list` and `lf machine end` is labeled as a ceiling estimate
+  rather than a provider bill.
 - **Credentials on rentals:** Owned SSH machines use their own native logins.
   For unattended rentals, forward explicitly named tokens or auth files via
-  `forward.env` / `forward.files` ([Remote Machines and rentals](subscriptions.md#remote-machines-and-rentals)).
+  `forward.env` / `forward.files`, and push rotated files to a live Machine
+  with `lf machine forward <label>`
+  ([Remote Machines and rentals](subscriptions.md#remote-machines-and-rentals)).
   Linear receives a short-lived access token refreshed from your laptop (the
   refresh grant stays local).
 - **Automatic cleanup:** Rented machines return 15 minutes after their last
   Task finishes, copying Sessions and Graph runs back home first so
-  `lf session list` shows them (`from code-1`). Unpushed work blocks return
+  `lf session list` shows them (`from modal-1`). Unpushed work blocks return
   unless you pass `--force`.
 
 ## Updates and scheduling
@@ -251,7 +271,11 @@ launchctl bootout gui/$(id -u)/com.loopflow.refresh
 ```
 
 Re-enable with `launchctl enable gui/$(id -u)/com.loopflow.refresh && lf schedule`.
-On Linux, remove the `# loopflow install schedule` crontab line.
+On Linux, remove the `# loopflow install schedule` crontab line. On container
+Linux without `crontab` or a systemd user service, `lf install` succeeds
+while reporting that automatic updates are unscheduled, and the local server
+runs detached without systemd (explicit `lf install schedule` still fails if
+`crontab` is missing).
 
 For any other recurring job, such as settling landings with Desktop closed
 (`lf pr reconcile`) or running a daily `wave-operate` or release, use your OS

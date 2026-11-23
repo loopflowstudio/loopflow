@@ -34,8 +34,29 @@ lf open --task ENG-123 --tab --host tmux
 `--host desktop|rex|cmux|herdr|tmux|terminal` selects the host explicitly (no
 silent fallback on failure). Plain terminals support `--here`; when `--tab`
 isn't supported by the host, `lf` prints the command to run in a terminal you
-open yourself. `--server <endpoint>` targets a specific Rex Unix socket. Rex
-workspaces can reach a Task's remote Machine; Herdr and cmux stay local.
+open yourself. `--server <endpoint>` targets a specific Rex Unix socket.
+`lf open --task` attaches to the Task's owning Machine from any local host;
+`--workspace` overviews on Rex can also span remote Machines, while Herdr and
+cmux overviews stay local.
+
+## Remote Tasks and Sessions
+
+`lf open` always presents on the calling Machine and never tries to open a UI
+inside a remote host or headless container.
+
+```bash
+lf open --task LOO-570 --tab                          # open a local tab attached to LOO-570's owning Machine
+lf open --task LOO-570 --session session_… --tab      # attach a specific Session on LOO-570's Machine
+lf open --machine modal-1 --session session_… --tab   # attach a remote-only Session with no local Task
+lf --machine modal-1 open --session session_… --tab   # same; both flag positions present here
+```
+
+For a Task owned by another Machine (an SSH box, pool Machine, or Modal
+rental), `lf open --task <ID>` resolves the owner automatically and attaches a
+local view to the remote Session. For a remote-only Session that has no local
+Task, pass `--machine <label>` in either flag position. If the owning Machine
+is unreachable, `lf open` returns a retryable error naming it rather than
+opening a local conversation.
 
 ## Open a workspace overview
 

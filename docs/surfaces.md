@@ -10,12 +10,13 @@ For presentation modes, sibling tabs, and workspace layouts, see
 ## Open Work anywhere
 
 ```bash
-lf open loopflow://loopflow/task/LOO-12       # attach LOO-12's conversation here
-lf open --task LOO-12 --tab                   # attach in a sibling tab
-lf open --task LOO-12 --focus                 # reveal its existing view
-lf open --wave product                        # open the Wave's conversation
-lf open --wave product --workspace            # open the Wave's Task overview
-lf open --task LOO-12 --host desktop          # open in Loopflow Desktop
+lf open loopflow://loopflow/task/LOO-12               # attach LOO-12's conversation here
+lf open --task LOO-12 --tab                           # attach in a sibling tab (follows remote owner)
+lf open --task LOO-12 --focus                         # reveal its existing view
+lf open --machine modal-1 --session session_… --tab   # attach a remote-only Session here
+lf open --wave product                                # open the Wave's conversation
+lf open --wave product --workspace                    # open the Wave's Task overview
+lf open --task LOO-12 --host desktop                  # open in Loopflow Desktop
 ```
 
 - Direct CLI calls attach in the current terminal (including inside Rex). Agent
@@ -90,6 +91,25 @@ which turns auto off).
 If the Machine pauses briefly, edits still show immediately and flush once it
 reconnects. After ~10 seconds offline, mutation controls disable until the
 connection returns. See [Connect clients](server.md) for connection recovery.
+
+### Remote Tasks
+
+When a Task is owned by another Machine (an SSH host, pool Machine, or Modal
+rental), Desktop routes **Files**, **Changes**, **Diff**, **Save**, **Shell**,
+and **Session** through your local Loopflow server to that owning Machine:
+
+- **Files** shows the remote working copy (including unchanged files) and saves
+  edits back to the owner.
+- **Changes** shows the remote checkout's uncommitted diff.
+- **Shell** starts in the remote checkout.
+- **Session** attaches to the remote conversation rather than a stale local
+  checkout.
+
+An unstarted Task shows **Not started** (no checkout yet). If the owning
+Machine is unreachable, panes report an explicit error naming that Machine
+instead of showing an empty diff or opening a local shell. When a Task moves to
+another Machine, stale panes invalidate while unsaved drafts stay attached to
+their original Machine and checkout.
 
 ### The backlog
 

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<title>Concept review: themes, round 7 — the chooser bar names what it acts on</title>
+<title>Concept review: themes, round 8 — nothing left to change</title>
 <style>
 :root { color-scheme: light dark; --bg:#faf8f5; --fg:#2a2624; --muted:#5f5752; --line:#e6dfd6; --card:#fffdf9; --yes:#31633e; --no:#a02e25; --prop:#24579e; --accent:#722f37; }
 @media (prefers-color-scheme: dark) { :root { --bg:#2b2d30; --fg:#e6e2dc; --muted:#a8a29b; --line:#45474b; --card:#323437; --yes:#8fcf9a; --no:#f0a39a; --prop:#9cc2ee; --accent:#e7a3ad; } }
@@ -19,6 +19,33 @@ pre { background:var(--bg); border:1px solid var(--line); border-radius:6px; pad
 .swatches { display:flex; gap:4px; flex-wrap:wrap; margin:.4rem 0 } .swatches span { width:28px; height:20px; border-radius:3px; border:1px solid var(--line) }
 ol.q li { margin:.6rem 0 }
 </style></head><body>
+<h1>The theme choice after round 8: do the concepts line up?</h1>
+<p class="muted">Area taken: Choose Theme and the theme choice behind it as PR #2020 stands after round 8 (named bar buttons, <code>CardGrid.rows</code>), against main. Earlier rounds follow below as written.</p>
+
+<h2>Round 8: the same interaction, walked again</h2>
+<p><b>Normal path, System mode.</b> Fjord Light ringed in the light grid, Signal in the dark. The person clicks Fjord Light, then Signal: the bar reads <b>Customize Signal</b>; clicking Fjord Light again makes it <b>Customize Fjord Light</b>. The target is on the button that acts on it, and <code>ThemeWorkflowTests</code> breaks if the label stops following the click.</p>
+<p><b>Failure.</b> A personal theme with a very long name: at 700 pt both buttons truncate (QA round 8, <code>scratch/qa/r8-long-700.png</code>); the bar holds and Cancel/Apply stay whole. The truncated label still starts with the verb and the name's start, and the heading and “Previewing X” carry the full name. <b>Recovery</b> is unchanged: nothing is written before Apply; Cancel wrote nothing in QA.</p>
+
+<table>
+<tr><th>Product concept</th><th>Code concept</th><th>Lines up</th><th>Note</th></tr>
+<tr><td>Each side's chosen theme (what Apply saves)</td><td><code>themeName(for: side)</code>; ring, heading</td><td class="yes">yes</td><td></td></tr>
+<tr><td>The theme the bar acts on</td><td><code>selectedTheme</code>, named in the label; <code>customize()</code>, <code>deleteTheme()</code></td><td class="yes">yes</td><td>Round 7's mismatch, closed. One local <code>selected</code> feeds “Previewing”, Customize and Delete/Revert, so they can't disagree.</td></tr>
+<tr><td>Your theme vs. a built-in vs. an override</td><td><code>selectedSource</code>, <code>deleteRevertsToBuiltin</code></td><td class="yes">yes</td><td>Delete X / Revert X to built-in.</td></tr>
+<tr><td>12 families, a light and a dark each</td><td><code>scripts/theme_catalogue.py</code>, <code>ThemeDefinition.builtins</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>The Machine's theme setting</td><td><code>config.theme {value}</code>, <code>ThemeChoice</code>; Desktop and phone</td><td class="yes">yes</td><td>Unchanged since round 6.</td></tr>
+<tr><td>The card grid</td><td><code>CardGrid</code></td><td class="yes">yes</td><td>Layout only; each row's cards computed once.</td></tr>
+</table>
+
+<div class="big">
+<h2 style="margin-top:.4rem">Biggest mismatch: none left in this area</h2>
+<p>The one candidate is redundancy: “Previewing X” now says what the Customize button says. It stays (round 7 question 2a): while the editor is open the Customize button is replaced by Done Editing, and “Previewing X” is then the only line naming the window's colors. What remains is ship-review's look on an unlocked display.</p>
+</div>
+
+<h2>Round 8 questions</h2>
+<ol class="q">
+<li>Long personal names at 700 pt: (a) truncate, as built; (b) drop the name from Delete/Revert and keep it on Customize only.</li>
+</ol>
+<hr>
 <h1>The theme choice after round 7: do the concepts line up?</h1>
 <p class="muted">Area taken: Choose Theme as round 7 left it (demo changes: 12 families, Arcade Day on Paper, Customize and Delete/Revert in the bottom bar, <code>CardGrid</code>), inside the whole theme choice of PR #2020. Earlier rounds follow below as written.</p>
 

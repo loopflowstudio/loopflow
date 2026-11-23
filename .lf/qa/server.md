@@ -193,9 +193,19 @@ turn; the row stays) and `lf session resume --prepare --json` the Task's
 primary. A live taskless conversation is `lf -a claude : 'hello'` under a PTY
 driver in a plain worktree, with a stand-in that `exec sleep 300`.
 `lf task show <id>` piped prints JSON: `execution.work.sessions[].id` and
-`execution.work.graph_processes[].id` are a Task's membership. A Working-board
-drag is `lf desktop dashboard move working-tasks/task:<id> --destination
-task:<id>`, run from the repository. To move a repository with its checkouts,
+`execution.work.graph_processes[].id` are a Task's membership; in SQL, a
+Session's Task is `agent_sessions.task_id`, a run's `graph_processes.task_id`
+(keyed by `lf_process_id`), a primary a `task_primary_sessions` row, and
+`tasks.issue_identifier` holds `lf-<uuid>` for a Task with no tracker. `lf
+session resume --prepare --json` prints more than one JSON document; read the
+first. A Working-board drag is `lf desktop dashboard move
+working-tasks/task:<id> --destination task:<id>`, run from the repository; it
+is the only CLI that changes a Task's rank (`lf task move` changes membership
+or Machine), and `lf task list` and `lf task show` show the result, `lf task
+status --json` carries no rank. A worktree nested inside another Task's
+checkout (`git worktree add <checkout>/nested`) is the case where "the Task
+holding a directory" and "the Task whose checkout this is" differ: adopt it
+with `lf task create --worktree`, then launch in a subdirectory of each. To move a repository with its checkouts,
 keep the worktrees inside it, `mv` it, `git worktree repair`, then run
 `lf task list` from the new path. Once every writer has exited, `sqlite3
 ?mode=ro` cannot open a home's store (no `-shm`); open it read-write.

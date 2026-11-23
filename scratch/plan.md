@@ -434,11 +434,24 @@ Main is merged through #1988 (`8892ba5671`, origin/main's head). The review is
    771 history events that say `inherited` (serde alias). Swift reads the
    value as a string; `server_schema.json` regenerated.
 
-Demo at gate (4b): `lf task move` then `lf task status` show the new rank;
-Desktop's Working board after merge and install. Auto stays a Machine fact
+Demo at gate (4b): `lf desktop dashboard move working-tasks/task:<id>
+--destination task:<id>` from the repository, then `lf task list` (the new
+order) and `lf task show` (the rank). `lf task move` does not reorder and `lf
+task status` shows no rank (QA 2026-11-22). Desktop's Working board after
+merge and install. Auto stays a Machine fact
 (2a), unchanged.
 
 ## Next: gate
+
+QA on `86fe72ab65` (2026-11-22, `scratch/qa.html`) found one regression and
+fixed it: `lf task create --worktree` refused a worktree nested inside another
+Task's checkout ("<outer> already has a different checkout"), because
+`task_holding` answers by containment where the old `counted_task` compared
+Git roots. Adoption now takes a holding Task as the checkout's only when its
+checkout is that root (`a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout`).
+Also repaired: `creation_adopts_only_the_selected_work` still expected
+adoption to give the open conversation the Task (change 3 removed that).
+`ops::task::adoption::` 9 and `ops::task::tests::` 35 passed.
 
 Items 1-6 are settled. PR #1973; branch merges main through #1988
 (`8892ba5671`). The acceptance check last passed at `2448546730` (10 tests).

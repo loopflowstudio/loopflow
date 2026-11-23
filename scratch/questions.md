@@ -210,3 +210,13 @@ Answers (Jack Heart): "1a 2a 3b 4b 5 not sure, explain"
   moving it onto `task_holding` is the next unification.
 - **`'inherited'` reads as `declared`** through a serde alias for 771
   history events. Passed over: rewriting the events' payloads.
+
+## QA on 86fe72ab65 (2026-11-22)
+
+- **Bare `lf resume` in a worktree nested inside a Task's checkout opens the
+  outer Task's conversation** (`task_holding` containment), where released lf
+  answers "This worktree has no associated work conversation". Left as is: it
+  is the plan's membership rule. Open for a person: should a separate Git
+  checkout inside a Task's checkout count as that Task's for resume, as it
+  does for launches? Adoption of such a worktree was refused by the same
+  change and is fixed (`a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout`).

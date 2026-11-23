@@ -1,163 +1,91 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>LOO-937 QA</title>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-937 QA</title>
 <style>
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#1c1c1e}
-h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem}
-pre{background:#f4f4f6;padding:.7rem .9rem;border-radius:6px;overflow-x:auto;font:12.5px/1.45 ui-monospace,Menlo,monospace}
-code{font:13px ui-monospace,Menlo,monospace;background:#f4f4f6;padding:0 .2em;border-radius:3px}
-table{border-collapse:collapse;margin:.6rem 0}td,th{border:1px solid #d8d8dc;padding:.3rem .6rem;text-align:left;vertical-align:top}
-.bad{color:#b3261e;font-weight:600}.ok{color:#1b6e3c;font-weight:600}
-@media (prefers-color-scheme:dark){body{background:#1c1c1e;color:#e6e6ea}pre,code{background:#2a2a2e}td,th{border-color:#444}}
-</style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
+h1{font-size:1.6rem}h2{font-size:1.15rem;margin-top:2rem;border-top:1px solid #ddd;padding-top:1rem}
+table{border-collapse:collapse;margin:.6rem 0;font-size:13.5px}td,th{border:1px solid #ddd;padding:.25rem .55rem;text-align:left;vertical-align:top}
+th{background:#f5f5f7}code,pre{font:12.5px ui-monospace,Menlo,monospace}pre{background:#f5f5f7;padding:.6rem .8rem;overflow-x:auto}
+.bad{color:#b00020;font-weight:600}.ok{color:#1b7f3b;font-weight:600}
+</style></head><body>
 <h1>LOO-937 QA: one home per Task fact</h1>
-<p>Branch <code>lf 0.16.0+51b59096d</code> (debug build) beside the installed
-<code>lf 0.16.0+7bb879aff</code>, which is a main build one migration behind
-the branch. Private homes under <code>/tmp/lf937{w,x,y}</code> with stand-in
-providers; a <code>VACUUM INTO</code> snapshot of the live store, touched by
-<code>sqlite3</code> only. No display: the Working board was driven through
-<code>lf desktop dashboard move</code>, not a window. This replaces the report
-from <code>9ffada248</code>, whose Process half no longer exists.</p>
+<p>Branch <code>lf 0.16.0+86fe72ab6</code> (debug) beside the installed <code>lf 0.16.0+c4de2038f</code>, a main build two migrations behind the branch (<code>loo974_agent_socket</code>, <code>task_facts_once</code>). Private homes under <code>/tmp/lf937q/{up,fr,fi}</code> with stand-in <code>claude</code>/<code>codex</code> on <code>PATH</code>; a <code>VACUUM INTO</code> snapshot of the live store touched by <code>sqlite3</code> only. No display: the Working board was driven through <code>lf desktop dashboard move</code>. This replaces the report from <code>51b59096d</code>; concept-review changes 3–6 landed since.</p>
 
 <h2>1. Returning user: the migration on a snapshot of the live store</h2>
-<p>The live store lacks only <code>task_facts_once</code>. Applied with
-foreign keys off, as the runner does.</p>
-<pre>whole migration                         6.8 s wall (0.5 s CPU), slowest statement 2.5 s
-store                                   638 MB → 670 MB
-pragma foreign_key_check                (empty)      integrity_check   ok</pre>
-<table>
-<tr><th></th><th>before</th><th>after</th></tr>
-<tr><td>Tasks</td><td>1,427</td><td>1,427</td></tr>
-<tr><td>Sessions naming a Task</td><td>19,016 of 22,826</td><td>21,813 (+2,797)</td></tr>
-<tr><td>Graph runs naming a Task</td><td>2,684 of 2,881</td><td>2,688 (+4)</td></tr>
-<tr><td>Task primaries marked on their row</td><td>0</td><td>438, one per <code>task_primary_sessions</code> row</td></tr>
-<tr><td>primary row and its Session name different Tasks</td><td>3</td><td>0</td></tr>
-<tr><td><code>planning_completed</code> ≠ (<code>planning_state</code> is completed)</td><td>0 of 882</td><td>0</td></tr>
-<tr><td>taskless Sessions or runs still inside a checkout</td><td></td><td>0 and 0</td></tr>
-<tr><td>Tasks with two primaries</td><td></td><td>0</td></tr>
+<p>Applied <code>loo974_agent_socket</code> then <code>task_facts_once</code> with foreign keys off, as the runner does.</p>
+<table><tr><th></th><th>before</th><th>after</th></tr>
+<tr><td>whole migration</td><td colspan=2>1.05 s wall, slowest statement 0.30 s; store 667 MB → 703 MB</td></tr>
+<tr><td><code>foreign_key_check</code> / <code>integrity_check</code></td><td colspan=2>empty / ok</td></tr>
+<tr><td>Tasks</td><td>1,556</td><td>1,556</td></tr>
+<tr><td>Sessions naming a Task</td><td>20,703 of 25,178</td><td>24,113</td></tr>
+<tr><td>Graph runs naming a Task</td><td>2,919 of 3,124</td><td>2,923</td></tr>
+<tr><td>taskless Sessions / runs inside a checkout</td><td>3,410 / 0</td><td>0 / 0</td></tr>
+<tr><td><code>task_primary_sessions</code> row naming a Session of another Task</td><td>5</td><td>0</td></tr>
+<tr><td><code>work_source</code></td><td>checkout 11,910 · declared 8,062 · inherited 750 · bound 14 · null 4,442</td><td>checkout 15,315 · declared 8,812 · bound 14 · null 1,037</td></tr>
+<tr><td><code>planning_completed</code> ≠ (state is completed)</td><td>0</td><td>0</td></tr>
+<tr><td><code>primary_scope</code></td><td colspan=2>repository 13 · wave 25 · null 25,140 (no <code>'task'</code> written, as change 5 intends)</td></tr>
 </table>
-<p>The 193 runs that still name no Task sit in no checkout.</p>
 
 <h2>2. Returning user: a home built by the installed lf, opened by the branch</h2>
-<pre>installed: Tasks p q r s (adopted worktrees) + one with no checkout
-           in wt-p, wt-q: lf -b graph qa ; lf -b default hello ; lf session resume --prepare
-           lf task complete s ; lf desktop dashboard move working-tasks/task:r --destination task:p
-branch:    lf task status p --json     byte-identical to the installed lf's (1,942 bytes)
-           lf task show, all five      same title, state, rank, section, lifecycle, branch,
-                                       worktree, Sessions and Graph runs
-           agent_sessions              p's and q's primary now primary_scope='task'</pre>
-<p><b>Changed for the person:</b> the order dragged with the installed lf
-(<code>r, p, q</code>) is gone; the branch lists <code>p, q, r</code> by rank.
-On the live store the saved order names 3 open Tasks
-(<code>LOO-515, LOO-312, LOO-330</code> → <code>LOO-312, LOO-330, LOO-515</code>).
-Not changed here: carrying it into rank would send order actions to the tracker
-(questions.md).</p>
+<pre>installed: Tasks p q r (adopted worktrees) + loose (no checkout)
+  in wt-p, wt-q: lf -b graph qa; lf -b default hello; lf session resume --prepare
+  lf desktop dashboard move working-tasks/task:r --destination task:p   → r, p, q
+  lf task complete loose</pre>
+<table><tr><th>branch read</th><th>against the installed lf's</th></tr>
+<tr><td><code>lf task show</code> ×4, <code>lf task status p --json</code></td><td class=ok>identical (timestamps aside)</td></tr>
+<tr><td>Task p / q membership</td><td>2 Sessions + 1 run each, unchanged; r none</td></tr>
+<tr><td><code>lf session list --json</code></td><td><code>task_primary: true</code> → absent; <code>primary_scope: null</code> → <code>"task"</code> (planned: Swift derives <code>taskPrimary</code> from it)</td></tr>
+<tr><td><code>lf task list</code></td><td>r, p, q → p, q, r: the installed drag lived in <code>task_orders</code>, which the branch no longer reads (known, questions.md)</td></tr>
+</table>
+<p>Back on the installed lf after the branch migrated the home: <code>lf session resume --prepare</code> in wt-p reopens p's primary (<code>task_primary: true</code>, <code>task_ids</code> = p), <code>lf task show p</code> lists the same Sessions and run, and it still sees its own saved order. The window skew the earlier report saw (primary missing under old lf) is gone with change 5.</p>
 
-<h2>3. Fresh install: work started in a checkout takes its Task</h2>
-<pre>lf task create 'Task A: first thing' --worktree wt-a
-cd wt-a; lf -b graph qa; lf -b default hello; lf session resume --prepare     (none names the Task)
-cd wt-b/sub/deep; lf -b default hello
+<h2>3. Fresh install: where work lands</h2>
+<pre>Tasks a (wt-a), b (wt-b), n (wt-a/nested: a Git worktree inside a's checkout)</pre>
+<p class=bad>First try: <code>lf task create 'Task n' --worktree wt-a/nested</code> → <code>Error: ae4f6f already has a different checkout; its work is unchanged</code>. The installed lf adopts the same path fine (home <code>fi</code>).</p>
+<p>Cause: <code>counted_task</code> now asks <code>task_holding</code> (deepest checkout by containment); before, it compared Git worktree roots. Adoption took "the Task holding this root" for "the Task whose checkout this is", found a, and refused. <b>Fixed</b> in <code>ops/task/adoption.rs</code>: with an explicit <code>--worktree</code>, a holding Task counts as the checkout's only when its checkout is that root. Test: <code>a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout</code> (fails without the fix). After:</p>
+<table><tr><th>launch</th><th>Session / run</th><th>Task</th><th>source</th></tr>
+<tr><td>wt-a: <code>lf -b graph qa</code></td><td>run aaf42d</td><td>a</td><td></td></tr>
+<tr><td>wt-a: <code>lf -b default hello</code></td><td>4fec38</td><td>a</td><td>checkout</td></tr>
+<tr><td>wt-a: <code>lf session resume --prepare</code></td><td>a20cc7</td><td>a, primary</td><td>declared</td></tr>
+<tr><td>wt-b/sub/deep: <code>lf -b default hello</code></td><td>fd97b4</td><td>b</td><td>checkout</td></tr>
+<tr><td>wt-a/nested/x: graph, hello</td><td>run 9089b6, 699ff7</td><td>n (deepest)</td><td>checkout</td></tr>
+<tr><td>repository root: hello</td><td>f3db49</td><td>none</td><td></td></tr>
+</table>
+<p>Bare <code>lf resume --prepare</code>: wt-a and wt-a/src/lib → a20cc7 (a's primary); wt-a/nested/x → a new primary 4be43f for n, in wt-a/nested.</p>
 
-c0e1b9 | Task A | declared | task     the primary
-e25f9f | Task A | checkout            headless
-0f87cd | Task B | checkout            started two directories down
-run 6f63d7 | Task A      run 1e5e68 | Task B
-7a63b8 | (none) | repository          the repository's conversation</pre>
+<h2>4. Adopting a checkout that holds a live conversation</h2>
+<pre>plain worktree wt-v: lf -a claude : 'hello there' in a PTY (stand-in exec sleep 300)
+lf task create 'Task v' --worktree wt-v</pre>
+<p>The open conversation 3960f7 stays taskless, as answered in 5c ("binding a worktree shoul[d not] auto bind in a session"). <code>lf session bind 3960f7 --task e33670</code> makes it v's primary (<code>bound</code>, <code>primary_scope</code> task on the wire, <code>lf task show</code> lists it). Wrong input: <code>bind nope</code> → "Session nope was not found"; <code>--task NOPE-1</code> → "Task "NOPE-1" is not registered"; <code>--task 'Task v'</code> (a title) → not registered, too.</p>
+<p>Also repaired: <code>creation_adopts_only_the_selected_work</code> still asserted the old adoption; it now asserts the conversation stays taskless.</p>
 
-<h2>4. Move the repository, then reuse the checkout's path</h2>
-<pre>moved/wt-b: Task B, one run, two Sessions
-mv moved moved2; git worktree repair; lf task list        checkout → moved2/wt-b
-git clone moved2 moved; worktree moved/wt-b; Task C adopts it; lf -b graph qa; lf -b default hello
+<h2>5. Move the repository, then reuse the path</h2>
+<pre>repo mv with wt-m inside; Task M adopts mv/wt-m; graph + hello there
+mv mv mv2; git worktree repair; lf task list      → M's checkout mv2/wt-m
+git clone mv2 mv; worktree mv/wt-m; Task M2 adopts it; graph + hello there</pre>
+<table><tr><th>Task</th><th>Sessions</th><th>runs</th></tr>
+<tr><td>M (mv2/wt-m)</td><td>c71664</td><td>576ee4 — its recorded cwd is <code>mv/wt-m</code>, the path M2 now holds</td></tr>
+<tr><td>M2 (mv/wt-m)</td><td>dcc802</td><td>2ec5bf</td></tr></table>
 
-run 7e6c46 | Task B | cwd /private/tmp/lf937x/moved/wt-b      (the path Task C now holds)
-run 279e2c | Task C | cwd /private/tmp/lf937x/moved/wt-b
-Task B: sessions 18acd2 cea946, graphs 7e6c46       unchanged through both steps
-Task C: sessions ab11d3,        graphs 279e2c</pre>
-
-<h2>5. A Task adopts a worktree that already holds work</h2>
-<pre>plain worktree wt-u: lf -b graph qa; lf -b default hello (both ended), then Task u adopts it
-  Task u: no Sessions, no runs                    ended work stays out
-plain worktree wt-v: lf -a claude : 'hello there' in a PTY, stand-in still running
-  before adopt   f97e88 | no Task | open
-  after adopt    f97e88 | Task v  | checkout       lf task show v lists it</pre>
-
-<h2>6. Primary conversation, both homes of the mark</h2>
-<pre>branch:    lf session resume --prepare in wt-p            reopens 5e8973, primary_scope task
-installed: new Task t, lf session resume --prepare        task_primary_sessions row → trigger marks 38abfe 'task'
-branch:    lf session resume --prepare in wt-t            opens 38abfe
-branch:    lf session bind &lt;repository conversation&gt; --task r
-           4922a2 loses the mark, 5e8eef takes it (work_source bound), mirror row → 5e8eef
-           lf task show r: 8c10d9, 4922a2, 5e8eef
-wrong input: an ended headless Session   "Select an unfinished interactive Session to become the Task conversation"
-             bind nope                   "Session nope was not found"
-             --task NOPE-1               "Task "NOPE-1" is not registered"</pre>
+<h2>6. Working-board drag</h2>
+<table><tr><th>move</th><th>result</th></tr>
+<tr><td>v onto a</td><td>ranks v 0, a 1, b 2, n 3; <code>lf task list</code> in that order</td></tr>
+<tr><td>v onto itself</td><td>unchanged</td></tr>
+<tr><td>onto a Task id that doesn't exist</td><td>"task_0000… is no Task; nothing changed."</td></tr>
+<tr><td>onto <code>nope</code></td><td>"invalid query: expected repository, task:&lt;durable-id&gt;, or wave:&lt;durable-id&gt;"</td></tr>
+<tr><td>onto a Task in another repository</td><td>"e33670 and 0519ac are in different repositories; nothing changed."</td></tr></table>
+<p>The plan's gate demo named <code>lf task move</code> then <code>lf task status</code>: the first changes membership or Machine, the second shows no rank. Plan corrected to the drag plus <code>lf task list</code>/<code>show</code>.</p>
 
 <h2>7. Completion, written by either lf</h2>
-<pre>installed: lf task complete r     → planning_state completed, planning_completed 1; branch list drops r
-branch:    lf task reopen r       → unstarted, 0
-branch:    lf task complete q     → completed, 1; installed list drops q</pre>
-
-<h2>8. Working board drag</h2>
-<pre>lf desktop dashboard move working-tasks/task:t --destination task:p
-  ranks t=0 p=1 q=2 r=3 s=4 loose=5; lf task list: t, p, r, loose
-onto itself            unchanged, exit 0
-onto no Task           "task_0000… is no Task; nothing changed."
-not a tile             "nope is not a tile here; nothing changed."
-a done Task (q)        ranks it before p (questions.md: any undeleted Task)
-installed lf, after    r, p, t: its own saved list (the window skew questions.md accepts)</pre>
-
-<h2>9. Two at once, and the hourly pass</h2>
-<pre>two lf -b graph qa in wt-p at the same moment     both exit 0, Task p has 3 runs
-lf machine prune --json on the upgraded home      ended_owners 0, nothing moved</pre>
-
-<h2>Fixed in this run</h2>
-<ul>
-<li><code>.lf/qa/server.md</code> told the next run to open a copy of the live
-store with <code>lf</code>, which the same file forbids (reads run recovery
-against the real checkouts and can start a ship). Replaced with the
-<code>sqlite3</code> snapshot method and the installed-then-branch home.</li>
-<li><code>scratch/plan.md</code>: the acceptance check did the same; and the
-cost of the primary mark during the upgrade window was stated as one error in
-processes already running. Both now say what this run saw.</li>
-</ul>
-<p>No product code changed: nothing the branch does broke.</p>
+<p>Branch <code>lf task complete q</code> → state completed, boolean 1; installed list drops q. Installed <code>lf task reopen q</code> → branch list shows q again.</p>
 
 <h2>Where it stands</h2>
-<p><span class="ok">Works:</span> the migration on live data; upgrade of an
-installed-lf home with every Task fact unchanged; membership by Task through a
-repository move and a reused path; adoption of a live conversation; the
-primary mark and its mirror in both directions; completion in both directions;
-board drag and its refusals.</p>
-<p><b>Not reached:</b> a Desktop window (no display; tile order and the refused
-drop are left to <code>DashboardWorkspaceTests</code> at gate). A served
-<code>session.list</code> read: my hand-written envelope was refused ("no
-operation"), and the same record came through <code>lf session list --json</code>
-(<code>primary_scope: "task"</code>, no <code>task_primary</code>). A run
-started from a Task's primary conversation outside any checkout, which needs
-a real provider turn. A tracker Project (private homes have no Linear), so a
-drag reaching Linear as an order action, and a cross-Project drop.</p>
-<p><b>Still wrong, worst first:</b></p>
+<p><b>Works:</b> the migration on live data (1 s); an installed-lf home opened by the branch with every Task read identical; the installed lf on the migrated home, primary included; membership by Task through nesting, a repository move and a reused path; adoption leaving live work alone, and <code>bind</code>; drag and its refusals; completion both ways.</p>
+<p><b>Fixed here:</b> adopting a worktree nested inside another Task's checkout.</p>
+<p><b>Not reached:</b> a Desktop window (no display), so the tile drag itself and the derived <code>taskPrimary</code> are checked on the wire only; Linear-backed rank and order actions (no tracker in the private homes).</p>
+<p><b>Still wrong / open, worst first:</b></p>
 <ol>
-<li><span class="bad">An older lf on a migrated store loses every Task's
-primary conversation.</span> Installed lf after the branch opened the home:
-<pre>lf session list --json    5e8973 primary_scope task, task_ids []        (before: [Task p])
-lf task show p            sessions [1d5e62]                              (before: [1d5e62, 5e8973])
-cd wt-p; lf session resume
-Error: invalid control authority: Session d9d79ee3…5e8973 is not an unfinished interactive conversation of this Task</pre>
-Its membership requires <code>primary_scope IS NULL</code>, so no trigger can
-help it. This holds for an lf started after the migration as well as one
-already running, until every lf process on the Machine is replaced: holders,
-servers and Graph workers in flight at <code>lf install</code>, and the
-installed lf whenever a branch build opens <code>~/.lf</code> first. The plan
-recorded a narrower cost. The alternative is keeping the mark in
-<code>task_primary_sessions</code> until LOO-877; that reverses a choice made
-at human review, so it is described in questions.md, not made.</li>
-<li>A board order dragged before the upgrade is dropped (section 2).</li>
-<li>The move command's answer lists done Tasks among the Working tiles
-(<code>q</code> and <code>s</code> above). Whether Desktop filters them was
-not seen.</li>
-<li>Not this change, same on main: a worktree removed with
-<code>git worktree remove</code> leaves its Task's checkout row, so another
-repository's worktree at that path cannot be adopted ("The Task belongs to
-another repository") and a run there joins the old Task.</li>
+<li>A drag made with the installed lf is invisible to the branch (and the reverse) until every lf on the Machine is this build; on the live store the saved order names 3 open Tasks. Known and accepted in questions.md.</li>
+<li>Bare <code>lf resume</code> in a worktree nested inside a Task's checkout, with no Task of its own (<code>wt-b/inner</code>): the branch opens Task b's conversation in <code>wt-b</code> (prepared 614169, <code>task_ids</code> b); the installed lf says "This worktree has no associated work conversation" and offers <code>lf</code> to start one there. Follows from the plan's rule (work inside a checkout is that Task's), now applied by <code>task_holding</code>; whether resume should open the outer Task from an inner Git checkout is a product call, left as is.</li>
+<li><code>lf session resume --prepare --json</code> prints more than one JSON document on stdout, so a plain <code>json.load</code> fails. Same on the installed lf; not this change.</li>
 </ol>
+</body></html>

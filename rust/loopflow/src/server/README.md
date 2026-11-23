@@ -127,12 +127,26 @@ and its directory are private; remote proxies must never forward this endpoint.
 The remote carrier (`remote.rs`, `lf server mobile`) speaks the same protocol
 over WebSocket on the host's Tailscale address: one text frame per message on
 `/v1/machine`, ticketed connections on `/v1/ticket`, binary frames for terminal
-bytes. It admits another untagged node of the approved owner through
-`tailscale whois`. The Machine's own node is refused unless
-`mobile-same-device` exists in the lf home, which is how an iOS Simulator on the
-same Mac connects; create it only on a Mac with one account. Setup saves the endpoint, owner and enabled choice in
-Machine-local `mobile.yaml`, using the shared atomic file writer. It does not
-add service state to `config.yaml` or the preferences catalogue.
+bytes. Setup saves the endpoint, owner and enabled choice in Machine-local
+`mobile.yaml`.
+
+`mobile/tailscale.rs` uses the Tailscale LocalAPI. On macOS it discovers the
+App Store endpoint via `IPNExtension` and the Standalone endpoint via
+`/Library/Tailscale/ipnport`. The default daemon socket is
+`/var/run/tailscaled.socket` on macOS and `/var/run/tailscale/tailscaled.sock`
+on Linux. An explicit `TS_SOCKET` selects only that socket.
+
+Binding reads full status to verify the saved owner and MagicDNS name, then
+loads the TLS certificate and key into memory. Each TCP connection needs a
+WhoIs result identifying another untagged device of that owner. For an iOS
+Simulator on the same Mac, create `mobile-same-device` in the lf home only if
+the Mac has one account.
+
+Every five seconds the listener checks status with `peers=false` so an account
+change closes active connections. Certificate renewal runs every six hours.
+After failure the manager retries from completion at 5, 10, 20 and then 30
+seconds. Status reads the manager's last result. Disabling cancels the pending
+bind, retry or listener.
 
 Another Machine reaches this server over SSH: `lf server connect` checks
 `LF_EXPECTED_MACHINE_ID`, starts the server when none is running

@@ -93,6 +93,10 @@ def test_macos_rust_runs_the_process_test(path: str) -> None:
     assert _jobs(path) == {MACOS_PROCESS_TEST}
 
 
+def test_tailscale_discovery_runs_the_native_fixtures() -> None:
+    assert MACOS_PROCESS_TEST in _jobs("rust/loopflow/src/server/mobile/tailscale/macos.rs")
+
+
 def test_deleted_rust_file_without_text_skips_the_process_test() -> None:
     assert _jobs("rust/loopflow-execution/src/gone.rs") == set()
 

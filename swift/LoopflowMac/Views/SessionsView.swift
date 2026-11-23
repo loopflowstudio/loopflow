@@ -1673,7 +1673,7 @@ struct SessionsContentView: View {
             }
         }
         .sheet(item: $model.projectsWave) { wave in
-            WaveProjectsView(wave: wave.name, repo: wave.repo, sourceReference: model.projectsReference)
+            WaveProjectsView(wave: wave.name, repo: wave.repo)
         }
         .modifier(TaskAbandonConfirmation(model: model))
         .modifier(TaskCompleteConfirmation(model: model))

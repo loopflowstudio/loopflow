@@ -259,6 +259,10 @@ Swift `WaveDetailReadingTests|DTOFixtureTests|WorkModelTests|RegistryQueryTests|
 `project` to `wave.plan.connect`; Swift's `wavePlanConnect` now carries it.
 `status_tests::` passes (one fixture gained `"url": null`); clippy clean.
 
+Compress after slice 4: the Backlog Wave menu's Project sheet shows the Wave's
+one Project; its scroll-to-reference (`sourceReference`, `projectsReference`)
+and truncation line went.
+
 ## Remains
 
 Nothing to implement. Gate: Swift DTO suites (`scripts/test_desktop.sh`),

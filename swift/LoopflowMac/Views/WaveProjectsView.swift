@@ -3,47 +3,33 @@ import Loopflow
 import SwiftUI
 
 struct WaveProjectsView: View {
-    @Environment(\.palette) private var palette
     @Environment(\.dismiss) private var dismiss
 
     let wave: String
     let repo: String
-    var sourceReference: String? = nil
 
     @State private var projects: WorkEvidence<ProjectPlanningSnapshot>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             HStack {
-                Text("\(wave) · Projects").font(Typography.textStrong)
+                Text("\(wave) · Project").font(Typography.textStrong)
                 Spacer()
                 Button("Done") { dismiss() }.buttonStyle(LoopflowButtonStyle())
             }
             switch projects {
             case nil:
-                ProgressView("Reading Projects…")
+                ProgressView("Reading the Project…")
             case .unavailable(let reason):
-                FailureLine("Projects did not load.", machine: reason)
-            case .available(let entries, let truncated):
-                if entries.isEmpty && !truncated {
-                    Text("No Projects in this Wave.").emptyLine()
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: Spacing.lg) {
-                                ForEach(entries) { project in
-                                    WaveProjectView(project: project, repo: repo).id(project.id)
-                                }
-                                if truncated { Text("More Projects are available.").foregroundStyle(palette.warning) }
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .onAppear {
-                            if let sourceReference,
-                               let project = entries.first(where: { $0.matches(reference: sourceReference) }) {
-                                proxy.scrollTo(project.id)
-                            }
-                        }
+                FailureLine("The Project did not load.", machine: reason)
+            case .available(let entries, _):
+                if let project = entries.first {
+                    ScrollView {
+                        WaveProjectView(project: project, repo: repo)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                } else {
+                    Text("This Wave has no Project yet.").emptyLine()
                 }
             }
         }

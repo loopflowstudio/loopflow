@@ -1,4 +1,4 @@
-at: dd8cb3db4631e0090a22ef8834b2459e1b8a3257
+at: 5336a5ebaf9d51fe1f890e86926e19e154780d26
 first:
   - path: scripts/testing.md
     why: Install the hook and inspect a new worktree
@@ -7,7 +7,7 @@ first:
   - path: scripts/build_cache.py
     why: Select, lock, clone and report a sibling target
   - path: python/tests/test_build_cache.py
-    why: Exercise freshness, busy sources and clone failures
+    why: See Cargo wait during a seeded sibling’s first build
   - path: .lf/qa/build-cache.md
     why: Replay the ready checkout and cross-volume fallback
   - path: scripts/benchmarks/crate-rebuild/README.md

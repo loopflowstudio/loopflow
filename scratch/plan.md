@@ -207,7 +207,17 @@ and build scripts" becomes the seeded behaviour plus what still compiles.
    with slice 2's bytes, noted Cargo.lock drift (31 units at 140 commits) and
    linked loo-922.html from testing.md.
 
-Remaining: gate. QA done (scratch/qa.html): fixed seeds ranking from clone-time mtimes. Open: the seeded build's 3.1 GB peak RSS (questions.md; QA saw 2.27 GB).
+Remaining after ship-review pass 1: fix source locking in `scripts/build_cache.py`.
+The ready-checkout QA fixed clone-time ranking, but a new seed has no Cargo
+lock files. A real first build wrote into it while `_quiescent` yielded true.
+Acquire Cargo's locks even when first use must create them, or skip that
+source. Add a deterministic regression in `python/tests/test_build_cache.py`
+using a freshly seeded sibling. When admitted, a competing writer must be
+excluded for the duration of the clone. Check that an ordinary busy source
+is still skipped and the seeded build passes. See `scratch/ship-review.html`.
+The delivery instruction is “ok lg2m ship it when it works”.
+
+Peak memory attribution is tracked separately in LOO-1070.
 
 After verify: check LOO-923 status/liveness, `lf task checkout LOO-923` if
 absent, then `lf ship LOO-923` with these measurements in its context.

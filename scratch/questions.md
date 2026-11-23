@@ -18,3 +18,7 @@
   a seed from another revision, whose registry artifacts give different keys.
   The probe can't tell, because shared-cache counters include other agents.
   A private-cache rerun of one seeded sample would show it.
+
+- Ship-review pass 1 chose to keep the installed default and the existing
+  incremental test profile. LOO-1070 tracks the memory comparison with a
+  controlled private cache. The first-build locking gap returns to implement.

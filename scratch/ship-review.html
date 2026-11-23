@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-922 · The first build in a new worktree</title>
+<style>
+:root{color-scheme:light dark;--bg:#faf9f5;--fg:#252622;--line:#bdbfb5;--panel:#efefe8;--accent:#245f48}
+@media(prefers-color-scheme:dark){:root{--bg:#181b19;--fg:#eceee8;--line:#585e57;--panel:#232923;--accent:#a6dabc}}
+*{box-sizing:border-box}body{margin:auto;max-width:54rem;padding:2rem 1.25rem 4rem;background:var(--bg);color:var(--fg);font:1rem/1.55 system-ui,sans-serif}
+h1,h2{line-height:1.2;text-wrap:balance}h1{font-size:clamp(2rem,6vw,3.2rem)}h2{font-size:1.45rem;margin-top:2.4rem}
+pre{padding:1rem;background:var(--panel);overflow-x:auto;border-left:3px solid var(--accent);font-size:1.02rem}
+code{font-family:ui-monospace,monospace}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}td,th{border-bottom:1px solid var(--line);padding:.45rem;text-align:right}th:first-child{text-align:left}caption{text-align:left;margin:.75rem 0}a{color:var(--accent)}li{margin:.5rem 0}
+</style></head><body><main>
+<h1>The first build in a new worktree</h1>
+<p>Install the hook once. The next checkout can reuse a quiet sibling’s compiled dependencies while keeping its own writable target. On APFS, QA moved a ready checkout, switched branches and built a binary that reported the checkout’s commit. <strong>Return to implement before delivery.</strong> A separate first-build probe found a window where Cargo can write to a source during cloning.</p>
+<pre>seed     from ../loopflow.ready at f4b74bc8eb
+lf 0.16.0+f4b74bc8e (build f4b74bc8e on v0.16.0)</pre>
+<table><caption>Medians from three alternating pairs. Both arms used the warm compiler cache. Each ran the same focused test to completion.</caption>
+<thead><tr><th scope="col">Measurement</th><th scope="col">Cold</th><th scope="col">Seeded</th></tr></thead><tbody>
+<tr><th scope="row">Units compiled to build lf</th><td>256</td><td>7</td></tr>
+<tr><th scope="row">Time to build lf</th><td>253.2 s</td><td>107.5 s</td></tr>
+<tr><th scope="row">Checkout to passing test</th><td>420.3 s</td><td>213.4 s</td></tr>
+<tr><th scope="row">CPU through passing test</th><td>463.0 s</td><td>340.4 s</td></tr>
+<tr><th scope="row">Target bytes written through test</th><td>4.89 GiB</td><td>4.25 GiB</td></tr>
+<tr><th scope="row">Peak process-tree RSS building lf</th><td>2.14 GiB</td><td>4.06 GiB</td></tr>
+</tbody></table>
+<p>Load average ranged from 17 to 103 on 16 CPUs. The cold arm discarded its seed immediately after checkout. Dependency drift took one seeded build to 31 compiled units. <a href="../scripts/benchmarks/crate-rebuild/results/loo-922.html">Full measurements</a></p>
+
+<h2>Try the published build</h2>
+<p>From the PR checkout, with a built sibling on the same APFS volume, use an unused sibling directory. The detached checkout can use the same commit even when its branch is already open.</p>
+<pre><code>uv run python scripts/build_cache.py install
+git worktree add --detach ../loopflow.try-seed HEAD
+(
+  cd ../loopflow.try-seed || exit 1
+  uv run python scripts/build_cache.py status
+  ls -A target/debug
+  cargo build -p loopflow --bin lf &amp;&amp; ./target/debug/lf --version
+  git rev-parse --short HEAD
+)
+git worktree remove ../loopflow.try-seed</code></pre>
+<p>The seed line names the source. With every source busy or a volume that cannot clone, the hook finishes quietly, status shows <code>seed     none</code>, and Cargo builds cold.</p>
+
+<h2>What changes after install</h2>
+<p>Existing installs need one refresh because Git runs its own copy of the script. Installation also opts future worktrees into seeding. For a cold comparison, remove the disposable checkout’s target before its first build.</p>
+<pre>target/debug/
+  .fingerprint/
+  build/
+  deps/</pre>
+<p>Cargo decides freshness. Each checkout builds its own top-level <code>lf</code> and creates its own incremental state. Sources rank by when their fingerprint directory last gained a unit. QA fixed an unbuilt seed jumping the queue simply because it had just been cloned.</p>
+
+<h2>What remains</h2>
+<p><strong>Fix here · Exclude the first writer.</strong> The busy-sibling test starts after Cargo has created its locks. The ship-review probe used a newly seeded sibling, entered the actual <code>_quiescent</code> guard, and built an edited binary offline while still inside that guard. This shows concurrent writing is possible. The probe did not observe a corrupt clone.</p>
+<pre>Seed contents: ['.fingerprint', 'build', 'deps']
+Seeder admitted sibling: True
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.34s
+Binary output before guard released: built in the seeded sibling
+Cargo locks now present: ['.cargo-lock', '.cargo-build-lock', '.cargo-artifact-lock']</pre>
+<p>Implement should acquire the locks Cargo will use on first build or skip a source it cannot lock. Add a regression for that order of events, then recheck the ordinary seeded and busy paths. <a href="../scripts/build_cache.py">Seeder</a> · <a href="../python/tests/test_build_cache.py">Fixtures</a></p>
+<ul>
+<li><strong>Separate Task · Peak memory.</strong> Largest-process RSS building <code>lf</code> rose from 2.09 to 3.17 GiB across cohort medians. QA measured 2.27 GB on another seeded build. Shared-cache counters cannot identify the responsible compile. LOO-1070 will compare matched private caches and identify the peak process.</li>
+<li><strong>Keep the measured edit loop.</strong> The seeded focused test still cost 185 CPU-seconds. Disabling incremental compilation took the next execution edit from 15 to 86 seconds in LOO-921. Drop the profile change. Pass the measurements to LOO-923 after verification.</li>
+<li><strong>Keep the documented limits.</strong> Pruning counts shared blocks at full size and can report more space freed than the filesystem recovers. Drop changes to pruning, release targets and coverage targets here. Fresh registry build scripts also remove the measured reason to change TLS dependencies or prebuild native libraries.</li>
+<li><strong>Let the old ready checkout age out.</strong> One ready checkout predates the ranking fix. The next ready checkout receives the corrected timestamp. Drop a one-off repair.</li>
+<li><strong>Carry unrun checks to verification.</strong> QA replayed the Task’s Git sequence on macOS. A private Machine Task launch and Linux runs on both reflink-capable and ordinary volumes remain untried. Use the PR’s try-it commands on Linux and check the seed line on each filesystem. Packaging, worktree placement and live-checkout protection already belong to LOO-920, LOO-681 and LOO-543.</li>
+</ul>
+<p>QA recorded 25 passing build-cache tests. On published head <code>dd8cb3db46</code>, <code>macos-inputs</code> and <code>scratch-clear</code> passed. The Python, Rust and macOS test jobs were skipped. Delivery and merged verification follow the locking repair. <a href="qa.html">QA record</a> · <a href="https://github.com/loopflowstudio/loopflow/pull/2028">PR #2028 and checks</a></p>
+
+<h2>Choices you can revisit</h2>
+<p>The first options describe this pass’s choices. Neither question needs an answer before the lock fix.</p>
+<ol><li>Should installing the cache also seed every new debug target?
+<ol type="a"><li>Keep installation as the single opt-in.</li><li>Add a per-checkout way to bypass the clone.</li></ol></li>
+<li>What should take priority for the incremental test profile?
+<ol type="a"><li>Keep the measured fast repeated edit.</li><li>Measure per-package settings for a faster first test.</li></ol></li></ol>
+</main></body></html>

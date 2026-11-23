@@ -1,10 +1,13 @@
-"""Install the pinned Machine cache, register worktrees and inspect the serving daemon."""
+"""Install the pinned Machine cache, seed and register worktrees, and inspect the serving daemon."""
 
 import argparse
+import ctypes
+import errno
 import fcntl
 import json
 import os
 import shlex
+import shutil
 import socket
 import struct
 import subprocess
@@ -42,6 +45,15 @@ def _worktree_roots(repo: Path, *, env: dict[str, str] | None = None) -> set[str
             if path.exists():
                 roots.add(str(path.resolve()))
     return roots
+
+
+def _outside_git_env() -> dict[str, str]:
+    # Git hooks export the current repository even when cwd points elsewhere.
+    return {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE")
+    }
 
 
 def _configured_roots(settings: dict) -> list[str]:
@@ -83,12 +95,7 @@ def _write_inventory(repo: Path, config: Path, settings: dict | None = None) -> 
     saved = json.loads(original) if original is not None else {}
     # Keep other repositories using the same Machine cache. Rewrite each
     # repository's complete inventory so removed worktrees do not accumulate.
-    # Git hooks can export the current repository even when cwd points elsewhere.
-    other_env = {
-        k: v
-        for k, v in os.environ.items()
-        if k not in ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE")
-    }
+    other_env = _outside_git_env()
     for old in _configured_roots(saved):
         path = Path(old)
         if path.exists() and old not in roots:
@@ -101,6 +108,113 @@ def _write_inventory(repo: Path, config: Path, settings: dict | None = None) -> 
     encoded = json.dumps(selected, indent=2) + "\n"
     if original != encoded:
         _replace_file(config, encoded)
+
+
+# --- Target seeding ---
+
+# Cargo's freshness records, build-script outputs and compiled units. Incremental
+# state is bound to its checkout's paths, and uplifted binaries would run another
+# branch's code before the first build.
+SEED_ENTRIES = (".fingerprint", "build", "deps")
+CARGO_LOCKS = (".cargo-lock", ".cargo-build-lock", ".cargo-artifact-lock")
+SEED_RECORD = ".loopflow-seed"
+
+
+def _clone(source: Path, destination: Path) -> None:
+    """Copy-on-write clone of a directory tree; raises instead of copying."""
+    if sys.platform == "darwin":
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.clonefile(os.fsencode(source), os.fsencode(destination), 0) != 0:
+            code = ctypes.get_errno()
+            raise OSError(code, os.strerror(code), str(source))
+    else:
+        subprocess.run(
+            ["cp", "-a", "--reflink=always", str(source), str(destination)],
+            check=True,
+            capture_output=True,
+        )
+
+
+@contextmanager
+def _quiescent(debug: Path):
+    """Hold every Cargo lock in `debug`, or yield False when one is busy."""
+    held = []
+    try:
+        for name in CARGO_LOCKS:
+            try:
+                descriptor = os.open(debug / name, os.O_RDONLY)
+            except FileNotFoundError:
+                continue
+            held.append(descriptor)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as error:
+                if error.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
+                    yield False
+                    return
+                raise
+        yield True
+    finally:
+        for descriptor in held:
+            os.close(descriptor)
+
+
+def _seed_sources(root: Path) -> list[Path]:
+    candidates = []
+    for path in _worktree_roots(root):
+        debug = Path(path) / "target/debug"
+        if Path(path) != root and all((debug / entry).is_dir() for entry in SEED_ENTRIES):
+            candidates.append(debug)
+    return sorted(candidates, key=lambda d: (d / ".fingerprint").stat().st_mtime_ns, reverse=True)
+
+
+def seed_target(repo: Path) -> Path | None:
+    """Clone a sibling worktree's Cargo state into a checkout with no target."""
+    root = Path(
+        subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"], cwd=repo, text=True
+        ).removesuffix("\n")
+    ).resolve()
+    target = root / "target"
+    if os.path.lexists(target):
+        return None
+    for source in _seed_sources(root):
+        with _quiescent(source) as idle:
+            if not idle:
+                continue
+            target.mkdir()
+            staging = target / "debug.seeding"
+            try:
+                staging.mkdir()
+                for entry in SEED_ENTRIES:
+                    _clone(source / entry, staging / entry)
+                # Atomic: a Cargo started meanwhile sees no target or a whole one.
+                staging.rename(target / "debug")
+            except (OSError, subprocess.CalledProcessError):
+                shutil.rmtree(staging, ignore_errors=True)
+                try:
+                    target.rmdir()
+                except OSError:
+                    pass  # A Cargo started meanwhile owns it now.
+                raise
+        commit = subprocess.run(
+            ["git", "rev-parse", "--short=10", "HEAD"],
+            cwd=source.parent.parent,
+            env=_outside_git_env(),
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        record = {"source": str(source.parent.parent), "commit": commit or None}
+        (target / SEED_RECORD).write_text(json.dumps(record) + "\n")
+        return source.parent.parent
+    return None
+
+
+def _seed_record(root: Path) -> dict | None:
+    try:
+        return json.loads((root / "target" / SEED_RECORD).read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
 
 
 def _default_configuration() -> dict:
@@ -174,10 +288,13 @@ def install_hook(repo: Path) -> None:
     source = Path(__file__).read_text()
     if not program.exists() or source != program.read_text():
         _replace_file(program, source)
-    command = shlex.join([str(Path(sys.executable).resolve()), str(program.resolve()), "register"])
+    command = shlex.join([str(Path(sys.executable).resolve()), str(program.resolve())])
+    quiet = "</dev/null >/dev/null 2>&1 || :"
+    # A previous HEAD of all zeros (SHA-1 or SHA-256) means a new worktree.
     block = (
         f'{begin}\nif [ "${{3:-}}" = 1 ]; then\n'
-        f"    {command} </dev/null >/dev/null 2>&1 || :\nfi\n{end}\n"
+        f'    case "${{1:-x}}" in *[!0]*) ;; *) {command} seed {quiet} ;; esac\n'
+        f"    {command} register {quiet}\nfi\n{end}\n"
     )
     saved = hook.with_name("post-checkout.before-loopflow")
     original = os.fsdecode(hook.read_bytes()) if hook.is_file() else ""
@@ -320,6 +437,7 @@ def cache_status(repo: Path, wrapper: Path | None, env: dict[str, str]) -> dict:
         "daemon": None,
         "loaded_roots": [],
         "stats": None,
+        "seed": _seed_record(Path(root)),
         "configured_idle_timeout_seconds": int(env["SCCACHE_IDLE_TIMEOUT"])
         if "SCCACHE_IDLE_TIMEOUT" in env
         else None,
@@ -406,6 +524,7 @@ def main() -> None:
     installer = commands.add_parser("install")
     installer.add_argument("--revision", default=REVISION)
     commands.add_parser("register")
+    commands.add_parser("seed")
     status = commands.add_parser("status")
     status.add_argument("--json", action="store_true")
     args = parser.parse_args()
@@ -414,6 +533,8 @@ def main() -> None:
             install(Path.cwd(), args.revision)
         elif args.command == "register":
             register(Path.cwd())
+        elif args.command == "seed":
+            seed_target(Path.cwd())
         else:
             result = cache_status(Path.cwd(), *configured_cache())
             if args.json:
@@ -435,6 +556,13 @@ def main() -> None:
                 listed = set(result["listed_roots"])
                 loaded = listed.intersection(result["loaded_roots"])
                 print(f"roots    {len(loaded)} of {len(listed)} loaded; {result['diagnostic']}")
+                seed = result["seed"]
+                print(
+                    f"seed     from {os.path.relpath(seed['source'], result['root'])}"
+                    f" at {seed['commit'] or 'unknown commit'}"
+                    if seed
+                    else "seed     none"
+                )
                 if stats:
                     counts = stats["stats"]
                     hits = counts.get("cache_hits", {}).get("counts", {}).get("Rust", 0)

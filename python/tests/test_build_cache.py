@@ -1,5 +1,7 @@
 """Git registration and Cargo configuration for the Machine cache."""
 
+import errno
+import fcntl
 import json
 import os
 import socket
@@ -381,3 +383,109 @@ def test_status_reads_a_fresh_daemon_before_its_first_cache_write(
     output = capsys.readouterr().out
     assert "roots    1 of 1 loaded; this checkout loaded" in output
     assert "cache    unmeasured" in output
+
+
+# --- Target seeding ---
+
+
+@pytest.fixture
+def cargo_repo(tmp_path, monkeypatch):
+    """A repository whose app depends on a build-script crate outside the checkout."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("RUSTC_WRAPPER", "")
+    monkeypatch.setenv("CARGO_INCREMENTAL", "1")
+    for key in os.environ.copy():
+        if key.startswith(("SCCACHE_", "CARGO_TARGET_", "CARGO_BUILD_")):
+            monkeypatch.delenv(key)
+    vendor = tmp_path / "vendor/scripted"
+    (vendor / "src").mkdir(parents=True)
+    (vendor / "Cargo.toml").write_text(
+        '[package]\nname="scripted"\nversion="0.1.0"\nedition="2021"\n'
+    )
+    (vendor / "build.rs").write_text('fn main() { println!("cargo:rerun-if-changed=build.rs"); }\n')
+    (vendor / "src/lib.rs").write_text("pub fn value() -> u8 { 1 }\n")
+    repo = tmp_path / "source"
+    (repo / "src").mkdir(parents=True)
+    (repo / ".gitignore").write_text("/target\n")
+    (repo / "Cargo.toml").write_text(
+        '[package]\nname="app"\nversion="0.1.0"\nedition="2021"\n'
+        f"[dependencies]\nscripted={{path={json.dumps(str(vendor))}}}\n"
+    )
+    (repo / "src/main.rs").write_text('fn main() { println!("{}", scripted::value()); }\n')
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(repo, "-c", "user.name=Fixture", "-c", "user.email=f@example.com", "commit", "-qm", "init")
+    _cargo_build(repo)
+    return repo
+
+
+def _cargo_build(directory: Path) -> dict[str, bool]:
+    """Build and return each compiled unit's freshness by crate name."""
+    result = subprocess.run(
+        ["cargo", "build", "--offline", "--message-format=json"],
+        cwd=directory,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+    )
+    assert result.returncode == 0, result.stderr
+    artifacts = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
+    return {
+        item["target"]["name"]: item["fresh"]
+        for item in artifacts
+        if item.get("reason") == "compiler-artifact"
+    }
+
+
+def test_new_worktree_reuses_a_siblings_dependencies_and_rebuilds_its_own(cargo_repo, tmp_path):
+    install_hook(cargo_repo)
+    tree = tmp_path / "new tree"
+    _git(cargo_repo, "worktree", "add", "--detach", str(tree))
+
+    debug = tree / "target/debug"
+    assert sorted(path.name for path in debug.iterdir()) == [".fingerprint", "build", "deps"]
+    status = json.loads(_cache_command(tree, "status", "--json").stdout)
+    assert status["seed"]["source"] == str(cargo_repo.resolve())
+    assert _cargo_build(tree) == {"build-script-build": True, "scripted": True, "app": False}
+
+
+def test_a_building_sibling_is_never_cloned(cargo_repo, tmp_path):
+    install_hook(cargo_repo)
+    lock = cargo_repo / "target/debug/.cargo-build-lock"
+    assert lock.exists()
+    with lock.open() as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        tree = tmp_path / "new tree"
+        _git(cargo_repo, "worktree", "add", "--detach", str(tree))
+        assert not (tree / "target").exists()
+    assert _cargo_build(tree)["scripted"] is False
+    assert "seed     none" in _cache_command(tree, "status").stdout
+
+
+def test_a_failed_clone_leaves_no_target(cargo_repo, tmp_path, monkeypatch):
+    tree = tmp_path / "new tree"
+    _git(cargo_repo, "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", str(tree))
+    clone = build_cache._clone
+    calls = []
+
+    def clone_once(source, destination):
+        if calls:
+            raise OSError(errno.EXDEV, "cross-device", str(source))
+        calls.append(source)
+        clone(source, destination)
+
+    monkeypatch.setattr(build_cache, "_clone", clone_once)
+    with pytest.raises(OSError):
+        build_cache.seed_target(tree)
+    assert calls and not (tree / "target").exists()
+    assert _cargo_build(tree)["app"] is False
+
+
+def test_an_existing_target_is_never_replaced(cargo_repo, tmp_path):
+    tree = tmp_path / "new tree"
+    _git(cargo_repo, "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", str(tree))
+    (tree / "target").mkdir()
+    assert build_cache.seed_target(tree) is None
+    assert list((tree / "target").iterdir()) == []

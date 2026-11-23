@@ -165,12 +165,15 @@ and build scripts" becomes the seeded behaviour plus what still compiles.
 
 ## Slices
 
-1. **Seed in the hook, end to end.** Add `seed_target`, the hook block's
-   null-OID branch, the `status` line, and the fixture tests 1–4. Reinstall the
-   hook here with `build_cache.py install`. Then create
-   a real worktree here and watch `cargo build -p loopflow --bin lf` print
-   7 `Compiling` lines. If Cargo or the clone disagrees with the probe, this
-   slice is where it shows.
+1. **Done: seed in the hook, end to end.** `seed_target`, the `seed`
+   subcommand, the hook's null-OID branch, the `status` line and fixture tests
+   (seeded `Fresh`/`Compiling`, busy sibling skipped, failed clone leaves no
+   target, existing target untouched) are in. Hook reinstalled on this Machine.
+   Real run (2026-11-22): `git worktree add` took 2.8 s including the clone,
+   seeded from `loopflow.loo-974-run-managed-tasks`; `cargo build -p loopflow
+   --bin lf` printed 7 `Compiling` lines, 76.5 s wall, 85 CPU-s, 2.24 GB RSS,
+   and the built `lf --version` named this checkout's commit. Cargo agreed with
+   the probe; nothing in the plan changed.
 2. **Measured arm.** Add the seeded/unseeded arm to
    `scripts/benchmarks/crate-rebuild/test_loop.py` (or a sibling driver), run
    three cohorts, and render results with `report.py` as

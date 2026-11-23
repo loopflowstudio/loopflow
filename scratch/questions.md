@@ -11,3 +11,5 @@ LOO-1080 concept-review choices recorded for review in `scratch/concept-review.h
 7. For the restore timing fixture, leave the selected socket missing on startup, then listen at that same path. Holding and failing each request makes the delay measurable from completion and lets the daemon observe cancellation.
 
 8. Keep overlapping setup and restore checks in the CLI transport fixtures. The virtual-clock manager fixture still owns precise backoff timing and in-flight request cancellation.
+
+9. QA: a server started for a home by any command runs as a launchd job whose environment carries `LF_HOME` only. `TS_SOCKET` in the setup command's shell never reaches that server, so `docs/server.md`'s "set `TS_SOCKET` in both the setup command and the server environment" has no supported route on macOS (and likely systemd). Not changed here: forwarding `TS_SOCKET` into the service definition belongs to `lf install server`.

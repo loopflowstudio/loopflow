@@ -1,0 +1,46 @@
+<!doctype html><meta charset="utf-8"><title>LOO-1080 QA</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:860px;margin:2em auto;padding:0 1em;color:#222}pre{background:#f5f5f5;padding:.7em;overflow-x:auto;font-size:13px}td,th{border-bottom:1px solid #ddd;padding:.3em .6em;text-align:left;vertical-align:top}table{border-collapse:collapse}h2{margin-top:1.6em}</style>
+<h1>LOO-1080 QA · phone access without the Tailscale CLI</h1>
+<p>Branch <code>lf</code> (debug build) in a private <code>LF_HOME=/tmp/lf-qa-1080/lfhome</code>, against this Mac's real App Store Tailscale (<code>IPNExtension</code>, macOS 26). A trap <code>tailscale</code> first on <code>PATH</code> logged every invocation. 2026-11-23.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
+<tr><td>Fresh setup</td><td><code>lf server mobile</code> with a running server, no saved approval</td><td>0.19 s; approval saved for node <code>nAxa7s3VVX11CNTRL</code>, endpoint <code>https://jacks-macbook-pro.tail0eda02.ts.net:50912</code>; <code>--status</code> ready. Trap log empty.</td></tr>
+<tr><td>Foreign-device rule</td><td><code>curl</code> the endpoint from this Mac (owner's own node)</td><td>Let's Encrypt certificate verified, then <code>Empty reply from server</code>: refused, as designed.</td></tr>
+<tr><td>Phone connects</td><td><code>touch mobile-same-device</code>; WSS <code>/v1/machine</code> hello + <code>plan.list</code></td><td><code>welcome</code> revision 9, plan.list answered.</td></tr>
+<tr><td>Idle quiet</td><td>Phone held open 125 s while ready</td><td>Still open; <b>0</b> nehelper records mentioning Tailscale, <b>0</b> nehelper records at all; trap log empty.</td></tr>
+<tr><td>Control</td><td>One <code>Tailscale status --json</code></td><td>3 nehelper records: "Created a new configuration delegate with name = Tailscale", two "Tailscale is removing configuration". The old 5 s poll would have produced ~75 in the same window.</td></tr>
+<tr><td><code>--off</code> with a phone attached</td><td><code>lf server mobile --off</code></td><td>0.09 s, "Mobile access is off"; phone closed at once; port 50912 released; local server unchanged; <code>enabled: false</code> saved.</td></tr>
+<tr><td>Re-enable</td><td><code>lf server mobile</code></td><td>Reused saved port 50912.</td></tr>
+<tr><td>Daemon outage</td><td>Server with <code>TS_SOCKET</code> → proxy to the real LocalAPI; phone attached; killed the proxy</td><td>Phone closed ~1.5 s later. Status: "Tailscale did not respond; open it and check its connection" at 2 s, then "Open Tailscale and sign in on this Machine, then try again".</td></tr>
+<tr><td>Recovery</td><td>Restarted the proxy at 26 s</td><td>Ready at 37 s (retries at ~2, 7, 17, 37 s: the 5→10→20 schedule). Phone reconnected at the saved address and held 12 s.</td></tr>
+<tr><td>Hung daemon</td><td>Socket that accepts and never answers</td><td><code>--status</code> 0.03 s ×3; <code>--off</code> 0.05 s; no connection attempts in the 40 s after off.</td></tr>
+<tr><td>Returning Machine</td><td>Restarted <code>lf server run</code> with the saved approval</td><td>Ready without setup: <code>status</code>, <code>cert</code>, then <code>status?peers=false</code> every 5 s on the proxy log.</td></tr>
+</table>
+
+<h2>Outage transcript</h2>
+<pre>daemon stopped at 0s
+   2 0s True None
+   5 2s False Tailscale did not respond; open it and check its connection
+  18 8s False Open Tailscale and sign in on this Machine, then try again
+   1 daemon back at 26s
+   9 27s False Open Tailscale and sign in on this Machine, then try again
+   6 37s True None
+phone: welcome, plan.list, closed after 6.5 s (connected 5 s before the stop)</pre>
+
+<h2>Fixed</h2>
+<p>Nothing in the branch broke.</p>
+
+<h2>Couldn't reach</h2>
+<ul>
+<li>A real phone (iOS app): the WebSocket client from this Mac used the same endpoint, TLS and protocol, with same-device admission opted in.</li>
+<li>Quitting or signing out the real Tailscale: it would cut this Machine's live tailnet connections. The outage ran through a <code>TS_SOCKET</code> proxy to the real LocalAPI instead; signed-out and owner-change wording are covered by the private-daemon fixtures.</li>
+<li>Standalone (<code>/Library/Tailscale</code>) and Linux <code>tailscaled</code>: not installed here; CI and fixtures.</li>
+</ul>
+
+<h2>Still wrong</h2>
+<ol>
+<li>A server started by any <code>lf</code> command runs as a launchd job with <code>LF_HOME</code> only, so <code>TS_SOCKET</code> never reaches it, though <code>docs/server.md</code> says to set it in the server environment. Recorded in <code>scratch/questions.md</code> #9; outside this change.</li>
+<li><code>lf server mobile</code> and <code>--status</code> print raw JSON without <code>--json</code>, while <code>--off</code> prints a sentence. Same on main.</li>
+</ol>

@@ -67,7 +67,7 @@ unbuilt sibling.
 
 In `scripts/build_cache.py`:
 
-- **Built target vs unbuilt seed (updated in post-build concept review):**
+- **Built target vs unbuilt seed:**
   A candidate seed source is a sibling worktree (`_worktree_roots`) whose
   `target/debug` holds all three `SEED_ENTRIES` **and** has been built by Cargo
   (`any((debug / name).exists() for name in CARGO_LOCKS)`). Unbuilt seeds (such

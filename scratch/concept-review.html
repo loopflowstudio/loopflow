@@ -1,12 +1,12 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-937 Concept Review (9169ff2c)</title>
+<title>LOO-937 Concept Review (7d8cc0c9)</title>
 <style>
 :root{--bg:#fbfaf7;--fg:#1d1c1a;--mute:#6b675f;--line:#e2ded5;--card:#fff;--yes:#2f7d4f;--no:#b3412e;--new:#7a5bc4;--code:#f1eee7}
 @media (prefers-color-scheme:dark){:root{--bg:#171614;--fg:#ece9e2;--mute:#a19c92;--line:#34312c;--card:#1f1e1b;--yes:#6cc28f;--no:#ec8a76;--new:#b9a2f0;--code:#2a2824}}
 body{background:var(--bg);color:var(--fg);font:16px/1.55 ui-sans-serif,system-ui,-apple-system,sans-serif;margin:0;padding:32px 16px}
-main{max-width:920px;margin:0 auto}
-h1{font-size:1.6rem;margin:0 0 .3rem}h2{font-size:1.15rem;margin:2.2rem 0 .6rem}
+main{max-width:940px;margin:0 auto}
+h1{font-size:1.6rem;margin:0 0 .3rem}h2{font-size:1.15rem;margin:2.2rem 0 .6rem}h3{font-size:1rem;margin:1.3rem 0 .4rem}
 p{margin:.5rem 0}.mute{color:var(--mute)}
 code{font:.86em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:1px 4px;border-radius:4px}
 pre{font:.84em/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:10px 12px;border-radius:8px;overflow-x:auto}
@@ -14,46 +14,169 @@ table{width:100%;border-collapse:collapse;font-size:.93rem}
 td,th{text-align:left;vertical-align:top;padding:8px 6px;border-top:1px solid var(--line)}
 th{font-weight:600;color:var(--mute)}
 .yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}
-.tag{display:inline-block;font-size:.78rem;padding:0 6px;border-radius:9px;border:1px solid var(--new);color:var(--new);margin-left:4px}
+.tag{display:inline-block;font-size:.76rem;padding:0 6px;border-radius:9px;border:1px solid var(--new);color:var(--new);margin-left:4px;vertical-align:baseline}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0}
 .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 @media (max-width:640px){.cols{grid-template-columns:1fr}table{font-size:.86rem}}
 .prop{border-left:3px solid var(--new)}
-ol li{margin:.5rem 0}
+ol li{margin:.6rem 0}
 .wrap{overflow-x:auto}
 </style></head><body><main>
-<h1>LOO-937 as built, at 9169ff2c</h1>
-<p class="mute">The area: which record holds each Task fact, how a directory, a Session or a Graph run finds its Task, and what a checkout builds on. Read against the branch base 2656258a, with the checkout-base slice (9cf46a0d, compress f05b4f0d, QA 9169ff2c) in it. The page on f07ab065 is in this file's history.</p>
+<h1>LOO-937 as built, at 7d8cc0c9</h1>
+<p class="mute">Area reviewed: what a Task's facts and work are, how a directory, Session or Graph run belongs to a Task, and what a checkout builds on — reviewed as a whole against base <code>2656258a</code>, including the membership compress (<code>00c1c416</code>) and QA (<code>7d8cc0c9</code>).</p>
+
 <h2>Product concepts and code concepts</h2>
 <div class="wrap"><table>
-<tr><th>What a person knows</th><th>What the code has</th><th></th><th>Note</th></tr>
-<tr><td>A Task's title, state, rank, URL, branch</td><td><code>tasks</code> (desired), <code>pm_items</code> (observed)</td><td class="yes">yes</td><td>Two records on purpose: the conflict merge base.</td></tr>
-<tr><td>Is it done?</td><td><code>planning_state</code>; the boolean is leaving</td><td class="yes">yes</td><td></td></tr>
-<tr><td>Task order, the drag on the Working board</td><td><code>tasks.planning_rank</code>, <code>reorder_task</code></td><td class="yes">yes</td><td><code>task_orders</code> is leaving.</td></tr>
-<tr><td>A Task's conversation</td><td><code>task_primary_sessions</code>, read through <code>primary_scope_sql</code></td><td class="yes">yes</td><td>LOO-877 moves it onto <code>agent_sessions</code>.</td></tr>
-<tr><td>"This directory is this Task's"</td><td><code>task_checkout_owner(dir)</code></td><td class="yes">yes</td><td>One answer for launch, resume, status, commit, land and provider conversations.</td></tr>
-<tr><td>A Session's or a run's Task</td><td><code>agent_sessions.task_id</code>, <code>graph_processes.task_id</code></td><td class="yes">yes</td><td>Stays put through a move and a reused path.</td></tr>
-<tr><td>"What this checkout builds on" (what <code>lf sync</code> pulls, what its PR targets)</td><td><code>checkout_base(repo, default)</code> &rarr; <code>CheckoutBase::{Stacked, Branch}</code></td><td class="yes">yes <span class="tag">since f07ab065</span></td><td>Both actions ask it. Two records behind one reader: a Task's stack (store) and a branch's <code>loopflow-base</code> (Git config), because a taskless checkout has no store row.</td></tr>
-<tr><td>Is a run alive?</td><td><code>task_graphs.run_pid</code>, <code>graph_processes.pid</code></td><td class="no">no</td><td>Two processes behind one concept. LOO-1075, outside this Task.</td></tr>
+<tr><th>What a person knows and does</th><th>What the code has</th><th>Match</th><th>Where it disagrees</th></tr>
+<tr>
+  <td>A Task's title, description, state, rank, URL, branch, team</td>
+  <td><code>tasks</code> (desired), <code>pm_items</code> (observed merge base); <code>planning_provider_revision</code> &amp; <code>planning_completed</code> leaving</td>
+  <td class="yes">yes</td>
+  <td>Two records on purpose for three-way conflict detection. <code>leaving_guard.rs</code> fails store tests on leaving reads.</td>
+</tr>
+<tr>
+  <td>Is a Task done?</td>
+  <td><code>tasks.planning_state = 'completed'</code>; triggers keep <code>planning_completed</code> in step for released lf</td>
+  <td class="yes">yes</td>
+  <td>One live reader across status, retirement and selections.</td>
+</tr>
+<tr>
+  <td>Task order, and dragging a Working-board tile</td>
+  <td><code>tasks.planning_rank</code>, <code>pm_items.rank</code>, <code>SqliteStore::reorder_task</code>; <code>task_orders</code> &amp; <code>task_order_json</code> leaving</td>
+  <td class="yes">yes</td>
+  <td>Sidebar, CLI list and connected tracker share one rank; cross-Project drop moves then ranks.</td>
+</tr>
+<tr>
+  <td>A Task's primary conversation</td>
+  <td><code>task_primary_sessions</code>, read through <code>primary_scope_sql</code></td>
+  <td class="yes">yes</td>
+  <td>Matches released lf until LOO-877 moves it to <code>agent_sessions.primary_scope='task'</code>. (Doc drift: <code>docs/dev/reference-code.md</code> dropped the table name.)</td>
+</tr>
+<tr>
+  <td>"This directory is this Task's" (Git-root rule)</td>
+  <td><code>task_checkout_owner(dir)</code>, <code>starting_task_in</code>, <code>WorkspaceResolver</code></td>
+  <td class="yes">yes</td>
+  <td>Git-root equality: a worktree nested inside a Task's checkout is not that Task's.</td>
+</tr>
+<tr>
+  <td>A Session's or Graph run's Task (history &amp; lists)</td>
+  <td><code>agent_sessions.task_id</code>, <code>graph_processes.task_id</code>, <code>SessionSummary::member_task()</code></td>
+  <td class="yes">yes</td>
+  <td>Recorded once at start; survives repo move and reused checkout paths. Wire still carries <code>task_ids</code> as a 0-or-1 array beside <code>work</code> and <code>workspace.task_id</code> (fits LOO-934).</td>
+</tr>
+<tr>
+  <td>"Is a Graph running in this Task's checkout?" (state <code>moving</code>, run &amp; retirement gates)</td>
+  <td><code>task_open_graph_pairs</code> (<code>sqlite/task_work.rs:400</code>)</td>
+  <td class="no">no</td>
+  <td><strong>Leftover path-prefix containment.</strong> Uses <code>within(g.cwd, c.worktree)</code> for taskless runs, violating the Git-root rule. A Graph in a nested worktree flips the outer Task to <code>moving</code> and blocks it.</td>
+</tr>
+<tr>
+  <td>"What this checkout builds on" and unstacking with <code>lf sync main</code></td>
+  <td><code>checkout_base(repo, default)</code>; <code>record_control_task_state</code> (<code>ops/sync.rs:441</code>)</td>
+  <td class="no">no</td>
+  <td><strong>One command, two rules.</strong> <code>lf sync main</code> detaches a stacked Task, but keeps <code>branch.&lt;name&gt;.loopflow-base</code> on a <code>--stack</code> checkout. No <code>lf</code> command unstacks a <code>--stack</code> checkout.</td>
+</tr>
+<tr>
+  <td>Is a Task's run alive?</td>
+  <td><code>task_graphs.run_pid</code> (carrier) vs <code>graph_processes.pid</code> (child)</td>
+  <td class="no">no</td>
+  <td>Two OS processes behind one concept. Outside this Task: <strong>LOO-1075</strong>.</td>
+</tr>
+<tr>
+  <td>A Task's branch</td>
+  <td><code>tasks.planning_branch_name</code>, <code>task_checkouts.branch</code>, <code>task_prs.branch</code></td>
+  <td class="no">no</td>
+  <td>Three homes (shared, local checkout, PR head). Outside this Task: <strong>LOO-934</strong>.</td>
+</tr>
 </table></div>
-<h2>What changed since the last page</h2>
+
+<h2>Biggest mismatch inside this Task: nested worktrees still hijack the outer Task's open-Graph state</h2>
+<p>Walk the concrete interaction under the Git-root rule (choice <code>c</code>): Task A owns <code>/src/repo.a</code>. Someone — or a harness worktree tool like <code>EnterWorktree</code> — creates a nested Git worktree at <code>/src/repo.a/.claude/worktrees/exp</code> (or <code>/src/repo/wt/exp</code> when <code>/src/repo</code> is a Task checkout) and runs <code>lf graph code</code> inside it.</p>
+
 <div class="cols">
-<div class="card"><b>Before (f07ab065)</b><pre>lf sync     : stack, loopflow-base, main
-lf pr open  : stack, loopflow-base,
-              Git upstream if another branch,
-              main</pre></div>
-<div class="card"><b>Now (9169ff2c)</b><pre>checkout_base:
-  Task stack's live parent
-  else loopflow-base unless its PR merged
-  else the repository's default branch
-lf sync and lf pr open both ask it</pre></div>
+<div class="card">
+<b>Existing (<code>7d8cc0c9</code>)</b>
+<pre>1. starting_task_in → checkout_owner_in(nested)
+   Git root = /src/repo.a/.claude/worktrees/exp ≠ /src/repo.a
+   → records graph_processes.task_id = NULL, cwd = nested root
+
+2. task_open_graph_pairs runs for Task A:
+   g.task_id = tw.id
+   OR (g.task_id IS NULL AND within(g.cwd, c.worktree))
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^
+                             TRUE for nested worktree!
+
+Result while nested Graph runs:
+- task_state_sql(A)       → 'moving'
+- graph_execution_facts   → shows nested run under Task A
+- task_open_work(A)       → blocks `lf task run A` &amp; retire
+- task_graphs(A)          → [] (contradicts status)</pre>
 </div>
-<p>QA walked it through four shapes (scratch/qa.html): a stacked Task whose parent goes unpushed, pushed, merged; a parent closed unmerged; a plain checkout with a stray upstream; <code>--stack</code> in a <code>trunk</code> repository. Sync and publish named the same base at every stage.</p>
-<h2>The biggest mismatch left</h2>
-<p>Inside this Task: none. Outside it, as before: run liveness (LOO-1075), and launch and store each defining "the checkout holding this directory" (<code>WorkspaceResolver</code>, fits LOO-934).</p>
+<div class="card prop">
+<b>Proposed <span class="tag">chosen for review</span></b>
+<pre>task_open_graph_pairs matches taskless runs
+by checkout root equality, not path prefix:
+
+  g.task_id = tw.id
+  OR (g.task_id IS NULL
+      AND EXISTS(SELECT 1 FROM task_checkouts c
+                 WHERE c.task_id = tw.id
+                   AND rtrim(g.cwd,'/') = rtrim(c.worktree,'/')))
+
+Result:
+- Nested worktree's run (cwd = nested root):
+  outer Task stays idle, runnable, not blocked.
+- Adopted checkout's pre-existing run (cwd = adopted root):
+  still blocks overlapping runs (`adopting_a_checkout...`).
+- `checkout_open_work` keeps `within`: deleting a worktree
+  on disk (`lf land`) still protects nested dirs inside it.</pre>
+</div>
+</div>
+<p class="mute">Why exact equality holds for adopted checkouts: <code>lf graph</code> (<code>lf.rs</code> → <code>graph::run</code>) always passes the resolved Git worktree root as <code>cwd</code>, matching what <code>task_checkouts.worktree</code> stores.</p>
+
+<h2>Second mismatch inside this Task: <code>lf sync main</code> does not unstack <code>--stack</code></h2>
+<div class="cols">
+<div class="card">
+<b>Existing (<code>7d8cc0c9</code>)</b>
+<pre>Stacked Task:    lf sync main → merges main, clears parent_pr_id
+--stack checkout: lf sync main → merges main, KEEPS loopflow-base
+                  next `lf sync` merges the old base back in
+                  next `lf pr open` still targets the old base
+                  no `lf` command can clear it</pre>
+</div>
+<div class="card prop">
+<b>Proposed <span class="tag">chosen for review</span></b>
+<pre>In `record_control_task_state` (runs only after sync succeeds,
+never on `--plan` or an aborted conflict):
+  when target_ref is default or origin/&lt;default&gt;:
+    clear `branch.&lt;current&gt;.loopflow-base`
+
+Both stacked Tasks and `--stack` checkouts now detach the same
+way: `lf sync main`.</pre>
+</div>
+</div>
+
+<h2>Small doc inconsistency to fix in the same pass</h2>
+<p><code>docs/dev/reference-code.md</code> (line 50, "Task on this Machine") lists only <code>task_checkouts, task_moves</code>, omitting <code>task_primary_sessions</code> after <code>06c61453</code> restored it as the Task primary's home until LOO-877. Restore it so it agrees with <code>docs/dev/reference-models.md</code> and <code>SCHEMA.md</code>.</p>
+
+<h2>Larger than this Task (noted, not changed here)</h2>
+<ul>
+  <li><strong>Run liveness</strong> (<code>task_graphs.run_pid</code> vs <code>graph_processes.pid</code>): filed as <strong>LOO-1075</strong>.</li>
+  <li><strong>Session membership on the wire &amp; <code>WorkspaceResolver</code></strong>: <code>SessionRecord</code> exposes <code>work</code>, <code>task_ids</code> (0-or-1 array) and <code>workspace.task_id</code> (computed in <code>WorkspaceResolver</code> beside <code>task_checkout_owner</code>). Fits <strong>LOO-934</strong>.</li>
+  <li><strong>Branch in three tables</strong> (<code>tasks.planning_branch_name</code>, <code>task_checkouts.branch</code>, <code>task_prs.branch</code>): handed to <strong>LOO-934</strong>.</li>
+  <li><strong>Dropping leaving tables/columns &amp; moving Task primary onto <code>primary_scope='task'</code></strong>: staged for <strong>LOO-877</strong>.</li>
+</ul>
+
 <h2>Questions</h2>
 <ol>
-<li><code>lf sync main</code> in a <code>--stack</code> checkout merges main and keeps the record (questions.md):<br>a) keep current <span class="tag">as built</span><br>b) clear the record, as a stacked Task detaches</li>
-<li>Next step:<br>a) gate <span class="tag">chosen</span><br>b) another slice</li>
+  <li>Taskless unended Graph runs in <code>task_open_graph_pairs</code>:<br>
+    a) match by checkout root equality (<code>rtrim(g.cwd,'/') = rtrim(c.worktree,'/')</code>), obeying the Git-root rule while keeping the overlap guard on adopted checkouts <span class="tag">chosen for review</span><br>
+    b) keep <code>within</code> path-prefix containment (nested worktree Graphs mark the outer Task <code>moving</code> and block it)<br>
+    c) drop the taskless path clause completely (adopting a checkout with a running Graph no longer blocks a second run)
+  </li>
+  <li><code>lf sync main</code> in a <code>--stack</code> checkout:<br>
+    a) clear <code>branch.&lt;name&gt;.loopflow-base</code> when the sync onto default completes, matching stacked Task detach <span class="tag">chosen for review</span><br>
+    b) keep <code>loopflow-base</code> so the next bare <code>lf sync</code> follows the parent branch again
+  </li>
 </ol>
 </main></body></html>

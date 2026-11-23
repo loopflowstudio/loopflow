@@ -600,6 +600,49 @@ merge and install. Auto stays a Machine fact
 - `cargo clippy --all-targets -- -D warnings` passed.
 - `EXPLAIN QUERY PLAN` with 10,000 Tasks and 100,000 Graph runs selected each Task's latest run through the covering `graph_processes_task` index, then fetched the run by rowid.
 
+## Next: finish the Git-root rule in open-Graph pairing and `--stack` detach (concept review on 7d8cc0c94a)
+
+Two mismatches left inside LOO-937's scope (`scratch/concept-review.html`), both chosen for review:
+
+1. **`task_open_graph_pairs` obeys the Git-root rule** (page question 1a).
+   `rust/loopflow-storage/src/sqlite/task_work.rs:400-409` still pairs unended
+   taskless Graph runs by path-prefix containment (`within(g.cwd, c.worktree)`).
+   Under the Git-root rule, a Graph run started inside a nested Git worktree
+   (e.g. `/repo.a/.claude/worktrees/exp` or `/repo/wt/exp`) records
+   `task_id = NULL`, so `task_open_graph_pairs` catches it, flips the outer Task
+   to `moving` (`task_state_sql`), reports it in `graph_execution_facts`, and
+   blocks `lf task run` and retirement (`task_open_work`) — contradicting
+   `task_graphs` and `task_checkout_owner`.
+   - Change `task_open_graph_pairs`'s taskless clause from
+     `within("g.cwd", "c.worktree")` to exact root equality
+     `rtrim(g.cwd,'/')=rtrim(c.worktree,'/')` (matching `checkout_at` and
+     `graph::run`, which always records the resolved worktree root as `g.cwd`).
+   - Keep `within` in `checkout_open_work` (its only caller is `pr_landing.rs`
+     before deleting a worktree directory on disk, where nested work inside that
+     directory would be destroyed).
+   - Tests: a taskless unended Graph running in a nested worktree inside a Task's
+     checkout leaves the outer Task `idle` (`task_state_sql`), out of
+     `graph_execution_facts.open_graphs`, and out of `task_open_work`;
+     `adopting_a_checkout_with_a_running_graph_prevents_another_run` still passes.
+2. **`lf sync main` detaches a `--stack` checkout** (page question 2a).
+   `checkout_base` unified reading a checkout's base across stacked Tasks
+   (`parent_pr_id`) and `--stack` checkouts (`branch.<name>.loopflow-base`),
+   but `record_control_task_state` (`rust/loopflow-execution/src/ops/sync.rs:441`)
+   clears only `parent_pr_id`, leaving no `lf` command to unstack a `--stack`
+   checkout.
+   - Add `git::worktrees::clear_stacked_base(repo)` (`git config --unset
+     branch.<current>.loopflow-base`, ignoring exit code 5 when unset) and call
+     it from `record_control_task_state` when `owner.target_ref` is `default` or
+     `origin/<default>` (runs only after sync finishes, including `Noop` and
+     resolved conflicts, never on `--plan` or aborted conflicts).
+   - Test in `sync_tests::`: in a `--stack` checkout, `lf sync --plan main`
+     keeps `loopflow-base`, `lf sync main` clears it, and the next bare
+     `lf sync` (and `lf pr open`) follows `main`.
+3. **Doc alignment.** Restore `task_primary_sessions` in the "Task on this
+   Machine" row of `docs/dev/reference-code.md` (line 50) so it matches
+   `docs/dev/reference-models.md` and `SCHEMA.md` (omitted when `06c6145399`
+   restored `task_primary_sessions` until LOO-877).
+
 ## Then: gate
 
 QA on `60fcf050b9` (2026-11-23, `scratch/qa.html`) walked `lf wt create

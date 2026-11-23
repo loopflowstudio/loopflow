@@ -305,3 +305,20 @@ landing removed the checkout. Kept the refusal: it names the key to fix and
 deletes nothing. The message prints Git's text twice (`OpsError` renders its
 `GitError` source after its own Display, which already includes it); that
 formatting is shared by every Git failure, left for its own change.
+
+## Concept review on 7d8cc0c94a (2026-11-23)
+
+- **`task_open_graph_pairs` matches taskless unended runs by checkout root
+  equality, not `within` containment** (page 1a, chosen for review). Under the
+  Git-root rule, a Graph run in a nested worktree records `task_id = NULL`, so
+  `within(g.cwd, c.worktree)` still flipped the outer Task to `moving` and
+  blocked `lf task run` and retirement. Passed over: keeping `within` (breaks
+  the Git-root rule), or dropping the taskless clause (drops the overlap guard
+  when adopting a checkout with a running Graph). `checkout_open_work` keeps
+  `within`, since `lf land` deletes the checkout directory on disk.
+- **`lf sync main` clears `branch.<name>.loopflow-base` on completion** (page
+  2a, chosen for review; reverses the earlier `lf wt create --stack` note).
+  Gives `--stack` checkouts the same detach command stacked Tasks use, clearing
+  the record only in `record_control_task_state` once `main` is integrated
+  (never on `--plan` or an aborted conflict). Passed over: keeping the record
+  and leaving no `lf` command to unstack a `--stack` checkout.

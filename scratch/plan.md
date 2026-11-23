@@ -10,7 +10,7 @@ During the live demo of PR #2033, Jack chose **Policy B** (`1b`, `2a`) plus a vi
 
 **Built in this slice.** The seven-pane sidebar has two dividers, monochrome symbols, and a capsule search field. Personal preferences and Project & Wave Config have independent live readings. The project pane holds Context, Git & Release, agent overrides, and Machine placement. Search can open either an agent default or its scoped override. File-only global results reveal the global file button.
 
-**Next slice.** Replace the declaration placeholders in scalar and ordered-list controls with their actual value or runtime default. Keep Reset and explicit null distinct, make precedence quiet, and check the Light and Dark window at compact and wide sizes. The resolver returns the combined agent order for `agents` and `default_agent`; displaying that list as the starting preference would give the wrong answer.
+**Next slice.** Replace the declaration placeholders in scalar and ordered-list controls with their actual value or runtime default. `"Inherited"` still shows in `swift/LoopflowMac/Views/ScopedSettingRow.swift`: the choice Picker's absent tag (~line 144), the TextField prompt (~156), the `OrderedSetting` label fallback (~315), and the `SettingProvenance` title (~51). A test in `SettingsWorkflowTests` should fail if any of them returns. Keep Reset and explicit null distinct, make precedence quiet, and check the Light and Dark window at compact and wide sizes. The resolver returns the combined agent order for `agents` and `default_agent`; displaying that list as the starting preference would give the wrong answer.
 
 **Checks for this slice**
 

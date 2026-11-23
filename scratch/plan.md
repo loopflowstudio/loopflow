@@ -45,7 +45,10 @@ fresh read can then show current membership and order.
   placement drives the preview and the write. The Machine resolves both IDs
   against its current Working reading and writes `task_orders` atomically
   against the saved sequence it read. A retry uses the same side against the
-  newer sequence. If either Task is absent, the Machine refuses the drop.
+  newer sequence. If either Task is absent from that reading, the Machine
+  refuses the drop and reports the absent Task's ID. A destination-only command
+  and a grid drop whose source is absent from the receiving grid use the
+  target's slot. The grid waits for a confirmed read in that case.
 
 ## Shared order
 
@@ -70,8 +73,20 @@ Another window moves A to C's slot, leaving B, C, A. Dropping B before A then
 saves C, B, A. Dropping A after C saves C, A, B. The test reads the Working
 list after each write and repeats each relative move through the CLI.
 
-The remaining walkthrough needs an unlocked Desktop for a grid drag, keyboard
-navigation and the key-window sidebar filters. [Pre-implementation review](concept-review.html)
+## Concept review
+
+The first built review found that the preview put B before A while the write
+could put B after A. The second build carries the side through `DropSide` and
+applies it on the Machine. The served regression and the stale drag in the
+private Desktop both exercised a Machine order newer than the drag. A missing
+target now returns `not_found`, so `PendingChanges` can remove the preview and
+show the refusal while the affected lists reread. Neither a conversation turn
+nor a saved Dashboard edit writes the repository's Working order.
+
+Keep rank and canonical Task ID as the initial order, with repository drags
+saved on this Machine. The remaining walkthrough belongs at gate, where an
+unlocked Desktop can exercise a grid drag, keyboard navigation and key-window
+sidebar filters. [Built concept review](concept-review.html)
 
 ## Docs
 
@@ -117,7 +132,8 @@ navigation and the key-window sidebar filters. [Pre-implementation review](conce
 - QA round 2 ([QA](qa.html) §6): a stale sidebar drag in the hooked app sent
   `D before A` and the Machine saved C, B, D, A over the newer order. A
   refused drop now names the absent Task and returns `not_found` over the
-  socket instead of `outcome_unknown`. `served_reads` checks it.
+  socket instead of `outcome_unknown`. The `served_reads` regression passed
+  again at `e71370f26c` during concept review.
 
 ## Gate
 

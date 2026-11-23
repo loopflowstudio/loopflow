@@ -419,7 +419,8 @@ keep their checkout-owner Task (`turns.rs`), since no Session records them.
 
 Test: `human_session::tests::list_task_keeps_each_session_with_its_task_after_a_move_and_path_reuse`
 (execution, since the storage demo can't call `list`): A's Session at the
-reused path lists under A only, C's under C. Next: gate.
+reused path lists under A only, C's under C. `ops::human_session::` 52
+passed (realign, 2026-11-23). Next: gate.
 
 ## Earlier: implement (concept review after the plan hub, 2026-11-22)
 

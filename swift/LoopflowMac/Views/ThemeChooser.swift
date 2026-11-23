@@ -82,7 +82,7 @@ struct ThemeChooser: View {
     }
 
     private func grid(_ entries: [ThemeEntry], side: AppearanceMode, importTile: Bool = false) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), alignment: .top)], alignment: .leading, spacing: Spacing.md) {
+        CardGrid(minimum: 180, spacing: Spacing.md) {
             ForEach(entries) { entry in card(entry, side: side) }
             if importTile { importPlaceholder }
         }
@@ -132,6 +132,45 @@ struct ThemeChooser: View {
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             appearance.importTheme(url)
+        }
+    }
+}
+
+/// Equal columns at least `minimum` wide, rows as tall as their tallest card, cards top-aligned.
+/// Not a `LazyVGrid`: a lazy grid drew no cards after Settings was closed and reopened.
+private struct CardGrid: Layout {
+    let minimum: CGFloat
+    let spacing: CGFloat
+
+    private func columns(_ width: CGFloat) -> (count: Int, width: CGFloat) {
+        let count = max(1, Int((width + spacing) / (minimum + spacing)))
+        return (count, (width - spacing * CGFloat(count - 1)) / CGFloat(count))
+    }
+
+    private func rowHeights(_ subviews: Subviews, _ count: Int, _ column: CGFloat) -> [CGFloat] {
+        stride(from: 0, to: subviews.count, by: count).map { start in
+            subviews[start..<min(start + count, subviews.count)]
+                .map { $0.sizeThatFits(ProposedViewSize(width: column, height: nil)).height }.max() ?? 0
+        }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        // An ideal-size question proposes nil or infinity; answer with one column.
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? minimum
+        let (count, column) = columns(width)
+        let heights = rowHeights(subviews, count, column)
+        return CGSize(width: width, height: heights.reduce(0, +) + spacing * CGFloat(max(0, heights.count - 1)))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let (count, column) = columns(bounds.width)
+        var y = bounds.minY
+        for (row, height) in rowHeights(subviews, count, column).enumerated() {
+            for (index, subview) in subviews[(row * count)..<min(row * count + count, subviews.count)].enumerated() {
+                let x = bounds.minX + CGFloat(index) * (column + spacing)
+                subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: column, height: nil))
+            }
+            y += height + spacing
         }
     }
 }

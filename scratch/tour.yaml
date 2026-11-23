@@ -1,4 +1,4 @@
-at: 3019d8370c8b25bcf375d299ff49b79d9fd89351
+at: 1f255fc2549cf7f8d802f9a9b0a2adca52c8cba5
 first:
   - path: scripts/testing.md
     why: Setup, default and measured checkout behavior
@@ -7,7 +7,9 @@ first:
   - path: Cargo.toml
     why: Apply the measured test profile
   - path: scripts/build_cache.py
-    why: Install the pin and register worktrees
+    why: How registration repairs the inventory and stops stale daemons
+  - path: python/tests/test_build_cache.py
+    why: Skipped hooks, stale daemons and caller-owned inventories
   - path: scripts/benchmarks/crate-rebuild/stop_probe.py
     why: Follow a compiler through daemon shutdown
   - path: scripts/benchmarks/crate-rebuild/test_loop.py

@@ -147,6 +147,8 @@ impl Change {
         }
 
         match &self.patch {
+            // Only untracked files changed: there is no patch to show.
+            Some(patch) if patch.is_empty() => {}
             Some(patch) => {
                 let fence = fence_for(patch);
                 section.push_str(&format!(
@@ -230,7 +232,7 @@ fn fence_for(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{format_int, Change, ChangeRange};
     use loopflow_test_support::TestRepo;
 
     fn git(repo: &TestRepo, args: &[&str]) {
@@ -389,6 +391,16 @@ mod tests {
             section.contains("  +2  -0   src/backoff.rs (untracked, no patch: read the file)\n"),
             "{section}"
         );
+
+        std::fs::write(repo.path().join("src/retry.rs"), "fn retry() {}\n").unwrap();
+        let only_untracked = Change::read(repo.path(), ChangeRange::Uncommitted)
+            .unwrap()
+            .prompt_section();
+        assert!(
+            only_untracked.starts_with("Uncommitted, 1 file."),
+            "{only_untracked}"
+        );
+        assert!(!only_untracked.contains("patch:\n"), "{only_untracked}");
     }
 
     #[test]

@@ -57,6 +57,8 @@ Built, in PR #2020: the two defaults and the `loopflow-titlebar` role (round 1),
 
 - 2026-11-22, implement round 8: `swift test --package-path swift --filter ThemeWorkflowTests` 4 passed (rerun at realign), including the label following Fjord Light → Signal → Fjord Light. The 700 pt fit was measured, not rendered: with an override of Terracotta Light (the longest built-in name) Customize, Revert, Advanced, Cancel and Apply take about 598 of the 660 pt inside the padding. A much longer personal theme name can still crowd it.
 
+- 2026-11-22, compress round 8: one `selected` name in `ThemeChooser`'s body; `CardGrid.rows` hands each row's cards and height to both layout passes. `ThemeWorkflowTests` 4 passed.
+
 ## Demo
 
 Dev app → Settings → Choose Theme: 12 cards per side in their own colors, both sides in System mode. Click Fig and the window turns plum with lime; Fig Leaf is the light half. Import a dark file from the light section in Light mode: the mode switches to Dark and the file previews there.

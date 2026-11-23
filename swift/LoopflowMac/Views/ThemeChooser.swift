@@ -12,6 +12,7 @@ struct ThemeChooser: View {
         // System shows both sides; Light or Dark shows only its own.
         let sides: [AppearanceMode] = appearance.current.mode == .system ? [.light, .dark] : [appearance.current.mode]
         let editingYours = editing && appearance.selectedSource == .yours
+        let selected = appearance.selectedTheme.name
         VStack(alignment: .leading, spacing: Spacing.lg) {
             Text("Choose Theme").serif(.title).foregroundStyle(palette.emphasisInk)
             Picker("Mode", selection: Binding(get: { appearance.current.mode }, set: { appearance.previewMode($0) })) {
@@ -21,7 +22,7 @@ struct ThemeChooser: View {
             .labelsHidden()
             .frame(width: 180)
             .accessibilityIdentifier("appearance-mode")
-            Text("Previewing \(appearance.selectedTheme.name)")
+            Text("Previewing \(selected)")
                 .font(Typography.meta).foregroundStyle(palette.textSecondary)
             ScrollView {
                 if editingYours {
@@ -54,14 +55,14 @@ struct ThemeChooser: View {
                 } else {
                     // Here rather than under the chosen card, so choosing a card never moves the grid;
                     // the label names the theme, since System mode rings one card per side.
-                    Button("Customize \(appearance.selectedTheme.name)") { appearance.customize(); editing = true }
-                        .help(appearance.selectedSource == .yours ? "Edit your theme" : "Make your own copy of \(appearance.selectedTheme.name)")
+                    Button("Customize \(selected)") { appearance.customize(); editing = true }
+                        .help(appearance.selectedSource == .yours ? "Edit your theme" : "Make your own copy")
                         .accessibilityIdentifier("appearance-customize-theme")
                 }
                 if appearance.canDelete {
-                    Button(appearance.deleteRevertsToBuiltin
-                        ? "Revert \(appearance.selectedTheme.name) to built-in"
-                        : "Delete \(appearance.selectedTheme.name)") { appearance.deleteTheme() }
+                    Button(appearance.deleteRevertsToBuiltin ? "Revert \(selected) to built-in" : "Delete \(selected)") {
+                        appearance.deleteTheme()
+                    }
                         .accessibilityIdentifier("appearance-delete-theme")
                 }
                 if let config = appearance.configPath {
@@ -150,10 +151,11 @@ private struct CardGrid: Layout {
         return (count, (width - spacing * CGFloat(count - 1)) / CGFloat(count))
     }
 
-    private func rowHeights(_ subviews: Subviews, _ count: Int, _ column: CGFloat) -> [CGFloat] {
+    /// Each row's cards and its height: the tallest card at the column width.
+    private func rows(_ subviews: Subviews, _ count: Int, _ column: CGFloat) -> [(cards: Subviews.SubSequence, height: CGFloat)] {
         stride(from: 0, to: subviews.count, by: count).map { start in
-            subviews[start..<min(start + count, subviews.count)]
-                .map { $0.sizeThatFits(ProposedViewSize(width: column, height: nil)).height }.max() ?? 0
+            let cards = subviews[start..<min(start + count, subviews.count)]
+            return (cards, cards.map { $0.sizeThatFits(ProposedViewSize(width: column, height: nil)).height }.max() ?? 0)
         }
     }
 
@@ -161,15 +163,15 @@ private struct CardGrid: Layout {
         // An ideal-size question proposes nil or infinity; answer with one column.
         let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? minimum
         let (count, column) = columns(width)
-        let heights = rowHeights(subviews, count, column)
+        let heights = rows(subviews, count, column).map(\.height)
         return CGSize(width: width, height: heights.reduce(0, +) + spacing * CGFloat(max(0, heights.count - 1)))
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let (count, column) = columns(bounds.width)
         var y = bounds.minY
-        for (row, height) in rowHeights(subviews, count, column).enumerated() {
-            for (index, subview) in subviews[(row * count)..<min(row * count + count, subviews.count)].enumerated() {
+        for (cards, height) in rows(subviews, count, column) {
+            for (index, subview) in cards.enumerated() {
                 let x = bounds.minX + CGFloat(index) * (column + spacing)
                 subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: column, height: nil))
             }

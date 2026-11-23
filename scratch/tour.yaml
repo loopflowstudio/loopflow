@@ -1,9 +1,9 @@
-at: 5e305e63c7d696065d5cbab24601cbf3755a2b8f
+at: 00a5638c6713b92bd05f0c8e7a96e57dfac75e08
 first:
   - path: scripts/testing.md
     why: Install seeding and inspect Cargo freshness
   - path: scripts/build_cache.py
-    why: Select and lock a source, then publish its clone
+    why: Select and lock a built sibling before cloning
   - path: python/tests/test_build_cache.py
     why: Exercise reuse, concurrent builds and failed clones
   - path: .lf/qa/build-cache.md
@@ -13,7 +13,9 @@ first:
   - path: scripts/benchmarks/crate-rebuild/seed_probe.py
     why: Measure both builds and count changed files
   - path: scripts/benchmarks/crate-rebuild/test_loop.py
-    why: Share benchmark options and lock the output directory
+    why: Start edit-to-test measurements with a cold target
+  - path: python/tests/test_crate_test_loop.py
+    why: Check benchmark isolation after the checkout hook runs
   - path: scripts/benchmarks/crate-rebuild/report.py
     why: Calculate paired totals and render cohort ranges
   - path: scripts/benchmarks/crate-rebuild/results/loo-922.html

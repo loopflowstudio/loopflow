@@ -182,15 +182,6 @@ public struct ProviderTransition: Codable, Sendable, Hashable {
     public let seed: String?
     public let observedAt: Int64
 
-    public var explanation: String {
-        switch kind {
-        case .retained: "Same process"
-        case .resumed: "Resumed in a new process"
-        case .forked: "Forked from \(fromProviderSession ?? "earlier conversation")" + (originalRunning == true ? "; original was running at fork" : "")
-        case .started: fromProviderSession == nil ? "New conversation" : "New conversation; earlier one left behind"
-        }
-    }
-
     enum CodingKeys: String, CodingKey {
         case kind, seed
         case fromProviderSession = "from_provider_session", toProviderSession = "to_provider_session"

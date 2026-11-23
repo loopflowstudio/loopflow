@@ -1,11 +1,15 @@
-at: 6717d57ab94a3241c1c31a0d1f6e3f5637d33e6a
+at: 551f922b36a651981c43d063c67c1b7f5678fc28
 first:
   - path: docs/workspaces.md
     why: Checkout search from the command line
   - path: swift/README.md
     why: Files walkthrough and keyboard controls
   - path: tests/fixtures/dto/task_files.json
-    why: Paths, scratch pages and truncation on the wire
+    why: Search hits, revisions and checkout paths on the wire
+  - path: rust/loopflow-execution/src/ops/task/grep.rs
+    why: Literal matches, source coordinates and bounded checkout scans
+  - path: rust/loopflow-execution/src/ops/task/checkout_file.rs
+    why: Pinned directory reads shared by grep and save
   - path: rust/loopflow-execution/src/ops/task/find.rs
     why: Git membership, scratch inventory and fuzzy ranking
   - path: rust/loopflow-execution/src/observe.rs
@@ -13,9 +17,9 @@ first:
   - path: rust/loopflow/src/lf/commands/read.rs
     why: Typed checkout read and its command line
   - path: swift/Loopflow/Services/RegistryQuery.swift
-    why: How Desktop asks the owner for paths
+    why: How Desktop searches the owning Machine
   - path: swift/LoopflowMac/Views/TaskFilePicker.swift
-    why: Search, arrow previews and accepting a file
+    why: Files and Grep share selection and previews
   - path: swift/LoopflowMac/Views/TaskFilesView.swift
     why: Picker and sidebar beside the selected document
   - path: swift/LoopflowMac/TaskFileDocument.swift
@@ -23,7 +27,9 @@ first:
   - path: swift/LoopflowMac/Views/TaskCodeReader.swift
     why: The numbered source reader shared with previews
   - path: swift/LoopflowTests/TaskFilesTests.swift
-    why: Previewing a peer file while editing a draft
+    why: Previewing peer matches while keeping a draft
+  - path: rust/loopflow/tests/machine_commands.rs
+    why: Search on a peer-only checkout
   - path: rust/loopflow/tests/served_reads.rs
     why: Finding paths beyond the first two thousand
   - path: scratch/plan.md
@@ -31,3 +37,7 @@ first:
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Generated from the Rust protocol types
+  - path: Cargo.lock
+    why: Resolved grep dependencies
+  - path: swift/LoopflowMac/ThirdPartyNotices/
+    why: Generated dependency inventory and license texts

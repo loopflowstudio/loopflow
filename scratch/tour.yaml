@@ -1,4 +1,4 @@
-at: fcf99fc9bb4e610ae7c14055d720247eda8c0ece
+at: 2d896175cc4250aaaee947474ee0583c319a0fef
 first:
   - path: swift/README.md
     why: Files walkthrough, rail, shortcuts and presentation
@@ -6,6 +6,8 @@ first:
     why: Present a file or line range beside a terminal
   - path: docs/workspaces.md
     why: Search a checkout from the command line
+  - path: swift/LoopflowTests/TaskFileBrowserJourneyTests.swift
+    why: Follow a call through review and presentation
   - path: swift/LoopflowMac/ReviewDiff.swift
     why: Line references keep their source through edits
   - path: swift/LoopflowMac/FileFind.swift
@@ -51,7 +53,7 @@ first:
   - path: swift/LoopflowMac/FileOutline.swift
     why: Live declarations from the reader’s syntax tree
   - path: swift/LoopflowMac/FileJumps.swift
-    why: Definition choices and return locations
+    why: Reference and definition picks share return history
   - path: swift/LoopflowTests/TaskFilesTests.swift
     why: Mixed review batch, Find routing and peer reads
   - path: swift/LoopflowTests/DesktopPaneControlTests.swift
@@ -59,7 +61,7 @@ first:
   - path: rust/loopflow/tests/machine_commands.rs
     why: Watch and search a peer-only checkout
   - path: scratch/plan.md
-    why: Remaining language coverage, journey and display checks
+    why: Journey results and remaining language and display checks
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Generated from the Rust protocol types

@@ -918,4 +918,36 @@ mod tests {
         );
         writer.execute_batch("ROLLBACK").unwrap();
     }
+
+    #[test]
+    fn a_workers_boundaries_do_not_wait_for_another_sessions_write() {
+        let (home, store, adapter, delivery) = fixture();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET interactive=0 WHERE id=?1",
+                [&adapter.session],
+            )
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .busy_timeout(std::time::Duration::from_millis(50))
+            .unwrap();
+        let writer = rusqlite::Connection::open(home.path().join("store.db")).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        // A worker reports through the stream lf owns: no boundary is its first.
+        assert!(!store.record_first_boundary(&adapter).unwrap());
+        let tool = boundary(
+            BoundaryMoment::Tool,
+            &adapter,
+            &delivery,
+            serde_json::json!({"session_id":"native","hook_event_name":"PostToolUse","tool_use_id":"t1"}),
+        );
+        assert!(answer(&store, &tool).unwrap().1.is_none());
+        writer.execute_batch("ROLLBACK").unwrap();
+    }
 }

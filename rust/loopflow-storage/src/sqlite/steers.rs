@@ -234,14 +234,23 @@ impl SqliteStore {
     /// headless run reports through the stream lf owns.
     pub fn record_first_boundary(&self, adapter: &SteerAdapter) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // Every later boundary reads, so only the first takes the write lock.
-        let recorded: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM session_activity
-                WHERE session_id=?1 AND agent_process_id=?2 AND observed_at<>0)",
-            params![adapter.session, adapter.agent_process_id],
+        // Only a boundary that will write takes the Machine's write lock: a
+        // later boundary, a worker or a process with no steer capability reads.
+        let first: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions s
+                WHERE s.id=?1 AND s.agent_process_id=?2 AND s.interactive=1
+                  AND EXISTS(SELECT 1 FROM steer_adapters a
+                    WHERE a.agent_process_id=?2 AND a.capability=?3)
+                  AND NOT EXISTS(SELECT 1 FROM session_activity
+                    WHERE session_id=?1 AND agent_process_id=?2 AND observed_at<>0))",
+            params![
+                adapter.session,
+                adapter.agent_process_id,
+                adapter.capability
+            ],
             |row| row.get(0),
         )?;
-        if recorded {
+        if !first {
             return Ok(false);
         }
         let changed = conn.execute(

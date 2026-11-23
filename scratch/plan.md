@@ -164,17 +164,14 @@ prompt once and hears the steer once.
    answers its in-turn `SessionStart`, that becomes the first boundary and
    records the conversation idle mid-turn. Claims stay exclusive, so the steer
    arrives once; the turn's Stop corrects the state.
-5. **Next (implement), one query:** `record_first_boundary`'s read asks only
-   whether this process has a row with `observed_at<>0`. A worker
-   (`interactive=0`) or a process without the steer capability answers no
-   until its stream writes a row, so each of its boundaries runs the
-   `INSERT … SELECT` that matches nothing, which still takes the Machine's
-   one SQLite write lock. Fold the write's eligibility (interactive Session,
-   this process current on it, capability present) into the read so only a
-   boundary that will write takes the lock. No behaviour change. Test: a
-   non-interactive Session's boundary answers under a held `BEGIN IMMEDIATE`
-   (beside the existing busy-timeout test in `boundary::tests`).
-6. **Then (qa), real providers:** the same reopen by hand on real Claude and Codex
+5. **Built:** `record_first_boundary`'s read now asks the write's whole
+   question (interactive Session, this process current, steer capability,
+   no observed row of its own), so a worker's or capability-less process's
+   boundaries read and never take the write lock. Test:
+   `boundary::tests::a_workers_boundaries_do_not_wait_for_another_sessions_write`
+   (fails on the old read with `database is locked`). Note: `interactive` is
+   the Session's column; `agent_interactive` is the process's.
+6. **Next (qa), real providers:** the same reopen by hand on real Claude and Codex
    with the branch `lf` (held terminal, the account's logins). Claude's run
    answers the inbox-at-SessionStart risk above: `delivered` with no turn
    means Claude dropped the early message; then build the bounded
@@ -182,7 +179,7 @@ prompt once and hears the steer once.
 
 ## Checks
 
-- `cargo nextest run -p loopflow --lib -E 'test(server::boundary::tests::) | test(server::wake::tests::) | test(lf::commands::context::tests::)'`: 25 passed (implement, after slice 4).
+- `cargo nextest run -p loopflow --lib -E 'test(server::boundary::tests::) | test(server::wake::tests::) | test(lf::commands::context::tests::)'`: 25 passed (implement, after slice 4); 26 passed (implement, after slice 5).
 - `cargo test -p loopflow-execution --lib harness::codex::tests::`: 7 passed (implement).
 - `cargo test -p loopflow --test integration documented_commands::`: passed (implement).
 - `tests/e2e/idle_wake.py --harness opencode` (OpenCode 2.0.32): passed, wake and reopen legs (implement).

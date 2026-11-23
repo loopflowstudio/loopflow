@@ -669,7 +669,7 @@ struct DesktopActionMonitor: NSViewRepresentable {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self, let window = self.view?.window,
                       event.window === window, window.isKeyWindow, window.attachedSheet == nil,
-                      (window.firstResponder as? NSTextView)?.hasMarkedText() != true,
+                      (window.firstResponder as? NSTextInputClient)?.hasMarkedText() != true,
                       let (action, args) = DesktopAction.binding(characters: event.charactersIgnoringModifiers,
                           keyCode: event.keyCode, specialKey: event.specialKey, modifiers: event.modifierFlags)
                 else { return event }

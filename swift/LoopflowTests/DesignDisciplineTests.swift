@@ -56,7 +56,7 @@ struct DesignDisciplineTests {
     @Test("Loopflow and LoopflowMac take every font size, padding, spacing and radius from the design system")
     func everyMeasureIsNamed() throws {
         let violations = try Self.violations(in: ["Loopflow", "LoopflowMac"], [
-            (#"(fixedS|s)ize: *[0-9]"#, "a font size outside the ramp", true),
+            (#"\b(size|fixedSize): *[0-9]"#, "a font size outside the ramp", true),
             (#"\.padding\(([^)]*, *)?-?[0-9]"#, "a padding outside Spacing", false),
             (#"spacing: *[1-9]"#, "a spacing outside Spacing", false),
             (#"[cC]ornerRadius: *[0-9]"#, "a radius outside CornerRadius", true),

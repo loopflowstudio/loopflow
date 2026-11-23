@@ -25,11 +25,11 @@ struct TerminalFeedbackTests {
 
     @Test("⌘` and ⌘⇧` leave the terminal to cycle windows; ⌃` and plain ` stay with it")
     func windowCycleBelongsToAppKit() {
-        #expect(GhosttyTerminalShortcut.cyclesWindows(characters: "`", modifiers: .command))
-        #expect(GhosttyTerminalShortcut.cyclesWindows(characters: "~", modifiers: [.command, .shift]))
-        #expect(!GhosttyTerminalShortcut.cyclesWindows(characters: "`", modifiers: .control))
-        #expect(!GhosttyTerminalShortcut.cyclesWindows(characters: "`", modifiers: []))
-        #expect(!GhosttyTerminalShortcut.cyclesWindows(characters: "`", modifiers: [.command, .option]))
+        #expect(GhosttyTerminalShortcut(characters: "`", modifiers: .command) == .cycleWindows)
+        #expect(GhosttyTerminalShortcut(characters: "~", modifiers: [.command, .shift]) == .cycleWindows)
+        #expect(GhosttyTerminalShortcut(characters: "`", modifiers: .control) == nil)
+        #expect(GhosttyTerminalShortcut(characters: "`", modifiers: []) == nil)
+        #expect(GhosttyTerminalShortcut(characters: "`", modifiers: [.command, .option]) == nil)
     }
 
     @Test("Copy notices stay with the originating window and retained view")

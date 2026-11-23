@@ -351,6 +351,26 @@ Drop `task_primary_sessions` with its three mirror triggers and make
 ship the release whose peer protocol accepts a `Disposition` without
 `planning_completed`, then stop sending it.
 
+## Next: implement (`lf wt create --stack`, human review 2026-11-23)
+
+Answers (Jack Heart): "a -- there should be a stack flag though", "and we can
+instruct to use the stack flag as necessary", "put the stack flag in here and
+the instructions as well".
+
+1. **`lf wt create <name> --stack`.** Without it nothing changes: the new
+   worktree's branch starts from main. With it, the branch starts from the
+   branch of the checkout it is run in (the current Task's branch), and the
+   new checkout records that branch as its base, the way a stacked Task
+   follows its parent, so `lf sync` follows it. Help text in Clap; `--plan`
+   shows the base it would use.
+2. **Instructions.** `LOOPFLOW.md`'s child-agent paragraph: a child whose
+   piece builds on this Task's work gets `lf wt create <name> --stack`; one
+   doing unrelated work gets plain `lf wt create`. One sentence; the
+   paragraph is paid for on every run.
+3. Tests: `--stack` from a Task's checkout creates a branch whose base is the
+   Task's branch head and holds its commits; without the flag the base is
+   main. `documented_commands` passes with the new example.
+
 ## Built: one Git-root rule (human review of the ownership split, 2026-11-23)
 
 Answer on the page's question 1: "i think I prefer (c)": Git-root equality

@@ -31,6 +31,10 @@ struct WorkPaletteTests {
             #expect(ratio(rgb(ink, environment), workSelection) >= 4.5)
         }
         #expect(definition.terminal.readabilityErrors.isEmpty)
+        let bar = rgb(palette.titlebarBackground, environment)
+        for ink in [palette.titlebarText, palette.titlebarSecondaryText] {
+            #expect(ratio(composite(rgb(ink, environment), over: bar), bar) >= 4.5, "title bar text \(ink) on \(bar)")
+        }
         for surface in surfaces {
             let base = rgb(surface, environment)
             #expect(ratio(rgb(palette.selectionEdge, environment), base) >= 3)

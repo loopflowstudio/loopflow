@@ -220,7 +220,8 @@ def test_security_pressure_stops_later_suites_but_product_failure_does_not(
         "RESOURCE_ENVELOPE",
         dict(gate.RESOURCE_ENVELOPE, sample_interval_seconds=0.05, host_security_samples=2),
     )
-    monkeypatch.setattr(gate, "_host_security_pressure", lambda: ("syspolicyd", 350.0))
+    pressure = ("syspolicyd", 350.0) if security_pressure else None
+    monkeypatch.setattr(gate, "_host_security_pressure", lambda: pressure)
     first = _plan(_cmd(["sleep", "60"] if security_pressure else ["false"], "first"))
     later = _plan(_cmd(["touch", str(marker)], "later"))
     later.suite.name = "later"

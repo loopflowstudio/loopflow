@@ -5,6 +5,7 @@ import gzip
 import hashlib
 import html
 import json
+import statistics
 from pathlib import Path
 
 from run import CASES, _catalog_complete, _validate_closure
@@ -44,6 +45,227 @@ def _table(summary: list[dict], metric: str, scale: float = 1) -> str:
     )
 
 
+def _test_loop(source: Path, output: Path) -> None:
+    from test_loop import CASES, summarize, validate
+
+    config = json.loads((source / "configuration.json").read_text())
+    receipts = json.loads((source / "receipts.json").read_text())
+    calibration = config.get("calibration_cohorts", [])
+    warm_cohorts = sorted(set(range(1, config["cohorts"] + 1)) - set(calibration))
+    validate(receipts, config["cohorts"], calibration)
+    summary = summarize([r for r in receipts if r["cohort"] in warm_cohorts])
+    totals = []
+    incremental = True
+    for owner, cases in (("app", CASES[:3]), ("execution", CASES[3:])):
+        medians = {}
+        for mode in ("cache", "incremental"):
+            values = [
+                sum(
+                    r["wall_seconds"]
+                    for r in receipts
+                    if r["cohort"] == cohort and r["mode"] == mode and r["case"] in cases
+                )
+                for cohort in warm_cohorts
+            ]
+            medians[mode] = statistics.median(values)
+            totals.append(
+                {
+                    "owner": owner,
+                    "mode": mode,
+                    "median": medians[mode],
+                    "min": min(values),
+                    "max": max(values),
+                }
+            )
+        incremental = incremental and medians["incremental"] < medians["cache"]
+
+    def observation(name: str):
+        path = source / name
+        return json.loads(path.read_text()) if path.exists() else None
+
+    loads = [
+        r[key][0]
+        for r in receipts
+        if r["cohort"] in warm_cohorts
+        for key in ("load_before", "load_after")
+        if key in r
+    ]
+    background = {"min_1m": min(loads), "max_1m": max(loads)} if loads else None
+    payload = {
+        "configuration": config,
+        "warm_cohorts": warm_cohorts,
+        "machine_verification": observation("machine-verification.json"),
+        "registration_during_compile": observation("registration/stop.json"),
+        "background_load": background,
+        "host_interruption": observation("host-interruption.json"),
+        "disk_interruption": observation("disk-interruption.json"),
+        "abandoned_attempts": {
+            str(p.relative_to(source)): json.loads(p.read_text())
+            for p in sorted((source / "abandoned-attempts").glob("*/receipts.json"))
+        },
+        "summary": summary,
+        "three_edit_totals": totals,
+        "default_incremental": incremental,
+        "concurrent_worktree_capacity": None,
+        "capacity_note": "Unmeasured; all Cargo commands ran serially",
+        "shared_cache_limit": "The shared Machine cache reached its 10 GiB cap during "
+        "LOO-921 (2026-11-16). These isolated warm-cache samples measure the cost "
+        "of a surviving entry; they do not establish that an entry survives "
+        "eviction between worktrees on the shared cache.",
+        "method": "Workspace wrapper records all compiler intervals. Cache deltas are "
+        "attributed to a compiler only when no other interval overlaps. "
+        "Two statistics RPCs per workspace compiler are included in timings. "
+        "Test compiler time includes linking. Memory is sampled every second; "
+        "sampled peak can miss shorter peaks. Daemon CPU is separate. "
+        "Published cache observations count all loaded roots and name the measured worktrees.",
+        "measurement_drivers": config.get("drivers"),
+        "report_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "receipts": receipts,
+    }
+    measured_roots = {Path(tree["path"]) for tree in config.get("trees", {}).values()}
+    for group in [receipts, *payload["abandoned_attempts"].values()]:
+        for receipt in group:
+            for field in ("stats_before", "stats_after"):
+                stats = receipt.get(field)
+                if stats and "basedirs" in stats:
+                    roots = stats.pop("basedirs")
+                    stats["basedir_count"] = len(roots)
+                    stats["measurement_basedirs"] = [
+                        root for root in roots if Path(root) in measured_roots
+                    ]
+    output.mkdir(parents=True, exist_ok=True)
+    raw = json.dumps(payload, indent=2) + "\n"
+    (output / "loo-921-raw.json.gz").write_bytes(gzip.compress(raw.encode(), mtime=0))
+    compact = {
+        **payload,
+        "raw_receipts": "loo-921-raw.json.gz",
+        "receipts": [
+            {
+                k: v
+                for k, v in r.items()
+                if k not in ("stats_before", "stats_after", "memory_samples", "cargo_units")
+            }
+            for r in receipts
+        ],
+    }
+    compact["abandoned_attempts"] = {
+        name: [
+            {
+                key: row[key]
+                for key in ("cohort", "mode", "case", "exit_code", "tests_passed", "wall_seconds")
+            }
+            for row in rows
+        ]
+        for name, rows in payload["abandoned_attempts"].items()
+    }
+    (output / "loo-921.json").write_text(json.dumps(compact, indent=2) + "\n")
+
+    def table(metric: str, scale: float = 1) -> str:
+        rows = []
+        for case in CASES + ["execution_new"]:
+            cells = []
+            for mode in ("cache", "incremental"):
+                row = next((r for r in summary if r["case"] == case and r["mode"] == mode), None)
+                value = row[metric] if row else None
+                cells.append(
+                    f"<td>{value['median'] / scale:.2f} "
+                    f"[{value['min'] / scale:.2f}–{value['max'] / scale:.2f}]</td>"
+                    if value
+                    else "<td>unmeasured</td>"
+                )
+            rows.append(f"<tr><th>{case.replace('_', ' ')}</th>{''.join(cells)}</tr>")
+        return (
+            "<table><tr><th>Sample</th><th>Cache</th><th>Incremental</th></tr>"
+            + "".join(rows)
+            + "</table>"
+        )
+
+    totals_html = "".join(
+        f"<tr><th>{r['owner']}</th><td>{r['mode']}</td><td>{r['median']:.2f} "
+        f"[{r['min']:.2f}–{r['max']:.2f}]</td></tr>"
+        for r in totals
+    )
+    load_note = (
+        f"One-minute load ranged from {background['min_1m']:.1f} to "
+        f"{background['max_1m']:.1f} across sample boundaries. "
+        "These are observations under background work, not a controlled CPU-speed comparison."
+        if background
+        else "Background load is unmeasured in these fixtures."
+    )
+    interruption_note = (
+        "The execution seed was interrupted when load rose above 400. "
+        "Its earlier receipts are retained; the unfinished seed group restarted."
+        if payload["host_interruption"]
+        else ""
+    )
+    calibration_note = config.get(
+        "calibration_reason", "Both incremental settings were seeded before measurement."
+    )
+    jobs = config.get("jobs")
+    jobs_note = (
+        f"Cargo used {html.escape(str(jobs))} jobs."
+        if jobs is not None
+        else "Cargo used the Machine's default job count."
+    )
+    stop_note = ""
+    if stop := payload["registration_during_compile"]:
+        cached = sum(stop["interrupted_rlibs"].values())
+        compiler = (
+            "The same compiler was running after the daemon exited."
+            if stop["compiler_outlived_daemon"]
+            else "Compiler survival was unconfirmed."
+        )
+        stop_note = (
+            "<h2>Registration during compilation</h2><p>"
+            "Worktree registration and daemon shutdown took "
+            f"{stop['registration_and_drain_seconds']:.1f} seconds. {compiler} "
+            f"The focused application test {'passed' if stop['test_passed'] else 'failed'}. "
+            f"The replacement {'loaded' if stop['new_root_loaded'] else 'did not load'} "
+            f"the new root. The disk cache received {cached} of "
+            f"{len(stop['interrupted_rlibs'])} interrupted library builds.</p>"
+        )
+    document = f"""<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width"><title>LOO-921 edit-to-test loop</title>
+<style>body{{font:16px/1.5 system-ui;max-width:1050px;margin:48px auto;padding:0
+24px;color:#20252b}}
+table{{width:100%;border-collapse:collapse;margin:24px 0}}
+th,td{{text-align:left;padding:10px;border-bottom:1px solid #ddd}}
+th{{background:#f4f5f6}}td{{font-variant-numeric:tabular-nums}}</style>
+<h1>A Rust edit through a passing test</h1>
+<p>{len(warm_cohorts)} warm alternating cohorts. {jobs_note}
+Median [minimum–maximum]. Each sample passes one focused test and includes its link.</p>
+<p>Revision <code>{html.escape(config["revision"])}</code>.<br>{html.escape(config["rustc"])}</p>
+<p>{html.escape(load_note)} {html.escape(interruption_note)}</p>
+<p>{html.escape(calibration_note)}</p>
+<p>{html.escape(payload["shared_cache_limit"])}</p>
+<h2>Elapsed seconds</h2>{table("wall_seconds")}
+<h2>Three edits, elapsed seconds</h2><p>Application includes new-worktree creation and its first
+build.
+Execution follows the application tests in the same target; the separate execution-new row is
+measured
+only in cache mode. These totals each contain three semantic edits, including the first build.</p>
+<table><tr><th>Owner</th><th>Mode</th><th>Seconds</th></tr>{totals_html}</table>
+<p>Measured test-profile default: incremental <strong>{"on" if incremental else "off"}</strong>.
+Incremental must win both three-edit totals to become the default.</p>
+{stop_note}
+<h2>Client CPU-seconds</h2>{table("cpu_seconds")}
+<h2>Daemon CPU-seconds (separate)</h2>{table("daemon_cpu_seconds")}
+<h2>Largest process RSS, GiB</h2>{table("rss_bytes", 1024**3)}
+<h2>Peak sampled process-tree RSS, GiB</h2>{table("tree_rss_bytes", 1024**3)}
+<p>{html.escape(payload["method"])} Concurrent-worktree capacity is unmeasured.
+Both incremental settings need their own third-party cache keys. The medians include only
+complete measured cohorts. The raw file also includes the seed commands for this run.
+Each worktree owns its target; all samples use one private cache.
+New roots are registered before starting its daemon. Worktree creation is timed separately and added
+to the first build; setup overlaps no Cargo command. Registry build scripts and proc macros still
+build.</p>
+<p><a href="loo-921.json">Compiler closures and command counters</a> ·
+<a href="loo-921-raw.json.gz">Raw cache, memory and Cargo unit receipts</a> ·
+<a href="../README.md">Method</a></p></html>"""
+    (output / "loo-921.html").write_text(document)
+    print(output / "loo-921.html")
+
+
 def _compiled(receipts: list[dict], label: str, case: str) -> str:
     """What the workspace compiled in this case, the same in every cohort or all variants."""
     variants = {
@@ -60,13 +282,20 @@ def _compiled(receipts: list[dict], label: str, case: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, required=True)
-    parser.add_argument("--name", required=True, help="File stem and page title, e.g. loo-923")
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument("--input", type=Path)
+    source_group.add_argument("--test-loop", type=Path)
+    parser.add_argument("--name", help="File stem and page title for --input, e.g. loo-923")
     parser.add_argument(
         "--cache-validation", type=Path, help="root_probe.py output, when it was run"
     )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if args.test_loop:
+        _test_loop(args.test_loop.resolve(), args.output.resolve())
+        return
+    if not args.name:
+        parser.error("--name is required with --input")
     source = args.input.resolve()
     name = args.name
     config = json.loads((source / "configuration.json").read_text())

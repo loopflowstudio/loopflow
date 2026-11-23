@@ -10,7 +10,9 @@ Run from `website/`. Preview at `http://localhost:5001`.
 Edit the homepage in `home.html`: the app mock, the workflows card, the command
 card and the copy around them are one template, drawn by hand. `main.py` fills
 in the download link and install command from `content.yaml`, which also holds
-every other page's copy; `static/style.css` controls layout. `navigation` at the
+every other page's copy; `static/style.css` controls layout. Colors come from
+`static/theme.css`, Loopflow Light's roles, which `scripts/theme_catalogue.py`
+writes; `style.css` uses those roles and never a color of its own. `navigation` at the
 top of the file is the one bar on the homepage and studio pages, including its
 Company menu. Graphs navigation on docs pages goes to `/docs/orchestration`.
 

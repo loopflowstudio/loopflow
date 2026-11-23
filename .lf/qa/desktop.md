@@ -205,6 +205,12 @@ them. Nothing here needs WindowServer focus.
 - Open with `--env LOOPFLOW_QA_HOOK_DIR=<dir>` beside the private `HOME`,
   `LF_HOME`, `LF_BIN` and `PATH`. Write one line to `<dir>/<name>.cmd`; the
   answer appears in `<name>.cmd.out`.
+- Give `snap` and `frame` an absolute prefix: a relative one is resolved
+  against the app's cwd (`/`), and the `.out` lists a file that was never written.
+- Skew without relaunching: start the private server through a symlink
+  `bin/lf` and swap the binary it serves (`kill` the server PID, relink,
+  start again on the same `LF_HOME`); the running app reconnects to the new
+  one, which is how "update the older one" is checked.
 - `snap <prefix>` writes every window with `cacheDisplay` (no title bar) and
   lists index, title and size. Indices change as windows open: read the list
   before each click.
@@ -214,8 +220,30 @@ them. Nothing here needs WindowServer focus.
   in `trackMouse` and the app hangs. Don't `activate` or `makeKey` in the
   hook: every later click goes dead. The first click after a launch is often
   swallowed; send it twice and look.
+- `frame <prefix>` writes each window's frame view, title bar and toolbar
+  included; `snap` and a locked-screen `screencapture -l` ("could not create
+  image from window") both miss the title bar. The hook's windows are never
+  key, so the bar draws lighter than its stated color (`#722f37` reads back
+  `#7e4448`); compare bars against each other, not against the file.
 - `menu Settings…` performs a main-menu item, which is how Choose Theme
-  opens. `close <window>` closes one.
+  opens. `close <window>` closes one. Customize answers `click` a few
+  seconds after the first; the editor's disclosure groups never open, and
+  after the editor opens Apply answers no click either.
+- `import <path>` stands in for the Import tile's file panel (unreachable
+  locked): it cancels any open panel and imports the file as the panel's OK
+  does. `size <window> <w> <h>` shows the "Yours" row. Keep the whole window
+  on the display: `tree` prints its frame, and a part below y = 0 answers no
+  click. On a 982 pt display 900x1250 sits at y = −384; 1500x900 puts the
+  dark section of System mode within reach.
+- Imported themes: most Ghostty files (GitHub Light Default, Catppuccin
+  Latte) are refused for cursor or selection text. A catalogue file from
+  `git show main:…` loads and stands in for a theme saved before a change.
+- Packaging refuses ("Third-party inputs changed") after an edit to a
+  third-party input (`Cargo.lock`, fonts, Ghostty resources) until `uv run
+  python scripts/third_party.py refresh` rewrites
+  `ThirdPartyNotices/inventory.json`; commit that. Theme files are not inputs.
+- `set -- $pair` does not split words in zsh; copy captures out of the
+  private Machine one by one before deleting it.
 - Theme: `lf set --global theme "<name>"` on the private Machine, then
   relaunch. An imported theme is a file in `$LF_HOME/themes/`; Ghostty.app's
   `Contents/Resources/ghostty/themes/` has many.
@@ -230,7 +258,11 @@ them. Nothing here needs WindowServer focus.
   `lf --task <id> desktop do details page=brief` switches the Task pane. A tile
   shows its workflow sentence only after its Task was visited in that window.
   `lf desktop do new-task` opens the New Task sheet, and `snap` lists a sheet
-  as its own untitled window. Apply in Choose Theme answers a doubled click.
+  as its own untitled window. Card clicks in the chooser preview reliably;
+  Apply and Cancel answered one hook click in round 7 (Apply wrote
+  `config.yaml`) after missing in earlier runs. If they miss, set the theme with
+  `lf set --global theme`. Send Customize once: Done Editing takes its place,
+  so a second click closes the editor again.
 - Opening a Task changes it: a link to an unstarted Task places its checkout
   (the server then calls it `idle`), and opening a Task whose worktree was
   moved away puts the worktree back. Read `lf plan list --json` for what a
@@ -243,9 +275,17 @@ them. Nothing here needs WindowServer focus.
   sheet is up), `defaults delete <bundle id>`, relaunch, and use the window
   titled with the repository's name; if none appears in 15 s, open
   `loopflow://<repo>`. Never send a finished Task's link to a relaunched app.
-- A theme set from the CLI reaches the running app, but relaunch before
-  judging Choose Theme: its tiles were blank once after a live change.
-- Not reachable: the title bar, hover, drag, the jump menu (its shortcut needs
+- A theme set from the CLI reaches the running app. Close and reopen Settings
+  a few times (`close`, then `menu Settings…`) to check the chooser's grids
+  draw: a `LazyVGrid` there drew no cards, or a short Yours row, after a reopen.
+- On a display someone is using, `open -n -g` keeps the app behind their
+  windows and the hook works as it does locked. `screencapture -l <number>`
+  shows what WindowServer composited (to tell an app bug from a `cacheDisplay`
+  one), but after Settings is reopened under the same window number it fails
+  with "could not create image from window".
+- `tree <window>` prints the window's accessibility elements with frames;
+  a lazy grid's cards appear there only once drawn.
+- Not reachable: hover, drag, the jump menu (its shortcut needs
   a key window, and setting `navigation.palette = .search` draws nothing),
   popovers and sheets opened from a "+" (New Wave never appeared), file panels
   and Ghostty faces. The in-process accessibility tree is empty, so there is no
@@ -406,6 +446,28 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
   and open the Task by its link first.
 - Stop the run's processes by PID (`ps -axo pid,ppid,command | grep <private
   dir>`), never by pattern.
+
+# Terminal faces without focus
+
+Ghostty panes render in a window launched behind others, so a glyph check
+needs an unlocked display but no keyboard or focus.
+
+- Production mode (no `-ui-test-mode`), isolated bundle, private Machine:
+  `open -n -g --env HOME=… --env LF_HOME=… --env LF_BIN=… --env PATH=…
+  "<bundle>" --args -ApplePersistenceIgnoreState YES --repo <repo>`, then
+  `open -g -b <bundle id> 'loopflow://<repo>/task/<id>'`.
+- `lf --task <id> desktop run "sh <script>"` (from the checkout, with
+  `LF_DESKTOP` set) opens a Shell tab and runs the script in it. `desktop
+  capture -p shell` answers "not a terminal"; take pixels instead.
+- `screencapture -x -o -l <n> terminal.png` with `<n>` from `CGWindowListCopyWindowInfo`
+  (owner = bundle name, onscreen, titled with the repository). Once the
+  screen locks it fails with "could not create image from window".
+- Personal Ghostty settings come from `$HOME/.config/ghostty/config` of the
+  app's `HOME`; change it and relaunch the app (kill its PID) to compare.
+- Locked, Ghostty's glyph path can still be measured offscreen: draw with
+  CoreText into an alpha-only `linearGray` context with the flags
+  `src/font/face/coretext.zig` sets (`setShouldSmoothFonts` = thicken) and
+  sum the alpha.
 
 # Diff and Files without clicks
 

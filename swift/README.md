@@ -310,29 +310,34 @@ File selection keeps a neutral fill and edge; keyboard focus has a separate outl
 Ordinary controls and links use text roles; the theme’s accent emphasizes deliberate actions.
 Status labels and shapes retain their meaning across palettes.
 Choose **Settings → Appearance** to preview the whole workspace. Pick
-**System**, **Light** or **Dark**, then set **Light theme** and **Dark theme**
-independently; System follows macOS using both. System lists both pickers;
-Light or Dark lists only its own. Each picker
-shows built-ins, then **Yours**, ending with a dashed **Import file…** tile.
-
-Beside the pickers, a sample draws the previewed theme where its colors land in
-the app: a title bar with the repository's name, a selected Task row, the
-status words on the sidebar's surface, and one terminal line:
+**System**, **Light** or **Dark**; System follows macOS and lists both sides,
+Light or Dark lists only its own. Each side's heading names its chosen theme
+(**Light themes · Fjord Light**), then shows built-ins as cards and **Yours**,
+ending with a dashed **Import file…** tile. An imported file joins the side its
+own colors say; in Light or Dark mode the preview switches to that side. Every card is drawn in its
+own theme: a title bar strip, its name as a heading, Busy, Blocked and Error,
+ANSI 1–6, a selected row and a **Run** button:
 
 ```text
-loopflow
-Selected Work    Blocked since 12:07
-Working  Available  Blocked  Failed  Passed
-$ lf task status LOO-515
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+Fig
+Busy  Blocked  Error
+● ● ● ● ● ●
+[Selected row] [Run]
 ```
 
-A theme whose status words are hard to read on the sidebar shows it here,
-before **Apply**.
+Families sort by name after Loopflow, so a family's light and dark halves sit in
+the same column. Clicking a card previews it in every window; the chosen card is
+ringed in the window's focus color. A theme with unreadable roles shows why
+under the cards, before **Apply**.
+
+Check font weight in an open shell or Session pane. Previewing, applying or
+cancelling a theme changes only its colors.
 
 ```yaml
 # ~/.lf/config.yaml
-theme: "light:Linen,dark:Hearth"   # System
-theme: "Hearth"                    # Dark (or Light) mode: one name
+theme: "light:Folio,dark:Fig"   # System
+theme: "Fig"                    # Dark (or Light) mode: one name
 ```
 
 **Apply** rewrites only that line; **Cancel**, Escape or closing writes nothing.
@@ -340,31 +345,44 @@ Edit it by hand and every window follows; a misspelled name keeps the last theme
 and names the fix. Absent means Loopflow Light/Dark. A repository's
 `.lf/config.yaml` never sets the theme.
 
-Built-ins are 12 light and 12 dark. **Loopflow Light** keeps the original
-cream/burgundy; **Loopflow Dark** is slate with warm bronze; **Linen** and **Hearth**
-are quieter light and charcoal alternatives.
+Built-ins are 12 families, each a light and a dark theme. **Loopflow Light** keeps
+the original cream/burgundy; **Loopflow Dark** is blue-grey with rose headings and
+links, under the same burgundy title bar. The other eleven are generated from
+specs in `scripts/theme_catalogue.py`: **Fig** is plum with a lime accent, its
+light half **Fig Leaf** a leaf-green ground with plum ink.
 
 Your themes are Ghostty theme files in `~/.lf/themes/`; `~/.config/ghostty/themes/`
 is read too, never written. Names resolve to yours, then built-ins, then Ghostty's.
-A file named like a built-in overrides it. **Customize** on a built-in writes your
-copy; on yours it edits in place. **Delete** removes yours (**Revert to built-in**
-for an override). **Import file…** copies a theme into Yours, accepting only the
-picker's appearance; a dark file in the Light picker explains itself instead.
+A file named like a built-in overrides it. **Customize <name>**, beside Cancel and Apply,
+acts on the card chosen last: on a built-in it writes your copy; on yours it edits in
+place. **Delete <name>** removes yours (**Revert <name> to built-in** for an override).
+**Import file…** copies a theme into Yours on the side its colors say; in Light or
+Dark mode the preview switches to that side.
 
 ```
 background = #171924
 foreground = #cad2ef
 palette = 4=#7aa2f7
-loopflow-accent = #3d59a1    # optional app roles; the rest derive from ANSI colors
+# Optional app roles; the rest derive from ANSI colors.
+loopflow-accent = #3d59a1
+# Optional; without it the bar follows the accent.
+loopflow-titlebar = #242f50
 ```
 
-Files read up to 256 KiB of UTF-8. Six-digit RGB background/foreground are
-required; cursor, selection, `palette = N=#RRGGBB` and `loopflow-` roles are
-optional. Preview explains defaults, repeats and omitted settings. Fonts,
-commands, keybindings, includes and theme references are never followed.
+Theme files can contain up to 256 KiB of UTF-8. Background and foreground
+require six-digit RGB values. Cursor, selection, `palette = N=#RRGGBB` and
+`loopflow-` roles are optional. Preview lists defaults, repeated colors and
+omitted settings such as fonts, commands, keybindings, includes and theme references.
 
-Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
-their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
+The title bar is its own role. A file that leaves it out gets a bar from its
+accent, darkened where needed (lightened under black text) so the bar's text
+stays readable; a theme you made before the role existed may show a slightly
+darker bar. **Customize** lists **Title bar** under Actions and focus, and saving
+states it: after that, changing **Button** leaves the bar alone.
+
+Unreadable app, default, selection or cursor text prevents Apply. ANSI colors keep
+their source values. Loopflow reads personal non-color settings from your Ghostty
+configuration at launch, ignores its `theme =` setting and leaves the file untouched.
 Source and license notices ship offline with the catalogue.
 
 Under the jump bar, the workflow bar reads where the Task stands:
@@ -786,25 +804,29 @@ current match for 160 ms; hiding a pane cancels the cue. Reduce Motion uses
 Find's persistent match styling. Programs that own selection may show their own
 copy confirmation; terminal feedback describes only a terminal-owned copy.
 
-Terminals draw in Spline Sans Mono 13 with its real bold and italic faces and
-ligatures off; Ghostty draws box drawing, blocks and braille itself, so Claude's
-frames stay continuous. Your Ghostty configuration still wins: a
-`font-family` you set comes first and Spline Sans Mono fills the glyphs it
-lacks, and your `font-size`, `adjust-cell-height` or `font-feature` replace
-Loopflow's.
+Task shells and Session panes use Spline Sans Mono at 13 points with its native
+stroke weight, bold and italic faces, and ligatures off. Ghostty draws box
+lines, blocks and braille so terminal frames stay continuous.
+
+For thicker strokes, add the `font-thicken` line below to your Ghostty
+configuration and reopen Loopflow. You can also set `font-size`,
+`adjust-cell-height` and `font-feature`. If you choose a `font-family`, Spline
+Sans Mono supplies missing glyphs. [Ghostty configuration locations](https://ghostty.org/docs/config#file-location)
 
 ```ini
-# In your Ghostty configuration; reopen Loopflow after editing.
+# ~/.config/ghostty/config
 font-family = Berkeley Mono
+font-thicken = true
 minimum-contrast = 1
 ```
 
-The default is `3`. Set `1` to preserve original colors. Correction moves only
-low-contrast text toward black or white while retaining its alpha and channel
-ordering. It preserves more color than replacing text with black or white, but
-cannot guarantee exact hue or separation of nearly identical colors. Faint text
-may not reach the requested ratio. Graphics, images, transparent backdrops and
-custom postprocessing are outside the opaque-text contrast guarantee.
+`minimum-contrast` defaults to `3`. Set it to `1` to keep original colors.
+Correction moves only low-contrast text toward black or white while retaining
+its alpha and channel ordering. It preserves more color than replacing text with
+black or white, but cannot guarantee exact hue or separation of nearly identical
+colors. Faint text may not reach the requested ratio. Graphics, images,
+transparent backdrops and custom postprocessing are outside the opaque-text
+contrast guarantee.
 
 Files and the Graph process log open beside retained Sessions and shells in the
 same multiplexer. Resize, zoom, close and Reopen preserve each pane’s content.

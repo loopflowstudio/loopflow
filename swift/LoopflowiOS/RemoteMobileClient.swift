@@ -72,6 +72,11 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         try await query.allWaves().filter { $0.status != .abandoned }
     }
 
+    /// The Machine's `theme:` text; nil when it names none.
+    func themeChoice() async throws -> String? {
+        try await request(.config(.configTheme(value: nil))).decode(ConfigurationFileValue.self).text
+    }
+
     private struct Ticket: Decodable { let ticket: String }
 
     /// Attaching fits the terminal to `size`.

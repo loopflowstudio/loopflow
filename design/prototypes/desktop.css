@@ -5,7 +5,7 @@
     --background: #faf8f5; --surface: #fffdf9; --surface-muted: #f3eee7; --surface-element: #ece6dd;
     --border: #e6dfd6; --border-strong: #d6ccc0;
     --text: #2a2624; --text-secondary: #5f5752; --text-tertiary: #685f58; --emphasis-ink: #722f37;
-    --accent: #722f37; --accent-text: #faf8f5; --keyboard-focus: #722f37;
+    --accent: #722f37; --accent-text: #faf8f5; --titlebar: #722f37; --keyboard-focus: #722f37;
     --work-selected-fill: #e1d9ce; --work-selected-text: #2a2624; --work-selected-secondary: #5f5752;
     --working: #3269aa; --waiting: #87601b; --available: #5d3539; --success: #3b734c; --failure: #b0443b;
 
@@ -80,7 +80,7 @@
   .btn[disabled] { color: var(--text-tertiary); border-color: var(--border); cursor: default; background: none; }
   .dot { width: var(--sm); height: var(--sm); border-radius: 50%; background: currentColor; flex: none; }
 
-  .titlebar { background: var(--accent); color: var(--accent-text); display: flex; align-items: center; gap: var(--sm); padding: 0 var(--md); min-width: 0; }
+  .titlebar { background: var(--titlebar); color: var(--accent-text); display: flex; align-items: center; gap: var(--sm); padding: 0 var(--md); min-width: 0; }
   .titlebar .lights { display: flex; gap: var(--sm); margin-right: var(--sm); }
   .titlebar .lights i { width: var(--md); height: var(--md); border-radius: 50%; background: #00000047; }
   .titlebar .icon:hover { background: #ffffff1f; }
@@ -249,7 +249,7 @@
   .chooser .names button:hover { background: var(--surface-element); }
   .chooser .names button[aria-pressed="true"] { background: var(--work-selected-fill); color: var(--work-selected-text); font-weight: var(--strong); }
   .sample { border: 1px solid var(--border); border-radius: var(--r-row); overflow: hidden; background: var(--background); }
-  .sample .bar { background: var(--accent); color: var(--accent-text); padding: var(--sm) var(--md); font-weight: var(--strong); }
+  .sample .bar { background: var(--titlebar); color: var(--accent-text); padding: var(--sm) var(--md); font-weight: var(--strong); }
   .sample .rows { padding: var(--sm); display: grid; gap: var(--xxs); background: var(--surface-muted); }
   .sample .rows p { display: flex; justify-content: space-between; padding: var(--sm) var(--md); border-radius: var(--r-row); }
   .sample .rows p.sel { background: var(--work-selected-fill); color: var(--work-selected-text); font-weight: var(--strong); }

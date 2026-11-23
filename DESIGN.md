@@ -184,8 +184,9 @@ covered.
    `.red`. Selection, keyboard focus, link, action and status are separate
    roles so a theme can change one without the others.
 4. **Tokens have one source per platform and the same names on each.**
-   Swift: `swift/Loopflow/Design/`. Web: the `:root` block of
-   `website/static/style.css`. A token unused for a release is deleted.
+   Swift: `swift/Loopflow/Design/`. Web: colors in `website/static/theme.css`,
+   generated from Loopflow Light; type, space and radius in the `:root` block
+   of `website/static/style.css`. A token unused for a release is deleted.
 5. **One component per job.** A second button, heading, status mark or
    workflow diagram is a bug even when it looks better. Improve the first.
 6. **Shape carries meaning.** Radius, border and elevation distinguish kinds
@@ -287,19 +288,21 @@ Website ramp, for every page (`:root` in `website/static/style.css`):
 
 ### Color
 
-Apps: `LoopflowPalette` roles, supplied by each of the 24 bundled themes and
+Apps: `LoopflowPalette` roles, supplied by each of the 26 bundled themes and
 any imported Ghostty theme. Every role is required; a theme missing one fails
 to decode. Ordinary text reaches 4.5:1 and meaningful indicators 3:1 on every
-surface, including selection fills, in every theme.
+surface, including selection fills, in every theme. The phone draws the theme
+its Machine's `theme:` names.
 
-Website (`:root`): `--burgundy #722f37` for headings; `--wine #9B1A4A` for the
-primary button; `--text #1a1a1a`, `--text-secondary #555555`, `--bg #ffffff`,
-`--border #e5e5e5`; `--paper-warm`, `--border-warm`, `--rule-strong`,
-`--track` and `--ok` for the warm cards; `--term-*` for the terminal block
-and docs code. The logo's cyan `#0ab3cc` lives only in the logo files. Tints, shadows and the
-drawings' avatar colors are named there too; no rule below `:root` writes a
-color or `!important`. The docs use these roles; they have no palette of
-their own.
+Website: Loopflow Light. `scripts/theme_catalogue.py` writes its roles to
+`website/static/theme.css` under the app's names (`--background`, `--surface`,
+`--text`, `--accent`, `--accent-ink`, the status inks and fills) with its light
+terminal (`--terminal-background`, `--terminal-foreground`, `--terminal-0` …
+`--terminal-15`), which the terminal block, docs code and drawings' avatars
+use. `style.css` mixes tints and shadows from those roles with `color-mix()`;
+no rule writes a color of its own or `!important`. The logo's cyan `#0ab3cc`
+lives only in the logo files. The docs use these roles; they have no palette
+of their own.
 
 ### Space, shape, motion
 

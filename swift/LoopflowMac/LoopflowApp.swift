@@ -339,12 +339,15 @@ struct AppAppearance: ViewModifier {
             .foregroundStyle(theme.palette.text)
             .background(theme.palette.background)
             .safeAreaInset(edge: .top) {
-                if let notice = appearance.notice, !appearance.chooserOpen {
+                if !appearance.chooserOpen, let notice = appearance.readFailure ?? appearance.notice {
                     HStack {
                         Text(notice).font(Typography.meta)
-                        Button("Choose Theme…") {
-                            appearance.beginPreview()
-                            openSettings()
+                        // After a failed read, choosing again would send the request that just failed.
+                        if appearance.readFailure == nil {
+                            Button("Choose Theme…") {
+                                appearance.beginPreview()
+                                openSettings()
+                            }
                         }
                     }
                     .padding(Spacing.sm).foregroundStyle(theme.palette.text)

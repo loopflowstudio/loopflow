@@ -198,7 +198,7 @@ struct ServerProtocolTests {
                                "prompt_id": .string("p-12")]),
             gap: .object(["first": .integer(1794358000), "last": .integer(1794358020)]),
             printed: ["54dc6432-26f1-43fe-ad9d-20b7e91bad69"],
-            inbox: .string("/Users/maya/.claude/sessions/4242.9c1d.key")), select: nil, requestID: nil)
+            inbox: .object(["claude": .string("/Users/maya/.claude/sessions/4242.9c1d.key")])), select: nil, requestID: nil)
         #expect(try encoded(boundary) == value("session_boundary"))
         guard case .response(_, _, .object(let answer)) = try answer("session_boundary_answer") else {
             Issue.record("Missing boundary answer"); return
@@ -229,10 +229,8 @@ struct ServerProtocolTests {
              #"{"kind":"config.explain","destination":{"kind":"personal_global"},"key":"theme"}"#),
             (.configUnset(destination: destination, key: "theme"),
              #"{"kind":"config.unset","destination":{"kind":"personal_global"},"key":"theme"}"#),
-            (.configTheme(path: "/theme.yaml", value: nil),
-             #"{"kind":"config.theme","path":"/theme.yaml","value":null}"#),
-            (.configTheme(path: "/theme.yaml", value: "Hearth"),
-             #"{"kind":"config.theme","path":"/theme.yaml","value":"Hearth"}"#),
+            (.configTheme(value: nil), #"{"kind":"config.theme","value":null}"#),
+            (.configTheme(value: "Hearth"), #"{"kind":"config.theme","value":"Hearth"}"#),
         ]
         for (operation, json) in operations {
             let encoded = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(operation))

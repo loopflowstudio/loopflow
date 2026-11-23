@@ -141,6 +141,15 @@ the refusal and corrupts state. Prefer dropping a precondition to adding one.
 If a fix reads as "extend the allowlist" or "verify identity", reframe it as a
 reduction. The best fix makes the system smaller.
 
+## Choosing between designs
+
+Rank candidate designs in this order: reliably functional, resilient and
+recoverable for the core uses (steering among them); then performant, without
+needless work or scattered processes on the Machine; then consistent across
+harnesses and surfaces; then open to functionality outside the core. When one
+harness drops a mechanism another keeps (an OpenCode server beside Codex's
+app-server), the plan says why at the top, before anything is deleted.
+
 ## Work model
 
 Waves hold durable objectives, memory, cadence and budget under
@@ -180,11 +189,13 @@ uv sync
 
 `rust/loopflow-terminal/build.rs` downloads the pinned `libghostty-vt` archive once per target
 directory; offline, point `LOOPFLOW_GHOSTTY_VT_DIR` at a directory holding
-`libghostty-vt.a`. Run one cargo command at a time: concurrent builds wait on
+`libghostty-vt.a`. Benchmark compiler receipt wrappers retain the `sccache` basename: cc-rs uses
+it to cache C/C++ build steps too. Run one cargo command at a time: concurrent builds wait on
 one target lock. CI runs the full matrix; locally, run it only to reproduce a
 CI failure. When work needs a tool the Machine lacks, install it (Homebrew on
 macOS) at Machine level and continue. Keep Machine-only tools out of config CI
-reads: sccache runs through `~/.cargo/config.toml`. `scripts/testing.md` holds
+reads: sccache runs through `~/.cargo/config.toml`, written by
+`scripts/build_cache.py install`. `scripts/testing.md` holds
 the command list; module READMEs and `.github/CI.md` own their checks.
 
 # Code Organization

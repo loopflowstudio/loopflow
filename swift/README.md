@@ -415,7 +415,7 @@ Reopen, Claim or Unassign, Move, Copy ID and link, and **Abandon…**.
 ⌘⌥←/→/↑/↓   focus the visual neighbor
 ⌘⇧Return    zoom the focused pane
 ⌘W / ⌘⇧T    close the selected tab / undo close
-⌘F          find in the focused terminal
+⌘F          find in the focused pane (terminal or Files)
 ```
 
 Panes sit in rounded islands with small gutters; drag a gutter to resize.
@@ -423,7 +423,7 @@ Panes sit in rounded islands with small gutters; drag a gutter to resize.
 
 The focused pane has a quiet raised edge. Copying selected text or a command
 block briefly confirms the number of copied lines without moving focus.
-Find reserves its own row above the terminal, so it never covers a match.
+Find reserves its own row above the terminal or document, so it never covers a match.
 Return / Shift-Return select the next / previous match; Escape closes Find.
 Search and terminal state stay with their retained pane when switching Work.
 
@@ -581,25 +581,68 @@ place and is still sent. Comments last as long as the window. **Copy** takes
 the selected lines without patch markers, as does a line's context menu, which
 also copies the selection or the new code shown; selecting text never takes
 the + and −. **Reference in conversation** types
-`path:L4-6 (after, working tree on <sha>)` alone. Files' Diff has the
-same comments, skipped lines and Send.
+`path:L4-6 (after, working tree on <sha>)` alone. Files' Read and Diff share the
+same comment queue and **Send to conversation** (⌘↩), formatting each comment
+with its source (working file, unsaved draft, or diff side and revision).
 
-**Files** holds open documents and their Read, Edit and Diff controls. One menu
-names the open file and, once several are open, where it sits among them
-(**TaskRow.swift** 1 of 3), and switches between them or closes it; under it,
-the Machine as a place (This Mac), then the checkout and folder in mono. Files starts with
-its chooser closed. Click the file-browser toggle or press Command-P for
-**scratch** and the Task's checkout tree, read from the Task's Machine as you
-open folders, 500 entries at a time (**Load more** for the rest). `M`, `R` and
-`U` mark files changed from the branch's recorded parent commit; `•` marks the
-folders holding them. ↑/↓ move, → opens a folder, ← closes it, Return opens the
-file. Search matches scratch, the folders you have opened and changed files. A
-folder that can't be read says why under it, with **Retry**. Expanded folders
-and scroll stay put across page and Task switches. Selection closes the dropdown; pin it to keep the list alongside the document
-(Control-Command-B). Escape dismisses the dropdown. Sidebar selection switches
-the whole Task workspace; selections inside a Task can focus its companion.
-Resizing or closing the browser is remembered while the window stays open;
-layouts are not yet restored after quitting the app.
+**Files** lets you find, read, jump through, comment on and edit files in the
+Task's checkout beside its conversation. Press **⌘P** and type part of a nested
+filename (`TaskFile`): matching paths rank `scratch/`, changed and open files
+first, and arrow keys preview each hit syntax-colored on the right without
+changing your open files or jump stack. Press Return to open it in **Read**,
+press **⌘F** to locate a call, **⌘-click** (or press `gd`) on the symbol to jump
+to its declaration — picking from an inline peek list if several match — click
+or Shift-click line numbers to queue a comment, and press **⌘[** to return to
+the call line. **⌘↩** puts every queued comment from Read and Diff into the
+conversation's unsent input.
+
+```text
+⌘P          find files across the checkout and scratch/ (empty query lists open and recent files)
+⇧⌘F         grep text across the checkout
+⌘F          inline find in the open file (one click promotes to ⇧⌘F grep)
+⇧⌘O         symbol outline for the open file
+⌘-click/gd  jump to declaration (inline peek on multiple matches)
+gr          inline references peek
+⌘[ / ⌘]     step Files jump history (falls through to Desktop Back/Forward once empty)
+⌃⌘E         toggle Edit for the current file
+```
+
+One 32 pt header sits above the document with a sidebar toggle, jump history
+(`‹`/`›`), an interactive path breadcrumb and document actions (folding into
+**…** down to 360 pt wide). Clicking any folder in the breadcrumb opens its
+siblings; clicking the filename switches or closes open files; on code files the
+enclosing symbol follows your reading position. The recorded Machine and full
+path stay reachable from the breadcrumb.
+
+The 236 pt left rail docks at 620 pt wide and opens as a dismissible drawer
+below that width (picking a file closes the drawer):
+
+- **Open & Scratch** lists open files, unsaved drafts, `scratch/` pages and
+  update dots. Auto-opened clean files are MRU-capped so rapid `gd` jumps do not
+  flood the list; closing a clean file drops it, while dirty drafts stay visible
+  until saved or discarded.
+- **Changed in Task** lists whole-Task changes (`+N −M`), unaffected by choosing
+  a step comparison in **Diff**.
+- **Checkout** reads directories lazily from the Task's Machine, 500 entries at
+  a time (**Load more** for the rest), compacts single-child folders once their
+  listing completes, reveals the open file through its ancestors and offers
+  **Show Ignored**. `↑`/`↓` move, `→` opens a folder, `←` closes it and Return
+  opens the file; an unreadable folder says why under it with **Retry**.
+  Expanded folders and scroll stay put across page and Task switches.
+
+One picker serves **Files** (⌘P), **Grep** (⇧⌘F) and **Changed** (whole-Task
+changes). Arrow keys preview beside the list on wide panes (narrow panes show
+the list first), Return opens the selected line and Escape returns focus and
+place. With Files focused, **⌘F** opens one inline find bar across Read code,
+Edit, rendered Markdown, rendered HTML and Diff (images report no text matches),
+with match count, Return / Shift-Return stepping and one-click promotion to
+checkout-wide Grep. **⇧⌘O** builds the open file's outline (types, functions,
+methods, Markdown headings) locally from Desktop's bundled Tree-sitter grammars,
+including live unsaved edits; cross-file `⌘-click` / `gd` definitions and `gr`
+references query the owning Machine so remote checkouts work the same way.
+Sidebar selection switches the whole Task workspace; selections inside a Task
+can focus its companion. Resizing or closing the browser is remembered while the
+window stays open; layouts are not yet restored after quitting the app.
 
 Open **•••** or press Command-/ for the selected Task’s actions. Row context
 menus use the same actions for the clicked Task. Command-T adds a shell tab. The main Session's menu switches between **Claude**,
@@ -647,17 +690,32 @@ Graph processes and http(s) pages. ⌘W closes the selected tab, or hides the pa
 ⇧⌘T restores the last closed tab's identity and history. Close ends its shell
 and jobs; New Shell starts fresh execution.
 
-**Read** is where documents open: Markdown renders formatted, HTML as a live
-page that runs its scripts but never reaches the network, and an image as the
-picture, whatever its extension. Links open in the
-browser. **Edit** retains editable UTF-8 drafts and selection in this window;
-**Diff** shows the draft comparison read-only.
+Every file opens in **Read**: code renders syntax-colored, selectable,
+line-numbered lines with whole-Task change marks in the gutter and clickable
+line numbers for comments; Markdown renders formatted; HTML renders as a live
+offline page that runs its scripts without reaching the network (external links
+open in the browser); and images open as pictures with their dimensions and byte
+size, whatever their extension. **Read** always shows the current buffer text —
+including unsaved local edits with draft and save status — so returning to Read
+never hides a draft. View mode (**Read**, **Edit**, **Diff**) is per-file:
+toggling **Edit** (⌃⌘E or header button) opens the native editor for UTF-8
+drafts while keeping other files in Read, and returning to Edit keeps your
+caret, Undo history and selection. Changed or dirty files also offer a
+draft-aware **Diff**, where `[` and `]` step changes within that file only.
 
-When an agent writes a `scratch/**/*.md` or `.html` file, Files reloads it if it
-is showing, or follows it. It takes the view only when nothing is selected, when
-the current document was itself followed, or when you haven't touched Files for
-two minutes. Edit, Diff, an unsaved draft or keyboard focus in Files keep your
-view; the page then opens as a tab beside it.
+On first entry to an empty Files pane (after restoring saved tabs and drafts),
+Files opens the newest `scratch/` Markdown or HTML page, else the first changed
+file, else the empty picker. That initial pick happens once; closing the last
+file, visiting Brief or Diff, or later writes never switch your view. Passive
+writes to `scratch/` (including gitignored paths) badge the file in **Open &
+Scratch** and show a quiet update bar (`Updated scratch/explore.html · Open`),
+leaving your reading position, caret and keyboard focus alone. If the written
+HTML page is already visible, Files waits briefly for writes to settle (~800 ms)
+before reloading once and restoring scroll. To present a finished page
+deliberately, run `lf open --host desktop --file <path>`: it opens in **Read**,
+pushes the prior file onto jump history and leaves terminal focus and drafts
+intact (while typing in Files' Edit editor, it shows a quiet
+`Presented <path> · Open` bar instead of interrupting keystrokes).
 
 Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
@@ -1009,7 +1067,8 @@ codebase tree, and registry health.
   to their Wave. The Wave's planning row retains the plan and its history;
   it has no separate operator.
 - **Task workspace presentation** reads `lf task changes --json`,
-  `lf task diff --json` and `lf task file --json`.
+  `lf task diff --json`, `lf task file --json`, `lf task files --json`,
+  `lf task find --json`, `lf task grep --json` and `lf task symbols --json`.
   Lifecycle mutations remain `lf task run` and `lf task interrupt`; review stages use
   the Task's persisted graph position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
@@ -1376,7 +1435,8 @@ targets. `files`, `graph-log` and `browse` select browser
 tabs without changing focus or zoom. Each web page tab retains its `WKWebView`
 until the tab closes; `page-back`, `page-forward` and `reload`
 (⌘R, the page's toolbar) act on the addressed page. ⌘[ and ⌘] stay Desktop
-navigation. Remote shells run on the recorded execution
+navigation outside a non-empty Files jump stack (where `files-back` and
+`files-forward` step file jumps first). Remote shells run on the recorded execution
 Machine; changed or missing checkouts refuse launch without opening a local
 shell. Disconnects never replay shell commands.
 

@@ -60,3 +60,10 @@ One isolated Task on a fixture Machine contains an unopened source file, two sam
 ## Demo
 
 With a Task conversation beside Files, press `⌘P`, type part of a nested filename and preview it. Open it (Read), find a call with `⌘F`, jump to its definition (`⌘-click`), comment on two lines, then return (`⌘[`). Rewrite a scratch page twice: the call stays in view and a calm update bar appears. Present the finished page with `lf open --host desktop --file scratch/explore.html`: it opens rendered immediately and the queued comment is still ready to send with `⌘↩`.
+
+## User docs
+
+Updated in place for implementation to match:
+- [swift/README.md](../swift/README.md) — Desktop **Files** walkthrough, shortcuts (`⌘P`, `⇧⌘F`, `⌘F`, `⇧⌘O`, `⌘-click`/`gd`, `gr`, `⌘[`/`⌘]`, `⌃⌘E`, `⌘↩`), 32 pt breadcrumb header, responsive 236 pt rail, per-file Read/Edit/Diff, one-time initial pick, calm `scratch/` updates, deliberate presentation, and `lf task find|grep|symbols` reads.
+- [docs/surfaces.md](../docs/surfaces.md) — `lf open --host desktop --file` presentation behavior (including quiet bar during active Edit) and Desktop **Files** overview.
+- [docs/workspaces.md](../docs/workspaces.md) — CLI checkout reads (`lf task find`, `lf task grep`, `lf task symbols`, `lf task file`) with examples and `--json` contract notes.

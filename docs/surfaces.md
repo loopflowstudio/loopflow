@@ -31,14 +31,19 @@ lf open --task LOO-12 --host desktop          # open in Loopflow Desktop
   `lf --task LOO-12 open --link --format markdown` (paste into PRs, Slack, or
   notes; installing `lf` registers the `loopflow:` URL handler).
 
-To present docs in Desktop:
+To present files or review pages in Desktop:
 
 ```bash
-lf open --host desktop --file docs/usage.md --file README.md
+lf open --host desktop --file scratch/explore.html --file docs/usage.md
 ```
 
-Opens those files in Desktop's Files pane (rendered Markdown/HTML, keeping
-active drafts intact) without launching a conversation or editor.
+Opens those files in Desktop's Files pane in **Read** mode (rendered Markdown or
+HTML, or line-numbered code), retaining every `--file` path, pushing the prior
+file onto Files' jump stack, and keeping terminal focus, active drafts, and Undo
+intact — without launching a conversation or a new Desktop window. While typing
+or composing in Files' Edit editor, Desktop adds the path to **Open & Scratch**
+and shows a quiet `Presented <path> · Open` bar instead of interrupting
+keystrokes.
 
 `lf session rename SESSION 'Resume repair'` updates the
 terminal title via standard OSC sequences, plus native cmux tabs/workspaces and
@@ -52,7 +57,12 @@ The native macOS app reads the same local store as `lf`; it keeps no copy of its
 - **Sidebar (⌘1–9):** your working Tasks in shared order (dragging reorders
   them for CLI lists too).
 - **Task workspace:** three resizable panes: `session` (conversation), `shell`
-  (at the Task's worktree), and `browser` (Files, Graph log, local dev URLs).
+  (at the Task's worktree), and `browser` (**Brief**, **Diff**, **Files**, Graph
+  log, local dev URLs). **Files** opens files read-only by default with one-key
+  **Edit** (⌃⌘E), checkout-wide **⌘P** fuzzy find and **⇧⌘F** grep, **⌘F**
+  in-file find, **⌘-click** / `gd` jump to definition with **⌘[** / **⌘]** jump
+  history, line comments shared with **Diff** (⌘↩), and quiet update notices for
+  `scratch/` writes.
 - **Dashboards:** saved side-by-side grids of Tasks selected by query. Each
   tile is headed by the Task's sidebar row, with the sentence saying where its
   workflow stands.

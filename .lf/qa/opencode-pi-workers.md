@@ -30,7 +30,13 @@ What to read afterwards:
 - OpenCode's own record: `sqlite3 "file:$HOME/.local/share/opencode/opencode.db?mode=ro"`,
   table `session_v2` (`id`, `directory`, tokens) and `session_message`
   (`session_id`, `seq`, `type`, `data`). `directory` must be the Task checkout.
-  OpenCode takes it from `$PWD`, not the process cwd.
+  OpenCode takes it from `$PWD`, not the process cwd. The model a TUI session
+  runs is `session_v2.model`; a `run` session leaves it empty, so read
+  `json_extract(data,'$.model.id')` of its `assistant` rows. The account's
+  default is `model` in `~/.config/opencode/opencode.json`; configure a
+  different one in `agent:` to tell them apart on screen.
+- `lf session history` shows an open OpenCode work session's finished turns as
+  `running`: completions are written when OpenCode exits.
 - A steer the plugin claimed: `steer_delivered` in `$LF_HOME/loopflow.db`;
   `.lf/prompts/*-steer.md` in the checkout. Plugin context goes into the
   request's system text, which OpenCode does not store, so a steer is never in
@@ -70,6 +76,39 @@ What to read afterwards:
 - Holder cleanup: `lf holder run` under `$Q` keeps each Task conversation
   (claude, codex, opencode, pi) as its child; `pgrep -P <holder>`, then kill
   those and the holder.
+
+- Idle wake: `tests/e2e/idle_wake.py` (see `tests/e2e/README.md`) steers an
+  idle OpenCode or Pi work session on a scripted model. A held terminal reads
+  the account's provider files, not the launching shell's
+  `OPENCODE_CONFIG_CONTENT`: name the model in
+  `$HOME/.config/opencode/opencode.json` or `$HOME/.pi/agent/`. `lf checkout
+  <task>` starts the work session in its holder; `lf resume --task <task>` in
+  a PTY views it. The plugin's socket is under `/tmp/lf-wake-*/` and is
+  recorded in `agent_sessions.agent_inbox`.
+- Idle wake on a real model: on the private Machine above, `lf checkout <task>`
+  then hold the view with `uv run python tests/e2e/hold_tui.py $Q/v $Q/<repo>
+  $Q/bin/lf resume --task <task>` in the background and read `$Q/v/screen.txt`.
+  Idle is `session_activity.yielded=1` for the Session; then `lf steer <task>
+  'Reply with only the word X.'` and wait for X on the screen. `lf session
+  steers <session> --json` shows `delivered_at` and `pending`. OpenCode's own
+  record of the wake is a `synthetic` row in `session_message`. The harness's
+  terminal replies leave `65535u…` in the prompt: send `hex 7f7f…` first.
+- Out of credits ("Default is out of credits", or "You've used today's free
+  messages"): the turn still names its model, so model checks work without an
+  answer. `opencode models | grep free` lists the free ones. Read
+  `json_extract(data,'$.model.id')` of `session_message` rows: a
+  `model-switched` row is the plugin's `switchModel`, `synthetic` a wake. A
+  failed turn reports no turn end, so a reopen right after one is the case
+  that tests "a new provider is idle".
+- Quit and reopen: `/exit` (OpenCode) or `/quit` (Pi; Ctrl+C does not quit it)
+  in the view, `lf steer`, then `lf resume --task <task>` again: the steer
+  arrives with nothing typed. A conversation quit this way stays quit; one
+  whose provider died (`kill -9`) is restarted by the server's recovery pass.
+- A first Claude launch in a new `/tmp` checkout stops at its folder-trust
+  prompt: `hex 1b5b42` then `hex 0d` picks "Yes, add it" for that session.
+- Stopping the Machine: match `LF_HOME=/private/tmp/…` as well as `/tmp/…` in
+  `ps eww`; the holder records the canonical path. Replacing `$Q/bin/lf` does
+  not replace a running holder: stop it, or the old plugin keeps running.
 
 Run from an agent shell, lf inherits that shell's caller markers
 (`OPENCODE_SESSION_ID`, `OPENCODE_CONFIG_CONTENT`, `CLAUDECODE`); keep them, as

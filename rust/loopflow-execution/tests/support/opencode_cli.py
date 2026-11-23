@@ -300,7 +300,7 @@ assert session.startswith("ses"), session
 sessions.setdefault(session, [])
 locations[session] = os.getcwd()
 _write(LOCATIONS, locations)
-if model := _flag("--model"):
+if model := CONFIG.get("model"):
     provider, _, name = model.partition("/")
     _write(HOME / "native-model.json", {"providerID": provider, "id": name})
 _save(sessions)

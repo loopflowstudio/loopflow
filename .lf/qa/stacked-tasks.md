@@ -59,3 +59,10 @@ file shows `base`. To land the parent with its checkout still on disk, squash
 it into `main`, delete the remote branch and mark the PR `MERGED`: `lf sync`
 in the child then merges main, and `lf pr open` retargets its PR to main.
 `lf task status` in the stacked checkout says "this checkout has no Task".
+
+# A default branch other than `main`
+
+`git init -q --bare -b trunk origin.git`, clone-shaped repo on `trunk`, push,
+then `git remote set-head origin trunk`: `get_default_branch` reads
+`refs/remotes/origin/HEAD`, and without it falls back to `init.defaultBranch`
+or `main`. Use a second `GH_QA_STATE` file per world so PR numbers don't mix.

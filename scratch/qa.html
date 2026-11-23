@@ -1,91 +1,86 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>LOO-937 QA: lf wt create --stack, on 60fcf050b9</title>
+<html><head><meta charset="utf-8"><title>LOO-937 QA: one answer for a checkout's base, on 271f9c4d3b</title>
 <style>
-body { font: 15px/1.5 -apple-system, system-ui, sans-serif; max-width: 920px; margin: 2rem auto; padding: 0 1rem; color: #1d1d1f; }
-pre { background: #f5f5f7; padding: .8rem 1rem; overflow-x: auto; font-size: 13px; border-radius: 6px; }
-h2 { margin-top: 2.2rem; }
-.bad { color: #b3261e; } .ok { color: #1a7f37; }
-table { border-collapse: collapse; } td, th { border: 1px solid #ddd; padding: .3rem .6rem; text-align: left; vertical-align: top; }
-</style>
-</head>
-<body>
-<h1>LOO-937 QA: <code>lf wt create --stack</code>, on 60fcf050b9</h1>
-<p>Branch-built <code>lf</code> in a private home (<code>/tmp/lf-qa-937s</code>), a GitHub-shaped origin rewritten to a local bare repository, and <code>.lf/qa/gh-standin.py</code> as <code>gh</code>. Every command ran through a wrapper with <code>LF_*</code> unset and stdin closed. Earlier scenarios for this Task (Session list, moves, returning homes) are in this file's history at <code>39ac96a0f9</code>.</p>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f5f5f2;padding:.8em;overflow-x:auto;font-size:13px}
+h2{margin-top:2em} td,th{padding:.3em .6em;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}
+.ok{color:#16702e}
+</style></head><body>
+<h1>LOO-937 QA: one answer for a checkout's base, on 271f9c4d3b</h1>
+<p>Branch-built <code>lf</code> (rebuilt at the compress commit) in a private home (<code>/tmp/lf-qa-base</code>), GitHub-shaped origins rewritten to local bare repositories, <code>.lf/qa/gh-standin.py</code> as <code>gh</code>. Every command ran through a wrapper with <code>LF_*</code> unset and stdin closed. What changed: <code>lf sync</code> and <code>lf pr open</code> both ask <code>checkout_base</code>; publication no longer follows a branch's Git upstream; a merged <code>--stack</code> base falls back to the repository's default branch, not a literal <code>main</code>. The <code>--stack</code> walkthrough on 60fcf050b9 is in this file's history.</p>
 
-<h2>1. A child checkout stacked on a Task's branch</h2>
-<p>Task <code>221f63</code> checked out, one commit in it, then from its checkout:</p>
-<pre>$ lf wt create child --stack --plan
-branch: qa/child
-base: qa/221f63-parent-work
-worktree: /private/tmp/lf-qa-937s/repo.child
-strategy: create
-$ lf wt create child --stack --json
-{"path":"/private/tmp/lf-qa-937s/repo.child","branch":"qa/child","base":"qa/221f63-parent-work","strategy":"create","created":true}
-$ git worktree list
-/private/tmp/lf-qa-937s/repo.221f63-parent-work  76eec7c [qa/221f63-parent-work]
-/private/tmp/lf-qa-937s/repo.child               76eec7c [qa/child]
-$ lf wt create plain          # same checkout, no flag
-/private/tmp/lf-qa-937s/repo.plain               866cc84 [qa/plain]     # main</pre>
-<p class="ok">Child starts at the parent's head and records <code>branch.qa/child.loopflow-base</code>; plain starts at main. A later parent commit arrives through <code>lf sync</code> in the child ("Synced onto qa/221f63-parent-work").</p>
-
-<h2>2. Opening the child's PR before the parent is published</h2>
-<p class="bad">Before the fix:</p>
-<pre>$ lf pr open --title Child --body 'child body'
-Error: command failed: git diff --quiet origin/qa/221f63-parent-work...HEAD --
-fatal: bad revision 'origin/qa/221f63-parent-work...HEAD'</pre>
-<p>The PR target was the parent's branch, which origin never had. <code>lf sync &lt;Task&gt;</code> already pushes an unpushed stack parent (<code>stacking_on_an_unpushed_parent_pushes_its_branch_and_sync_follows_it</code>), so <code>lf pr open</code> now does the same for a <code>--stack</code> base. A branch not on origin has no PR, so no merge request moves.</p>
-<pre class="ok">$ lf pr open --title Kid --body kid          # fresh Task 8c3f5e, unpushed, child kid2
-created #102 draft https://github.com/qa/repo/pull/102
-$ git ls-remote origin.git
-9f98a2e…  refs/heads/qa/8c3f5e-second-parent
-1d2fb2b…  refs/heads/qa/kid2
-gh state: 102 qa/kid2 -> qa/8c3f5e-second-parent OPEN</pre>
-<p>The parent Task then publishes its own PR normally (<code>created #103</code>), and the child's <code>lf sync</code> still merges it.</p>
-
-<h2>3. The parent lands while its checkout is still on disk</h2>
-<p>Parent squashed into main as GitHub does, remote branch deleted, PR marked <code>MERGED</code>, then another main commit.</p>
-<p class="bad">Before the fix, in the child:</p>
-<pre>$ lf sync
-Merging qa/221f63-parent-work...
-Synced onto qa/221f63-parent-work.          # main's commits never arrive</pre>
-<p><code>stacked_base</code> only asked whether the local branch exists; the parent's checkout keeps it until <code>lf land</code> cleans up. <code>lf pr</code> already asked <code>gh pr view &lt;base&gt;</code>; <code>lf sync</code> now asks the same (<code>branch_pr_merged</code>, one function).</p>
-<pre class="ok">$ lf sync
+<h2>1. Stacked Tasks: parent unpushed, pushed, then merged</h2>
+<p>Tasks c5b504 (parent) and a90bba (child), both checked out; one commit in the parent, never pushed.</p>
+<pre>$ lf sync c5b504                       # in the child
+Stacked a90bba on c5b504; pushed c5b504's branch qa/c5b504-parent-work to origin
+Synced onto origin/qa/c5b504-parent-work.
+$ lf pr open --title Child --body 'child body'
+created #100 draft …                    # gh: 100 qa/a90bba-child-work -> qa/c5b504-parent-work
+# parent commits again and publishes (#101); in the child:
+$ lf sync
+Synced onto origin/qa/c5b504-parent-work.   # parent.txt holds p1, p2
+# parent squashed into main, a second main commit, branch deleted, #101 MERGED, 65 s for the cache
+$ lf sync
 Merging main...
-Synced onto main.                            # main2.txt present
+Synced onto main.                       # main2.txt present
 $ lf pr open --title Child --body 'child body 2'
-updated #101 draft …
-gh state: 101 qa/child -> main OPEN</pre>
+updated #100 draft …                    # gh: 100 qa/a90bba-child-work -> main</pre>
+<p class="ok">Sync and publish name the same base at every stage.</p>
 
-<h2>4. Edges</h2>
+<h2>2. A stacked Task whose parent closed unmerged</h2>
+<pre>$ lf sync                 # parent 2071fe's PR #103 CLOSED
+Error: stack parent 2071fe's PR #103 closed without merging; `lf sync 2071fe` restacks this Task on its branch, `lf sync main` detaches it
+$ lf sync feature-x
+Error: feature-x names no other open Task; name one to restack this Task on it, the default branch to detach it, or omit the target to sync its parent
+$ lf sync main
+Synced onto origin/main.
+$ lf sync                 # detached now
+Synced onto main.
+$ lf pr open --title OC --body b
+created #104 draft …      # -> main</pre>
+<p class="ok"><code>lf sync main</code> detaches without first failing on the closed parent (the stack's branch is read lazily).</p>
+
+<h2>3. A plain checkout whose Git upstream names another branch</h2>
+<p>The clause this slice deleted. <code>lf wt create up</code>, then <code>git branch -u origin/feature-x</code>, one commit.</p>
+<pre>$ git status -sb
+## qa/up...origin/feature-x
+$ lf pr open --title Up --body ub
+created #102 draft …      # gh: 102 qa/up -> main
+$ git status -sb
+## qa/up...origin/qa/up
+origin feature-x: 7210056 main 2   # untouched</pre>
+<p class="ok">Targets the default branch, pushes its own branch, leaves <code>feature-x</code> alone.</p>
+
+<h2>4. <code>--stack</code> in a repository whose default branch is <code>trunk</code></h2>
+<pre>$ lf wt create kid --stack --plan      # in Task eb43c3's checkout
+base: qa/eb43c3-trunk-parent
+$ lf pr open --title Kid --body kb     # base never pushed
+created #100 draft …                    # -> qa/eb43c3-trunk-parent; origin now has the base
+# parent commits locally; in kid:
+$ lf sync
+Synced onto qa/eb43c3-trunk-parent.     # tp2 arrives before the parent pushes
+# parent publishes #101, squashed into trunk, branch deleted, MERGED
+$ lf sync
+Merging trunk...
+Synced onto trunk.
+$ lf pr open --title Kid --body kb2
+updated #100 draft …                    # -> trunk</pre>
+<p class="ok">The old resolver retargeted a merged base to the literal <code>main</code>; it now follows <code>trunk</code>.</p>
+
+<h2>5. Odds and ends</h2>
 <table>
 <tr><th>Case</th><th>Saw</th></tr>
-<tr><td><code>--stack</code> on main</td><td class="ok"><code>"base":null</code>, no <code>loopflow-base</code>: starts from main</td></tr>
-<tr><td><code>--stack --plan</code> on a detached HEAD</td><td class="ok"><code>base: main</code></td></tr>
-<tr><td><code>--stack --persistent</code></td><td><span class="bad">Before: branch from main, no base recorded, <code>"base":null</code>.</span> <span class="ok">After: base recorded, starts at the parent's head, <code>loopflow-persistent true</code>.</span></td></tr>
-<tr><td>Same name again</td><td class="ok">"Using existing worktree"</td></tr>
-<tr><td><code>lf task status</code> in the stacked checkout</td><td class="ok">"this checkout has no Task"; in a subdirectory of the Task's checkout, the Task</td></tr>
+<tr><td>Plain checkout, origin's main ahead of local main</td><td><code>lf sync</code> "Merging main…", the new commit arrives (local main fetched first)</td></tr>
+<tr><td><code>lf wt list</code> / <code>--json</code> after the upstream read went</td><td>Lists every checkout with PR state; JSON has no <code>base_branch</code></td></tr>
 </table>
 
-<h2>Fixed here</h2>
-<ul>
-<li><code>ops/pr.rs</code> <code>resolve_pr_target</code>: merged base → main first; otherwise fetch the base, push it with an upstream when origin lacks it. <code>branch_pr_merged</code> is the one merged check.</li>
-<li><code>ops/sync_execution.rs</code>: a <code>--stack</code> base whose PR merged is no longer followed.</li>
-<li><code>engine/checkout.rs</code>: <code>--persistent</code> with a stack goes through the stacked path and marks the branch persistent (<code>worktrees::mark_persistent</code>, now the flag's one writer).</li>
-<li><code>tests/served_reads.rs</code> did not compile: <code>Write::CheckoutCreate</code> spells <code>--stack</code>.</li>
-<li>Tests: <code>sync_tests::a_checkout_created_with_stack_builds_on_this_branch_and_sync_follows_it</code> (persistent case added), new <code>sync_tests::a_stacked_checkout_publishes_onto_its_unpushed_base_and_follows_main_once_it_merges</code>: 2 passed. Clippy on <code>loopflow-execution</code>, <code>loopflow</code>: clean.</li>
-</ul>
-
 <h2>Where it stands</h2>
-<p><b>Works:</b> create, plan, sync, publish before and after the parent, parent landing, persistent, main and detached HEAD.</p>
-<p><b>Not reached:</b> the served <code>checkout.create {stack: true}</code> from Desktop (no display here; the wire carries it and <code>served_reads</code> spells it); a real GitHub (the stand-in has no <code>pr merge</code>, so <code>lf land</code> of the parent wasn't run).</p>
-<p><b>Still wrong, worst first:</b></p>
-<ol>
-<li><code>served_reads::server_operations_match_their_lf_commands</code> fails at <code>session bind</code>: served <code>outlook</code> is "starting", the CLI's "could_not_start" after its start attempt. Not this write; not checked against main. Gate.</li>
-<li>A base already on origin but behind its local branch is not pushed, so the child's PR diff shows the parent's unpushed commits until the parent pushes. Task stacking pushes in that case (with merge-request care); left alone here.</li>
-<li>The base push is silent: nothing prints "pushed qa/… so the PR can target it". The PR's base says it.</li>
-</ol>
-</body>
-</html>
+<p>Works: stacked Task sync and publish through unpushed, pushed, merged and closed parents; detaching; <code>--stack</code> through an unpushed and a merged base; a non-<code>main</code> default branch; a stray Git upstream. Nothing fixed this run.</p>
+<p>Not reached: real GitHub and <code>lf land</code> (the stand-in has no <code>gh pr merge</code>); Desktop's served <code>checkout.create {stack: true}</code>.</p>
+<p>Still wrong, worst first (carried from the last run, unchanged here):</p>
+<ul>
+<li><code>served_reads::server_operations_match_their_lf_commands</code> failing at <code>session bind</code>; gate.</li>
+<li>A <code>--stack</code> base already on origin but behind its local branch isn't pushed, so the child's PR diff shows the parent's unpushed commits until the parent pushes.</li>
+<li>The base push is silent; only the PR's base says it happened.</li>
+</ul>
+</body></html>

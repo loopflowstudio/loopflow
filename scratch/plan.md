@@ -368,11 +368,62 @@ Drop `task_primary_sessions` with its three mirror triggers and make
 ship the release whose peer protocol accepts a `Disposition` without
 `planning_completed`, then stop sending it.
 
-## Next: gate
+## Next: implement (concept review after the plan hub, 2026-11-22)
+
+Main through #2022 is merged (`9f10bb15`); sync with main again first. The
+review is `scratch/concept-review.html`; the answers, word for word, are in
+`scratch/questions.md`. Build these, in this order, then gate as below.
+
+1. **`tasks.planning_revision` leaves** (1a). #1983 replaced the peer exchange
+   with `plan_stamps`; the column is only incremented
+   (`planning_write.rs:252`) and selected as column 12 of `TASK_COLUMNS`
+   (`children.rs:1831`), which the row mapper drops. Mark
+   `-- leaving: tasks.planning_revision LOO-877` in `task_facts_once.sql`,
+   delete the increment and the select, move the inventory row to leaving.
+2. **A run's OS process has one home** (3b). `task_graphs.run_pid`,
+   `run_os_started_at` and `run_died_at` repeat `graph_processes.pid`,
+   `os_started_at` and its end. `task_graphs` keeps the Task's step and the
+   run id; liveness, recovery (#1972) and retirement read the run. Check first
+   whether the carrier claims the step (`start_run_in`) before the run
+   registers (`record_graph`); if it does, the claim registers the run in the
+   same transaction rather than keeping a second pid. Staged: mark the three
+   columns leaving.
+3. **Work already in a checkout never joins the Task that takes it** (5.1c).
+   Delete the auto-join of open Sessions in `write_task_checkout_in`
+   (`children.rs:67-75`) and the path clause in `task_open_graph_pairs`, so a
+   run outside the Task can't block it. Joining is explicit: "there should be
+   a way to explicitly bind the current session to the task". `lf session
+   bind` exists but binds the Task's primary conversation; give it (or its
+   help) a way to bind the current Session as one of the Task's Sessions
+   without making it primary. The upgrade backfill keeps its checkout rule
+   for Sessions and runs written before the migration (that is history, not
+   adoption).
+4. **One definition of "the Task holding this directory"** (5.2c). One
+   storage function answers it; `counted_task` (`ops/task.rs:2592`) calls it
+   with the worktree root it already computes, and the scan of every
+   `task_checkouts` row goes. Decide once, in that function, the nested
+   worktree case and two Tasks on one root, and test both. Counterexample to
+   check first: `task_checkouts.worktree` rows stored uncanonicalized.
+5. **The primary mark's upgrade day** (5.3b). This release keeps
+   `task_primary_sessions` as the home that writers write, and readers learn
+   to read the mark; no writer sets `primary_scope='task'` yet, so a released
+   lf still running beside the new store keeps seeing the Task's primary.
+   LOO-877 flips writers to the mark and drops the table; record the flip
+   there. Update the migration's comments and the SCHEMA.md leaving mark to
+   match.
+6. **`work_source='inherited'` goes now** (5.4b). Remove the value from the
+   CHECK in the `agent_sessions` rebuild (map any stored rows to `declared`),
+   from the Rust and Swift enums, and from fixtures.
+
+Demo at gate (4b): `lf task move` then `lf task status` show the new rank;
+Desktop's Working board after merge and install. Auto stays a Machine fact
+(2a), unchanged.
+
+## Then: gate
 
 Every slice is built and pushed (PR #1973, head `2448546730`, which merges
 main through #1980; the acceptance check passed there, 10 tests, and
-`cargo check --all-targets` is clean). Nothing remains for implement.
+`cargo check --all-targets` is clean).
 
 Run on that head (2026-11-18, clean `LF_*`):
 `cargo test -p loopflow-storage --lib -- task_work:: leaving_members_are_unreadable`

@@ -164,3 +164,21 @@ commands in a checkout are not listed as Task work; LOO-965 owns
 ## Sync with main (2026-11-22)
 
 Kept main’s removal of the old Git planning exchange test. Conversation recovery now reads the Session’s Task primary mark, and the table rebuild carries its recovery counters and last start failure.
+
+## Concept review after the plan hub (9f10bb15, 2026-11-22)
+
+Answers (Jack Heart): "1a 2a 3b 4b 5 not sure, explain"
+
+- 1a: mark `tasks.planning_revision` leaving in this PR (`task_facts_once`),
+  drop the increment in `planning_write.rs` and the dead `TASK_COLUMNS` column.
+- 2a: auto stays a Machine fact (`task_auto`, not carried).
+- 3b: in this PR, a run's OS process gets one home. `task_graphs` keeps the
+  step and the run id; liveness reads `graph_processes`. Check first whether
+  the carrier claims the step before the run registers.
+- 4b: demo the Working-board drag at gate with `lf task move` and
+  `lf task status`; Desktop after merge.
+- 5: the four questions from the 0ef1ad038a review, explained again in the
+  conversation; unanswered.
+- 5 answers (Jack Heart): "5c -- i thin kthere should be a way to explicitly
+  bind the current session to the task, but i dont think that binding a
+  worktree shoul auto bind in a session", "5.2c", "5.3 b", "5.4b".

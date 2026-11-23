@@ -267,13 +267,25 @@ async fn task_checkout_machine_keeps_session_filters_beside_other_machines() {
             params![task.as_str(), repo.path().to_str().unwrap()],
         )
         .unwrap();
-        for (id, path, scope) in [
-            ("a-alias", alias.join("sub"), None),
-            ("b-subdir", repo.path().join("sub"), None),
-            ("c-repo", repo.path().to_path_buf(), Some("repository")),
-            ("d-orphan", other.path().to_path_buf(), None),
+        // Sessions started in the checkout recorded its Task, through an alias
+        // too; a Repository primary there keeps its own scope.
+        for (id, path, scope, task) in [
+            ("a-alias", alias.join("sub"), None, Some(task.as_str())),
+            (
+                "b-subdir",
+                repo.path().join("sub"),
+                None,
+                Some(task.as_str()),
+            ),
+            (
+                "c-repo",
+                repo.path().to_path_buf(),
+                Some("repository"),
+                None,
+            ),
+            ("d-orphan", other.path().to_path_buf(), None, None),
         ] {
-            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,primary_scope,interactive) VALUES(?1,?1,'human',1,0,?2,?3,1)",params![id,path.to_str().unwrap(),scope]).unwrap();
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,primary_scope,task_id,wave_id,interactive) VALUES(?1,?1,'human',1,0,?2,?3,?4,?5,1)",params![id,path.to_str().unwrap(),scope,task,task.and(Some(&wave))]).unwrap();
             loopflow_storage::sqlite::sessions::test_capture(
                 &conn,
                 id,

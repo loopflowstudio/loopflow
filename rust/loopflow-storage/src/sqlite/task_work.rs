@@ -59,7 +59,7 @@ pub(super) fn session_tasks(session: &str) -> String {
 
 /// SQL: directory `cwd` is `root` or below it. Whole path components:
 /// `/repo.task` does not hold `/repo.task-other`.
-pub(super) fn within(cwd: &str, root: &str) -> String {
+fn within(cwd: &str, root: &str) -> String {
     format!("({cwd}=rtrim({root},'/') OR instr({cwd},rtrim({root},'/')||'/')=1)")
 }
 
@@ -156,14 +156,7 @@ pub(super) fn graphs_of_task(
     conn: &rusqlite::Connection,
     task: &TaskId,
 ) -> StoreResult<Vec<crate::graph_process::GraphExecution>> {
-    super::graph_inventory::graphs_in(
-        conn,
-        &format!(
-            "g.lf_process_id IN (SELECT graph FROM ({}))",
-            task_graph_pairs("?1")
-        ),
-        &[&task.as_str()],
-    )
+    super::graph_inventory::graphs_in(conn, "g.task_id=?1", &[&task.as_str()])
 }
 
 /// Each of `tasks`' completed Graph steps, by step process, for all of them in
@@ -770,10 +763,7 @@ impl SqliteStore {
         let conn = connection.savepoint()?;
         open_work_in(
             &conn,
-            &format!(
-                "EXISTS(SELECT 1 FROM tasks tw WHERE tw.id=?1 AND ({}))",
-                session_membership("a")
-            ),
+            &format!("a.task_id=?1 AND {}", counts_for_task("a")),
             &format!(
                 "g.lf_process_id IN (SELECT graph FROM ({}))",
                 task_open_graph_pairs("?1")

@@ -18,10 +18,20 @@ struct ThemeWorkflowTests {
     }
 
     @Test func themeReadIncludesTheSlotForACheckedEdit() throws {
-        let result = try JSONDecoder().decode(ThemeDeclaration.self, from: loadFixtureData("theme_declaration.json"))
-        #expect(result.entries.map(\.path) == [["theme"]])
-        #expect(result.entries.map(\.value) == [result.file.value])
+        let data = try loadFixtureData("theme_declaration.json")
+        let result = try JSONDecoder().decode(ThemeDeclaration.self, from: data)
+        #expect(result.entries?.map(\.path) == [["theme"]])
+        #expect(result.entries?.map(\.value) == [result.file.value])
         #expect(result.file.value == .string("dark"))
+
+        var legacy = try JSONDecoder().decode([String: JSONValue].self, from: data)
+        legacy.removeValue(forKey: "entries")
+        let displayOnly = try JSONDecoder().decode(ThemeDeclaration.self, from: JSONEncoder().encode(legacy))
+        #expect(displayOnly.file.text == "dark" && displayOnly.entries == nil)
+        legacy["entries"] = .null
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(ThemeDeclaration.self, from: JSONEncoder().encode(legacy))
+        }
     }
 
     @Test(arguments: [false, true])
@@ -87,7 +97,7 @@ struct ThemeWorkflowTests {
             try #require(notices.current?.action).perform()
             try await waitFor { store.selection.mode == .system }
             let restored = try await ServerClient.configuration(.configTheme(value: nil), as: ThemeDeclaration.self, location: location)
-            #expect(restored.entries.map(\.value) == [.null])
+            #expect(restored.entries?.map(\.value) == [.null])
         }
     }
 

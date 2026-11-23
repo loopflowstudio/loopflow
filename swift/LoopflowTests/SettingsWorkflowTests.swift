@@ -139,6 +139,16 @@ struct SettingsWorkflowTests {
             let globalURL = try global.prepareForOpening()
             #expect(globalURL.resolvingSymlinksInPath() == home.appending(path: "config.yaml").resolvingSymlinksInPath())
             #expect(FileManager.default.fileExists(atPath: globalURL.path))
+            navigation.search = "logs.linear_requests"
+            let logResult = try window.inspect().find(viewWithId: "logs").find(ViewType.Toggle.self)
+            #expect(try !logResult.isOn())
+            try logResult.tap()
+            let logDeadline = ContinuousClock.now + .seconds(10)
+            while personal.file?.slots["logs"]?.declared.value?["linear_requests"] != .bool(true) {
+                try #require(ContinuousClock.now < logDeadline)
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(try pane(.general).inspect().find(viewWithId: "logs").find(ViewType.Toggle.self).isOn())
             navigation.search = "yolo"
             let results = try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView()
             let globalResult = try results.find(viewWithId: "yolo")

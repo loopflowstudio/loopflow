@@ -35,9 +35,8 @@ struct ScopedSettingRow: View {
         })
     }
     private var initialText: String {
-        let value = if let field = definition.editedField { authored?[field] } else { authored }
-        guard let value else { return "" }
-        if usesYAML { return value.settingsYAML }
+        guard let value = definition.fieldValue(in: authored) else { return "" }
+        if case .yaml = definition.control { return value.settingsYAML }
         return value == .null ? "" : value.settingsText
     }
 
@@ -75,7 +74,7 @@ struct ScopedSettingRow: View {
             do {
                 let change: ConfigurationChange
                 if let text = draft.text {
-                    guard usesYAML else { return }
+                    guard case .yaml = definition.control else { return }
                     try await Task.sleep(for: .milliseconds(150))
                     change = .set(text)
                 } else { change = .reset }
@@ -134,7 +133,7 @@ struct ScopedSettingRow: View {
             let origin = model.reading.value?.title(locator: candidate.locator) ?? candidate.locator
             return labeled(candidate.value, origin: origin)
         }
-        let value = definition.editedField.map { effective.value[$0] ?? .null } ?? effective.value
+        let value = definition.fieldValue(in: effective.value) ?? .null
         return labeled(value, origin: source ?? "Default")
     }
 
@@ -142,20 +141,12 @@ struct ScopedSettingRow: View {
         origin == "Default" ? "\(value.settingsText) (Default)" : "\(value.settingsText) (from \(origin))"
     }
 
-    private var usesYAML: Bool {
-        definition.controlType != "string" && definition.controlType != "integer" && definition.editedField == nil
-    }
-
     @ViewBuilder private var control: some View {
-        if key == "logs" {
-            Toggle(definition.title, isOn: Binding(get: {
-                (authored?["linear_requests"] ?? effective.value["linear_requests"]) == .bool(true)
-            }, set: { save(fieldChange(.bool($0), in: file), to: file) }))
-            .toggleStyle(.switch)
-        } else if definition.isSwitch {
+        switch definition.control {
+        case .toggle:
             ScopedBooleanToggle(model: model, definition: definition, effective: effective,
                                 file: file, notices: notices, manager: manager)
-        } else if let choices = definition.choices {
+        case .choices(let choices, let nullable):
             Picker(definition.title, selection: Binding(get: { declared }, set: { selection in
                 switch selection {
                 case .absent: save(.reset, to: file)
@@ -163,23 +154,23 @@ struct ScopedSettingRow: View {
                 }
             })) {
                 Text(unsetText).tag(ConfigurationScope.Authored.absent)
-                if definition.nullable {
+                if nullable {
                     Text("Explicit null").tag(ConfigurationScope.Authored.present(.null))
                 }
                 ForEach(choices, id: \.self) { Text($0.settingsText).tag(ConfigurationScope.Authored.present($0)) }
             }
-        } else if definition.controlType == "array", case .object(let item) = definition.controlSchema["items"], item["type"] == .string("string") {
+        case .stringList:
             OrderedSetting(title: definition.title, value: authored, unsetText: unsetText,
                            canClearInherited: definition.combination == "append_reset" && file.owner != .personalGlobal, save: { values in
                 await model.apply(.set(JSONValue.array(values.map(JSONValue.string)).settingsYAML), key: key, to: file, notices: notices, manager: manager)
             })
-        } else if !usesYAML {
+        case .text, .integer:
             TextField(definition.title, text: input, prompt: Text(declared == .present(.null) ? "Explicit null" : unsetText))
                 .focused($focused)
                 .onSubmit { commitText() }
                 .onChange(of: focused) { _, focused in if !focused { commitText() } }
                 .onExitCommand { draft = nil }
-        } else {
+        case .yaml:
             DisclosureGroup(definition.title) {
                 TextEditor(text: input).font(Typography.mono).frame(minHeight: 65)
                 HStack {
@@ -209,22 +200,17 @@ struct ScopedSettingRow: View {
         }
     }
 
-    private func fieldChange(_ value: JSONValue?, in file: ConfigurationScope.File) -> ConfigurationChange {
-        guard let field = definition.editedField else { return value.map { .set($0.settingsYAML) } ?? .reset }
-        var fields: [String: JSONValue] = [:]
-        if case .present(.object(let existing)) = file.slots[key]?.declared { fields = existing }
-        fields[field] = value
-        return fields.isEmpty ? .reset : .set(JSONValue.object(fields).settingsYAML)
-    }
-
     private func commitText() {
         guard let draft, let text = draft.text, !model.editsDisabled else { return }
         let change: ConfigurationChange
-        if key == "automation" {
-            change = fieldChange(Int64(text).map(JSONValue.integer) ?? .string(text), in: draft.file)
-        } else if definition.controlType == "string" || key == "user" {
-            change = fieldChange(text.isEmpty ? nil : .string(text), in: draft.file)
-        } else { change = .set(text) }
+        switch definition.control {
+        case .text:
+            change = definition.change(to: text.isEmpty ? nil : .string(text), in: draft.file)
+        case .integer where definition.editedField != nil:
+            change = definition.change(to: Int64(text).map(JSONValue.integer) ?? .string(text), in: draft.file)
+        default:
+            change = .set(text)
+        }
         save(change, to: draft.file)
     }
 
@@ -248,53 +234,14 @@ struct ScopedBooleanToggle: View {
     var body: some View {
         let key = definition.key
         Toggle(definition.title, isOn: Binding(
-            get: { (file.slots[key]?.declared.value ?? effective.value) == .bool(true) },
+            get: { (definition.fieldValue(in: file.slots[key]?.declared.value) ?? definition.fieldValue(in: effective.value)) == .bool(true) },
             set: { enabled in
-                Task { await model.apply(.set(enabled ? "true" : "false"), key: key, to: file, notices: notices, manager: manager) }
+                let change = definition.change(to: .bool(enabled), in: file)
+                Task { await model.apply(change, key: key, to: file, notices: notices, manager: manager) }
             }
         ))
         .toggleStyle(.switch)
         .disabled(model.editsDisabled)
-    }
-}
-
-extension ConfigurationDefinition {
-    var editedField: String? {
-        switch key {
-        case "user": "name"
-        case "logs": "linear_requests"
-        case "automation": "retries"
-        default: nil
-        }
-    }
-
-    var controlSchema: [String: JSONValue] {
-        guard case .object(let root) = schema else { return [:] }
-        if case .array(let options) = root["anyOf"], case .object(let first) = options.first,
-           case .string(let reference) = first["$ref"], case .object(let defs) = root["$defs"],
-           case .object(let choice) = defs[String(reference.split(separator: "/").last ?? "")] { return choice }
-        return root
-    }
-    var nullable: Bool {
-        if case .array(let types) = schema["type"] { return types.contains(.string("null")) }
-        if case .array(let options) = schema["anyOf"] { return options.contains { $0["type"] == .string("null") } }
-        return false
-    }
-
-    var isSwitch: Bool { controlType == "boolean" && !nullable }
-
-    var choices: [JSONValue]? {
-        if controlType == "boolean" && nullable { return [.bool(true), .bool(false)] }
-        if case .array(let values) = controlSchema["enum"] { return values }
-        return nil
-    }
-
-    var controlType: String? {
-        switch controlSchema["type"] {
-        case .string(let name): name
-        case .array(let names): names.compactMap { if case .string(let name) = $0, name != "null" { name } else { nil } }.first
-        default: nil
-        }
     }
 }
 

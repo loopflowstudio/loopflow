@@ -93,6 +93,7 @@ struct ContextSettingsWorkflowTests {
             #expect(throws: RegistryQueryError.self) { try privateFile.prepareForOpening() }
             #expect(!fm.fileExists(atPath: privateFile.path))
             let view = ScopedSettings(model: model, pane: .project, checkouts: [repo.path], waves: [], notices: notices)
+            _ = try view.inspect().find(viewWithId: "context.docs").find(text: "README.md (from Shared repository settings)")
             let toggle = try view.inspect().find(viewWithId: "context.diff").find(ViewType.Toggle.self)
             #expect(try toggle.isOn())
             #expect(try await launchHasDiff(in: repo))

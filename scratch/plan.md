@@ -16,7 +16,8 @@ During the live demo of PR #2033, Jack chose **Policy B** (`1b`, `2a`) plus a vi
 
 **Checks for this slice**
 
-- `scripts/test_desktop.sh --filter 'SettingsWorkflowTests'` — 9 passed (both settings suites).
+- `scripts/test_desktop.sh --skip-build --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|ThemeWorkflowTests'` after building Desktop and `lf` — 20 passed, one compact-window scrolling check skipped headless.
+- `loopflow-execution` libtest with `config::files:: config::keys:: engine::config::promotion::` — 24 passed.
 - `cargo test -p loopflow --test integration documented_commands::` — 4 passed.
 - Live Light and Dark windows at compact and wide sizes remain for qa/gate.
 

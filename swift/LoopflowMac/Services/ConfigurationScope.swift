@@ -41,6 +41,59 @@ struct ConfigurationDefinition: Decodable {
     let portability: String
     let lifecycle: String
     let description: String
+
+    enum Control {
+        case toggle, text, integer, stringList, yaml
+        case choices([JSONValue], nullable: Bool)
+    }
+
+    // These controls edit one field of a mapping. Checked writes still cover
+    // the whole declaration, including its other fields.
+    var editedField: String? {
+        switch key {
+        case "user": "name"
+        case "logs": "linear_requests"
+        case "automation": "retries"
+        default: nil
+        }
+    }
+
+    func fieldValue(in value: JSONValue?) -> JSONValue? {
+        if let editedField { return value?[editedField] }
+        return value
+    }
+
+    func change(to value: JSONValue?, in file: ConfigurationScope.File) -> ConfigurationChange {
+        guard let editedField else { return value.map { .set($0.settingsYAML) } ?? .reset }
+        var fields: [String: JSONValue] = [:]
+        if case .present(.object(let existing)) = file.slots[key]?.declared { fields = existing }
+        fields[editedField] = value
+        return fields.isEmpty ? .reset : .set(JSONValue.object(fields).settingsYAML)
+    }
+
+    var control: Control {
+        var field = editedField.map { schema["properties"][$0] } ?? schema
+        var nullable = false
+        if case .array(let options) = field["anyOf"] {
+            nullable = options.contains { $0["type"] == .string("null") }
+            if case .string(let ref) = options.first?["$ref"], let name = ref.split(separator: "/").last {
+                field = schema["$defs"][String(name)]
+            }
+        }
+        var type = field["type"]
+        if case .array(let types) = type {
+            nullable = types.contains(.string("null"))
+            type = types.first { $0 != .string("null") } ?? .null
+        }
+        if case .array(let values) = field["enum"] { return .choices(values, nullable: nullable) }
+        switch type {
+        case .string("boolean"): return nullable ? .choices([.bool(true), .bool(false)], nullable: true) : .toggle
+        case .string("string"): return .text
+        case .string("integer"): return .integer
+        case .string("array") where field["items"]["type"] == .string("string"): return .stringList
+        default: return .yaml
+        }
+    }
 }
 
 struct ConfigurationInspection: Decodable {
@@ -122,9 +175,16 @@ struct ConfigurationScope: Codable {
     }
 
     func source(_ key: String) -> String? {
-        let locators = Set(settings[key]?.candidates.filter { $0.reason == "selected" }.map(\.locator) ?? [])
-        guard locators.count == 1, let path = locators.first else { return nil }
-        return title(locator: path)
+        guard let candidates = settings[key]?.candidates else { return nil }
+        var sources = candidates.filter { $0.reason == "selected" }
+        if sources.isEmpty {
+            // Append/reset lists can have several sources and no single winner.
+            sources = candidates.filter {
+                $0.reason == "contributes" || ($0.reason == "clears earlier contributions" && $0.source != "builtin")
+            }
+        }
+        let titles = Set(sources.map { title(locator: $0.locator) }).sorted()
+        return titles.isEmpty ? nil : titles.joined(separator: ", ")
     }
 
     func title(locator path: String) -> String {

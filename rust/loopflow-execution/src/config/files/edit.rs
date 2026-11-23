@@ -52,9 +52,10 @@ pub(super) fn context_field(
     let prefix = &written[..written.len() - preference.len()];
     let context = [prefix, &["context"]].concat();
     let list = at(document, &context).is_some_and(Value::is_sequence);
+    let prefix: Vec<_> = prefix.iter().map(|s| (*s).to_owned()).collect();
     let paths: Vec<_> = keys::spellings(preference, root)
         .into_iter()
-        .map(|path| [prefix.iter().map(|s| (*s).to_owned()).collect(), path].concat())
+        .map(|tail| [prefix.as_slice(), &tail].concat())
         .collect();
     let existing = paths.iter().find(|path| at(document, path).is_some());
     if let Some(value) = value {
@@ -105,44 +106,42 @@ fn insert(document: &mut Value, path: &[&str], value: Value) -> Result<()> {
 pub struct Setting<'a> {
     destination: &'a ResolvedDestination,
     key: &'a str,
-    path: Vec<String>,
+    /// The Wave and target select a block; only the preference is edited inside it.
     prefix: Vec<String>,
+    preference: Vec<String>,
     root: Root,
 }
 
 impl<'a> Setting<'a> {
     pub fn catalogued(destination: &'a ResolvedDestination, key: &'a str) -> Self {
-        let typed = keys::typed(&key.split('.').collect::<Vec<_>>());
+        let mut typed = keys::typed(&key.split('.').collect::<Vec<_>>());
         let target_len = match refs(&typed).as_slice() {
             ["skills", _, ..] => 2,
             ["graphs", _, "steps", _, ..] => 4,
             _ => 0,
         };
-        let prefix = [destination.prefix.clone(), typed[..target_len].to_owned()].concat();
-        let path = [destination.prefix.clone(), typed].concat();
-        let root = if destination.prefix.is_empty() {
-            destination.root()
-        } else {
-            Root::Wave
-        };
+        let preference = typed.split_off(target_len);
+        let mut prefix = destination.prefix.clone();
+        prefix.extend(typed);
         Self {
             destination,
             key,
-            path,
             prefix,
-            root,
+            preference,
+            root: if destination.scope == settings::SettingScope::Wave {
+                Root::Wave
+            } else {
+                Root::General
+            },
         }
     }
 
     fn paths(&self, document: &Value) -> Vec<Vec<String>> {
-        let key = &self.path[self.prefix.len()..];
+        let key = self.preference.as_slice();
         let mut paths = Vec::new();
         for prefix in self.prefixes() {
             let node = at(document, &prefix).unwrap_or(&Value::Null);
             let mut tails = keys::spellings(&refs(key), self.root);
-            if key == ["planning"] {
-                tails.push(vec!["linear".into(), "team".into()]);
-            }
             if key == ["context", "docs"] && node.get("context").is_some_and(Value::is_sequence) {
                 tails.push(vec!["context".into()]);
             }
@@ -184,15 +183,15 @@ impl<'a> Setting<'a> {
         let Some(first) = entries.first() else {
             return Ok(None);
         };
-        if self.key == "repo.tracker" {
-            if let Some(node) = at(normalized, &self.prefix) {
-                return Ok(Some(keys::tracker_value(node)));
+        if let Some(block) = at(normalized, &self.prefix) {
+            if self.key == "repo.tracker" {
+                return Ok(Some(keys::tracker_value(block)));
+            }
+            if let Some(value) = at(block, &self.preference) {
+                return Ok(Some(value.clone()));
             }
         }
-        match at(normalized, &self.path) {
-            Some(value) => Ok(Some(value.clone())),
-            None => Ok(Some(serde_yaml_ng::to_value(&first.value)?)),
-        }
+        Ok(Some(serde_yaml_ng::to_value(&first.value)?))
     }
 
     pub(super) fn edit(&self, document: &mut Value, text: Option<&str>) -> Result<()> {
@@ -241,8 +240,7 @@ impl<'a> Setting<'a> {
         let parsed = text
             .map(|text| self.destination.parse_value(self.key, text))
             .transpose()?;
-        let key = &self.path[self.prefix.len()..];
-        super::edit_document(document, &refs(key), parsed, self.root)?;
+        super::edit_document(document, &refs(&self.preference), parsed, self.root)?;
         Ok(())
     }
 

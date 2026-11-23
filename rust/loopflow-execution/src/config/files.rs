@@ -663,28 +663,28 @@ fn edit_document(
     if matches!(preference, ["context", _]) {
         return edit::context_field(document, &written, preference, value, root);
     }
-    if written.len() >= 2 && written[written.len() - 2] == "machine" {
-        if let Some(placement) = written[..written.len() - 1]
+    if let [prefix @ .., "machine", field] = written.as_slice() {
+        if let Some(placement) = prefix
             .iter()
             .try_fold(&mut *document, |value, key| value.get_mut(*key))
+            .and_then(|block| block.get_mut("machine"))
         {
             super::placement::expand_shorthand(placement)?;
+            if value.is_some() {
+                match *field {
+                    "tasks" => {
+                        remove(placement, &["capacity"]);
+                    }
+                    "capacity" => {
+                        remove(placement, &["tasks"]);
+                    }
+                    _ => {}
+                }
+            }
         }
     }
     let changed = match value {
         Some(value) => {
-            if written.len() >= 2 && written[written.len() - 2] == "machine" {
-                let sibling = match written.last() {
-                    Some(&"tasks") => Some("capacity"),
-                    Some(&"capacity") => Some("tasks"),
-                    _ => None,
-                };
-                if let Some(sibling) = sibling {
-                    let mut path = written[..written.len() - 1].to_vec();
-                    path.push(sibling);
-                    remove(document, &path);
-                }
-            }
             super::settings::insert(document, &written, value);
             true
         }

@@ -169,9 +169,16 @@ pub fn spellings(parts: &[&str], root: Root) -> Vec<Vec<String>> {
             vec!["planning".into(), "team".into()],
             vec!["linear".into(), "team".into()],
         ],
-        ["planning"] => ["repo.tracker", "tracker", "repo.plan", "plan", "planning"]
-            .map(|path| path.split('.').map(str::to_owned).collect())
-            .to_vec(),
+        ["planning"] => [
+            "repo.tracker",
+            "tracker",
+            "repo.plan",
+            "plan",
+            "planning",
+            "linear.team",
+        ]
+        .map(|path| path.split('.').map(str::to_owned).collect())
+        .to_vec(),
         ["planning", rest @ ..] => group(
             vec![
                 vec!["repo".into(), "plan".into()],
@@ -331,12 +338,8 @@ pub fn gather(document: &mut Value, parts: &[&str], root: Root) -> Vec<String> {
     };
     // Gather the group's spellings into their own document and fold it, so
     // the same rule as a read decides what the group holds.
-    let mut spelled = spellings(group, root);
-    if group == ["planning"] {
-        spelled.push(vec!["linear".into(), "team".into()]);
-    }
     let mut partial = Value::Mapping(Mapping::new());
-    for spelling in spelled {
+    for spelling in spellings(group, root) {
         let path: Vec<&str> = spelling.iter().map(String::as_str).collect();
         if let Some(found) = path
             .iter()

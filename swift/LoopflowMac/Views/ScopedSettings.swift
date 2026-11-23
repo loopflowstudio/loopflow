@@ -198,14 +198,11 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     }
 
     func appears(in selected: SettingsPane, wave: String?) -> Bool {
-        if selected == .project {
-            switch self {
-            case .pullRequests, .diffView, .release: return wave == nil
-            case .policy, .execution, .harnesses: return true
-            default: break
-            }
+        guard selected == .project else { return selected == pane }
+        switch self {
+        case .pullRequests, .diffView, .release: return wave == nil
+        default: return pane == .project || pane == .agents
         }
-        return selected == pane
     }
 
     var keys: [String] {

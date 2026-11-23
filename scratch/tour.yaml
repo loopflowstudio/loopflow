@@ -1,35 +1,37 @@
-at: 236f78982201f5190f3fafdfeed092db072e829e
+at: 51a9c32e0de7eff436925e4e420dbed4f68aceba
 first:
   - path: docs/surfaces.md
     why: Follow a setting from search through Undo
-  - path: swift/README.md
-    why: Theme selection and staged color edits
+  - path: docs/config.md
+    why: Distinguish effective values from declarations
   - path: scratch/plan.md
-    why: Design choices, measurements and remaining visual checks
+    why: Design choices and remaining visual checks
   - path: swift/LoopflowMac/Views/SettingsWindow.swift
-    why: See the sidebar and its two independent destinations
-  - path: swift/LoopflowMac/Views/ScopedSettings.swift
-    why: Find each preference and its configuration file
-  - path: swift/LoopflowMac/Views/SettingsSearch.swift
-    why: Follow personal and project results to their controls
+    why: The sidebar and its personal and project destinations
   - path: rust/loopflow-execution/src/engine/config/scope.rs
-    why: Effective values beside each editable declaration
+    why: Effective values and editable declarations from one reading
+  - path: swift/LoopflowMac/Services/ConfigurationScope.swift
+    why: Map catalog fields to controls and label their sources
   - path: swift/Loopflow/Models/ConfigurationEdit.swift
     why: Checked edits, move previews and receipts
+  - path: swift/LoopflowMac/Services/ScopedSettingsModel.swift
+    why: Observe the selected work and save checked edits
+  - path: swift/LoopflowMac/Views/ScopedSettings.swift
+    why: Place controls in personal and project panes
+  - path: swift/LoopflowMac/Views/ScopedSettingRow.swift
+    why: Bind each editor to its original declaration
+  - path: swift/LoopflowMac/Views/SettingsSearch.swift
+    why: Find the same controls from search
   - path: rust/loopflow-execution/src/engine/config.rs
-    why: Shared entry points for CLI and Desktop
-  - path: rust/loopflow-execution/src/config/files.rs
-    why: Parse values in their checkout and update files
+    why: Shared operations for CLI and Desktop
+  - path: rust/loopflow-execution/src/config/keys.rs
+    why: The spellings both readers and writers recognize
   - path: rust/loopflow-execution/src/config/files/edit.rs
-    why: Check and restore the affected YAML entries
+    why: Check and restore entries inside a configuration block
   - path: rust/loopflow-execution/src/engine/config/promotion.rs
     why: Review, install and recover a declaration move
   - path: rust/loopflow-execution/src/observe.rs
-    why: Publish writes to live settings readers
-  - path: swift/LoopflowMac/Services/ScopedSettingsModel.swift
-    why: Observe the selected work and find editable files
-  - path: swift/LoopflowMac/Views/ScopedSettingRow.swift
-    why: Preview a draft against its original declaration
+    why: Deliver writes to live Settings readers
   - path: swift/LoopflowMac/Design/AppearanceStore.swift
     why: Apply themes and stage color edits
   - path: swift/LoopflowMac/Services/SettingsUndo.swift
@@ -39,11 +41,11 @@ first:
   - path: swift/LoopflowMac/Views/MachineConnections.swift
     why: Check registered Machines while their pane is open
   - path: swift/LoopflowTests/ContextSettingsWorkflowTests.swift
-    why: Exercise a checkout edit through agent launch
+    why: Follow a checkout edit through agent launch
   - path: swift/LoopflowTests/SettingsWorkflowTests.swift
-    why: Check nullable choices, scoped writes and native scrolling
+    why: Exercise search switches and scoped writes
   - path: swift/LoopflowTests/ThemeWorkflowTests.swift
-    why: Check theme writes, hand edits and Undo
+    why: Cover older servers, checked theme writes and Undo
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Regenerated from the typed server operations

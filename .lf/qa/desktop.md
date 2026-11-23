@@ -376,9 +376,9 @@ as text instead.
   `NSClipView origin` in `views` shows the scroll in Project & Wave Config.
 - Switch clicks toggle both ways on Settings rows (`yolo` On→Off wrote
   `yolo: false`). The first click after a launch is often swallowed.
-- `field Inherited|<text>` types into the first text row with that
-  placeholder, and `return <title>` commits it. A refused value shows its
-  error as a `SelectionTextField` just below the row; the file stays as it was.
+- Use the placeholder printed by `views` in `field <placeholder>|<text>`,
+  then `return <title>` to commit. A rejected value shows its error below
+  the field.
 - An explicit null in a text row shows as the placeholder `Explicit null`;
   choice rows put it in a popup, which `views` cannot read.
 - Interrupted moves: with the server stopped, write

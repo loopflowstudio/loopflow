@@ -25,13 +25,15 @@ struct AppearanceSelection: Equatable {
 
 struct ThemeDeclaration: Decodable {
     let file: ConfigurationFileValue
-    let entries: [ConfigurationEntry]
+    let entries: [ConfigurationEntry]?
 
     private enum CodingKeys: String, CodingKey { case entries }
 
     init(from decoder: Decoder) throws {
         file = try ConfigurationFileValue(from: decoder)
-        entries = try decoder.container(keyedBy: CodingKeys.self).decode([ConfigurationEntry].self, forKey: .entries)
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        // Older servers omit entries. Their theme can be displayed, but editing needs the checked slot.
+        entries = fields.contains(.entries) ? try fields.decode([ConfigurationEntry].self, forKey: .entries) : nil
     }
 }
 
@@ -139,30 +141,20 @@ final class AppearanceStore {
         let observedFiles = currentFingerprint()
         library = ThemeLibrary.load(paths)
         var problems = library.problems
-        let answer: ConfigurationFileValue
-        let entries: [ConfigurationEntry]?
+        let answer: ThemeDeclaration
         do {
-            let data = try await ServerClient.configuration(.configTheme(value: nil), location: location)
-            do {
-                let theme = try JSONDecoder().decode(ThemeDeclaration.self, from: data)
-                answer = theme.file
-                entries = theme.entries
-            } catch DecodingError.keyNotFound(let key, _) where key.stringValue == "entries" {
-                // Older servers can still supply the window theme without supporting checked edits.
-                answer = try JSONDecoder().decode(ConfigurationFileValue.self, from: data)
-                entries = nil
-            }
+            answer = try await ServerClient.configuration(.configTheme(value: nil), as: ThemeDeclaration.self, location: location)
         } catch {
             if reading == generation { readFailure = error.localizedDescription }
             return
         }
         guard reading == generation else { return }
         readFailure = nil
-        configPath = answer.path
+        configPath = answer.file.path
         let previous = selection
-        declaration = entries
+        declaration = answer.entries
         fingerprint = observedFiles
-        switch selection(from: answer.text) {
+        switch selection(from: answer.file.text) {
         case let .success(choice): selection = choice
         case let .failure(error): problems.insert(error.message, at: 0)
         }

@@ -160,12 +160,18 @@ def _quiescent(debug: Path):
 
 
 def _seed_sources(root: Path) -> list[Path]:
-    candidates = []
-    for path in _worktree_roots(root):
-        debug = Path(path) / "target/debug"
-        if Path(path) != root and all((debug / entry).is_dir() for entry in SEED_ENTRIES):
-            candidates.append(debug)
-    return sorted(candidates, key=lambda d: (d / ".fingerprint").stat().st_mtime_ns, reverse=True)
+    """Sibling worktrees holding every seed entry, most recently built first."""
+    candidates = [
+        Path(path)
+        for path in _worktree_roots(root)
+        if Path(path) != root
+        and all((Path(path) / "target/debug" / entry).is_dir() for entry in SEED_ENTRIES)
+    ]
+    return sorted(
+        candidates,
+        key=lambda tree: (tree / "target/debug/.fingerprint").stat().st_mtime_ns,
+        reverse=True,
+    )
 
 
 def seed_target(repo: Path) -> Path | None:
@@ -179,7 +185,8 @@ def seed_target(repo: Path) -> Path | None:
     if os.path.lexists(target):
         return None
     for source in _seed_sources(root):
-        with _quiescent(source) as idle:
+        debug = source / "target/debug"
+        with _quiescent(debug) as idle:
             if not idle:
                 continue
             target.mkdir()
@@ -187,7 +194,7 @@ def seed_target(repo: Path) -> Path | None:
             try:
                 staging.mkdir()
                 for entry in SEED_ENTRIES:
-                    _clone(source / entry, staging / entry)
+                    _clone(debug / entry, staging / entry)
                 # Atomic: a Cargo started meanwhile sees no target or a whole one.
                 staging.rename(target / "debug")
             except (OSError, subprocess.CalledProcessError):
@@ -199,14 +206,14 @@ def seed_target(repo: Path) -> Path | None:
                 raise
         commit = subprocess.run(
             ["git", "rev-parse", "--short=10", "HEAD"],
-            cwd=source.parent.parent,
+            cwd=source,
             env=_outside_git_env(),
             capture_output=True,
             text=True,
         ).stdout.strip()
-        record = {"source": str(source.parent.parent), "commit": commit or None}
+        record = {"source": str(source), "commit": commit or None}
         (target / SEED_RECORD).write_text(json.dumps(record) + "\n")
-        return source.parent.parent
+        return source
     return None
 
 

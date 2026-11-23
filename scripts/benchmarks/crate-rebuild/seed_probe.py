@@ -6,7 +6,7 @@ import json
 import os
 import re
 import shutil
-import statistics
+import stat
 import subprocess
 import sys
 import time
@@ -26,15 +26,6 @@ COMMANDS = {
     "build": ["cargo", "build", "--locked", "-v", "-p", "loopflow", "--bin", "lf"],
     "test": ["cargo", "test", "--locked", "-v", "-p", PACKAGE, "--lib", TEST, "--", "--exact"],
 }
-METRICS = (
-    "wall_seconds",
-    "cpu_seconds",
-    "rss_bytes",
-    "tree_rss_bytes",
-    "compiled",
-    "fresh",
-    "written_bytes",
-)
 
 
 def _samples(cohorts: int) -> list[tuple[int, str]]:
@@ -62,7 +53,7 @@ def _files(debug: Path) -> dict[str, tuple[int, int, int]]:
         for name in names:
             path = os.path.join(directory, name)
             info = os.lstat(path)
-            if os.path.isfile(path) and not os.path.islink(path):
+            if stat.S_ISREG(info.st_mode):
                 rows[os.path.relpath(path, debug)] = (
                     info.st_ino,
                     info.st_mtime_ns,
@@ -84,25 +75,6 @@ def _written(before: dict, after: dict) -> int:
 def _remove_tree(tree: Path) -> None:
     if tree.exists():
         _run(["git", "worktree", "remove", "--force", str(tree)], ROOT)
-
-
-def summarize(receipts: list[dict]) -> list[dict]:
-    rows = []
-    for arm in ARMS:
-        for step in ("add", *COMMANDS):
-            samples = [r for r in receipts if r["arm"] == arm]
-            if not samples:
-                continue
-            row = {"arm": arm, "step": step, "n": len(samples)}
-            for metric in ("wall_seconds",) if step == "add" else METRICS:
-                values = [r[step][metric] for r in samples]
-                row[metric] = {
-                    "median": statistics.median(values),
-                    "min": min(values),
-                    "max": max(values),
-                }
-            rows.append(row)
-    return rows
 
 
 def validate(receipts: list[dict], cohorts: int) -> None:
@@ -228,7 +200,6 @@ def main() -> None:
             continue
         receipts.append(_sample(output, root, config["revision"], cohort, arm, reserve))
         _write(receipts_path, receipts)
-        _write(output / "summary.json", summarize(receipts))
     validate(receipts, config["cohorts"])
     root.rmdir()
     print(f"Receipts: {output}")

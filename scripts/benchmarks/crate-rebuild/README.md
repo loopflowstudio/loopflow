@@ -19,7 +19,7 @@ uv run python scripts/benchmarks/crate-rebuild/report.py --test-loop /tmp/lf-tes
 then a focused `cargo test` that passes. It uses the Machine's own Cargo
 configuration from [`build_cache.py install`](../../testing.md#shared-compilation-cache)
 (the pinned wrapper and the Machine's `jobs`), with a private cache directory
-and socket so every counter belongs to the run. Both incremental settings get
+and socket plus a private root inventory so every counter belongs to the run. Both incremental settings get
 a seed application test and execution test.
 Switching `CARGO_INCREMENTAL` changes third-party artifact keys too; a seed in
 only one mode leaves the other cold. Seeds are excluded from the samples.
@@ -61,6 +61,21 @@ tree RSS and CPU-seconds describe one loop.
 The shared Machine cache reached its 10 GiB cap during LOO-921 (2026-11-16).
 The private warm-cache rows measure the cost of surviving entries, not their
 survival rate under shared-cache eviction. The cap stays unchanged.
+
+## Registration during a build
+
+```bash
+uv run python scripts/build_cache.py install
+uv run python scripts/benchmarks/crate-rebuild/stop_probe.py --output /tmp/lf-stop-proof
+```
+
+The probe runs a focused execution test in one linked Loopflow worktree. While
+a cacheable library is compiling, it adds another worktree through Git. Both
+use the installed registration hook and pin with a private inventory, socket
+and cache. Idle exit is disabled for this experiment. `stop.json` records the
+compiler PID observed across registration, the original and replacement daemon
+PIDs, whether the replacement loaded the second root, and the Cargo and test
+outcomes. `cargo.log` holds the build output.
 
 ## Cache probes and the revision comparison
 

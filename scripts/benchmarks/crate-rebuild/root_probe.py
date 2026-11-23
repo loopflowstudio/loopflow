@@ -139,8 +139,7 @@ def main() -> None:
             run(["git", "worktree", "add", "--detach", str(b)])
             refresh(b, config)
             build("before_idle", b, b / "target", (0, 1))
-            # The production entry point never sends a stop/restart. Let this
-            # fixture's daemon expire in exactly the same way.
+            # Observe natural expiry independently of the registration hook.
             if process.wait(timeout=60) != 0:
                 raise RuntimeError("cache server failed instead of expiring idle")
             (b / "target").rename(root / "retained-before-idle-target")

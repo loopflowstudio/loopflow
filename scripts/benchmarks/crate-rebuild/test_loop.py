@@ -18,7 +18,7 @@ import tomlkit
 from run import _timing
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from build_cache import cargo_configuration, configured_cache, inventory_path, refresh  # noqa: E402
+from build_cache import cargo_configuration, configured_cache, daemon_pid, refresh  # noqa: E402
 from resource_envelope import load_policy  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -223,6 +223,13 @@ def main() -> None:
             "trees": {},
         }
         _write(state, config)
+    # Git invokes the registration hook while adding the measured worktrees.
+    # Give the hook the same private inventory and socket as the compilers.
+    env.update(
+        SCCACHE_DIR=str(root / "cache"),
+        SCCACHE_SERVER_UDS=str(root / "cache.sock"),
+        SCCACHE_CONF=str(root / "roots.json"),
+    )
     receipts = json.loads(receipts_path.read_text()) if receipts_path.exists() else []
     # Register every measured root before starting the private daemon. Creating a
     # worktree is timed separately and included in its first sample's wall time.
@@ -284,7 +291,7 @@ def main() -> None:
         _run(["git", "worktree", "add", "--detach", str(tree), revision], ROOT, env)
         config["trees"][key] = {"path": str(tree), "setup_seconds": time.monotonic() - start}
         _write(state, config)
-    refresh(ROOT, inventory_path())
+    refresh(ROOT, Path(env["SCCACHE_CONF"]))
     # cc-rs recognizes this basename and also routes native compiles through it.
     wrapper = root / "sccache"
     wrapper.write_text(
@@ -295,19 +302,14 @@ def main() -> None:
         RUSTC_WRAPPER=str(wrapper),
         LOOPFLOW_REBUILD_CACHE=str(cache),
         LOOPFLOW_REBUILD_ALL="1",
-        SCCACHE_DIR=str(root / "cache"),
-        SCCACHE_SERVER_UDS=str(root / "cache.sock"),
     )
     # The private daemon reads the same inventory and Machine environment as Cargo.
     # Its lifetime is bounded by this command, including failures and interruptions.
     try:
         _run([str(cache), "--start-server"], ROOT, env)
-        owners = _run(
-            ["lsof", "-nP", "-a", "-U", "-c", "sccache", "-t", str(root / "cache.sock")], ROOT, env
-        ).split()
-        daemon_pid = next(
-            int(p) for p in owners if _run(["ps", "-p", p, "-o", "comm="], ROOT, env) == str(cache)
-        )
+        server_pid = daemon_pid(env["SCCACHE_SERVER_UDS"])
+        if server_pid is None:
+            raise RuntimeError("private cache daemon exited at startup")
 
         def stats() -> dict:
             return json.loads(
@@ -332,7 +334,7 @@ def main() -> None:
             edit_suffix = f"{stem}_attempt_{item.get('attempt', 0)}"
             edit = _edit(tree, owner, edit_suffix) if cohort else None
             before, load_before = stats(), os.getloadavg()
-            daemon_before = _processes().get(daemon_pid)
+            daemon_before = _processes().get(server_pid)
             package, test_filter = FILTERS[owner]
             command = [
                 "cargo",
@@ -378,7 +380,7 @@ def main() -> None:
                         child.wait()
             elapsed = time.monotonic() - start
             after, load_after = stats(), os.getloadavg()
-            daemon_after = _processes().get(daemon_pid)
+            daemon_after = _processes().get(server_pid)
             log = (output / f"{stem}.log").read_text()
             raw = (output / f"{stem}.jsonl").read_text()
             compilers = [json.loads(line) for line in compiler_log.read_text().splitlines()]
@@ -490,7 +492,6 @@ def main() -> None:
         print(f"Receipts: {output}; experiment state: {root}", flush=True)
     if (output / "passed.json").exists():
         shutil.rmtree(root)
-        refresh(ROOT, inventory_path())
 
 
 if __name__ == "__main__":

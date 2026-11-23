@@ -304,7 +304,7 @@ uv run python scripts/build_cache.py status    # in any worktree
 
 ```text
 wrapper  ~/.local/share/loopflow/sccache/ca81ec2a…/bin/sccache (pinned)
-daemon   pid 4242, same executable, up 3m; configured idle timeout sccache default (600s) (next start)
+daemon   pid 4242, /…/ca81ec2a…/bin/sccache, up 3m; configured idle timeout sccache default (600s) (next start)
 roots    61 of 61 loaded; this checkout loaded
 Rust     258 hits, 1 miss
 cache    6.2 GiB of 10 GiB
@@ -328,39 +328,31 @@ repository sets no wrapper and CI never reads this configuration. Running
 sccache 0.19.0 cannot reuse Rust crates across worktrees, and it prints the same
 `--version` as the pin, so `status` identifies the binary by its path.
 
-A new worktree registers itself. `install` adds a block to the repository's
-`post-checkout` hook, which Git runs after `git worktree add`, including the
-checkouts `lf` creates for Tasks. The block lists the new root in
-`~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set), in the
-background, and cannot fail a checkout. `scripts/dev-lf` refreshes the same list
-before it builds; `status` refreshes before reading it. Roots from other
-repositories stay in the file.
+A new worktree registers before `git worktree add` returns. The installed
+`post-checkout` hook carries its own copy of the registration script, so it
+also works in older revisions. It lists the root in
+`~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set) and retains
+other repositories' roots. Git can finish the checkout if registration fails.
 
-The daemon reads that list once, when it starts. It exits after ten minutes
-without a request and the next build starts it again with the current list.
-`status` shows the configured timeout for the next daemon start; a running
-daemon may have started with another value. Zero disables idle exit.
-Reading statistics also resets the idle timer: repeatedly running `status`
-postpones the exit. The API exposes neither the active timeout nor the last
-request time.
-On a busy Machine that exit may not come: during LOO-921 the pinned daemon ran
-1h45m with no 300-second gap between cache file writes or hits, so roots listed
-in that time stayed unloaded. Nothing here stops or restarts it. Compiles run in
-each client, so a stop kills none, but a compile still running 10 seconds after
-it loses its cache write. Until the daemon restarts, a new worktree's builds
-work and miss, and `status` reports the unloaded root:
+The pinned daemon reads its roots at startup. When it is serving a client-side
+cache and lacks this root, registration asks it to stop. The next compile
+starts a daemon with the updated list. Existing client compilers run to
+completion. The daemon gives outstanding connections up to ten seconds to
+finish, so a late cache write can be lost. In the two-worktree check, a
+`rustls` compile continued across the stop and its Cargo invocation passed the
+focused execution test. The [probe](benchmarks/crate-rebuild/README.md#registration-during-a-build)
+exercises this through the installed hook.
 
-```text
-roots    60 of 61 loaded; this checkout loads at the daemon's next idle exit
-```
+`scripts/dev-lf` and `status` refresh the inventory. Only `register` asks a
+daemon to stop. `status` reads the executable of the process accepting
+connections on the socket, the loaded roots and cache counters.
+`status --json` returns the same observations. Reading stats resets the idle timer.
 
-| `status` exit | Meaning | Do |
+| `status` exit | Meaning | Next command |
 |---|---|---|
-| 0 | this checkout's root is loaded by the pinned daemon, or no daemon is running and the next build starts one with it | build |
-| 3 | the running daemon started before this root was listed | build anyway and take the misses, or wait for the idle exit |
-| 1 | the configured wrapper is missing or is not the pin | `install`; until then `RUSTC_WRAPPER= cargo …` |
-
-`status --json` prints the same facts for scripts.
+| 0 | The root is loaded, or listed for the next daemon start | `cargo build` |
+| 3 | The serving daemon lacks this root | `uv run python scripts/build_cache.py register` |
+| 1 | Check the wrapper, socket owner or reported configuration error | `uv run python scripts/build_cache.py install` |
 
 A wrapper path that no longer exists fails every Rust build on the Machine, in
 every repository. Build directly while you repair it:

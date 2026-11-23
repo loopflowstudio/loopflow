@@ -1,15 +1,18 @@
-"""Install the pinned Machine sccache, refresh its roots, report its status."""
+"""Install the pinned Machine cache, register worktrees and inspect the serving daemon."""
 
 import argparse
 import fcntl
 import json
 import os
+import shlex
+import socket
+import struct
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-import tomlkit
+import tomllib
 
 REVISION = "ca81ec2a2566efc623692741440d99c710268841"
 CACHE_ENV = {
@@ -39,10 +42,10 @@ def worktree_roots(repo: Path) -> set[str]:
 
 def refresh(repo: Path, config: Path, settings: dict | None = None) -> None:
     """Write the next daemon's configuration, leaving the running daemon alone."""
-    roots = worktree_roots(repo)
     config.parent.mkdir(parents=True, exist_ok=True)
     with config.with_suffix(".lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        roots = worktree_roots(repo)
         saved = json.loads(config.read_text()) if config.exists() else {}
         if not isinstance(saved, dict) or not isinstance(saved.get("basedirs", []), list):
             raise ValueError("cache configuration must be an object with a basedirs list")
@@ -80,7 +83,7 @@ def _default_configuration() -> dict:
         candidates = [directory / "sccache/config"]
     for source in candidates:
         if source.exists():
-            return tomlkit.loads(source.read_text()).unwrap()
+            return tomllib.loads(source.read_text())
     return {}
 
 
@@ -106,6 +109,8 @@ def cargo_configuration() -> Path:
 
 
 def configure_cargo(path: Path, wrapper: Path, env: dict[str, str]) -> None:
+    import tomlkit  # Only the installer edits TOML. The installed Git hook uses the stdlib.
+
     original = path.read_text() if path.exists() else ""
     config = tomlkit.loads(original)
     if "build" not in config:
@@ -138,28 +143,30 @@ def install_hook(repo: Path) -> None:
         hook = repo / hook
     original = hook.read_text() if hook.exists() else "#!/bin/sh\n"
     begin, end = "# loopflow build cache begin", "# loopflow build cache end"
+    # Worktrees can check out revisions that predate this installer.
+    program = hook.parent / "loopflow-build-cache.py"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    source = Path(__file__).read_bytes()
+    if not program.exists() or source != program.read_bytes():
+        with tempfile.NamedTemporaryFile(dir=hook.parent, delete=False) as output:
+            output.write(source)
+        Path(output.name).replace(program)
+    command = shlex.join([str(Path(sys.executable).resolve()), str(program.resolve()), "register"])
     block = (
-        begin
-        + "\n"
-        + (
-            "(if [ -f scripts/build_cache.py ]; then\n"
-            "    uv run python scripts/build_cache.py refresh </dev/null >/dev/null 2>&1 || :\n"
-            "fi) >/dev/null 2>&1 &\n"
-            ": # cache registration cannot fail checkout\n"
-        )
-        + end
-        + "\n"
+        f'{begin}\nif [ "${{3:-}}" = 1 ]; then\n'
+        f"    {command} </dev/null >/dev/null || :\nfi\n{end}\n"
     )
+    body = original
     if begin in original:
         start = original.index(begin)
         finish = original.index(end, start) + len(end)
-        if original[finish : finish + 1] == "\n":
-            finish += 1
-        updated = original[:start] + block + original[finish:]
+        body = original[:start] + original[finish:].removeprefix("\n")
+    if body.startswith("#!"):
+        shebang, _, rest = body.partition("\n")
+        updated = shebang + "\n" + block + rest
     else:
-        updated = original + ("" if original.endswith("\n") else "\n") + block
+        updated = block + body
     if updated != original or not hook.exists():
-        hook.parent.mkdir(parents=True, exist_ok=True)
         hook.write_text(updated)
     hook.chmod(hook.stat().st_mode | 0o111)
 
@@ -202,23 +209,45 @@ def install(repo: Path, revision: str) -> None:
 
 def configured_cache() -> tuple[Path | None, dict[str, str]]:
     path = cargo_configuration()
-    config = tomlkit.loads(path.read_text()).unwrap() if path.exists() else {}
+    config = tomllib.loads(path.read_text()) if path.exists() else {}
     wrapper = config.get("build", {}).get("rustc-wrapper")
-    env = {}
-    for key, value in config.get("env", {}).items():
-        if key.startswith("SCCACHE_"):
-            env[key] = str(value["value"] if isinstance(value, dict) else value)
+    env = {k: v for k, v in os.environ.items() if k.startswith("SCCACHE_")}
+    for key, setting in config.get("env", {}).items():
+        if not key.startswith("SCCACHE_"):
+            continue
+        entry = setting if isinstance(setting, dict) else {"value": setting}
+        value = str(entry["value"])
+        if entry.get("relative"):
+            value = str(path.parent.parent / value)
+        if entry.get("force") or key not in env:
+            env[key] = value
     return Path(wrapper) if wrapper else None, env
 
 
-def cache_status(repo: Path) -> dict:
-    wrapper, env = configured_cache()
+def daemon_pid(address: str) -> int | None:
+    # A draining daemon can still appear in lsof under the replacement's socket name.
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(5)
+        try:
+            client.connect(address)
+        except (FileNotFoundError, ConnectionRefusedError):
+            return None
+        if sys.platform == "darwin":
+            return client.getsockopt(0, 2)  # SOL_LOCAL, LOCAL_PEERPID from sys/un.h
+        credentials = client.getsockopt(
+            socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("iII")
+        )
+        return struct.unpack("iII", credentials)[0]
+
+
+def cache_status(repo: Path, wrapper: Path | None, env: dict[str, str]) -> dict:
     expected = Path.home() / ".local/share/loopflow/sccache" / REVISION / "bin/sccache"
     # A revision override is still a pin when its full SHA is carried in the stable path.
     pinned = bool(
         wrapper
         and wrapper.is_file()
         and os.access(wrapper, os.X_OK)
+        and wrapper.name == "sccache"
         and wrapper.parent.name == "bin"
         and wrapper.parent.parent.parent == expected.parent.parent.parent
         and len(wrapper.parent.parent.name) == 40
@@ -245,25 +274,21 @@ def cache_status(repo: Path) -> dict:
     }
     if not pinned:
         return {**result, "exit_code": 1}
-    socket = env.get("SCCACHE_SERVER_UDS")
-    if socket and Path(socket).exists():
-        owners = subprocess.run(
-            ["lsof", "-nP", "-a", "-U", "-c", "sccache", "-t", socket],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        for pid in set(owners.stdout.split()):
-            command = subprocess.run(
-                ["ps", "-p", pid, "-o", "comm="], capture_output=True, text=True
+    address = env.get("SCCACHE_SERVER_UDS")
+    if address and (pid := daemon_pid(address)):
+        executable = (
+            os.readlink(f"/proc/{pid}/exe")
+            if sys.platform.startswith("linux")
+            else subprocess.run(
+                ["ps", "-p", str(pid), "-o", "comm="], capture_output=True, text=True
             ).stdout.strip()
-            if command == str(wrapper):
-                uptime = subprocess.run(
-                    ["ps", "-p", pid, "-o", "etime="], capture_output=True, text=True
-                ).stdout.strip()
-                result["daemon"] = {"pid": int(pid), "executable": command, "uptime": uptime}
-                break
-    if result["daemon"]:
+        )
+        uptime = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "etime="], capture_output=True, text=True
+        ).stdout.strip()
+        result["daemon"] = {"pid": pid, "executable": executable, "uptime": uptime}
+        if executable != str(wrapper):
+            return {**result, "exit_code": 1}
         # --show-stats answers empty statistics if no server exists; never starts one.
         raw = subprocess.check_output(
             [str(wrapper), "--show-stats", "--stats-format", "json"],
@@ -278,12 +303,42 @@ def cache_status(repo: Path) -> dict:
     return {**result, "exit_code": 0 if root in loaded else 3}
 
 
+def register(repo: Path) -> None:
+    wrapper, env = configured_cache()
+    config = Path(env.get("SCCACHE_CONF", str(inventory_path())))
+    config.parent.mkdir(parents=True, exist_ok=True)
+    # Concurrent checkouts must observe the daemon after the preceding registration.
+    with config.with_suffix(".register.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        state = cache_status(repo, wrapper, env)
+        if not state["exit_code"]:
+            return
+        if state["exit_code"] == 1:
+            raise ValueError(
+                "registration needs the installed wrapper and its pinned daemon socket"
+            )
+        if env.get("SCCACHE_CLIENT_SIDE") != "1":
+            raise ValueError(
+                "root listed for the next start; only client-side registration can stop the daemon"
+            )
+        if state["daemon"]:
+            subprocess.run(
+                [str(wrapper), "--stop-server"],
+                env={**os.environ, **env},
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                check=True,
+                timeout=15,
+            )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     installer = commands.add_parser("install")
     installer.add_argument("--revision", default=REVISION)
     commands.add_parser("refresh")
+    commands.add_parser("register")
     status = commands.add_parser("status")
     status.add_argument("--json", action="store_true")
     args = parser.parse_args()
@@ -291,9 +346,12 @@ def main() -> None:
         if args.command == "install":
             install(Path.cwd(), args.revision)
         elif args.command == "refresh":
-            refresh(Path.cwd(), inventory_path(), _default_configuration())
+            _, env = configured_cache()
+            refresh(Path.cwd(), Path(env.get("SCCACHE_CONF", str(inventory_path()))))
+        elif args.command == "register":
+            register(Path.cwd())
         else:
-            result = cache_status(Path.cwd())
+            result = cache_status(Path.cwd(), *configured_cache())
             if args.json:
                 print(json.dumps(result, indent=2))
             else:
@@ -305,18 +363,21 @@ def main() -> None:
                     f"({'pinned' if result['pinned'] else 'not pinned'})"
                 )
                 print(
-                    f"daemon   pid {daemon['pid']}, same executable, up {daemon['uptime']}; "
+                    f"daemon   pid {daemon['pid']}, {daemon['executable']}, up {daemon['uptime']}; "
                     f"configured idle timeout {idle} (next start)"
                     if daemon
                     else f"daemon   not running; next build loads the list; idle timeout {idle}"
                 )
+                loaded = set(result["loaded_roots"]).intersection(result["listed_roots"])
                 print(
-                    f"roots    {len(result['loaded_roots'])} "
+                    f"roots    {len(loaded)} "
                     f"of {len(result['listed_roots'])} loaded; "
                     + (
                         "this checkout loaded"
                         if daemon and result["exit_code"] == 0
-                        else "this checkout loads at the daemon's next idle exit"
+                        else "socket served by another executable"
+                        if daemon and result["exit_code"] == 1
+                        else "this checkout is unloaded; run register"
                         if daemon
                         else "this checkout listed"
                         if result["exit_code"] == 0

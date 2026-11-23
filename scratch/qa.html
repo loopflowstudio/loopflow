@@ -52,6 +52,24 @@ Exact menu chords (⌘, ⌘Q ⇧⌘↩ ⇧⌘E) still go to the menu. A headless
 <h2>Checks</h2>
 <pre>scripts/test_desktop.sh --filter 'GhosttyModifierInputTests|SessionModifierInputTests'   # 11 tests passed headless, including the new Shift-menu test; CI repeats</pre>
 
+<h2>Antigravity 1.5.14</h2>
+<p>The installed <code>agy</code> requested modifyOtherKeys level 2
+(<code>CSI &gt;4;2m</code>), pushed Kitty flags 5 (<code>CSI &gt;5u</code>),
+then queried the active flags (<code>CSI ?u</code>).</p>
+<p>A private Machine opened a prepared Antigravity Session in the branch's
+Desktop terminal view. The launch wrapper opened the installed TUI on an empty
+workspace without an initial prompt. The terminal passed
+<code>TERM=xterm-256color</code> and <code>COLORTERM=truecolor</code> to the provider.</p>
+<table>
+<tr><th>Desktop input</th><th>Visible, unsent agy draft</th></tr>
+<tr><td>q, Shift-/, Shift-A, x</td><td><code>q?Ax</code></td></tr>
+<tr><td>Release the pane, reopen the same Session, repeat</td><td><code>q?Axq?Ax</code></td></tr>
+</table>
+<p>The fixture delivered AppKit key-down and key-up events. The byte tests
+also checked Shift-/ and Shift-A with only modifyOtherKeys enabled
+(<code>?</code>, <code>CSI 27;2;65~</code>) and with both modes active
+(<code>?A</code>).</p>
+
 <h2>Where it stands</h2>
 <p><b>Works now:</b> modified Return, Tab and Option keys reach a held Session with modifiers intact in legacy and
 Kitty modes, once each, through the app's real event dispatch, and again after the app quits and reopens.

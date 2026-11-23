@@ -6,7 +6,7 @@
 
 > “Also include in this fix: sessions launched from Desktop / lf server (not from Rex or an existing terminal) have no color in agy and some claude sessions, whereas sessions started in Rex first (e.g. LOO-996) keep color.” — Jack Heart
 
-Verify shifted text through a held Session using the modes requested by the installed `agy`, and check the unsent draft in its TUI before and after reattaching. Set missing or empty `TERM` and `COLORTERM` at the registry's common launch path. Check the environment seen by a real PTY child with and without caller-provided values.
+The held-terminal registry fills missing or empty `TERM` and `COLORTERM` at launch. Desktop, server and Rex callers share that path.
 
 Done when a focused Desktop Session delivers terminal-owned chords to the running program with their modifiers intact, including after reopening the Session. Desktop shortcuts and macOS app menus still work over a focused terminal, Ghostty terminal bindings run once without standalone-app defaults swallowing chords, Option text / dead keys / IME composition type and cancel cleanly, and the same keyboard behavior applies in a Desktop Shell.
 
@@ -67,6 +67,8 @@ App-wide Shift-menu matching outside focused terminals (Sidebar, Brief, Files), 
 5. **Built embedded terminal defaults and AppKit command dispatch.** Ghostty starts with cleared bindings and loads the supported editing, selection, scrolling, prompt, font and search actions. Option-Left and Option-Right keep their word movements. The responder routes Control-/ directly and gives menus first refusal on Command-period. Only visible, enabled menu items participate in Shift matching.
 
 **Checked this slice.** `scripts/test_desktop.sh --filter 'GhosttyModifierInputTests|SessionModifierInputTests|embeddedConfigBindsPromptJumps'` passed 15 tests, including zero config diagnostics, `⌃/` in both protocols, one `⌘.` via AppKit command dispatch and held Session reattachment. One display-only composition check was skipped.
+
+**Antigravity and color.** The installed `agy` 1.5.14 requested modifyOtherKeys level 2 and Kitty flags 5. The focused Swift run with the live QA probe passed 17 tests and skipped one display diagnostic. The unsent draft read `q?Ax`, then `q?Axq?Ax` after reattachment. The provider received `xterm-256color:truecolor`. The permanent fixtures cover both modes and reattachment without an installed provider. [QA report](qa.html)
 
 **Remaining.** Gate and unlocked-Mac QA for physical key delivery, live menus, palette focus, input-source switching and IME composition.
 

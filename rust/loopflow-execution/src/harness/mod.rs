@@ -347,11 +347,25 @@ impl ThreadNaming {
     }
 }
 
+/// Where `lf self sync-skills` puts skills for a harness to list as its own:
+/// one directory per scope, not every directory the harness reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InstalledSkills {
+    /// Relative to the home directory.
+    pub global: &'static str,
+    /// Relative to the repository root.
+    pub repository: &'static str,
+    /// A `skills.json` under the home directory that must list `global`
+    /// (as an absolute path) before the harness reads it.
+    pub global_registry: Option<&'static str>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Capabilities {
     pub thread: ThreadNaming,
     pub initial_prompt_on_resume: bool,
     pub native_skills: Option<crate::skills::catalog::SkillDialect>,
+    pub installed_skills: InstalledSkills,
     pub turn_limit: bool,
     pub output_schema: bool,
     pub respawns_after_crash: bool,

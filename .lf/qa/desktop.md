@@ -466,6 +466,28 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
 - Stop the run's processes by PID (`ps -axo pid,ppid,command | grep <private
   dir>`), never by pattern.
 
+# Terminal faces without focus
+
+Ghostty panes render in a window launched behind others, so a glyph check
+needs an unlocked display but no keyboard or focus.
+
+- Production mode (no `-ui-test-mode`), isolated bundle, private Machine:
+  `open -n -g --env HOME=… --env LF_HOME=… --env LF_BIN=… --env PATH=…
+  "<bundle>" --args -ApplePersistenceIgnoreState YES --repo <repo>`, then
+  `open -g -b <bundle id> 'loopflow://<repo>/task/<id>'`.
+- `lf --task <id> desktop run "sh <script>"` (from the checkout, with
+  `LF_DESKTOP` set) opens a Shell tab and runs the script in it. `desktop
+  capture -p shell` answers "not a terminal"; take pixels instead.
+- `screencapture -x -o -l <n> terminal.png` with `<n>` from `CGWindowListCopyWindowInfo`
+  (owner = bundle name, onscreen, titled with the repository). Once the
+  screen locks it fails with "could not create image from window".
+- Personal Ghostty settings come from `$HOME/.config/ghostty/config` of the
+  app's `HOME`; change it and relaunch the app (kill its PID) to compare.
+- Locked, Ghostty's glyph path can still be measured offscreen: draw with
+  CoreText into an alpha-only `linearGray` context with the flags
+  `src/font/face/coretext.zig` sets (`setShouldSmoothFonts` = thicken) and
+  sum the alpha.
+
 # Diff and Files without clicks
 
 A headless run's shell may lack Accessibility and event-posting rights:

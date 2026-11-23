@@ -347,6 +347,13 @@ impl super::Launcher for loopflow_harness::Antigravity {
             },
             initial_prompt_on_resume: false,
             native_skills: None,
+            installed_skills: super::InstalledSkills {
+                // agy 1.5.14 ignores `~/` paths in this file; sync writes the
+                // absolute one.
+                global: ".agents/skills",
+                repository: ".agents/skills",
+                global_registry: Some(".gemini/config/skills.json"),
+            },
             turn_limit: false,
             output_schema: false,
             respawns_after_crash: false,

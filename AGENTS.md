@@ -19,6 +19,7 @@ How we build Loopflow. Contributors and agents follow it.
 - Mock side effects; don't test mock wiring or reshape production code for tests
 - Design docs go under `scratch/`; `lf pr submit` and `lf pr land` run `lf scratch clear`, which removes added files and keeps existing ones
 - Stop only processes you started, by PID; never `pkill` or `killall` by pattern. Other agents and the person's own apps run on this Machine
+- Context too large for a prompt: give the agent the whole index (every file, with sizes) and the command that reads any piece, and let it choose what to read. lf never cuts, ranks or picks for an agent that can run commands
 
 **Secrets:**
 - Fetch every secret from Doppler. Never hardcode a key, read one from a dotfile, or paste one into code. Prefer `doppler run -- <cmd>`, which injects the value as an env var.
@@ -287,6 +288,7 @@ plan, code and memory and keeps open findings with the work.
 - Tables read by Work projections use `store_revision_<table>_<insert|update|delete>` triggers to advance their domain in `store_revisions` inside the write. An observation stamp is a reading time, not a change: planning update triggers compare every other column and count a stamp only when it goes NULL ↔ value (`planning_update_triggers_compare_every_column`); a new column joins its table's `WHEN` clause.
 - Runtime migration preflights recognize draft markers inside release batches and keep external lock guards through commit or rollback. Upgrade fixtures start before the whole release batch.
 - Seed a released schema from SQL under `rust/loopflow-storage/tests/fixtures/migrations/`; test sources name only current columns.
+- A partial index on a table in `query_plans::GROWING` needs its measured `sqlite_stat1` row in `MEASURED`; a full index does not. A read of a few Tasks maps rows with `map_task_row`: `TaskIdentifiers::read` scans every Task and belongs to list reads.
 
 **Load:** one Machine runs hundreds of concurrent agents over about 10,000
 recorded Tasks and every steer, turn and event they wrote. Every agent shares

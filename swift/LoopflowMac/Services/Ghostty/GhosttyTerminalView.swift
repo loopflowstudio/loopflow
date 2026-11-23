@@ -214,6 +214,7 @@ final class GhosttyTerminalMount: NSView {
         terminal.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - searchHeight))
         let connectionHeight: CGFloat = terminal.connectionBar.isHidden ? 0 : min(36, terminal.frame.height)
         terminal.connectionBar.frame = NSRect(x: 8, y: terminal.frame.maxY - connectionHeight, width: max(0, bounds.width - 16), height: connectionHeight)
+        terminal.layoutConnectionBar()
         terminal.searchBar.frame = NSRect(x: 0, y: terminal.frame.maxY, width: bounds.width, height: searchHeight)
     }
 }
@@ -622,18 +623,30 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var connectionReadonly = false
     var connectionReading: ServerConnectionReading? { serverConnection?.reading }
     var connectionAcceptsInput: Bool { serverConnection?.reading.acceptsInput ?? true }
-    private let connectionLabel = NSTextField(labelWithString: "")
-    private lazy var retryConnection = NSButton(title: "Retry connection", target: self, action: #selector(retryServerConnection))
-    lazy var connectionBar: NSStackView = {
-        let bar = NSStackView(views: [connectionLabel, retryConnection])
-        bar.orientation = .horizontal
-        bar.spacing = 8
+    let connectionLabel = NSTextField(labelWithString: "")
+    lazy var retryConnection = NSButton(title: "Retry connection", target: self, action: #selector(retryServerConnection))
+    lazy var connectionBar: NSView = {
+        let bar = NSView()
         bar.isHidden = true
         bar.wantsLayer = true
         connectionLabel.lineBreakMode = .byTruncatingTail
-        connectionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        bar.addSubview(connectionLabel)
+        bar.addSubview(retryConnection)
         return bar
     }()
+
+    /// A relay's close reason can run longer than the pane: the message
+    /// truncates so Retry connection stays beside it, inside the bar.
+    func layoutConnectionBar() {
+        let bounds = connectionBar.bounds
+        let button = retryConnection.isHidden ? .zero : retryConnection.fittingSize
+        let reserved = button.width > 0 ? button.width + 8 : 0
+        let label = connectionLabel.fittingSize
+        let labelWidth = min(label.width, max(0, bounds.width - reserved))
+        connectionLabel.frame = NSRect(x: 0, y: (bounds.height - label.height) / 2, width: labelWidth, height: label.height)
+        retryConnection.frame = NSRect(x: labelWidth + (button.width > 0 ? 8 : 0), y: (bounds.height - button.height) / 2,
+                                       width: button.width, height: button.height)
+    }
 
     @objc private func retryServerConnection() {
         serverConnection?.retry()

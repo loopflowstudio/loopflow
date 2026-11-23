@@ -1,11 +1,15 @@
 """Git registration and Cargo configuration for the Machine cache."""
 
+import errno
+import fcntl
 import json
 import os
+import select
 import socket
 import subprocess
 import sys
 import tempfile
+from contextlib import ExitStack
 from pathlib import Path
 
 import build_cache
@@ -381,3 +385,209 @@ def test_status_reads_a_fresh_daemon_before_its_first_cache_write(
     output = capsys.readouterr().out
     assert "roots    1 of 1 loaded; this checkout loaded" in output
     assert "cache    unmeasured" in output
+
+
+# --- Target seeding ---
+
+
+@pytest.fixture
+def cargo_repo(tmp_path, monkeypatch):
+    """A repository whose app depends on a build-script crate outside the checkout."""
+    monkeypatch.setenv("RUSTUP_HOME", os.environ.get("RUSTUP_HOME", str(Path.home() / ".rustup")))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("RUSTC_WRAPPER", "")
+    monkeypatch.setenv("CARGO_INCREMENTAL", "1")
+    for key in os.environ.copy():
+        if key.startswith(("SCCACHE_", "CARGO_TARGET_", "CARGO_BUILD_")):
+            monkeypatch.delenv(key)
+    vendor = tmp_path / "vendor/scripted"
+    (vendor / "src").mkdir(parents=True)
+    (vendor / "Cargo.toml").write_text(
+        '[package]\nname="scripted"\nversion="0.1.0"\nedition="2021"\n'
+    )
+    (vendor / "build.rs").write_text('fn main() { println!("cargo:rerun-if-changed=build.rs"); }\n')
+    (vendor / "src/lib.rs").write_text("pub fn value() -> u8 { 1 }\n")
+    repo = tmp_path / "source"
+    (repo / "src").mkdir(parents=True)
+    (repo / ".gitignore").write_text("/target\n")
+    (repo / "Cargo.toml").write_text(
+        '[package]\nname="app"\nversion="0.1.0"\nedition="2021"\n'
+        f"[dependencies]\nscripted={{path={json.dumps(str(vendor))}}}\n"
+    )
+    (repo / "src/main.rs").write_text('fn main() { println!("{}", scripted::value()); }\n')
+    _git(repo, "init", "-q")
+    _cargo_build(repo)
+    _git(repo, "add", ".")
+    _git(repo, "-c", "user.name=Fixture", "-c", "user.email=f@example.com", "commit", "-qm", "init")
+    return repo
+
+
+@pytest.fixture
+def cloning(tmp_path):
+    """Skip where the temporary filesystem has no copy-on-write clones (ext4)."""
+    probe = tmp_path / "clone-probe"
+    probe.mkdir()
+    (probe / "artifact").write_bytes(b"clone this data")
+    try:
+        build_cache._clone(probe, tmp_path / "clone-probe-copy")
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("this filesystem cannot clone")
+
+
+def _add_worktree(repo: Path, name: str) -> Path:
+    tree = repo.parent / name
+    _git(repo, "worktree", "add", "--detach", str(tree))
+    return tree
+
+
+def _cargo_build(directory: Path) -> dict[str, bool]:
+    """Build and return each compiled unit's freshness by crate name."""
+    result = subprocess.run(
+        ["cargo", "build", "--offline", "--message-format=json"],
+        cwd=directory,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+    )
+    assert result.returncode == 0, result.stderr
+    artifacts = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
+    return {
+        item["target"]["name"]: item["fresh"]
+        for item in artifacts
+        if item.get("reason") == "compiler-artifact"
+    }
+
+
+def _seed_entries(tree: Path) -> tuple[str, ...]:
+    return build_cache._seed_entries(tree / "target/debug")
+
+
+def test_new_worktree_reuses_a_siblings_dependencies_and_rebuilds_its_own(cargo_repo, cloning):
+    install_hook(cargo_repo)
+    tree = _add_worktree(cargo_repo, "new tree")
+
+    debug = tree / "target/debug"
+    entries = sorted(path.name for path in debug.iterdir())
+    assert entries == sorted(_seed_entries(cargo_repo))
+    status = json.loads(_cache_command(tree, "status", "--json").stdout)
+    assert status["seed"]["source"] == str(cargo_repo.resolve())
+    assert _cargo_build(tree) == {"build-script-build": True, "scripted": True, "app": False}
+
+
+def test_a_newer_sibling_build_cannot_supply_the_checkouts_executable(cargo_repo):
+    tree = _add_worktree(cargo_repo, "new tree")
+    (cargo_repo / "src/main.rs").write_text('fn main() { println!("sibling"); }\n')
+    _cargo_build(cargo_repo)
+
+    assert build_cache.seed_target(tree) is None
+    _cargo_build(tree)
+    assert subprocess.check_output([tree / "target/debug/app"], text=True).strip() == "1"
+
+
+def test_new_worktree_starts_cold_when_only_an_unbuilt_seed_is_idle(cargo_repo, cloning):
+    install_hook(cargo_repo)
+    unbuilt = _add_worktree(cargo_repo, "unbuilt")
+    assert build_cache.seed_record(unbuilt)["source"] == str(cargo_repo.resolve())
+    lock = cargo_repo / "target/debug/.cargo-build-lock"
+    with lock.open() as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        tree = _add_worktree(cargo_repo, "new tree")
+        assert not (tree / "target").exists()
+        assert not list((unbuilt / "target/debug").glob(".cargo*lock"))
+    assert _cargo_build(tree)["scripted"] is False
+    assert "seed     none" in _cache_command(tree, "status").stdout
+
+
+def test_cargo_waits_while_a_built_source_is_locked(cargo_repo):
+    debug = cargo_repo / "target/debug"
+    (cargo_repo / "src/main.rs").write_text('fn main() { println!("rebuilt"); }\n')
+
+    with ExitStack() as processes:
+        with build_cache._quiescent(debug) as idle:
+            assert idle
+            cargo = processes.enter_context(
+                subprocess.Popen(
+                    ["cargo", "build", "--offline", "--color", "never"],
+                    cwd=cargo_repo,
+                    stdin=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            )
+            readable, _, _ = select.select([cargo.stderr], [], [], 60)
+            assert readable, "Cargo did not report its lock wait"
+            message = cargo.stderr.readline()
+            assert "Blocking waiting for file lock" in message, message
+        assert cargo.wait(timeout=60) == 0
+    assert subprocess.check_output([debug / "app"], text=True).strip() == "rebuilt"
+
+
+def test_a_failed_clone_leaves_no_target(cargo_repo, cloning, monkeypatch):
+    tree = _add_worktree(cargo_repo, "new tree")
+    clone = build_cache._clone
+
+    def clone_then_fail(source, destination):
+        clone(source, destination)
+        raise OSError(errno.EXDEV, "cross-device", str(source))
+
+    monkeypatch.setattr(build_cache, "_clone", clone_then_fail)
+    with pytest.raises(OSError):
+        build_cache.seed_target(tree)
+    assert not (tree / "target").exists()
+    assert _cargo_build(tree)["app"] is False
+
+
+def test_an_existing_target_is_never_replaced(cargo_repo):
+    tree = _add_worktree(cargo_repo, "new tree")
+    (tree / "target").mkdir()
+    assert build_cache.seed_target(tree) is None
+    assert list((tree / "target").iterdir()) == []
+
+
+def test_a_seeded_worktree_can_seed_others_after_cargo_builds_in_it(cargo_repo, cloning):
+    install_hook(cargo_repo)
+    built = _add_worktree(cargo_repo, "built")
+    assert build_cache.seed_record(built)["source"] == str(cargo_repo.resolve())
+    _cargo_build(built)
+    with (cargo_repo / "target/debug/.cargo-build-lock").open() as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        unbuilt = _add_worktree(cargo_repo, "unbuilt")
+        assert build_cache.seed_record(unbuilt)["source"] == str(built.resolve())
+        fingerprint = Path("target/debug", _seed_entries(built)[0])
+        source_mtime = (built / fingerprint).stat().st_mtime_ns
+        assert (unbuilt / fingerprint).stat().st_mtime_ns == source_mtime
+        later = _add_worktree(cargo_repo, "later")
+    assert json.loads(_cache_command(later, "status", "--json").stdout)["seed"]["source"] == str(
+        built.resolve()
+    )
+    assert not list((unbuilt / "target/debug").glob(".cargo*lock"))
+
+
+def test_a_target_in_cargos_unit_directory_layout_seeds_its_build_tree(tmp_path, cloning):
+    # Cargo 1.100 keeps each unit's fingerprint and outputs under build/<package>/<hash>/.
+    repo = tmp_path / "source"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(
+        repo,
+        "-c",
+        "user.name=F",
+        "-c",
+        "user.email=f@example.com",
+        "commit",
+        "-qm",
+        "i",
+        "--allow-empty",
+    )
+    unit = repo / "target/debug/build/scripted/0123abcd/fingerprint"
+    unit.mkdir(parents=True)
+    (unit / "lib-scripted.json").write_text("{}")
+    (repo / "target/debug/.cargo-build-lock").touch()
+    (repo / "target/debug/scripted").touch()
+    tree = _add_worktree(repo, "new tree")
+
+    assert build_cache.seed_target(tree) == repo.resolve()
+    assert [path.name for path in (tree / "target/debug").iterdir()] == ["build"]
+    assert (tree / "target/debug/build/scripted/0123abcd/fingerprint/lib-scripted.json").is_file()

@@ -44,6 +44,7 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::Krs(_)
         | WorkValue::MetricTargets(_) => "projects",
         WorkValue::TaskProject(_)
+        | WorkValue::TaskParent(_)
         | WorkValue::TaskLinearId(_)
         | WorkValue::TaskIdentifier(_)
         | WorkValue::TaskTitle(_)
@@ -77,6 +78,7 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::ProjectInitiatives(_) => "planning_initiatives",
         WorkValue::ProjectTeams(_) => "planning_teams",
         WorkValue::TaskProject(_) => "project_id",
+        WorkValue::TaskParent(_) => "parent_task_id",
         WorkValue::TaskLinearId(_) => "external_issue_id",
         WorkValue::TaskIdentifier(_) => "issue_identifier",
         WorkValue::TaskTitle(_) => "issue_title",
@@ -132,7 +134,7 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
                         WorkValue::MetricTargets(serde_json::from_str(&row.get::<_, String>(11)?)?),
                     ])
         }),
-        "tasks" => read_record(conn, "SELECT project_id,external_issue_id,issue_identifier,issue_title,issue_description,planning_rank,planning_assignee,planning_due_date,planning_deleted_at,planning_url,planning_branch_name,planning_team_id,planning_state,planning_completed,planning_completed_at FROM tasks WHERE id=?1", id, |row| {
+        "tasks" => read_record(conn, "SELECT project_id,external_issue_id,issue_identifier,issue_title,issue_description,planning_rank,planning_assignee,planning_due_date,planning_deleted_at,planning_url,planning_branch_name,planning_team_id,planning_state,planning_completed,planning_completed_at,parent_task_id FROM tasks WHERE id=?1", id, |row| {
                     Ok(vec![
                         WorkValue::TaskProject(row.get(0)?),
                         WorkValue::TaskLinearId(row.get(1)?),
@@ -151,6 +153,7 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
                             planning_completed: row.get(13)?,
                             planning_completed_at: row.get(14)?,
                         }),
+                        WorkValue::TaskParent(row.get(15)?),
                     ])
         }),
         "task_comments" => read_record(conn, "SELECT task_id,body,author,created_at FROM task_comments WHERE id=?1", id, |row| {
@@ -213,6 +216,16 @@ fn write_record(
         if before.contains(edit) {
             continue;
         }
+        if let WorkValue::TaskParent(Some(parent)) = edit {
+            if let Some(refusal) = parent_refusal(conn, id, parent)? {
+                // Nobody is there to hear a tracker's or another Machine's
+                // parent refused: the Task keeps the parent it has.
+                if origin == WriteOrigin::Local {
+                    return Err(StoreError::InvalidAuthority(refusal.into()));
+                }
+                continue;
+            }
+        }
         changes.push(edit);
         let value = edit.value()?;
         match edit {
@@ -274,6 +287,31 @@ fn write_record(
         }
     }
     Ok(changed)
+}
+
+/// Task parents belong to the same repository and cannot form a cycle.
+pub(super) fn parent_refusal(
+    conn: &Connection,
+    task: &str,
+    parent: &str,
+) -> StoreResult<Option<&'static str>> {
+    let found: Option<(bool, bool)> = conn
+        .prepare_cached(
+            "WITH RECURSIVE up(id) AS (
+                 SELECT id FROM tasks WHERE id=?2
+                 UNION SELECT t.parent_task_id FROM tasks t JOIN up ON up.id=t.id
+                 WHERE t.parent_task_id IS NOT NULL
+             ) SELECT child.repository_id=parent.repository_id, EXISTS(SELECT 1 FROM up WHERE id=?1)
+               FROM tasks child JOIN tasks parent ON parent.id=?2 WHERE child.id=?1",
+        )?
+        .query_row(params![task, parent], |row| Ok((row.get(0)?, row.get(1)?)))
+        .optional()?;
+    Ok(match found {
+        None => Some("parent Task is not known to this Machine"),
+        Some((false, _)) => Some("parent Task belongs to another repository"),
+        Some((true, true)) => Some("a Task cannot be its own ancestor"),
+        Some((true, false)) => None,
+    })
 }
 
 // ---- Stamps ----
@@ -595,6 +633,7 @@ mod tests {
         let id = TaskId::new();
         store
             .create_task(&NewTask {
+                parent_task_id: None,
                 repository_id: crate::test_fixture::repository(store, "/repo"),
                 id: id.clone(),
                 project_id: Some(project),

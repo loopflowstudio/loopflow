@@ -3252,6 +3252,7 @@ mod tests {
             let task = loopflow_model::durable::TaskId::new();
             store
                 .create_task(&loopflow_storage::work::task::NewTask {
+                    parent_task_id: None,
                     repository_id: loopflow_execution::repository::location::ensure_repository(
                         &store,
                         repo.path().to_str().unwrap(),
@@ -3638,6 +3639,7 @@ mod tests {
         let path = repo.path().canonicalize().unwrap();
         let task = store
             .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: loopflow_execution::repository::location::ensure_repository(
                     store,
                     path.to_str().unwrap(),

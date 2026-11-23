@@ -12,7 +12,8 @@ print the same row. Rust round-trips it; Desktop reads `lf desktop` instead.
 
 `task_status.json` pins `lf task show --json`: the planning/execution envelope
 for available, unavailable, invalid, removed and absent planning, with the Task's
-overview, Graph processes and comments. Rust round-trips it. The Mac app reads the
+overview, Graph processes and comments, the Task it was filed from and its
+children. Rust round-trips it. The Mac app reads the
 overview, Graph processes, comments and recorded work from
 `lf task show --subscribe` (`subscribe_frames.json`). These cases have no execution.
 

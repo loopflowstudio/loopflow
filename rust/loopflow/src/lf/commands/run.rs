@@ -998,9 +998,10 @@ mod tests {
                     assert_eq!(
                         built
                             .components
-                            .diff
+                            .change
                             .as_ref()
-                            .is_some_and(|diff| diff.contains("+changed file body")),
+                            .and_then(|change| change.patch.as_deref())
+                            .is_some_and(|patch| patch.contains("+changed file body")),
                         patch
                     );
                     assert_eq!(

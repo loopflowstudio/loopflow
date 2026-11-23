@@ -3,6 +3,7 @@
 import gzip
 import importlib
 import json
+import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +18,51 @@ def probe(monkeypatch):
     directory = ROOT / "scripts/benchmarks/crate-rebuild"
     monkeypatch.syspath_prepend(str(directory))
     return importlib.import_module("test_loop")
+
+
+@pytest.mark.parametrize("cold", [False, True])
+def test_measurement_worktree_keeps_the_hook_seed_only_when_warm(
+    probe, tmp_path, monkeypatch, cold
+):
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "--quiet", repo], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=f@example.com",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "init",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    hook = repo / ".git/hooks/post-checkout"
+    hook.write_text("#!/bin/sh\nmkdir -p target/debug/deps && touch hook-ran\n")
+    hook.chmod(0o755)
+    monkeypatch.setattr(probe, "ROOT", repo)
+    tree = tmp_path / "measurement"
+    probe.add_worktree(tree, "HEAD", os.environ.copy(), cold=cold)
+    assert (tree / "hook-ran").exists()
+    assert (tree / "target").exists() == (not cold)
+
+
+def test_seed_probe_counts_a_relinked_cargo_artifact_once(probe, tmp_path):
+    seed_probe = importlib.import_module("seed_probe")
+    deps = tmp_path / "deps"
+    deps.mkdir()
+    artifact = deps / "lf-hash"
+    artifact.write_bytes(b"old build")
+    before = seed_probe._allocations(tmp_path)
+    assert list(before.values()) == [artifact.stat().st_blocks * 512]
+
+    (tmp_path / "lf").hardlink_to(artifact)
+    artifact.rename(deps / "another-name")
+    assert seed_probe._allocations(tmp_path) == before
 
 
 def test_consecutive_edits_replace_the_committed_message_in_each_crate(probe, tmp_path):

@@ -141,7 +141,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
     private func taskCreate(_ submission: MobileTaskSubmission, requestID: String) -> ServedWrite {
         .taskCreate(directory: submission.directory, requestID: requestID, title: nil,
-                    request: submission.request, wave: nil, graph: nil, session: nil, run: true)
+                    request: submission.request, wave: nil, parent: nil, graph: nil, session: nil, run: true)
     }
 
     /// The created Task is on screen: its saved creation is done.

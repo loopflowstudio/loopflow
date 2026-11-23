@@ -163,9 +163,8 @@ Processes to the calling agent's Task; 5,672 `lf session serve`, plus `commit`,
   (concept review 5c). A Session joins by starting there, or by `lf session
   bind` (as primary). A taskless Graph run already there stays out of the
   Task's history and still blocks a second run (`task_open_graph_pairs`).
-- Readers: `session_membership`, `session_tasks` and `task_graph_pairs` read
-  `task_id` only. Three path matches remain, all about what occupies a
-  directory now: `task_open_graph_pairs` for unended runs that recorded no
+- Membership reads the Session's or Graph run's `task_id`. Three path matches
+  remain, all about what occupies a directory now: `task_open_graph_pairs` for unended runs that recorded no
   Task, `checkout_open_work` for a checkout no Task holds, and
   `task_checkout_owner` (by Git root) for a launch and for provider conversations lf has no
   Session for (`human_session/turns.rs`).
@@ -497,7 +496,7 @@ Task's), `ops::task::tests:: ops::run:: ops::human_session:: git::` passed;
 ## Built: the Session list reads the stored Task (concept review on 8e62c4f468)
 
 `human_session/workspace.rs` `associate` no longer touches `task_ids`: a
-listed Session's Tasks are the store's `session_tasks` (its
+listed Session's membership comes from its summary (its
 `agent_sessions.task_id`, Repository and Wave primaries excluded), so
 `lf session list --task`, its JSON and Desktop's `names(task:)` read one
 answer. `WorkspaceResolver` only places the Session (worktree root,
@@ -593,6 +592,13 @@ order) and `lf task show` (the rank). `lf task move` does not reorder and `lf
 task status` shows no rank (QA 2026-11-22). Desktop's Working board after
 merge and install. Auto stays a Machine fact
 (2a), unchanged.
+
+## Compress checks (2026-11-23)
+
+- `cargo test -p loopflow-execution -p loopflow-storage --lib` with focused filters passed for membership across path reuse, Graph and steer reads, retirement, Task order and Git boolean configuration.
+- Session list checks passed for Task, Wave, primary and orphan pages, including raw provider conversations.
+- `cargo clippy --all-targets -- -D warnings` passed.
+- `EXPLAIN QUERY PLAN` with 10,000 Tasks and 100,000 Graph runs selected each Task's latest run through the covering `graph_processes_task` index, then fetched the run by rowid.
 
 ## Then: gate
 

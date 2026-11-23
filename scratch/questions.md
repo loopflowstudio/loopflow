@@ -290,3 +290,8 @@ unreachable from a process whose cwd reads `/private/var/...`. lf's own writers
 store Git's resolved toplevel, so only fixtures hit it; the fixture now records
 resolved paths. Canonicalizing in `write_task_checkout_in` would close it for
 any writer, at the cost of every reader seeing the resolved spelling. Left as is.
+
+## Session membership on the wire (compress, 2026-11-23)
+
+Kept the CLI and Desktop `task_ids` array. The store returns one optional
+Task and the Session surface turns it into the existing zero-or-one list.

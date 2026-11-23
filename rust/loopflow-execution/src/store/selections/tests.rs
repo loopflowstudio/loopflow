@@ -350,6 +350,18 @@ fn a_task_move_changes_its_rank_in_every_plan_and_a_drop_in_another_project_join
         [three, two, five, one, four]
     );
     assert_eq!(working(), [three, two, five, one]);
+    // Standalone Tasks follow even a Project at the largest supported rank.
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(&format!(
+            "UPDATE projects SET planning_rank={};
+         UPDATE tasks SET project_id=NULL WHERE id='{five}';",
+            u32::MAX
+        ))
+        .unwrap();
+    assert_eq!(working(), [three, two, one, five]);
 }
 
 #[test]

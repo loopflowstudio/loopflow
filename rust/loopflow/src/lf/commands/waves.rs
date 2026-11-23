@@ -2145,13 +2145,9 @@ impl<'a> DetailReads<'a> {
                 .entry(open.repo.clone())
                 .or_insert_with(|| loopflow_execution::ops::tracker::connected(&open.repo));
         }
-        let graphs = store
-            .sqlite
-            .latest_task_graphs(&tasks.iter().map(|task| &task.id).collect::<Vec<_>>())?;
-        let execution = store.sqlite.graph_execution_facts(
-            graphs.values(),
-            &tasks.iter().map(|task| &task.id).collect::<Vec<_>>(),
-        )?;
+        let ids: Vec<_> = tasks.iter().map(|task| &task.id).collect();
+        let graphs = store.sqlite.latest_task_graphs(&ids)?;
+        let execution = store.sqlite.graph_execution_facts(graphs.values(), &ids)?;
         let mut defaults =
             HashMap::<_, (String, Option<loopflow_execution::config::ConfigSource>)>::new();
         let mut selections = HashMap::new();

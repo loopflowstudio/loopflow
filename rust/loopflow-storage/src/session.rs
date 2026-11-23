@@ -366,7 +366,6 @@ pub struct SessionSummary {
     /// Its held terminal is open and its agent's pid is not recorded yet: a
     /// start under way, which has no liveness to read.
     pub launching: bool,
-    pub task_ids: Vec<TaskId>,
     pub captured: Option<i64>,
     pub id: LfSessionId,
     pub artifact_key: Option<String>,
@@ -393,6 +392,16 @@ pub struct SessionSummary {
     pub independent: bool,
     pub wave_name: Option<String>,
     pub task_identifier: Option<String>,
+}
+
+impl SessionSummary {
+    /// Repository and Wave primaries keep their own scope.
+    pub fn member_task(&self) -> Option<&TaskId> {
+        match self.primary_scope.as_deref() {
+            None | Some("task") => self.task_id.as_ref(),
+            _ => None,
+        }
+    }
 }
 
 /// An agent's recorded end.

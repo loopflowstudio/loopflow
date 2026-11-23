@@ -403,11 +403,8 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
         .map(|work| work.label())
         .collect();
     assert_eq!(open, [format!("Graph run {independent}")]);
-    assert_eq!(
-        store.session_task_ids("manual").unwrap(),
-        std::slice::from_ref(&task)
-    );
-    assert!(store.session_task_ids("sibling").unwrap().is_empty());
+    assert_eq!(store.session_task("manual").unwrap().as_ref(), Some(&task));
+    assert!(store.session_task("sibling").unwrap().is_none());
     let summaries = crate::store::session_projection::session_summaries(
         &store,
         &SessionFilter {
@@ -427,7 +424,7 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
     );
     assert!(summaries
         .iter()
-        .all(|session| session.task_ids == std::slice::from_ref(&task)));
+        .all(|session| session.member_task() == Some(&task)));
     let graphs = store
         .graph_inventory(
             &GraphProcessFilter {
@@ -476,7 +473,7 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
         .sessions
         .iter()
         .any(|session| session.id == "child-session"));
-    assert_eq!(store.session_task_ids("child-session").unwrap(), [child]);
+    assert_eq!(store.session_task("child-session").unwrap(), Some(child));
     {
         let conn = store.conn.lock().unwrap();
         conn.execute(

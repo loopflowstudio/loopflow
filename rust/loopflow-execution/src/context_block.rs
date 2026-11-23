@@ -140,9 +140,9 @@ impl ContextDelivery {
         store: &loopflow_storage::sqlite::SqliteStore,
         session: &str,
     ) -> crate::store::StoreResult<bool> {
-        let task = match store.session_task_ids(session)?.as_slice() {
-            [task] => store.task(task)?,
-            _ => None,
+        let task = match store.session_task(session)? {
+            Some(task) => store.task(&task)?,
+            None => None,
         };
         let identity = Some(SessionIdentity {
             session: session.to_owned(),

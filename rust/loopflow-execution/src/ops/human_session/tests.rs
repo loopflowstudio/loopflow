@@ -234,7 +234,6 @@ fn summary_fixture() -> crate::session::SessionSummary {
         task_terminal: false,
         in_task_checkout: false,
         launching: false,
-        task_ids: vec![task.clone()],
         captured: Some(1),
         id: "metadata".into(),
         artifact_key: Some(crate::session_record::new_artifact_key()),

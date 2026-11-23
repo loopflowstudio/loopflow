@@ -175,7 +175,7 @@ fn descendant_admission_excludes_registration_of_a_missing_root() {
     let earlier = crate::store::sessions::create_session(&store, earlier, None).unwrap();
     register().unwrap();
     // A conversation already running in the checkout keeps having no Task.
-    assert!(store.session_task_ids(&earlier.id).unwrap().is_empty());
+    assert!(store.session_task(&earlier.id).unwrap().is_none());
     assert_eq!(store.session(&earlier.id).unwrap().unwrap(), earlier);
     // Allocating the checkout claims the Task; the earlier session does not.
     assert!(store.task_owned(&task.id).unwrap());
@@ -204,7 +204,7 @@ fn missing_root_exclusion_preserves_taskless_session_admission() {
     )
     .unwrap();
     // A conversation already running in the checkout keeps having no Task.
-    assert!(store.session_task_ids(&session.id).unwrap().is_empty());
+    assert!(store.session_task(&session.id).unwrap().is_none());
     assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
     // Allocating the checkout claims the Task; the earlier session does not.
     assert!(store.task_owned(&task.id).unwrap());
@@ -260,12 +260,12 @@ fn checkout_exclusion_preserves_registration_and_retry() {
     assert!(register().is_err());
     assert!(store.task(&task.id).unwrap().unwrap().worktree.is_none());
     assert!(store.task_prs(&task.id).unwrap().is_empty());
-    assert!(store.session_task_ids(&session.id).unwrap().is_empty());
+    assert!(store.session_task(&session.id).unwrap().is_none());
     assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
     drop(exclusion);
     register().unwrap();
     // A conversation already running in the checkout keeps having no Task.
-    assert!(store.session_task_ids(&session.id).unwrap().is_empty());
+    assert!(store.session_task(&session.id).unwrap().is_none());
     assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
     let work = crate::store::task_work::task_work(&store, &task.id).unwrap();
     assert!(work.sessions.is_empty());

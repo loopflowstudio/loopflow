@@ -349,7 +349,7 @@ mod tests {
     fn recorded_step_exits_are_emitted_once_including_steps_between_readings() {
         let (dir, store, task) = fixture();
         let conn = rusqlite::Connection::open(dir.path().join("db")).unwrap();
-        // Graph membership follows the Task checkout on the local Machine.
+        // Each Graph records the Task when it starts in the checkout.
         conn.execute("INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/task') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree", [task.as_str()]).unwrap();
         // A Graph finished before the first reading is not reported.
         store.test_graph(

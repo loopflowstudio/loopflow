@@ -1991,7 +1991,7 @@ pub fn ensure_agent_worktree(
 
 /// Persistent branches keep their checkout and local plans after delivery.
 pub fn is_persistent_worktree(repo: &Path) -> Result<bool, GitError> {
-    Ok(current_branch_config(repo, "loopflow-persistent")?.as_deref() == Some("true"))
+    Ok(current_branch_config(repo, "loopflow-persistent", &["--bool"])?.as_deref() == Some("true"))
 }
 
 /// Keep `branch`'s checkout and local plans after delivery.
@@ -2003,7 +2003,7 @@ pub fn mark_persistent(repo: &Path, branch: &str) -> Result<(), GitError> {
 /// that branch still exists locally. A deleted base leaves the checkout
 /// following the default branch again.
 pub fn stacked_base(repo: &Path) -> Result<Option<String>, GitError> {
-    match current_branch_config(repo, "loopflow-base")? {
+    match current_branch_config(repo, "loopflow-base", &[])? {
         Some(base) if branch_exists(repo, &base)? => Ok(Some(base)),
         _ => Ok(None),
     }
@@ -2015,14 +2015,20 @@ pub fn record_stacked_base(repo: &Path, branch: &str, base: &str) -> Result<(), 
 }
 
 /// `branch.<current>.<key>` from Git config; `None` when detached or unset.
-fn current_branch_config(repo: &Path, key: &str) -> Result<Option<String>, GitError> {
+fn current_branch_config(
+    repo: &Path,
+    key: &str,
+    options: &[&str],
+) -> Result<Option<String>, GitError> {
     let Some(branch) = current_branch(repo)? else {
         return Ok(None);
     };
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
-        .args(["config", "--get", &format!("branch.{branch}.{key}")])
+        .arg("config")
+        .args(options)
+        .args(["--get", &format!("branch.{branch}.{key}")])
         .output()?;
     match output.status.code() {
         Some(0) => Ok(Some(
@@ -2782,6 +2788,27 @@ mod tests {
         );
         assert_eq!(recovered.branch, persistent.branch);
         assert!(super::is_clean(&repo).unwrap());
+    }
+
+    #[test]
+    fn persistence_uses_git_boolean_values() {
+        let repo = init_repo();
+        git(repo.path(), &["commit", "--allow-empty", "-m", "initial"]);
+        for (value, expected) in [("yes", true), ("off", false)] {
+            git(
+                repo.path(),
+                &["config", "branch.main.loopflow-persistent", value],
+            );
+            assert_eq!(
+                super::is_persistent_worktree(repo.path()).unwrap(),
+                expected
+            );
+        }
+        git(
+            repo.path(),
+            &["config", "branch.main.loopflow-persistent", "invalid"],
+        );
+        assert!(super::is_persistent_worktree(repo.path()).is_err());
     }
 
     #[test]

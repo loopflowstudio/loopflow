@@ -3504,9 +3504,8 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
     use crate::store::ProcessIdentityEvidence;
     let graph = store
         .sqlite
-        .task_graphs(&task.id)
+        .latest_task_graph(&task.id)
         .map_err(task_error)?
-        .pop()
         .filter(|graph| {
             crate::process::RecordedProcess::from(&graph.run).evidence()
                 != ProcessIdentityEvidence::Dead

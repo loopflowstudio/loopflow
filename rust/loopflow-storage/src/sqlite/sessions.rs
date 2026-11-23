@@ -253,7 +253,7 @@ pub(super) fn primary_scope_sql(s: &str) -> String {
 const SESSION_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
     s.completed_at,s.created_at,s.request,s.interactive,s.repo,
     s.task_id,s.wave_id,", session_graph!(), " AS graph_lf_process_id,s.work_source,s.bound_at,
-    s.input_published,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), " AS node,", session_step!("iterations"), " AS iterations,json_extract(c.payload,'$.caller_key') AS caller_artifact_key,s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
+    s.input_published,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), " AS node,", session_step!("iterations"), " AS iterations,json_extract(c.payload,'$.caller_key') AS caller_artifact_key,s.current_capture,s.opened_at FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<LfSession>> {
     Ok((|| {
@@ -390,10 +390,25 @@ fn inventory_query(
         ));
     }
     if let Some(task) = &filter.task {
-        let task = bind(Value::Text(task.clone()));
+        let value = bind(Value::Text(task.clone()));
+        if TaskId::parse(task).is_ok() {
+            sql.push_str(&format!(
+                " AND {}",
+                super::task_work::session_in_task("s", &value)
+            ));
+        } else {
+            sql.push_str(&format!(
+                " AND {} AND s.task_id IN (SELECT id FROM tasks WHERE id={value} OR issue_identifier={value} OR external_issue_id={value})",
+                super::task_work::counts_for_task("s")
+            ));
+        }
+    }
+    if let Some(wave) = &filter.wave {
+        let wave = bind(Value::Text(wave.to_string()));
         sql.push_str(&format!(
-            " AND s.id IN ({})",
-            super::task_work::session_ids(&task)
+            " AND (s.wave_id={wave} OR ({} AND s.task_id IN (
+                SELECT t.id FROM projects p JOIN tasks t ON t.project_id=p.id WHERE p.wave_id={wave})))",
+            super::task_work::counts_for_task("s")
         ));
     }
     if let Some(primary) = filter.primary {
@@ -407,10 +422,9 @@ fn inventory_query(
         });
     }
     if filter.orphan {
-        sql.push_str(&format!(
-            " AND s.wave_id IS NULL AND NOT EXISTS ({})",
-            super::task_work::session_tasks("s")
-        ));
+        sql.push_str(
+            " AND s.wave_id IS NULL AND (s.task_id IS NULL OR s.primary_scope IS NOT NULL)",
+        );
     }
     if let Some(search) = &filter.search {
         let search = bind(Value::Text(search.clone()));
@@ -457,7 +471,6 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         (gs.seq=(SELECT MAX(later.seq) FROM graph_process_steps later WHERE later.graph_lf_process_id=gs.graph_lf_process_id)),
         w.slug,
         COALESCE(captured.independent=1,0),
-        (SELECT json_group_array(id) FROM ({})),
         {scope},
         {available},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
@@ -481,7 +494,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         LEFT JOIN graph_processes graph ON graph.lf_process_id=gs.graph_lf_process_id
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
-        ORDER BY {order}", super::task_work::session_tasks("a"),
+        ORDER BY {order}",
         scope = primary_scope_sql("a"),
         task_state = super::durable::task_state_sql("t"),
         here = super::session_recovery::task_conversation_here_sql("a", "t", "pc"))
@@ -510,10 +523,10 @@ fn read_summary(
                     id,
                     started_at: row.get::<_, Option<i64>>(18)?.unwrap_or_default(),
                     ended_at: row.get(19)?,
-                    pid: row.get(36)?,
-                    os_started_at: row.get(37)?,
-                    exit_code: row.get(38)?,
-                    error: row.get(39)?,
+                    pid: row.get(35)?,
+                    os_started_at: row.get(36)?,
+                    exit_code: row.get(37)?,
+                    error: row.get(38)?,
                 };
                 Some(crate::session::GraphProcessSummary {
                     id: run.id.to_string(),
@@ -531,15 +544,15 @@ fn read_summary(
             }
             None => None,
         };
-        let agent_process_id: Option<loopflow_model::id::AgentProcessId> = row.get(29)?;
+        let agent_process_id: Option<loopflow_model::id::AgentProcessId> = row.get(28)?;
         // An agent whose end is recorded is dead by its row; the OS is asked about the rest.
-        let agent_process_evidence = if row.get(40)? {
+        let agent_process_evidence = if row.get(39)? {
             crate::ProcessIdentityEvidence::Dead
         } else {
             projection.evidence(agent_process_id.as_ref())
         };
         let live = agent_process_evidence == crate::ProcessIdentityEvidence::Live;
-        let unviewed: bool = row.get(32)?;
+        let unviewed: bool = row.get(31)?;
         let task_identifier = task_id
             .as_ref()
             .map(|id| super::children::cached_short_task_id(conn, labels, id))
@@ -547,43 +560,42 @@ fn read_summary(
             .flatten();
         Ok(crate::session::SessionSummary {
             transition: super::provider_transitions::latest_in(conn, &row.get::<_, String>(0)?)?,
-            has_provider_history: row.get(34)?,
+            has_provider_history: row.get(33)?,
             preview: row
-                .get::<_, Option<String>>(31)?
+                .get::<_, Option<String>>(30)?
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?
                 .filter(|_| live),
             // A terminal no viewer occupies is gone, whatever its launch recorded.
-            terminal_id: row.get::<_, Option<String>>(30)?.filter(|_| {
+            terminal_id: row.get::<_, Option<String>>(29)?.filter(|_| {
                 live && !unviewed
                     && projection.holder(agent_process_id.as_ref())
                         != crate::ProcessIdentityEvidence::Dead
             }),
             unviewed,
-            held: live && row.get(35)?,
+            held: live && row.get(34)?,
             agent_end: row
-                .get::<_, Option<i64>>(41)?
+                .get::<_, Option<i64>>(40)?
                 .map(|at| {
-                    row.get(42)
+                    row.get(41)
                         .map(|exit_code| crate::session::AgentEnd { at, exit_code })
                 })
                 .transpose()?,
-            starts_since_turn: row.get(43)?,
-            last_started_at: row.get(44)?,
-            start_failure: row.get(45)?,
-            task_ids: serde_json::from_str(&row.get::<_, String>(24)?)?,
-            primary_scope: row.get(25)?,
+            starts_since_turn: row.get(42)?,
+            last_started_at: row.get(43)?,
+            start_failure: row.get(44)?,
+            primary_scope: row.get(24)?,
             agent_process_evidence,
-            available: live && row.get(26)?,
+            available: live && row.get(25)?,
             program_status: row
-                .get::<_, Option<String>>(28)?
+                .get::<_, Option<String>>(27)?
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?
                 .filter(|_| live),
             agent_process_id,
-            task_terminal: row.get(27)?,
-            in_task_checkout: row.get(46)?,
-            launching: row.get(47)?,
+            task_terminal: row.get(26)?,
+            in_task_checkout: row.get(45)?,
+            launching: row.get(46)?,
             captured: row.get(15)?,
             id: row.get(0)?,
             artifact_key: row
@@ -602,7 +614,7 @@ fn read_summary(
             skill: row.get(10)?,
             provider: row.get(11)?,
             account: row
-                .get::<_, Option<String>>(33)?
+                .get::<_, Option<String>>(32)?
                 .map(|id| crate::ProviderAccountId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
@@ -993,11 +1005,8 @@ impl SqliteStore {
     pub fn task_conversations(&self, task: &TaskId) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT candidates.id,candidates.artifact_key,candidates.title,candidates.title_source,candidates.completed_at,candidates.created_at,candidates.request,candidates.interactive,candidates.repo,candidates.task_id,candidates.wave_id,candidates.graph_lf_process_id,candidates.work_source,candidates.bound_at,candidates.input_published,candidates.cwd,candidates.skill,candidates.provider,candidates.model,candidates.node,candidates.iterations,candidates.caller_artifact_key,candidates.current_capture,
-                (SELECT opened_at FROM agent_sessions WHERE id=candidates.id) AS opened_at FROM ({SESSION_SELECT}
-            WHERE s.interactive=1 AND s.completed_at IS NULL
-            AND s.id IN ({})) AS candidates",
-            super::task_work::session_ids("?1")
+            "{SESSION_SELECT} WHERE s.interactive=1 AND s.completed_at IS NULL AND {}",
+            super::task_work::session_in_task("s", "?1")
         ))?;
         let rows = query.query_map([task.as_str()], |row| {
             Ok((read_session(row)?, row.get("opened_at")?))

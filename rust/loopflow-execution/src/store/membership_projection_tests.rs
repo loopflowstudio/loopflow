@@ -60,9 +60,9 @@ fn scoped_sessions_stay_out_of_tasks_and_orphan_pages_include_only_unassociated_
             );
         }
     }
-    assert_eq!(store.session_task_ids("a-task").unwrap(), vec![task]);
+    assert_eq!(store.session_task("a-task").unwrap(), Some(task));
     for id in ["b-repo", "c-wave", "d-orphan", "e-wave-attribution"] {
-        assert!(store.session_task_ids(id).unwrap().is_empty());
+        assert!(store.session_task(id).unwrap().is_none());
     }
     let mut filter = SessionFilter {
         orphan: true,

@@ -173,21 +173,10 @@ pub struct TaskSelectionReading {
 pub struct TaskOrder(HashMap<String, u32>);
 
 impl TaskOrder {
-    pub fn key(
-        &self,
-        project: Option<&str>,
-        rank: u32,
-        id: &str,
-    ) -> (u32, Option<String>, u32, String) {
-        (
-            project
-                .and_then(|project| self.0.get(project))
-                .copied()
-                .unwrap_or(u32::MAX),
-            project.map(str::to_owned),
-            rank,
-            id.to_owned(),
-        )
+    pub fn key(&self, project: Option<&str>, rank: u32, id: &str) -> impl Ord {
+        let project =
+            project.map(|id| (self.0.get(id).copied().unwrap_or(u32::MAX), id.to_owned()));
+        (project.is_none(), project, rank, id.to_owned())
     }
 }
 
@@ -244,7 +233,7 @@ fn task_selection_in(
         .iter()
         .filter(|session| session.completed_at.is_none())
     {
-        for task in &session.task_ids {
+        if let Some(task) = session.member_task() {
             let activity = activity
                 .entry(task.clone())
                 .or_insert_with(|| TaskActivity {

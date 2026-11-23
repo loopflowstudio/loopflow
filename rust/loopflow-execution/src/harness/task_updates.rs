@@ -168,7 +168,7 @@ impl RunObservation {
     }
 }
 
-/// Write what changed on the Session's Tasks, and on the Tasks it conducts,
+/// Write what changed on the Session's Task and on the Tasks it conducts,
 /// since their last readings as Task steers. Only an interactive conversation
 /// reads them, so only one looks; a worker Run pays nothing.
 pub fn write(store: &SqliteStore, session_id: &str) -> StoreResult<()> {
@@ -179,13 +179,12 @@ pub fn write(store: &SqliteStore, session_id: &str) -> StoreResult<()> {
         return Ok(());
     }
     let revision = store.task_update_revision()?;
-    for task in store.session_task_ids(session_id)? {
+    if let Some(task) = store.session_task(session_id)? {
         let quiet = quiet_key(store, &task);
-        if quiet_at(quiet.as_ref()) == Some(revision) {
-            continue;
+        if quiet_at(quiet.as_ref()) != Some(revision) {
+            write_task(store, &task)?;
+            set_quiet_at(quiet, revision);
         }
-        write_task(store, &task)?;
-        set_quiet_at(quiet, revision);
     }
     for (task, closed) in store.session_conducted_tasks(session_id)? {
         let quiet = quiet_key(store, &task);

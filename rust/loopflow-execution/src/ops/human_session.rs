@@ -851,18 +851,6 @@ pub async fn list(
     store: &SharedStore,
     filter: &crate::session::SessionFilter,
 ) -> Result<Vec<SessionRecord>> {
-    // Association filters apply after the summaries and before pagination,
-    // so raw conversations no Session records are filtered the same way.
-    let association_filter =
-        filter.orphan || filter.task.is_some() || filter.wave.is_some() || filter.on.is_some();
-    let mut selection = filter.clone();
-    if association_filter {
-        selection.task = None;
-        selection.wave = None;
-        selection.orphan = false;
-        selection.on = None;
-        selection.limit = 0;
-    }
     let on = match &filter.on {
         Some(raw) => Some(
             crate::config::Agent::parse(raw)
@@ -870,59 +858,52 @@ pub async fn list(
         ),
         None => None,
     };
-    let mut sessions = Vec::new();
+    let mut selection = filter.clone();
+    let task = match &filter.task {
+        Some(selector) => {
+            let Some(id) = crate::store::children::resolve_task_id(&store.sqlite, selector, None)?
+            else {
+                return Ok(Vec::new());
+            };
+            selection.task = Some(id.to_string());
+            Some(id)
+        }
+        None => None,
+    };
+    // Harness selection uses the parsed agent below, before taking the page.
+    if on.is_some() {
+        selection.limit = 0;
+    }
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    for session in store.session_summaries(&selection, now).await? {
+    let mut sessions = Vec::new();
+    for summary in store.session_summaries(&selection, now).await? {
+        if on.as_ref().is_some_and(|agent| !runs_on(agent, &summary)) {
+            continue;
+        }
         sessions.push(summary_surface(
-            &session,
-            ending_here(&store.sqlite, &session, now),
+            &summary,
+            ending_here(&store.sqlite, &summary, now),
         ));
+        if sessions.len() == filter.limit {
+            break;
+        }
     }
     workspace::associate(store, &mut sessions).await?;
     turns::read(&store.sqlite, &mut sessions)?;
-    let task = match &filter.task {
-        Some(selector) => crate::store::children::resolve_task_id(&store.sqlite, selector, None)?,
-        None => None,
-    };
-    let in_task = |session: &SessionRecord| {
-        filter.task.is_none()
-            || task
-                .as_ref()
-                .is_some_and(|task| session.task_ids.contains(task))
-    };
-    let wave_tasks = match &filter.wave {
-        Some(wave) => store.sqlite.task_ids_in_wave(wave)?,
-        None => Default::default(),
-    };
-    let in_work = |session: &SessionRecord| {
-        (!filter.orphan || (session.task_ids.is_empty() && session.wave_id.is_none()))
-            && in_task(session)
-            && (filter.wave.is_none()
-                || session.wave_id == filter.wave
-                || session
-                    .task_ids
-                    .iter()
-                    .any(|task| wave_tasks.contains(task)))
-    };
-    if association_filter {
-        sessions.retain(|session| {
-            in_work(session) && on.as_ref().is_none_or(|on| runs_on(on, session))
-        });
-        sessions = sessions
-            .into_iter()
-            .take(if filter.limit == 0 {
-                usize::MAX
-            } else {
-                filter.limit
-            })
-            .collect();
-    }
     if lists_raw(filter) {
+        let wave_tasks = match &filter.wave {
+            Some(wave) => Some(store.sqlite.task_ids_in_wave(wave)?),
+            None => None,
+        };
         let raw = turns::raw(&store.sqlite, filter.repo.as_deref())?;
-        sessions.extend(
-            raw.into_iter()
-                .filter(|raw| (!filter.available || raw.availability.is_some()) && in_work(raw)),
-        );
+        sessions.extend(raw.into_iter().filter(|raw| {
+            (!filter.available || raw.availability.is_some())
+                && (!filter.orphan || raw.task_ids.is_empty())
+                && task.as_ref().is_none_or(|id| raw.task_ids.contains(id))
+                && wave_tasks
+                    .as_ref()
+                    .is_none_or(|ids| raw.task_ids.iter().any(|id| ids.contains(id)))
+        }));
     }
     Ok(sessions)
 }
@@ -971,7 +952,7 @@ pub fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
 }
 
 /// Whether `session` ran on the `--on` harness, and on its model when one is named.
-fn runs_on(on: &crate::config::Agent, session: &SessionRecord) -> bool {
+fn runs_on(on: &crate::config::Agent, session: &crate::session::SessionSummary) -> bool {
     session.provider.as_deref() == Some(on.harness.as_str())
         && (on.model.is_none() || on.model == session.model)
 }
@@ -1040,7 +1021,7 @@ fn summary_surface(
         availability: session_availability(session),
         program_status: session.program_status.clone(),
         agent_process_id: session.agent_process_id.clone(),
-        task_ids: session.task_ids.clone(),
+        task_ids: session.member_task().cloned().into_iter().collect(),
         id: session.id.clone(),
         workspace: None,
         interactive: session.interactive,
@@ -1814,7 +1795,7 @@ pub async fn surface(store: &SharedStore, session: &LfSession) -> Result<Session
         availability: session_availability(&metadata),
         program_status: metadata.program_status.clone(),
         agent_process_id: metadata.agent_process_id.clone(),
-        task_ids: store.sqlite.session_task_ids(&session.id)?,
+        task_ids: metadata.member_task().cloned().into_iter().collect(),
         id: session.id.clone(),
         workspace: None,
         interactive: session.interactive,

@@ -121,6 +121,7 @@ pub struct GraphStep {
 /// One Graph run as it recorded itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphExecution {
+    pub task_id: Option<loopflow_model::durable::TaskId>,
     pub run: Execution,
     /// The repository and directory the Graph ran in.
     pub repo: Option<String>,

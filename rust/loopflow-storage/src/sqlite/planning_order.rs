@@ -10,15 +10,34 @@ use serde_json::json;
 
 use crate::work::task::Task;
 use crate::{StoreError, StoreResult};
-use loopflow_model::durable::ProjectId;
+use loopflow_model::durable::{ProjectId, TaskId};
 
 pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResult<()> {
-    let project = task.project_id.as_ref();
-    let previous = siblings_in(conn, task)?;
-    let mut desired = previous.clone();
-    desired.retain(|id| id != task.id.as_str());
-    desired.insert((rank as usize).min(desired.len()), task.id.to_string());
-    if previous != desired {
+    place_in_order(
+        conn,
+        &task.id,
+        task.project_id.as_ref(),
+        siblings_in(conn, task)?,
+        rank as usize,
+    )?;
+    Ok(())
+}
+
+fn place_in_order(
+    conn: &Connection,
+    task: &TaskId,
+    project: Option<&ProjectId>,
+    mut order: Vec<String>,
+    position: usize,
+) -> StoreResult<Vec<String>> {
+    let from = order
+        .iter()
+        .position(|id| id == task.as_str())
+        .ok_or(StoreError::NotFound)?;
+    let to = position.min(order.len() - 1);
+    if from != to {
+        let moved = order.remove(from);
+        order.insert(to, moved);
         if let Some(project) = project {
             let base = observed_order(conn, project)?.map(|value| json!({"value":value}));
             tracker_actions::enqueue(
@@ -26,13 +45,13 @@ pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResu
                 &ActionOwner::Project(project.clone()),
                 ActionKind::Order,
                 None,
-                &json!(desired),
+                &json!(order),
                 base.as_ref(),
             )?;
         }
-        apply_order(conn, project, &desired, WriteOrigin::Local)?;
+        apply_order(conn, project, &order, WriteOrigin::Local)?;
     }
-    Ok(())
+    Ok(order)
 }
 
 /// `task` takes `target`'s place among `target`'s Project's Tasks, or among
@@ -44,25 +63,16 @@ pub(super) fn move_in(conn: &Connection, task: &Task, target: &Task) -> StoreRes
             task.identifier, target.identifier
         )));
     }
-    let moved;
-    let task = if task.project_id == target.project_id {
-        task
-    } else {
-        super::task_content::move_task_in(
-            conn,
-            &task.id,
-            task.project_id.as_ref(),
-            target.project_id.as_ref(),
-        )?;
-        moved = super::children::task_on(conn, &task.id)?.ok_or(StoreError::NotFound)?;
-        &moved
-    };
-    let position = siblings_in(conn, task)?
+    let project = target.project_id.as_ref();
+    if task.project_id != target.project_id {
+        super::task_content::move_task_in(conn, &task.id, task.project_id.as_ref(), project)?;
+    }
+    let order = siblings_in(conn, target)?;
+    let position = order
         .iter()
         .position(|id| id == target.id.as_str())
         .ok_or(StoreError::NotFound)?;
-    reorder_in(conn, task, position as u32)?;
-    siblings_in(conn, task)
+    place_in_order(conn, &task.id, project, order, position)
 }
 
 /// The Tasks `task` is ranked among, in rank order. Ties break by id, as

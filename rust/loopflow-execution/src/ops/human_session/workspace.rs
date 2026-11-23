@@ -21,8 +21,7 @@ pub struct SessionWorkspace {
 
 /// Where each listed Session's directory sits: the Git worktree holding it and
 /// the Task whose checkout that worktree is, by `task_checkout_owner`'s rule
-/// (root equality, lower id on a shared root). Presentation only: a Session's
-/// Tasks are the one it recorded as it started.
+/// (root equality, lower id on a shared root). A Session records its own Task separately.
 #[derive(Debug)]
 struct WorkspaceResolver {
     home: MachineId,
@@ -36,14 +35,18 @@ impl WorkspaceResolver {
         checkouts.sort_by(|a, b| a.task_id.as_str().cmp(b.task_id.as_str()));
         let mut resolver = Self {
             home,
-            checkouts,
+            checkouts: Vec::with_capacity(checkouts.len()),
             roots: HashMap::new(),
             owners: HashMap::new(),
         };
-        for checkout in resolver.checkouts.clone() {
+        for checkout in checkouts {
             if let Some(root) = resolver.root(&checkout.worktree) {
-                resolver.owners.entry(root).or_insert(checkout.task_id);
+                resolver
+                    .owners
+                    .entry(root)
+                    .or_insert_with(|| checkout.task_id.clone());
             }
+            resolver.checkouts.push(checkout);
         }
         resolver
     }

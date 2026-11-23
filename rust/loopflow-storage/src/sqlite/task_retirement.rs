@@ -77,7 +77,7 @@ impl SqliteStore {
              JOIN held_terminals t ON t.id=s.held_terminal_id
              WHERE tw.id=?1 AND s.interactive=1 AND s.completed_at IS NULL AND t.ended_at IS NULL
                AND {terminal_due}",
-            members = super::task_work::session_membership("s"),
+            members = super::task_work::session_in_task("s", "tw.id"),
             terminal_due = due("COALESCE(t.viewer_hold_at,t.created_at)"),
         ))?;
         let terminals = query
@@ -129,9 +129,9 @@ impl SqliteStore {
         let mut query = conn.prepare(&format!(
             "SELECT t.id,t.viewer_hold,t.ended_at IS NOT NULL,t.viewer_hold_at FROM held_terminals t
              WHERE t.viewer_hold IS NOT NULL
-               AND t.id IN (SELECT s.held_terminal_id FROM agent_sessions s WHERE s.id IN ({sessions}))
+               AND t.id IN (SELECT s.held_terminal_id FROM agent_sessions s WHERE {sessions})
              ORDER BY 1",
-            sessions = super::task_work::session_ids("?1")
+            sessions = super::task_work::session_in_task("s", "?1")
         ))?;
         let rows = query.query_map([task.as_str()], |r| {
             Ok((
@@ -176,10 +176,10 @@ impl SqliteStore {
                CROSS JOIN task_checkouts c ON c.task_id=a.id
                WHERE a.abandoned_at IS NOT NULL
                AND NOT EXISTS(SELECT 1 FROM task_retirements WHERE task_id=a.id)
-             UNION SELECT tw.id FROM hosted h CROSS JOIN tasks tw ON tw.id IN ({members})
+             UNION SELECT tw.id FROM hosted h CROSS JOIN tasks tw ON {members}
                WHERE tw.planning_state='completed' OR tw.abandoned_at IS NOT NULL
              ORDER BY 1",
-            members = super::task_work::session_tasks("h")
+            members = super::task_work::session_in_task("h", "tw.id")
         ))?;
         let tasks = query
             .query_map([], |r| Ok(TaskId::from_raw(r.get::<_, String>(0)?)))?
@@ -316,12 +316,12 @@ fn viewer_retirements(
     let mut query = conn.prepare(&format!(
         // CROSS JOIN starts from the held terminal's own Sessions.
         "SELECT DISTINCT h.task_id FROM agent_sessions s CROSS JOIN task_retirements h
-         ON h.task_id IN ({}) AND h.phase!='retired'
+         ON {} AND h.phase!='retired'
          WHERE s.held_terminal_id=?1 AND (?2 IS NULL OR h.due_at < ?2+?3)
          AND (h.due_at IS NOT NULL OR h.phase!='waiting' OR h.reason IS NOT ?4
               OR h.retry_at IS NOT NULL OR h.failures!=0)
          ORDER BY h.task_id",
-        super::task_work::session_tasks("s")
+        super::task_work::session_in_task("s", "h.task_id")
     ))?;
     let tasks = query
         .query_map(

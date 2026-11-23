@@ -26,35 +26,27 @@ pub struct TaskWorkRecords {
     pub graph: Option<SavedTaskGraphRow>,
 }
 
-fn tasks(selector: &str) -> String {
-    format!("SELECT id FROM tasks WHERE id={selector} OR issue_identifier={selector} OR external_issue_id={selector}")
-}
-
-/// Whether a Session counts toward its `task_id`: Repository and Wave
-/// primaries keep their own scope.
+/// Repository and Wave primaries keep their own scope, even in a Task checkout.
 pub(super) fn counts_for_task(session: &str) -> String {
     format!("{session}.primary_scope IS NULL")
 }
 
-/// A Session belongs to the Task it recorded when it was created.
-pub(super) fn session_membership(session: &str) -> String {
-    format!("{} AND {session}.task_id=tw.id", counts_for_task(session))
+pub(super) fn session_in_task(session: &str, task: &str) -> String {
+    format!("{session}.task_id={task} AND {}", counts_for_task(session))
 }
 
-pub(super) fn session_ids(selector: &str) -> String {
-    format!(
-        "SELECT a.id FROM agent_sessions a JOIN ({}) tw ON ({})",
-        tasks(selector),
-        session_membership("a")
-    )
-}
-
-/// The Task a Session belongs to, as a subquery of at most one row.
-pub(super) fn session_tasks(session: &str) -> String {
-    format!(
-        "SELECT {session}.task_id AS id WHERE {session}.task_id IS NOT NULL AND {}",
-        counts_for_task(session)
-    )
+fn session_task_in(conn: &rusqlite::Connection, session: &str) -> StoreResult<Option<String>> {
+    Ok(conn
+        .query_row(
+            &format!(
+                "SELECT s.task_id FROM agent_sessions s WHERE s.id=?1 AND {}",
+                counts_for_task("s")
+            ),
+            [session],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten())
 }
 
 /// SQL: directory `cwd` is `root` or below it. Whole path components:
@@ -116,40 +108,15 @@ pub(super) fn starting_task_in(
     if let Some(named) = named {
         return Ok(Some(named.clone()));
     }
-    let here = match cwd {
-        Some(cwd) => checkout_owner_in(conn, std::path::Path::new(cwd))?,
-        None => None,
-    };
-    let task = match here {
-        Some(task) => Some(task),
-        None => conn
-            .query_row(
-                &format!(
-                    "SELECT s.task_id FROM agent_sessions s WHERE s.id=?1 AND {}",
-                    counts_for_task("s")
-                ),
-                [started_by],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()?
-            .flatten(),
-    };
-    Ok(task.map(TaskId::from_raw))
-}
-
-/// The Tasks conducted from the Tasks `members` selects: those filed from one
-/// of them. A conversation conducts its Task's children and nothing below
-/// them; it belongs only to `session_tasks`.
-pub(super) fn conducted_tasks(members: &str) -> String {
-    format!("SELECT id FROM tasks WHERE parent_task_id IN ({members})")
-}
-
-/// Each Task among `task_ids` paired with each Graph started for it. The Graph
-/// recorded its Task at launch, so the pairs come from an index probe per Task.
-fn task_graph_pairs(task_ids: &str) -> String {
-    format!(
-        "SELECT task_id, lf_process_id AS graph FROM graph_processes WHERE task_id IN ({task_ids})"
-    )
+    if let Some(cwd) = cwd {
+        if let Some(task) = checkout_owner_in(conn, std::path::Path::new(cwd))? {
+            return Ok(Some(TaskId::from_raw(task)));
+        }
+    }
+    match started_by {
+        Some(session) => Ok(session_task_in(conn, session.as_str())?.map(TaskId::from_raw)),
+        None => Ok(None),
+    }
 }
 
 pub(super) fn graphs_of_task(
@@ -165,12 +132,11 @@ fn completed_graph_steps(
     conn: &rusqlite::Connection,
     tasks: &[&TaskId],
 ) -> StoreResult<HashMap<TaskId, HashSet<LfProcessId>>> {
-    let mut query = conn.prepare(&format!(
-        "SELECT pairs.task_id, gs.lf_process_id FROM ({}) pairs
-         JOIN graph_process_steps gs ON gs.graph_lf_process_id=pairs.graph
-         WHERE gs.ended_at IS NOT NULL",
-        task_graph_pairs("SELECT value FROM json_each(?1)")
-    ))?;
+    let mut query = conn.prepare(
+        "SELECT g.task_id, gs.lf_process_id FROM graph_processes g
+         JOIN graph_process_steps gs ON gs.graph_lf_process_id=g.lf_process_id
+         WHERE g.task_id IN (SELECT value FROM json_each(?1)) AND gs.ended_at IS NOT NULL",
+    )?;
     let ids = super::children::ids_json(tasks.iter().map(|id| id.as_str()));
     let mut completed = HashMap::<TaskId, HashSet<LfProcessId>>::new();
     for row in query.query_map([&ids], |row| {
@@ -184,46 +150,6 @@ fn completed_graph_steps(
         completed.entry(task).or_default().insert(step);
     }
     Ok(completed)
-}
-
-/// Each of `tasks`' most recently launched Graph, for all of them in one reading.
-fn latest_task_graphs(
-    conn: &rusqlite::Connection,
-    tasks: &[&TaskId],
-) -> StoreResult<HashMap<TaskId, crate::graph_process::GraphExecution>> {
-    let mut latest = HashMap::new();
-    let mut query = conn.prepare(&format!(
-        "SELECT task_id, graph FROM ({}) pairs
-         ORDER BY (SELECT g.rowid FROM graph_processes g WHERE g.lf_process_id=pairs.graph)",
-        task_graph_pairs("SELECT value FROM json_each(?1)")
-    ))?;
-    let ids = super::children::ids_json(tasks.iter().map(|id| id.as_str()));
-    for row in query.query_map([&ids], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })? {
-        let (task, graph) = row?;
-        latest.insert(task, graph);
-    }
-    let ids = super::children::ids_json(latest.values().map(String::as_str));
-    let graphs: HashMap<_, _> = super::graph_inventory::graphs_in(
-        conn,
-        "g.lf_process_id IN (SELECT value FROM json_each(?1))",
-        &[&ids],
-    )?
-    .into_iter()
-    .map(|graph| (graph.run.id.to_string(), graph))
-    .collect();
-    latest
-        .into_iter()
-        .map(|(task, graph)| {
-            let task = TaskId::parse(&task)
-                .map_err(|error| crate::StoreError::InvalidData(error.to_string()))?;
-            let graph = graphs.get(&graph).cloned().ok_or_else(|| {
-                crate::StoreError::InvalidData(format!("Graph {graph} has no Graph process"))
-            })?;
-            Ok((task, graph))
-        })
-        .collect()
 }
 
 /// The Task's Graph row: the graph it took up, the step it stands at or its
@@ -575,9 +501,9 @@ fn members(
     let sessions = tx
         .prepare(&format!(
             "SELECT s.id,s.title,s.interactive,{},s.completed_at
-            FROM agent_sessions s WHERE s.id IN ({}) ORDER BY s.created_at,s.id",
+            FROM agent_sessions s WHERE {} ORDER BY s.created_at,s.id",
             super::sessions::SESSION_GRAPH,
-            session_ids("?1")
+            session_in_task("s", "?1")
         ))?
         .query_and_then([task.as_str()], |row| {
             Ok(TaskSession {
@@ -600,13 +526,13 @@ fn member_graphs(tx: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec<Me
     } else {
         super::durable::task_wave_in(tx, task)?
     };
-    graphs
+    Ok(graphs
         .into_iter()
         .map(|graph| {
-            let entry = super::graph_inventory::entry_of(&graph, Some(task.clone()), wave.clone())?;
-            Ok((graph, entry))
+            let entry = super::graph_inventory::entry_of(&graph, wave.clone());
+            (graph, entry)
         })
-        .collect()
+        .collect())
 }
 
 impl SqliteStore {
@@ -628,8 +554,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
             "SELECT DISTINCT s.held_terminal_id FROM agent_sessions s
-             WHERE s.id IN ({}) AND s.completed_at IS NULL AND s.held_terminal_id IS NOT NULL",
-            session_ids("?1")
+             WHERE {} AND s.completed_at IS NULL AND s.held_terminal_id IS NOT NULL",
+            session_in_task("s", "?1")
         ))?;
         let terminals = query
             .query_map([task.as_str()], |row| row.get(0))?
@@ -652,18 +578,12 @@ impl SqliteStore {
         .collect()
     }
 
-    pub fn session_task_ids(&self, session: &str) -> StoreResult<Vec<TaskId>> {
+    pub fn session_task(&self, session: &str) -> StoreResult<Option<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!(
-            "SELECT tw.id FROM agent_sessions a JOIN tasks tw ON tw.id IN ({})
-             WHERE a.id=?1 ORDER BY tw.id",
-            session_tasks("a")
-        ))?;
-        let rows = query.query_map([session], |row| row.get::<_, String>(0))?;
-        rows.map(|row| {
-            TaskId::parse(&row?).map_err(|error| crate::StoreError::InvalidData(error.to_string()))
-        })
-        .collect()
+        session_task_in(&conn, session)?
+            .map(|id| TaskId::parse(&id))
+            .transpose()
+            .map_err(|error| crate::StoreError::InvalidData(error.to_string()))
     }
 
     /// The Tasks `session` conducts, each with `done` or `abandoned` once it
@@ -676,9 +596,9 @@ impl SqliteStore {
         let mut query = conn.prepare(&format!(
             "SELECT c.id, CASE WHEN c.abandoned_at IS NOT NULL THEN 'abandoned'
                 WHEN c.planning_state='completed' THEN 'done' END
-             FROM agent_sessions a JOIN tasks c ON c.id IN ({})
+             FROM agent_sessions a JOIN tasks c ON {}
              WHERE a.id=?1 ORDER BY c.created_at, c.id",
-            conducted_tasks(&session_tasks("a"))
+            session_in_task("a", "c.parent_task_id")
         ))?;
         let rows = query.query_map([session], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
@@ -763,7 +683,7 @@ impl SqliteStore {
         let conn = connection.savepoint()?;
         open_work_in(
             &conn,
-            &format!("a.task_id=?1 AND {}", counts_for_task("a")),
+            &session_in_task("a", "?1"),
             &format!(
                 "g.lf_process_id IN (SELECT graph FROM ({}))",
                 task_open_graph_pairs("?1")
@@ -1040,8 +960,31 @@ impl SqliteStore {
         &self,
         tasks: &[&TaskId],
     ) -> StoreResult<HashMap<TaskId, crate::graph_process::GraphExecution>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        latest_task_graphs(&conn, tasks)
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        let ids = super::children::ids_json(tasks.iter().map(|task| task.as_str()));
+        // The task_id index ends in rowid, so each Task needs only its last entry.
+        let graphs = super::graph_inventory::graphs_in(
+            &snapshot,
+            "g.rowid IN (SELECT (SELECT last.rowid FROM graph_processes last
+                WHERE last.task_id=task.value ORDER BY last.rowid DESC LIMIT 1)
+                FROM json_each(?1) task)",
+            &[&ids],
+        )?;
+        Ok(graphs
+            .into_iter()
+            .map(|graph| {
+                let task = graph.task_id.clone().expect("selected by Task id");
+                (task, graph)
+            })
+            .collect())
+    }
+
+    pub fn latest_task_graph(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Option<crate::graph_process::GraphExecution>> {
+        Ok(self.latest_task_graphs(&[task])?.remove(task))
     }
 
     /// Each of `tasks`' completed Graph steps, read for all of them at once.

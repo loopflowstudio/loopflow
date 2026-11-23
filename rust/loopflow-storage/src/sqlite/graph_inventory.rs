@@ -61,7 +61,7 @@ pub(super) fn graphs_in(
 ) -> StoreResult<Vec<GraphExecution>> {
     let graph_processes = conn
         .prepare(&format!(
-            "SELECT {},g.repo,g.cwd,g.graph,g.compiled,g.caller_session_id FROM graph_processes g
+            "SELECT {},g.repo,g.cwd,g.graph,g.compiled,g.caller_session_id,g.task_id FROM graph_processes g
              WHERE ({scope}) ORDER BY g.rowid",
             run_columns("g")
         ))?
@@ -73,6 +73,7 @@ pub(super) fn graphs_in(
                 row.get::<_, String>("graph")?,
                 row.get::<_, String>("compiled")?,
                 row.get::<_, Option<loopflow_model::id::LfSessionId>>("caller_session_id")?,
+                row.get::<_, Option<String>>("task_id")?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -103,8 +104,12 @@ pub(super) fn graphs_in(
     }
     graph_processes
         .into_iter()
-        .map(|(run, repo, cwd, name, compiled, caller_session)| {
+        .map(|(run, repo, cwd, name, compiled, caller_session, task)| {
             Ok(GraphExecution {
+                task_id: task
+                    .map(|id| TaskId::parse(&id))
+                    .transpose()
+                    .map_err(invalid)?,
                 compiled: serde_json::from_str::<CompiledGraph>(&compiled)?,
                 steps: steps.remove(run.id.as_str()).unwrap_or_default(),
                 run,
@@ -122,16 +127,7 @@ pub(super) fn entry_in(
     conn: &Connection,
     graph: &GraphExecution,
 ) -> StoreResult<GraphProcessInventoryEntry> {
-    let task = conn
-        .query_row(
-            "SELECT task_id FROM graph_processes WHERE lf_process_id=?1",
-            [graph.id()],
-            |row| row.get::<_, Option<String>>(0),
-        )?
-        .map(|id| TaskId::parse(&id))
-        .transpose()
-        .map_err(invalid)?;
-    let wave = match &task {
+    let wave = match &graph.task_id {
         Some(task) => super::durable::task_wave_in(conn, task)?,
         None => conn
             .query_row(
@@ -147,22 +143,18 @@ pub(super) fn entry_in(
             .transpose()
             .map_err(invalid)?,
     };
-    entry_of(graph, task, wave)
+    Ok(entry_of(graph, wave))
 }
 
-/// The Graph's inventory entry once its Task and Wave are known.
-pub fn entry_of(
-    graph: &GraphExecution,
-    task_id: Option<TaskId>,
-    wave_id: Option<WaveId>,
-) -> StoreResult<GraphProcessInventoryEntry> {
+/// The Graph's inventory entry in its Wave.
+pub fn entry_of(graph: &GraphExecution, wave_id: Option<WaveId>) -> GraphProcessInventoryEntry {
     let run = &graph.run;
-    Ok(GraphProcessInventoryEntry {
+    GraphProcessInventoryEntry {
         summary: GraphProcessSummary {
             id: run.id.to_string(),
             name: graph.name.clone(),
             state: GraphProcessSummaryState::of_run(run.result()),
-            task_id,
+            task_id: graph.task_id.clone(),
             wave_id,
             updated_at: run
                 .ended_at
@@ -171,7 +163,7 @@ pub fn entry_of(
         },
         repo: graph.repo.clone(),
         ended_at: run.ended_at,
-    })
+    }
 }
 
 /// Facts read together for Graph execution: each step's latest captured input,

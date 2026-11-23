@@ -399,16 +399,11 @@ admission requires its Session row before provider launch.
 A Graph run is one `lf graph <graph>`, `lf <graph>` or
 `lf task run ISSUE [GRAPH]` invocation and the steps it starts as child
 processes; `graph_processes` holds the run, `graph_process_steps` its steps.
-Task and taskless execution share the Graph runner. A Task observes every
-LfSession and Graph run associated with its checkout, plus explicitly bound work.
-The shared Rust association reader includes checkout descendants at path component
-boundaries and retained paths after removal. It neither follows causal ancestry
-nor rewrites recorded work or usage. Session inventory exposes `task_ids` so
-Desktop navigation uses the same membership as Task status.
+Task and taskless execution share the Graph runner. A Session or Graph run
+records its Task at launch. Moving the checkout or reusing its path leaves
+that history intact. Session inventory exposes the recorded membership in
+`task_ids`, which Desktop uses for navigation.
 
-No Graph is privileged: every one started for the Task, by naming it or in its
-checkout, is equally its work. The Graph records that Task when it starts, so
-reading a Task's Graphs costs the same however many other Graphs ran.
 `task status`'s `work` contains all Sessions and Graph runs, including
 headless and closed history. Its Task Graph record observes the most recently
 launched Graph: `none`, `latest` or `finished`. Execution also reports an open

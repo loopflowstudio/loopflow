@@ -219,7 +219,17 @@ them. Nothing here needs WindowServer focus.
   before sending the mouse-down; sent the other way a segmented control spins
   in `trackMouse` and the app hangs. Don't `activate` or `makeKey` in the
   hook: every later click goes dead. The first click after a launch is often
-  swallowed; send it twice and look.
+  swallowed; send it twice and look. Test that clicks land with a row click
+  and `lf desktop state --json` (its `destination` changes) before relying
+  on one; in some runs no hook click lands even after a relaunch. Then drive
+  through `lf desktop do <action>` (`new-task` opens the New Task sheet) and
+  the CLI command behind the button (`lf desktop sort`, `lf desktop dashboard
+  move`), and report the click itself as not reached.
+- `snap` with two windows can block the main thread for minutes while
+  `cacheDisplay` renders; wait for the `.out` rather than timing out. Quit
+  a restored second window first: one left on “Updating…” after killed
+  reads keeps a stale list. `lf desktop state --json` lists each window's
+  sidebar rows under `list`, which reads order without a snapshot.
 - `frame <prefix>` writes each window's frame view, title bar and toolbar
   included; `snap` and a locked-screen `screencapture -l` ("could not create
   image from window") both miss the title bar. The hook's windows are never

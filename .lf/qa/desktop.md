@@ -285,7 +285,14 @@ them. Nothing here needs WindowServer focus.
   with "could not create image from window".
 - `tree <window>` prints the window's accessibility elements with frames;
   a lazy grid's cards appear there only once drawn.
-- Not reachable: hover, drag, the jump menu (its shortcut needs
+- `drag <window> <x> <y> <x2> <y2>` sends down, twelve moves and up straight
+  to the window, which drives a SwiftUI `DragGesture`: sidebar Task rows
+  reorder this way. A system drag (`.draggable`/`.dropDestination`, the
+  Working Tasks grid) starts no dragging session from synthesized events.
+- Sidebar row clicks did not select a Task; `open -g -b <bundle id>
+  'loopflow://<repo>/task/<id>'` does.
+- `osascript` quit hung with the screen locked; stop the app by PID.
+- Not reachable: hover, system drags, the jump menu (its shortcut needs
   a key window, and setting `navigation.palette = .search` draws nothing),
   popovers and sheets opened from a "+" (New Wave never appeared), file panels
   and Ghostty faces. The in-process accessibility tree is empty, so there is no
@@ -305,6 +312,18 @@ them. Nothing here needs WindowServer focus.
   `touch <dir>/go`, then "Waiting".
 - Stand-in providers exit at once here, so a Session pane shows "Process
   exited" under its opening overlay. That is the stand-in, not the pane.
+- Rows show Available and Busy from live conversations. Start each Task's
+  work session with `lf checkout <id>` and a stand-in `claude` that stays
+  running (see [session reads](session-reads.md)); attach a viewer
+  (`script -q <log> lf resume --task <id>` fed by `sleep 3000 |`). Available
+  follows the `Stop` hook. Busy comes only from the provider's terminal: the
+  stand-in prints `\x1b]7501;id=turn:state=working\x1b\\` on a prompt and
+  `state=idle` before `Stop` (Program Status, OSC 7501). A provider started
+  before the stand-in learned that keeps the old code: quit it and reopen with
+  `lf resume --task <id>`.
+- The installed `lf` reads a branch private home when the branch adds no
+  migration, so `lf desktop view show [state:busy|state:available]` from both
+  binaries compares old and new order on one store.
 
 # Driving sheets and captures with the screen locked
 

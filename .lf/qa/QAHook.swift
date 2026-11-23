@@ -84,6 +84,24 @@ enum QAHook {
             if let up = event(.leftMouseUp) { NSApp.postEvent(up, atStart: false) }
             if let down = event(.leftMouseDown) { window.sendEvent(down) }
             return "clicked \(window.title) \(point)"
+        case "drag":
+            // A SwiftUI DragGesture: down, a few moves, up, each sent straight to the window.
+            let n = arg.split(separator: " ").compactMap { Double($0) }
+            guard n.count == 5, windows.indices.contains(Int(n[0])) else { return "usage: drag window x y x2 y2" }
+            let window = windows[Int(n[0])]
+            let height = window.contentView?.frame.height ?? window.frame.height
+            func event(_ type: NSEvent.EventType, _ x: Double, _ y: Double) -> NSEvent? {
+                NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: height - y), modifierFlags: [],
+                                   timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                   context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            }
+            event(.leftMouseDown, n[1], n[2]).map(window.sendEvent)
+            for step in 1...12 {
+                let t = Double(step) / 12
+                event(.leftMouseDragged, n[1] + (n[3] - n[1]) * t, n[2] + (n[4] - n[2]) * t).map(window.sendEvent)
+            }
+            event(.leftMouseUp, n[3], n[4]).map(window.sendEvent)
+            return "dragged \(window.title)"
         case "size":
             let n = arg.split(separator: " ").compactMap { Double($0) }
             guard n.count == 3, windows.indices.contains(Int(n[0])) else { return "usage: size window w h" }

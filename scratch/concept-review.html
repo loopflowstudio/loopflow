@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LOO-922 concept review: seeding a new worktree's target</title>
+<style>
+:root { color-scheme: light dark; --bg:#fbfaf7; --fg:#1d1c1a; --mute:#6b675f; --line:#dedad2;
+  --yes:#1f7a3f; --no:#b3261e; --prop:#2f5fb3; --propbg:#eaf0fb; --card:#ffffff; }
+@media (prefers-color-scheme: dark) { :root { --bg:#161513; --fg:#ebe8e2; --mute:#9d988e; --line:#34312c;
+  --yes:#5cc27f; --no:#f07a70; --prop:#86a9f0; --propbg:#1c2433; --card:#1e1d1a; } }
+body { background:var(--bg); color:var(--fg); font:16px/1.55 ui-sans-serif, -apple-system, "Helvetica Neue", sans-serif;
+  max-width: 980px; margin: 2.5rem auto; padding: 0 1.25rem; }
+h1 { font-size:1.6rem; margin-bottom:.2rem } h2 { font-size:1.2rem; margin-top:2.4rem }
+.lede { color:var(--mute); margin-top:0 }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.94rem }
+th, td { text-align:left; vertical-align:top; padding:.55rem .6rem; border-bottom:1px solid var(--line) }
+th { font-weight:600 }
+.yes { color:var(--yes); font-weight:700 } .no { color:var(--no); font-weight:700 }
+code { font: .88em ui-monospace, "SF Mono", Menlo, monospace }
+.prop { background:var(--propbg); border-left:3px solid var(--prop); padding:.1rem .4rem }
+.tag { font-size:.8rem; color:var(--prop); font-weight:600 }
+.cols { display:grid; grid-template-columns:1fr 1fr; gap:1rem }
+.card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:.9rem 1rem }
+.card h3 { margin:.1rem 0 .5rem; font-size:1rem }
+pre { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:.7rem .9rem; overflow-x:auto; font-size:.85rem; margin:.4rem 0 }
+.tree .gone { color:var(--no); text-decoration:line-through } .tree .kept { color:var(--yes) }
+ol.q > li { margin-bottom:.8rem } ol.q ol { list-style:lower-alpha; margin-top:.3rem }
+.chosen::after { content:" (chosen)"; color:var(--prop); font-weight:600 }
+@media (max-width:720px){ .cols { grid-template-columns:1fr } }
+</style>
+</head>
+<body>
+<h1>Seeding a new worktree's Rust target</h1>
+<p class="lede">LOO-922, reviewed before implementation, against base <code>0b3e42bd41</code>.
+Area taken: the whole life of a worktree's build outputs for a loopflow developer. That covers creation
+(cold or seeded), first build, the build cache's one opt-in and one readout, and reclaim by
+<code>lf wt clean --builds</code>. The seed is one stage in that life, so it's reviewed as part of it.</p>
+
+<h2>The interaction</h2>
+<p>You (or lf, for a Task) run <code>git worktree add ../x main</code>. lf's own add
+(<code>rust/loopflow-execution/src/git/mod.rs</code>, <code>add_worktree</code>) never passes
+<code>--no-checkout</code>, so Git's <code>post-checkout</code> hook fires with a null old OID in both cases.
+The hook clones a sibling's compiled units. Your first <code>cargo build -p loopflow --bin lf</code>
+compiles 7 units instead of 256 and uses 87 CPU-s instead of 208.</p>
+<p><b>Failure:</b> every sibling is mid-build, or the volume can't clone. You get no seed and today's
+cold build, and <code>status</code> says <code>seed none</code>. <b>Recovery:</b> nothing to recover.
+The cold path is the fallback, and the rename never exposes a half seed to Cargo.
+<b>Doubt:</b> something looks stale. Cargo's fingerprints decide freshness, and every workspace unit is dirty in a
+new checkout, so the remedy is the usual one: <code>rm -rf target</code>.</p>
+
+<h2>Do the concepts line up?</h2>
+<table>
+<tr><th>What a person knows / does</th><th>What the code has</th><th></th><th>Note</th></tr>
+<tr><td>"Make a new worktree"</td><td><code>git worktree add</code> → post-checkout, <code>$1</code> = null OID</td><td class="yes">yes</td>
+  <td>One trigger covers hand-made and lf-made worktrees. No lf code changes.</td></tr>
+<tr><td>"The build cache": <code>install</code> once, <code>status</code> to look</td><td><code>scripts/build_cache.py</code> for sccache roots and the seed</td><td class="yes">yes</td>
+  <td>Two mechanisms, one idea for the person: new worktrees build fast. One opt-in and one readout fit that idea.</td></tr>
+<tr><td>"A seed": the reusable part of another worktree's build</td><td>Plan: clone all of <code>target/debug</code>, then delete <code>incremental/</code> and top-level files</td><td class="no">no</td>
+  <td>The code defined a seed as "everything minus a cleanup list". That is an implementation accident, and the cleanup list is where a new uplifted file would slip through. <span class="prop">Proposed: the seed is exactly <code>.fingerprint</code>, <code>build</code>, <code>deps</code>.</span></td></tr>
+<tr><td>"Where did this come from?"</td><td><code>target/.loopflow-seed</code> → <code>status</code> line</td><td class="yes">yes</td>
+  <td>Can't be recovered after the first build, so it's worth the one file.</td></tr>
+<tr><td>"Give me a cold target"</td><td><code>LOOPFLOW_SEED_TARGET=0</code> <i>and</i> <code>rm -rf target</code></td><td class="no">no</td>
+  <td>Two ways to do one thing. The benchmark driver already uses <code>rmtree(tree / "target")</code>. <span class="prop">Proposed: no knob.</span></td></tr>
+<tr><td>"Is it fresh?"</td><td>Cargo fingerprints; the seeder never touches mtimes</td><td class="yes">yes</td><td>One source of truth, and it isn't ours.</td></tr>
+<tr><td>"Don't copy a build in progress"</td><td><code>flock(LOCK_EX|LOCK_NB)</code> on each Cargo lock file</td><td class="yes">yes</td><td>The lock Cargo already uses. The probe showed a held lock blocks a second build.</td></tr>
+<tr><td>"I installed it, it should work"</td><td>The hook runs a <i>copy</i> of the script in the Git hooks directory, refreshed only by <code>install</code></td><td class="no">no</td>
+  <td>The person never sees that copy. An existing install would quietly never seed. <span class="prop">Proposed: reinstall once in slice 1, and testing.md says so.</span></td></tr>
+<tr><td>"Free disk" (<code>lf wt clean --builds</code>)</td><td><code>build_cleanup.rs</code> sums <code>st_blocks</code></td><td class="yes">yes*</td>
+  <td>It counts shared clone blocks at full size. It overstates what it frees and reaps fewer roots per 64 GiB pass, but deletes nothing wrongly. Noted, left alone.</td></tr>
+</table>
+
+<h2>Biggest mismatch: what a seed is</h2>
+<div class="cols">
+<div class="card"><h3>Before (plan as written)</h3>
+<pre class="tree">clonefile(source/target/debug → debug.seeding)
+debug.seeding/
+  .fingerprint/   <span class="kept">kept</span>
+  build/          <span class="kept">kept</span>
+  deps/           <span class="kept">kept</span>
+  examples/       <span class="kept">kept</span>
+  <span class="gone">incremental/</span>   rm -rf after clone
+  <span class="gone">lf, lf.d, *.rlib</span>  rm after clone
+  .cargo-lock …   cloned
+rename → debug</pre>
+<p>Correctness depends on the delete list covering every top-level file Cargo uplifts. Deleting
+<code>incremental/</code> takes time proportional to its file count.</p></div>
+<div class="card"><h3>After <span class="tag">PROPOSED</span></h3>
+<pre class="tree">mkdir debug.seeding
+for e in .fingerprint build deps:
+    clone(source/target/debug/e → debug.seeding/e)
+rename → debug</pre>
+<p>Three clones and no delete step. A stale <code>lf</code> binary can't arrive, because nothing at the top level
+is copied. A source missing one of the three is skipped. A clone that fails partway removes
+<code>debug.seeding</code>. Fixture 4 now patches the clone to fail after the first entry, which replaces the
+plan's "forced <code>cp</code> failure" (the plan doesn't use <code>cp</code> on macOS).</p></div>
+</div>
+
+<h2>What this review didn't change</h2>
+<p>The trigger, the lock check, the atomic rename, Cargo-owned freshness and the "never a full copy" rule
+all survive the counterexamples I tried:</p>
+<ul>
+<li>A Task worktree made by lf: hook fires.</li>
+<li>A sibling mid-build: skipped.</li>
+<li>A sibling reaped by cleanup mid-clone: the clone fails, or a missing output dirties its unit.</li>
+<li>A different Cargo.lock or toolchain: mismatched units compile.</li>
+<li>Another volume: EXDEV, no seed.</li>
+</ul>
+<p>The remaining ~200 CPU-s of a fresh <i>test</i> build is workspace libraries in the incremental test
+profile. No seed reaches it, and it stays outside this work (see <code>scratch/questions.md</code>).</p>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Opting out of seeding:
+  <ol><li class="chosen">No knob; <code>rm -rf target</code> after the add.</li>
+  <li>Keep <code>LOOPFLOW_SEED_TARGET=0</code> to skip the 2–7 s clone.</li></ol></li>
+<li>What a seed contains:
+  <ol><li class="chosen">Exactly <code>.fingerprint</code>, <code>build</code>, <code>deps</code>.</li>
+  <li>The whole <code>target/debug</code> minus a delete list (the original plan).</li></ol></li>
+<li>Choosing the source:
+  <ol><li class="chosen">Newest <code>.fingerprint</code> mtime among quiescent siblings.</li>
+  <li>Prefer the main checkout.</li>
+  <li>Prefer the sibling with the closest merge-base.</li></ol></li>
+<li>The hook's stale script copy:
+  <ol><li class="chosen">Reinstall once, documented in testing.md.</li>
+  <li>The hook runs the checkout's own <code>scripts/build_cache.py</code> when present, else its copy.</li></ol></li>
+<li>Test-profile workspace libraries (~200 CPU-s):
+  <ol><li class="chosen">Leave to LOO-921's edit-loop decision.</li>
+  <li>File a Task measuring per-package <code>incremental = false</code> for crates not being edited.</li></ol></li>
+</ol>
+</body>
+</html>

@@ -7,6 +7,8 @@
   but costs the repeated-edit loop LOO-921 measured (execution edit 15 s vs
   86 s). It is left as is; a separate Task could measure per-package
   `incremental = false` for non-edited crates.
-- Seeding is on by default wherever `build_cache.py install` ran, and
-  `LOOPFLOW_SEED_TARGET=0` skips it. This was chosen over opt-in because install
-  is already the opt-in, and the probe showed −58% CPU on a fresh `lf` build.
+- Seeding is on wherever `build_cache.py install` ran, with no knob; a cold
+  target is `rm -rf target`. Chosen over opt-in because install is already the
+  opt-in, and the probe showed −58% CPU on a fresh `lf` build. An env-var
+  opt-out was dropped in concept review as a duplicate of deleting the
+  directory.

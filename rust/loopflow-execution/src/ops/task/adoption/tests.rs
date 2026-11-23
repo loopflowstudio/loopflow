@@ -186,13 +186,13 @@ fn creation_adopts_only_the_selected_work() {
     assert_eq!(table.primary(&plain), None);
     assert_eq!(table.session(&research).task_id, None);
 
-    // A checkout alone selects no primary, however recent; the conversation
-    // open in it becomes the Task's work.
+    // A checkout alone selects no primary, however recent, and the
+    // conversation already open in it stays out of the Task.
     let adopted = table.create("Prototype", None, Some(&root)).unwrap();
     assert_eq!(adopted.worktree.as_deref(), Some(root.as_path()));
     assert_eq!(adopted.branch, "prototype");
     assert_eq!(table.primary(&adopted), None);
-    assert_eq!(table.session(&research).task_id, Some(adopted.id.clone()));
+    assert_eq!(table.session(&research).task_id, None);
     assert_eq!(
         table.create("Retry", None, Some(&root)).unwrap().id,
         adopted.id,
@@ -214,6 +214,35 @@ fn creation_adopts_only_the_selected_work() {
         crate::git::current_branch(&root).unwrap().as_deref(),
         Some("prototype")
     );
+}
+
+#[test]
+fn a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout() {
+    let table = Table::new(false);
+    let outer_root = table.worktree("outer");
+    let outer = table.create("Outer", None, Some(&outer_root)).unwrap();
+    let nested_path = outer_root.join("nested");
+    git(
+        &table.main(),
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "nested",
+            nested_path.to_str().unwrap(),
+        ],
+    );
+    let nested_root = nested_path.canonicalize().unwrap();
+
+    let nested = table.create("Nested", None, Some(&nested_root)).unwrap();
+    assert_ne!(nested.id, outer.id);
+    assert_eq!(nested.worktree.as_deref(), Some(nested_root.as_path()));
+    assert_eq!(table.task(&outer.id).worktree, Some(outer_root.clone()));
+    assert_eq!(
+        table.create("Retry", None, Some(&outer_root)).unwrap().id,
+        outer.id
+    );
+    assert_eq!(table.count("tasks"), 2);
 }
 
 #[test]

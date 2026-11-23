@@ -1,58 +1,68 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>LOO-937 QA on 00c1c4168a</title>
+<html><head><meta charset="utf-8"><title>LOO-937 QA on c5fe7709b5</title>
 <style>
 body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
 pre{background:#f5f5f2;padding:.8em;overflow-x:auto;font-size:13px}
 h2{margin-top:2em}.ok{color:#176b2c}.warn{color:#9a5b00}
 </style></head><body>
-<h1>LOO-937 QA: Task membership from the recorded Task, on 00c1c4168a</h1>
-<p>Branch <code>lf</code> (debug build) against private homes under <code>/tmp/lf-qa-937*</code>, with stand-in <code>claude</code>/<code>codex</code> that exit 1. Baseline: the released <code>lf 0.16.0+5d5bf92c7</code> from <code>/Applications/Loopflow.app</code>. No server was started; nothing was left running.</p>
+<h1>LOO-937 QA: what changed since the last pass (7d8cc0c94a → c5fe7709b5)</h1>
+<p>Branch <code>lf</code> (debug build at <code>c5fe7709b5</code>) in a private world at <code>/tmp/lf-qa-937s</code>: a GitHub-shaped origin rewritten to a local bare repository, <code>.lf/qa/gh-standin.py</code> as <code>gh</code>, a stand-in <code>claude</code> that runs <code>cat &gt; /dev/null</code>, a private <code>LF_HOME</code> and its own <code>lf server run</code>. Everything started here was stopped at the end.</p>
+<p>Three changes since the last QA: <code>lf sync main</code> ends a <code>--stack</code> checkout's base (93fbc3ded5, plus a fork upstream in c5fe7709b5); taskless open Graphs pair with a Task only at the same worktree root (5eca00f274); Session placement reads checkout paths (c5fe7709b5).</p>
 
-<h2>1. Upgrade: history recorded by released lf, opened by the branch</h2>
-<p>Repository with Tasks A and B adopted from worktrees <code>wt/a</code>, <code>wt/b</code>. In each: <code>lf -b graph qa</code>, <code>lf -b default 'hello'</code>, and a prepared primary in A. Then the branch opened the home (migration 135 applied).</p>
-<pre>br A: sessions ['session_3c3c4c41', 'd219d4f2b7324f35'] runs ['46e98eff', '609f0cd0']
-br B: sessions ['session_f2a3a06b'] runs ['49a12879']</pre>
-<p class="ok">Same lists as before the upgrade.</p>
+<h2>1. A <code>--stack</code> checkout follows main after <code>lf sync main</code></h2>
+<p>Task <code>df60ce</code> checked out and committed; <code>lf wt create child --stack</code> there. Main and the child then both edit <code>a.txt</code>.</p>
+<pre>$ lf sync main                      # no harness configured
+Merging main...
+Launching sync agent to resolve conflicts...
+Error: execution failed: No agent selected. …
+base: qa/df60ce-parent-work         # still stacked
+$ lf sync --abort
+Sync aborted.
+base: qa/df60ce-parent-work         # still stacked
 
-<h2>2. Repository moved, its old path reused by a second clone</h2>
-<p><code>mv repo moved</code>, <code>git worktree repair</code>; <code>git clone origin.git repo</code> with a worktree at the old <code>repo/wt/a</code>, adopted as Task C, which ran a Graph and got a primary. A's Graph runs still record the old <code>repo/wt/a</code> path, now C's checkout.</p>
-<pre>             released lf                      branch
-A  sessions  [session_c3, a6e6f5d11f]         same
-   runs      [4aeefc68]                       same
-C  sessions  [4ee244608d]                     same
-   runs      [b3914df5]                       same
-lf session list --task C   [4ee244608d]       same</pre>
-<p class="ok">No Task picks up another's work through the reused path; <code>lf task status</code> shows each Task's own latest run. Released 0.16 already records the Task at launch, so the two builds agree on new work: what the branch changes for people is old history (backfilled by the migration) and reads that no longer fall back to paths.</p>
-<p>Released lf after the branch migrated the store: <code>lf task list</code> and <code>lf -b graph qa</code> work, and the run records Task A.</p>
+$ lf sync --plan        → base: qa/df60ce-parent-work
+$ lf sync main --manual
+Error: sync onto main failed (conflicts: a.txt)
+base mid-conflict: qa/df60ce-parent-work
+$ echo resolved &gt; a.txt; lf sync --continue
+Sync complete; branch remains local.
+base after: &lt;unset&gt;
+$ lf sync --plan        → base: main
+$ lf pr open --title Child --body b
+created #100 draft …                # stand-in state: head qa/child, base main</pre>
+<p class="ok">The base changes only when the sync completes; an aborted or unfinished sync keeps it. The PR then targets main.</p>
+<pre>child2: lf sync origin/main  → Synced onto origin/main.   base: &lt;unset&gt;
+child3: lf sync              → Synced onto qa/df60ce-parent-work.   base: kept</pre>
+<p class="ok"><code>origin/main</code> clears it too; a plain sync keeps following the parent.</p>
 
-<h2>3. Session list wire</h2>
-<pre>d219d4f2b7324f35  task        ['task_edd3f06add404222a75cc4a8d44fca26']
-72a941fc278f4511  repository  []</pre>
-<p class="ok"><code>task_ids</code> stays a zero-or-one array; a Repository primary names none.</p>
+<h2>2. Taskless open Graphs: nested worktree vs the Task's own root</h2>
+<p>Two live <code>lf -b graph live</code> runs (stand-in step held open): one in a Git worktree nested under Task <code>df60ce</code>'s checkout (<code>.claude/worktrees/nest</code>), one in a plain worktree <code>repo.adopt</code> that <code>lf task create --worktree</code> then adopted as Task <code>f7148a</code>. Both rows record no Task:</p>
+<pre>22188328…|  |…/repo.df60ce-parent-work/.claude/worktrees/nest|
+872fb2a0…|  |…/repo.adopt|
 
-<h2>4. Working-board order</h2>
-<pre>$ lf desktop dashboard move working-tasks/task:&lt;D&gt; --destination task:&lt;A&gt;
-["task_0cef55…","task_edd3f0…","task_7fcbde…"]
-$ lf task list
-0cef55 · — · Task D standalone
-edd3f0 · QA · Task A work
-7fcbde · QA · Task B work
-$ lf desktop dashboard move working-tasks/task:&lt;A&gt; --destination task:&lt;C&gt;
-Error: edd3f0 and a850ba are in different repositories; nothing changed.   (exit 2)</pre>
-<p class="ok">Rank changes and <code>lf task show</code> reports rank 0; a cross-repository move says why.</p>
+df60ce  idle      latest Graph: No Task Graph has run
+f7148a  moving    latest Graph: Graph 872fb2a0… has live or unresolved execution in the Task's work; inspect `lf history show 872fb2a0…` …
+lf task show: df60ce graphs [] · f7148a graphs []
 
-<h2>5. <code>loopflow-persistent</code> read as a Git boolean</h2>
-<p><code>lf wt create persist-qa --persistent</code> writes <code>branch.qa/persist-qa.loopflow-persistent=true</code>. Set to <code>on</code>: <code>lf commit</code> works. Set to <code>ture</code>:</p>
-<pre>Error: git error: read branch.qa/persist-qa.loopflow-persistent: fatal: bad boolean config value 'ture' for 'branch.qa/persist-qa.loopflow-persistent'
-: read branch.qa/persist-qa.loopflow-persistent: fatal: bad boolean config value 'ture' …
-; inspect the affected work before retrying</pre>
-<p class="warn">Refusing is safer than the old silent "not persistent" (landing would remove the checkout), and it names the key. Git's text prints twice: shared Git-error formatting, noted in questions.md, not fixed here.</p>
+$ lf task run f7148a -a claude
+Error: Graph 872fb2a0… has live or unresolved execution in the Task's work; …
+$ lf task run df60ce live -a claude
+df60ce · live from start running as Graph run 6746c513…
+6746c513…|task_df60ce…|…/repo.df60ce-parent-work|      # records its Task
+df60ce  moving</pre>
+<p class="ok">A run in a nested worktree no longer occupies the outer Task: it stays idle and starts. A run at the adopted Task's root blocks a second run and stays out of that Task's history.</p>
+
+<h2>3. Session list</h2>
+<pre>0d14027f2a6b4663  …/repo.df60ce-parent-work  task_ids [task_df60ce…]  workspace task_df60ce…
+lf session list --task df60ce → 0d14027f…  df60ce Parent work
+lf session list --task f7148a → No Sessions.</pre>
+<p class="ok">The Task run's conversation lists under its Task; the adopted Task, whose only work is a taskless run, lists none.</p>
 
 <h2>Where it stands</h2>
 <ul>
-<li>Works: membership through upgrade, move and path reuse; Session list filters; latest Graph per Task; rank moves and the cross-repository refusal; released lf on the migrated store.</li>
-<li>Not reached: Desktop's Working board and Session list on screen (no Dev app build here; the wire they read is unchanged and checked above). History with no recorded Task can't be produced by released 0.16; the migration's backfill is covered by <code>upgrade_records_the_task_each_session_belonged_to_by_path</code> and <code>upgrade_gives_graph_runs_that_named_no_task_theirs</code>.</li>
-<li>Still wrong, minor: duplicated Git error text (above).</li>
+<li>Works: base clearing on <code>main</code> and <code>origin/main</code>, kept through conflict, abort and plain sync; publish onto main afterwards; open-Graph pairing at the root and not in nested worktrees; Task runs record their Task; Session list by Task.</li>
+<li>Not reached: a fork's upstream as the default target (needs a fork-shaped remote; covered by <code>sync_tests</code>); a checkout whose <code>.git</code> file is gone in the Session list (covered by the <code>workspace</code> unit test); Desktop on screen.</li>
+<li>Still rough, minor: <code>lf task status f7148a</code> says the taskless run is "in the Task's work" while <code>lf task show</code> keeps it out of the Task's history (questions.md). The sync merge commit reads "Merge 887dfba…" (a SHA, not "main"); not this change.</li>
 </ul>
-<p>Fixed in this pass: nothing; notes in <code>.lf/qa/server.md</code> now name the released binary and the relocate step released lf needs after a move.</p>
+<p>Fixed in this pass: nothing in code. <code>.lf/qa/stacked-tasks.md</code> now describes base clearing and the <code>--manual</code> route; <code>.lf/qa/server.md</code> describes the live-Graph file, an adopted taskless run and how to stop the world (carrier first, SIGKILL the stand-in).</p>
 </body></html>

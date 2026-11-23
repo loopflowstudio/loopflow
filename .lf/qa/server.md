@@ -192,7 +192,13 @@ adopts a worktree; inside it `lf -b graph qa` records a run,
 `lf -b default hello` a finished headless Session (the stand-in fails the
 turn; the row stays; it must `exit 1` without reading stdin, since `cat` on
 `-p` stream-json never ends) and `lf session resume --prepare --json` the Task's
-primary. A live taskless conversation is `lf -a claude : 'hello'` under a PTY
+primary. A live Graph for that: `.lf/graphs/live.yaml` holding `- step: default`
+(not `skill:`), committed where the run starts, and `default_agent: claude`
+with the `cat > /dev/null` stand-in. A run started before `lf task create
+--worktree` adopts its directory keeps `task_id` NULL and blocks `lf task run`
+there. To stop it all: list PIDs whose cwd is in the world (`lsof -a -d cwd
+-F pn`); kill a `lf task run` carrier first or it relaunches the step, and
+SIGKILL the stand-in `sh` (it waits on `cat` and ignores TERM). A live taskless conversation is `lf -a claude : 'hello'` under a PTY
 driver in a plain worktree, with a stand-in that `exec sleep 300`.
 `lf task show <id>` piped prints JSON: `execution.work.sessions[].id` and
 `execution.work.graph_processes[].id` are a Task's membership; in SQL, a

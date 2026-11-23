@@ -329,3 +329,11 @@ formatting is shared by every Git failure, left for its own change.
   another worktree. Session listing uses the enclosing worktree's recorded
   owner, just as Task lookup does. Sync completion treats the default branch's
   configured upstream as a detach target, including on a fork.
+
+## QA on c5fe7709b5: status wording for a taskless run at a Task's root
+
+`lf task status` on an adopted Task says a taskless run "has live or
+unresolved execution in the Task's work", while `lf task show` keeps the run
+out of the Task's history (by design: it blocks a second run, it isn't the
+Task's). "in the Task's checkout" would match. Not changed: the sentence is
+shared wording outside this Task's slices.

@@ -60,6 +60,12 @@ it into `main`, delete the remote branch and mark the PR `MERGED`: `lf sync`
 in the child then merges main, and `lf pr open` retargets its PR to main.
 `lf task status` in the stacked checkout says "this checkout has no Task".
 
+`lf sync main` (or `origin/main`) there unsets `loopflow-base` once the sync
+completes: a conflict without an agent leaves it set until `lf sync --continue`,
+and `lf sync --abort` keeps it. Resolve by hand with `lf sync main --manual`,
+edit, then `--continue`; without `--manual` the sync launches an agent to
+resolve and fails with no harness selected. `lf sync --plan` prints `base:`.
+
 # A default branch other than `main`
 
 `git init -q --bare -b trunk origin.git`, clone-shaped repo on `trunk`, push,

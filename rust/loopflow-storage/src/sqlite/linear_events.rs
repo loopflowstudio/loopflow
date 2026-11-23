@@ -255,6 +255,7 @@ fn put_project(
         ":team_ids": &team_ids,
         ":description": &project.description,
         ":revision": &project.revision,
+        ":url": &project.url,
     };
     let revision = revision_nanos(project.revision.as_deref())?;
     let previous = conn
@@ -279,13 +280,14 @@ fn put_project(
         }
     }
     conn.execute(
-        "INSERT INTO tracker_projects(repo,tracker,id,observed_at,slug,name,summary,status,team_ids,description,revision,description_revision,description_observed_at)
-         VALUES(:repo,:tracker,:id,:observed_at,:slug,:name,:summary,:status,:team_ids,:description,:revision,
+        "INSERT INTO tracker_projects(repo,tracker,id,observed_at,slug,name,summary,status,team_ids,description,revision,url,description_revision,description_observed_at)
+         VALUES(:repo,:tracker,:id,:observed_at,:slug,:name,:summary,:status,:team_ids,:description,:revision,:url,
              CASE WHEN :description IS NOT NULL THEN :revision END,
              CASE WHEN :description IS NOT NULL THEN :observed_at END)
          ON CONFLICT(repo,tracker,id) DO UPDATE SET
          observed_at=excluded.observed_at,revision=excluded.revision,
          slug=excluded.slug,name=excluded.name,summary=excluded.summary,status=excluded.status,team_ids=excluded.team_ids,
+         url=COALESCE(excluded.url,tracker_projects.url),
          description=COALESCE(excluded.description,tracker_projects.description),
          description_revision=CASE WHEN excluded.description IS NOT NULL THEN excluded.revision ELSE description_revision END,
          description_observed_at=COALESCE(excluded.description_observed_at,description_observed_at)", values,

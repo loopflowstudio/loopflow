@@ -82,3 +82,23 @@ WHERE project_id IS NOT NULL AND kind='link' AND phase IN ('queued','sent','conf
 -- leaving: tracker_projects.initiative_ids LOO-995
 -- leaving: tracker_projects.membership_unresolved LOO-995
 -- leaving: projects.planning_initiatives LOO-995
+-- A Wave's header links its tracker Project, so a read keeps the Project's URL.
+ALTER TABLE tracker_projects ADD COLUMN url TEXT;
+DROP TRIGGER store_revision_tracker_projects_update;
+CREATE TRIGGER store_revision_tracker_projects_update AFTER UPDATE ON tracker_projects
+WHEN NEW.repo IS NOT OLD.repo OR NEW.tracker IS NOT OLD.tracker OR
+    NEW.id IS NOT OLD.id OR NEW.archived IS NOT OLD.archived OR
+    NEW.membership_unresolved IS NOT OLD.membership_unresolved OR
+    NEW.task_order_json IS NOT OLD.task_order_json OR
+    NEW.revision IS NOT OLD.revision OR NEW.slug IS NOT OLD.slug OR
+    NEW.name IS NOT OLD.name OR NEW.summary IS NOT OLD.summary OR
+    NEW.status IS NOT OLD.status OR NEW.krs IS NOT OLD.krs OR
+    NEW.metric_targets IS NOT OLD.metric_targets OR
+    NEW.initiative_ids IS NOT OLD.initiative_ids OR
+    NEW.team_ids IS NOT OLD.team_ids OR NEW.description IS NOT OLD.description OR
+    NEW.description_revision IS NOT OLD.description_revision OR NEW.url IS NOT OLD.url OR
+    (NEW.observed_at IS NULL) IS NOT (OLD.observed_at IS NULL) OR
+    (NEW.description_observed_at IS NULL) IS NOT (OLD.description_observed_at IS NULL)
+BEGIN
+    UPDATE store_revisions SET revision=revision+1 WHERE domain='planning';
+END;

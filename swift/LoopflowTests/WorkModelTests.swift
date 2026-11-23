@@ -190,7 +190,7 @@ struct WorkModelTests {
             .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto")
         var historical = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("wave_detail.json"))) as? [String: Any])
         historical["projects"] = ["state": "ok", "truncated": false, "items": [[
-            "id": "old-plan", "tracker_id": NSNull(), "slug": "old", "name": "Previous",
+            "id": "old-plan", "tracker_id": NSNull(), "url": NSNull(), "slug": "old", "name": "Previous",
             "workflow": "feature", "status": "completed",
             "sync": ["actions": []]
         ]]]

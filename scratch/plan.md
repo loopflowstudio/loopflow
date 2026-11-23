@@ -234,11 +234,33 @@ matrix for gate and CI.
 
 Jack Heart, on `scratch/concept-review.html`'s questions: "1b 2b 3b 4 - w e dont have child waves".
 
-1. Renaming a linked Wave also renames its Linear Project: queue a
-   `project_name` tracker action, as an unlinked rename already does.
-2. Drop the removal line "N Projects stay readable in history" and
-   `WaveRemoval.projects` (wire change: Rust, Swift, DTO fixtures, schema).
-3. Desktop: replace the Wave pane's **Projects** button with the Project's
-   name and its tracker link in the Wave header.
+Built:
+
+1. `relocate_waves` renames the Wave's Project whether or not it is linked;
+   a linked one's new name goes out as a queued `project_name` field action
+   (`tracker_actions::tests::renaming_a_wave_renames_its_project_in_the_tracker_too`).
+2. The removal line for Projects and `WaveRemoval.projects` are gone (Rust,
+   Swift, `wave_removal.json`, schema); completed Tasks keep their line.
+3. Desktop's Wave header shows the Project's name, a link when its URL is
+   known; the Projects button and its sheet in the Wave pane went. The URL is
+   new: Linear's project `url` is read into `tracker_projects.url`
+   (`remove_chapters.sql`, revision trigger includes it), served as
+   `ProjectSummary.url` (required, nullable) and printed by `lf wave status`.
+   Asana Projects carry none yet.
 4. Child Wave Project naming: no change ("we dont have child waves").
 5. Unanswered: the queued create's snapshot stays as built.
+
+Learned: no Project URL existed anywhere before this; "link" meant the
+plumbing above. A Project linked before this branch shows its name without a
+link until the next tracker read sees its URL.
+
+Checks run: storage `renaming_a_wave_renames…`,
+`a_linked_projects_url_is_kept_from_the_tracker_read`,
+`planning_update_triggers_compare_every_column`, migrations; CLI
+`wave_lifecycle::` (pass). For gate: Swift `WaveDetailReadingTests`,
+`DTOFixtureTests`, `WorkModelTests`, `RegistryQueryTests`
+(`scripts/test_desktop.sh`), clippy, the full matrix in CI.
+Swift `WaveDetailReadingTests|DTOFixtureTests|WorkModelTests|RegistryQueryTests|RemoveWaveSheetTests|ServerProtocolTests`:
+150 pass. `ServerProtocolTests` had been failing since slice 2 added
+`project` to `wave.plan.connect`; Swift's `wavePlanConnect` now carries it.
+`status_tests::` passes (one fixture gained `"url": null`); clippy clean.

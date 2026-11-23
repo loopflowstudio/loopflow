@@ -1,5 +1,7 @@
 import Foundation
+import SwiftUI
 import Testing
+import ViewInspector
 
 @testable import Loopflow
 @testable import LoopflowMac
@@ -32,6 +34,26 @@ struct WaveDetailReadingTests {
 
         reading.clear()
         #expect(reading.plan(cached: cached) == cached)
+    }
+
+    @Test("the Wave header names its Project and links it once the tracker has a URL")
+    @MainActor
+    func headerLinksTheProject() throws {
+        let linked = try #require(try planningWave().workMap.projects.items.first)
+        let link = try WaveHeaderProject(project: linked).inspect().find(ViewType.Link.self)
+        #expect(try link.url() == URL(string: "https://linear.app/loopflow/project/current-1a2b3c4d5e6f"))
+        #expect(try link.labelView().text().string() == "current")
+
+        let local = try #require(try planningWave { wave in
+            var projects = wave["projects"] as! [String: Any]
+            var items = projects["items"] as! [[String: Any]]
+            items[0]["url"] = NSNull()
+            projects["items"] = items
+            wave["projects"] = projects
+        }.workMap.projects.items.first)
+        let header = try WaveHeaderProject(project: local).inspect()
+        #expect(throws: (any Error).self) { try header.find(ViewType.Link.self) }
+        #expect(try header.find(text: "current").string() == "current")
     }
 
     /// `wave-1` of the planning fixture, after `edit` reshapes its wire entry.

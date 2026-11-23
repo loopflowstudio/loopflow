@@ -570,7 +570,7 @@ Wave selected.
 ### Rename or remove a Wave
 
 ```bash
-lf wave rename billing payments          # moves files on main; keeps Tasks, ID, and planning
+lf wave rename billing payments          # moves files on main; keeps Tasks and ID; renames its Project, in Linear too
 lf wave remove payments --preview        # preview what happens to Tasks and Sessions
 lf wave remove payments                  # moves open Tasks to the parent Wave or repository
 lf wave remove payments --delete-backlog # delete unstarted Tasks instead; started ones always move

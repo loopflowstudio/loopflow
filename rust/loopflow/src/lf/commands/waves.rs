@@ -371,6 +371,9 @@ pub struct ProjectSummary {
     pub slug: String,
     pub name: String,
     pub status: loopflow_storage::work::project::ProjectStatus,
+    /// Where the tracker shows the Project; `None` until a read sees it.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub url: Option<String>,
 }
 
 async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectSummary> {
@@ -381,6 +384,7 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
             .map(|project| -> Result<ProjectSummary> {
                 Ok(ProjectSummary {
                     sync: store.project_tracker_sync(&project.id)?,
+                    url: store.sqlite.project_url(&project.id)?,
                     tracker_id: project.tracker_id.map(|id| id.as_str().to_owned()),
                     id: project.id.to_string(),
                     slug: project.slug,
@@ -410,6 +414,9 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
                     project.name,
                     project.status.as_str()
                 );
+                if let Some(url) = &project.url {
+                    println!("            {url}");
+                }
                 for line in project.sync.lines() {
                     println!("    {line}");
                 }

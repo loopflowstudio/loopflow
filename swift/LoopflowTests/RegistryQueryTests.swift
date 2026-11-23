@@ -342,6 +342,7 @@ struct RegistryQueryTests {
       {
         "id": "project-1",
         "tracker_id": null,
+        "url": null,
         "sync": {"actions": []},
         "slug": "release-feedback",
         "name": "current",

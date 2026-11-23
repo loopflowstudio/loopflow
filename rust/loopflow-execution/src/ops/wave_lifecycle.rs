@@ -722,11 +722,7 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
         };
         lines.push(format!(
             "{} {verb} readable in history.",
-            count(
-                removal.completed_tasks,
-                "completed Task",
-                "completed Tasks"
-            )
+            count(removal.completed_tasks, "completed Task", "completed Tasks")
         ));
     }
     if removal.sessions > 0 {

@@ -208,6 +208,9 @@ pub struct TrackerProject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub status: ProjectStatus,
+    /// Where the tracker shows this Project; a read from released lf has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
     /// Stable ids of the Linear teams this Project belongs to. A managed Project
     /// must carry exactly the repository Team.
     #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid_vec")]

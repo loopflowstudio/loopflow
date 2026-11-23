@@ -332,6 +332,7 @@ macro_rules! project_fields {
     name
     updatedAt
     archivedAt
+    url
     description
     content
     status { type }
@@ -2088,6 +2089,7 @@ struct ProjectNode {
     #[serde(rename = "archivedAt")]
     archived_at: Option<String>,
     status: ProjectStatusNode,
+    url: Option<String>,
     #[serde(deserialize_with = "Option::deserialize")]
     description: Option<String>,
     #[serde(deserialize_with = "Option::deserialize")]
@@ -2106,6 +2108,7 @@ impl ProjectNode {
             name: self.name,
             summary: self.description.unwrap_or_default(),
             status: self.status.type_,
+            url: self.url,
             team_ids: self.teams.nodes.into_iter().map(|team| team.id).collect(),
         })
     }

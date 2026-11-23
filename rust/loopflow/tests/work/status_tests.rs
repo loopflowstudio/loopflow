@@ -414,7 +414,8 @@ fn wave_status_and_roadmap_list_a_started_project_without_tasks() {
             "slug": project.slug,
             "name": project.name,
             "status": "started",
-            "sync": {"actions": []}
+            "sync": {"actions": []},
+            "url": null
         }],
         "truncated": false
     });

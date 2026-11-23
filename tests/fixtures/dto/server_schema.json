@@ -5586,6 +5586,13 @@
             "string",
             "null"
           ]
+        },
+        "url": {
+          "description": "Where the tracker shows the Project; `None` until a read sees it.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5594,7 +5601,8 @@
         "tracker_id",
         "slug",
         "name",
-        "status"
+        "status",
+        "url"
       ],
       "type": "object"
     },

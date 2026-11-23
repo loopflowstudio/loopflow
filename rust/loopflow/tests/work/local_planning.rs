@@ -1232,6 +1232,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             name: "Product".into(),
             summary: "".into(),
             status: loopflow_execution::work::project::ProjectStatus::Started,
+            url: None,
             team_ids: vec!["fixture-team".into()],
         };
         loopflow_execution::store::sqlite::linear_events::accept_linear_project_in(
@@ -1580,6 +1581,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                     summary: project.summary.clone(),
                     description: Some(project.description.clone()),
                     status: project.status,
+                    url: None,
                     team_ids: vec!["fixture-team".into()],
                     revision: None,
                 };

@@ -23,13 +23,15 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
     public let slug: String
     public let name: String
     public let status: ProjectStatus
+    /// Where the tracker shows this Project, once a read has seen it.
+    public let url: URL?
 
     public func matches(reference: String) -> Bool {
         id == reference || slug == reference || trackerId == reference
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, slug, name, status, sync
+        case id, slug, name, status, sync, url
         case trackerId = "tracker_id"
     }
 
@@ -41,6 +43,7 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
         slug = try values.decode(String.self, forKey: .slug)
         name = try values.decode(String.self, forKey: .name)
         status = try values.decode(ProjectStatus.self, forKey: .status)
+        url = try values.decode(URL?.self, forKey: .url)
     }
 }
 

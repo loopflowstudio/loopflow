@@ -275,3 +275,39 @@ fn unchanged_project_content_saves_nothing_with_and_without_linear_mapping() {
         assert_eq!(store.pending_project_changes(&project).unwrap(), changes);
     }
 }
+
+#[test]
+fn a_linked_projects_url_is_kept_from_the_tracker_read() {
+    let home = tempfile::tempdir().unwrap();
+    let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
+    let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
+    crate::test_fixture::wave(&store, &wave);
+    let read = |revision: &str, url: serde_json::Value| {
+        let observed = serde_json::from_value(serde_json::json!({
+            "id":wave.id().to_string(), "revision":revision, "slug":"product", "name":"Product",
+            "summary":"", "status":"started", "team_ids":["team"], "url":url
+        }))
+        .unwrap();
+        crate::sqlite::linear_events::accept_linear_project_in(
+            &store,
+            wave.id(),
+            &observed,
+            17,
+            crate::planning_sync::TrackerKind::Linear,
+        )
+        .unwrap();
+    };
+    let url = "https://linear.app/loopflow/project/product-1a2b3c4d5e6f";
+    read("2026-10-10T12:00:00Z", url.into());
+    let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
+    assert_eq!(
+        store.project_url(&project.id).unwrap().as_deref(),
+        Some(url)
+    );
+    // A read from a peer on released lf carries no URL; the known one stays.
+    read("2026-10-11T12:00:00Z", serde_json::Value::Null);
+    assert_eq!(
+        store.project_url(&project.id).unwrap().as_deref(),
+        Some(url)
+    );
+}

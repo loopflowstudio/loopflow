@@ -404,6 +404,7 @@ fn mirrored_project(
         summary: String::new(),
         description: None,
         status: loopflow_storage::work::project::ProjectStatus::Backlog,
+        url: None,
         team_ids: vec![team.to_owned()],
     };
     for value in values(action)? {

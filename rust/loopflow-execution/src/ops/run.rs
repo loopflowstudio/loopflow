@@ -1275,6 +1275,7 @@ mod tests {
                 name: "Loopflow API".to_string(),
                 summary: String::new(),
                 status: loopflow_storage::work::project::ProjectStatus::Started,
+                url: None,
                 team_ids: vec!["team-1".to_string()],
             }],
             items: Vec::new(),

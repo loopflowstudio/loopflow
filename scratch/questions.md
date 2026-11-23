@@ -26,17 +26,16 @@
   released lf still send it in Git and hub exchange; nothing here produces it.
 - This repository's own `.lf/wave/*/config.yaml` files still carry
   `linear: initiative:`; released lf reads them, the branch ignores them.
-- A Wave removal summary now always says "N Project(s) stay readable in
-  history", since every Wave has its Project; `WaveRemoval.projects` equals
-  the number of retiring Waves. Kept as is; dropping the line and field is a
-  wire change for another pass.
 - QA 2026-11-23: renaming a Wave left its local Project's name as it was.
-  Concept review chose: an unlinked Project's name follows the rename (plan
-  slice 3); a linked one keeps the tracker's name, nothing is sent.
-- QA 2026-11-23: Desktop's Wave pane still has a **Projects** button listing
-  the Wave's Projects; with one per Wave it lists one. Left as is.
+  Slice 4: the Project's name follows the rename, linked or not; a linked
+  one's new name is sent to the tracker.
 - Renaming a Wave overwrites a local Project name someone edited by hand
   (none of the commands here sets one apart from its Wave's).
 - Concept review after slice 3: a queued Task `create` snapshots
   `task_project`; `retire_wave_in` rewrites it on removal. Reading fields at
   send time instead is a tracker-drain redesign, its own Task (page question 5).
+- Slice 4 kept the Backlog Wave menu's **Projects** item and the historical
+  Project reference that open `WaveProjectsView`; only the Wave pane's
+  button went.
+- Asana Projects have no URL in the header: Asana project reads don't go
+  through `TrackerProject` imports, only mirrored creates.

@@ -32,7 +32,11 @@ struct WaveDetailPane: View {
     let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     @Environment(\.palette) private var palette
-    @State private var showProjects = false
+
+    /// The Wave's one Project, from the live reading once it has arrived.
+    private var project: ProjectPlanningSnapshot? {
+        (streamed?.snapshot?.workMap.projects ?? wave.plan?.projects)?.items.first
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -51,9 +55,6 @@ struct WaveDetailPane: View {
                 .frame(minWidth: 230, idealWidth: 320, maxWidth: 440, maxHeight: .infinity)
             }
         }
-        .sheet(isPresented: $showProjects) {
-            WaveProjectsView(wave: wave.name, repo: repoPath, sourceReference: nil)
-        }
     }
 
     private var header: some View {
@@ -67,8 +68,7 @@ struct WaveDetailPane: View {
 
             Spacer()
 
-            Button("Projects") { showProjects = true }
-                .buttonStyle(LoopflowButtonStyle())
+            if let project { WaveHeaderProject(project: project) }
 
             Button {
                 onClose()
@@ -260,6 +260,27 @@ private struct WavePlanView: View {
         let outcome = MockWaveFixture.detailReading(state: MockWaveFixture.detailState)
         reading = outcome.reading
         isAwaitingDetail = outcome.awaitingFirstRead
+    }
+}
+
+/// The Project's name in the Wave header; a link once the tracker has it.
+struct WaveHeaderProject: View {
+    let project: ProjectPlanningSnapshot
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Group {
+            if let url = project.url {
+                Link(project.name, destination: url)
+                    .foregroundStyle(palette.actionInk)
+                    .help("Open \(project.name) in the tracker")
+            } else {
+                Text(project.name).foregroundStyle(palette.textSecondary)
+            }
+        }
+        .font(Typography.meta)
+        .lineLimit(1)
+        .accessibilityIdentifier("wave-header-project")
     }
 }
 

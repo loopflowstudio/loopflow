@@ -166,6 +166,9 @@ jobs:
       - name: Test native process identity
         run: |
           uv run python scripts/test_network.py cargo test --offline -p loopflow --lib journal::os_process::
+      - name: Test Tailscale App Store and Standalone discovery
+        run: |
+          uv run python scripts/test_network.py cargo test --offline -p loopflow --lib server::mobile::tailscale::macos::
 
   loopflow-ui-test:
     if: inputs.loopflow-ui-test

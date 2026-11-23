@@ -51,7 +51,7 @@ queue, and only where its changes reach them (`scripts/macos_inputs.py`):
 |-----|----------|
 | `loopflow-ui-test` | `swift/` (Desktop and iOS), its build scripts, DTO fixtures, server protocol and Read/Write types, Rust `build.rs` and libghostty-vt pin/patches |
 | `swift-test` | Swift sources, shared DTO fixtures and server types, Desktop build inputs, the scripts and Python check it runs |
-| `macos-process-test` | Rust files containing `target_os = "macos"`, data clones, store copy, OS process identity, `lf install` |
+| `macos-process-test` | Rust files containing `target_os = "macos"`, data clones, store copy, OS process identity, Tailscale endpoint discovery, `lf install` |
 
 CI changes, the classifier, an unknown diff or a failed classifier run all
 three. Ordinary Rust changes reach Swift through the `lf --json` wire, which the

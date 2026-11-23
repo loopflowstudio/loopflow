@@ -46,19 +46,21 @@ final class TaskFilesStore {
     var jumps: FileJumps { browser.jumps }
     var visit: FileVisit? { browser.visit }
 
-    func reveal(_ location: FilePosition, hit: TaskGrepHit? = nil) {
-        browser.open(location.path, automatically: true)
+    /// History traversal has no origin to record. A path without a visit opens rendered.
+    func reveal(_ path: String, at visit: FileVisit?, mode: Mode = .read, from origin: FilePosition? = nil) {
+        let line = visit?.line ?? 1
+        jumps.record(FilePosition(path: path, line: line), from: origin)
+        jumps.dismiss()
+        browser.open(path, automatically: true)
         page = .files
-        mode = .read
+        self.mode = mode
         jumps.target = nil
-        jumps.readingLine = location.line
-        browser.visit = FileVisit(line: location.line, hit: hit, visitID: UUID())
+        jumps.readingLine = line
+        browser.visit = visit
     }
 
     func openMatch(_ hit: TaskGrepHit) {
-        let destination = FilePosition(path: hit.path, line: hit.line)
-        jumps.record(destination, from: jumps.position(in: self))
-        reveal(destination, hit: hit)
+        reveal(hit.path, at: FileVisit(line: hit.line, hit: hit), from: jumps.position(in: self))
     }
 
     func selectFileFromInput(_ path: String) {
@@ -96,12 +98,8 @@ final class TaskFilesStore {
 
     func openPresentation(_ request: FilesBrowserState.Presentation) {
         filePicker = nil
-        let position = FilePosition(path: request.path, line: request.lines?.lowerBound ?? 1)
-        jumps.record(position, from: jumps.position(in: self))
-        reveal(position)
-        // Without a line address, Markdown and HTML open rendered.
-        browser.visit = request.lines.map { FileVisit(line: position.line, hit: nil, visitID: UUID(), lines: $0) }
-        mode = request.mode
+        let visit = request.lines.map { FileVisit(line: $0.lowerBound, lines: $0) }
+        reveal(request.path, at: visit, mode: request.mode, from: jumps.position(in: self))
     }
 
     private(set) var scratchPaths: [String] = []
@@ -142,10 +140,6 @@ final class TaskFilesStore {
     let tree: CheckoutTree
 
     var changeBadges: [String: CheckoutChange] { CheckoutChange.badges(workingChanges?.files ?? []) }
-
-    func moveTree(_ move: CheckoutTree.Move) async {
-        if let file = await tree.move(move) { selectFileFromInput(file) }
-    }
 
     enum Mode: String, CaseIterable {
         case read = "Read"

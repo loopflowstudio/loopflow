@@ -1,11 +1,10 @@
 use std::{path::Path, sync::LazyLock};
 
-use grep_regex::RegexMatcherBuilder;
-use grep_searcher::{sinks::UTF8, SearcherBuilder};
+use grep_matcher::Matcher;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use super::grep::{scan_checkout, MAX_HITS};
+use super::grep::{literal_matcher, scan_checkout, MAX_HITS};
 use super::{file_context, file_store, task_error};
 use crate::ops::OpsResult;
 
@@ -49,25 +48,12 @@ pub fn task_symbols(
         .iter()
         .map(String::as_str)
         .filter(|candidate| path.as_deref().is_none_or(|p| p == *candidate));
-    let matcher = RegexMatcherBuilder::new()
-        .fixed_strings(true)
-        .word(name.chars().all(|c| c.is_alphanumeric() || c == '_'))
-        .build(name)
-        .map_err(task_error)?;
-    let mut searcher = SearcherBuilder::new()
-        .line_number(true)
-        .bom_sniffing(false)
-        .build();
+    let whole_word = name.chars().all(|c| c.is_alphanumeric() || c == '_');
+    let matcher = literal_matcher(name, whole_word)?;
     let stopped = scan_checkout(&checkout.worktree, paths, cancelled, |path, source| {
-        let mut candidate = false;
-        searcher.search_slice(
-            &matcher,
-            source.as_bytes(),
-            UTF8(|_, _| {
-                candidate = true;
-                Ok(false)
-            }),
-        )?;
+        let candidate = matcher
+            .is_match(source.as_bytes())
+            .expect("RegexMatcher cannot fail while matching");
         Ok(!candidate || declarations(path, source, name, &mut result.hits))
     })?;
     result.truncated = stopped || inventory.truncated;

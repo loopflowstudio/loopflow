@@ -31,3 +31,5 @@
 - A scratch write uses the owning Machine’s current directory listing to check which names survived an atomic save. The checkout-wide picker inventory can lag this event by three seconds.
 
 - An explicit presentation keeps its banner through passive writes. Later writes still mark their files in Open & Scratch. Grep returns the byte offset of its cropped excerpt so Desktop can distinguish repeated occurrences after a Unicode prefix.
+
+- Choosing a pending presentation by filename accepts its latest line range and mode with either a click or Return in the navigator. Back returns to the prior reading line.

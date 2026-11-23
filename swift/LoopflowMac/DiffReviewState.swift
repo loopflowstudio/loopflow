@@ -48,7 +48,7 @@ final class DiffReviewState {
     /// A file's changes: the count read with the file list, else its own lines'.
     func changeCount(_ file: ReviewFile, in reader: ReviewReader = .changes) -> Int {
         if rendering(of: file, in: reader) != nil { return 1 }
-        return reader == .changes ? reviewReading.counts[file.path] ?? file.stops.count : file.stops.count
+        return reader == .changes ? reviewReading.filesByPath[file.path]?.changes ?? file.stops.count : file.stops.count
     }
     /// Files' Diff mode: the selected file through the review stream.
     private(set) var fileReview: FileReview?
@@ -146,7 +146,7 @@ final class DiffReviewState {
     func rendering(of file: ReviewFile, in reader: ReviewReader) -> ReviewRendering? {
         if showsDraft(reader) { return nil }
         // Before its patch reads, a file `lf task changes` counted no lines in may be a picture.
-        let awaitingPatch = reader == .changes && isReading(file) && reviewReading.counts[file.path] == 0
+        let awaitingPatch = reader == .changes && isReading(file) && reviewReading.filesByPath[file.path]?.changes == 0
         guard let rendering = ReviewRendering.of(file, awaitingPatch: awaitingPatch) else { return nil }
         return rendering.hasSource && sourceFiles.contains(file.path) ? nil : rendering
     }
@@ -185,7 +185,7 @@ final class DiffReviewState {
         diffTour = tour
         tourAge = age
         let known = Dictionary((review?.files ?? []).map { ($0.path, $0) }) { first, _ in first }
-        let paths = Set(changes.files.map(\.path))
+        let paths = Set(reviewReading.filesByPath.keys)
         let commits = [changes.baseCommit, changes.headCommit]
         if let changed, commits == readCommits {
             unread = paths.filter { unread.contains($0) || known[$0] == nil || TaskFilesStore.touches(changed, $0) }
@@ -211,7 +211,7 @@ final class DiffReviewState {
     private func readPatches() async {
         let generation = reviewGeneration
         guard let changes else { return }
-        let files = Dictionary(changes.files.map { ($0.path, $0) }) { first, _ in first }
+        let files = reviewReading.filesByPath
         let query = self.query, issue = self.issue, base = changes.baseCommit, head = comparison.head
         await withTaskGroup(of: (String, FileReading?).self) { group in
             var running = 0
@@ -238,8 +238,12 @@ final class DiffReviewState {
     /// The next shown file without lines: one near the viewport, else the
     /// first in the stream's order. Hidden files are never read.
     private func nextToRead() -> String? {
-        let waiting = (shownReview?.files ?? []).map(\.path).filter { unread.contains($0) && !reading.contains($0) }
-        return waiting.first(where: nearPaths.contains) ?? waiting.first
+        var first: String?
+        for file in shownReview?.files ?? [] where unread.contains(file.path) && !reading.contains(file.path) {
+            if nearPaths.contains(file.path) { return file.path }
+            if first == nil { first = file.path }
+        }
+        return first
     }
 
     /// A file came into or left the viewport before its lines were read.

@@ -3,7 +3,7 @@ use std::io::{self, Read};
 use std::path::Path;
 
 use grep_matcher::Matcher;
-use grep_regex::RegexMatcherBuilder;
+use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::{sinks::UTF8, SearcherBuilder};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -62,11 +62,7 @@ fn search(
     if query.contains(['\n', '\r']) {
         return Err(task_error("Search for text on a single line."));
     }
-    let matcher = RegexMatcherBuilder::new()
-        .fixed_strings(true)
-        .word(whole_word)
-        .build(query)
-        .map_err(task_error)?;
+    let matcher = literal_matcher(query, whole_word)?;
     let mut searcher = SearcherBuilder::new()
         .line_number(true)
         .bom_sniffing(false)
@@ -117,6 +113,14 @@ fn search(
         },
     )? || inventory.truncated;
     Ok(result)
+}
+
+pub(super) fn literal_matcher(query: &str, whole_word: bool) -> OpsResult<RegexMatcher> {
+    RegexMatcherBuilder::new()
+        .fixed_strings(true)
+        .word(whole_word)
+        .build(query)
+        .map_err(task_error)
 }
 
 /// Returns true when the visitor stopped before consuming every match.

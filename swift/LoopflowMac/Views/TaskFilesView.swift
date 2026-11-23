@@ -95,10 +95,7 @@ struct TaskFilesView: View {
         HStack {
             Text(text).lineLimit(1).truncationMode(.middle)
             Spacer()
-            Button("Open") {
-                store.browser.notice = nil
-                open()
-            }.buttonStyle(LoopflowButtonStyle())
+            Button("Open", action: open).buttonStyle(LoopflowButtonStyle())
             Button { store.browser.notice = nil } label: { Image(systemName: "xmark") }
                 .buttonStyle(.plain).accessibilityLabel("Dismiss file notice")
                 .accessibilityIdentifier("files-dismiss-notice")
@@ -141,10 +138,7 @@ struct TaskFilesView: View {
                 Button("File Outline") { store.jumps.search(.outline, line: store.jumps.readingLine, in: store) }
                 if !docked {
                     Picker("View", selection: $store.mode) { modeChoices }
-                    if let document = store.selectedDocument {
-                        Button("Save") { Task { await document.save(issue: store.issue, query: store.query) } }
-                            .disabled(!document.canSave).keyboardShortcut("s")
-                    }
+                    if let document = store.selectedDocument { saveButton(document) }
                 }
                 Divider()
                 Text(store.query.remoteMachine ?? "This Mac")
@@ -263,13 +257,7 @@ struct TaskFilesView: View {
                 case .rightArrow: .expand
                 default: .open
                 }
-                Task {
-                    await store.moveTree(move)
-                    if let selection = store.tree.selection {
-                        proxy.scrollTo("entry:" + selection)
-                        if move == .open, selection == store.selection { dismissDrawer() }
-                    }
-                }
+                Task { await moveTree(move) }
                 return .handled
             }
         }
@@ -333,20 +321,7 @@ struct TaskFilesView: View {
     private var navigationBar: some View {
         HStack(spacing: Spacing.sm) {
             if let document = store.selectedDocument, document.snapshot?.state == .text {
-                Button {
-                    Task {
-                        await document.save(issue: store.issue, query: store.query)
-                        await store.refresh()
-                    }
-                } label: {
-                    Image(systemName: document.saving ? "arrow.triangle.2.circlepath" : "square.and.arrow.down")
-                }
-                .buttonStyle(.plain)
-                .help(document.saving ? "Saving…" : "Save")
-                .accessibilityLabel("Save")
-                .disabled(!document.canSave)
-                .keyboardShortcut("s", modifiers: .command)
-                .fixedSize()
+                saveButton(document).labelStyle(.iconOnly)
             }
             Picker("View", selection: $store.mode) {
                 modeChoices
@@ -356,6 +331,20 @@ struct TaskFilesView: View {
         .font(Typography.meta).padding(.horizontal, Spacing.sm)
         .frame(height: TaskFileChrome.headerHeight)
         .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func saveButton(_ document: TaskFileDocument) -> some View {
+        Button {
+            Task {
+                await document.save(issue: store.issue, query: store.query)
+                await store.refresh()
+            }
+        } label: {
+            Label("Save", systemImage: document.saving ? "arrow.triangle.2.circlepath" : "square.and.arrow.down")
+        }
+        .help(document.saving ? "Saving…" : "Save")
+        .disabled(!document.canSave)
+        .keyboardShortcut("s")
     }
 
     @ViewBuilder private var modeChoices: some View {
@@ -408,6 +397,10 @@ struct TaskFilesView: View {
         .frame(minWidth: 160, maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    func moveTree(_ move: CheckoutTree.Move) async {
+        if let file = await store.tree.move(move) { read(file) }
+    }
+
     private func read(_ path: String) {
         if let presentation = store.browser.presentations.first(where: { $0.path == path }) {
             store.openPresentation(presentation)
@@ -449,9 +442,8 @@ struct TaskFilesView: View {
             } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
         } else if let document = store.selectedDocument, let snapshot = document.snapshot {
             if snapshot.state == .text, store.mode == .read {
-                TaskFileReadingView(document: document, baseURL: store.query.remoteMachine == nil
-                    ? URL(fileURLWithPath: store.cwd).appendingPathComponent(document.path) : nil,
-                    store: store, visit: store.visit, addToConversation: addToConversation, ready: { reportVisible(document.path) })
+                TaskFileReadingView(document: document, store: store, addToConversation: addToConversation,
+                                    ready: { reportVisible(document.path) })
                     .onAppear { store.browser.visibleReadPath = document.path }
                     .onDisappear {
                         if store.browser.visibleReadPath == document.path { store.browser.visibleReadPath = nil }
@@ -489,41 +481,40 @@ struct TaskFilesView: View {
 /// Render the working document, including any local edits.
 struct TaskFileReadingView: View {
     let document: TaskFileDocument
-    /// Where relative references resolve; `nil` for a peer's checkout.
-    let baseURL: URL?
-    var store: TaskFilesStore?
-    var visit: FileVisit?
+    let store: TaskFilesStore
     var addToConversation: ((String) -> Bool)?
     var ready: () -> Void = {}
 
     private var hasChanges: Bool {
-        document.dirty || store?.workingTree.counts[document.path] != nil
+        document.dirty || store.workingTree.filesByPath[document.path] != nil
     }
 
     var body: some View {
         switch (document.path as NSString).pathExtension.lowercased() {
-        case "html" where visit == nil:
-            TaskHTMLView(html: document.text, baseURL: baseURL, find: store?.find, ready: ready)
+        case "html" where store.visit == nil:
+            let baseURL = store.query.remoteMachine == nil
+                ? URL(fileURLWithPath: store.cwd).appendingPathComponent(document.path) : nil
+            TaskHTMLView(html: document.text, baseURL: baseURL, find: store.find, ready: ready)
                 .accessibilityIdentifier("files-rendered-html")
-        case "md" where visit == nil:
+        case "md" where store.visit == nil:
             ScrollViewReader { proxy in
                 ScrollView {
-                    MarkdownBlocks(source: document.text, find: store?.find)
+                    MarkdownBlocks(source: document.text, find: store.find)
                         .frame(maxWidth: 720, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(Spacing.md).textSelection(.enabled)
                 }
-                .onChange(of: store?.find?.current) {
-                    if case .markdown(let index, _) = store?.find?.current?.cell { proxy.scrollTo(MarkdownBlocks.anchor(index), anchor: .center) }
+                .onChange(of: store.find?.current) {
+                    if case .markdown(let index, _) = store.find?.current?.cell { proxy.scrollTo(MarkdownBlocks.anchor(index), anchor: .center) }
                 }
             }
             .accessibilityIdentifier("files-rendered-markdown")
             .onAppear(perform: ready)
         default:
-            TaskCodeReader(path: document.path, text: document.text, location: visit, store: store,
+            TaskCodeReader(path: document.path, text: document.text, location: store.visit, store: store,
                            revision: document.dirty ? nil : document.snapshot?.revision, addToConversation: addToConversation, ready: ready)
-                .task(id: "\(document.editVersion)|\(store?.workingChanges?.baseCommit ?? "")|\(hasChanges)") {
-                    if hasChanges { await store?.diffReview.loadDiff() }
+                .task(id: "\(document.editVersion)|\(store.workingChanges?.baseCommit ?? "")|\(hasChanges)") {
+                    if hasChanges { await store.diffReview.loadDiff() }
                 }
         }
     }

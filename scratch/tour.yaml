@@ -1,4 +1,4 @@
-at: eeb5111d7043c7961084421f0c6e8aacb32af7ce
+at: d555826195456146bb01a52d25f00fc5263914bd
 first:
   - path: swift/README.md
     why: Files walkthrough, rail, shortcuts and presentation
@@ -13,13 +13,15 @@ first:
   - path: swift/Loopflow/Models/TaskWorkspace.swift
     why: Source and excerpt coordinates in Desktop search hits
   - path: swift/LoopflowMac/TaskFilesStore.swift
-    why: One Task coordinates working changes, drafts and presentations
-  - path: swift/LoopflowMac/ComparisonReading.swift
-    why: One addressed comparison owns changes, sides and pending reads
-  - path: swift/LoopflowMac/DiffReviewState.swift
-    why: Whole Task and step readings share the review stream
+    why: Open file, line, and range destinations with history
   - path: swift/LoopflowMac/FilesBrowserState.swift
     why: Banner dismissal keeps unread offers in the rail
+  - path: swift/LoopflowMac/FileJumps.swift
+    why: Clicked occurrences, lookup results and return history
+  - path: swift/LoopflowMac/ComparisonReading.swift
+    why: Changed files and sides indexed within each comparison
+  - path: swift/LoopflowMac/DiffReviewState.swift
+    why: Whole Task and step readings share the review stream
   - path: swift/LoopflowMac/CheckoutTree.swift
     why: Paged listings own their reads and compacted rows
   - path: swift/LoopflowMac/ReviewDiff.swift
@@ -33,19 +35,19 @@ first:
   - path: rust/loopflow-execution/src/ops/task/find.rs
     why: Git membership, scratch inventory and fuzzy ranking
   - path: rust/loopflow-execution/src/ops/task/grep.rs
-    why: Bounded checkout search and excerpt coordinates
+    why: Shared literal matching and bounded checkout reads
   - path: rust/loopflow-execution/src/ops/task/symbols.rs
     why: Checkout declarations and enclosing names
   - path: rust/loopflow/src/lf/commands/desktop.rs
     why: Address a path and lines from a terminal
-  - path: swift/LoopflowMac/FileJumps.swift
-    why: Clicked occurrences, lookup results and return history
   - path: swift/LoopflowMac/MultiplexerStore.swift
     why: Reveal Files beside a zoomed terminal
   - path: swift/LoopflowMac/DesktopActions.swift
     why: Route reading keys and present files beside the caller
   - path: swift/LoopflowMac/Views/TaskFilesView.swift
-    why: Breadcrumb, responsive rail, update bar and HTML settling
+    why: Breadcrumb, responsive rail and per-file Read, Edit, Diff
+  - path: swift/LoopflowMac/Views/TaskFilePicker.swift
+    why: Preview checkout files, grep matches and Task changes
   - path: swift/LoopflowMac/Views/TaskCodeReader.swift
     why: Scroll to the matched occurrence in long lines
   - path: swift/LoopflowMac/Views/ReviewStreamView.swift
@@ -54,8 +56,6 @@ first:
     why: Offline page search, highlighting and settled reloads
   - path: swift/LoopflowMac/Views/WorkspacePanesView.swift
     why: Responder ownership between Files and terminal panes
-  - path: swift/LoopflowMac/Views/TaskFilePicker.swift
-    why: Preview checkout files, grep matches and Task changes
   - path: swift/LoopflowMac/FileOutline.swift
     why: Live declarations from the reader’s syntax tree
   - path: swift/LoopflowTests/TaskFilesTests.swift

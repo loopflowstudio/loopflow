@@ -17,7 +17,7 @@ final class ComparisonReading {
             }
         }
     }
-    private(set) var counts: [String: Int] = [:]
+    private(set) var filesByPath: [String: TaskChangedFile] = [:]
     private(set) var error: String?
     var loading: Bool { pending != nil }
     private var pending: Task<Void, Never>?
@@ -39,11 +39,11 @@ final class ComparisonReading {
             do {
                 let next = try await query.taskChanges(issue: issue, base: comparison.base, head: comparison.head)
                 changes = next
-                counts = Dictionary(next.files.map { ($0.path, $0.changes) }, uniquingKeysWith: { first, _ in first })
+                filesByPath = Dictionary(next.files.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
                 error = nil
             } catch {
                 changes = nil
-                counts = [:]
+                filesByPath = [:]
                 self.error = error.localizedDescription
             }
         }

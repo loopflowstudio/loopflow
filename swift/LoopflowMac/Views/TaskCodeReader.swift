@@ -130,7 +130,7 @@ struct TaskCodeReader: View {
         guard let review = store.diffReview.fileReview, review.path == path,
               review.editVersion == store.selectedDocument?.editVersion,
               review.baseCommit == store.workingChanges?.baseCommit,
-              store.workingTree.counts[path] != nil || store.selectedDocument?.dirty == true,
+              store.workingTree.filesByPath[path] != nil || store.selectedDocument?.dirty == true,
               let mark = review.marks[line] else { return nil }
         return mark == .removed ? palette.failureTone : palette.successTone
     }

@@ -10,9 +10,10 @@ struct FilePosition: Equatable {
 
 struct FileVisit: Equatable {
     let line: Int
-    let hit: TaskGrepHit?
-    let visitID: UUID?
+    var hit: TaskGrepHit?
     var lines: ClosedRange<Int>?
+    // Repeating an address scrolls again. Picker previews stay keyed to their hit.
+    var visitID: UUID? = UUID()
 }
 
 @Observable @MainActor
@@ -96,7 +97,7 @@ final class FileJumps {
         if let current {
             if backwards { forward.append(current) } else { back.append(current) }
         }
-        store.reveal(destination)
+        store.reveal(destination.path, at: FileVisit(line: destination.line))
     }
 
     func dismiss() {
@@ -107,9 +108,8 @@ final class FileJumps {
 
     func accept(_ candidate: Candidate, in store: TaskFilesStore) {
         guard let origin = peek?.origin else { return }
-        dismiss()
-        record(candidate.position, from: origin)
-        store.reveal(candidate.position, hit: candidate.hit)
+        let visit = FileVisit(line: candidate.position.line, hit: candidate.hit)
+        store.reveal(candidate.position.path, at: visit, from: origin)
     }
 
     @discardableResult

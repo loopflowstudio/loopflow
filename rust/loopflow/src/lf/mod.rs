@@ -3368,6 +3368,10 @@ pub enum WtCommand {
         /// Keep this workspace after delivery
         #[arg(long)]
         persistent: bool,
+        /// Start the branch from this checkout's branch instead of main, and
+        /// keep following it: `lf sync` merges it and `lf pr` targets it
+        #[arg(long)]
+        stack: bool,
         /// Print the worktree, or the placement with --plan
         #[arg(long)]
         json: bool,

@@ -2074,6 +2074,40 @@ pub fn is_persistent_worktree(repo: &Path) -> Result<bool, GitError> {
     }
 }
 
+/// The branch this checkout was stacked on by `lf wt create --stack`, while
+/// that branch still exists locally. A deleted base leaves the checkout
+/// following the default branch again.
+pub fn stacked_base(repo: &Path) -> Result<Option<String>, GitError> {
+    let Some(branch) = current_branch(repo)? else {
+        return Ok(None);
+    };
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["config", "--get", &format!("branch.{branch}.loopflow-base")])
+        .output()?;
+    let base = match output.status.code() {
+        Some(0) => String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        Some(1) => return Ok(None),
+        _ => {
+            return Err(GitError::CommandFailed {
+                command: "read stacked base configuration".into(),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            })
+        }
+    };
+    Ok(branch_exists(repo, &base)?.then_some(base))
+}
+
+/// Record that `branch` builds on `base`, so [`stacked_base`] finds it.
+pub fn record_stacked_base(repo: &Path, branch: &str, base: &str) -> Result<(), GitError> {
+    git_stdout(
+        repo,
+        &["config", &format!("branch.{branch}.loopflow-base"), base],
+    )
+    .map(|_| ())
+}
+
 /// Move a bare/default `lf` session off canonical main while preserving both
 /// local commits and uncommitted files. A deliberate non-default checkout and
 /// an existing linked worktree are left alone.

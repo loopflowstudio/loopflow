@@ -18002,14 +18002,15 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf wt create <name> [--plan] [--persistent] --json`.",
+          "description": "`lf wt create <name> [--plan] [--persistent] [--stack] --json`.",
           "examples": [
             {
               "directory": "/repo",
               "kind": "checkout.create",
               "name": "spike",
               "persistent": false,
-              "preview": false
+              "preview": false,
+              "stack": false
             }
           ],
           "properties": {
@@ -18028,6 +18029,9 @@
             },
             "preview": {
               "type": "boolean"
+            },
+            "stack": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -18035,7 +18039,8 @@
             "directory",
             "name",
             "preview",
-            "persistent"
+            "persistent",
+            "stack"
           ],
           "type": "object",
           "x-result": {

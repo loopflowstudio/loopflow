@@ -92,6 +92,7 @@ lf sync --plan                      # preview what sync would do without touchin
 lf sync                             # merge main (or stack parent) into this branch
 lf sync LOO-12                      # stack this Task on LOO-12 and merge its branch
 lf wt create spike                  # create a sibling worktree
+lf wt create spike --stack          # branch from this checkout's branch; sync and PRs follow it
 lf wt prune --branches --dry-run    # preview cleanup of merged PRs and finished Tasks
 ```
 

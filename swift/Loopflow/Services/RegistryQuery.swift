@@ -334,7 +334,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// Process carrying a sync started detached.
     case checkoutSync(directory: String, onto: String?, preview: Bool, manual: Bool, continueSync: Bool, abort: Bool,
                       adopt: Bool)
-    case checkoutCreate(directory: String, name: String, preview: Bool, persistent: Bool)
+    case checkoutCreate(directory: String, name: String, preview: Bool, persistent: Bool, stack: Bool)
     /// Service credentials on the Machine, run from `/`.
     case accountDisconnect(provider: String)
     /// Served, no browser profile is chosen interactively.
@@ -450,8 +450,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             argv += Self.flags([("--plan", preview), ("--manual", manual), ("--continue", continueSync)])
             argv += Self.flags([("--abort", abort), ("--adopt", adopt)])
             return argv + ["--json"]
-        case .checkoutCreate(_, let name, let preview, let persistent):
-            return ["wt", "create", name] + Self.flags([("--plan", preview), ("--persistent", persistent)]) + ["--json"]
+        case .checkoutCreate(_, let name, let preview, let persistent, let stack):
+            let flags = Self.flags([("--plan", preview), ("--persistent", persistent), ("--stack", stack)])
+            return ["wt", "create", name] + flags + ["--json"]
         case .desktopPortfolioSet(let change): return ["desktop", "portfolio"] + change + ["--json"]
         case .desktopDashboardQuery(_, let id, let expression, let revision):
             return ["desktop", "dashboard", "query"] + (revision.map { ["--revision=\($0)"] } ?? []) + ["--", id, expression]
@@ -642,9 +643,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .checkoutSync(let directory, let onto, let preview, let manual, let continueSync, let abort, let adopt):
             TaggedFields("checkout.sync", ["directory": directory, "onto": onto, "preview": preview, "manual": manual,
                                            "continue": continueSync, "abort": abort, "adopt": adopt])
-        case .checkoutCreate(let directory, let name, let preview, let persistent):
+        case .checkoutCreate(let directory, let name, let preview, let persistent, let stack):
             TaggedFields("checkout.create", ["directory": directory, "name": name, "preview": preview,
-                                             "persistent": persistent])
+                                             "persistent": persistent, "stack": stack])
         case .accountDisconnect(let provider):
             TaggedFields("account.disconnect", ["provider": provider])
         case .accountConnect(let provider, let chromeProfile, let apiKey):

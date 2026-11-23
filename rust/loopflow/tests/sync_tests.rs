@@ -1036,6 +1036,48 @@ fn stacking_on_a_different_parent_keeps_inherited_files_on_sync() {
 }
 
 #[test]
+fn a_checkout_created_with_stack_builds_on_this_branch_and_sync_follows_it() {
+    let home = tempfile::TempDir::new().unwrap();
+    let repo = TestRepo::new();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let parent_path = repo.create_named_worktree("parent");
+    commit_file(&parent_path, "parent.txt", "parent work\n");
+    let created = |args: &[&str]| -> serde_json::Value {
+        let output = lf(&parent_path, args);
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+
+    let planned = lf(
+        &parent_path,
+        &["wt", "create", "child", "--stack", "--plan"],
+    );
+    let planned = String::from_utf8_lossy(&planned.stdout);
+    assert!(planned.contains("base: parent\n"), "{planned}");
+    let child = created(&["wt", "create", "child", "--stack", "--json"]);
+    assert_eq!(child["base"], "parent");
+    let child_path = std::path::PathBuf::from(child["path"].as_str().unwrap());
+    assert_eq!(
+        git(&child_path, &["rev-parse", "HEAD"]),
+        git(&parent_path, &["rev-parse", "HEAD"])
+    );
+
+    let plain = created(&["wt", "create", "plain", "--json"]);
+    assert!(plain["base"].is_null());
+    let plain_path = std::path::PathBuf::from(plain["path"].as_str().unwrap());
+    assert_eq!(git(&plain_path, &["rev-parse", "HEAD"]), repo.head_sha());
+
+    commit_file(&parent_path, "later.txt", "later parent work\n");
+    let output = lf(&child_path, &["sync", "--plan"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("base: parent\n"), "{stdout}");
+    lf(&child_path, &["sync"]);
+    assert_eq!(
+        std::fs::read_to_string(child_path.join("later.txt")).unwrap(),
+        "later parent work\n"
+    );
+}
+
+#[test]
 fn stacking_on_an_unpushed_parent_pushes_its_branch_and_sync_follows_it() {
     let home = tempfile::TempDir::new().unwrap();
     let repo = TestRepo::new();

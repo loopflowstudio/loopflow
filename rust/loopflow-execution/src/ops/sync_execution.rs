@@ -99,7 +99,17 @@ pub(crate) fn run_sync_in(
         }
     }
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
-    let default_target = if on_main { &upstream } else { &default };
+    // A checkout made with `lf wt create --stack` follows the branch it was made from.
+    let stacked_base = if on_main || stacked.is_some() {
+        None
+    } else {
+        crate::git::worktrees::stacked_base(repo_root)?
+    };
+    let default_target = if on_main {
+        &upstream
+    } else {
+        stacked_base.as_ref().unwrap_or(&default)
+    };
     let target = if detach {
         upstream.as_str()
     } else {

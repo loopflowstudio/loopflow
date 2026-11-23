@@ -269,3 +269,7 @@ worktree is gone. Reversible in `checkout_owner_in` (`sqlite/task_work.rs`).
   a stack flag though". Branch from main stays the default; a stack flag is
   its own Task.
 - Then: "put the stack flag in here and the instructions as well"; LOO-1077 abandoned ("dont do a task"), built here.
+- `lf wt create --stack` (choices made): `lf sync main` in a `--stack`
+  checkout merges main once and keeps the record, so the next bare `lf sync`
+  follows the base again; a stacked Task's `lf sync main` detaches it. Clearing
+  the record there would match Tasks; reversible in `run_sync_in`.

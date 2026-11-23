@@ -2236,6 +2236,9 @@ fn resolve_main_repo(repo: &Path) -> PathBuf {
 fn pr_target(repo: &Path, main_repo: &Path, default_branch: &str) -> OpsResult<String> {
     let current_branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    if let Some(base) = crate::git::worktrees::stacked_base(repo)? {
+        return resolve_pr_target(repo, &base);
+    }
 
     if let Ok(worktrees) = list_worktrees(main_repo) {
         if let Some(state) = worktrees

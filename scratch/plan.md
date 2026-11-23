@@ -351,7 +351,7 @@ Drop `task_primary_sessions` with its three mirror triggers and make
 ship the release whose peer protocol accepts a `Disposition` without
 `planning_completed`, then stop sending it.
 
-## Next: implement (`lf wt create --stack`, human review 2026-11-23)
+## Built: `lf wt create --stack` (human review 2026-11-23)
 
 Answers (Jack Heart): "a -- there should be a stack flag though", "and we can
 instruct to use the stack flag as necessary", "put the stack flag in here and
@@ -370,6 +370,23 @@ the instructions as well".
 3. Tests: `--stack` from a Task's checkout creates a branch whose base is the
    Task's branch head and holds its commits; without the flag the base is
    main. `documented_commands` passes with the new example.
+
+Built. The record is Git config on the new branch,
+`branch.<name>.loopflow-base`, beside `loopflow-persistent`: the new checkout
+has no Task, so `task_checkouts.parent_pr_id` can't carry it, and a branch
+upstream is overwritten by every `push -u`. `git::worktrees::stacked_base`
+reads it (None once the base branch is gone, so the checkout follows main
+again); `lf sync` with no target merges it when no Task stack applies, and
+`pr_target` targets it. On the default branch or a detached HEAD, `--stack`
+has nothing to stack on and creates from main. `checkout.create` carries
+`stack` on the wire (Rust, Swift, fixture, schema). LOOPFLOW.md's child-agent
+paragraph names `--stack`; `docs/ops.md` has the example; goldens
+regenerated. Tests: `sync_tests::a_checkout_created_with_stack_builds_on_this_branch_and_sync_follows_it`
+(plan shows the base, `--json` base, HEAD holds the parent's commits, plain
+create starts at main, a later parent commit arrives through `lf sync`);
+`server::schema::tests::`, `server::wire::`, `lf::commands::write::tests::`,
+`machine::wire::`, `documented_commands::`, `golden_prompt` passed. Not run
+here: clippy, Swift `ServerProtocolTests` (gate).
 
 ## Built: one Git-root rule (human review of the ownership split, 2026-11-23)
 

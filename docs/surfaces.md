@@ -348,7 +348,9 @@ repository settings**. The switch shows **On**. **In effect** still shows
   **Undo** or **⌘Z** restores a saved edit even after switching destinations.
   If the declaration changed on disk, use **Refresh** to review it before
   retrying. A rejected edit leaves its field editable. An unavailable scope
-  keeps the last reading visible and pauses edits until the read succeeds.
+  keeps the last reading visible and pauses edits. If the local server
+  restarts, Settings reconnects automatically and enables edits when fresh
+  values arrive.
   Settings and the CLI share the same [configuration files](config.md).
 
 **Appearance** selects themes or opens the color editor. **Shortcuts** shows

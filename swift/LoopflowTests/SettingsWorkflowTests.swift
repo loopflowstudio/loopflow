@@ -84,6 +84,64 @@ struct SettingsWorkflowTests {
         #expect(defaults.object(forKey: "taskFilesAutosave") == nil)
     }
 
+    @Test func personalAndProjectSettingsRecoverAfterServerRestart() async throws {
+        let root = URL(fileURLWithPath: "/tmp/lf-reconnect-\(UUID().uuidString.prefix(8))").resolvingSymlinksInPath()
+        let repo = root.appending(path: "project")
+        let home = root.appending(path: "home")
+        for folder in [repo.appending(path: ".lf"), home] {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = repo.appending(path: ".lf/config.yaml")
+        try Data("chrome: true\n".utf8).write(to: config)
+        let lf = try BuiltLf(home: home, cwd: repo)
+        _ = try await lf.run(["desktop", "portfolio", "--json"])
+        let server = LocalServerFixture(lf)
+        // Only the test starts the server, so Settings can open while it is offline.
+        let location = ServerLocation(startsServer: false) { try await lf.run($0) }
+        let personal = ScopedSettingsModel(location: location)
+        let project = ScopedSettingsModel(location: location)
+        project.select(checkout: repo.path)
+        project.destination = .sharedRepository
+
+        func waitFor(_ condition: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+            let deadline = ContinuousClock.now + .seconds(10)
+            while !condition() {
+                try #require(ContinuousClock.now < deadline, sourceLocation: sourceLocation)
+                try await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        do {
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask { await personal.observe() }
+                group.addTask { await project.observe() }
+                defer { group.cancelAll() }
+                try await waitFor { personal.reading.failure != nil && project.reading.failure != nil }
+                _ = try await server.status()
+                try await waitFor { personal.file != nil && project.file != nil }
+                let personalPath = try #require(personal.file).path
+                #expect(!personal.catalogue.isEmpty && !project.catalogue.isEmpty)
+                #expect(project.file?.slots["chrome"]?.declared == .present(.bool(true)))
+
+                await server.stop()
+                try await waitFor { personal.reading.failure != nil && project.reading.failure != nil }
+                #expect(personal.editsDisabled && project.editsDisabled)
+                #expect(personal.file?.path == personalPath)
+                #expect(project.file?.slots["chrome"]?.declared == .present(.bool(true)))
+
+                try Data("chrome: false\n".utf8).write(to: config)
+                _ = try await server.status()
+                try await waitFor { !personal.editsDisabled && !project.editsDisabled }
+                let file = try #require(project.file)
+                #expect(file.slots["chrome"]?.declared == .present(.bool(false)))
+                #expect(await project.apply(.reset, key: "chrome", to: file, notices: NoticeCenter(), manager: nil))
+                #expect(project.file?.slots["chrome"]?.declared == .absent)
+                #expect(try !String(contentsOf: config, encoding: .utf8).contains("chrome"))
+            }
+        } catch { await server.stop(); throw error }
+        await server.stop()
+    }
+
     @Test func sharedCheckoutKeepsItsDestinationThroughValidationAndGlobalMachineEdits() async throws {
         let root = URL(fileURLWithPath: "/tmp/lf-form-\(UUID().uuidString.prefix(8))").resolvingSymlinksInPath()
         let repo = root.appending(path: "project")

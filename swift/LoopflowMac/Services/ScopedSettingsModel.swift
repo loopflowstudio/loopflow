@@ -110,36 +110,42 @@ final class ScopedSettingsModel {
 
     func observe() async {
         let id = observation
-        if catalogue.isEmpty {
+        var delay = Duration.seconds(1)
+        while !Task.isCancelled, observation == id {
+            var opened: LineSubscription?
             do {
-                catalogue = try await ServerClient.configuration(.configCatalog, as: [ConfigurationDefinition].self, location: location)
+                if catalogue.isEmpty || reading.failure != nil {
+                    let definitions = try await ServerClient.configuration(.configCatalog, as: [ConfigurationDefinition].self, location: location)
+                    guard !Task.isCancelled, observation == id else { return }
+                    catalogue = definitions
+                }
+                let scope = ServedRead.configScope(directory: work.checkout, wave: work.wave, target: work.target)
+                let subscription = ServerClient.subscribe(scope, location: location)
+                opened = subscription
+                stream = subscription
+                for try await line in subscription.lines {
+                    guard !Task.isCancelled, observation == id else { break }
+                    let frame = try JSONDecoder().decode(SubscriptionFrame<ConfigurationScope>.self, from: line)
+                    if let value = frame.body {
+                        delay = .seconds(1)
+                        reading = .available(value)
+                        if destination == .personalWave && file == nil { destination = .sharedWave }
+                    } else { reading = reading.failed(frame.unavailable ?? "Settings unavailable") }
+                    if let answered = frame.answers { finishConfirmations(through: answered) }
+                }
+                throw RegistryQueryError("Settings disconnected")
             } catch {
-                if observation == id { reading = reading.failed(error.localizedDescription) }
-                return
+                if !Task.isCancelled, observation == id { reading = reading.failed(error.localizedDescription) }
             }
-        }
-        guard !Task.isCancelled, observation == id else { return }
-        let stream = ServerClient.subscribe(.configScope(directory: work.checkout, wave: work.wave, target: work.target), location: location)
-        self.stream = stream
-        do {
-            for try await line in stream.lines {
-                guard !Task.isCancelled, observation == id else { break }
-                let frame = try JSONDecoder().decode(SubscriptionFrame<ConfigurationScope>.self, from: line)
-                if let value = frame.body {
-                    reading = .available(value)
-                    if destination == .personalWave && file == nil { destination = .sharedWave }
-                } else { reading = reading.failed(frame.unavailable ?? "Settings unavailable") }
-                if let answered = frame.answers { finishConfirmations(through: answered) }
+            if observation == id {
+                stream = nil
+                finishConfirmations(through: .max)
             }
-            if !Task.isCancelled, observation == id { reading = reading.failed("Settings disconnected") }
-        } catch {
-            if !Task.isCancelled, observation == id { reading = reading.failed(error.localizedDescription) }
+            await opened?.cancel()
+            guard observation == id else { return }
+            do { try await Task.sleep(for: delay) } catch { return }
+            delay = min(delay * 2, .seconds(30))
         }
-        if observation == id {
-            self.stream = nil
-            finishConfirmations(through: .max)
-        }
-        await stream.cancel()
     }
 
     @discardableResult

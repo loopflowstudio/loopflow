@@ -30,3 +30,8 @@ are in d52cf7179e:scratch/loo-921-cross-worktree-cache.md.
 
 November 22 default choice: apply the measured winner to the test profile.
 Each sample ran `cargo test`; no dev-profile build was timed in this comparison.
+
+November 22 concept review: use the existing Git hook and manual `register`
+for recovery. Drop `dev-lf`'s passive inventory write so ordinary builds can
+use either the Machine cache or a caller's configuration without editing the
+inventory. Leave `status` as a diagnostic. See `scratch/concept-review.html`.

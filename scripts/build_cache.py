@@ -2,7 +2,6 @@
 
 import argparse
 import ctypes
-import errno
 import fcntl
 import json
 import os
@@ -13,7 +12,7 @@ import struct
 import subprocess
 import sys
 import tempfile
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 import tomllib
@@ -137,26 +136,16 @@ def _clone(source: Path, destination: Path) -> None:
 
 @contextmanager
 def _quiescent(debug: Path):
-    """Hold every Cargo lock in `debug`, or yield False when one is busy."""
-    held = []
-    try:
-        for name in CARGO_LOCKS:
-            try:
-                descriptor = os.open(debug / name, os.O_RDONLY)
-            except FileNotFoundError:
-                continue
-            held.append(descriptor)
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError as error:
-                if error.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
-                    yield False
-                    return
-                raise
-        yield True
-    finally:
-        for descriptor in held:
-            os.close(descriptor)
+    """Hold Cargo's locks, creating them when a seed has never been built."""
+    with ExitStack() as locks:
+        try:
+            for name in CARGO_LOCKS:
+                lock = locks.enter_context((debug / name).open("a"))
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+        else:
+            yield True
 
 
 def _seed_sources(root: Path) -> list[Path]:

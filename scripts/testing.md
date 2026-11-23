@@ -351,6 +351,9 @@ git worktree add ../loopflow.my-change main && cd ../loopflow.my-change
 cargo build -p loopflow --bin lf     # 7 Compiling lines (workspace crates), not 256
 ```
 
+If a build starts in the source worktree during cloning, Cargo waits for the
+clone to finish, even on that worktree's first build.
+
 A seed from a sibling whose `Cargo.lock` has drifted recompiles the units that
 changed: one 140 commits away compiled 31.
 

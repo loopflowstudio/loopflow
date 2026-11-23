@@ -53,8 +53,8 @@ and the `-v` logs beside them; the driver is `scratch/probe/measure.sh`.
 - **Quiescence:** Cargo 1.98 keeps `target/debug/.cargo-lock`,
   `.cargo-build-lock` and `.cargo-artifact-lock`. Holding any one of them
   exclusively with `flock` made a second `cargo build` print "Blocking waiting
-  for file lock". The seeder takes each existing lock with `LOCK_EX|LOCK_NB`.
-  If any lock is busy it skips that source.
+  for file lock". The seeder opens or creates all three and takes them with
+  `LOCK_EX|LOCK_NB`. If it cannot hold them all, it skips that source.
 
 ## Design
 
@@ -207,14 +207,12 @@ and build scripts" becomes the seeded behaviour plus what still compiles.
    with slice 2's bytes, noted Cargo.lock drift (31 units at 140 commits) and
    linked loo-922.html from testing.md.
 
-Remaining after ship-review pass 1: fix source locking in `scripts/build_cache.py`.
-The ready-checkout QA fixed clone-time ranking, but a new seed has no Cargo
-lock files. A real first build wrote into it while `_quiescent` yielded true.
-Acquire Cargo's locks even when first use must create them, or skip that
-source. Add a deterministic regression in `python/tests/test_build_cache.py`
-using a freshly seeded sibling. When admitted, a competing writer must be
-excluded for the duration of the clone. Check that an ordinary busy source
-is still skipped and the seeded build passes. See `scratch/ship-review.html`.
+4. **Done: exclude a first build in the seed source.** On the old guard,
+   Cargo 1.98.1 printed `Compiling app` inside a freshly seeded sibling.
+   With the lock files created and held, it reported a lock wait, then built
+   and ran the edited binary after release. Busy-source and dependency-reuse
+   checks also passed. Gate runs the full build-cache suite.
+
 The delivery instruction is “ok lg2m ship it when it works”.
 
 Peak memory attribution is tracked separately in LOO-1070.

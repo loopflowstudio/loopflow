@@ -4,10 +4,12 @@ import errno
 import fcntl
 import json
 import os
+import select
 import socket
 import subprocess
 import sys
 import tempfile
+from contextlib import ExitStack
 from pathlib import Path
 
 import build_cache
@@ -415,9 +417,9 @@ def cargo_repo(tmp_path, monkeypatch):
     )
     (repo / "src/main.rs").write_text('fn main() { println!("{}", scripted::value()); }\n')
     _git(repo, "init", "-q")
+    _cargo_build(repo)
     _git(repo, "add", ".")
     _git(repo, "-c", "user.name=Fixture", "-c", "user.email=f@example.com", "commit", "-qm", "init")
-    _cargo_build(repo)
     return repo
 
 
@@ -462,6 +464,36 @@ def test_a_building_sibling_is_never_cloned(cargo_repo, tmp_path):
         assert not (tree / "target").exists()
     assert _cargo_build(tree)["scripted"] is False
     assert "seed     none" in _cache_command(tree, "status").stdout
+
+
+def test_first_build_waits_while_a_freshly_seeded_sibling_is_locked(cargo_repo, tmp_path):
+    install_hook(cargo_repo)
+    tree = tmp_path / "seeded"
+    _git(cargo_repo, "worktree", "add", "--detach", str(tree))
+    debug = tree / "target/debug"
+    assert (debug / ".fingerprint").is_dir()
+    assert not list(debug.glob(".cargo*lock"))
+    (tree / "src/main.rs").write_text('fn main() { println!("built in sibling"); }\n')
+
+    with ExitStack() as processes:
+        with build_cache._quiescent(debug) as idle:
+            assert idle
+            cargo = processes.enter_context(
+                subprocess.Popen(
+                    ["cargo", "build", "--offline", "--color", "never"],
+                    cwd=tree,
+                    stdin=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            )
+            readable, _, _ = select.select([cargo.stderr], [], [], 60)
+            assert readable, "Cargo did not report its lock wait"
+            message = cargo.stderr.readline()
+            assert "Blocking waiting for file lock" in message, message
+            assert not (debug / "app").exists()
+        assert cargo.wait(timeout=60) == 0
+    assert subprocess.check_output([debug / "app"], text=True).strip() == "built in sibling"
 
 
 def test_a_failed_clone_leaves_no_target(cargo_repo, tmp_path, monkeypatch):

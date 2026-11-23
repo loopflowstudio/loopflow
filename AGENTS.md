@@ -19,6 +19,7 @@ How we build Loopflow. Contributors and agents follow it.
 - Mock side effects; don't test mock wiring or reshape production code for tests
 - Design docs go under `scratch/`; `lf pr submit` and `lf pr land` run `lf scratch clear`, which removes added files and keeps existing ones
 - Headless runs make the call and keep moving; note genuinely open choices in `scratch/questions.md`
+- Context too large for a prompt: give the agent the whole index (every file, with sizes) and the command that reads any piece, and let it choose what to read. lf never cuts, ranks or picks for an agent that can run commands
 
 **Secrets:**
 - Fetch every secret from Doppler. Never hardcode a key, read one from a dotfile, or paste one into code. Prefer `doppler run -- <cmd>`, which injects the value as an env var.

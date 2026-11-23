@@ -7,7 +7,7 @@ struct TaskWorkspaceView: View {
     let client: RemoteMobileClient
     let feed: TaskFeed
     let task: MobileTask
-    let theme: ThemeDefinition
+    @Environment(\.theme) private var theme
     @Binding var draft: String
     @State private var showsChanges = false
     /// The Task as the Machine last read it.
@@ -150,7 +150,7 @@ struct TaskWorkspaceView: View {
 
     @ViewBuilder private var content: some View {
         if let session = task.primarySession ?? begun {
-            SessionView(client: client, task: task, session: session, theme: theme, draft: $draft) { showsChanges = true }
+            SessionView(client: client, task: task, session: session, draft: $draft) { showsChanges = true }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Changes", systemImage: "plusminus") { showsChanges = true }
@@ -158,7 +158,7 @@ struct TaskWorkspaceView: View {
                 }
                 .sheet(isPresented: $showsChanges) {
                     NavigationStack {
-                        TaskChangesView(client: client, task: task, theme: theme)
+                        TaskChangesView(client: client, task: task)
                             .navigationTitle("Changes")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
@@ -177,7 +177,7 @@ struct TaskWorkspaceView: View {
                     // Nothing is checked out until the Task starts, so there is nothing to ask the Machine for.
                     StateView("No changes yet")
                 case .value, .failed:
-                    TaskChangesView(client: client, task: task, theme: theme)
+                    TaskChangesView(client: client, task: task)
                 }
             }
             .background(theme.palette.background)
@@ -196,7 +196,7 @@ enum Loaded<Value> {
 struct TaskChangesView: View {
     let client: RemoteMobileClient
     let task: MobileTask
-    let theme: ThemeDefinition
+    @Environment(\.theme) private var theme
     @State private var changes = Loaded<TaskChangesSnapshot>.loading
 
     var body: some View {
@@ -212,7 +212,7 @@ struct TaskChangesView: View {
             case .value(let changes):
                 List(changes.files) { file in
                     NavigationLink {
-                        TaskDiffView(client: client, task: task, path: file.path, theme: theme)
+                        TaskDiffView(client: client, task: task, path: file.path)
                     } label: {
                         VStack(alignment: .leading, spacing: Spacing.xs) {
                             Text((file.path as NSString).lastPathComponent)
@@ -267,7 +267,7 @@ struct TaskFileView: View {
     let client: RemoteMobileClient
     let task: MobileTask
     let path: String
-    let theme: ThemeDefinition
+    @Environment(\.theme) private var theme
     @State private var file = Loaded<TaskFileSnapshot>.loading
 
     var body: some View {
@@ -310,7 +310,7 @@ struct TaskDiffView: View {
     let client: RemoteMobileClient
     let task: MobileTask
     let path: String
-    let theme: ThemeDefinition
+    @Environment(\.theme) private var theme
     @State private var diff = Loaded<TaskDiffSnapshot>.loading
 
     var body: some View {
@@ -351,7 +351,7 @@ struct TaskDiffView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink("Whole file") { TaskFileView(client: client, task: task, path: path, theme: theme) }
+                NavigationLink("Whole file") { TaskFileView(client: client, task: task, path: path) }
             }
         }
         .task { await load() }

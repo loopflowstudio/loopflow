@@ -120,7 +120,7 @@ class TestColorContrast:
             "getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim()"
         )
         bg_color = page.evaluate(
-            "getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()"
+            "getComputedStyle(document.documentElement).getPropertyValue('--background').trim()"
         )
 
         # Basic sanity check - colors should be defined

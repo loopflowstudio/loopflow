@@ -20,7 +20,7 @@ struct ThemeEditor: View {
             ])
             colors("Actions and focus", fields: [
                 ("Button", \.accent), ("Button hover", \.accentHover), ("Button pressed", \.accentPressed),
-                ("Button text", \.accentText), ("Action text and focus", \.accentInk),
+                ("Button text", \.accentText), ("Action text and focus", \.accentInk), ("Title bar", \.titlebar),
             ])
             colors("Work selection", fields: [
                 ("Selected fill", \.workSelectedFill), ("Selected text", \.workSelectedText),

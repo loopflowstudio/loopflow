@@ -229,10 +229,8 @@ struct ServerProtocolTests {
              #"{"kind":"config.explain","destination":{"kind":"personal_global"},"key":"theme"}"#),
             (.configUnset(destination: destination, key: "theme"),
              #"{"kind":"config.unset","destination":{"kind":"personal_global"},"key":"theme"}"#),
-            (.configTheme(path: "/theme.yaml", value: nil),
-             #"{"kind":"config.theme","path":"/theme.yaml","value":null}"#),
-            (.configTheme(path: "/theme.yaml", value: "Hearth"),
-             #"{"kind":"config.theme","path":"/theme.yaml","value":"Hearth"}"#),
+            (.configTheme(value: nil), #"{"kind":"config.theme","value":null}"#),
+            (.configTheme(value: "Hearth"), #"{"kind":"config.theme","value":"Hearth"}"#),
         ]
         for (operation, json) in operations {
             let encoded = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(operation))

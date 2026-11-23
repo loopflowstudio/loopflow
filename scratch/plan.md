@@ -386,7 +386,9 @@ regenerated. Tests: `sync_tests::a_checkout_created_with_stack_builds_on_this_br
 create starts at main, a later parent commit arrives through `lf sync`);
 `server::schema::tests::`, `server::wire::`, `lf::commands::write::tests::`,
 `machine::wire::`, `documented_commands::`, `golden_prompt` passed. Not run
-here: clippy, Swift `ServerProtocolTests` (gate).
+here: clippy, Swift `ServerProtocolTests` (the change touched
+`RegistryQuery.swift`) — gate runs both. Nothing else remains in the plan;
+next is gate.
 
 ## Built: one Git-root rule (human review of the ownership split, 2026-11-23)
 
@@ -562,8 +564,8 @@ Also repaired: `creation_adopts_only_the_selected_work` still expected
 adoption to give the open conversation the Task (change 3 removed that).
 `ops::task::adoption::` 9 and `ops::task::tests::` 35 passed.
 
-Items 1-6 are settled. PR #1973; branch merges main through #2024
-(`7487986a30`, conflict-free; nothing it touched calls the split functions). The acceptance check last passed at `2448546730` (10 tests).
+Items 1-6 are settled. PR #1973; branch merges main through #2032
+(`43e031870e`). The acceptance check last passed at `2448546730` (10 tests).
 
 Run on that head (2026-11-18, clean `LF_*`):
 `cargo test -p loopflow-storage --lib -- task_work:: leaving_members_are_unreadable`

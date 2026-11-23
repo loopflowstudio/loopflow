@@ -1,7 +1,9 @@
-at: f18d8b0ba5af46e7479bd8002a2df60affa87b3b
+at: 2bb4d1998df746612e0e4bb29b2dd82533c5a87b
 first:
   - path: docs/surfaces.md
     why: What the Settings window offers
+  - path: swift/README.md
+    why: Theme selection, Undo and pairing on macOS
   - path: docs/config.md
     why: Read effective settings and their declarations
   - path: scratch/plan.md
@@ -12,8 +14,16 @@ first:
     why: Checked edits and Undo preserve unrelated declarations
   - path: rust/loopflow-execution/src/engine/config/promotion.rs
     why: Preview, apply and recover moves across files
+  - path: rust/loopflow/src/lf/commands/machine.rs
+    why: Machine identity and rental status behind both surfaces
   - path: swift/LoopflowMac/Views/SettingsWindow.swift
     why: Settings navigation and the shared observation
+  - path: swift/LoopflowMac/Design/AppearanceStore.swift
+    why: Immediate theme selection, exact Undo and editor drafts
+  - path: swift/LoopflowMac/Views/MobileSettings.swift
+    why: One status drives the sidebar and pairing code
+  - path: swift/LoopflowMac/Views/MachineConnections.swift
+    why: Check four connections and show each result
   - path: swift/LoopflowMac/Services/ScopedSettingsModel.swift
     why: Follow selection, write to the file and undo
   - path: swift/LoopflowMac/Views/ScopedSettings.swift
@@ -22,6 +32,8 @@ first:
     why: Edit, inspect and move a declaration
   - path: swift/LoopflowTests/ContextSettingsWorkflowTests.swift
     why: Trace settings through the CLI and provider launch
+  - path: swift/LoopflowTests/ThemeWorkflowTests.swift
+    why: Follow theme picks and Undo through the branch server
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Regenerated from the typed server operations

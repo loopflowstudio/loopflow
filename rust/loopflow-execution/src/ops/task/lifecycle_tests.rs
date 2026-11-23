@@ -178,7 +178,7 @@ fi
     }, || {
         let planning = runtime.block_on(crate::ops::linear::test_fixture::refresh_task_input(repo.path(), "FIX-1", LinearRefresh::Force)).unwrap();
         store.sqlite.seed_inventory(&crate::test_linear_input::InventoryFixture {
-            wave_id: wave.id().clone(), initiative: "initiative-1".into(),
+            wave_id: wave.id().clone(),
             synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
             snapshot: serde_json::from_value(json!({"projects": [planning.project], "items": [planning.item]})).unwrap(),
         }).unwrap();
@@ -318,7 +318,7 @@ fn fixture(
         repo.path().canonicalize().unwrap().display().to_string(),
     );
     let project = Project {
-        id: ProjectId::new(),
+        id: ProjectId::for_wave(wave.id()),
 
         tracker_id: Some(LinearProjectId::new("project-1").unwrap()),
         summary: String::new(),

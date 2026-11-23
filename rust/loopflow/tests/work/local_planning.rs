@@ -1474,7 +1474,6 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                         project: Some(project.clone()),
                         item: incoming.clone(),
                     },
-                    Some((wave.id(), "initiative")),
                 )
                 .unwrap();
             // Unsent title and assignee saves are sent last and win; status
@@ -1517,7 +1516,6 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                         project: Some(project.clone()),
                         item: incoming,
                     },
-                    Some((wave.id(), "initiative")),
                 )
                 .unwrap();
             assert_eq!(store.pending_task_changes(&second).unwrap(), changes);
@@ -1626,12 +1624,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
         };
         if mapped {
             store
-                .seed_issue(
-                    &canonical.to_string(),
-                    "linear",
-                    &original,
-                    Some((&projects[0].wave_id, "source")),
-                )
+                .seed_issue(&canonical.to_string(), "linear", &original)
                 .unwrap();
         }
         let args = ["task", "move", task.id.as_str(), "--wave", "destination"];
@@ -1700,12 +1693,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             incoming.item.revision = Some("2026-10-08T14:00:00Z".into());
             incoming.observed_at += 1;
             store
-                .seed_issue(
-                    &canonical.to_string(),
-                    "linear",
-                    &incoming,
-                    Some((&projects[0].wave_id, "source")),
-                )
+                .seed_issue(&canonical.to_string(), "linear", &incoming)
                 .unwrap();
             let retained = store.task(&task.id).unwrap().unwrap();
             assert_eq!(retained.project_id, Some(projects[1].id.clone()));
@@ -1721,12 +1709,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             incoming.observed_at += 1;
             incoming.item.revision = Some("2026-10-08T14:01:00Z".into());
             store
-                .seed_issue(
-                    &canonical.to_string(),
-                    "linear",
-                    &incoming,
-                    Some((&projects[2].wave_id, "competing")),
-                )
+                .seed_issue(&canonical.to_string(), "linear", &incoming)
                 .unwrap();
             // The unsent refiling is sent after Linear's move and wins, rebased
             // onto the move it replaces.
@@ -2408,14 +2391,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     let scope = loopflow_execution::repository::discover(repo.path())
         .unwrap()
         .to_string();
-    store
-        .seed_issue(
-            &scope,
-            "linear",
-            &record,
-            Some((task.wave_id.as_ref().unwrap(), "initiative")),
-        )
-        .unwrap();
+    store.seed_issue(&scope, "linear", &record).unwrap();
     let task = store.task(&id).unwrap().unwrap();
     store
         .edit_task(

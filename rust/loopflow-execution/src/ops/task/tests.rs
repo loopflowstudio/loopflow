@@ -318,7 +318,6 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
             .block_on(fixture.store.seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: fixture.task.wave_id.clone().unwrap(),
-                    initiative: snapshot.projects[0].initiative_ids[0].clone(),
                     synced_at: 7,
                     snapshot,
                 },
@@ -718,7 +717,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         repository.display().to_string(),
     );
     let project = Project {
-        id: ProjectId::new(),
+        id: ProjectId::for_wave(wave.id()),
 
         summary: String::new(),
         status: loopflow_storage::work::project::ProjectStatus::Started,

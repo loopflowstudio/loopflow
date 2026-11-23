@@ -43,7 +43,6 @@ impl Fixture {
     async fn seed_snapshot(&self, wave: &Wave) -> InventoryFixture {
         let row = InventoryFixture {
             wave_id: wave.id().clone(),
-            initiative: "initiative-1".into(),
             synced_at: 1,
             snapshot: Inventory {
                 projects: vec![],
@@ -91,7 +90,7 @@ fn gated(mut response: QueuedResponse) -> (QueuedResponse, Arc<Barrier>, Arc<Bar
 }
 
 async fn forced_read(repo: &Path) -> OpsResult<()> {
-    refresh_wave(repo, "product").await
+    refresh_wave(repo, "product").await.map(|_| ())
 }
 
 #[tokio::test]
@@ -106,7 +105,7 @@ async fn pm_read_linear_oauth_recovers() {
         serde_json::to_value(fixture.store.get_wave(wave.id()).await.unwrap()).unwrap();
     let timestamp = time::OffsetDateTime::from_unix_timestamp(now()).unwrap();
     let project = Project {
-        id: ProjectId::new(),
+        id: ProjectId::for_wave(wave.id()),
 
         summary: String::new(),
         status: loopflow_storage::work::project::ProjectStatus::Started,
@@ -133,12 +132,9 @@ async fn pm_read_linear_oauth_recovers() {
             "id":"team-1", "name":"Fixture", "key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"
         }]}}})),
-        json_response(StatusCode::OK, json!({"data":{"initiative":{"projects":{
-            "nodes":[{"id":"project-1", "name":"Product — Reliability", "description":"", "status":{"type":"started"},
+        json_response(StatusCode::OK, json!({"data":{"project":{"id":"project-1", "name":"Product — Reliability", "description":"", "status":{"type":"started"},
             "content":"workflow: feature\n\n## Definition\n\nFresh definition.\n\n## KRs\n\n- [ ] Fresh proof",
-            "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}}],
-            "pageInfo":{"hasNextPage":false,"endCursor":null}
-        }}}})),
+            "teams":{"nodes":[{"id":"team-1"}]}}}})),
         json_response(StatusCode::OK, json!({"data":{"project":{"issues":{
             "nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}
         }}}})),

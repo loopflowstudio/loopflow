@@ -522,7 +522,6 @@ fn task_snapshot_reads_its_current_parent_project() {
             "linear",
             observation,
             None,
-            None,
         ))
         .unwrap();
 
@@ -941,7 +940,6 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
             &repo.path().to_string_lossy(),
             "linear",
             observation,
-            None,
             None,
         ))
         .unwrap();

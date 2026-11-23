@@ -51,7 +51,6 @@ async fn migration_preserves_planning_identity_and_removes_snapshot_storage() {
         loopflow_test_support::retained_task_input(&database, "/repo", "fix-1");
     let list = crate::test_linear_input::InventoryFixture {
         wave_id: wave.clone(),
-        initiative: "initiative".into(),
         synced_at: 42,
         snapshot: serde_json::from_value(snapshot).unwrap(),
     };

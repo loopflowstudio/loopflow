@@ -94,7 +94,7 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
             repo.path().canonicalize().unwrap().display().to_string(),
         );
         let project = Project {
-            id: ProjectId::new(),
+            id: ProjectId::for_wave(wave.id()),
             wave_id: wave.id().clone(),
 
             summary: String::new(),
@@ -326,7 +326,7 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
                 let mut restored = original.clone();
                 restored.item.revision = Some(format!("2026-09-30T12:00:{:02}Z", index * 2));
                 runtime
-                    .block_on(store.seed_issue(&scope, "linear", restored, None, None))
+                    .block_on(store.seed_issue(&scope, "linear", restored, None))
                     .unwrap();
                 let mut observed = original.clone();
                 observed.item.revision = Some(format!("2026-09-30T12:00:{:02}Z", index * 2 + 1));
@@ -341,7 +341,7 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
                     observed.item.team_id = Some("another-team".into());
                 }
                 runtime
-                    .block_on(store.seed_issue(&scope, "linear", observed, None, None))
+                    .block_on(store.seed_issue(&scope, "linear", observed, None))
                     .unwrap();
                 if condition == "removed" {
                     runtime

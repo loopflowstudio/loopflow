@@ -65,7 +65,7 @@ fn registered_wave(repo: &Path, slug: &str) -> Wave {
 fn project(wave: &Wave) -> Project {
     let now = OffsetDateTime::now_utc();
     Project {
-        id: ProjectId::new(),
+        id: ProjectId::for_wave(wave.id()),
 
         summary: String::new(),
         status: loopflow_execution::work::project::ProjectStatus::Started,

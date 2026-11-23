@@ -1212,7 +1212,7 @@ impl LinearClient {
             .transpose()
     }
 
-/// The Linear Project a person names: its id, its URL, its slug id or its
+    /// The Linear Project a person names: its id, its URL, its slug id or its
     /// name. A name two live Projects share is an error naming both.
     pub(crate) async fn named_project(&self, key: &str) -> LinearResult<Option<TrackerProject>> {
         let key = key.trim();
@@ -2048,7 +2048,7 @@ struct ProjectStatusNode {
     type_: loopflow_storage::work::project::ProjectStatus,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct ProjectStatusChoice {
     #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
     id: String,
@@ -2218,7 +2218,7 @@ mod tests {
         for _ in 0..5 {
             let client = LinearClient::with_base_url("token".into(), None, url.clone());
             assert!(matches!(
-                client.initiatives().await,
+                client.project_statuses().await,
                 Err(crate::linear::LinearError::RateLimited { .. })
             ));
         }
@@ -2229,7 +2229,7 @@ mod tests {
     async fn last_allowed_response_is_returned_before_shared_pause() {
         let mut last = json_response(
             StatusCode::OK,
-            json!({"data":{"initiatives":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}),
+            json!({"data":{"projectStatuses":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}),
         );
         last.headers
             .push(("x-ratelimit-complexity-remaining".into(), "0".into()));
@@ -2240,9 +2240,9 @@ mod tests {
         ));
         let (url, requests) = test_server::spawn(vec![last]).await;
         let client = LinearClient::with_base_url("token".into(), None, url);
-        assert!(client.initiatives().await.unwrap().is_empty());
+        assert!(client.project_statuses().await.unwrap().is_empty());
         assert!(matches!(
-            client.initiatives().await,
+            client.project_statuses().await,
             Err(crate::linear::LinearError::RateLimited { .. })
         ));
         assert_eq!(requests.lock().await.len(), 1);
@@ -2574,38 +2574,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_projects_resolves_owning_teams() {
-        let (base_url, requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": { "initiative": { "projects": {
-                "nodes": [{
-                    "id": "project-1",
-                    "name": "Unified Practice Targets",
-                    "description": "",
-                    "status": {"type":"started"},
-                    "content": "## Definition\n\nA bet.\n\n## KRs\n",
-                    "initiatives": { "nodes": [{ "id": "initiative-1" }] },
-                    "teams": { "nodes": [{ "id": "team-cadenza" }] }
-                }],
-                "pageInfo": { "hasNextPage": false, "endCursor": null }
-            } } } }),
-        )])
+    async fn a_project_is_named_by_url_or_name_and_a_shared_name_is_refused() {
+        let node = |id: &str| {
+            json!({
+                "id": id, "name": "Refunds", "description": "", "updatedAt": null,
+                "archivedAt": null, "status": {"type":"started"}, "content": "",
+                "teams": { "nodes": [{ "id": "team-billing" }] }
+            })
+        };
+        let page = |nodes: Vec<Value>| {
+            json_response(
+                StatusCode::OK,
+                json!({"data":{"projects":{"nodes":nodes,"pageInfo":{"hasNextPage":false,"endCursor":null}}}}),
+            )
+        };
+        let (base_url, requests) = test_server::spawn(vec![
+            page(vec![node("project-1")]),
+            page(vec![]),
+            page(vec![node("project-1"), node("project-2")]),
+        ])
         .await;
         let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
 
-        let projects = client
-            .list_projects("initiative-1")
+        let project = client
+            .named_project("https://linear.app/acme/project/refunds-1a2b3c4d5e6f/overview")
             .await
-            .expect("list projects");
+            .unwrap()
+            .unwrap();
+        assert_eq!(project.id, "project-1");
+        assert_eq!(project.team_ids, ["team-billing".to_string()]);
+        let request: Value = serde_json::from_str(&requests.lock().await[0].body).unwrap();
+        assert_eq!(request["variables"]["slugId"], "1a2b3c4d5e6f");
 
-        assert_eq!(projects.len(), 1);
-        assert_eq!(projects[0].team_ids, ["team-cadenza".to_string()]);
-        let request: Value =
-            serde_json::from_str(&requests.lock().await[0].body).expect("query json");
-        assert!(request["query"]
-            .as_str()
-            .expect("query string")
-            .contains("teams(first: 50)"));
+        assert!(client.named_project("Nothing").await.unwrap().is_none());
+        let error = client
+            .named_project("Refunds")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("2 Linear Projects match `Refunds`"),
+            "{error}"
+        );
     }
 
     #[tokio::test]
@@ -2975,7 +2985,6 @@ mod tests {
                     "id": "project-api", "name": "Product — Loopflow API",
                     "description": "", "status": {"type":"started"},
                     "content": "## Definition\n\nOne model.\n\n## KRs\n",
-                    "initiatives": { "nodes": [{ "id": "initiative-product" }] },
                     "teams": { "nodes": [{ "id": "team-loo" }] }
                 }
             } } }),
@@ -2991,7 +3000,6 @@ mod tests {
         let project = project.unwrap();
         assert_eq!(item.project_id.as_deref(), Some("project-api"));
         assert_eq!(item.team_id.as_deref(), Some("team-loo"));
-        assert_eq!(project.initiative_ids, ["initiative-product"]);
         assert_eq!(project.team_ids, ["team-loo"]);
     }
 
@@ -3063,7 +3071,7 @@ mod model_tests {
     fn project_snapshot_requires_status() {
         let value = serde_json::json!({
             "id":"718867bb-ee14-40cc-82a0-090c3118d78e", "slug":"plan", "name":"Plan", "summary":"",
-            "initiative_ids":[], "team_ids":[]
+            "team_ids":[]
         });
         let error = serde_json::from_value::<TrackerProject>(value).unwrap_err();
         assert!(

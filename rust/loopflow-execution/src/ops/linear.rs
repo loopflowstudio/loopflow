@@ -660,7 +660,7 @@ async fn connect_async(
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let linked = linked_project(&store, &registered).await?;
     let ctx = resolve_repository_context(repo).await?;
-    let created = match options.project.as_deref() {
+    match options.project.as_deref() {
         Some(key) => {
             progress.status(&format!("looking for Linear Project `{key}`"));
             let project = ctx
@@ -670,35 +670,26 @@ async fn connect_async(
                 .map_err(linear_error)?
                 .ok_or_else(|| OpsError::Message(format!("no Linear Project matches `{key}`")))?;
             validate_project_ownership(&project, &wave, &ctx.team_id)?;
-            match linked.as_deref() {
-                Some(linked) if linked == project.id => {}
-                Some(linked) => {
-                    return Err(OpsError::Message(format!(
-                        "wave/{wave} already links Linear Project {linked}; it links one Project"
-                    )))
-                }
-                None => {
-                    progress.status(&format!(
-                        "linking wave/{wave} to Linear Project `{}`",
-                        project.name
-                    ));
-                    let locks = lock_wave_planning(&registered).await?;
-                    let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-                    let wave_id = registered.id().clone();
-                    crate::store::run_planning_write(&store.sqlite, Some(locks), move |sqlite| {
-                        loopflow_storage::sqlite::linear_events::link_wave_project_in(
-                            &sqlite,
-                            &wave_id,
-                            &project,
-                            observed_at,
-                            loopflow_storage::planning_sync::TrackerKind::Linear,
-                        )
-                    })
-                    .await
-                    .map_err(|error| OpsError::Message(error.to_string()))?;
-                }
+            if linked.as_deref() != Some(project.id.as_str()) {
+                progress.status(&format!(
+                    "linking wave/{wave} to Linear Project `{}`",
+                    project.name
+                ));
+                let locks = lock_wave_planning(&registered).await?;
+                let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+                let wave_id = registered.id().clone();
+                crate::store::run_planning_write(&store.sqlite, Some(locks), move |sqlite| {
+                    loopflow_storage::sqlite::linear_events::link_wave_project_in(
+                        &sqlite,
+                        &wave_id,
+                        &project,
+                        observed_at,
+                        loopflow_storage::planning_sync::TrackerKind::Linear,
+                    )
+                })
+                .await
+                .map_err(|error| OpsError::Message(error.to_string()))?;
             }
-            false
         }
         None => {
             if linked.is_none() {
@@ -712,18 +703,22 @@ async fn connect_async(
                 )
                 .await;
             }
-            linked.is_none()
         }
-    };
+    }
     refresh_inventory(repo, &wave, &ctx).await?;
     let project = store
         .get_project(&own)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message(format!("wave/{wave} has no Project")))?;
+    let project_id = project.tracker_id.map(|id| id.as_str().to_owned());
+    // A Project Loopflow made in Linear carries the Wave Project's own id.
+    let created = project_id
+        .as_deref()
+        .is_some_and(|id| id.replace('-', "") == own.as_str().trim_start_matches("proj_"));
     Ok(LinearInitResult {
         wave,
-        project_id: project.tracker_id.map(|id| id.as_str().to_owned()),
+        project_id,
         project_name: project.name,
         created,
         team_id: team.id,
@@ -1161,14 +1156,14 @@ async fn apply_or_plan_repository_reteam(
             }
             if item.team_id.as_deref() == Some(team_id.as_str()) {
                 already += 1;
-                let registered_identifier = store
-                    .task_issue_identifier(&item.id)
-                    .await
-                    .map_err(|error| {
-                        OpsError::Message(format!("failed to read task registry: {error}"))
-                    })?;
-                if registered_identifier.is_some_and(|identifier| identifier != item.identifier)
-                {
+                let registered_identifier =
+                    store
+                        .task_issue_identifier(&item.id)
+                        .await
+                        .map_err(|error| {
+                            OpsError::Message(format!("failed to read task registry: {error}"))
+                        })?;
+                if registered_identifier.is_some_and(|identifier| identifier != item.identifier) {
                     identifier_updates.push(ReteamIdentifierUpdate {
                         wave: wave.clone(),
                         issue_id: item.id,
@@ -1554,13 +1549,11 @@ fn validate_project_ownership(
     wave: &str,
     team_id: &str,
 ) -> OpsResult<()> {
-    crate::linear::validate_project_ownership(wave, Some(team_id), project).map_err(
-        |error| {
-            OpsError::Message(format!(
-                "{error}. Repair the associations and run `lf wave status {wave} --sync`."
-            ))
-        },
-    )
+    crate::linear::validate_project_ownership(wave, Some(team_id), project).map_err(|error| {
+        OpsError::Message(format!(
+            "{error}. Repair the associations and run `lf wave status {wave} --sync`."
+        ))
+    })
 }
 
 pub(super) fn title_case(slug: &str) -> String {
@@ -1702,11 +1695,44 @@ mod tests {
     fn projects_response(projects: serde_json::Value) -> QueuedResponse {
         json_response(
             StatusCode::OK,
-            json!({ "data": { "initiative": { "projects": {
+            json!({ "data": { "projects": {
                 "nodes": projects,
                 "pageInfo": { "hasNextPage": false, "endCursor": null }
-            } } } }),
+            } } }),
         )
+    }
+
+    /// Wave `scan`, its Project linked to Linear Project `project-123`.
+    async fn scan_linked_to(store: &Store, repo: &Path) -> Wave {
+        write_goal(repo, "scan", "agent: codex\n");
+        let wave = crate::work::wave::ensure_wave_row(store, repo, "scan")
+            .await
+            .unwrap();
+        link_wave(store, repo, "scan", &project_node("project-123", "Scan")).await;
+        wave
+    }
+
+    /// Link `wave`'s Project to the Linear Project `node` describes.
+    async fn link_wave(store: &Store, repo: &Path, wave: &str, node: &Value) {
+        let locator = crate::work::wave::discover(repo, wave).unwrap();
+        let wave = store.get_wave_at(&locator).await.unwrap().unwrap();
+        store.sqlite.wave_project(wave.id()).unwrap();
+        let project: TrackerProject = serde_json::from_value(json!({
+            "id": node["id"], "revision": null,
+            "slug": crate::linear::project_slug(node["name"].as_str().unwrap()),
+            "name": node["name"], "summary": "", "status": "started",
+            "team_ids": node["teams"]["nodes"].as_array().unwrap().iter()
+                .map(|team| team["id"].clone()).collect::<Vec<_>>(),
+        }))
+        .unwrap();
+        loopflow_storage::sqlite::linear_events::link_wave_project_in(
+            &store.sqlite,
+            wave.id(),
+            &project,
+            1,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
+        )
+        .unwrap();
     }
 
     fn project_node(id: &str, name: &str) -> serde_json::Value {
@@ -1716,7 +1742,6 @@ mod tests {
             "description": "",
             "content": "workflow: feature\n\n## Definition\n\nA measured bet.\n\n## KRs\n",
             "status": {"type":"started"},
-            "initiatives": { "nodes": [{ "id": "initiative-123" }] },
             "teams": { "nodes": [{ "id": "team-123" }] }
         })
     }
@@ -1731,14 +1756,13 @@ mod tests {
         )
     }
 
-    fn migration_project_node(id: &str, name: &str, initiative: &str, teams: &[&str]) -> Value {
+    fn migration_project_node(id: &str, name: &str, teams: &[&str]) -> Value {
         json!({
             "id": id,
             "name": name,
             "description": "A measured bet.",
             "status": {"type":"started"},
             "content": "## Definition\n\nA measured bet.\n\n## Graphs\n\n- first: (none)\n- loop: (none)\n- finally: (none)\n\n## KRs\n\n- [ ] Ownership holds",
-            "initiatives": { "nodes": [{ "id": initiative }] },
             "teams": { "nodes": teams.iter().map(|id| json!({ "id": id })).collect::<Vec<_>>() }
         })
     }
@@ -1827,29 +1851,38 @@ mod tests {
                     "id": "other-team", "name": "Fixture", "key": "FIX",
                     "description": "<!-- loopflow-repository: loopflowstudio/fixture -->"
                 }]}}});
+                let mut linked = project_node("project-1", "Billing");
+                linked["teams"] = json!({ "nodes": [{ "id": "team-1" }] });
                 let (url, _) = test_server::spawn(vec![
                     json_response(StatusCode::OK, team.clone()),
                     json_response(StatusCode::OK, team.clone()),
                     json_response(StatusCode::OK, team.clone()),
-                    projects_response(json!([])),
+                    projects_response(json!([linked])),
+                    project_readback(&linked),
+                    issues_response(json!([])),
                     // This process already validated the claim; the second
                     // connect skips that ListTeams.
                     json_response(StatusCode::OK, team.clone()),
                     json_response(StatusCode::OK, team),
-                    projects_response(json!([])),
+                    projects_response(json!([linked])),
+                    project_readback(&linked),
+                    issues_response(json!([])),
                 ])
                 .await;
                 LINEAR_TEST_CONTEXT
                     .scope(fixture.context(&url), async {
                         let options = LinearInitOptions {
                             wave: Some("product".into()),
+                            project: Some("Billing".into()),
                             ..Default::default()
                         };
+                        // Connecting again to the Project it links changes nothing.
                         for _ in 0..2 {
                             let result =
                                 connect_async(&repo, &options, &NullProgress).await.unwrap();
                             assert_eq!(result.team_id, "team-1");
-                            assert_eq!(result.initiative_id, "initiative-1");
+                            assert_eq!(result.project_id.as_deref(), Some("project-1"));
+                            assert_eq!(result.project_name, "Billing");
                             assert!(!result.created && !result.team_created);
                         }
                         let config = crate::config::load_config(Some(&repo)).unwrap().unwrap();
@@ -1874,8 +1907,23 @@ mod tests {
         });
     }
 
+    /// The ops Wave's Project, once `connect` has run against `state`.
+    fn ops_project(fixture: &test_fixture::Fixture) -> loopflow_storage::work::project::Project {
+        let ops = fixture
+            .store
+            .sqlite
+            .list_waves(None)
+            .unwrap()
+            .into_iter()
+            .find(|wave| wave.slug() == "ops")
+            .expect("ops is registered");
+        let mut projects = fixture.store.sqlite.list_projects(Some(ops.id())).unwrap();
+        assert_eq!(projects.len(), 1, "a Wave is one Project");
+        projects.remove(0)
+    }
+
     #[test]
-    fn connect_adds_an_unregistered_wave_on_main_before_linking_it() {
+    fn connect_adds_an_unregistered_wave_on_main_and_makes_its_project() {
         with_pm_home(|home, runtime| {
             std::fs::write(
                 home.path().join("config.yaml"),
@@ -1892,7 +1940,11 @@ mod tests {
                         .current_dir(cwd)
                         .output()
                         .unwrap();
-                    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
                     String::from_utf8(output.stdout).unwrap()
                 };
                 git(&["config", "user.email", "fixture@example.com"], &main);
@@ -1901,29 +1953,23 @@ mod tests {
                 git(&["commit", "-q", "-m", "seed"], &main);
                 let worktree = main.parent().unwrap().join("task");
                 git(
-                    &["worktree", "add", "-q", worktree.to_str().unwrap(), "-b", "task"],
+                    &[
+                        "worktree",
+                        "add",
+                        "-q",
+                        worktree.to_str().unwrap(),
+                        "-b",
+                        "task",
+                    ],
                     &main,
                 );
-                let team = json!({"data": {"teams": {"nodes": [{
-                    "id": "team-1", "name": "Fixture", "key": "FIX",
-                    "description": "<!-- loopflow-repository: loopflowstudio/fixture -->"
-                }]}}});
-                let (url, requests) = test_server::spawn(vec![
-                    // Adding the Wave checks its tracker before the Initiative lookup.
-                    json_response(StatusCode::OK, team.clone()),
-                    json_response(StatusCode::OK, team.clone()),
-                    json_response(
-                        StatusCode::OK,
-                        json!({"data": {"initiatives": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}}}),
-                    ),
-                    json_response(
-                        StatusCode::OK,
-                        json!({"data": {"initiativeCreate": {"initiative": {"id": "6f1d2c3b-4a5e-4f60-8a71-9b2c3d4e5f60"}}}}),
-                    ),
-                    json_response(StatusCode::OK, team.clone()),
-                    projects_response(json!([])),
-                ])
-                .await;
+                let state = Arc::new(tokio::sync::Mutex::new(
+                    crate::test_support::planning_tasks::PlanningState {
+                        export_mode: true,
+                        ..Default::default()
+                    },
+                ));
+                let (url, server) = crate::test_support::planning_tasks::serve(state.clone()).await;
                 LINEAR_TEST_CONTEXT
                     .scope(fixture.context(&url), async {
                         let result = connect_async(
@@ -1934,17 +1980,22 @@ mod tests {
                             },
                             &NullProgress,
                         )
-                        .await;
-                        let queries: Vec<String> = requests
-                            .lock()
-                            .await
-                            .iter()
-                            .map(|request| request.body.chars().take(80).collect())
-                            .collect();
-                        let result = result.unwrap_or_else(|error| panic!("{error}\n{queries:#?}"));
+                        .await
+                        .unwrap();
+                        let project = ops_project(&fixture);
+                        // Loopflow made it, under the Wave Project's own id.
                         assert!(result.created);
+                        assert_eq!(
+                            result.project_id.as_deref(),
+                            project.tracker_id.as_ref().map(|id| id.as_str())
+                        );
+                        assert_eq!(state.lock().await.creation_writes, 1);
+                        // The repository already names its Team; nothing to commit.
                         assert!(
-                            matches!(result.files, super::super::wave_lifecycle::AuthoredFiles::Committed { .. }),
+                            matches!(
+                                result.files,
+                                super::super::wave_lifecycle::AuthoredFiles::Unchanged
+                            ),
                             "{:?}",
                             result.files
                         );
@@ -1953,27 +2004,97 @@ mod tests {
                         assert!(git(&["ls-files", ".lf/wave/ops"], &main).contains("GOAL.md"));
                         assert_eq!(git(&["status", "--porcelain"], &main), "");
                         let log = git(&["log", "--format=%s", "-3"], &main);
-                        assert!(log.contains("lf wave plan connect: ops to Linear"), "{log}");
                         assert!(log.contains("lf wave add: ops"), "{log}");
-                        assert_eq!(
-                            read_initiative(&main, "ops").as_deref(),
-                            Some("6f1d2c3b-4a5e-4f60-8a71-9b2c3d4e5f60")
-                        );
-                        let ops = fixture
-                            .store
-                            .list_waves(None)
-                            .await
-                            .unwrap()
-                            .into_iter()
-                            .find(|wave| wave.slug() == "ops")
-                            .expect("ops is registered");
-                        assert_eq!(
-                            fixture.store.sqlite.list_projects(Some(ops.id())).unwrap().len(),
-                            0,
-                            "add gives the Wave no Project"
-                        );
                     })
                     .await;
+                server.abort();
+            });
+        });
+    }
+
+    #[test]
+    fn connect_links_an_existing_project_in_place_of_the_one_it_made() {
+        with_pm_home(|home, runtime| {
+            std::fs::write(
+                home.path().join("config.yaml"),
+                "planning:\n  provider: linear\n",
+            )
+            .unwrap();
+            runtime.block_on(async {
+                let fixture = test_fixture::Fixture::new().await;
+                let (main, _) = fixture.planning_repo().await;
+                fixture.seed(test_fixture::now() + 3600).await;
+                let existing = json!({"id":"5d0c1b2a-3948-4e5f-9a6b-7c8d9e0f1a2b",
+                    "name":"Refunds", "description":"", "content":"",
+                    "status":{"type":"started"}, "updatedAt":"2026-09-30T12:00:00Z",
+                    "archivedAt":null, "teams":{"nodes":[{"id":"team-1"}]}});
+                let state = Arc::new(tokio::sync::Mutex::new(
+                    crate::test_support::planning_tasks::PlanningState {
+                        extra_projects: vec![existing.clone()],
+                        export_mode: true,
+                        ..Default::default()
+                    },
+                ));
+                let (url, server) = crate::test_support::planning_tasks::serve(state.clone()).await;
+                LINEAR_TEST_CONTEXT
+                    .scope(fixture.context(&url), async {
+                        let made = connect_async(
+                            &main,
+                            &LinearInitOptions {
+                                wave: Some("ops".into()),
+                                ..Default::default()
+                            },
+                            &NullProgress,
+                        )
+                        .await
+                        .unwrap();
+                        assert!(made.created);
+                        let result = connect_async(
+                            &main,
+                            &LinearInitOptions {
+                                wave: Some("ops".into()),
+                                project: Some("refunds".into()),
+                                ..Default::default()
+                            },
+                            &NullProgress,
+                        )
+                        .await
+                        .unwrap();
+                        assert!(!result.created);
+                        assert_eq!(result.project_id.as_deref(), existing["id"].as_str());
+                        assert_eq!(result.project_name, "Refunds");
+                        let project = ops_project(&fixture);
+                        assert_eq!(
+                            project.tracker_id.as_ref().map(|id| id.as_str()),
+                            existing["id"].as_str()
+                        );
+                        assert_eq!(project.name, "Refunds");
+                        // A Task made in the Wave now goes to the linked Project.
+                        let context = fixture.context(&url);
+                        let task = tokio::task::block_in_place(|| {
+                            LINEAR_TEST_CONTEXT.sync_scope(context, || {
+                                crate::ops::task::task_create(
+                                    &main,
+                                    Some("ops"),
+                                    Some("Refund the duplicate charge".into()),
+                                    None,
+                                    crate::ops::task::TaskAdoptionOptions::default(),
+                                    None,
+                                )
+                            })
+                        })
+                        .unwrap();
+                        let provider = state.lock().await;
+                        let issue = provider
+                            .issues
+                            .iter()
+                            .find(|issue| issue["title"] == "Refund the duplicate charge")
+                            .expect("the Task reached Linear");
+                        assert_eq!(issue["project"]["id"], existing["id"]);
+                        assert!(task.tracker_id.is_some());
+                    })
+                    .await;
+                server.abort();
             });
         });
     }
@@ -1990,7 +2111,6 @@ mod tests {
             let goal = repo.path().join(".lf/wave/product/GOAL.md");
 
             write_repository_linear_config(repo.path(), "team-product").unwrap();
-            write_initiative_to_wave(repo.path(), "product", "initiative-product").unwrap();
             let config = crate::config::load_repo_config(repo.path())
                 .unwrap()
                 .unwrap();
@@ -2007,11 +2127,6 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert_eq!(wave.agent.as_deref(), Some("claude"));
-            let wave = read_wave_config(repo.path(), "product").unwrap();
-            assert_eq!(
-                wave.linear.unwrap().initiative.as_deref(),
-                Some("initiative-product")
-            );
         });
     }
 
@@ -2022,11 +2137,7 @@ mod tests {
                 repo.path(),
                 "planning:\n  provider: linear\n  team: team-loo\n",
             );
-            write_goal(
-                repo.path(),
-                "product",
-                "linear:\n  initiative: initiative-product\n",
-            );
+            write_goal(repo.path(), "product", "agent: codex\n");
 
             runtime.block_on(async {
                 let store = crate::store::open_ephemeral_store(
@@ -2041,10 +2152,6 @@ mod tests {
             assert_eq!(
                 selected_linear_team(repo.path()).unwrap().as_deref(),
                 Some("team-loo")
-            );
-            assert_eq!(
-                read_initiative(repo.path(), "product").as_deref(),
-                Some("initiative-product")
             );
         });
     }
@@ -2087,12 +2194,12 @@ mod tests {
                 write_goal(
                     repo.path(),
                     "survival",
-                    "linear:\n  initiative: initiative-survival\n",
+                    "agent: codex\n",
                 );
                 write_goal(
                     repo.path(),
                     "survival/infrastructure",
-                    "linear:\n  initiative: initiative-infrastructure\n",
+                    "agent: codex\n",
                 );
 
                 repo.stage_all();
@@ -2120,33 +2227,25 @@ mod tests {
                 let old_survival = migration_project_node(
                     "project-survival",
                     "Survival — A real task reaches done",
-                    "initiative-survival",
-                    &["team-old"],
-                );
+                    &["team-old"],);
                 let old_infrastructure = migration_project_node(
                     "project-infrastructure",
                     "Infrastructure — Gmail",
-                    "initiative-infrastructure",
-                    &["team-old"],
-                );
+                    &["team-old"],);
                 let new_survival = migration_project_node(
                     "project-survival",
                     "Survival — A real task reaches done",
-                    "initiative-survival",
-                    &["team-loo"],
-                );
+                    &["team-loo"],);
                 let new_infrastructure = migration_project_node(
                     "project-infrastructure",
                     "Infrastructure — Gmail",
-                    "initiative-infrastructure",
-                    &["team-loo"],
-                );
+                    &["team-loo"],);
                 let mut expanded_survival = old_survival.clone();
                 expanded_survival["teams"] = json!({"nodes": [{"id":"team-old"},{"id":"team-loo"}]});
                 let mut expanded_infrastructure = old_infrastructure.clone();
                 expanded_infrastructure["teams"] = expanded_survival["teams"].clone();
                 let responses = vec![
-                    projects_response(json!([old_survival])),
+                    project_readback(&old_survival),
                     issues_response(json!([migration_issue_node(
                         "issue-open",
                         "OLD-1",
@@ -2155,7 +2254,7 @@ mod tests {
                         "team-old",
                         false,
                     )])),
-                    projects_response(json!([old_infrastructure])),
+                    project_readback(&old_infrastructure),
                     issues_response(json!([migration_issue_node(
                         "issue-done",
                         "OLD-2",
@@ -2212,7 +2311,7 @@ mod tests {
                     project_readback(&new_survival),
                     project_update_response("project-infrastructure"),
                     project_readback(&new_infrastructure),
-                    projects_response(json!([new_survival])),
+                    project_readback(&new_survival),
                     issues_response(json!([migration_issue_node(
                         "issue-open",
                         "LOO-1",
@@ -2221,7 +2320,7 @@ mod tests {
                         "team-loo",
                         false,
                     )])),
-                    projects_response(json!([new_infrastructure])),
+                    project_readback(&new_infrastructure),
                     issues_response(json!([migration_issue_node(
                         "issue-done",
                         "LOO-2",
@@ -2231,6 +2330,9 @@ mod tests {
                         true,
                     )])),
                 ];
+                link_wave(&store, repo.path(), "survival", &old_survival).await;
+                link_wave(&store, repo.path(), "survival/infrastructure", &old_infrastructure)
+                    .await;
                 let (base_url, requests) = test_server::spawn(responses).await;
                 let client = crate::linear::LinearClient::with_base_url(
                     "linear-secret".to_string(),
@@ -2267,7 +2369,6 @@ mod tests {
                     Some("team-loo")
                 );
                 for wave in ["survival", "survival/infrastructure"] {
-                    assert!(read_initiative(repo.path(), wave).is_some());
                     let locator = crate::work::wave::discover(repo.path(), wave).unwrap();
                     let registered = resolved.store.get_wave_at(&locator).await.unwrap().unwrap();
                     let projects = resolved.store.list_projects(Some(registered.id())).await.unwrap();
@@ -2337,7 +2438,7 @@ mod tests {
                 write_goal(
                     repo.path(),
                     "survival",
-                    "linear:\n  initiative: initiative-survival\n",
+                    "agent: codex\n",
                 );
 
                 let database = repo.path().join("loopflow.db");
@@ -2352,21 +2453,15 @@ mod tests {
                 let old_project = migration_project_node(
                     "project-survival",
                     "Survival — A real task reaches done",
-                    "initiative-survival",
-                    &["team-old"],
-                );
+                    &["team-old"],);
                 let expanded_project = migration_project_node(
                     "project-survival",
                     "Survival — A real task reaches done",
-                    "initiative-survival",
-                    &["team-old", "team-loo"],
-                );
+                    &["team-old", "team-loo"],);
                 let migrated_project = migration_project_node(
                     "project-survival",
                     "Survival — A real task reaches done",
-                    "initiative-survival",
-                    &["team-loo"],
-                );
+                    &["team-loo"],);
                 let old_issue = migration_issue_node(
                     "issue-open",
                     "OLD-1",
@@ -2386,7 +2481,7 @@ mod tests {
                 let marker = reteam_comment_body("OLD-1", "LOO");
                 let mut responses = Vec::new();
                 if cache_planning {
-                    responses.push(projects_response(json!([old_project.clone()])));
+                    responses.push(project_readback(&old_project));
                     responses.push(issues_response(json!([old_issue.clone()])));
                 }
                 let failure = || {
@@ -2408,13 +2503,13 @@ mod tests {
                     )
                 };
                 responses.extend([
-                    projects_response(json!([old_project.clone()])),
+                    project_readback(&old_project),
                     issues_response(json!([old_issue.clone()])),
                 ]);
                 if interruption == "expansion" {
                     responses.extend([
                         failure(),
-                        projects_response(json!([expanded_project.clone()])),
+                        project_readback(&expanded_project),
                         issues_response(json!([old_issue.clone()])),
                         project_readback(&expanded_project),
                         issue_comments_response(),
@@ -2430,7 +2525,7 @@ mod tests {
                     if interruption == "move" {
                         responses.extend([
                             failure(),
-                            projects_response(json!([expanded_project.clone()])),
+                            project_readback(&expanded_project),
                             issues_response(json!([old_issue.clone()])),
                             project_readback(&expanded_project),
                             issue_comments_response_with(Some(&marker)),
@@ -2444,7 +2539,7 @@ mod tests {
                 if interruption == "narrowing" {
                     responses.extend([
                         failure(),
-                        projects_response(json!([migrated_project.clone()])),
+                        project_readback(&migrated_project),
                         issues_response(json!([migrated_issue.clone()])),
                         project_readback(&migrated_project),
                     ]);
@@ -2453,9 +2548,10 @@ mod tests {
                 }
                 responses.extend([
                     project_readback(&migrated_project),
-                    projects_response(json!([migrated_project.clone()])),
+                    project_readback(&migrated_project),
                     issues_response(json!([migrated_issue.clone()])),
                 ]);
+                link_wave(&store, repo.path(), "survival", &old_project).await;
                 let (base_url, requests) = test_server::spawn(responses).await;
                 let resolved = ResolvedReteamContext {
                     repository: LinearRepository {
@@ -2472,12 +2568,12 @@ mod tests {
                 };
 
                 if cache_planning {
-                    let projects = resolved
+                    let projects = vec![resolved
                         .repository
                         .client
-                        .list_projects("initiative-survival")
+                        .project_ownership("project-survival")
                         .await
-                        .unwrap();
+                        .unwrap()];
                     let items = resolved
                         .repository
                         .client
@@ -2489,7 +2585,6 @@ mod tests {
                         .seed_inventory(
                             InventoryFixture {
                                 wave_id: wave.id().clone(),
-                                initiative: "initiative-survival".into(),
                                 synced_at: 1,
                                 snapshot: Inventory { projects, items },
                             },
@@ -2540,30 +2635,10 @@ mod tests {
         });
     }
 
-    #[test]
-    fn duplicate_linear_project_slugs_are_drift() {
-        let project = |id: &str, name: &str| TrackerProject {
-            description: None,
-            revision: None,
-            id: id.to_string(),
-            slug: crate::linear::project_slug(name),
-            name: name.to_string(),
-            summary: String::new(),
-            status: loopflow_storage::work::project::ProjectStatus::Started,
-            initiative_ids: vec!["initiative-1".to_string()],
-            team_ids: vec!["team-loo".to_string()],
-        };
-        let projects = vec![project("one", "Wave Chat"), project("two", "Wave-Chat")];
-
-        let error = ensure_unique_project_slugs(&projects, "product")
-            .expect_err("duplicate slug must fail");
-        assert!(error.to_string().contains("both derive slug `wave-chat`"));
-    }
-
     #[tokio::test]
     async fn refresh_reads_projects_and_their_issues() {
         let (base_url, requests) = test_server::spawn(vec![
-            projects_response(json!([project_node("project-123", "Scan")])),
+            project_readback(&project_node("project-123", "Scan")),
             issues_response(json!([
                 { "id": "issue-1", "identifier": "LOO-1", "url": null,
                   "title": "First", "description": "one",
@@ -2577,11 +2652,11 @@ mod tests {
         let ctx = linear_test_ctx(base_url);
         let repo = tempfile::tempdir().unwrap();
         let store = isolated_pm_store(repo.path()).await;
+        let wave = scan_linked_to(&store, repo.path()).await;
 
-        let result =
-            test_fixture::capture_inventory(repo.path(), "scan", &ctx, "initiative-123", &store)
-                .await
-                .expect("fetch succeeds");
+        let result = test_fixture::capture_inventory(&wave, &ctx, &store)
+            .await
+            .expect("fetch succeeds");
         assert_eq!(result.projects.len(), 1);
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.items[0].name, "First");
@@ -2594,7 +2669,7 @@ mod tests {
     #[tokio::test]
     async fn refresh_preserves_moved_and_detached_issue_ownership() {
         let (base_url, _) = test_server::spawn(vec![
-            projects_response(json!([project_node("project-123", "Scan")])),
+            project_readback(&project_node("project-123", "Scan")),
             issues_response(json!([
                 { "id": "moved", "identifier": "LOO-1", "url": null,
                   "title": "Moved", "description": "Preserve the observed destination",
@@ -2615,11 +2690,11 @@ mod tests {
         let ctx = linear_test_ctx(base_url);
         let repo = tempfile::tempdir().unwrap();
         let store = isolated_pm_store(repo.path()).await;
+        let wave = scan_linked_to(&store, repo.path()).await;
 
-        let snapshot =
-            test_fixture::capture_inventory(repo.path(), "scan", &ctx, "initiative-123", &store)
-                .await
-                .unwrap();
+        let snapshot = test_fixture::capture_inventory(&wave, &ctx, &store)
+            .await
+            .unwrap();
         assert_eq!(snapshot.items[0].project_id.as_deref(), Some("successor"));
         assert_eq!(
             snapshot.items[0].revision.as_deref(),

@@ -121,11 +121,7 @@ fn task_run_checks_admission_while_standalone_graphs_run_with_task_context() {
         }
         deliver_state_writes(&registered.store, &registered.task.id);
         runtime
-            .block_on(
-                registered
-                    .store
-                    .seed_issue(&scope, "linear", record, None, None),
-            )
+            .block_on(registered.store.seed_issue(&scope, "linear", record))
             .unwrap();
         // Old valid planning still admits a launch without reaching the provider.
         rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -1261,7 +1257,7 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
         record.item.state = Some("completed".into());
         record.item.completed = true;
         runtime
-            .block_on(store.seed_issue(&scope, "linear", record, None, None))
+            .block_on(store.seed_issue(&scope, "linear", record, None))
             .unwrap();
     }
 
@@ -1433,7 +1429,7 @@ fn checkout_leaves_graph_selection_to_the_first_run() {
     observation.item.name = "Graph chosen at first run".into();
     observation.item.branch_name = None;
     runtime
-        .block_on(store.seed_issue(&scope, "linear", observation, None, None))
+        .block_on(store.seed_issue(&scope, "linear", observation, None))
         .unwrap();
     let task = runtime
         .block_on(store.get_task_by_issue("INF-124"))
@@ -2756,9 +2752,9 @@ fn linear_completion_and_reopening_preserve_the_graph() {
     record.item.revision = Some("2026-10-07T12:00:00Z".into());
     record.item.state = Some("started".into());
     record.item.completed = false;
-    rt.block_on(store.seed_issue(&scope, "linear", record, None, None))
+    rt.block_on(store.seed_issue(&scope, "linear", record, None))
         .unwrap();
-    rt.block_on(store.seed_issue(&scope, "linear", stale, None, None))
+    rt.block_on(store.seed_issue(&scope, "linear", stale, None))
         .unwrap();
     assert_eq!(task.state(), "active");
     assert_eq!(task.graph(), graph);

@@ -245,7 +245,7 @@ async fn serve(state: Shared) -> (String, tokio::task::JoinHandle<()>) {
 }
 
 async fn asana_repo(fixture: &Fixture) -> PathBuf {
-    let (repo, _) = fixture.planning_repo().await;
+    let (repo, _) = fixture.local_planning_repo().await;
     std::fs::write(
         repo.join(".lf/config.yaml"),
         format!("planning:\n  provider: asana\n  team: \"https://app.asana.com/0/team/{TEAM}/overview\"\n"),
@@ -303,10 +303,10 @@ fn asana_task_create_mirrors_task_under_its_loopflow_identity() {
         assert_eq!(task["name"], "Ship the Asana provider");
         // The Task lives in the team project Loopflow made for the repository.
         let projects = runtime.block_on(state.lock()).projects.clone();
-        assert_eq!(projects.len(), 1);
-        assert_eq!(projects[0]["gid"], PROJECT);
-        assert_eq!(projects[0]["name"], "fixture");
-        assert_eq!(task["memberships"], json!([{"project": {"gid": PROJECT}}]));
+        let team: Vec<_> = projects.iter().filter(|p| p["name"] == "fixture").collect();
+        assert_eq!(team.len(), 1);
+
+        assert_eq!(task["memberships"], json!([{"project": {"gid": team[0]["gid"]}}]));
         // Asana renders rich text, so markdown arrives formatted.
         assert_eq!(
             task["html_notes"],
@@ -508,7 +508,12 @@ fn asana_tasks_coworkers_create_become_tasks() {
         let asana = runtime.block_on(state.lock());
         let id = task.tracker_id.as_ref().unwrap().as_str();
         assert_eq!(asana.tasks[id]["external"]["gid"], id);
-        assert_eq!(asana.projects.len(), 2, "the existing project was reused");
+        // The existing team project was reused; the other is the Wave's.
+        assert_eq!(asana.projects.len(), 3);
+        assert_eq!(
+            asana.projects.iter().filter(|p| p["name"] == "fixture").count(),
+            1
+        );
     });
 }
 

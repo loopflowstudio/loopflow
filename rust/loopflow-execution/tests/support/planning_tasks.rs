@@ -12,23 +12,7 @@ use crate::ops::linear::{LinearRefresh, LINEAR_TEST_CONTEXT};
 use loopflow_storage::work::task::Task;
 
 pub async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) {
-    let (repo, wave) = fixture.planning_repo().await;
-    let project = serde_json::from_value(json!({
-        "id": "project-1", "slug": "Project", "name": "Project", "summary": "",
-        "workflow": "feature", "status": "started",
-        "initiative_ids": ["initiative-1"], "team_ids": ["team-1"]
-    }))
-    .unwrap();
-    loopflow_storage::sqlite::linear_events::accept_linear_project_in(
-        &fixture.store.sqlite,
-        wave.id(),
-        "initiative-1",
-        &project,
-        now(),
-        loopflow_storage::planning_sync::TrackerKind::Linear,
-    )
-    .unwrap();
-    (repo, wave)
+    fixture.planning_repo().await
 }
 
 pub async fn serve(
@@ -52,14 +36,9 @@ pub struct PlanningState {
     /// Added to every answer: a provider taking its time.
     pub response_delay: Option<std::time::Duration>,
     pub rate_limit_query: Option<&'static str>,
-    pub wave_summary: String,
-    pub reject_wave_update: bool,
-    pub wave_updates: usize,
     pub export_mode: bool,
     pub creation_writes: usize,
-    pub attachment_writes: usize,
     pub lose_creation_reply: bool,
-    pub lose_attachment_reply: bool,
     pub hide_exports: bool,
     pub slow_export_id: Option<String>,
     pub deletion_writes: usize,
@@ -118,8 +97,7 @@ fn planning_project(id: &str) -> serde_json::Value {
     json!({"id":id, "name":name, "description":"", "content":"workflow: feature",
         "status":{"type":if completed { "completed" } else { "started" }},
         "updatedAt":if completed { "2026-09-30T12:00:01Z" } else { "2026-09-30T12:00:00Z" },
-        "archivedAt":null,
-        "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}})
+        "archivedAt":null, "teams":{"nodes":[{"id":"team-1"}]}})
 }
 
 pub async fn planning_graphql(
@@ -198,7 +176,6 @@ pub async fn planning_response(
         || (state.field_reads_blocked
             && (query.contains("IssueOwnership")
                 || query.contains("ProjectOwnership")
-                || query.contains("ListInitiativeProjects")
                 || query.contains("ListProjectIssues")))
     {
         return axum::Json(json!({"errors":[{"message":"planning offline"}]}));
@@ -263,30 +240,11 @@ pub async fn planning_response(
     } else if query.contains("query ListTeams") {
         json!({"teams":{"nodes":[{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
-    } else if query.contains("mutation UpdateInitiative") {
-        state.wave_updates += 1;
-        if state.reject_wave_update {
-            return axum::Json(json!({"errors":[{"message":"summary update refused"}]}));
-        }
-        if let Some(summary) = vars["input"]["description"].as_str() {
-            state.wave_summary = summary.into();
-        }
-        json!({"initiativeUpdate":{"success":true,"initiative":{"id":vars["id"]}}})
-    } else if query.contains("query ListInitiatives") {
-        json!({"initiatives":page(vec![json!({"id":"initiative-1", "name":"Product", "description":state.wave_summary})])})
-    } else if query.contains("query ListInitiativeProjects") {
+    } else if query.contains("query ListProjectIssues") {
         if !state.issues.is_empty() && state.fail_snapshot {
             state.fail_snapshot = false;
             return axum::Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
         }
-        let mut projects = if state.export_mode {
-            vec![]
-        } else {
-            vec![project]
-        };
-        projects.extend(state.extra_projects.clone());
-        json!({"initiative":{"projects":page(projects)}})
-    } else if query.contains("query ListProjectIssues") {
         if !state.export_mode
             && state
                 .extra_projects
@@ -320,6 +278,15 @@ pub async fn planning_response(
             vec![planning_project(vars["id"].as_str().unwrap())]
         };
         json!({"projects":page(projects)})
+    } else if query.contains("query NamedProject") {
+        let name = vars["name"].as_str().unwrap_or_default().to_lowercase();
+        let named: Vec<_> = state
+            .extra_projects
+            .iter()
+            .filter(|p| p["name"].as_str().unwrap_or_default().to_lowercase() == name)
+            .cloned()
+            .collect();
+        json!({"projects":page(named)})
     } else if query.contains("query ProjectOwnership") {
         let owned = state
             .extra_projects
@@ -360,7 +327,6 @@ pub async fn planning_response(
             project["description"] = input["description"].clone();
             project["content"] = input["content"].clone();
             project["status"] = json!({"type":input["statusId"]});
-            project["initiatives"] = json!({"nodes":[]});
             mark_issue_updated(&mut project);
             state.extra_projects.push(project);
         } else {
@@ -406,20 +372,6 @@ pub async fn planning_response(
         } else {
             json!({"data":{"issueCreate":{"success":true,"issue":created}}})
         });
-    } else if query.contains("mutation DeliverProjectAttachment") {
-        state.attachment_writes += 1;
-        let project = state
-            .extra_projects
-            .iter_mut()
-            .find(|p| p["id"] == vars["input"]["projectId"])
-            .unwrap();
-        project["initiatives"] = json!({"nodes":[{"id":vars["input"]["initiativeId"]}]});
-        mark_issue_updated(project);
-        let attached = project.clone();
-        if std::mem::take(&mut state.lose_attachment_reply) {
-            return axum::Json(json!({"errors":[{"message":"attachment reply lost"}]}));
-        }
-        json!({"initiativeToProjectCreate":{"success":true,"initiativeToProject":{"project":attached}}})
     } else if query.contains("mutation DeliverTaskField")
         || query.contains("mutation DeliverProjectField")
     {

@@ -843,7 +843,7 @@ mod tests {
         let now = OffsetDateTime::from_unix_timestamp(OffsetDateTime::now_utc().unix_timestamp())
             .expect("current unix time");
         Project {
-            id: ProjectId::new(),
+            id: ProjectId::for_wave(wave.id()),
 
             summary: String::new(),
             status: loopflow_storage::work::project::ProjectStatus::Started,
@@ -874,7 +874,6 @@ mod tests {
         snapshot.items[0].revision = Some("2026-10-05T12:00:00Z".into());
         InventoryFixture {
             wave_id: wave.id().clone(),
-            initiative: snapshot.projects[0].initiative_ids[0].clone(),
             synced_at: 1,
             snapshot,
         }
@@ -1440,7 +1439,6 @@ mod tests {
                     project: Some(snapshot.snapshot.projects[0].clone()),
                     observed_at: 2,
                 },
-                Some((wave.id().clone(), snapshot.initiative.clone())),
                 None,
             )
             .await
@@ -1458,7 +1456,6 @@ mod tests {
                     project: Some(snapshot.snapshot.projects[0].clone()),
                     observed_at: snapshot.synced_at,
                 },
-                None,
                 None,
             )
             .await
@@ -1506,7 +1503,6 @@ mod tests {
                     project: Some(older_project),
                     observed_at: 20,
                 },
-                None,
                 None,
             )
             .await
@@ -1607,89 +1603,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delayed_project_projection_preserves_a_newer_task_transfer() {
-        let (_directory, store, wave) = planning_store().await;
-        let predecessor = make_project(&wave);
-        store.create_project(&predecessor).await.unwrap();
-        let task = make_task(&store, &wave, &predecessor);
-        let pr = make_task_pr(&task);
-        store.seed_task(&task, &pr).await.unwrap();
-        let old = task_planning_snapshot(&wave, &predecessor, &task);
-        store.seed_inventory(old.clone(), None).await.unwrap();
-        // The first refresh has fetched its response, then pauses.
-        let delayed = old;
-        let mut newer = delayed.clone();
-        newer.synced_at = 2;
-        let mut successor = newer.snapshot.projects[0].clone();
-        successor.id = "successor-project".into();
-        successor.slug = "successor".into();
-        successor.name = "Successor".into();
-        newer.snapshot.items[0].project_id = Some(successor.id.clone());
-        newer.snapshot.items[0].revision = Some("2026-10-05T12:00:01Z".into());
-        newer.snapshot.projects.push(successor);
-        store.seed_inventory(newer, None).await.unwrap();
-        let accepted = store
-            .linear_issue_state(wave.repo(), &task.identifier)
-            .await
-            .unwrap();
-        let transferred = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_ne!(transferred.project_id, Some(predecessor.id));
-        // A delayed response omits the now-known successor. Rejection must
-        // preserve both normalized facts and the durable Task transfer.
-        assert!(store.seed_inventory(delayed, None).await.is_err());
-        assert_eq!(
-            store
-                .linear_issue_state(wave.repo(), &task.identifier)
-                .await
-                .unwrap(),
-            accepted
-        );
-        assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-        assert_eq!(
-            store.get_task(&task.id).await.unwrap().unwrap(),
-            transferred
-        );
-    }
-
-    #[tokio::test]
-    async fn cold_detail_preserves_durable_work_without_confirmed_wave_membership() {
-        let (_directory, store, wave) = planning_store().await;
-        let project = make_project(&wave);
-        store.create_project(&project).await.unwrap();
-        let task = make_task(&store, &wave, &project);
-        let pr = make_task_pr(&task);
-        let task = store.seed_task(&task, &pr).await.unwrap();
-        let mut snapshot = task_planning_snapshot(&wave, &project, &task);
-        let mut observed_project = snapshot.snapshot.projects.remove(0);
-        observed_project.initiative_ids = vec!["elsewhere".into()];
-        observed_project.name = "Another Wave's plan".into();
-        observed_project.slug = "another-waves-plan".into();
-        let mut item = snapshot.snapshot.items.remove(0);
-        item.name = "Work now owned elsewhere".into();
-
-        // Durable identity survives a cold planning cache. It does not prove
-        // that this freshly observed Initiative still belongs to that Wave.
-        store
-            .seed_issue(
-                wave.repo(),
-                "linear",
-                crate::test_linear_input::IssueFixture {
-                    item,
-                    project: Some(observed_project),
-                    observed_at: 10,
-                },
-                None,
-                None,
-            )
-            .await
-            .unwrap();
-        assert_eq!(wave_refresh_at(_directory.path(), &wave), None);
-        assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-        assert_eq!(store.get_project(&project.id).await.unwrap(), Some(project));
-        assert_eq!(store.get_task(&task.id).await.unwrap(), Some(task));
-    }
-
-    #[tokio::test]
     async fn cold_detail_refreshes_confirmed_work_and_retains_identity() {
         let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
@@ -1711,7 +1624,6 @@ mod tests {
                     project: Some(observed),
                     observed_at: 10,
                 },
-                Some((wave.id().clone(), snapshot.initiative)),
                 None,
             )
             .await
@@ -1738,62 +1650,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stale_project_readback_cannot_assign_newer_membership_to_a_wave() {
-        let (_directory, store, wave) = planning_store().await;
-        let project = make_project(&wave);
-        let task = make_task(&store, &wave, &project);
-        let snapshot = task_planning_snapshot(&wave, &project, &task);
-        let old = snapshot.snapshot.projects[0].clone();
-        let mut current = old.clone();
-        current.initiative_ids = vec!["elsewhere".into()];
-        current.revision = Some("2026-10-05T12:00:01Z".into());
-        store
-            .seed_issue(
-                wave.repo(),
-                "linear",
-                crate::test_linear_input::IssueFixture {
-                    item: snapshot.snapshot.items[0].clone(),
-                    project: Some(current.clone()),
-                    observed_at: 10,
-                },
-                None,
-                None,
-            )
-            .await
-            .unwrap();
-        assert!(
-            loopflow_storage::sqlite::linear_events::accept_linear_project_in(
-                &store.sqlite,
-                wave.id(),
-                &snapshot.initiative,
-                &old,
-                20,
-                loopflow_storage::planning_sync::TrackerKind::Linear
-            )
-            .is_err()
-        );
-        assert!(store.seed_inventory(snapshot, None).await.is_err());
-        assert_eq!(wave_refresh_at(_directory.path(), &wave), None);
-        assert!(store
-            .list_projects(Some(wave.id()))
-            .await
-            .unwrap()
-            .is_empty());
-        let retained = store
-            .linear_issue_state(wave.repo(), task.tracker_id.as_ref().unwrap().as_str())
-            .await
-            .unwrap();
-        assert_eq!(retained.project_team_ids, current.team_ids);
-        let retained_input: crate::test_linear_input::IssueFixture =
-            loopflow_test_support::retained_task_input(
-                &_directory.path().join("registry.db"),
-                wave.repo(),
-                &task.identifier,
-            );
-        assert_eq!(retained_input.project, Some(current));
-    }
-
-    #[tokio::test]
     async fn confirmed_project_preserves_full_refresh_age_and_rejects_another_wave() {
         let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
@@ -1808,7 +1664,6 @@ mod tests {
         loopflow_storage::sqlite::linear_events::accept_linear_project_in(
             &store.sqlite,
             wave.id(),
-            &snapshot.initiative,
             &confirmed,
             10,
             loopflow_storage::planning_sync::TrackerKind::Linear,
@@ -1840,7 +1695,6 @@ mod tests {
             loopflow_storage::sqlite::linear_events::accept_linear_project_in(
                 &store.sqlite,
                 other.id(),
-                &snapshot.initiative,
                 &confirmed,
                 20,
                 loopflow_storage::planning_sync::TrackerKind::Linear
@@ -1851,11 +1705,13 @@ mod tests {
             store.get_project(&project.id).await.unwrap().unwrap(),
             durable
         );
+        // The other Wave's own Project stays unlinked.
         assert!(store
             .list_projects(Some(other.id()))
             .await
             .unwrap()
-            .is_empty());
+            .iter()
+            .all(|project| project.tracker_id.is_none()));
         store.seed_inventory(snapshot, None).await.unwrap();
         assert_eq!(
             store
@@ -1900,7 +1756,6 @@ mod tests {
                     project: Some(response.snapshot.projects[1].clone()),
                     observed_at: 2,
                 },
-                None,
                 None,
             )
             .await
@@ -2392,7 +2247,6 @@ mod tests {
         loopflow_storage::sqlite::linear_events::accept_linear_project_in(
             &store.sqlite,
             wave.id(),
-            &snapshot.initiative,
             &observed,
             10,
             loopflow_storage::planning_sync::TrackerKind::Linear,

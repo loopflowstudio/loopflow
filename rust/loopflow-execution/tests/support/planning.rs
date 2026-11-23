@@ -51,11 +51,6 @@ pub fn seed_linear_admission(
         params![wave.id(),project.tracker_synced_at],
     ).unwrap();
     conn.execute(
-        "INSERT INTO tracker_wave_projects(wave_id,project_id,position) VALUES(?1,?2,0)",
-        params![wave.id(), external_project],
-    )
-    .unwrap();
-    conn.execute(
         "INSERT INTO tracker_items(repo,tracker,id,observed_at,identifier,project_id,claimed_project_id,name,description,rank,completed,team_id,project_id_observed,assignee_observed,completed_at_observed,due_date_observed)
          VALUES(?1,'linear',?2,?3,?4,?5,?5,?6,?7,1,0,'team-task-pr-tests',1,1,1,1)",
         params![wave.repo(),external_issue,task.tracker_synced_at,task.identifier,external_project,task.title,task.description],

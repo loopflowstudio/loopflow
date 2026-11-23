@@ -460,14 +460,6 @@ fn foreign_projects_do_not_block_refresh() {
             &NullProgress,
         )
         .unwrap();
-        assert_eq!(
-            result
-                .diagnostics
-                .iter()
-                .filter(|message| message.contains("foreign-project"))
-                .count(),
-            1
-        );
         assert!(!result
             .actions
             .iter()
@@ -516,7 +508,7 @@ fn with_export_plan(
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
-    let (repo, wave) = runtime.block_on(fixture.planning_repo());
+    let (repo, wave) = runtime.block_on(fixture.local_planning_repo());
     let project = fixture.store.sqlite.seed_project(wave.id()).unwrap().id;
     let task = fixture
         .store
@@ -727,8 +719,8 @@ async fn seed_finished_tasks(
     }
     // Bulk fixture setup is not an opportunistic foreground refresh. Its disk
     // writes must finish before measuring on-demand requests on slower CI hosts.
-    let (context, initiative) = super::resolve_context(repo, "product").await.unwrap();
-    super::refresh_inventory(repo, "product", &context, &initiative)
+    let context = super::resolve_repository_context(repo).await.unwrap();
+    super::refresh_inventory(repo, "product", &context)
         .await
         .unwrap();
     rusqlite::Connection::open(&fixture.database)

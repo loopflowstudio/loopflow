@@ -70,7 +70,28 @@ impl Fixture {
         token
     }
 
+    /// A connected repository whose Wave `product` links Linear Project
+    /// `project-1`, the one the fixture servers answer with.
     pub(crate) async fn planning_repo(&self) -> (PathBuf, Wave) {
+        let (repo, wave) = self.local_planning_repo().await;
+        let project = serde_json::from_value(serde_json::json!({
+            "id": "project-1", "revision": null, "slug": "project", "name": "Project",
+            "summary": "", "status": "started", "team_ids": ["team-1"]
+        }))
+        .unwrap();
+        loopflow_storage::sqlite::linear_events::link_wave_project_in(
+            &self.store.sqlite,
+            wave.id(),
+            &project,
+            0,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
+        )
+        .unwrap();
+        (repo, wave)
+    }
+
+    /// The same repository with Wave `product`'s Project linked to nothing yet.
+    pub(crate) async fn local_planning_repo(&self) -> (PathBuf, Wave) {
         let repo = self.directory.path().join("repo");
         std::fs::create_dir_all(repo.join(".lf")).unwrap();
         // Local fixture history only; no installed Machine or remote is touched.
@@ -96,11 +117,7 @@ impl Fixture {
         )
         .unwrap();
         std::fs::create_dir_all(repo.join(".lf/wave/product")).unwrap();
-        std::fs::write(
-            repo.join(".lf/wave/product/GOAL.md"),
-            "---\nlinear:\n  initiative: initiative-1\n---\nKeep working.\n",
-        )
-        .unwrap();
+        std::fs::write(repo.join(".lf/wave/product/GOAL.md"), "Keep working.\n").unwrap();
         let repo = std::fs::canonicalize(repo).unwrap();
         let wave = Wave::new(
             WaveId::new(),
@@ -197,14 +214,14 @@ pub(crate) async fn refresh_task_input(
 }
 
 pub async fn capture_inventory(
-    repo: &std::path::Path,
-    wave: &str,
+    wave: &crate::work::wave::Wave,
     context: &super::LinearRepository,
-    initiative: &str,
     store: &Store,
 ) -> crate::ops::OpsResult<crate::test_linear_input::Inventory> {
-    let projects =
-        super::checked_projects_with_store(repo, context, initiative, wave, store).await?;
+    let projects: Vec<_> = super::checked_project_with_store(context, wave, store)
+        .await?
+        .into_iter()
+        .collect();
     let items = context
         .client
         .list_project_issues(&projects)

@@ -89,7 +89,6 @@ mod tests {
         store
             .seed_inventory(&crate::test_linear_input::InventoryFixture {
                 wave_id: wave.id().clone(),
-                initiative: snapshot.projects[0].initiative_ids[0].clone(),
                 synced_at: 42,
                 snapshot,
             })
@@ -104,7 +103,6 @@ mod tests {
             &issue,
             None,
             43,
-            None,
             loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
@@ -143,7 +141,6 @@ mod tests {
             &issue,
             None,
             44,
-            None,
             loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
@@ -273,7 +270,6 @@ mod tests {
         store
             .seed_inventory(&crate::test_linear_input::InventoryFixture {
                 wave_id: wave.id().clone(),
-                initiative: project.initiative_ids[0].clone(),
                 synced_at: 42,
                 snapshot,
             })
@@ -311,35 +307,8 @@ mod tests {
             let conn = store.conn.lock().unwrap();
             conn.execute("UPDATE tracker_items SET needs_refresh=0", [])
                 .unwrap();
-            conn.execute("UPDATE tracker_projects SET membership_unresolved=1", [])
+            conn.execute("UPDATE tracker_projects SET archived=1", [])
                 .unwrap();
-        }
-        validate().unwrap();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE tracker_projects SET membership_unresolved=0,archived=1",
-                [],
-            )
-            .unwrap();
-        }
-        validate().unwrap();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE tracker_projects SET archived=0,initiative_ids='[\"removed\"]'",
-                [],
-            )
-            .unwrap();
-        }
-        validate().unwrap();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE tracker_projects SET initiative_ids=?1",
-                [serde_json::to_string(&project.initiative_ids).unwrap()],
-            )
-            .unwrap();
         }
         validate().unwrap();
         assert_eq!(store.task(&task.id).unwrap().unwrap(), task);
@@ -361,7 +330,6 @@ mod tests {
             "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
-        let initiative = snapshot.projects[0].initiative_ids[0].clone();
         snapshot.projects.truncate(1);
         snapshot
             .items
@@ -369,7 +337,6 @@ mod tests {
         snapshot.items.truncate(1);
         let mut row = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
-            initiative,
             synced_at: 42,
             snapshot,
         };
@@ -404,7 +371,6 @@ mod tests {
                     project: Some(row.snapshot.projects[0].clone()),
                     observed_at: 44,
                 },
-                Some((wave.id(), &row.initiative)),
             )
             .unwrap();
         let refreshed = store.task(&task.id).unwrap().unwrap();
@@ -478,7 +444,6 @@ mod tests {
         store
             .seed_inventory(&crate::test_linear_input::InventoryFixture {
                 wave_id: wave.id().clone(),
-                initiative: project.initiative_ids[0].clone(),
                 synced_at: 42,
                 snapshot,
             })
@@ -504,45 +469,10 @@ mod tests {
             &issue,
             Some(&project),
             43,
-            None,
             loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         assert_eq!(teams(), serde_json::to_string(&project.team_ids).unwrap());
-        assert_eq!(state(), PlanningState::Available);
-
-        // An Initiative move is held, and released once Linear moves it back.
-        let initiative = project.initiative_ids[0].clone();
-        project.initiative_ids = vec!["another-initiative".into()];
-        let error = loopflow_storage::sqlite::linear_events::accept_linear_issue_in(
-            &store,
-            "/repo",
-            &issue,
-            Some(&project),
-            44,
-            None,
-            loopflow_storage::planning_sync::TrackerKind::Linear,
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(
-            error.contains(
-                "moved to another Initiative in Linear; move it back, then run `lf wave sync`"
-            ),
-            "{error}"
-        );
-        assert_eq!(state(), PlanningState::Invalid);
-        project.initiative_ids = vec![initiative];
-        loopflow_storage::sqlite::linear_events::accept_linear_issue_in(
-            &store,
-            "/repo",
-            &issue,
-            Some(&project),
-            45,
-            None,
-            loopflow_storage::planning_sync::TrackerKind::Linear,
-        )
-        .unwrap();
         assert_eq!(state(), PlanningState::Available);
     }
 }

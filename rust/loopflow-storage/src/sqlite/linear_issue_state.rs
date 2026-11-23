@@ -116,16 +116,8 @@ impl SqliteStore {
                 "ambiguous planning selector {selector:?}; use a Task UUID"
             )));
         }
-        let Some((
-            id,
-            revision,
-            observed_at,
-            teams,
-            team_id,
-            invalid,
-            removed,
-            project_id,
-        )) = rows.into_iter().next()
+        let Some((id, revision, observed_at, teams, team_id, invalid, removed, project_id)) =
+            rows.into_iter().next()
         else {
             let (removed, changed) = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM tracker_events WHERE issue_id=?1 AND removed=1),
@@ -196,9 +188,8 @@ impl SqliteStore {
             let observations = (|| -> StoreResult<_> {
                 let mut query = conn.prepare(
                     "SELECT p.id,p.team_ids
-                     FROM tracker_wave_projects m JOIN tracker_projects p ON p.id=m.project_id
-                     WHERE m.wave_id=?1 AND p.repo=?2 AND p.tracker=?3 AND p.archived=0
-                     ORDER BY p.id",
+                     FROM projects l JOIN tracker_projects p ON p.id=l.external_project_id
+                     WHERE l.wave_id=?1 AND p.repo=?2 AND p.tracker=?3 AND p.archived=0",
                 )?;
                 let project_claims = query
                     .query_map(params![wave_id, repo, tracker], |row| {
@@ -211,9 +202,9 @@ impl SqliteStore {
                     .collect::<StoreResult<Vec<_>>>()?;
                 let mut query = conn.prepare(
                     "SELECT i.id,i.identifier,i.project_id,i.team_id
-                     FROM tracker_items i JOIN tracker_wave_projects m ON m.project_id=i.project_id
+                     FROM projects l JOIN tracker_items i ON i.project_id=l.external_project_id
                      JOIN tracker_projects p ON p.id=i.project_id AND p.repo=i.repo AND p.tracker=i.tracker
-                     WHERE m.wave_id=?1 AND i.repo=?2 AND i.tracker=?3 AND i.needs_refresh=0
+                     WHERE l.wave_id=?1 AND i.repo=?2 AND i.tracker=?3 AND i.needs_refresh=0
                      AND p.archived=0 ORDER BY i.id",
                 )?;
                 let issue_claims = query

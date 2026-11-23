@@ -1217,6 +1217,8 @@ impl SqliteStore {
 
     // Projects group a Wave's Tasks and deliberately own no worktree.
 
+    /// Save `project` as the store holds it, the Wave's own Project included;
+    /// nothing is queued for the tracker. Fixtures seed saved Projects this way.
     pub fn insert_project(&self, project: &Project) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1237,7 +1239,7 @@ impl SqliteStore {
                     Edit::ProjectStatus(project.status),
                 ],
             ),
-            crate::sqlite::planning_write::WriteOrigin::Local,
+            crate::sqlite::planning_write::WriteOrigin::Tracker,
         )?;
         transaction.execute(
             "UPDATE projects SET pm_snapshot_synced_at=?2,created_at=?3,updated_at=?4 WHERE id=?1",

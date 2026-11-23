@@ -385,7 +385,7 @@ fn observe_planning(task: &support::RegisteredTask, checkout: &Path) {
         loopflow_test_support::retained_task_input(&task.database, &scope, "INF-123");
     record.item.revision = Some("2026-10-04T12:00:00Z".into());
     runtime
-        .block_on(task.store.seed_issue(&scope, "linear", record, None, None))
+        .block_on(task.store.seed_issue(&scope, "linear", record, None))
         .unwrap();
 }
 

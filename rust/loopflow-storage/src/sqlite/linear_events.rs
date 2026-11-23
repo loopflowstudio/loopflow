@@ -25,14 +25,15 @@ pub fn accept_linear_project_in(
         row.get(0)
     })?;
     put_project(&tx, &repo, observed_at, project, tracker)?;
-    associate_project(&tx, &project.id, wave)?;
-    project_accepted_planning(&tx, &repo, &[project.id.as_str()], &[], tracker)?;
+    project_accepted_planning(&tx, &repo, &[project.id.as_str()], &[], Some(wave), tracker)?;
     tx.commit()?;
     Ok(())
 }
 
-/// Link `wave`'s Project to a tracker Project that already exists. The Project's
-/// own unsent `create` is retired: the existing one stands in for it.
+/// Link `wave`'s Project to a tracker Project that already exists. The
+/// Project's own unsent `create` is retired: the existing one stands in for
+/// it. A Project linked elsewhere moves its link while none of its Tasks is in
+/// the tracker yet; the tracker Project it leaves stays in the tracker.
 pub fn link_wave_project_in(
     store: &SqliteStore,
     wave: &WaveId,
@@ -40,28 +41,49 @@ pub fn link_wave_project_in(
     observed_at: i64,
     tracker: TrackerKind,
 ) -> StoreResult<()> {
-    {
-        let conn = store.conn.lock().expect("store mutex poisoned");
-        if let Some(own) = sqlite::children::held_wave_project_in(&conn, wave)? {
-            let creating: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM tracker_actions
-                 WHERE project_id=?1 AND kind='create' AND phase IN ('sent','conflicted'))",
-                [own.as_str()],
-                |row| row.get(0),
-            )?;
-            if creating {
+    let tracker = tracker.as_str();
+    let mut conn = store.conn.lock().expect("store mutex poisoned");
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let repo: String = tx.query_row("SELECT repo FROM waves WHERE id=?1", [wave], |row| {
+        row.get(0)
+    })?;
+    if let Some(own) = sqlite::children::held_wave_project_in(&tx, wave)? {
+        let (linked, creating, tracked): (Option<String>, bool, i64) = tx.query_row(
+            "SELECT external_project_id,
+                EXISTS(SELECT 1 FROM tracker_actions WHERE project_id=?1 AND kind='create'
+                    AND phase IN ('sent','conflicted')),
+                (SELECT count(*) FROM tasks WHERE project_id=?1 AND external_issue_id IS NOT NULL)
+             FROM projects WHERE id=?1",
+            [own.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        if creating {
+            return Err(StoreError::InvalidData(format!(
+                "Wave {wave}'s Project is being created in the tracker; link it once that lands"
+            )));
+        }
+        if let Some(linked) = linked.filter(|linked| *linked != project.id) {
+            if tracked > 0 {
                 return Err(StoreError::InvalidData(format!(
-                    "Wave {wave}'s Project is being created in the tracker; link it once that lands"
+                    "Wave {wave}'s Project links tracker Project {linked}, which holds {tracked} of its Tasks; move them to {} in the tracker first",
+                    project.id
                 )));
             }
-            conn.execute(
-                "UPDATE tracker_actions SET phase='retired',error='linked to an existing tracker Project'
-                 WHERE project_id=?1 AND kind='create' AND phase='queued'",
+            tx.execute(
+                "UPDATE projects SET external_project_id=NULL WHERE id=?1",
                 [own.as_str()],
             )?;
         }
+        tx.execute(
+            "UPDATE tracker_actions SET phase='retired',error='linked to an existing tracker Project'
+             WHERE project_id=?1 AND kind='create' AND phase='queued'",
+            [own.as_str()],
+        )?;
     }
-    accept_linear_project_in(store, wave, project, observed_at, tracker)
+    put_project(&tx, &repo, observed_at, project, tracker)?;
+    project_accepted_planning(&tx, &repo, &[project.id.as_str()], &[], Some(wave), tracker)?;
+    tx.commit()?;
+    Ok(())
 }
 
 pub fn reconcile_linear_project_teams_in(
@@ -88,8 +110,7 @@ pub fn reconcile_linear_project_teams_in(
         ],
     )?;
     put_project(&tx, &repo, observed_at, project, tracker)?;
-    associate_project(&tx, &project.id, wave)?;
-    project_accepted_planning(&tx, &repo, &[project.id.as_str()], &[], tracker)?;
+    project_accepted_planning(&tx, &repo, &[project.id.as_str()], &[], Some(wave), tracker)?;
     tx.commit()?;
     Ok(())
 }
@@ -128,13 +149,15 @@ pub fn accept_linear_issue_in(
         repo,
         project.map(|project| project.id.as_str()).as_slice(),
         &[issue.id.as_str()],
+        None,
         tracker,
     )?;
     tx.commit()?;
     Ok(())
 }
 
-/// A Wave's whole tracker inventory: the Project it links and that Project's issues.
+/// A Wave's whole tracker inventory: the Project its Project links and that
+/// Project's issues.
 pub fn accept_linear_inventory_in(
     store: &SqliteStore,
     wave: &WaveId,
@@ -151,7 +174,6 @@ pub fn accept_linear_inventory_in(
     })?;
     for project in projects {
         put_project(&tx, &repo, observed_at, project, tracker)?;
-        associate_project(&tx, &project.id, wave)?;
     }
     for item in issues {
         put_item(&tx, &repo, observed_at, item, tracker)?;
@@ -167,6 +189,7 @@ pub fn accept_linear_inventory_in(
         &repo,
         &projects.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
         &issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+        Some(wave),
         tracker,
     )?;
     for project in projects {
@@ -205,6 +228,7 @@ pub fn accept_linear_project_order_in(
         repo,
         &[],
         &items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+        None,
         tracker,
     )?;
     let accepted = observe_order(&tx, repo, project, items, tracker)?;
@@ -391,11 +415,12 @@ fn observe_order(
     sqlite::planning_order::observe_in(conn, repo, external, &project, observed)
 }
 
-// Both durable projections read the tracker Projects a Wave links.
+// Both durable projections read the tracker Projects a Wave's Project links,
+// or the one being linked to Wave ?4.
 const ACCEPTED_WAVE_PROJECTS: &str = "
-    SELECT p.repo,p.tracker,p.id,p.observed_at,p.archived,p.task_order_json,p.revision,p.slug,p.name,p.summary,p.status,p.team_ids,p.description,p.description_revision,p.description_observed_at,m.wave_id FROM tracker_projects p
-    JOIN tracker_wave_projects m ON m.project_id=p.id
-    JOIN waves w ON w.id=m.wave_id AND w.repo=p.repo
+    SELECT p.repo,p.tracker,p.id,p.observed_at,p.archived,p.task_order_json,p.revision,p.slug,p.name,p.summary,p.status,p.team_ids,p.description,p.description_revision,p.description_observed_at,w.id AS wave_id FROM tracker_projects p
+    LEFT JOIN projects l ON l.external_project_id=p.id
+    JOIN waves w ON w.id=COALESCE(?4,l.wave_id) AND w.repo=p.repo
     WHERE p.repo=?1 AND p.tracker=?2 AND p.archived=0";
 
 /// Inputs select IDs only; project their accepted rows inside the ingestion transaction.
@@ -404,6 +429,7 @@ fn project_accepted_planning(
     repo: &str,
     projects: &[&str],
     items: &[&str],
+    linking: Option<&WaveId>,
     tracker: &str,
 ) -> StoreResult<()> {
     let project_ids = serde_json::to_string(projects)?;
@@ -419,7 +445,7 @@ fn project_accepted_planning(
     ))?;
     let observations = query
         .query_and_then(
-            params![repo, tracker, project_ids],
+            params![repo, tracker, project_ids, linking],
             |row| -> StoreResult<_> {
                 let external: String = row.get(0)?;
                 let wave: WaveId = row.get(2)?;
@@ -473,7 +499,7 @@ fn project_accepted_planning(
                 let (linked, creating): (bool, bool) = tx
                     .query_row(
                         "SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND external_project_id IS NOT NULL),
-                            EXISTS(SELECT 1 FROM tracker_actions WHERE project_id=?1 AND kind='create' AND phase!='retired')",
+                            EXISTS(SELECT 1 FROM tracker_actions WHERE project_id=?1 AND kind='create' AND phase IN ('queued','sent','conflicted'))",
                         [own.as_str()],
                         |row| Ok((row.get(0)?, row.get(1)?)),
                     )?;
@@ -485,16 +511,6 @@ fn project_accepted_planning(
                 own
             }
         };
-        let rank: Option<u32> = tx
-            .query_row(
-                "SELECT position FROM tracker_wave_projects WHERE wave_id=?1 AND project_id=?2",
-                params![wave_id, external],
-                |r| r.get(0),
-            )
-            .optional()?;
-        if let Some(rank) = rank {
-            edits.push(Edit::ProjectRank(rank));
-        }
         tracker_actions::reconcile_in(
             tx,
             &tracker_actions::ActionOwner::Project(id.clone()),
@@ -565,35 +581,32 @@ fn project_accepted_planning(
              AND c.removed=1)"
     ))?;
     let observations = query
-        .query_map(
-            params![repo, tracker, item_ids],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    vec![
-                        Edit::TaskProject(row.get(3)?),
-                        Edit::TaskLinearId(Some(row.get(4)?)),
-                        Edit::TaskIdentifier(row.get(6)?),
-                        Edit::TaskTitle(Some(row.get(7)?)),
-                        Edit::TaskDescription(Some(row.get(8)?)),
-                        Edit::TaskRank(row.get(9)?),
-                        Edit::TaskUrl(row.get(10)?),
-                        Edit::TaskBranch(row.get(11)?),
-                        Edit::TaskTeam(row.get(12)?),
-                        Edit::TaskAssignee(row.get(13)?),
-                        Edit::TaskDueDate(row.get(14)?),
-                    ],
-                    Disposition {
-                        planning_state: row.get(15)?,
-                        planning_completed: i64::from(row.get::<_, bool>(16)?),
-                        planning_completed_at: row.get(17)?,
-                    },
-                ))
-            },
-        )?
+        .query_map(params![repo, tracker, item_ids, linking], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                vec![
+                    Edit::TaskProject(row.get(3)?),
+                    Edit::TaskLinearId(Some(row.get(4)?)),
+                    Edit::TaskIdentifier(row.get(6)?),
+                    Edit::TaskTitle(Some(row.get(7)?)),
+                    Edit::TaskDescription(Some(row.get(8)?)),
+                    Edit::TaskRank(row.get(9)?),
+                    Edit::TaskUrl(row.get(10)?),
+                    Edit::TaskBranch(row.get(11)?),
+                    Edit::TaskTeam(row.get(12)?),
+                    Edit::TaskAssignee(row.get(13)?),
+                    Edit::TaskDueDate(row.get(14)?),
+                ],
+                Disposition {
+                    planning_state: row.get(15)?,
+                    planning_completed: i64::from(row.get::<_, bool>(16)?),
+                    planning_completed_at: row.get(17)?,
+                },
+            ))
+        })?
         .collect::<Result<Vec<_>, _>>()?;
     drop(query);
     for (existing, observed_at, external, revision, mut edits, disposition) in observations {
@@ -668,28 +681,6 @@ fn record_adoptions(
             _ => {}
         }
     }
-    Ok(())
-}
-
-/// A Wave links one tracker Project; linking it again is a no-op.
-fn associate_project(tx: &Transaction<'_>, project_id: &str, wave: &WaveId) -> StoreResult<()> {
-    let linked: Option<String> = tx
-        .query_row(
-            "SELECT project_id FROM tracker_wave_projects WHERE wave_id=?1 AND project_id!=?2",
-            params![wave, project_id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    if let Some(linked) = linked {
-        return Err(StoreError::InvalidData(format!(
-            "Wave {wave} already links tracker Project {linked}, not {project_id}"
-        )));
-    }
-    tx.execute(
-        "INSERT INTO tracker_wave_projects(wave_id,project_id,position) VALUES(?1,?2,0)
-         ON CONFLICT(wave_id,project_id) DO NOTHING",
-        params![wave, project_id],
-    )?;
     Ok(())
 }
 

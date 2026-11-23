@@ -343,7 +343,7 @@ mod tests {
     fn project(wave: &Wave, slug: &str, planning_id: &str) -> Project {
         let now = OffsetDateTime::now_utc();
         Project {
-            id: ProjectId::new(),
+            id: ProjectId::for_wave(wave.id()),
 
             summary: String::new(),
             status: loopflow_storage::work::project::ProjectStatus::Started,
@@ -1273,7 +1273,6 @@ mod tests {
                 name: "Loopflow API".to_string(),
                 summary: String::new(),
                 status: loopflow_storage::work::project::ProjectStatus::Started,
-                initiative_ids: vec!["initiative-1".to_string()],
                 team_ids: vec!["team-1".to_string()],
             }],
             items: Vec::new(),
@@ -1282,7 +1281,6 @@ mod tests {
             .seed_inventory(
                 InventoryFixture {
                     wave_id: wave.id().clone(),
-                    initiative: "initiative-1".to_string(),
                     synced_at: OffsetDateTime::now_utc().unix_timestamp(),
                     snapshot,
                 },

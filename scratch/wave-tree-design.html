@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One tree of Waves</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --ink: #1c1b19; --soft: #5f5b54; --line: #dedad2;
+    --panel: #f2efe8; --accent: #2f5d50; --new: #8a4b12; --newbg: #fbf0e2;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #171614; --ink: #ebe7df; --soft: #a39d92; --line: #36332e;
+      --panel: #201e1b; --accent: #8fc4b3; --new: #e3a765; --newbg: #2c2318; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 17px/1.6 Charter, "Iowan Old Style", Georgia, serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 20px 96px; }
+  h1 { font-size: 2.1rem; line-height: 1.15; margin: 0 0 12px; }
+  h2 { font-size: 1.45rem; margin: 64px 0 8px; padding-top: 20px; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.08rem; margin: 30px 0 6px; }
+  p, li { max-width: 68ch; }
+  .lede { font-size: 1.15rem; color: var(--soft); }
+  code, pre { font-family: var(--mono); font-size: 0.84em; }
+  code { background: var(--panel); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  .c { color: var(--soft); }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 0.93rem; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; }
+  .scroll { overflow-x: auto; }
+  .new { color: var(--new); background: var(--newbg); border-radius: 4px; padding: 0 5px;
+    font: 600 0.78rem/1.6 -apple-system, system-ui, sans-serif; white-space: nowrap; }
+  .said { border-left: 3px solid var(--accent); margin: 16px 0; padding: 2px 0 2px 16px; color: var(--soft); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 640px) { .two { grid-template-columns: 1fr; } }
+  .two > div { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .two h4 { margin: 0 0 6px; font: 600 0.9rem -apple-system, system-ui, sans-serif; }
+  .tree { font-family: var(--mono); font-size: 0.82rem; line-height: 1.65; white-space: pre; overflow-x: auto; margin: 0; }
+  .dim { color: var(--soft); }
+  ol.q > li { margin-bottom: 14px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>One tree of Waves</h1>
+<p class="lede">What Loopflow feels like from a solo founder's first day to a few people inside a large company, when all work is one kind of thing that nests.</p>
+
+<p>Draft for comparison, 2026-11-20. Written without reading the parallel draft. Anything marked <span class="new">proposed</span> is this document's choice and has not been said by anyone; the rest restates what is recorded in <code>scratch/said.md</code>. Tracker facts are from <code>scratch/hierarchy-research.md</code>.</p>
+
+<h2>The whole model in one screen</h2>
+
+<p><strong>A Wave is a piece of work.</strong> It can hold other Waves, to any depth. There is no second kind.</p>
+
+<p>Any Wave may have any of these, and none is required:</p>
+<ul>
+  <li><strong>A thread</strong>: the conversation you use to drive it. It never changes as the work grows, and it hears when a Wave directly under it stops, fails or lands.</li>
+  <li><strong>A runner</strong>: at most one, with a checkout and its PRs over time, one current.</li>
+  <li><strong>Goal, memory and settings.</strong></li>
+  <li><strong>Connections</strong> to things outside: one tracker item (a Linear team, initiative, project or issue), a chat channel, docs or folders.</li>
+</ul>
+
+<p>Four rules cover the rest.</p>
+<ol>
+  <li><strong>The tree is Loopflow's.</strong> Changing it changes nothing outside, and it need not match Linear's or Slack's shape.</li>
+  <li><strong>What a Wave lacks, it finds by going up.</strong> Chat to post in, where to file, settings, memory. If nothing up to the root has it, the action fails and says so.</li>
+  <li><strong>A Wave is personal until you publish it.</strong> Publishing shares that one Wave. Others see it under the nearest shared Wave above it.</li>
+  <li><strong>Nothing outside is created unless you ask.</strong> Connecting attaches to what exists. Making a Linear project or issue is always a deliberate step.</li>
+</ol>
+
+<p>Waves live with the plan, published live like the tracker, and are not files in the repository. <span class="new">proposed</span> A Wave's goal and memory are docs connected to it; when the tracker is Linear, the goal sits in Linear where teammates already read.</p>
+
+<pre><code>lf wave create store --parent infrastructure     <span class="c"># personal, connected to nothing</span>
+lf wave move store --parent product              <span class="c"># tree only</span>
+lf wave connect store linear:project/store-rework
+lf wave connect infrastructure slack:#infra
+lf wave publish store                            <span class="c"># this one becomes shared</span>
+lf wave show store                               <span class="c"># what it has, and what it gets from above</span>
+lf wave close store                              <span class="c"># what's worth keeping moves up</span></code></pre>
+
+<p>The same seven commands serve all four stages below. What changes from stage to stage is only what is connected and who a Wave is published to.</p>
+
+<h2>1. A solo founder, from day one to a company that runs itself</h2>
+
+<h3>Day one</h3>
+<p>You run <code>lf init</code> in an empty repository. There is one Wave: the repository. You open its thread and say what you're building.</p>
+<p>It files the first three pieces of work under itself and starts them. Each has a runner and will end in a PR. You have connected nothing, and nothing asked you to.</p>
+
+<pre class="tree">acme
+  sign-up flow            running · implement
+  billing skeleton        running · design
+  landing page            needs you · review</pre>
+
+<h3>Week two: work fans out</h3>
+<p>Billing turns out to be five things. In billing's thread you say "split this up." Five Waves appear under it. Billing's thread is unchanged; it now tells you when one of the five stops or lands. Its own first PR merges and billing stays open, because work is still under it.</p>
+<p>You never decided that billing was "a project now". It held work, so it holds work.</p>
+
+<h3>Month two: areas appear</h3>
+<p>The top level has thirty things in it. You tell the root thread "group these." It proposes <em>product</em>, <em>infrastructure</em> and <em>growth</em>, creates them and moves Waves under them. Each new Wave gets a goal and starts collecting memory. Nothing was committed and no PR was opened to do it.</p>
+
+<h3>Month six: you zoom</h3>
+<p>Each level's thread knows only the level under it, so each level is a summary of the one below.</p>
+<ul>
+  <li><strong>At the root</strong>: "Infrastructure has one thing waiting on you. Growth shipped four PRs. Product is blocked on pricing." You answer the pricing question there.</li>
+  <li><strong>In infrastructure</strong>: the eight Waves under it and which are stuck.</li>
+  <li><strong>In one stuck Wave</strong>: its diff and its runner's question.</li>
+</ul>
+<p>You can step in at any level and the levels above and below keep working. A Wave with a cadence wakes on its own, reads what's under it, and files or starts what its goal calls for; settings and budget come from above unless it sets its own.</p>
+
+<h3>When you want the outside world</h3>
+<p>You connect a Discord channel to the root. Every Wave can now reach you there, because each one finds that channel by going up. Later you connect a separate channel to growth, and only growth's Waves move to it.</p>
+
+<table>
+  <tr><th>The founder never has to</th><th>Because</th></tr>
+  <tr><td>Convert a task into a project</td><td>there is one kind</td></tr>
+  <tr><td>Open the Waves three levels down</td><td>each thread reports the level under it</td></tr>
+  <tr><td>Set up a tracker</td><td>the plan travels with the repository by default</td></tr>
+  <tr><td>Commit to reorganise</td><td>the tree is not repository content</td></tr>
+</table>
+
+<h2>2. Five people, a big codebase, Linear and Slack already in use</h2>
+
+<h3>Setting up is one request</h3>
+<p>One person runs <code>lf init</code> and says: "Set us up from our Linear and Slack." The agent reads the Linear teams and active projects and the Slack channel list, then shows the tree it would make:</p>
+
+<pre class="tree">acme                         linear: workspace     slack: #eng
+  platform                   linear: team PLAT     slack: #platform
+    store rework             linear: project
+    perf                     linear: project
+  app                        linear: team APP      slack: #app
+    onboarding v2            linear: project       doc: Onboarding v2 brief</pre>
+
+<p>She edits it by talking ("perf belongs under app"), then says go. The agent runs <code>create</code>, <code>connect</code> and <code>publish</code>. There is no importer: the commands are good enough that an agent does the mapping, and keeps it up when Linear changes.</p>
+<p>Nothing was created in Linear or Slack. Every connection points at something that already existed.</p>
+
+<h3>The other four join</h3>
+<p>They install Loopflow and the shared tree is there, the way the plan is. No pull, no PR to review.</p>
+
+<h3>Doing work: where people and agents meet</h3>
+<p>The meeting point is a Linear issue. Dana takes PLAT-212, "Drop members marked leaving", and starts a thread on it. A Wave now exists under <em>store rework</em>, connected to that issue. Its status and PR link update in Linear exactly as if she'd done it by hand.</p>
+<p>It grows into four pieces. Those four are personal Waves under hers.</p>
+
+<div class="two">
+  <div><h4>Dana sees</h4>
+<pre class="tree">store rework
+  PLAT-212 drop leaving members
+    stage the column drop
+    backfill
+    remove the readers
+    drop the column</pre></div>
+  <div><h4>Linear and her teammates see</h4>
+<pre class="tree">store rework
+  PLAT-212 drop leaving members
+    <span class="dim">four PRs, linked to PLAT-212</span></pre></div>
+</div>
+
+<p>If one of the four is something a teammate should pick up, she publishes it and asks for a Linear issue for it. It appears under PLAT-212 as a sub-issue. The other three stay hers.</p>
+
+<h3>What the team shares</h3>
+<ul>
+  <li><strong>Memory.</strong> What an agent learns in <em>platform</em> is read by everyone's agents working under <em>platform</em>, the moment it's saved. It no longer waits inside a code PR.</li>
+  <li><strong>Settings and Graphs.</strong> <em>App</em> runs the <code>feature</code> Graph and <em>platform</em> runs <code>code</code>, set once on each Wave.</li>
+  <li><strong>The plan doc.</strong> The onboarding brief is a Google Doc connected to its Wave. People edit it in a meeting; the Waves under it read the latest at their next step.</li>
+  <li><strong>Where to talk.</strong> A Wave's updates go to the nearest connected channel above it.</li>
+</ul>
+
+<h3>What the team doesn't share</h3>
+<p>Runners. Each Wave has at most one, and it belongs to the person who started it. Nobody drives someone else's agent. Handing work over means a new Wave, or a Linear issue someone else takes.</p>
+
+<h3>The repo-level agent</h3>
+<p>The root Wave has a thread too. Asked "what should we do about flaky CI?", it can file Linear issues, unassigned, in the project found by going up. A person takes one, and that is the meeting point again.</p>
+
+<h2>3. One person inside a large organisation</h2>
+
+<p>The test for this stage: someone who has never heard of Loopflow can't tell you're using it.</p>
+
+<h3>Starting</h3>
+<p>You run <code>lf init</code> in your clone of a repository you don't own. <span class="new">proposed</span> Nothing is written into the repository: no <code>.lf/</code> to commit, no ref pushed. Your Waves, settings, Graphs and skills live on your Machine.</p>
+
+<h3>Bringing the context in</h3>
+<p>You tell your root thread: "I'm on the Payments team. Set me up." It builds a small personal tree and connects it to what you can already read:</p>
+
+<pre class="tree">payments (personal)          linear: team PAY      slack: #payments (read)
+  ledger migration           linear: project       doc: Ledger migration RFC
+  on-call                    slack: #pay-oncall (read)
+  my scratch</pre>
+
+<p>Connections on a personal Wave are personal too. Connecting to the PAY team changes nothing in Linear; it tells your agents where your work sits and what to read.</p>
+
+<h3>Working</h3>
+<p>You take PAY-4821 the normal way and start a thread on it. Your agent has the RFC, the project's other issues and the channel history as context, found by going up. It fans out into six personal Waves. Each one's PR is an ordinary PR from your account, linked to PAY-4821.</p>
+
+<table>
+  <tr><th>Anyone else sees</th><th>Only you see</th></tr>
+  <tr><td>PAY-4821 moving through its states</td><td>the six Waves under it</td></tr>
+  <tr><td>PRs from you, reviewed as usual</td><td>your memory of the codebase and the team's habits</td></tr>
+  <tr><td>Messages you chose to send</td><td>drafts your agents wrote for you</td></tr>
+</table>
+
+<h3>What "doesn't gum up the works" means concretely</h3>
+<ul>
+  <li><strong>No sub-issues appear</strong> in the team's backlog. In Linear a sub-issue shows in team views like any issue, so fan-out stays in Loopflow.</li>
+  <li><strong>Nothing is posted for you.</strong> <span class="new">proposed</span> A channel connected to a personal Wave is read-only by default; an agent that wants to post writes a draft and shows you.</li>
+  <li><strong>The repository has no Loopflow files.</strong></li>
+  <li><strong>Linear writes are the ones you'd make yourself</strong>: status, assignee and PR link on issues you own.</li>
+</ul>
+
+<h2>4. A few of you inside that organisation</h2>
+
+<p>Two teammates start using Loopflow too. The same test holds for everyone else: it looks like three people collaborating normally.</p>
+
+<h3>Sharing between the three of you</h3>
+<p>You publish <em>ledger migration</em> to the three of you. <span class="new">proposed</span> Publishing names who it is for: a group you set up once, and the place its plan travels.</p>
+
+<pre><code>lf group create payments-lf --members dana,eli --carrier git:&lt;a small repo the three of you can push to&gt;
+lf wave publish ledger-migration --to payments-lf</code></pre>
+
+<p>From then on the three of you share, for that Wave and what is published under it:</p>
+<ul>
+  <li>its goal and memory,</li>
+  <li>its settings,</li>
+  <li><strong>its Graphs and skills</strong>, which travel with the Wave instead of being committed to the organisation's repository, <span class="new">proposed</span></li>
+  <li>who is working on what under it, and where each piece stands.</li>
+</ul>
+<p>Each of you still has personal Waves under it that the other two never see.</p>
+
+<h3>What everyone else sees</h3>
+<p>Linear issues with assignees, PRs with reviewers, messages in <code>#payments</code>. When Eli's agent needs something from you, it files a Linear issue assigned to you or drafts a message for Eli to send. Coordination between you travels through the tools the whole team reads, so nobody outside the three is missing half the conversation.</p>
+
+<h3>Growing from three to the whole team</h3>
+<p>Add people to the group. If the team adopts Loopflow outright, the group's carrier becomes the team repository's own and this is stage 2. The tree, the Waves and their history are the same ones.</p>
+
+<h2>What stays the same across all four</h2>
+
+<div class="scroll">
+<table>
+  <tr><th></th><th>Solo</th><th>Five people</th><th>Alone in a big org</th><th>A few in a big org</th></tr>
+  <tr><td>The tree</td><td>yours</td><td>shared top, personal below</td><td>all personal</td><td>shared with a group, personal below</td></tr>
+  <tr><td>Tracker</td><td>none needed</td><td>Linear, connected</td><td>Linear, connected personally</td><td>same</td></tr>
+  <tr><td>Created outside</td><td>nothing</td><td>issues on request</td><td>nothing</td><td>issues on request</td></tr>
+  <tr><td>In the repository</td><td>Graphs, skills</td><td>Graphs, skills</td><td>nothing</td><td>nothing</td></tr>
+  <tr><td>A non-user sees</td><td>PRs</td><td>issues, PRs, messages</td><td>issues, PRs</td><td>issues, PRs, messages</td></tr>
+</table>
+</div>
+
+<h2>What this asks of the product</h2>
+<ul>
+  <li><strong>Task and Wave become one kind.</strong> PR #1986 is the first slice under the old names: a parent link, a thread that hears about what's under it, staying open after merge, reopening after close.</li>
+  <li><strong>Waves leave the repository</strong> and travel with the plan. In this repository 54 of the last month's 55 commits under <code>.lf/wave/</code> were memory edits riding in code PRs.</li>
+  <li><strong>The doc store</strong> (LOO-997) holds goals, memory and plans, so it comes early.</li>
+  <li><strong>Everything Loopflow needs can live outside the repository</strong>, for stages 3 and 4: settings, Graphs and skills.</li>
+  <li><strong>Sharing has an audience</strong> smaller than "everyone with the repository", for stage 4.</li>
+  <li><strong>Turning a Wave into a Linear project flattens its sub-issues</strong> in Linear. Loopflow's tree keeps the shape; Linear's does not.</li>
+</ul>
+
+<h2>Questions</h2>
+<ol class="q">
+  <li>The word in the UI and CLI for a Wave with a runner that is meant to end:
+    a. Task, as a word for that case only. b. Everything is a Wave.</li>
+  <li>A new Wave under one connected to a Linear project:
+    a. starts unconnected; you ask for an issue. b. gets a Linear issue by default when it has a runner. c. a setting on the Wave above.
+    <br>Stage 2 reads better with b; stage 3 needs a.</li>
+  <li>Who a published Wave is shared with:
+    a. everyone on the repository's plan, always. b. a named group, as in stage 4. c. a at first, b later.</li>
+  <li>Graphs and skills:
+    a. stay repository content; stages 3 and 4 keep them on each Machine. b. can also travel with a Wave.</li>
+  <li>An agent reads and writes memory:
+    a. as files Loopflow places in the checkout, untracked, saved back. b. only through <code>lf</code> and what's given at launch.</li>
+  <li>When the tracker is Linear, a shared Wave's goal lives:
+    a. in Linear, on the project. b. on the plan, linked from Linear.</li>
+  <li>Posting to a channel connected to a personal Wave:
+    a. drafts only. b. posts as you. c. a setting.</li>
+  <li>A Wave's thread hears about:
+    a. the level directly under it. b. everything under it. c. the level under it, plus anything deeper that needs a person.</li>
+  <li>Closing a Wave with personal Waves under it:
+    a. closes the ones with nothing unmerged and names the rest, as #1986 does. b. closes all. c. asks.</li>
+  <li>Does #1986 land as built, with the fusion as later work?</li>
+</ol>
+
+</main>
+</body>
+</html>

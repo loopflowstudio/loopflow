@@ -749,3 +749,118 @@ Jack Heart, on "1. Subtasks, not subwaves. A Task can have child Tasks, and the 
 These are called waves. Each wave can publish its own PRs and can publish as many PRs as it wants. It always has at most one current PR but it also has previous KPRs.  This should be relatively cheap to create, to close, and to open. It always has at most one runner on it
 
 My question becomes: how does linear just not have this kind of notion of an infinitely nested or nestable hierarchy?"
+Jack Heart: "we can remove KRs for now, that can come back later"
+Jack Heart: "lets land 1997"
+Jack Heart: "Can sub-issues have sub-issues in Linear?"
+Jack Heart: "Okay can you maybe launch a research subagent to really get at:
+- the nuances of what limits and what relationships
+- what is sort of copywrite versus what is normalized
+- how it works in Linear versus Asana
+- whether there are any other competing models we should look at?"
+
+Jack Heart (pasted, 2026-11-20): "I've been going back and forth with Fable in this and also in the chapter or in the work tree for removing chapters, in which it came up that it was unclear whether waves now can have many projects, zero projects, or only zero to one projects and I'm finding it really hard to reason about all the different things so I'm just going to try to ramble here and see if we can figure it out.
+1. The first driving factor is that I am finding that work emergently scales into multiple areas, which is, of course, nothing new. I'm currently driving tasks that have lots of follow-up tasks and turning one big design into a lot more skit, small-scope designs, or sequences of releases. I'm kind of driving that all from one single task thread. and in my mind previously, a task was kind of like one single PR mostly although that was another thing that's kind of a little bit ambiguous: can you have multiple PRs or not? I've gone a little bit back and forth on that. Then waves were these long-standing areas of work that were mostly shared in the repo and this is showing me that I kind of want some hierarchy where I'm able to manage multiple workers in parallel or even manage workers that themselves manage multiple workers in parallel. That is required and I don't really want to introduce some sort of public-facing wave for every level of hierarchy then coming from the other side, I want this to work. I want to work well with outside trackers, namely most importantly Linear. I'd even be okay designing around almost exclusively Linear and then retrofitting onto Asana.
+
+But a world where, I think, what I'm really coming around to is the idea that there's really this bifurcation or split in the task tracking: there's the humans' task tracking and then there are the agents and below. There should be a level at which they meet and basically you can have a meeting. A human can say, "Yeah I'm going to go do this," and then the human can start a thread for doing that with their agent. Maybe that can spread out into further hierarchy beyond that. I also want it to scale up to the idea that you can run a company where you have an entire top-level company agent, or at least a repo-level agent, that's kind of managing everything. It seems plausible to me. I think there's some ambiguity about whether that agent would then create subtasks that other humans could go grab. I think that's entirely plausible.
+
+I do think we should sort of keep in mind this idea: the hierarchy goes from the human-facing tool to the agent orchestration tool. Mostly while you can file tasks at a sort of level higher than you, still, fundamentally, I'm not really that interested in what some people are doing with sharing agents across users. I don't think that makes sense really
+[…]
+but I still get kind of lost on what maps to what. Is a wave?
+
+I do ultimately want to have this: in Loopflow it's sort of a single UI where you can integrate with outside trackers to pre-populate or give you something to map to for all of your different task organizing. Whatever organization comes from the outside world, we should bring in, adapt to, and work within.
+
+You should be able to have sessions for "I want to chat about whatever infrastructure or engineering or the Swift UI or whatever," however your company organizes things. You should be able to filter tasks to those groups and all those things. You also should be able to further subdivide your work within that without necessarily gunking up the world for all your coworkers."
+Jack Heart, on "It doesn't invent levels there": "I think it probably shoudl be able to create new projects or initiatives, but it hsoul mostly not doing this"
+Jack Heart: "i guess maybe one key question is: what other tools try to integrate and adapt a company's slack channels , google docs  /notion, issue tracker into one sort of coherent view of the work as one large graph
+
+I'm struggling to think about a world where you want to integrate with both Slack and Linear and come out with one coherent set of waves"
+Jack Heart (pasted): "Okay I'm starting to think the model is that Loopflow has its own hierarchy of the work. There's a good API for mutating that hierarchy in a way that doesn't inherently affect any of the outside systems. There are good APIs for connecting each of those. For each level you can connect it to a linear team initiative, project, Slack channel, Google Doc, Google folder, Notion folder, whatever.  that these waves can be either personal or shared in the repo they have their own hierarchy I suppose. They don't really need to honor the hierarchies of the other systems. You can theoretically set it up so that the hierarchy in Loopflow is backwards from the hierarchy in some other system. That's fine still fundamentally they kind of should when you want to do things like post in chat or file a task in a project and then we can traverse the hierarchy. If there is no chat attached to here, you can go up until you find one. If there isn't one at all, even in the repo, then it fails"
+Jack Heart (pasted): "Then we just make sure our CLI and API are really good so that, if you do have a robust setup in Slack or Linear or whatever, you can easily just tell your agent, "Hey make it all for me," and it just should work.
+
+We don't need to have an automatic one. We can allow it to be sort of more manual because agents are capable of maintaining it.
+
+I think the only system that really works is that Loopflow owns its own hierarchy and works really well with its own hierarchy and then has integrations, rather than Loopflow just follows"
+Jack Heart: "i think we we need something like lf wave publish also"
+Jack Heart: "and figure out how team members share canonical wave sets"
+Jack Heart: "personal to shared" (read as the answer to: which did you mean by publish — a. personal to shared)
+Jack Heart: "In this world are waves and tasks separate? I'm not sure they need to be. At the same time I think there are some questions: can you attach a task and a project to the same wave? Maybe you can  or maybe you can't"
+Jack Heart (on: does publishing a Wave publish the Waves under it): "For number one I think, generally speaking, publishing the wave should only publish the one because you want to be able to make a main wave that you do want to share (but then have subwaves that are just for your personal doing whatever). It's a little less clear to me whether you would want to ever publish the tasks, but just collapse the subhierarchy in between"
+Jack Heart (on the row "Goal, memory, settings | no | yes | something a Wave may have"): "Right. In this world I think things like memory and settings would need to climb the tree and so it makes sense to me that we would go ahead and allow tasks to have this. I will say that for the most part if you're really truly a task, then there's basically no point to storing memory forever for later. I think that kind of applies in other places as well so that's something to figure out"
+Jack Heart (on the row "Holds other work | no (until #1986) | yes | any Wave"): "Right I think this line is one of the motivating changes here, right? It's not great to have a task and then, "Oh find out: oh I actually want to do follow-up work." How does that happen?"
+Jack Heart quoted the row "Where it's stored | the store, travels live | a directory on main | still different" with nothing under it.
+Jack Heart (on storage A/B/C): "Yeah I think I'm probably most interested in exploring whether maybe waves shouldn't be content in the repo. I think that, once you're already having, it could be sort of like the task tracker, where it's sort of live published and not part of a PR. I think that probably makes more sense anyway"
+Jack Heart (on "No Loopflow, no Waves"): "This isn't physically impossible, right? It's just kind of awkward for them to know the exact address to look at"
+
+Jack Heart (pasted): "Can you write up a design doc for me for this whole system, focused on what the user experience is? I want to start with:
+1. You're a solo founder. You start with Loopflow on day one and you slowly scale it into sort of like a self-running company where you can zoom it. You can get involved at any level of abstraction.
+Level two might be: you're a five-person startup that has a pretty big codebase already. You have some combination of Linear, Slack, Google Docs, whatever, and you want to try using Loopflow, sort of coordinated as a team
+
+And then level 3 would be: you're working inside the context of a really big organization. You try adopting Loopflow for yourself. You want to do that in a way that works for you and really helps you bring in all the context that you want, but doesn't gum up the works for anybody or else.
+
+Then you are like, "Hey this is working well for me," and you want to start coordinating or collaborating with some other people on your team within the large organization. Can you again do that in a way where you guys are collaborating and it just looks like normal collaboration to anybody not using Loopflow? To you guys who are using Loopflow, you're able to share everything you want to share, like graphs and memory and"
+Jack Heart: "I have another agent doing the same thing so make sure not to cheat an look at thir design or collide with theirs. We will comare an cxontrast later."
+Jack Heart: "ok, now compare yours to theirs"
+Jack Heart: "in this world, would we expland the git task tracker into the git wave store, and then just always sync that and then have optional syncs to/from linear and asana?"
+Jack Heart: "does this also change the answer about the machine hub as the record of truth for the store into the git trakcer?"
+Jack Heart: "also, how does this work for personal vs shared waves if we have one global git master"
+Jack Heart: "i dont really mind the privacy but i wonder about the scalability of it. i wonder if there is more of tree model where basically your local store has everyhign from the main store + your own stuff"
+Jack Heart (on the two-layer model with personal re-placing): "the other thing about that is that it becomes really unclear at the UI level what other people mgiht be seeing"
+Jack Heart: "one ground rule would be shared can contain private but not the other way around"
+Jack Heart: "another question might be: at one point does a hosted SaaS solution make the UX much better? and if so, is there a line in the sand for the functionality we should build in this opensource version that is more targetting individual adopters and small teams with minimal hierarchy?"
+Jack Heart (on "Hearing from Slack, Linear and Docs as things happen… Without one you poll"): "I think i wan this at level 2 though"
+Jack Heart: "i think basically single player hub: in, multiplayer hub: probably better as saas"
+Jack Heart: "Okay I'm starting to think that this model is maybe a little unconstrained. I can imagine companies where some teams use Linear and some teams use Asana and that could potentially work. But it also feels like having this, with the source of truth potentially being Git in some places, Slack or Asana in others, and Notion or Linear in some places, ends up being kind of confusing"
+Jack Heart (on the Linear and Google Docs rows of the live-without-a-public-address table): "It occurred to me that I didn't really think about this before but we can just use CloudflareD to do this"
+Jack Heart: "can we start to clarify what is \"locked\" in this design vs what is unclear/"
+Jack Heart (on locked item 17, Loopflow owns its own tree): "where this sort of breaks down is like ... if you have a wave that is a linear project, shouldnt adding \"tasks\" to it mean adding those tasks to Linear?"
+Jack Heart (on "Above any tracker connection, Waves are still Loopflow's own…"): "and what about initiatives or teams that may exist?
+
+What should we enforce at the data model level, and waht should be manually sync'ed via integration systems? when and where shoul htat sycing appear at each of our levels"
+Jack Heart: "lets take the time to look at each fo our previous levels and map out how we expect teh system to behave in these dynamic ways for each, and see waht likes up and what has tension across use cases and user expectations"
+Jack Heart (on "Every issue belongs to exactly one team, and it must be one of its Project's teams"): "what team is it in if its in a project for multiple teams?"
+Jack Heart (on "3. At most one runner, at most one current PR. 4. At most one tracker connection per Wave."): "At most one session and worktree also. we will need more lgoica about when to open and close these in a way that makes sense."
+Jack Heart: "what do we gain from making waves=linear initiatives, teams? we would basically get like ... KRs if we ant them maybe, and then for teams maybe its somsort of access boundary?"
+Jack Heart: "lets say for now we dont want any of that"
+Jack Heart (on one session on a shared Wave: one in total, or one per person): "one per person, but a person doesnt need an active session with every shared wave necessarily"
+Jack Heart (on "Runner and worktree: one for the Wave. So only one of those five can be running it at a time."): "Wait what, no this is wrong, these are also one per person"
+Jack Heart: "current PR is per person as well"
+Jack Heart: "a wave may have at most one ACTIVE runner on your machine in its worktree. cron jobs would work in their own separate work tree"
+Jack Heart (on whose Machine runs a shared Wave's cron job): "1. not sure there is such a thing right now. crons are per machine, at least until you have a saas server where the crons would run"
+Jack Heart (on laptop and mini each having a worktree for a Wave): "I think both could have them yeah"
+Jack Heart (right after): "im not sure though. i guess i want only one machine to be active per wave f"
+Jack Heart: "well, one task = one remote brnach = one pr. but theoretically possibly two different machines pushing to it"
+Jack Heart: "i think we eshould maintain one worker and one (chat) session on the same machine. so each wave has a machine home of sorts"
+Jack Heart (on home Machine from the Wave above; reaching a Wave homed elsewhere): "yeah thats right. we are going to need cross-machine steering"
+Jack Heart: "steering can work across people through mechanisms like linear comments"
+Jack Heart: "its possible we should be doing that all the time" (unclear which "that"; asked)
+Jack Heart: "but right now we can do more local steering"
+Jack Heart: "well the issue i had with 1986 is that it was not clear to me that its the right way to do hierarchty"
+Jack Heart: "in the world where in loopfloweveryhign is just nested waves but can be linked to a task or a project or other thing..... it becomes unclear to me whether we want to do things like upgrade to project or use subissues"
+Jack Heart: "let's just right a new plan from scratch, abandon  1986, and figure out wheter to start moving from tehre"
+Jack Heart (on 1. grow from the Task record? 2. slice 1 from #1986 minus the Linear link, or clean?): "1) Agreed.  2) better to start over, but allowed to look as a reference"
+Jack Heart: "i will say, im not sure the fan out im using, never sent to the tracker, makes sense. I have been starting with a task, finding its kinda big, and then deciding to launch more tasks. none of that is not sent to the tracker."
+Jack Heart: "can you write your best thoughts to a scratch design doc and i am going to review with another agent"
+
+## 2026-11-22
+
+On one nestable work record and choosing Linear mappings by outcome: "yeah this sounds right"
+Jack Heart: "a team would own a project would it not"
+Jack Heart: "just your diagram showing only a task for a team collabing in a large org"
+Jack Heart: "ok. what do you recommend in terms of a plan to start to test drive this"
+Jack Heart: "what is slice 1"
+Jack Heart (on auto-parenting `lf task create` from a Task thread/worktree): "This seems dangerous to me. i thikn making a subtask needs to be an explicit flag"
+Jack Heart: "hmm, what do we get out of not usign subissues"
+Jack Heart: "also, does linear require any kidn of alignment of project between issues and subissues"
+Jack Heart: "What are the defaults on the autoclose"
+Jack Heart (on Slice 1 parent sync: A sync to Linear sub-issues vs B Loopflow-only): "ok, lets do A then"
+Jack Heart: "lets use this task for slice 1"
+Jack Heart: "does linear refuse cycles? we should refuse cycles"
+Jack Heart (on 1 edit this branch in place vs 2 reset to origin/main): "1"
+Jack Heart (on concept-review Q1, completing a parent with children): "i think i do want to have compelte parent means complete/abandon children"
+Jack Heart: "of course it shoul be clear thoughout the app"
+Jack Heart (on concept-review Q1-Q4): "is either one better or worse than other" / "1 -- can we just abandon them 2 these shoudl probably usually be auto completed but if not then they get abandoned" / "3 b i think"
+Jack Heart (on Q4 single-PR vs multi-PR on merged parent): "4 i am not sure about this one, lets talk it thorough"
+Jack Heart: "all the other orchestrators assume multiple prs allowed per session/task i assume"
+Jack Heart (on Q4 multi-PR on merged open Task): "i think we should just do that, but assume always 1 task = 1 worktree = 1 current pr"
+Jack Heart: "i dont think we should leave inprogress children open. they should get abandoned too"
+Jack Heart (on abandoning all remaining open children when completing a parent): "its possible this should be a setting like linear, but probably better to start this way."

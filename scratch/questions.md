@@ -39,3 +39,5 @@
 - QA round 6: a failed `config.theme` read retries every second rather than waiting for a reconnect or a file change, so updating the server clears the banner by itself. Passed over: retrying on reconnect only (ServerLink exposes no reconnect signal to AppearanceStore).
 
 - Implement round 7: Customize and Delete/Revert moved to the bottom bar as proposed at the demo, before any reply to the proposal. Delete/Revert also shows while editing (the old row was hidden then). Passed over: reserving the row's height under every card (keeps the buttons by the card, costs a blank strip per card).
+
+- QA round 7: the chooser's grids are a non-lazy `CardGrid` layout rather than `LazyVGrid`, after the lazy grid drew blank or overlapping rows on reopening Settings. Passed over: forcing a redraw on appear (treats the symptom; the lazy grid's estimated rows stay).

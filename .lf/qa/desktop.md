@@ -258,10 +258,11 @@ them. Nothing here needs WindowServer focus.
   `lf --task <id> desktop do details page=brief` switches the Task pane. A tile
   shows its workflow sentence only after its Task was visited in that window.
   `lf desktop do new-task` opens the New Task sheet, and `snap` lists a sheet
-  as its own untitled window. Apply and Cancel in Choose Theme answered a doubled click
-  once and no click at all in later runs (no `config.theme` write in the
-  server log); set the theme with `lf set --global theme` to see it applied.
-  Card clicks in the chooser preview reliably.
+  as its own untitled window. Card clicks in the chooser preview reliably;
+  Apply and Cancel answered one hook click in round 7 (Apply wrote
+  `config.yaml`) after missing in earlier runs. If they miss, set the theme with
+  `lf set --global theme`. Send Customize once: Done Editing takes its place,
+  so a second click closes the editor again.
 - Opening a Task changes it: a link to an unstarted Task places its checkout
   (the server then calls it `idle`), and opening a Task whose worktree was
   moved away puts the worktree back. Read `lf plan list --json` for what a
@@ -274,9 +275,14 @@ them. Nothing here needs WindowServer focus.
   sheet is up), `defaults delete <bundle id>`, relaunch, and use the window
   titled with the repository's name; if none appears in 15 s, open
   `loopflow://<repo>`. Never send a finished Task's link to a relaunched app.
-- A theme set from the CLI reaches the running app. With the unknown-name
-  notice up, Choose Theme once drew no light cards on every open; a later run
-  on the same steps drew them all, so a blank grid there is not reproducible.
+- A theme set from the CLI reaches the running app. Close and reopen Settings
+  a few times (`close`, then `menu Settings…`) to check the chooser's grids
+  draw: a `LazyVGrid` there drew no cards, or a short Yours row, after a reopen.
+- On a display someone is using, `open -n -g` keeps the app behind their
+  windows and the hook works as it does locked. `screencapture -l <number>`
+  shows what WindowServer composited (to tell an app bug from a `cacheDisplay`
+  one), but after Settings is reopened under the same window number it fails
+  with "could not create image from window".
 - `tree <window>` prints the window's accessibility elements with frames;
   a lazy grid's cards appear there only once drawn.
 - Not reachable: hover, drag, the jump menu (its shortcut needs

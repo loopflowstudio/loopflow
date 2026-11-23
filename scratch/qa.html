@@ -9,6 +9,53 @@ code{background:#f3f1ee;padding:0 .25em;border-radius:3px}
 table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.3rem .6rem;text-align:left}
 .ok{color:#256b2a}.bad{color:#9a2a2a}
 </style>
+<h1>Round 7: Harbor gone, Arcade Day on Paper, Customize and Delete in the bottom bar</h1>
+<p>Isolated bundle <code>com.loopflow.mac.qa50f7f9.dev</code> with <code>QAHook.swift</code>, branch at fef71de686. Private Machine <code>/tmp/lfq7</code>: branch <code>lf</code> server, one git-planned repository with one Task, and a personal theme <code>My Harbor</code> (the pre-round-7 Harbor Light file), standing in for someone who had Harbor. The display was in use (idle 0 s), so the app ran with <code>open -n -g</code> behind other windows and was driven through the hook. Run 2026-11-22.</p>
+
+<h2>R7.1 First open: 12 cards per side, the new bottom bar</h2>
+<p class="ok">No config, so Loopflow Light. The bottom bar reads Customize · Advanced, then Cancel · Apply. 12 light cards (Folio is the light half of the Folio pair), 12 dark, no Harbor. The saved Harbor file stays under Yours as My Harbor.</p>
+<img src="qa/r7-chooser-fresh.png">
+
+<h2>R7.2 Choosing a card moves no row</h2>
+<p class="ok">Horizontal edges down one column of the grid, before and after choosing Arcade Day: <code>536, 558, 750, 778, 800, 1018…</code> both times. They also match when choosing My Harbor (Delete appears) and Arcade Day again. Arcade Day previews on <code>#f7f6fa</code> (the Paper ground), pale grey-lilac rather than pink; its Run button and Apply stay magenta.</p>
+<img src="qa/r7-arcade-day-preview.png">
+
+<h2>R7.3 Your own theme: Delete in the bar, Cancel undoes it</h2>
+<p class="ok">Choosing My Harbor adds Delete after Customize; Advanced moves right by one button, and the grid doesn't move. Delete takes the card out of the preview and falls back to Loopflow Light, but the file stays on disk until Apply. Cancel closed the window, and on reopening My Harbor was there.</p>
+<img src="qa/r7-yours-delete.png">
+
+<h2>R7.4 Reopening Settings drew a blank or overlapping grid (broken, fixed)</h2>
+<p class="bad">After Cancel, reopening Settings and widening the window drew the Yours row too short. The dark heading sat over My Harbor's buttons until the window was resized again. Closing and reopening twice more drew no cards at all: headings, Yours and the bottom bar, with empty space where the grids go. A real window capture (<code>screencapture -l</code>) was just as blank, so it isn't the hook's <code>cacheDisplay</code>. This is round 5's R5.10, here with no unknown-name notice up. The cause is the <code>LazyVGrid</code>: it estimates rows it hasn't drawn and drops its cells when the Settings window closes.</p>
+<img src="qa/r7-overlap.png" style="width:600px">
+<img src="qa/r7-blank-reopen.png">
+<p><b>Fix:</b> <code>ThemeChooser</code>'s grids are a small non-lazy <code>CardGrid</code> layout: equal columns at least 180 pt wide, each row as tall as its tallest card. A grid holds at most 13 cards, so laziness bought nothing. The first build trapped when Settings opened (exit 6): SwiftUI asks a layout's ideal size with an infinite width, and <code>Int(.infinity)</code> traps. An unbounded width now answers with one column. Rerun: four close/reopen cycles each drew every card with no overlap, and resizes answer in 0.3 s. <code>ThemeWorkflowTests|ThemeTests</code>: 27 passed.</p>
+<img src="qa/r7-reopen-fixed.png">
+
+<h2>R7.5 The bar at the minimum width</h2>
+<p class="ok">At 700 pt with My Harbor chosen, Customize · Delete · Advanced · Cancel · Apply fit on one line with room to spare. The grid goes to three columns.</p>
+<img src="qa/r7-narrow.png" style="width:700px">
+
+<h2>R7.6 Customize, the editor, Revert while editing</h2>
+<p class="ok">On Arcade Day, one click on Customize opens the editor: the bar becomes Done Editing · Revert to built-in · Advanced. Revert while editing goes back to the built-in card grid, with Customize · Advanced in the bar, and writes no file.</p>
+<p>Done Editing replaces Customize in the same place, so a double-click opens the editor and closes it again. (My first attempt did exactly that.) Nothing is lost: the copy stays staged and Revert shows.</p>
+<img src="qa/r7-editor.png">
+<img src="qa/r7-reverted.png">
+
+<h2>R7.7 Apply</h2>
+<p class="ok">Apply answered a hook click this time (earlier rounds couldn't get one). It wrote <code>theme: light:Arcade Day,dark:Loopflow Dark</code> to the private <code>config.yaml</code> and closed the window. The repository window is on <code>#f7f6fa</code> with a <code>#472f90</code> bar (not key, so lighter than stated).</p>
+<img src="qa/r7-arcade-day-applied.png">
+
+<h2>R7.8 A returning setting that names Harbor</h2>
+<p class="ok"><code>lf set --global theme "light:Harbor Light,dark:Harbor"</code> on the running app: the window keeps Arcade Day. Choose Theme draws every card, and above the bar it says "No theme named "Harbor Light": keeping Arcade Day. Fix theme: in …/config.yaml with a built-in name or a file in …/themes."</p>
+<img src="qa/r7-harbor-unknown.png">
+
+<h2>Round 7: what works</h2>
+<p>The catalogue is 12 + 12 with Harbor gone and old Harbor settings named as unknown. Arcade Day is on Paper. Customize, Delete and Revert live in the bottom bar and act on the chosen card; choosing a card never moves a row. Apply and Cancel work. The grid now draws on every reopen.</p>
+<h2>Round 7: not reached</h2>
+<p>A key window's title bar, the real Import file panel, and the editor's disclosure groups (Title bar row): the hook can't make a window key or open panels, and the display was in use. The phone and the site didn't change this round.</p>
+<h2>Round 7: still wrong, worst first</h2>
+<p>1. Customize and Done Editing share a spot, so a double-click toggles the editor open and shut. 2. Choosing your own theme pushes Advanced right by Delete's width; the grid holds still, but the bar shifts.</p>
+
 <h1>Round 6: a failed theme read, against a released server</h1>
 <p>Isolated bundle <code>com.loopflow.mac.qa50f7f9.dev</code> with <code>QAHook.swift</code>, branch at a630122eaa. Private Machine <code>/tmp/lfq6</code> (one git-planned repository, one Task, <code>theme: "light:Fig Leaf,dark:Fig"</code>) served first by a copy of the installed <code>lf</code> (0.16.0+c4de2038f), then by the branch <code>lf</code> on the same home. Screen locked. Run 2026-11-22.</p>
 <h2>R6.1 Launch against the 0.16.0 server</h2>

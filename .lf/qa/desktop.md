@@ -324,6 +324,20 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
   `config.theme`).
 - With a sheet open, `osascript … quit` fails with "User canceled"; stop that
   one PID. `open -n` beside a live instance leaves two; check `pgrep` first.
+- New Task with the QA hook alone (no capture loop): `insert <words>` types
+  into the open sheet's field, `key return` sends ⌘↩ (Start), `key escape`
+  closes it. `press new-task-file` answers "not found"; click the point
+  instead: in the 540 pt sheet File to backlog sits at (74, 308), 33 pt lower
+  once a "Not filed." line shows. `lf desktop do new-task` prints the scope it
+  opened in (`repository` or `wave:<id>`), which is how to tell a sidebar
+  click on a Wave landed. A Wave's own default: `graph: <name>` in
+  `.lf/wave/<name>/config.yaml`, committed. Removing that Wave with the sheet
+  open turns its **In** back to the repository; File then files there, so it
+  is no way to get a refusal.
+- The private server's argv is plain `lf server run` (the `env -i` wrapper
+  execs it from `PATH`); find its PID with `ps -E -p <pid> -o command=` and its
+  `LF_HOME=`. In zsh `kill $PIDS` with a newline-separated list kills nothing;
+  pipe the PIDs to `xargs kill`.
 - New Task: `lf desktop do new-task` opens the sheet. Type with
   `(sheet.firstResponder as? NSTextView)?.insertText(…)`; ⌘↩ and Esc work as
   `sheet.performKeyEquivalent(with:)` on a synthesized key event.

@@ -10,6 +10,8 @@ The Machine's creation receipt distinguishes a confirmed refusal from a lost ans
 - `task_create_tests::task_create_answers_and_its_conversation_starts_the_graph_across_a_server_restart` passed against a disposable Machine with a lost reply.
 - `cargo test -p loopflow --test integration documented_commands::` passed all four checks.
 
+- QA (`scratch/qa.html`): isolated Dev bundle on a private Machine. File (repository and Wave), Start with the scope's default, a removed Wave, and server down then back all worked. Not reached live: choosing a named workflow from the menu, a confirmed refusal leading to retry, and a lost reply.
+
 ## Remaining
 
-Demo the sheet in Loopflow Dev and follow the running Graph in its mounted workspace. The display checks belong to demo or QA.
+Demo the sheet on an unlocked display, including the Workflow menu.

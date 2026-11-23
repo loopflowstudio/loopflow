@@ -129,6 +129,22 @@ enum QAHook {
                 }
             }
             return "typed"
+        case "insert":
+            // Types into the focused field of the frontmost sheet (New Task opens focused); `type` needs a key window.
+            guard let sheet = windows.compactMap(\.attachedSheet).first ?? windows.first,
+                  let field = sheet.firstResponder as? NSTextView else { return "no text field focused" }
+            field.insertText(arg, replacementRange: field.selectedRange())
+            return "inserted"
+        case "key":
+            // `key return` sends ⌘↩, `key escape` sends Esc, to the frontmost sheet.
+            guard let sheet = windows.compactMap(\.attachedSheet).first ?? windows.first else { return "no window" }
+            let (characters, code, flags): (String, UInt16, NSEvent.ModifierFlags) =
+                arg == "escape" ? ("\u{1b}", 53, []) : ("\r", 36, .command)
+            guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
+                                               timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: sheet.windowNumber,
+                                               context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                                               isARepeat: false, keyCode: code) else { return "no event" }
+            return sheet.performKeyEquivalent(with: event) ? "handled" : "unhandled"
         default:
             return "unknown: \(line)"
         }

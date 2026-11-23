@@ -1,0 +1,80 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-1065 QA: New Task File and Start</title>
+<style>
+body{font:15px/1.5 -apple-system,sans-serif;max-width:980px;margin:2em auto;padding:0 1em;color:#222}
+h2{margin-top:2em;border-top:1px solid #ddd;padding-top:1em}
+img{max-width:100%;border:1px solid #ccc;margin:.5em 0}
+.ok{color:#176b2c;font-weight:600}.open{color:#8a5a00;font-weight:600}
+code{background:#f3f3f3;padding:0 .25em}
+</style>
+<h1>LOO-1065 QA: Mac New Task, File and Start</h1>
+<p>An isolated Dev bundle (<code>com.loopflow.mac.qa1065.dev</code>) built from this branch, running on a private Machine
+(<code>/tmp/q1065</code>: own HOME, LF_HOME, branch <code>lf server run</code>, stand-in <code>claude</code>). The repository
+<code>demo</code> has the default Graph <code>qa</code>, and its Wave <code>Ops</code> takes <code>review</code>. I drove the app through
+<code>.lf/qa/QAHook.swift</code>: synthesized clicks, text inserted into the sheet's field, ⌘↩ and Esc as key equivalents.
+Captures come from <code>cacheDisplay</code>. Every Task listed below was checked against <code>lf task list</code> / <code>lf task status</code>.</p>
+
+<h2>1. File from the repository <span class="ok">works</span></h2>
+<p>New Task over an empty repository backlog. The sheet offers <b>Start with qa ⌘↩</b> with "demo's default", and <b>File to backlog</b> sits on its own line.</p>
+<img src="qa/s1-1.png">
+<p>Clicking File closed the sheet. The backlog then showed "Filed ff5cfc" with the row selected and its brief open. <code>lf task list</code> shows
+<code>ff5cfc · — ·</code> (unstarted, no workflow pinned), and the saved submission under <code>desktop-cache/submissions</code> was retired.</p>
+<img src="qa/s2-0.png">
+
+<h2>2. The Start picker follows the scope <span class="ok">works</span></h2>
+<p>With Ops selected, the sheet opened "In Ops" and read <b>Start with review ⌘↩</b>, "Ops's default", with the review steps (help graph, you at demo).</p>
+<img src="qa/s3-1.png">
+<p>⌘↩ started it: <code>431c5f</code> has a worktree and branch, and its status reads "Graph review: Waiting for you at demo." The Task page opened with the review bar.</p>
+<img src="qa/s4-0.png">
+<p>Unrelated to this change: the Files pane read "Files did not open: The Task file location changed". desktop.md already records this
+for the window a Task is started in (Task ea8659).</p>
+
+<h2>3. File into a Wave <span class="ok">works</span></h2>
+<p>From Ops, File put <code>eb630a</code> in Ops's backlog. The row was selected under "Filed eb630a" and the toolbar offered "Start with review".</p>
+<img src="qa/s7-0.png">
+
+<h2>4. The sheet's Wave is removed while it is open <span class="ok">reasonable</span></h2>
+<p>I opened the sheet in Wave <code>Later</code>, then ran <code>lf wave remove later</code>. The sheet's <b>In</b> switched to demo on its own, and the Start line
+switched to qa. File then filed <code>bfd33e</code> in the repository, revealed it and selected it. No refusal arrives, because the label changes
+before the press.</p>
+<img src="qa/s9-1.png">
+<img src="qa/s10-0.png">
+
+<h2>5. Server stopped, then back <span class="ok">works</span></h2>
+<p>I killed the private server and pressed File. The sheet stayed open with the words kept, showing "Not filed. Loopflow server unavailable or owned by another account".
+Nothing was saved to <code>submissions</code>.</p>
+<img src="qa/s11-1.png">
+<p>After restarting the server I pressed File again. The sheet closed and the notice read "Filed 8747cc" while the app still said
+"The Machine is away; showing what was last read". The new row was missing and the backlog read "Nothing selected".</p>
+<img src="qa/s12-0.png">
+<p>About 30 s later the app reconnected. 8747cc appeared selected with its brief open, and the saved submission was retired.</p>
+<img src="qa/s13-0.png">
+
+<h2>6. Small paths <span class="ok">works</span></h2>
+<ul>
+<li>File with an empty request: clicking it filed nothing (Task count unchanged).</li>
+<li>Esc closed the sheet.</li>
+</ul>
+
+<h2>Fixed during this run</h2>
+<p>No product bugs found. <code>QAHook.swift</code> gained <code>insert</code> and <code>key</code>, because <code>type</code> cannot reach a sheet that is not key.
+desktop.md now records the New Task coordinates, how to find the private server's PID, and the zsh <code>kill $PIDS</code> trap.</p>
+
+<h2>What I couldn't reach</h2>
+<ul>
+<li><b>Choosing a named workflow, and Use default.</b> The Workflow menu is a SwiftUI <code>Menu</code>, which the hook can't open. Only the inherited
+default was driven live. The headless suite covers named workflows and Use default (plan.md).</li>
+<li><b>A confirmed refusal leading to retry.</b> I found no live input the server refuses after saving. A removed Wave turns into the repository
+before the press, and server-down fails before saving. The receipt logic is covered in <code>CreationSubmissionTests</code>.</li>
+<li><b>A reply lost mid-request, leading to recovery.</b> Timing a kill between send and answer isn't reliable by hand. The Rust fixture
+<code>task_create_answers…across_a_server_restart</code> covers it.</li>
+<li><b>Unlocked-display rendering and keyboard focus.</b> Everything here went through <code>cacheDisplay</code> and synthesized events.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>In the restart case, "Filed 8747cc" shows for up to ~30 s above a backlog that lacks the row and reads "Nothing selected". It resolves itself.
+The lag comes from the app's reconnect, not from this change, but File makes it visible.</li>
+<li>Files pane "The Task file location changed" right after Start (already known, Task ea8659).</li>
+</ol>

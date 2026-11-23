@@ -229,7 +229,7 @@ impl SqliteStore {
     /// Save where the conversation's own process takes a wake once it is
     /// idle, as its hook or plugin reports it: Claude's inbox key file, or an
     /// OpenCode plugin's or Pi extension's wake socket. Written only when it
-    /// changes.
+    /// changes. Antigravity's launch records its own (`record_launch_inbox`).
     pub fn record_agent_inbox(&self, adapter: &SteerAdapter, key: &Path) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -273,6 +273,7 @@ impl SqliteStore {
                 Some("codex") => path(6)?.map(IdleReach::Codex),
                 Some("claude") => path(7)?.map(IdleReach::Claude),
                 Some("opencode" | "pi") => path(7)?.map(IdleReach::Plugin),
+                Some("agy") => path(7)?.map(IdleReach::Antigravity),
                 _ => None,
             };
             let Some(reach) = reach else {

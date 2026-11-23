@@ -5,8 +5,9 @@
 //! each one it has news for. A server restart forgets nothing. No process or
 //! clock per Session: Claude takes the message in its cross-session inbox,
 //! Codex as a turn its app-server starts, OpenCode and Pi on the wake socket
-//! lf's plugin listens on inside the provider. A conversation the server
-//! cannot reach hears it at its next boundary.
+//! lf's plugin listens on inside the provider, Antigravity as a message to
+//! `agy`'s own language server. A conversation the server cannot reach hears
+//! it at its next boundary.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -16,6 +17,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use serde_json::json;
 
+use loopflow_execution::harness::antigravity::LanguageServer;
 use loopflow_execution::steer::{IdleConversation, IdleReach};
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -132,6 +134,7 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
             },
             IdleReach::Codex(endpoint) => Reach::Codex(endpoint),
             IdleReach::Plugin(socket) => Reach::Plugin(open_plugin(socket)?),
+            IdleReach::Antigravity(wake) => Reach::Antigravity(LanguageServer::find(wake)?),
         };
         let steers = loopflow_execution::steer::claim(
             store,
@@ -149,6 +152,7 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
             }
             Reach::Codex(endpoint) => start_codex_turn(endpoint, thread, &steers.text)?,
             Reach::Plugin(socket) => send_plugin(socket, &steers.text)?,
+            Reach::Antigravity(server) => server.send(thread, &steers.text)?,
         }
         store.record_woken(adapter)?;
         loopflow_execution::steer::delivered(store, session, &steers);
@@ -163,6 +167,7 @@ enum Reach<'a> {
     Inbox(UnixStream, String),
     Codex(&'a Path),
     Plugin(UnixStream),
+    Antigravity(LanguageServer),
 }
 
 /// Claude's inbox socket and key for `thread`, from the key it publishes
@@ -442,6 +447,10 @@ mod tests {
 
         /// The conversation's turn ends; its hook names its inbox.
         fn stop(&self, store: &SqliteStore, inbox: &Path) {
+            self.turn_end(store, Some(inbox));
+        }
+
+        fn turn_end(&self, store: &SqliteStore, inbox: Option<&Path>) {
             super::super::boundary::answer(
                 store,
                 &SessionBoundary {
@@ -451,7 +460,7 @@ mod tests {
                     callback: serde_json::json!({"hook_event_name":"Stop","session_id":"native"}),
                     gap: None,
                     printed: Vec::new(),
-                    inbox: Some(inbox.to_owned()),
+                    inbox: inbox.map(Path::to_owned),
                 },
             )
             .unwrap();
@@ -593,6 +602,101 @@ mod tests {
                 .len(),
             1,
             "still idle"
+        );
+    }
+
+    #[test]
+    fn an_idle_antigravity_conversation_takes_its_news_from_agys_language_server() {
+        let fixture = fixture("wake-agy");
+        fixture
+            .store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider='agy' WHERE id='wake-agy'",
+                [],
+            )
+            .unwrap();
+        // `agy`'s language server, the log line naming its port after an
+        // earlier one, and the wake file its launch wrote.
+        let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let log = fixture.home.path().join("agy.log");
+        std::fs::write(
+            &log,
+            format!(
+                "I server.go:1322] Language server listening on random port at 1 for HTTP\n\
+                 I server.go:1314] Language server listening on random port at {} for HTTP\n\
+                 I server.go:1314] Language server listening on random port at 2 for HTTPS (gRPC)\n",
+                server.local_addr().unwrap().port()
+            ),
+        )
+        .unwrap();
+        let wake = fixture.home.path().join("launch.wake");
+        std::fs::write(
+            &wake,
+            serde_json::json!({"log": log, "token": "launch-token"}).to_string(),
+        )
+        .unwrap();
+        let claim = fixture
+            .store
+            .session_attachment("wake-agy")
+            .unwrap()
+            .unwrap();
+        fixture
+            .store
+            .record_launch_inbox("wake-agy", &claim, &wake)
+            .unwrap();
+        let language_server = std::thread::spawn(move || {
+            let (stream, _) = server.accept().unwrap();
+            let mut reader = std::io::BufReader::new(&stream);
+            let mut head = Vec::new();
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+                head.push(line.trim_end().to_ascii_lowercase());
+            }
+            let length: usize = head
+                .iter()
+                .find_map(|line| line.strip_prefix("content-length: "))
+                .unwrap()
+                .parse()
+                .unwrap();
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            (&stream)
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}")
+                .unwrap();
+            (
+                head,
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            )
+        });
+        // Its hook names no inbox: the launch recorded it.
+        fixture.turn_end(&fixture.store, None);
+        fixture.comment(&fixture.store, "c-1", "use the staging bucket");
+        after_turn(&fixture.store, "wake-agy");
+        let (head, body) = language_server.join().unwrap();
+        assert_eq!(
+            head[0],
+            "post /exa.language_server_pb.languageserverservice/sendusercascademessage http/1.1"
+        );
+        assert!(head.contains(&"x-codeium-csrf-token: launch-token".to_string()));
+        assert_eq!(body["cascadeId"], "native");
+        assert!(body["items"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("use the staging bucket"));
+        assert_eq!(
+            fixture
+                .store
+                .session_steers("wake-agy", 0, 8)
+                .unwrap()
+                .pending,
+            0
         );
     }
 

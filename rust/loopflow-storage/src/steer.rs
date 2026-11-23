@@ -49,6 +49,9 @@ pub enum IdleReach {
     /// The wake socket an OpenCode plugin or Pi extension listens on inside
     /// the provider's process.
     Plugin(std::path::PathBuf),
+    /// The wake file an Antigravity launch wrote: `agy`'s log, which names
+    /// its language server's port, and the token that server was started with.
+    Antigravity(std::path::PathBuf),
 }
 
 impl std::fmt::Debug for SteerAdapter {

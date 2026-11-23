@@ -993,6 +993,26 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Where the AgentProcess its launch started takes a wake once idle, for
+    /// an address lf made itself (Antigravity's wake file); a provider that
+    /// makes its own reports it on a boundary (`record_agent_inbox`).
+    pub fn record_launch_inbox(
+        &self,
+        session: &str,
+        expected: &SessionAttachment,
+        inbox: &Path,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_attachment_in(&tx, session, expected)?;
+        tx.execute(
+            "UPDATE agent_sessions SET agent_inbox=?2 WHERE agent_process_id=?1",
+            params![expected.agent_process_id, inbox.to_string_lossy()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// The agent the Session's current AgentProcess runs on; a retry may move
     /// the conversation to another provider or model. Closing the process and
     /// routing a steer both go by the recorded provider.

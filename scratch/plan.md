@@ -305,6 +305,12 @@ check keeps only the unavailable case. Gone with the list: the Swift
 the selected-Task planning test. `MockWaveFixture`'s Project gained the
 `url` key slice 4 made required (it had been decoding as unavailable).
 
+Checks run: CLI `dto_fixtures::`, `server::schema::tests::` (schema
+regenerated), `status_tests::`, `wave_lifecycle::`,
+`lf::commands::waves::tests::` and the three `local_planning::` tests that
+read the Project; Swift `DTOFixtureTests|WaveDetailReadingTests|WorkModelTests|RegistryQueryTests|MockWaveFixtureTests|WorkNavigationTests|ServerProtocolTests`
+(202 pass); clippy clean.
+
 ## Remains
 
 After slice 5, gate: Swift DTO suites (`scripts/test_desktop.sh`), the full

@@ -1,19 +1,15 @@
-at: ee2d2ede690e0fd86aa31989824db27fd47670a8
+at: 6bd79b8989dbe757c2f9fc486284628ff256c61d
 first:
   - path: rust/loopflow/src/server/README.md
-    why: the four reaches and what agent_inbox holds per provider
+    why: the Antigravity reach beside main's Claude, Codex and socket reaches
   - path: rust/loopflow-storage/src/steer.rs
-    why: IdleReach gains Plugin and Antigravity
+    why: IdleReach gains Antigravity
   - path: rust/loopflow-storage/src/sqlite/steers.rs
-    why: idle candidates pick their reach by provider
-  - path: rust/loopflow/src/server/wake.rs
-    why: the plugin socket and language-server sends, with tests
-  - path: rust/loopflow-execution/src/harness/server_connection.js
-    why: the wake socket every plugin binds and reports
-  - path: rust/loopflow-execution/src/harness/context_opencode.js
-    why: synthetic wake; Stop and prompt name the conversation
-  - path: rust/loopflow-execution/src/harness/context_pi.mjs
-    why: followUp + triggerTurn wake
+    why: an agy row without endpoint or socket reaches its wake file
+  - path: rust/loopflow-storage/src/sqlite/processes.rs
+    why: record_launch_inbox, the launch-side write
   - path: rust/loopflow-execution/src/harness/antigravity.rs
-    why: launch token, log file, wake file; LanguageServer send
+    why: launch token, log file, wake file; LanguageServer find and send
+  - path: rust/loopflow/src/server/wake.rs
+    why: the language-server send, with its stand-in test
 hide: []

@@ -86,6 +86,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 - `steer_adapters`: agent_process_id, capability, created_at, activated_at
 - `steer_delivered`: session_id, steer_id, claimed_at, delivered_at
+- `steer_wake_reading`: id, seq
 - `steers`: seq, id, repo, wave_id, task_id, project_id, session_id, source, revision, author, text, created_at
 - `task_comments`: id, task_id, body, author, created_at, provider_revision
 - `task_update_readings`: task_id, observation

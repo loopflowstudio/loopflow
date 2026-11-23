@@ -461,10 +461,13 @@ fn scopes() -> String {
          OR ((SELECT interactive FROM agent_sessions WHERE id=?1)
              AND p.source NOT LIKE 'update:'||?1||':%'))
         -- A shared steer saved before this Session started and already read
-        -- by another Session was read there; a later Session starts past it.
+        -- by another Session of its kind was read there; a later Session
+        -- starts past it. A Task conversation's reading leaves the next
+        -- worker its own copy, and a worker's leaves the conversation one.
         AND (p.session_id=?1 OR p.created_at>=(SELECT created_at FROM agent_sessions WHERE id=?1)
-         OR NOT EXISTS(SELECT 1 FROM steer_delivered d
-            WHERE d.steer_id=p.id AND d.session_id!=?1 AND d.delivered_at IS NOT NULL))
+         OR NOT EXISTS(SELECT 1 FROM steer_delivered d JOIN agent_sessions o ON o.id=d.session_id
+            WHERE d.steer_id=p.id AND d.session_id!=?1 AND d.delivered_at IS NOT NULL
+            AND o.interactive=(SELECT interactive FROM agent_sessions WHERE id=?1)))
         )", super::task_work::session_tasks("s"))
 }
 

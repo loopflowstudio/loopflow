@@ -212,7 +212,7 @@ lf session steers <session>                          # pending vs. delivered
   on their next turn.
 - **Stopped interactive Sessions** start in a held terminal when steered by
   name. A Task steer starts its stopped primary conversation and reaches each
-  running Session on the Task. Wave and repository steers wait for the next
+  running Session on the Task; the next Graph step reads it too. Wave and repository steers wait for the next
   boundary. Several steers saved while the server is down arrive together
   when it returns. Attach with `lf resume <session>` to see the reply.
 

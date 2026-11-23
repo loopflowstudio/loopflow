@@ -1517,7 +1517,12 @@ fn server_operations_match_their_lf_commands() {
         effect("INF-123")
     });
     // A steer and a comment save the same text by the same author; each save
-    // has its own ID.
+    // has its own ID. A Task steer also makes the server start the Task's quit
+    // primary conversation (`session_steers` covers that), so this Task has none.
+    rusqlite::Connection::open(&database)
+        .unwrap()
+        .execute("DELETE FROM task_primary_sessions", [])
+        .unwrap();
     for steer in [true, false] {
         let (directory, issue, message) = (
             directory.clone(),

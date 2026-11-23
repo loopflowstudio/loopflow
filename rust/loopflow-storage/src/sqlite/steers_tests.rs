@@ -958,6 +958,52 @@ fn a_starting_conversation_takes_its_steers_when_one_names_it() {
     assert!(store.take_steers_to_start("primary").unwrap().is_empty());
 }
 
+/// A Task steer the Task's conversation read when it started is still the
+/// next worker's to read, and the reverse: each kind reads its own copy.
+/// A later conversation starts past what a conversation already read.
+#[test]
+fn a_task_steer_the_conversation_read_still_reaches_the_next_worker() {
+    let (_home, store, _adapter) = fixture();
+    task_with_primary(&store, "primary", "worker");
+    {
+        let conn = store.conn.lock().unwrap();
+        save_in(
+            &conn,
+            ("task", "task"),
+            "task",
+            "1",
+            &Author::Named("Author".into()),
+            "USE_THE_FIXTURE",
+        )
+        .unwrap();
+    }
+    assert_eq!(store.take_steers_to_start("primary").unwrap().len(), 1);
+    for (session, interactive) in [("next-worker", 0), ("next-conversation", 1)] {
+        store.test_session(session, &crate::session_record::new_artifact_key());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET cwd='/task',interactive=?2,
+                 created_at=(SELECT MAX(created_at)+1 FROM steers) WHERE id=?1",
+                params![session, interactive],
+            )
+            .unwrap();
+    }
+    assert_eq!(
+        store.session_steers("next-worker", 0, 32).unwrap().pending,
+        1
+    );
+    assert_eq!(
+        store
+            .session_steers("next-conversation", 0, 32)
+            .unwrap()
+            .pending,
+        0
+    );
+}
+
 /// The server's reading and a starting conversation's check scan no growing
 /// table, and a start that nothing names takes no write lock.
 #[test]

@@ -467,7 +467,17 @@ SQLite migrations before server readiness or view timing is measured.
 Headless Swift view tests inspect production leaf views directly when a parent
 needs `@Environment` Observation objects, which ViewInspector can't inject.
 Keep those views internal for `@testable` access. Mounted terminal frame checks
-stay in `.requiresDisplay` suites.
+stay in `.requiresDisplay` suites. Ghostty calls `io_write_cb` on its IO thread.
+Mark the callback `@Sendable` when installing it from a main-actor fixture and
+synchronize access to the bytes it collects.
+
+Headless keyboard tests can focus a terminal in a deferred window before
+attaching its Ghostty surface. Post AppKit events from a nested run loop:
+`NSApp.postEvent` stops the current loop and can end Swift Testing early.
+
+Swift fixtures that exercise the Desktop Session relay open the prepared Session's
+`open_argv`. A bare interactive chat can print the provider's prompt without
+ever reporting relay readiness to the pane.
 
 # Review Ritual
 

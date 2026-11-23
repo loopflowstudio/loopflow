@@ -781,7 +781,10 @@ line in `logs/lf.log`; the tool goes on and the next boundary asks again.
 
 The launch carries its capability as `LF_PROVIDER_CONTEXT` when the server
 records its boundaries and as `LF_BARE_STEER` when no one does. For chats and
-batches, tool and prompt hooks run only `--moment steer`, which reports nothing. A chat idle at its prompt reads a steer when its person next types.
+batches, tool and prompt hooks run only `--moment steer`, which reports
+nothing. A chat idle at its prompt reads a steer when its person next types.
+When the server can wake a work session, its start hook leaves waiting steers
+for the server to deliver as a turn.
 
 Every tool hook first compares files and starts `lf` only when a steer may be
 waiting. Saving a steer touches one marker under `steers/` inside the write:
@@ -827,11 +830,16 @@ that lapses for the next boundary:
   A turn already running takes the message as a steer. OpenCode's TUI shows
   the answer but not the message that caused it.
 
-When a conversation reopens without an initial prompt, it waits for input.
-The first boundary that names a new inbox or socket records its provider as
-idle and sends what was saved while it was closed: an OpenCode plugin names
-its socket as it loads, a Pi extension at `session_start`. Claude's start hook
-reads those steers into its context instead, and starts no turn.
+A reopened work session takes steers saved while it was closed as a turn
+before anyone types. Without a steer or an opening prompt, it waits for input.
+The new provider process's first boundary records it idle
+(`record_first_boundary`). That boundary, or a later one naming a new inbox
+or socket, lets the server deliver waiting steers. Claude reports its start.
+Codex runs its start hook inside a turn, so lf reports the start once the
+app-server holds the conversation. If Codex has an opening prompt, lf reports
+the prompt before starting its turn. OpenCode names its socket when the plugin
+loads, and Pi names its socket at `session_start`. The next boundary claims
+any steers the server could not deliver.
 
 A server that restarts reads the same conversations again. An unreachable
 Claude inbox or extension socket leaves its news unclaimed. After a failed

@@ -473,6 +473,14 @@ impl Registry {
                 .contains(&name.as_str())
             })
             .collect();
+        // A GUI or service launch may have no terminal environment of its own.
+        for (name, default) in [("TERM", "xterm-256color"), ("COLORTERM", "truecolor")] {
+            match env.iter_mut().rev().find(|(key, _)| key == name) {
+                Some((_, value)) if value.is_empty() => *value = default.into(),
+                None => env.push((name.into(), default.into())),
+                _ => {}
+            }
+        }
         env.push((HELD_ENV.into(), terminal.to_string()));
         env.push((WITHIN_ENV.into(), terminal.to_string()));
         env.push((PARENT_ENV.into(), holder.pid.to_string()));

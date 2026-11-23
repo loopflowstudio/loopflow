@@ -415,14 +415,17 @@ struct ThemeTests {
         #expect(manager.theme.name == "Loopflow Dark")
     }
 
-    @Test func compiledOverlayOverridesPersonalColors() throws {
+    @Test(arguments: [nil, false, true] as [Bool?])
+    func themeOverridesColorsAndKeepsFontSettings(personalThickening: Bool?) throws {
         try #require(GhosttyManager.libraryReady)
         let baseline = try #require(ghostty_config_new())
         defer { ghostty_config_free(baseline) }
+        try GhosttyThemeConfiguration.load(GhosttyManager.loopflowConfig, into: baseline)
         try GhosttyThemeConfiguration.load("""
         background=112233
         foreground=445566
         font-size=19
+        \(personalThickening.map { "font-thicken=\($0)" } ?? "")
         \((0..<256).map { "palette=\($0)=123456" }.joined(separator: "\n"))
         cursor-color=123456
         cursor-text=654321
@@ -435,11 +438,12 @@ struct ThemeTests {
         theme=light:/unread-light,dark:/unread-dark
 
         """, into: baseline)
-        try GhosttyThemeConfiguration.load("theme=\n", into: baseline)
+        try GhosttyThemeConfiguration.load(GhosttyManager.embeddedConfig, into: baseline)
         ghostty_config_finalize(baseline)
         let darkImport = try imported("""
         background=171924
         foreground=CAD2EF
+        font-thicken=true
         cursor-color=AABBCC
         cursor-text=222222
         selection-background=304060
@@ -448,7 +452,9 @@ struct ThemeTests {
         for theme in ThemeDefinition.builtins + [darkImport, try imported("background=FFF4DF\nforeground=34291F").theme] {
             let candidate = try GhosttyThemeConfiguration.candidate(theme, baseline: baseline)
             defer { ghostty_config_free(candidate) }
-            try GhosttyThemeConfiguration.validate(theme, config: candidate)
+            var thickened = false
+            try #require(ghostty_config_get(candidate, &thickened, "font-thicken", 12))
+            #expect(thickened == (personalThickening ?? false))
             var size: Float = 0
             #expect(ghostty_config_get(candidate, &size, "font-size", 9))
             #expect(size == 19)

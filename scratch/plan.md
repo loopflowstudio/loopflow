@@ -2,63 +2,66 @@
 
 > Visual redesign of the settings pane. make it more like a standard Apple Settings pane, sort of like Rex
 
-Direction on record: [demo-notes.md](demo-notes.md) (verbatim feedback from Jack Heart during the live demo of PR #2033), [design.md](design.md), [explore.html](explore.html), and [concept-review.html](concept-review.html). User docs: [Surfaces](../docs/surfaces.md#settings), [Configuration](../docs/config.md#inspect-effective-settings), [Connect clients](../docs/server.md#phone-access), and [Loopflow for macOS](../swift/README.md).
+Direction on record: [demo-notes.md](demo-notes.md) (verbatim feedback from Jack Heart during the live demo of PR #2033), [design.md](design.md), [explore.html](explore.html), [qa.html](qa.html), and [concept-review.html](concept-review.html). User docs: [Surfaces](../docs/surfaces.md#settings), [Configuration](../docs/config.md#inspect-effective-settings), [Connect clients](../docs/server.md#phone-access), and [Loopflow for macOS](../swift/README.md).
 
-## Policy B & visual polish
+## Remaining slice: align row concepts with Policy B
 
-During the live demo of PR #2033, Jack chose **Policy B** (`1b`, `2a`) plus a visual polish pass over the sidebar and controls:
+The Policy B shell (six personal panes + one `Project & Wave Config` pane, monochrome sidebar, two dividers, capsule search, independent personal/project subscriptions) and the Rust backend (`config.scope`, checked YAML writes, `observe::invalidate_path`, `config.promote` + `Action::Dismiss`, `machine.status`) are built and passing. Post-build concept review ([concept-review.html](concept-review.html)) found four row-level mismatches left over from the earlier raw-file editor. Finish them in one focused slice, ordered so the most visible bugs clear first:
 
-**Built in this slice.** The seven-pane sidebar has two dividers, monochrome symbols, and a capsule search field. Personal preferences and Project & Wave Config have independent live readings. The project pane holds Context, Git & Release, agent overrides, and Machine placement. Search can open either an agent default or its scoped override. File-only global results reveal the global file button.
+### 1. Fix Agent Policy `unsetText` and null defaults (`catalog.rs`, `ScopedSettingRow.swift`)
 
-**Built: no "Inherited" display values.** `ScopedSettingRow.unsetText` labels an unset control with the value in effect and its origin (`On (Default)`, `GitHub PR (from Shared repository settings)`); the choice Picker's absent option, the TextField prompt and the ordered-list label all use it, and the provenance disclosure is always titled "In effect". `agents` and `default_agent` read the highest other declaration of their own key from the candidates, else the catalog default, because their effective value is the combined agent order. Absent, `Explicit null` and authored values stay distinct tags. `sharedCheckoutKeepsItsDestinationThroughValidationAndGlobalMachineEdits` fails if "Inherited" returns to any Settings pane.
+- **Why:** `scope.settings["agent"]` holds the combined winning agent across `agent`, `default_agent`, and `agents`, while `ScopedSettingRow.unsetText` filters `effective.candidates` by `candidate.key == key` only for `default_agent` and `agents` (and bypasses `definition.unset`). On the personal `Agents` pane, an unset `Primary agent` (`agent`) currently renders `claude (from My global preferences)` when only `default_agent: claude` is set, and an unset `Starting preference` (`default_agent`) renders `None (Default)`.
+- **Rust (`rust/loopflow-execution/src/config/catalog.rs` + `tests/fixtures/dto/configuration_catalog.json`):**
+  - Add `unset` phrases to `agent` (`unset "Use starting preference"`) and `default_agent` (`unset "First in fallback order"`).
+- **Swift (`swift/LoopflowMac/Views/ScopedSettingRow.swift`):**
+  - Treat all three Agent Policy keys (`agent`, `default_agent`, `agents`) uniformly in `unsetText`: check `effective.candidates.last(where: { $0.key == key })`. If found, show `labeled(candidate.value.settingsText, origin: title(locator: candidate.locator))`. If absent, use `definition.unset` when present, else the decoded catalogue default (`Empty list (Default)` for `agents`).
 
-**Built: null defaults name what decides.** A catalogue row may carry `unset` (wire field, nullable): `~/src`, `stable`, `Git's user.name`, `Off`, `Claude's own setting`, `Codex's own setting`, `This Machine`, `Squash when GitHub allows it`. Rows show it instead of "None (Default)". Live Light and Dark QA at compact and wide sizes is done ([qa.html](qa.html), round 3).
+### 2. Show `In effect` provenance only where a real layer participates (`ScopedSettingRow.swift`, `ScopedSettings.swift`)
 
-**Checks for this slice**
+- **Why:** `ScopedSettingRow` currently renders `SettingProvenance("In effect", …)` unconditionally on every non-global, non-policy row, stacking ~16 duplicate `› In effect · X · Default` disclosures directly underneath controls that already display `X (Default)`.
+- **Swift (`ScopedSettingRow.swift`, `ScopedSettings.swift`):**
+  - In `Project & Wave Config`, render `SettingProvenance("In effect", …)` only when `declared != .absent || effective.candidates.contains { $0.source != "builtin" }`.
+  - Show the active file's path once in the bottom file section beside `Open file…` (secondary/mono text, selectable) so the destination path is visible even on a clean checkout with no overrides.
 
-- `scripts/test_desktop.sh --skip-build --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|ThemeWorkflowTests'` after building Desktop and `lf` — 20 passed, one compact-window scrolling check skipped headless.
-- `loopflow-execution` libtest with `config::files:: config::keys:: engine::config::promotion::` — 24 passed.
-- `cargo test -p loopflow --test integration documented_commands::` — 4 passed.
-- Live Light and Dark windows at compact and wide sizes — checked in QA round 3 (screenshots in `scratch/qa-r3/`).
+### 3. Clean Picker choices, hide no-op `Explicit null`, unify Reset + Undo (`ConfigurationScope.swift`, `ScopedSettingRow.swift`, `ScopedSettingsModel.swift`)
 
-### 1. Clear policy for what belongs in `⌘,` Settings (Policy B · `2a`)
+- **Why:** Rust's resolver skips YAML `null` identically to omitting the key (`settings.rs:526`), so offering `Explicit null` as a selectable menu item on every nullable Picker lets people author a no-op. Choice pickers also display raw lowercase schema tokens (`gh`, `local`, `default`, `priority`, `on`, `off`, `squash`, `merge`, `rebase`). Meanwhile, `Reset…` opens a 2-step raw YAML diff (`Reset in this file`) even on personal panes, contradicting instant-apply + Undo used by Picker `(Default)` and clearing a text field; Undo notices print raw keys (`Saved repo_root in My global preferences`); and clearing an integer field (`Automatic retries`) fails validation instead of resetting.
+- **Swift:**
+  - **No-op `Explicit null`:** Keep `ConfigurationScope.Authored.present(.null)` in the data model so existing hand-written `key: null` is recognized and resettable, but render `Text("Explicit null").tag(.present(.null))` inside a Picker **only when `declared == .present(.null)`**.
+  - **Human choice labels:** Add `ConfigurationDefinition.displayText(for:)` (used by Pickers, `effectiveText`, `unsetText`, and `SettingProvenance`, while writes continue using `settingsYAML`):
+    - `land`: `gh` → `"GitHub PR"`, `local` → `"Local merge"`
+    - `codex.service_tier`: `default` → `"Standard"`, `priority` → `"Fast"`
+    - `auto`: `on` → `"On"`, `off` → `"Off"`
+    - `merge_method`: `squash` → `"Squash"`, `merge` → `"Merge"`, `rebase` → `"Rebase"`
+  - **Consistent Reset:** For simple controls (`toggle`, `choices`, `text`, `integer`, `stringList`), clicking **Reset** calls `save(.reset, to: file)` immediately (still checked against `slot.entries`, with exact `ConfigurationEditReceipt` Undo). Keep the 2-step live YAML diff preview (`Reset…` → `Cancel` / `Reset in this file`) only for raw `.yaml` controls (`repo.tracker`, `machine`, `diff_groups`, `release`, `context.budgets`), matching their explicit `Apply` / `Cancel` model.
+  - **Empty integer fields reset:** In `ScopedSettingRow.commitText()`, when `text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty` on `.integer`, emit `definition.change(to: nil, in: draft.file)` (which resets cleanly instead of failing validation with `""`).
+  - **Human titles in Undo notices:** In `ScopedSettingsModel.apply` and `promote`, look up `catalogue.first(where: { $0.key == key })?.title ?? key` and phrase notices cleanly: `"Saved \(title)"` / `"Reset \(title)"` on `.personalGlobal`, and `"Saved \(title) in \(owner.title)"` / `"Reset \(title) in \(owner.title)"` / `"Moved \(title)"` on scoped files.
 
-Separate calm **personal/app preferences** from **scoped repo/Wave `config.yaml` overrides** (following Rex, T3 Code, Rune, Zed, and Cursor):
+### 4. Concrete target naming, Launch-only filtering, and minor chrome cleanup (`SettingsTargetPicker.swift`, `ScopedSettings.swift`, `SettingsWindow.swift`, `ThemeChooser.swift`)
 
-- **Main sidebar panes are personal/global only** (`~/.lf/config.yaml` + Desktop prefs) — **no `Applies to`**, **no `Save in`**, **no `"Inherited"`**, **no per-row `Source` disclosures**, and **no raw YAML map textareas**:
-  1. **General** — Display name (`user.name`), Autosave Task Files, Repositories folder (`repo_root`), Release channel (`stream`), Log Linear requests (`logs.linear_requests`), plus an **"Open `~/.lf/config.yaml`"** button.
-  2. **Appearance** — Appearance mode (`System` / `Light` / `Dark`), Theme cards (instant-apply + `⌘Z` Undo), Customize (`ThemeEditor` keeps Apply/Cancel).
-  3. **Shortcuts** — Grouped read-only keyboard shortcuts (shared with standalone Keyboard Shortcuts window).
-  4. **Agents** — Personal defaults in `~/.lf/config.yaml`: Primary agent (`agent`), Starting preference (`default_agent`), Fallback order (`agents`), Run without asking (`yolo`), Claude model (`claude.model`), Codex service tier (`codex.service_tier`), Claude Chrome integration (`chrome`), Default Graph (`wave.graph`), Auto-ship new Tasks (`auto`), Automatic retries (`automation.retries`). Every control shows its **actual active or built-in default value** (never `"Inherited"`). Show a quiet `Reset` button only when the setting is explicitly set in `~/.lf/config.yaml`.
-  5. **Machines** — Live **Connection health** (up to 4 concurrent SSH probes, Refresh), **Plan hub** (`hub`), plus **"Open `~/.lf/config.yaml`"** (and collapsed Advanced disclosure if needed) for map keys (`pools`, `ondemands`, `machines`, `connections`, `forward.*`) instead of stacking raw YAML textboxes on the main pane.
-  6. **Mobile** — Tailscale switch + live green sidebar readiness dot + QR pairing + Copy/Share/Refresh.
-- **One dedicated `Project & Wave Config` pane** (at the bottom of the sidebar, separated by a quiet divider) owns scoped repository/Wave/Skill/Graph-step overrides — including **Context** (`context.*`) and **Git & Release** (`land`, `merge_method`, `pr`, `diff_hidden`, `diff_groups`, `release`, `repo.tracker`), plus scoped **Agents** and **Machine placement** (`machine`):
-  - Reuses the existing Rust `config.scope`, `config.preview`, `config.edit`, `config.promote`, `observe::invalidate_path`, Undo, and crash-journal Dismiss infrastructure intact.
-  - Defaults **Applies to** to the active checkout (falling back to the first portfolio checkout or a Choose Checkout prompt when none is open), with **Save in** (`My` vs. `Shared`), **Advanced** Skill/Graph-step targeting, and an **"Open file…"** button for the selected YAML file.
-  - **No `"Inherited"` as a control's displayed value anywhere.** Every picker/toggle displays the **actual effective value** (for example, `Standard (Default)` or `GitHub PR (from Global)` or `Off`), while still preserving absent / `Explicit null` / authored value distinctions in the file writer. Show a subtle override indicator + `Reset` / expandable `In effect` precedence ladder + `Move to…` only where meaningful (when overridden, losing to another layer, or expanded by the person) instead of stacking `"Inherited · …"` disclosures under every unset row.
-  - Keep complex map/inactive keys (`diff_groups`, `release`, `context.budgets`, `isolate`, `summaries`, `summary_tokens`, `portfolio`, `auth_browsers`) out of the primary form under a collapsed **Advanced** section + **"Open file…"** (still searchable).
+- **Why:** Three unrelated disclosures are labeled `Advanced` (Skill/Graph-step targeting in `SettingsTargetPicker`, secondary/inactive catalog keys in `ScopedSettings`, and `~/.lf/config.yaml` path in `ThemeChooser`). Selecting a Skill or Graph step leaves 10 non-Launch settings on screen as unexplained read-only rows, and jumping from Search to a non-Launch key doesn't clear `project.target`.
+- **Swift:**
+  - Rename `SettingsTargetPicker`'s `DisclosureGroup("Advanced")` to `DisclosureGroup("Skill or Graph step")`.
+  - Pass `targeted: model.target != .general` into `SettingsSection.appears(in:wave:targeted:)` and filter section keys and `other` (`Advanced settings`) to `applicability == "launch"` while targeted (hiding empty sections and the Wave-only `Git & Release` redirect). Show one clear note beside `Inspect general work`: `"Showing launch settings for this target. Repository and general settings apply to all work."`
+  - In `SettingsWindow.open(_ match:)`, when opening a `.project` setting with `definition.applicability != "launch"` and `project.target != .general`, reset `project.target = .general`.
+  - In `ThemeChooser`, replace `DisclosureGroup("Advanced")` with a quiet file section showing `Open ~/.lf/config.yaml` (or `Configuration file` path) matching `General` / `Agents` / `Machines`.
+  - In `SettingsWindow`, remove the dead sidebar-toggle toolbar button (`.toolbar(removing: .sidebarToggle)`) so the Settings window doesn't render an empty toolbar strip above the sidebar search box and detail form; in `searchResults`, avoid duplicating identical failure messages when both `personal` and `project` report the same server error.
 
-### 2. Visual polish pass (`1b` + demo feedback)
+### 5. Update docs & tests
 
-- **Quiet dividers instead of sidebar section text headers (`1b`):** Remove the `"App"`, `"Workflow"`, `"Infrastructure"` text headers in the sidebar. Group panes cleanly with native dividers:
-  - `General`, `Appearance`, `Shortcuts`
-  - *(divider)*
-  - `Agents`, `Machines`, `Mobile`
-  - *(divider)*
-  - `Project & Wave Config` (shows subtle override dot when the inspected checkout/Wave file has overrides)
-- **Minimalist monochrome SF Symbols:** Delete the rainbow colored square badges (`pane.badge.color` rounded rects). Use crisp, minimalist monochrome SF Symbols that adapt naturally to sidebar selection and Light/Dark mode.
-- **More rounded sidebar search box:** Replace the 4 pt `CornerRadius.control` search box with a pill/capsule shape (`Capsule()` with subtle fill/border and clean padding) that feels native to macOS Settings.
-- **Hand-named macOS Settings labels:** Give every visible setting a natural macOS Settings title (no raw key-derived `"Repo Root"`, `"Linear Requests"`, `"Codex · Service Tier"`, `"Supported Harnesses"`).
-- **Clean spacing & contrast:** Tighten visual rhythm in Light and Dark modes across window sizes while keeping every explicit measure, font, and color compliant with `DesignDisciplineTests`.
-
-### 3. Keep docs, search, and tests aligned
-
-- Update cross-pane search (`SettingsSearch.swift`) so searching any catalog key routes cleanly to its Policy B home (`General`, `Agents`, `Machines`, `Appearance`, or `Project & Wave Config` for `Context` / `Git & Release` / scoped keys) and highlights the row.
-- Update `docs/surfaces.md`, `swift/README.md`, and `scratch/questions.md` to reflect Policy B (6 personal panes + `Project & Wave Config`, monochrome sidebar with dividers, no `"Inherited"` display values).
-- Update `SettingsWorkflowTests`, `ContextSettingsWorkflowTests`, `DesignDisciplineTests`, and `documented_commands` to cover the new Policy B navigation, real-value default display (no `"Inherited"` on Global pickers), monochrome sidebar/divider layout, and `"Open file…"` actions.
+- Update `docs/surfaces.md` (Settings section) to reflect instant `Reset` on simple controls, **Skill or Graph step** disclosure name, and conditional `In effect` provenance.
+- Update `SettingsWorkflowTests` and `ContextSettingsWorkflowTests` to verify:
+  - Unset `Primary agent` on personal `Agents` shows `Use starting preference (Default)` even when `default_agent: claude` is set in `~/.lf/config.yaml`, and unset `Starting preference` shows `First in fallback order (Default)`.
+  - Clean checkout rows in `Project & Wave Config` do not render `In effect`, while overridden/inherited rows (including losing Shared vs My toggles) do.
+  - Nullable Pickers omit `Explicit null` unless `declared == .present(.null)`, and show human labels (`GitHub PR`, `Standard`, `On`).
+  - Simple-control `Reset` resets immediately with human-titled Undo notice, and clearing `Automatic retries` resets cleanly.
+  - Targeting a Skill hides non-Launch sections and searching a non-Launch key clears `project.target`.
+- Run focused checks:
+  - `cargo test -p loopflow-execution --lib config::` and `cargo test -p loopflow --test integration documented_commands::` + `cargo clippy --all-targets -- -D warnings`
+  - `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|ContextSettingsWorkflowTests|ThemeWorkflowTests|DesignDisciplineTests'`
 
 ## Already built on this branch (keep intact)
 
-- Rust bulk `config.scope` read/subscription (median 16.4 ms, p95 125.6 ms across 47 entries), `observe::invalidate_path` synchronous cache invalidation, `config.preview` / `config.edit` checked YAML writer preserving comments and 3-way absent/`null`/value semantics, `LandMethod` enum, `config.promote` atomic/resumable 2-file move + idempotent `Action::Dismiss`, `machine.status` concurrent SSH probes, and `lf config scope` CLI command.
-- Swift `ScopedSettingsModel`, `SettingsUndo`, `AppearanceStore` instant-apply + Undo + staged `ThemeEditor`, `AutosaveToggle`, shared `KeyboardShortcutsView`, lifted `MobileSetup`, and `MachineConnections`.
-- All Rust tests (`config::` 113, `promotion::` 2, `served_reads`, `documented_commands`, clippy `-D warnings`) and DTO fixtures (`tests/fixtures/dto/`).
+- **Policy B sidebar & window:** 6 personal panes (`General`, `Appearance`, `Shortcuts`, `Agents`, `Machines`, `Mobile`) + 1 `Project & Wave Config` pane, monochrome SF Symbols, 2 unselectable dividers, capsule search bar, independent `personal` / `project` live subscriptions, `Open ~/.lf/config.yaml` and `Open file…`.
+- **Rust backend:** Bulk `config.scope` read/subscription (median 16.4 ms, p95 125.6 ms across 47 entries), `observe::invalidate_path` synchronous cache invalidation + `read_stream::wake_file_readers()`, `config.preview` / `config.edit` checked YAML writer preserving comments and 3-way absent/`null`/value semantics, `LandMethod` enum, `Definition.unset` wire field, `config.promote` atomic/resumable 2-file move + idempotent `Action::Dismiss`, `machine.status` concurrent SSH probes, and `lf config scope` CLI command.
+- **Desktop surfaces:** `ScopedSettingsModel`, `SettingsUndo`, `AppearanceStore` instant-apply + Undo + staged `ThemeEditor`, `AutosaveToggle`, shared `KeyboardShortcutsView`, lifted `MobileSetup`, and `MachineConnections`.

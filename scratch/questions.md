@@ -1,21 +1,22 @@
 # Settings choices made for review
 
 - Use native system chrome and monochrome sidebar symbols. Theme previews keep their actual colors.
-- Apply simple changes immediately with Undo. Keep Apply and Cancel inside the ThemeEditor and YAML disclosures. The earlier chooser previewed every theme change until a single Apply.
-- Separate the three sidebar groups with dividers. Keep the standalone Keyboard Shortcuts window.
+- Apply simple changes and simple-control Resets immediately with checked writes and Undo. Keep Apply, Cancel, and previewed Reset inside the ThemeEditor and raw YAML disclosures.
+- Separate the three sidebar groups with dividers. Keep the standalone Keyboard Shortcuts window. Remove the unused sidebar-toggle toolbar strip in Settings.
 - Promote to the immediate destination listed on the button. Leave an occupied destination to direct editing. This gives Promote one reversible meaning even where combination policies differ.
 - Keep Applies to and Save in independent. Start Project & Wave Config on the active checkout or the first portfolio checkout, with My settings when available. A single combined picker obscures a successful Shared edit when a private declaration still applies.
-- Bind edits to the selected file’s declaration. Show the combined or winning value separately where it differs. A copied effective list can duplicate inherited documents, and a losing toggle must still show what was saved.
+- Bind edits to the selected file’s declaration. Show `In effect` provenance in Project & Wave Config only when this file declares the key or another non-builtin layer participates, and show the selected file path once beside Open file….
 - Confirm Promote with a named move and YAML preview. A move changes ownership or audience and can change the result for the selected work.
-- A search for an agent preference lists its personal default first, then its Project & Wave Config override. Each result opens its own destination.
+- A search for an agent preference lists its personal default first, then its Project & Wave Config override. Each result opens its own destination, clearing Wave or Skill/Graph-step targets when the chosen setting applies more broadly.
 - Edit the tagged tracker and Machine placement as whole YAML declarations. Their Rust codecs interpret the tag and the mutually exclusive placement fields together.
 - Refresh Mobile while Settings is open and remote connections while Machines is visible, 30 seconds after the last check finishes. Each SSH probe keeps its existing 20-second deadline.
 - Return opens the first search result until ↑/↓ selects another. A switch keeps the results open so Undo or a second edit stays within reach.
 - Keep older servers’ theme declarations readable. Desktop uses the checked entries supplied by newer servers for edits and Undo.
 - Edit the plan hub in Machines. Open the global file for Machine maps and forwarding.
-- Hide `Lifecycle::Inactive` keys (`isolate`, `summaries`, `summary_tokens`) and internal Desktop state (`portfolio`) from primary Settings forms; keep authored or advanced catalog entries reachable through a collapsed Advanced section and search.
+- Hide `Lifecycle::Inactive` keys (`isolate`, `summaries`, `summary_tokens`) and internal Desktop state (`portfolio`) from primary Settings forms; keep authored or advanced catalog entries reachable through a collapsed Advanced settings section and search. Name the Skill/Graph-step target disclosure **Skill or Graph step**, and show only Launch-applicable settings while a Skill or Graph step is targeted.
 - Require an explicit **Dismiss pending move** action (`Action::Dismiss`) to clear an interrupted 2-file move journal whose files diverged, keeping both config files intact.
-- Label a saved YAML null **Explicit null**. The resolver skips that layer when selecting an effective value, so a lower declaration can still supply the value.
+- Keep `Authored.present(.null)` in the model so a hand-written YAML `null` is recognized and resettable as **Explicit null**, but show **Explicit null** in a Picker only when the file already declares `null` — never as a menu choice to author a no-op null.
+- Display human labels for enum choices (`GitHub PR` / `Local merge`, `Standard` / `Fast`, `On` / `Off`, `Squash` / `Merge` / `Rebase`) and human setting titles in Undo notices.
 - Search for a file-only global preference to highlight Open ~/.lf/config.yaml. Opening a missing global file creates an empty YAML mapping. The first scoped edit creates its file through the config writer, which also installs the Git exclusion for private preferences.
 - Keep search anchored to the catalog key across destinations. A draft, its Reset preview and its move confirmation belong to the declaration address until the editor closes.
 - Give Log Linear requests the same switch in search and General. List each contributing source when an unset list combines declarations.

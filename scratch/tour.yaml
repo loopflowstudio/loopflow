@@ -1,17 +1,25 @@
-at: c2e606e2d9ece31f2af8a482abd7535d280bc31f
+at: f0ec4544443001e976451205d0d302f3082e76de
 first:
   - path: docs/ops.md
-    why: Modal sizing, quote and return receipt
+    why: Rent, price, update and return a Machine
+  - path: scratch/plan.md
+    why: Built behavior, Linux trials and remaining work
   - path: rust/loopflow-storage/src/rental.rs
-    why: Admission prices the limits and records the sizing mode
-  - path: rust/loopflow-storage/src/sqlite/rentals.rs
-    why: Stored terms distinguish historical costs from ceiling estimates
-  - path: rust/loopflow/src/lf/commands/rental.rs
-    why: Configure, quote and list rentals
+    why: Admission prices the ceiling and records the floor
   - path: rust/loopflow-execution/src/rental/sandbox.py
-    why: Modal receives CPU, memory and time limits
-  - path: rust/loopflow-storage/src/sqlite/rentals_tests.rs
-    why: Historical records and capped admissions
-  - path: python/tests/test_rental_bridge.py
-    why: Check both SDK requests and an expired deadline
+    why: Image tools, SSH environment and Modal limits
+  - path: rust/loopflow/src/lf/commands/rental.rs
+    why: Attach only after the uploaded build serves
+  - path: rust/loopflow/src/lf/commands/install/published.rs
+    why: Find the Linux counterpart and verify its archive
+  - path: rust/loopflow-execution/src/installation/server.rs
+    why: Serialize startup and select the serving executable
+  - path: rust/loopflow-execution/src/installation/server/linux.rs
+    why: Start and replace a detached Linux server
+  - path: rust/loopflow-storage/src/sqlite/processes.rs
+    why: Inspect live owners on the installed schema
+  - path: rust/loopflow/tests/served_reads.rs
+    why: Concurrent connects and restart on an empty Machine
+  - path: rust/loopflow/src/lf/commands/binaries.rs
+    why: Live Graph process across the v0.15.1 upgrade
 hide: []

@@ -8,7 +8,7 @@ struct WaveProjectsView: View {
     let wave: String
     let repo: String
 
-    @State private var projects: WorkEvidence<ProjectPlanningSnapshot>?
+    @State private var project: WorkReading<ProjectPlanningSnapshot?>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
@@ -17,28 +17,26 @@ struct WaveProjectsView: View {
                 Spacer()
                 Button("Done") { dismiss() }.buttonStyle(LoopflowButtonStyle())
             }
-            switch projects {
+            switch project {
             case nil:
                 ProgressView("Reading the Project…")
             case .unavailable(let reason):
                 FailureLine("The Project did not load.", machine: reason)
-            case .available(let entries, _):
-                if let project = entries.first {
-                    ScrollView {
-                        WaveProjectView(project: project, repo: repo)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                } else {
-                    Text("This Wave has no Project yet.").emptyLine()
+            case .available(let project?):
+                ScrollView {
+                    WaveProjectView(project: project, repo: repo)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+            case .available(.none):
+                Text("This Wave has no Project yet.").emptyLine()
             }
         }
         .padding(Spacing.xxl).frame(minWidth: 500, minHeight: 420, alignment: .topLeading)
         .task {
             do {
-                projects = try await RegistryQueryLocal.shared.status(wave: wave, cwd: repo).projects
+                project = try await RegistryQueryLocal.shared.status(wave: wave, cwd: repo).project
             } catch {
-                projects = .unavailable(reason: error.localizedDescription)
+                project = .unavailable(reason: error.localizedDescription)
             }
         }
     }

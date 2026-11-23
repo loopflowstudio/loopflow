@@ -605,56 +605,53 @@
     ],
     "truncated": false
   },
-  "projects": {
+  "project": {
     "state": "ok",
-    "items": [
-      {
-        "id": "proj_0123456789ab40008000000000000001",
-        "url": null,
-        "slug": "release-feedback",
-        "name": "current",
-        "status": "started",
-        "sync": {
-          "actions": [
-            {
-              "id": "create-task",
-              "seq": 1,
-              "owner_kind": "task",
-              "owner_id": "proj_0123456789ab40008000000000000001",
-              "kind": "create",
-              "change": "create",
-              "subject": null,
-              "phase": "queued",
-              "tracker": "linear",
-              "error": null,
-              "local_value": {
-                "title": "Saved offline"
-              },
-              "tracker_value": null
+    "value": {
+      "id": "proj_0123456789ab40008000000000000001",
+      "url": null,
+      "slug": "release-feedback",
+      "name": "current",
+      "status": "started",
+      "sync": {
+        "actions": [
+          {
+            "id": "create-task",
+            "seq": 1,
+            "owner_kind": "task",
+            "owner_id": "proj_0123456789ab40008000000000000001",
+            "kind": "create",
+            "change": "create",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": null,
+            "local_value": {
+              "title": "Saved offline"
             },
-            {
-              "id": "order-project",
-              "seq": 2,
-              "owner_kind": "project",
-              "owner_id": "proj_0123456789ab40008000000000000001",
-              "kind": "order",
-              "change": "order",
-              "subject": null,
-              "phase": "sent",
-              "tracker": "linear",
-              "error": "Reply lost; awaiting readback",
-              "local_value": [
-                "task-b",
-                "task-a"
-              ],
-              "tracker_value": null
-            }
-          ]
-        },
-        "tracker_id": "project-1"
-      }
-    ],
-    "truncated": false
+            "tracker_value": null
+          },
+          {
+            "id": "order-project",
+            "seq": 2,
+            "owner_kind": "project",
+            "owner_id": "proj_0123456789ab40008000000000000001",
+            "kind": "order",
+            "change": "order",
+            "subject": null,
+            "phase": "sent",
+            "tracker": "linear",
+            "error": "Reply lost; awaiting readback",
+            "local_value": [
+              "task-b",
+              "task-a"
+            ],
+            "tracker_value": null
+          }
+        ]
+      },
+      "tracker_id": "project-1"
+    }
   },
   "setup": {
     "graph": {

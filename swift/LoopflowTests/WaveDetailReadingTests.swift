@@ -20,16 +20,16 @@ struct WaveDetailReadingTests {
         #expect(reading.snapshot == nil)
     }
 
-    @Test("an unavailable Project reading replaces cached Projects")
-    func unavailableProjectsReplaceCachedPlan() throws {
-        let cached = WavePlan(objective: "Earlier objective", projects: try planningWave().workMap.projects)
-        #expect(!cached.projects.items.isEmpty)
+    @Test("an unavailable Project reading replaces the cached Project")
+    func unavailableProjectReplacesCachedPlan() throws {
+        let cached = WavePlan(objective: "Earlier objective", project: try planningWave().workMap.project)
+        #expect(cached.project.present != nil)
 
-        let current = try planningWave { $0["projects"] = ["state": "unavailable", "reason": "Provider unavailable"] }
+        let current = try planningWave { $0["project"] = ["state": "unavailable", "reason": "Provider unavailable"] }
         var reading = WaveDetailReading()
         reading.update(current)
 
-        #expect(reading.plan(cached: cached).projects == .unavailable(reason: "Provider unavailable"))
+        #expect(reading.plan(cached: cached).project == .unavailable(reason: "Provider unavailable"))
         #expect(reading.plan(cached: cached).objective == current.workMap.objective)
 
         reading.clear()
@@ -39,18 +39,18 @@ struct WaveDetailReadingTests {
     @Test("the Wave header names its Project and links it once the tracker has a URL")
     @MainActor
     func headerLinksTheProject() throws {
-        let linked = try #require(try planningWave().workMap.projects.items.first)
+        let linked = try #require(try planningWave().workMap.project.present)
         let link = try WaveHeaderProject(project: linked).inspect().find(ViewType.Link.self)
         #expect(try link.url() == URL(string: "https://linear.app/loopflow/project/current-1a2b3c4d5e6f"))
         #expect(try link.labelView().text().string() == "current")
 
         let local = try #require(try planningWave { wave in
-            var projects = wave["projects"] as! [String: Any]
-            var items = projects["items"] as! [[String: Any]]
-            items[0]["url"] = NSNull()
-            projects["items"] = items
-            wave["projects"] = projects
-        }.workMap.projects.items.first)
+            var reading = wave["project"] as! [String: Any]
+            var project = reading["value"] as! [String: Any]
+            project["url"] = NSNull()
+            reading["value"] = project
+            wave["project"] = reading
+        }.workMap.project.present)
         let header = try WaveHeaderProject(project: local).inspect()
         #expect(throws: (any Error).self) { try header.find(ViewType.Link.self) }
         #expect(try header.find(text: "current").string() == "current")

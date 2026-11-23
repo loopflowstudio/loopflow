@@ -1,8 +1,8 @@
 //! `lf wave list`, `lf wave status`, and `lf wave show` — read the wave registry (`store`).
 //!
 //! `lf wave list` lists durable Wave identities, authored goals, Task counts and
-//! Machine placement. `lf wave status [wave]` adds Projects, Task conditions,
-//! metric readings and Session history; it never reads process health or a live
+//! Machine placement. `lf wave status [wave]` adds the Wave's Project, Task
+//! conditions and Session history; it never reads process health or a live
 //! loop. With no argument it resolves the ambient Wave. Reads preserve missing
 //! evidence; `--json` prints the record the server sends.
 //!
@@ -66,7 +66,8 @@ pub struct WaveSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WaveDetailSnapshot {
     pub wave: WaveSnapshot,
-    pub projects: Evidence<ProjectSummary>,
+    /// The Wave's one Project; `None` for a Wave that has made none yet.
+    pub project: Reading<Option<ProjectSummary>>,
     pub tasks: Evidence<RoadmapTask>,
     /// This Wave's Machine-local Session history, newest first.
     pub history: Evidence<SessionHistory>,
@@ -98,6 +99,31 @@ impl<T> Evidence<T> {
     fn from_result(result: Result<(Vec<T>, bool)>) -> Self {
         match result {
             Ok((items, truncated)) => Self::Ok { items, truncated },
+            Err(error) => Self::Unavailable {
+                reason: error.to_string(),
+            },
+        }
+    }
+}
+
+/// One value, or the reason it could not be read: the single-value form of
+/// `Evidence`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum Reading<T> {
+    Ok {
+        value: T,
+    },
+    /// The source could not be read. Never rendered as absence.
+    Unavailable {
+        reason: String,
+    },
+}
+
+impl<T> Reading<T> {
+    fn from_result(result: Result<T>) -> Self {
+        match result {
+            Ok(value) => Self::Ok { value },
             Err(error) => Self::Unavailable {
                 reason: error.to_string(),
             },
@@ -341,7 +367,8 @@ pub struct WaveRoadmap {
     /// The graph the Wave's Tasks take up by default.
     pub graph: Option<String>,
     pub wave: WaveSnapshot,
-    pub projects: Evidence<ProjectSummary>,
+    /// The Wave's one Project; `None` for a Wave that has made none yet.
+    pub project: Reading<Option<ProjectSummary>>,
 }
 
 impl RoadmapSnapshot {
@@ -376,52 +403,55 @@ pub struct ProjectSummary {
     pub url: Option<String>,
 }
 
-async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectSummary> {
+async fn project_planning(store: &SharedStore, wave: &Wave) -> Reading<Option<ProjectSummary>> {
     let result = async {
-        let projects = store.list_projects(Some(wave.id())).await?;
-        let projects = projects
-            .into_iter()
-            .map(|project| -> Result<ProjectSummary> {
-                Ok(ProjectSummary {
-                    sync: store.project_tracker_sync(&project.id)?,
-                    url: store.sqlite.project_url(&project.id)?,
-                    tracker_id: project.tracker_id.map(|id| id.as_str().to_owned()),
-                    id: project.id.to_string(),
-                    slug: project.slug,
-                    name: project.name,
-                    status: project.status,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Ok((projects, false))
+        let id = store.sqlite.wave_project(wave.id())?;
+        let Some(project) = store.get_project(&id).await? else {
+            return Ok(None);
+        };
+        Ok(Some(ProjectSummary {
+            sync: store.project_tracker_sync(&project.id)?,
+            url: store.sqlite.project_url(&project.id)?,
+            tracker_id: project.tracker_id.map(|id| id.as_str().to_owned()),
+            id: project.id.to_string(),
+            slug: project.slug,
+            name: project.name,
+            status: project.status,
+        }))
     }
     .await;
-    Evidence::from_result(result)
+    Reading::from_result(result)
 }
 
-fn print_projects(projects: &Evidence<ProjectSummary>) {
-    match projects {
-        Evidence::Unavailable { reason } => println!("  projects unavailable: {reason}"),
-        Evidence::Ok { items, .. } => {
-            for project in items {
-                let link = if project.tracker_id.is_some() {
-                    "linked"
-                } else {
-                    "local"
-                };
-                println!(
-                    "  Project   {} ({link}) · {}",
-                    project.name,
-                    project.status.as_str()
-                );
-                if let Some(url) = &project.url {
-                    println!("            {url}");
-                }
-                for line in project.sync.lines() {
-                    println!("    {line}");
-                }
-            }
+fn print_project(project: &Reading<Option<ProjectSummary>>) {
+    let project = match project {
+        Reading::Unavailable { reason } => {
+            println!("  project unavailable: {reason}");
+            return;
         }
+        Reading::Ok { value: None } => {
+            println!("  Project   none");
+            return;
+        }
+        Reading::Ok {
+            value: Some(project),
+        } => project,
+    };
+    let link = if project.tracker_id.is_some() {
+        "linked"
+    } else {
+        "local"
+    };
+    println!(
+        "  Project   {} ({link}) · {}",
+        project.name,
+        project.status.as_str()
+    );
+    if let Some(url) = &project.url {
+        println!("            {url}");
+    }
+    for line in project.sync.lines() {
+        println!("    {line}");
     }
 }
 
@@ -636,7 +666,7 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
             ),
         ),
         wave: snapshot,
-        projects: project_planning(store, wave).await,
+        project: project_planning(store, wave).await,
         tasks,
         setup: loopflow_execution::work::wave::setup::read_wave_setup(store, wave, &checkout)
             .await?,
@@ -1661,7 +1691,7 @@ async fn roadmap_snapshot(
         roadmaps.push(WaveRoadmap {
             graph: loopflow_execution::work::wave::config::wave_graph(&checkout, wave.slug())?,
             wave: snapshot,
-            projects: project_planning(store, wave).await,
+            project: project_planning(store, wave).await,
         });
     }
     roadmaps.sort_by(|a, b| a.wave.name.cmp(&b.wave.name));
@@ -2790,7 +2820,7 @@ fn print_status(status: &WaveDetailSnapshot) {
         None => println!("  machine      unplaced"),
     }
     print_setup(&status.setup);
-    print_projects(&status.projects);
+    print_project(&status.project);
     match &status.tasks {
         Evidence::Unavailable { reason } => println!("  tasks unavailable: {reason}"),
         Evidence::Ok { items, .. } => {
@@ -3010,7 +3040,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
     let now = now();
     for wave in &roadmap.waves {
         print_wave_heading(&wave.wave);
-        print_projects(&wave.projects);
+        print_project(&wave.project);
         let tasks = match roadmap.wave_tasks(wave) {
             Evidence::Unavailable { reason } => {
                 println!("  tasks unavailable: {reason}");
@@ -3747,39 +3777,22 @@ mod tests {
         assert!(matches!(before, super::Evidence::Ok { items, .. } if items.len() == 2));
         let removed = store.get_task_by_issue("FIX-1").await.unwrap().unwrap();
         store.sqlite.delete_task(&removed.id).unwrap();
-        for project_id in ["current", "next"] {
-            let mut stale = snapshot.clone();
-            if project_id == "next" {
-                let mut successor = stale.snapshot.projects[0].clone();
-                successor.id = "next".into();
-                successor.slug = "next".into();
-                successor.name = "Next project".into();
-                stale.snapshot.projects[0].status =
-                    loopflow_storage::work::project::ProjectStatus::Completed;
-                stale.snapshot.projects[0].revision = Some("2026-09-30T00:00:01Z".into());
-                stale.snapshot.projects.push(successor);
-                for item in &mut stale.snapshot.items {
-                    item.project_id = Some(project_id.to_string());
-                    item.revision = Some("2026-09-30T00:00:01Z".into());
-                }
-            }
-            store.seed_inventory(stale, None).await.unwrap();
-            let reopened = Arc::new(
-                loopflow_execution::store::open_ephemeral_store(
-                    &loopflow_execution::store::StorageConfig::sqlite(database.clone()),
-                )
-                .await
-                .unwrap(),
-            );
-            let detail = super::wave_tasks(&reopened, &wave, false, &shared)
-                .await
-                .unwrap();
-            let super::Evidence::Ok { items, .. } = detail else {
-                panic!("planning unavailable");
-            };
-            assert_eq!(items.len(), 1);
-            assert_eq!(items[0].task.tracker_id.as_deref(), Some("started"));
-        }
+        store.seed_inventory(snapshot, None).await.unwrap();
+        let reopened = Arc::new(
+            loopflow_execution::store::open_ephemeral_store(
+                &loopflow_execution::store::StorageConfig::sqlite(database.clone()),
+            )
+            .await
+            .unwrap(),
+        );
+        let detail = super::wave_tasks(&reopened, &wave, false, &shared)
+            .await
+            .unwrap();
+        let super::Evidence::Ok { items, .. } = detail else {
+            panic!("planning unavailable");
+        };
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].task.tracker_id.as_deref(), Some("started"));
     }
 
     #[tokio::test]
@@ -3803,8 +3816,7 @@ mod tests {
         // The Wave's own Project, linked to nothing yet.
         assert!(matches!(
             super::project_planning(&store, &wave).await,
-            super::Evidence::Ok { items, truncated: false }
-                if items.len() == 1 && items[0].tracker_id.is_none()
+            super::Reading::Ok { value: Some(project) } if project.tracker_id.is_none()
         ));
         store.seed_inventory(crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(), synced_at: 2,
@@ -3813,12 +3825,15 @@ mod tests {
                 "workflow":"feature", "status":"started", "team_ids":["team"]
             }], "items":[]})).unwrap(),
         }, None).await.unwrap();
-        let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
+        let super::Reading::Ok {
+            value: Some(project),
+        } = super::project_planning(&store, &wave).await
+        else {
             panic!("Project plan unavailable");
         };
-        assert_eq!(items[0].name, "First project");
+        assert_eq!(project.name, "First project");
         assert_eq!(
-            items[0].status,
+            project.status,
             loopflow_storage::work::project::ProjectStatus::Started
         );
         let unreadable = crate::test_linear_input::InventoryFixture {
@@ -3833,24 +3848,22 @@ mod tests {
         store.seed_inventory(unreadable, None).await.unwrap();
         assert!(matches!(
             super::project_planning(&store, &wave).await,
-            super::Evidence::Ok { items, .. } if items.len() == 1
+            super::Reading::Ok { value: Some(_) }
         ));
         // Invalid provider evidence cannot erase the owned plan.
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
             .execute("UPDATE tracker_projects SET team_ids='not-json'", [])
             .unwrap();
-        let super::Evidence::Ok {
-            items,
-            truncated: false,
+        let super::Reading::Ok {
+            value: Some(project),
         } = super::project_planning(&store, &wave).await
         else {
             panic!("saved Project plan unavailable");
         };
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].name, "First project");
+        assert_eq!(project.name, "First project");
         assert_eq!(
-            items[0].status,
+            project.status,
             loopflow_storage::work::project::ProjectStatus::Started
         );
     }

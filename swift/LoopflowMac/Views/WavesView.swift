@@ -508,12 +508,12 @@ struct WavesView: View {
         }
     }
 
-    /// Each Wave's Projects arrive with the roadmap in every planning frame;
+    /// Each Wave's Project arrives with the roadmap in every planning frame;
     /// only the authored objective is read here, from its GOAL.md.
     private func buildWavePlanCache(registryWaves: [Wave]) -> [String: WavePlan] {
-        var projects: [String: WorkEvidence<ProjectPlanningSnapshot>] = [:]
+        var projects: [String: WorkReading<ProjectPlanningSnapshot?>] = [:]
         for roadmap in model.roadmap.value?.waves ?? [] {
-            projects[roadmap.wave.id] = roadmap.projects
+            projects[roadmap.wave.id] = roadmap.project
         }
 
         var plans: [String: WavePlan] = [:]
@@ -522,8 +522,8 @@ struct WavesView: View {
                 repoRoot: URL(fileURLWithPath: wave.repo),
                 waveName: wave.name
             ) ?? ""
-            if let projects = projects[wave.id] {
-                plans[wave.id] = WavePlan(objective: objective, projects: projects)
+            if let project = projects[wave.id] {
+                plans[wave.id] = WavePlan(objective: objective, project: project)
             } else if !objective.isEmpty {
                 plans[wave.id] = WavePlan(objective: objective)
             }

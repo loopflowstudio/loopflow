@@ -2,12 +2,12 @@ import Foundation
 
 public struct WaveWorkMap: Sendable, Hashable {
     public let objective: String
-    public let projects: WorkEvidence<ProjectPlanningSnapshot>
+    public let project: WorkReading<ProjectPlanningSnapshot?>
     public let tasks: WorkEvidence<RoadmapTask>
 
-    public init(objective: String, projects: WorkEvidence<ProjectPlanningSnapshot>, tasks: WorkEvidence<RoadmapTask>) {
+    public init(objective: String, project: WorkReading<ProjectPlanningSnapshot?>, tasks: WorkEvidence<RoadmapTask>) {
         self.objective = objective
-        self.projects = projects
+        self.project = project
         self.tasks = tasks
     }
 }
@@ -489,5 +489,48 @@ public enum WorkEvidence<Item: Decodable & Sendable & Hashable>: Decodable, Send
     public func filter(_ isIncluded: (Item) -> Bool) -> WorkEvidence<Item> {
         guard case let .available(items, truncated) = self else { return self }
         return .available(items: items.filter(isIncluded), truncated: truncated)
+    }
+}
+
+/// One value from `lf wave status`, or the reason there is none. Mirrors Rust
+/// `Reading<T>` (`lf/commands/waves.rs`), the single-value `WorkEvidence`.
+public enum WorkReading<Value: Decodable & Sendable & Hashable>: Decodable, Sendable, Hashable {
+    case available(Value)
+    case unavailable(reason: String)
+
+    enum CodingKeys: String, CodingKey {
+        case state, value, reason
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let state = try container.decode(String.self, forKey: .state)
+        switch state {
+        case "ok":
+            self = .available(try container.decode(Value.self, forKey: .value))
+        case "unavailable":
+            self = .unavailable(reason: try container.decode(String.self, forKey: .reason))
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .state,
+                in: container,
+                debugDescription: "unknown reading state '\(state)'"
+            )
+        }
+    }
+
+    public var unavailableReason: String? {
+        if case let .unavailable(reason) = self { return reason }
+        return nil
+    }
+}
+
+extension WorkReading where Value == ProjectPlanningSnapshot? {
+    /// The Wave's Project when it was read and the Wave has one. Callers that
+    /// render must check `unavailableReason` too, or a failed read looks like
+    /// a Wave without a Project.
+    public var present: ProjectPlanningSnapshot? {
+        if case let .available(project) = self { return project }
+        return nil
     }
 }

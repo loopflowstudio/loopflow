@@ -695,9 +695,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         &["wave", "status", "inbox", "--json"],
     );
     assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 2);
-    let projects = wave["projects"]["items"].as_array().unwrap();
-    assert_eq!(projects.len(), 1);
-    assert_eq!(projects[0]["name"], "inbox");
+    assert_eq!(wave["project"]["value"]["name"], "inbox");
     let goal = repo.path().join(".lf/wave/inbox/GOAL.md");
     let memory = repo.path().join(".lf/wave/inbox/MEMORY.md");
     std::fs::write(&goal, "## Objective\n\nKeep private parser work local.\n").unwrap();
@@ -993,7 +991,7 @@ fn a_wave_is_made_with_one_project_and_every_task_joins_it() {
             home.path(),
             &["wave", "plan", "product", "--json"],
         );
-        assert_eq!(plan["projects"]["items"].as_array().unwrap().len(), 1);
+        assert_eq!(plan["project"]["value"]["name"], "product");
 
         let create = |title: &str| {
             let output = command(
@@ -1182,19 +1180,15 @@ fn project_reads_keep_canonical_identity_after_edits() {
             assert_eq!(retained.base_commit, saved.base_commit);
             assert_eq!(retained.tracker_synced_at, saved.tracker_synced_at);
             {
-                let rows = &status["projects"]["items"];
-                let rows = rows.as_array().unwrap();
-                assert_eq!(rows.len(), 1);
-                for (row, project) in rows.iter().zip(&projects) {
-                    assert_eq!(row["id"], project.id.as_str());
-                    assert_eq!(
-                        row["tracker_id"],
-                        project.tracker_id.as_ref().unwrap().as_str()
-                    );
-                    assert!(row.get("work_id").is_none());
-                    assert!(row["sync"].is_object());
-                }
-                assert_eq!(rows[0]["name"], if edited { "Edited" } else { "first" });
+                let row = &status["project"]["value"];
+                assert_eq!(row["id"], projects[0].id.as_str());
+                assert_eq!(
+                    row["tracker_id"],
+                    projects[0].tracker_id.as_ref().unwrap().as_str()
+                );
+                assert!(row.get("work_id").is_none());
+                assert!(row["sync"].is_object());
+                assert_eq!(row["name"], if edited { "Edited" } else { "first" });
             }
         }
     }

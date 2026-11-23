@@ -272,7 +272,7 @@ struct RoadmapWaveSection: View {
                     .textSelection(.enabled)
             }
 
-            ForEach(roadmap.projects.items) { WaveProjectView(project: $0, repo: roadmap.wave.repo) }
+            if let project = roadmap.project.present { WaveProjectView(project: project, repo: roadmap.wave.repo) }
             switch roadmap.tasks {
             case .unavailable(let reason):
                 FailureLine("Tasks did not load.", machine: reason)

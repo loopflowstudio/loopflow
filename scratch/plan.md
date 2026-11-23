@@ -263,7 +263,7 @@ Compress after slice 4: the Backlog Wave menu's Project sheet shows the Wave's
 one Project; its scroll-to-reference (`sourceReference`, `projectsReference`)
 and truncation line went.
 
-## Slice 5: the wire carries one Project (concept review after slice 4)
+## Slice 5: the wire carries one Project (concept review after slice 4) — built
 
 Chosen for review (`scratch/concept-review.html`, questions 1 and 2): the
 last place the code says a Wave has several Projects is the wire.
@@ -296,6 +296,14 @@ Checks: CLI `dto_fixtures::`, `server::schema::tests::`, `status_tests::`,
 `wave_lifecycle::`, `lf::commands::waves::tests::`; Swift
 `DTOFixtureTests|WaveDetailReadingTests|WorkModelTests|RegistryQueryTests`
 (`scripts/test_desktop.sh`); clippy.
+
+Built (2026-11-23): `Reading<T>` / Swift `WorkReading<Value>` (with
+`present` for the Project) carry `project` on both structs; `print_project`
+prints `Project   none` for a Wave without one. Desktop's planning-failure
+check keeps only the unavailable case. Gone with the list: the Swift
+"ended and started Projects in order" DTO test and the successor half of
+the selected-Task planning test. `MockWaveFixture`'s Project gained the
+`url` key slice 4 made required (it had been decoding as unavailable).
 
 ## Remains
 

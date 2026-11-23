@@ -336,21 +336,17 @@ struct RegistryQueryTests {
       }
     ]
   },
-  "projects": {
+  "project": {
     "state": "ok",
-    "items": [
-      {
-        "id": "project-1",
-        "tracker_id": null,
-        "url": null,
-        "sync": {"actions": []},
-        "slug": "release-feedback",
-        "name": "current",
-        "workflow": "task-design",
-        "status": "started"
-      }
-    ],
-    "truncated": false
+    "value": {
+      "id": "project-1",
+      "tracker_id": null,
+      "url": null,
+      "sync": {"actions": []},
+      "slug": "release-feedback",
+      "name": "current",
+      "status": "started"
+    }
   },
   "tasks": {
     "state": "ok",
@@ -512,7 +508,7 @@ struct RegistryQueryTests {
             "state": "unavailable",
             "reason": "Session history unavailable: disk is gone"
           },
-          "projects": {
+          "project": {
             "state": "unavailable",
             "reason": "Project planning unavailable"
           },

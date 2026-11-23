@@ -1568,7 +1568,7 @@ final class WorkModel {
     /// A saved Project or Task change has not reached its tracker.
     private var planningPending: Bool {
         visibleRoadmaps.contains { roadmap in
-            roadmap.projects.items.contains { $0.sync.actions.contains { $0.phase == .queued } }
+            (roadmap.project.present?.sync.actions.contains { $0.phase == .queued } ?? false)
                 || roadmap.tasks.items.contains { $0.task.sync.actions.contains { $0.phase == .queued } }
         }
     }
@@ -2334,8 +2334,7 @@ final class WorkModel {
             guard !Task.isCancelled else { return }
             let result = try? await query.status(wave: wave.wave.name, cwd: wave.wave.repo)
             guard !Task.isCancelled else { return }
-            guard let entries = result?.projects.items else { continue }
-            if entries.contains(where: { $0.matches(reference: reference) }) {
+            if result?.project.present?.matches(reference: reference) == true {
                 select(.wave(id: wave.wave.id))
                 projectsWave = wave.wave
                 return
@@ -3063,7 +3062,7 @@ final class WorkModel {
     }
 
     func waveForProject(projectId: String) -> WaveRoadmap? {
-        roadmap.value?.waves.first { $0.projects.items.contains { $0.matches(reference: projectId) } }
+        roadmap.value?.waves.first { $0.project.present?.matches(reference: projectId) == true }
     }
 
     /// Current repository inventory only; retained navigation evidence is display-only.
@@ -3323,9 +3322,8 @@ final class WorkModel {
         if case .available(_, true) = snapshot.tasks { return "Task reading is incomplete" }
         for wave in snapshot.waves {
             guard let old = previous?.waves.first(where: { $0.wave.id == wave.wave.id }) else { continue }
-            if case .available = old.projects {
-                if let reason = wave.projects.unavailableReason { return "\(wave.wave.displayName): \(reason)" }
-                if case .available(_, true) = wave.projects { return "\(wave.wave.displayName): Project reading is incomplete" }
+            if case .available = old.project, let reason = wave.project.unavailableReason {
+                return "\(wave.wave.displayName): \(reason)"
             }
             if case .available = old.tasks {
                 if let reason = wave.tasks.unavailableReason { return "\(wave.wave.displayName): \(reason)" }

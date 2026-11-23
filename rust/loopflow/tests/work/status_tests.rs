@@ -406,9 +406,9 @@ fn wave_status_and_roadmap_list_a_started_project_without_tasks() {
     let project = seed_started_project(home.path());
     let status = status_json(home.path(), &["infrastructure"], None);
     let roadmap = roadmap_json(home.path(), "infrastructure");
-    let expected_projects = serde_json::json!({
+    let expected_project = serde_json::json!({
         "state": "ok",
-        "items": [{
+        "value": {
             "id": project.id.as_str(),
             "tracker_id": project.tracker_id.as_ref().unwrap().as_str(),
             "slug": project.slug,
@@ -416,11 +416,10 @@ fn wave_status_and_roadmap_list_a_started_project_without_tasks() {
             "status": "started",
             "sync": {"actions": []},
             "url": null
-        }],
-        "truncated": false
+        }
     });
     for view in [&status, &roadmap_wave(&roadmap, &roadmap["waves"][0])] {
-        assert_eq!(view["projects"], expected_projects);
+        assert_eq!(view["project"], expected_project);
         assert_eq!(view["wave"]["status"], "ready");
         assert_eq!(view["tasks"]["state"], "ok");
         assert_eq!(view["tasks"]["items"], serde_json::json!([]));
@@ -543,18 +542,15 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
         let roadmap = roadmap_json(home.path(), "product");
         let wave = &roadmap_wave(&roadmap, &roadmap["waves"][0]);
         for view in [&status, wave] {
-            assert_eq!(view["projects"]["state"], "ok");
-            assert_eq!(view["projects"]["truncated"], false);
-            let projects = view["projects"]["items"].as_array().unwrap();
-            assert_eq!(projects.len(), 1);
-            let projects: Vec<_> = projects
-                .iter()
-                .filter(|project| project["tracker_id"] == "95159066-9098-4d0b-8903-01459dc7ec14")
-                .collect();
-            assert_eq!(projects.len(), 1);
-            assert_eq!(projects[0]["slug"], "auditability");
-            assert_eq!(projects[0]["status"], "started");
-            assert!(projects[0].get("graph").is_none());
+            assert_eq!(view["project"]["state"], "ok");
+            let project = &view["project"]["value"];
+            assert_eq!(
+                project["tracker_id"],
+                "95159066-9098-4d0b-8903-01459dc7ec14"
+            );
+            assert_eq!(project["slug"], "auditability");
+            assert_eq!(project["status"], "started");
+            assert!(project.get("graph").is_none());
             assert_eq!(view["tasks"]["state"], "ok");
             let tasks = view["tasks"]["items"].as_array().unwrap();
             assert_eq!(tasks.len(), 2);
@@ -565,7 +561,7 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
                 .iter()
                 .any(|task| task["task"]["identifier"] == "W2-127"));
         }
-        assert_eq!(wave["projects"], status["projects"]);
+        assert_eq!(wave["project"], status["project"]);
     }
 }
 
@@ -585,7 +581,7 @@ fn provider_inventory_loss_preserves_saved_planning_in_both_views() {
         let status = status_json(home.path(), &["product"], None);
         let roadmap = roadmap_json(home.path(), "product");
         for view in [&status, &roadmap_wave(&roadmap, &roadmap["waves"][0])] {
-            assert_eq!(view["projects"], before["projects"]);
+            assert_eq!(view["project"], before["project"]);
             assert_eq!(view["tasks"]["state"], "ok");
             let tasks = view["tasks"]["items"].as_array().unwrap();
             assert_eq!(tasks.len(), 2);

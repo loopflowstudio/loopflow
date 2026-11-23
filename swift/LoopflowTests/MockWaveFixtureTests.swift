@@ -37,7 +37,7 @@ struct MockWaveFixtureTests {
 
     @Test("the infrastructure plan keeps its Project when live detail is unavailable")
     func infrastructurePlan() {
-        let project = MockWaveFixture.plans["wave-1"]?.projects.items.first
+        let project = MockWaveFixture.plans["wave-1"]?.project.present
         #expect(project?.slug == "release-feedback")
         #expect(project?.status == .started)
     }

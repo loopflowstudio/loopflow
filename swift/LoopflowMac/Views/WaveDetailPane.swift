@@ -7,7 +7,7 @@ struct WaveDetailReading {
 
     func plan(cached: WavePlan) -> WavePlan {
         guard let snapshot else { return cached }
-        return WavePlan(objective: snapshot.workMap.objective, projects: snapshot.workMap.projects)
+        return WavePlan(objective: snapshot.workMap.objective, project: snapshot.workMap.project)
     }
 
     mutating func update(_ snapshot: WaveRoadmap) {
@@ -35,7 +35,7 @@ struct WaveDetailPane: View {
 
     /// The Wave's one Project, from the live reading once it has arrived.
     private var project: ProjectPlanningSnapshot? {
-        (streamed?.snapshot?.workMap.projects ?? wave.plan?.projects)?.items.first
+        (streamed?.snapshot?.workMap.project ?? wave.plan?.project)?.present
     }
 
     var body: some View {
@@ -217,7 +217,7 @@ private struct WavePlanView: View {
 
     private var projectAndTasks: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            ForEach(displayedPlan.projects.items) { WaveProjectView(project: $0, repo: wave.repo) }
+            if let project = displayedPlan.project.present { WaveProjectView(project: project, repo: wave.repo) }
             if isAwaitingDetail {
                 WorkSectionHeading("Tasks")
                 ProgressView("Loading Tasks…").accessibilityIdentifier("wave-detail-loading")

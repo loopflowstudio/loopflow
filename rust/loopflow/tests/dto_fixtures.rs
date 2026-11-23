@@ -64,13 +64,13 @@ fn wave_detail_preserves_graph_and_machine() {
         snapshot.setup.skill_agents["implement"].source,
         loopflow_execution::config::ConfigSource::Repository
     );
-    let Evidence::Ok {
-        items: projects, ..
-    } = &snapshot.projects
+    let loopflow::lf::commands::waves::Reading::Ok {
+        value: Some(project),
+    } = &snapshot.project
     else {
-        panic!("missing Projects")
+        panic!("missing Project")
     };
-    assert_eq!(projects[0].sync.actions[1].change, "order");
+    assert_eq!(project.sync.actions[1].change, "order");
     let Evidence::Ok { items: tasks, .. } = &snapshot.tasks else {
         panic!("missing Tasks")
     };
@@ -89,19 +89,22 @@ fn wave_detail_preserves_graph_and_machine() {
         Some("pr_33333333333333333333333333333333")
     );
 
-    let loopflow::lf::commands::waves::Evidence::Ok { items, .. } = &snapshot.projects else {
-        panic!("missing Projects")
+    let loopflow::lf::commands::waves::Reading::Ok {
+        value: Some(project),
+    } = &snapshot.project
+    else {
+        panic!("missing Project")
     };
     assert_eq!(
-        items[0].status,
+        project.status,
         loopflow_execution::work::project::ProjectStatus::Started
     );
 
     let encoded = serde_json::to_string(&snapshot).unwrap();
     let decoded: WaveDetailSnapshot = serde_json::from_str(&encoded).unwrap();
     assert_eq!(
-        serde_json::to_value(&decoded.projects).unwrap(),
-        serde_json::to_value(&snapshot.projects).unwrap()
+        serde_json::to_value(&decoded.project).unwrap(),
+        serde_json::to_value(&snapshot.project).unwrap()
     );
 }
 
@@ -113,7 +116,7 @@ fn status_keeps_task_runtime_alongside_project_status() {
     };
     assert_eq!(items[0].runtime.as_ref().unwrap().reason, "ready");
     let encoded = serde_json::from_str::<serde_json::Value>(WAVE_DETAIL).unwrap();
-    assert_eq!(encoded["projects"]["items"][0]["status"], "started");
+    assert_eq!(encoded["project"]["value"]["status"], "started");
 }
 
 #[test]
@@ -140,7 +143,7 @@ fn status_and_roadmap_round_trip_and_keep_workspace_facts() {
         Some("build-server")
     );
     assert!(
-        serde_json::to_value(&roadmap.waves[0].projects).unwrap()["items"][0]
+        serde_json::to_value(&roadmap.waves[0].project).unwrap()["value"]
             .get("graph")
             .is_none()
     );

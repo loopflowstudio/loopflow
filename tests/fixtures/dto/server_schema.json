@@ -2359,52 +2359,6 @@
           "properties": {
             "items": {
               "items": {
-                "$ref": "#/$defs/ProjectSummary"
-              },
-              "type": "array"
-            },
-            "state": {
-              "const": "ok",
-              "type": "string"
-            },
-            "truncated": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "state",
-            "items",
-            "truncated"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "The source could not be read. Never rendered as emptiness.",
-          "properties": {
-            "reason": {
-              "type": "string"
-            },
-            "state": {
-              "const": "unavailable",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state",
-            "reason"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Evidence3": {
-      "description": "A reading, or the reason there is none. \"We looked and found nothing\" and\n\"we could not look\" are different facts, and an audit surface that renders\nthem the same is lying — so the wire says which.",
-      "oneOf": [
-        {
-          "description": "The source answered. `truncated` says a cap hid older items, so a full\npage never reads as \"that was all there was\".",
-          "properties": {
-            "items": {
-              "items": {
                 "$ref": "#/$defs/RoadmapTask"
               },
               "type": "array"
@@ -2443,7 +2397,7 @@
         }
       ]
     },
-    "Evidence4": {
+    "Evidence3": {
       "description": "A reading, or the reason there is none. \"We looked and found nothing\" and\n\"we could not look\" are different facts, and an audit surface that renders\nthem the same is lying — so the wire says which.",
       "oneOf": [
         {
@@ -7365,6 +7319,51 @@
         }
       ]
     },
+    "Reading": {
+      "description": "One value, or the reason it could not be read: the single-value form of\n`Evidence`.",
+      "oneOf": [
+        {
+          "properties": {
+            "state": {
+              "const": "ok",
+              "type": "string"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ProjectSummary"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "state",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The source could not be read. Never rendered as absence.",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "state": {
+              "const": "unavailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Records": {
       "description": "Oldest first; replacement moves a record to the end. No heartbeat or clock.",
       "properties": {
@@ -7781,7 +7780,7 @@
           "type": "string"
         },
         "tasks": {
-          "$ref": "#/$defs/Evidence3",
+          "$ref": "#/$defs/Evidence2",
           "description": "Every Task once; each names its Wave."
         },
         "waves": {
@@ -14694,18 +14693,19 @@
       "description": "`lf wave status <wave>` and `lf wave plan <wave>`: current planning,\nTask conditions and Session history. Wire type; no defaults.",
       "properties": {
         "history": {
-          "$ref": "#/$defs/Evidence4",
+          "$ref": "#/$defs/Evidence3",
           "description": "This Wave's Machine-local Session history, newest first."
         },
-        "projects": {
-          "$ref": "#/$defs/Evidence2"
+        "project": {
+          "$ref": "#/$defs/Reading",
+          "description": "The Wave's one Project; `None` for a Wave that has made none yet."
         },
         "setup": {
           "$ref": "#/$defs/WaveSetup",
           "description": "What the Wave's Tasks run, where, and which logins pay, with each source."
         },
         "tasks": {
-          "$ref": "#/$defs/Evidence3"
+          "$ref": "#/$defs/Evidence2"
         },
         "wave": {
           "$ref": "#/$defs/WaveSnapshot"
@@ -14713,7 +14713,7 @@
       },
       "required": [
         "wave",
-        "projects",
+        "project",
         "tasks",
         "history",
         "setup"
@@ -14894,8 +14894,9 @@
             "null"
           ]
         },
-        "projects": {
-          "$ref": "#/$defs/Evidence2"
+        "project": {
+          "$ref": "#/$defs/Reading",
+          "description": "The Wave's one Project; `None` for a Wave that has made none yet."
         },
         "wave": {
           "$ref": "#/$defs/WaveSnapshot"
@@ -14904,7 +14905,7 @@
       "required": [
         "graph",
         "wave",
-        "projects"
+        "project"
       ],
       "type": "object"
     },

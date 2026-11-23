@@ -632,23 +632,6 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("Wave detail keeps ended and started Projects in the supplied order")
-    func projectOrderAndStatus() throws {
-        var root = try #require(JSONSerialization.jsonObject(with: loadFixtureData("wave_detail.json")) as? [String: Any])
-        var projects = try #require(root["projects"] as? [String: Any])
-        let rows = try #require(projects["items"] as? [[String: Any]])
-        var ended = try #require(rows.first)
-        ended["id"] = "ended-project"
-        ended["status"] = "completed"
-        projects["items"] = [ended] + rows
-        root["projects"] = projects
-
-        let status = try JSONDecoder().decode(WaveDetailSnapshot.self, from: JSONSerialization.data(withJSONObject: root))
-        #expect(status.projects.items.count == 2)
-        #expect(status.projects.items.first?.id == "ended-project")
-        #expect(status.projects.items.map(\.status) == [.completed, .started])
-    }
-
     @Test("Work Activity fixture carries Session records tagged with Work")
     func workActivityFixtureCarriesSessionRecords() throws {
         let data = try loadFixtureData("work_activity_snapshot.json")
@@ -693,7 +676,7 @@ struct DTOFixtureTests {
         // The Machine runtime evidence carries the state and the one contextual action.
 
 
-        #expect(detail.projects.items.first?.sync.actions[1].kind == "order")
+        #expect(detail.project.present?.sync.actions[1].kind == "order")
         #expect(detail.tasks.items.map(\.task.identifier) == ["INF-123", "INF-124"])
         #expect(detail.tasks.items[0].task.state == "unstarted")
         #expect(detail.tasks.items[0].runtime?.provider == nil)

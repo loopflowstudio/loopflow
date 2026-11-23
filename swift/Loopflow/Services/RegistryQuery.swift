@@ -1515,16 +1515,17 @@ public struct WaveRoadmap: Sendable, Hashable {
     /// The graph the Wave's Tasks take up by default.
     public let graph: String?
     public let wave: WaveSnapshot
-    public let projects: WorkEvidence<ProjectPlanningSnapshot>
+    /// The Wave's one Project; nil when the Wave has made none yet.
+    public let project: WorkReading<ProjectPlanningSnapshot?>
     /// This Wave's share of the roadmap's Tasks, which the wire sends once.
     public let tasks: WorkEvidence<RoadmapTask>
 
     public var workMap: WaveWorkMap {
-        WaveWorkMap(objective: wave.goal, projects: projects, tasks: tasks)
+        WaveWorkMap(objective: wave.goal, project: project, tasks: tasks)
     }
 
     enum CodingKeys: String, CodingKey {
-        case wave, projects, graph
+        case wave, project, graph
     }
 
     init(from decoder: Decoder, roadmapTasks: WorkEvidence<RoadmapTask>) throws {
@@ -1532,7 +1533,7 @@ public struct WaveRoadmap: Sendable, Hashable {
         graph = try container.decode(String?.self, forKey: .graph)
         let wave = try container.decode(WaveSnapshot.self, forKey: .wave)
         self.wave = wave
-        projects = try container.decode(WorkEvidence<ProjectPlanningSnapshot>.self, forKey: .projects)
+        project = try container.decode(WorkReading<ProjectPlanningSnapshot?>.self, forKey: .project)
         tasks = roadmapTasks.filter { $0.task.waveId == wave.id }
     }
 }
@@ -1541,16 +1542,17 @@ public struct WaveRoadmap: Sendable, Hashable {
 /// reshaping or dropping fields, so every Wave surface starts from one reading.
 public struct WaveDetailSnapshot: Decodable, Sendable {
     public let wave: WaveSnapshot
-    public let projects: WorkEvidence<ProjectPlanningSnapshot>
+    /// The Wave's one Project; nil when the Wave has made none yet.
+    public let project: WorkReading<ProjectPlanningSnapshot?>
     public let tasks: WorkEvidence<RoadmapTask>
     public let history: WorkEvidence<SessionHistory>
 
     public var workMap: WaveWorkMap {
-        WaveWorkMap(objective: wave.goal, projects: projects, tasks: tasks)
+        WaveWorkMap(objective: wave.goal, project: project, tasks: tasks)
     }
 
     enum CodingKeys: String, CodingKey {
-        case wave, projects, tasks, history
+        case wave, project, tasks, history
     }
 }
 

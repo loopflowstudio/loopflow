@@ -22,22 +22,19 @@
           "label": null
         }
       },
-      "projects": {
+      "project": {
         "state": "ok",
-        "items": [
-          {
-            "id": "proj-project-current",
-            "slug": "loopflow-api",
-            "name": "current",
-            "status": "started",
-            "sync": {
-              "actions": []
-            },
-            "tracker_id": "project-1",
-            "url": "https://linear.app/loopflow/project/current-1a2b3c4d5e6f"
-          }
-        ],
-        "truncated": false
+        "value": {
+          "id": "proj-project-current",
+          "slug": "loopflow-api",
+          "name": "current",
+          "status": "started",
+          "sync": {
+            "actions": []
+          },
+          "tracker_id": "project-1",
+          "url": "https://linear.app/loopflow/project/current-1a2b3c4d5e6f"
+        }
       },
       "graph": "feature"
     },
@@ -62,7 +59,7 @@
           "label": "mini"
         }
       },
-      "projects": {
+      "project": {
         "state": "unavailable",
         "reason": "Project planning unavailable"
       },

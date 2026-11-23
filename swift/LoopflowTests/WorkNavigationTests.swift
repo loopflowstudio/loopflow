@@ -893,7 +893,7 @@ struct WorkNavigationTests {
     }
 
     @Test("Bound Sessions retain ancestry and panes across planning loss and return",
-          arguments: ["absent-task", "no-current-project", "no-waves"])
+          arguments: ["absent-task", "no-project", "no-waves"])
     func boundSessionRetainsAncestry(planning: String) async throws {
         let work = WorkReference.task(id: "issue-review")
         let records = try [session("first", work: work, waveId: "wave-1"),
@@ -902,8 +902,8 @@ struct WorkNavigationTests {
         var snapshot = try #require(JSONSerialization.jsonObject(with: Data(original.utf8)) as? [String: Any])
         var waves = try #require(snapshot["waves"] as? [[String: Any]])
         snapshot["tasks"] = ["state": "ok", "items": [], "truncated": false]
-        if planning == "no-current-project" {
-            waves[0]["projects"] = ["state": "ok", "items": [], "truncated": false]
+        if planning == "no-project" {
+            waves[0]["project"] = ["state": "ok", "value": NSNull()]
         }
         snapshot["waves"] = planning == "no-waves" ? [] : waves
         let missing = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)

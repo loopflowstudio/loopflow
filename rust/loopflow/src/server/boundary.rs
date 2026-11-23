@@ -30,8 +30,8 @@ const PLANNING_REFRESH: Duration = Duration::from_secs(8);
 pub(super) enum After {
     /// A turn ended: the Session's planning, its wake and any pending move.
     TurnEnd(TurnEnd),
-    /// A conversation the server could not reach before named its inbox: wake
-    /// the Session with what was saved while it was closed.
+    /// A new provider process, or one that named a new inbox: wake the
+    /// Session with what was saved while it was closed or unreachable.
     Reachable(String),
 }
 
@@ -96,6 +96,9 @@ pub(super) fn answer(
     let event = callback["hook_event_name"]
         .as_str()
         .unwrap_or("SessionStart");
+    // A reopened conversation is idle until its first turn says otherwise;
+    // recorded before this boundary's own turn reading, which then wins.
+    let first = store.record_first_boundary(adapter)?;
     let yielded = match (moment, event) {
         (BoundaryMoment::Stop, "Stop") => Some(true),
         (BoundaryMoment::Tool, "UserPromptSubmit") => Some(false),
@@ -115,15 +118,14 @@ pub(super) fn answer(
         store.record_recording_gap(&adapter.session, gap.first, gap.last)?;
     }
     let connection = attachment::session_connection(store, &adapter.session)?;
-    // Where the server wakes this conversation once it is idle.
-    // One it could not reach before may hold steers saved while it was closed:
-    // a reopened conversation sits idle until someone types.
-    let reachable = match inbox {
-        Some(inbox) if store.record_agent_inbox(adapter, inbox)? => {
-            Some(After::Reachable(adapter.session.clone()))
-        }
-        _ => None,
+    // Where the server wakes this conversation once it is idle. A new
+    // process, or one it could not reach before, may hold steers saved while
+    // it was closed: the wake runs them as a turn.
+    let addressed = match inbox {
+        Some(inbox) => store.record_agent_inbox(adapter, inbox)?,
+        None => false,
     };
+    let reachable = (first || addressed).then(|| After::Reachable(adapter.session.clone()));
     if *moment == BoundaryMoment::Event {
         loopflow_execution::harness::pi::observe_native(store, adapter, callback)?;
         return Ok((nothing, reachable));
@@ -476,40 +478,25 @@ mod tests {
         assert!(answer(&store, &foreign).is_err());
     }
 
-    #[test]
-    fn a_conversation_that_becomes_reachable_is_checked_for_news_once() {
-        let (_home, store, adapter, delivery) = fixture();
-        // The provider that ran this Session before was stopped mid-turn.
+    /// The provider that ran this Session before was stopped mid-turn.
+    fn stopped_mid_turn(store: &SqliteStore, adapter: &SteerAdapter, delivery: &std::path::Path) {
         let prompt = boundary(
             BoundaryMoment::Tool,
-            &adapter,
-            &delivery,
+            adapter,
+            delivery,
             serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit"}),
         );
-        answer(&store, &prompt).unwrap();
+        answer(store, &prompt).unwrap();
         store
             .conn
             .lock()
             .unwrap()
             .execute("UPDATE session_activity SET agent_process_id='earlier'", [])
             .unwrap();
-        // A reopened work session names its socket before anyone types.
-        let mut listening = boundary(
-            BoundaryMoment::Tool,
-            &adapter,
-            &delivery,
-            serde_json::json!({"session_id":"native","hook_event_name":"OpenCodeMessagesTransform"}),
-        );
-        listening.inbox = Some(loopflow_execution::steer::Inbox::Socket(
-            "/tmp/lf-wake-fixture/s".into(),
-        ));
-        let (_, after) = answer(&store, &listening).unwrap();
-        assert!(
-            matches!(&after, Some(After::Reachable(session)) if session == "session"),
-            "{after:?}"
-        );
-        // It has run no turn, so it is idle: the wake can reach it.
-        let idle: (bool, String) = store
+    }
+
+    fn activity(store: &SqliteStore) -> (bool, String) {
+        store
             .conn
             .lock()
             .unwrap()
@@ -518,33 +505,33 @@ mod tests {
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .unwrap();
-        assert_eq!(idle, (true, adapter.agent_process_id.to_string()));
-        // The same socket again is nothing new.
-        assert!(answer(&store, &listening).unwrap().1.is_none());
+            .unwrap()
     }
 
     #[test]
-    fn a_reopened_work_session_is_idle_after_its_terminal_status_moves_first() {
+    fn a_reopened_conversation_is_idle_at_its_first_boundary_and_woken_once() {
         let (_home, store, adapter, delivery) = fixture();
-        // The provider before it failed its turn, which reports no turn end.
-        let prompt = boundary(
-            BoundaryMoment::Tool,
+        stopped_mid_turn(&store, &adapter, &delivery);
+        // A reopened Codex or Claude conversation starts before anyone types,
+        // naming no inbox.
+        let start = boundary(
+            BoundaryMoment::Start,
             &adapter,
             &delivery,
-            serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit"}),
+            serde_json::json!({"session_id":"native","hook_event_name":"SessionStart","source":"resume"}),
         );
-        answer(&store, &prompt).unwrap();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute("UPDATE session_activity SET agent_process_id='earlier'", [])
-            .unwrap();
-        // The held terminal's status stream reaches the new provider first.
-        assert!(store
-            .begin_program_status("session", Some(&adapter.agent_process_id), "held:terminal")
-            .unwrap());
+        let (_, after) = answer(&store, &start).unwrap();
+        assert!(
+            matches!(&after, Some(After::Reachable(session)) if session == "session"),
+            "{after:?}"
+        );
+        assert_eq!(
+            activity(&store),
+            (true, adapter.agent_process_id.to_string())
+        );
+        // Its next boundary is not its first.
+        assert!(answer(&store, &start).unwrap().1.is_none());
+        // An inbox named late is new: the wake runs again, and claims nothing twice.
         let mut listening = boundary(
             BoundaryMoment::Tool,
             &adapter,
@@ -554,9 +541,65 @@ mod tests {
         listening.inbox = Some(loopflow_execution::steer::Inbox::Socket(
             "/tmp/lf-wake-fixture/s".into(),
         ));
-        answer(&store, &listening).unwrap();
-        let idle = store.idle_conversation_candidates(Some("session")).unwrap();
-        assert_eq!(idle.len(), 1, "a reopened work session the wake cannot see");
+        assert!(matches!(
+            answer(&store, &listening).unwrap().1,
+            Some(After::Reachable(_))
+        ));
+        // The same socket again is nothing new.
+        assert!(answer(&store, &listening).unwrap().1.is_none());
+        assert_eq!(
+            store
+                .idle_conversation_candidates(Some("session"))
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_first_boundary_that_is_a_prompt_leaves_the_conversation_working() {
+        let (_home, store, adapter, delivery) = fixture();
+        stopped_mid_turn(&store, &adapter, &delivery);
+        let mut prompt = boundary(
+            BoundaryMoment::Tool,
+            &adapter,
+            &delivery,
+            serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit"}),
+        );
+        prompt.inbox = Some(loopflow_execution::steer::Inbox::Socket(
+            "/tmp/lf-wake-fixture/s".into(),
+        ));
+        answer(&store, &prompt).unwrap();
+        assert_eq!(
+            activity(&store),
+            (false, adapter.agent_process_id.to_string())
+        );
+        assert!(store
+            .idle_conversation_candidates(Some("session"))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn a_reopened_work_session_is_idle_after_its_terminal_status_moves_first() {
+        let (_home, store, adapter, delivery) = fixture();
+        // The provider before it failed its turn, which reports no turn end.
+        stopped_mid_turn(&store, &adapter, &delivery);
+        // The held terminal's status stream reaches the new provider first.
+        assert!(store
+            .begin_program_status("session", Some(&adapter.agent_process_id), "held:terminal")
+            .unwrap());
+        let start = boundary(
+            BoundaryMoment::Start,
+            &adapter,
+            &delivery,
+            serde_json::json!({"session_id":"native","hook_event_name":"SessionStart","source":"resume"}),
+        );
+        assert!(answer(&store, &start).unwrap().1.is_some());
+        assert_eq!(
+            activity(&store),
+            (true, adapter.agent_process_id.to_string())
+        );
     }
 
     #[test]
@@ -855,6 +898,8 @@ mod tests {
             .unwrap()
             .busy_timeout(std::time::Duration::from_millis(50))
             .unwrap();
+        // A process's first boundary writes; this one is not its first.
+        assert!(store.record_first_boundary(&adapter).unwrap());
         let writer = rusqlite::Connection::open(home.path().join("store.db")).unwrap();
         writer.execute_batch("BEGIN IMMEDIATE").unwrap();
         let tool = boundary(

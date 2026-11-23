@@ -100,8 +100,9 @@ tagged device) with MagicDNS and HTTPS certificates enabled on the tailnet.
 `lf server` talks directly to Tailscale's LocalAPI without launching the
 `tailscale` app or CLI. It discovers the macOS App Store app, Standalone macOS
 Tailscale, or `tailscaled` over its Unix socket (`/var/run/tailscaled.socket` on
-macOS, `/var/run/tailscale/tailscaled.sock` on Linux, or `TS_SOCKET` when set in
-the server's environment).
+macOS and `/var/run/tailscale/tailscaled.sock` on Linux). Set `TS_SOCKET` in
+both the setup command and the server's environment to select a particular
+daemon socket.
 
 If Tailscale stops, signs out, or changes owner, the server closes active phone
 connections and marks mobile access unavailable while local Sessions keep

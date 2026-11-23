@@ -127,7 +127,7 @@ and its directory are private; remote proxies must never forward this endpoint.
 The remote carrier (`remote.rs`, `lf server mobile`) speaks the same protocol
 over WebSocket on the host's Tailscale address: one text frame per message on
 `/v1/machine`, ticketed connections on `/v1/ticket`, binary frames for terminal
-bytes. `mobile.rs` talks directly to Tailscale's LocalAPI over HTTP with zero
+bytes. `mobile/tailscale.rs` talks directly to Tailscale's LocalAPI over HTTP with zero
 subprocesses: same-UID `IPNExtension` open vnode proof files via `libproc` on
 macOS App Store builds, `/Library/Tailscale/ipnport` and its proof file on macOS
 Standalone, and `tailscaled` Unix sockets (`TS_SOCKET`,

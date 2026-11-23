@@ -1,20 +1,17 @@
 //! Installed Tailscale owns identity, routing and certificate issuance.
 //! The Machine exposes HTTPS only on its tailnet addresses.
 use std::fs;
-use std::net::{IpAddr, SocketAddr};
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::Arc;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use super::wire::{Operation, ServerOperation};
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use loopflow_execution::machine::client::Connection;
-use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 use serde_json::Value;
-use tokio_rustls::{rustls, TlsAcceptor};
+mod tailscale;
+pub(super) use tailscale::Tailscale;
 
 pub use loopflow_execution::machine::mobile::{Configuration, Status, TailscaleIdentity};
 
@@ -106,8 +103,11 @@ fn configure(configuration: Option<Configuration>) -> Result<Option<Configuratio
 
 pub fn enable() -> Result<Configuration> {
     let _lock = lock()?;
-    let host = Host::discover()?;
-    let owner = host.identity()?.0;
+    let (_, host) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(Tailscale::discover())?;
+    let owner = host.owner;
     let value = loopflow_execution::config::files::read(&configuration_path())?;
     // Explicit setup replaces obsolete mobile settings; file read/parse errors
     // still surface instead of discarding an unreadable document.
@@ -140,10 +140,12 @@ pub(super) fn save_disabled() -> Result<Option<Configuration>> {
 }
 
 pub fn disable() -> Result<()> {
-    let _lock = lock()?;
+    // A live manager serializes setup and can cancel certificate issuance
+    // even while the setup CLI holds the lock for offline/startup coordination.
     match configure(None) {
         Ok(_) => Ok(()),
         Err(error) if service_is_stopped(&error) => {
+            let _lock = lock()?;
             save_disabled()?;
             // Startup binds the local socket before reading saved approval.
             // If it raced our first probe, stop that live snapshot too. A later
@@ -158,155 +160,7 @@ pub fn disable() -> Result<()> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(super) struct Host {
-    binary: PathBuf,
-    pub dns: String,
-}
-
-impl Host {
-    pub(super) fn discover() -> Result<Self> {
-        let mut candidates = Vec::new();
-        if let Some(binary) = loopflow_execution::os_process::which_on_path(Path::new("tailscale"))
-        {
-            candidates.push(binary);
-        }
-        #[cfg(target_os = "macos")]
-        for directory in [
-            PathBuf::from("/Applications"),
-            loopflow_execution::installation::account_home()?.join("Applications"),
-        ] {
-            let Ok(entries) = fs::read_dir(directory) else {
-                continue;
-            };
-            let mut bundles: Vec<_> = entries
-                .flatten()
-                .map(|entry| entry.path())
-                .filter(|path| {
-                    path.file_name()
-                        .and_then(|name| name.to_str())
-                        .is_some_and(|name| name.starts_with("Tailscale") && name.ends_with(".app"))
-                })
-                .collect();
-            bundles.sort();
-            for bundle in bundles {
-                for executable in ["Tailscale", "tailscale"] {
-                    let binary = bundle.join("Contents/MacOS").join(executable);
-                    if binary.is_file() {
-                        candidates.push(binary);
-                    }
-                }
-            }
-        }
-        let mut installed = false;
-        for binary in candidates {
-            let probe = Self {
-                binary,
-                dns: String::new(),
-            };
-            let Ok(status) = probe.json(&["status", "--json"]) else {
-                continue;
-            };
-            installed = true;
-            if status["BackendState"] != "Running" {
-                continue;
-            }
-            let dns = status["Self"]["DNSName"]
-                .as_str()
-                .unwrap_or("")
-                .trim_end_matches('.');
-            anyhow::ensure!(
-                !dns.is_empty() && dns.ends_with(".ts.net"),
-                "Enable Tailscale MagicDNS and HTTPS for this Machine"
-            );
-            return Ok(Self {
-                binary: probe.binary,
-                dns: dns.into(),
-            });
-        }
-        anyhow::bail!(if installed {
-            "Open Tailscale and sign in on this Machine, then try again"
-        } else {
-            "Install and open Tailscale on this Machine, then try again"
-        })
-    }
-
-    pub(super) fn identity(&self) -> Result<(TailscaleIdentity, Vec<IpAddr>)> {
-        let status = self.json(&["status", "--json"])?;
-        let owner = owner_from_status(&status)?;
-        let ips = status["Self"]["TailscaleIPs"]
-            .as_array()
-            .context("Tailscale has no addresses")?
-            .iter()
-            .map(|ip| {
-                ip.as_str()
-                    .context("Invalid Tailscale address")?
-                    .parse()
-                    .context("Invalid Tailscale address")
-            })
-            .collect::<Result<Vec<IpAddr>>>()?;
-        anyhow::ensure!(!ips.is_empty(), "Tailscale has no addresses");
-        anyhow::ensure!(
-            status["Self"]["DNSName"]
-                .as_str()
-                .map(|s| s.trim_end_matches('.'))
-                == Some(&self.dns),
-            "Tailscale address changed. Choose Set up again, then scan the new QR code."
-        );
-        Ok((owner, ips))
-    }
-
-    /// The peer's admission when it is the owner's other device; tickets bind to it.
-    pub(super) fn permits(
-        &self,
-        peer: SocketAddr,
-        owner: &TailscaleIdentity,
-    ) -> Result<Option<super::ticket::Admission>> {
-        let who = self.json(&["whois", "--json", "--proto=tcp", &peer.to_string()])?;
-        Ok(permits_peer(&who, owner, same_device_path().exists()))
-    }
-
-    pub(super) fn certificate(&self) -> Result<TlsAcceptor> {
-        // The sandboxed macOS CLI cannot write arbitrary paths. Keep the key only
-        // in memory; never put it in an argument, config, error or log.
-        let pem = self.run(&[
-            "cert",
-            "--min-validity=24h",
-            "--cert-file=-",
-            "--key-file=-",
-            &self.dns,
-        ])?;
-        let certificates = CertificateDer::pem_slice_iter(&pem)
-            .collect::<Result<Vec<_>, _>>()
-            .context("Tailscale returned an invalid certificate")?;
-        let key = PrivateKeyDer::from_pem_slice(&pem)
-            .context("Tailscale returned an invalid certificate key")?;
-        let config = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certificates, key)
-            .context("Tailscale certificate does not match its key")?;
-        Ok(TlsAcceptor::from(Arc::new(config)))
-    }
-
-    fn run(&self, args: &[&str]) -> Result<Vec<u8>> {
-        let output = loopflow_execution::os_process::bounded_output(
-            // The macOS app otherwise chooses GUI mode under launchd.
-            Command::new(&self.binary)
-                .env("TAILSCALE_BE_CLI", "1")
-                .args(args),
-            Duration::from_secs(15),
-        )
-        .context("Tailscale did not respond; open it and check its connection")?;
-        anyhow::ensure!(output.status.success(), "Tailscale could not complete setup. Check that it is signed in and HTTPS certificates are enabled for this tailnet");
-        Ok(output.stdout)
-    }
-
-    fn json(&self, args: &[&str]) -> Result<Value> {
-        serde_json::from_slice(&self.run(args)?).context("Tailscale returned an unsupported status")
-    }
-}
-
-fn owner_from_status(status: &Value) -> Result<TailscaleIdentity> {
+fn owner_from_status(status: &Value, full: bool) -> Result<TailscaleIdentity> {
     anyhow::ensure!(
         status["BackendState"] == "Running",
         "Sign in to Tailscale on this Machine"
@@ -321,9 +175,10 @@ fn owner_from_status(status: &Value) -> Result<TailscaleIdentity> {
         .filter(|id| *id != 0)
         .context("Tailscale did not identify this Machine's owner")?;
     anyhow::ensure!(
-        status["User"][user.to_string()]["LoginName"]
-            .as_str()
-            .is_some_and(|s| !s.is_empty()),
+        (!full && status["User"].is_null())
+            || status["User"][user.to_string()]["LoginName"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty()),
         "Tailscale did not identify this Machine's owner"
     );
     Ok(TailscaleIdentity {
@@ -365,36 +220,19 @@ fn permits_peer(
 }
 
 #[cfg(test)]
+#[allow(dead_code)] // The transport binary also drives certificate, peer and request controls.
+#[path = "../../tests/support/tailscale.rs"]
+mod localapi_fixture;
+
+#[cfg(test)]
 mod tests {
     use super::{owner_from_status, permits_peer, Configuration};
     use serde_json::json;
 
     #[test]
-    fn app_executable_answers_status_without_a_terminal() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = tempfile::tempdir().unwrap();
-        let binary = directory.path().join("Tailscale");
-        std::fs::write(
-            &binary,
-            "#!/bin/sh\nif [ \"$TAILSCALE_BE_CLI\" = 1 ]; then\n  printf '%s' '{\"BackendState\":\"Running\"}'\nelse\n  printf '%s' 'The Tailscale GUI failed to start'\nfi\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let host = super::Host {
-            binary,
-            dns: "host.example.ts.net".into(),
-        };
-        assert_eq!(
-            host.json(&["status", "--json"]).unwrap()["BackendState"],
-            "Running"
-        );
-    }
-
-    #[test]
     fn admission_requires_a_different_user_owned_device_of_the_saved_owner() {
         let mut status = json!({"BackendState":"Running", "Self":{"ID":"host", "UserID":1}, "User":{"1":{"LoginName":"owner@example.com"}}});
-        let owner = owner_from_status(&status).unwrap();
+        let owner = owner_from_status(&status, true).unwrap();
         let mut who = json!({"Node":{"StableID":"phone", "User":1}, "UserProfile":{"ID":1}});
         assert!(permits_peer(&who, &owner, false).is_some());
         who["Node"]["StableID"] = json!("host");
@@ -408,13 +246,13 @@ mod tests {
         assert!(permits_peer(&who, &owner, false).is_none());
         assert!(permits_peer(&json!({}), &owner, false).is_none());
         status["Self"]["Tags"] = json!(["tag:server"]);
-        assert!(owner_from_status(&status).is_err());
+        assert!(owner_from_status(&status, true).is_err());
         status["Self"]["Tags"] = json!([]);
         status["BackendState"] = json!("NeedsLogin");
-        assert!(owner_from_status(&status).is_err());
+        assert!(owner_from_status(&status, true).is_err());
         status["BackendState"] = json!("Running");
         status["Self"]["UserID"] = json!(2);
-        assert!(owner_from_status(&status).is_err());
+        assert!(owner_from_status(&status, true).is_err());
     }
 
     #[test]
@@ -440,17 +278,28 @@ mod tests {
     /// A private `LF_HOME` holding unrelated preferences beside mobile setup.
     struct Home {
         dir: tempfile::TempDir,
-        guards: Vec<EnvVarGuard>,
+        _home: EnvVarGuard,
+        _socket: EnvVarGuard,
+        daemon: Option<super::localapi_fixture::Daemon>,
     }
 
     const PREFERENCES: &str = "agent: claude\n";
 
     impl Home {
         fn new() -> Self {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = tempfile::tempdir_in("/tmp").unwrap();
             std::fs::write(dir.path().join("config.yaml"), PREFERENCES).unwrap();
-            let guards = vec![EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap())];
-            Self { dir, guards }
+            let _home = EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap());
+            let _socket = EnvVarGuard::set(
+                "TS_SOCKET",
+                dir.path().join("tailscaled.sock").to_str().unwrap(),
+            );
+            Self {
+                dir,
+                _home,
+                _socket,
+                daemon: None,
+            }
         }
 
         fn saved(&self) -> PathBuf {
@@ -461,46 +310,19 @@ mod tests {
             serde_yaml_ng::from_str(&std::fs::read_to_string(self.saved()).unwrap()).unwrap()
         }
 
-        fn status_file(&self) -> PathBuf {
-            self.dir.path().join("tailscale-status.json")
-        }
-
-        /// Put a stand-in `tailscale` first on PATH: this Machine is node1 of
-        /// user 1 at fixture.tail.ts.net on 127.0.0.1.
         fn tailscale(&mut self) {
-            use std::os::unix::fs::PermissionsExt;
-            let bin = self.dir.path().join("bin");
-            std::fs::create_dir_all(&bin).unwrap();
             let certificate =
                 rcgen::generate_simple_self_signed(vec!["fixture.tail.ts.net".into()]).unwrap();
-            let pem = self.dir.path().join("certificate.pem");
-            std::fs::write(
-                &pem,
-                format!(
-                    "{}{}",
-                    certificate.cert.pem(),
-                    certificate.signing_key.serialize_pem()
-                ),
-            )
-            .unwrap();
-            std::fs::write(self.status_file(), status(1).to_string()).unwrap();
-            let cli = bin.join("tailscale");
-            std::fs::write(
-                &cli,
-                format!(
-                    "#!/bin/sh\ncase \"$1\" in\nstatus) cat '{}' ;;\ncert) cat '{}' ;;\n*) exit 1 ;;\nesac\n",
-                    self.status_file().display(),
-                    pem.display()
-                ),
-            )
-            .unwrap();
-            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
-            let path = format!(
-                "{}:{}",
-                bin.display(),
-                std::env::var("PATH").unwrap_or_default()
+            let pem = format!(
+                "{}{}",
+                certificate.signing_key.serialize_pem(),
+                certificate.cert.pem()
             );
-            self.guards.push(EnvVarGuard::set("PATH", &path));
+            self.daemon = Some(super::localapi_fixture::Daemon::start(
+                self.dir.path(),
+                &status(1),
+                pem,
+            ));
         }
     }
 
@@ -661,8 +483,7 @@ mod tests {
             let repaired = manager.configure(Some(saved.clone())).unwrap();
             assert_ne!(port(&repaired), port(&saved));
             assert_eq!(repaired.owner, saved.owner);
-            // Check ownership without opening a connection: that would launch
-            // a concurrent Tailscale WhoIs subprocess during shutdown.
+            // The repaired address is already listening when setup answers.
             assert_eq!(
                 std::net::TcpListener::bind(("127.0.0.1", port(&repaired)))
                     .unwrap_err()
@@ -700,7 +521,7 @@ mod tests {
             home.tailscale();
             let saved = approval(0);
             save(&saved).unwrap();
-            std::fs::write(home.status_file(), status(2).to_string()).unwrap();
+            home.daemon.as_ref().unwrap().status.send_replace(status(2));
             let manager = Manager::start();
             let restored = manager.restored();
             assert!(!restored.ready);

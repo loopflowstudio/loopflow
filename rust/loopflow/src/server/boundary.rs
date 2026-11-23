@@ -15,8 +15,6 @@ use loopflow_execution::steer::NativeBoundary;
 use loopflow_execution::store::SharedStore;
 use loopflow_storage::sqlite::SqliteStore;
 
-/// How long a hook waits for the server before its turn goes on without it.
-pub(crate) const HOOK_DEADLINE: Duration = Duration::from_secs(2);
 /// How long a pending Session move waits after its Stop is answered: the hook
 /// prints and exits, then the provider ends its turn.
 const MOVE_AFTER_STOP: Duration = Duration::from_secs(2);

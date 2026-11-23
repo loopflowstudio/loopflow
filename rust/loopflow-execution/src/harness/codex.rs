@@ -1211,14 +1211,18 @@ async fn open_native(launch: &super::Launch<'_>) -> Result<OpenedCodex> {
         .unwrap_or_else(|| "Loopflow".to_string());
     let thread = codex_connection::open_thread(&endpoint, params, &title).await?;
     store.record_session_connection(session, attachment, &endpoint.to_string_lossy(), &thread)?;
+    let opening = turns == 0 && !launch.config.task_prompt.is_empty();
     if let Some(context) = &launch.config.conversation_context {
         // Hooks run on the app-server, which never inherits the terminal's
         // launch file. Bind before the client can send a turn.
         let mut context = context.clone();
         context.identify(store, session)?;
         context.bind_codex_session(thread.as_str())?;
+        let adapter = store.reserve_steer_adapter(session, attachment)?;
+        let delivery = crate::context_block::native_delivery_path(&context.home, thread.as_str());
+        report_first_boundary(adapter, delivery, &thread, opening);
     }
-    if turns == 0 && !launch.config.task_prompt.is_empty() {
+    if opening {
         // Provider history settles on the next read whether it ran, so a
         // broken store cannot stop the turn.
         codex_connection::start_turn(
@@ -1233,6 +1237,51 @@ async fn open_native(launch: &super::Launch<'_>) -> Result<OpenedCodex> {
         .context("Codex first turn was not sent")?;
     }
     Ok(OpenedCodex { thread, endpoint })
+}
+
+/// Codex runs its start hook only inside a turn, so a reopened conversation
+/// would report nothing until someone types. The launch reports the process's
+/// first boundary itself: a start, which lets the server wake the idle
+/// conversation with steers saved while it was closed, or the opening prompt,
+/// sent before its turn so the wake leaves a working conversation alone. A
+/// server that does not answer is a recording gap: the steers wait for the
+/// first typed turn.
+fn report_first_boundary(
+    adapter: crate::steer::SteerAdapter,
+    delivery: std::path::PathBuf,
+    thread: &AgentSessionId,
+    opening: bool,
+) {
+    use crate::machine::wire::{BoundaryMoment, ServerOperation, SessionBoundary};
+    let (moment, callback) = match opening {
+        true => (
+            BoundaryMoment::Tool,
+            json!({"hook_event_name":"UserPromptSubmit","session_id":thread.as_str()}),
+        ),
+        false => (
+            BoundaryMoment::Start,
+            json!({"hook_event_name":"SessionStart","session_id":thread.as_str(),"source":"resume"}),
+        ),
+    };
+    let operation = ServerOperation::SessionBoundary(SessionBoundary {
+        moment,
+        delivery,
+        adapter: Some(adapter),
+        callback,
+        gap: None,
+        printed: Vec::new(),
+        inbox: None,
+    });
+    let answered = crate::machine::socket_path().and_then(|socket| {
+        crate::machine::client::hook_request(
+            &socket,
+            operation,
+            crate::machine::client::HOOK_DEADLINE,
+        )
+    });
+    if let Err(error) = answered {
+        tracing::warn!(error = %format!("{error:#}"), "Codex's first boundary unrecorded; waiting steers wait for its first turn");
+    }
 }
 
 #[cfg(test)]

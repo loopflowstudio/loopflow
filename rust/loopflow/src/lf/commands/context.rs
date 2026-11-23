@@ -493,7 +493,7 @@ fn ask_server(
         loopflow_execution::machine::client::hook_request(
             &socket,
             operation,
-            crate::server::boundary::HOOK_DEADLINE,
+            loopflow_execution::machine::client::HOOK_DEADLINE,
         )
     });
     match answered {

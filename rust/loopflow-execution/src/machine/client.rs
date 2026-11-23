@@ -455,6 +455,9 @@ fn identity(kind: &str, name: &str) -> ClientIdentity {
     }
 }
 
+/// How long a hook waits for the server before its turn goes on without it.
+pub const HOOK_DEADLINE: Duration = Duration::from_secs(2);
+
 /// A provider hook's one request: connecting, `hello` and the answer share
 /// `within`, so a stopped, restarting or slow server costs the turn at most that.
 pub fn hook_request(

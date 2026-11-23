@@ -22,3 +22,6 @@
 - Ship-review pass 1 chose to keep the installed default and the existing
   incremental test profile. LOO-1070 tracks the memory comparison with a
   controlled private cache. The first-build locking gap returns to implement.
+
+- Compress reused the six recorded samples to check report equivalence. A
+  disposable Cargo repository exercised both probe arms and hard-link accounting.

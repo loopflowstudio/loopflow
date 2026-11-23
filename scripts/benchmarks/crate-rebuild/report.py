@@ -20,6 +20,17 @@ LABELS = {
 }
 
 
+REPORT_STYLE = """<style>
+body {font:16px/1.5 system-ui,sans-serif;max-width:1050px;margin:48px auto;
+padding:0 24px;color:#20252b}
+h1 {font-size:32px;letter-spacing:-.03em} h2 {margin-top:40px;font-size:22px}
+code,td {font-variant-numeric:tabular-nums} code {font-size:.9em}
+table {width:100%;border-collapse:collapse;margin:16px 0 28px}
+th,td {padding:10px;border-bottom:1px solid #ddd;text-align:left}
+thead {background:#f4f5f6} small {color:#626970;white-space:nowrap} a {color:#145b90}
+</style>"""
+
+
 def _table(summary: list[dict], metric: str, scale: float = 1) -> str:
     rows = []
     for case in CASES:
@@ -267,7 +278,7 @@ build.</p>
 
 
 def _seed_probe(source: Path, output: Path) -> None:
-    from seed_probe import ARMS, COMMANDS, validate
+    from seed_probe import ARMS, validate
 
     config = json.loads((source / "configuration.json").read_text())
     receipts = json.loads((source / "receipts.json").read_text())
@@ -279,46 +290,37 @@ def _seed_probe(source: Path, output: Path) -> None:
         "total": "Through the passing test",
     }
 
-    def value(receipt: dict, step: str, metric: str) -> float | None:
-        if step == "total":
-            if metric in ("compiled", "fresh"):
-                return None  # The test counts the build's units again as Fresh.
-            if metric in ("rss_bytes", "tree_rss_bytes"):
-                return max(receipt[s][metric] for s in COMMANDS)
-            parts = [receipt[s].get(metric) for s in ("add", *COMMANDS)]
-            return sum(p for p in parts if p is not None) if parts[1] is not None else None
-        return receipt[step].get(metric)
-
-    def spread(values: list[float], scale: float, digits: int) -> dict:
-        return {
-            "median": statistics.median(values) / scale,
-            "min": min(values) / scale,
-            "max": max(values) / scale,
-            "digits": digits,
+    # Each build and test counts units separately. Only costs have a total.
+    samples = {arm: [] for arm in ARMS}
+    for receipt in receipts:
+        add, build, test = (receipt[step] for step in ("add", "build", "test"))
+        total = {
+            "wall_seconds": add["wall_seconds"] + build["wall_seconds"] + test["wall_seconds"],
+            "cpu_seconds": build["cpu_seconds"] + test["cpu_seconds"],
+            "written_bytes": build["written_bytes"] + test["written_bytes"],
+            "rss_bytes": max(build["rss_bytes"], test["rss_bytes"]),
+            "tree_rss_bytes": max(build["tree_rss_bytes"], test["tree_rss_bytes"]),
         }
+        samples[receipt["arm"]].append({**receipt, "total": total})
 
     def table(metric: str, scale: float = 1, digits: int = 1) -> str:
         rows = []
         for step, label in steps.items():
-            cells = {}
-            for arm in ARMS:
-                values = [value(r, step, metric) for r in receipts if r["arm"] == arm]
-                if None not in values:
-                    cells[arm] = spread(values, scale, digits)
-            if not cells:
+            if metric not in samples["seeded"][0][step]:
                 continue
-            html_cells = "".join(
-                f"<td>{c['median']:.{digits}f} <small>[{c['min']:.{digits}f}–"
-                f"{c['max']:.{digits}f}]</small></td>"
-                for c in (cells[arm] for arm in ARMS)
-            )
-            seeded, cold = cells["seeded"]["median"], cells["cold"]["median"]
-            change = (
-                f"{seeded - cold:+.{digits}f} ({(seeded - cold) / cold * 100:+.0f}%)"
-                if cold
-                else ""
-            )
-            rows.append(f"<tr><th>{label}</th>{html_cells}<td>{change}</td></tr>")
+            cells = []
+            medians = {}
+            for arm in ARMS:
+                values = [sample[step][metric] / scale for sample in samples[arm]]
+                median = medians[arm] = statistics.median(values)
+                cells.append(
+                    f"<td>{median:.{digits}f} <small>[{min(values):.{digits}f}–"
+                    f"{max(values):.{digits}f}]</small></td>"
+                )
+            cold = medians["cold"]
+            delta = medians["seeded"] - cold
+            change = f"{delta:+.{digits}f} ({delta / cold * 100:+.0f}%)" if cold else ""
+            rows.append(f"<tr><th>{label}</th>{''.join(cells)}<td>{change}</td></tr>")
         return (
             "<table><thead><tr><th>Step</th><th>Seeded</th><th>Cold</th><th>Change</th>"
             f"</tr></thead><tbody>{''.join(rows)}</tbody></table>"
@@ -326,13 +328,14 @@ def _seed_probe(source: Path, output: Path) -> None:
 
     seeded = [r for r in receipts if r["seed"]]
     shared = statistics.median(r["still_seeded_bytes"] / r["target_bytes"] for r in seeded)
-    loads = [r[s][k][0] for r in receipts for s in COMMANDS for k in ("load_before", "load_after")]
+    loads = [
+        r[s][k][0]
+        for r in receipts
+        for s in ("build", "test")
+        for k in ("load_before", "load_after")
+    ]
     sources = sorted(
-        {
-            (r["seed"]["source"], r["seed"]["commit"], r["seed"]["commits_apart"])
-            for r in receipts
-            if r["seed"]
-        }
+        {(r["seed"]["source"], r["seed"]["commit"], r["seed"]["commits_apart"]) for r in seeded}
     )
     payload = {
         "configuration": config,
@@ -362,20 +365,12 @@ def _seed_probe(source: Path, output: Path) -> None:
     document = f"""<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>LOO-922 seeded worktrees</title>
-<style>
-body {{font:16px/1.5 system-ui,sans-serif;max-width:1050px;margin:48px auto;
-padding:0 24px;color:#20252b}}
-h1 {{font-size:32px;letter-spacing:-.03em}} h2 {{margin-top:40px;font-size:22px}}
-code,td {{font-variant-numeric:tabular-nums}} code {{font-size:.9em}}
-table {{width:100%;border-collapse:collapse;margin:16px 0 28px}}
-th,td {{padding:10px;border-bottom:1px solid #ddd;text-align:left}}
-thead {{background:#f4f5f6}} small {{color:#626970;white-space:nowrap}} a {{color:#145b90}}
-</style>
+{REPORT_STYLE}
 <h1>LOO-922: a new worktree seeded from a sibling's target, against a cold one</h1>
 <p>{config["cohorts"]} cohorts alternating which arm goes first. Each sample adds a
-worktree through the installed post-checkout hook, builds <code>lf</code>, then passes
-<code>{escape(COMMANDS["test"][7])}</code>. The cold arm runs <code>rm -rf target</code>
-right after the add, and that removal counts toward its add. Values are
+worktree through the installed post-checkout hook, builds <code>lf</code>, then runs
+<code>{escape(" ".join(config["commands"]["test"]))}</code>. The cold arm removes the target
+right after checkout and includes that time in the add. Values are
 <strong>median [minimum–maximum]</strong>; lower is better.</p>
 <p>Revision <code>{escape(config["revision"])}</code>. The Machine's shared cache and Cargo
 jobs. One-minute load average {min(loads):.0f}–{max(loads):.0f} on {config["cpus"]} logical
@@ -544,15 +539,7 @@ def main() -> None:
     document = f"""<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>{escape(name.upper())} rebuild measurements</title>
-<style>
-body {{font:16px/1.5 system-ui,sans-serif;max-width:1050px;margin:48px auto;
-padding:0 24px;color:#20252b}}
-h1 {{font-size:32px;letter-spacing:-.03em}} h2 {{margin-top:40px;font-size:22px}}
-code,td {{font-variant-numeric:tabular-nums}} code {{font-size:.9em}}
-table {{width:100%;border-collapse:collapse;margin:16px 0 28px}}
-th,td {{padding:10px;border-bottom:1px solid #ddd;text-align:left}}
-thead {{background:#f4f5f6}} small {{color:#626970;white-space:nowrap}} a {{color:#145b90}}
-</style>
+{REPORT_STYLE}
 <h1>{escape(name.upper())}: what each edit rebuilds, and what it costs</h1>
 <p>{cohorts} alternating paired cohorts, one Cargo job. Values are
 <strong>median [minimum–maximum]</strong>; lower is better. Every case but the

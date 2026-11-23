@@ -12,7 +12,7 @@ import struct
 import subprocess
 import sys
 import tempfile
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, suppress
 from pathlib import Path
 
 import tomllib
@@ -53,6 +53,11 @@ def _outside_git_env() -> dict[str, str]:
         for k, v in os.environ.items()
         if k not in ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE")
     }
+
+
+def _checkout_root(repo: Path) -> Path:
+    path = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], cwd=repo, text=True)
+    return Path(path.removesuffix("\n")).resolve()
 
 
 def _configured_roots(settings: dict) -> list[str]:
@@ -151,10 +156,9 @@ def _quiescent(debug: Path):
 def _seed_sources(root: Path) -> list[Path]:
     """Sibling worktrees holding every seed entry, most recently built first."""
     candidates = [
-        Path(path)
-        for path in _worktree_roots(root)
-        if Path(path) != root
-        and all((Path(path) / "target/debug" / entry).is_dir() for entry in SEED_ENTRIES)
+        tree
+        for tree in map(Path, _worktree_roots(root))
+        if tree != root and all((tree / "target/debug" / entry).is_dir() for entry in SEED_ENTRIES)
     ]
     # An unbuilt seed carries its source's mtime; at a tie the source wins.
     return sorted(
@@ -167,13 +171,26 @@ def _seed_sources(root: Path) -> list[Path]:
     )
 
 
+def _clone_debug(debug: Path, target: Path) -> None:
+    target.mkdir()
+    staging = target / "debug.seeding"
+    try:
+        staging.mkdir()
+        for entry in SEED_ENTRIES:
+            _clone(debug / entry, staging / entry)
+        # Directory clones can get a fresh mtime. Keep the source's rank.
+        shutil.copystat(debug / ".fingerprint", staging / ".fingerprint")
+        staging.rename(target / "debug")
+    except (OSError, subprocess.CalledProcessError):
+        shutil.rmtree(staging, ignore_errors=True)
+        with suppress(OSError):
+            target.rmdir()  # A concurrent Cargo build can own the target now.
+        raise
+
+
 def seed_target(repo: Path) -> Path | None:
     """Clone a sibling worktree's Cargo state into a checkout with no target."""
-    root = Path(
-        subprocess.check_output(
-            ["git", "rev-parse", "--show-toplevel"], cwd=repo, text=True
-        ).removesuffix("\n")
-    ).resolve()
+    root = _checkout_root(repo)
     target = root / "target"
     if os.path.lexists(target):
         return None
@@ -182,25 +199,7 @@ def seed_target(repo: Path) -> Path | None:
         with _quiescent(debug) as idle:
             if not idle:
                 continue
-            target.mkdir()
-            staging = target / "debug.seeding"
-            try:
-                staging.mkdir()
-                for entry in SEED_ENTRIES:
-                    _clone(debug / entry, staging / entry)
-                # A cloned directory gets a fresh mtime; keep the source's so an
-                # unbuilt seed never outranks the sibling that last built.
-                built = (debug / ".fingerprint").stat()
-                os.utime(staging / ".fingerprint", ns=(built.st_atime_ns, built.st_mtime_ns))
-                # Atomic: a Cargo started meanwhile sees no target or a whole one.
-                staging.rename(target / "debug")
-            except (OSError, subprocess.CalledProcessError):
-                shutil.rmtree(staging, ignore_errors=True)
-                try:
-                    target.rmdir()
-                except OSError:
-                    pass  # A Cargo started meanwhile owns it now.
-                raise
+            _clone_debug(debug, target)
         commit = subprocess.run(
             ["git", "rev-parse", "--short=10", "HEAD"],
             cwd=source,
@@ -214,7 +213,7 @@ def seed_target(repo: Path) -> Path | None:
     return None
 
 
-def _seed_record(root: Path) -> dict | None:
+def seed_record(root: Path) -> dict | None:
     try:
         return json.loads((root / "target" / SEED_RECORD).read_text())
     except (FileNotFoundError, json.JSONDecodeError):
@@ -428,10 +427,7 @@ def cache_status(repo: Path, wrapper: Path | None, env: dict[str, str]) -> dict:
     else:
         listed = []
     listed = [str(Path(path)) for path in listed]
-    root = subprocess.check_output(
-        ["git", "rev-parse", "--show-toplevel"], cwd=repo, text=True
-    ).removesuffix("\n")
-    root = str(Path(root).resolve())
+    root = str(_checkout_root(repo))
     result = {
         "wrapper": str(wrapper) if wrapper else None,
         "pinned": pinned,
@@ -441,7 +437,7 @@ def cache_status(repo: Path, wrapper: Path | None, env: dict[str, str]) -> dict:
         "daemon": None,
         "loaded_roots": [],
         "stats": None,
-        "seed": _seed_record(Path(root)),
+        "seed": seed_record(Path(root)),
         "configured_idle_timeout_seconds": int(env["SCCACHE_IDLE_TIMEOUT"])
         if "SCCACHE_IDLE_TIMEOUT" in env
         else None,

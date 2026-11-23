@@ -423,6 +423,12 @@ def cargo_repo(tmp_path, monkeypatch):
     return repo
 
 
+def _add_worktree(repo: Path, name: str) -> Path:
+    tree = repo.parent / name
+    _git(repo, "worktree", "add", "--detach", str(tree))
+    return tree
+
+
 def _cargo_build(directory: Path) -> dict[str, bool]:
     """Build and return each compiled unit's freshness by crate name."""
     result = subprocess.run(
@@ -441,10 +447,9 @@ def _cargo_build(directory: Path) -> dict[str, bool]:
     }
 
 
-def test_new_worktree_reuses_a_siblings_dependencies_and_rebuilds_its_own(cargo_repo, tmp_path):
+def test_new_worktree_reuses_a_siblings_dependencies_and_rebuilds_its_own(cargo_repo):
     install_hook(cargo_repo)
-    tree = tmp_path / "new tree"
-    _git(cargo_repo, "worktree", "add", "--detach", str(tree))
+    tree = _add_worktree(cargo_repo, "new tree")
 
     debug = tree / "target/debug"
     assert sorted(path.name for path in debug.iterdir()) == [".fingerprint", "build", "deps"]
@@ -453,23 +458,21 @@ def test_new_worktree_reuses_a_siblings_dependencies_and_rebuilds_its_own(cargo_
     assert _cargo_build(tree) == {"build-script-build": True, "scripted": True, "app": False}
 
 
-def test_a_building_sibling_is_never_cloned(cargo_repo, tmp_path):
+def test_a_building_sibling_is_never_cloned(cargo_repo):
     install_hook(cargo_repo)
     lock = cargo_repo / "target/debug/.cargo-build-lock"
     assert lock.exists()
     with lock.open() as held:
         fcntl.flock(held, fcntl.LOCK_EX)
-        tree = tmp_path / "new tree"
-        _git(cargo_repo, "worktree", "add", "--detach", str(tree))
+        tree = _add_worktree(cargo_repo, "new tree")
         assert not (tree / "target").exists()
     assert _cargo_build(tree)["scripted"] is False
     assert "seed     none" in _cache_command(tree, "status").stdout
 
 
-def test_first_build_waits_while_a_freshly_seeded_sibling_is_locked(cargo_repo, tmp_path):
+def test_first_build_waits_while_a_freshly_seeded_sibling_is_locked(cargo_repo):
     install_hook(cargo_repo)
-    tree = tmp_path / "seeded"
-    _git(cargo_repo, "worktree", "add", "--detach", str(tree))
+    tree = _add_worktree(cargo_repo, "seeded")
     debug = tree / "target/debug"
     assert (debug / ".fingerprint").is_dir()
     assert not list(debug.glob(".cargo*lock"))
@@ -496,43 +499,37 @@ def test_first_build_waits_while_a_freshly_seeded_sibling_is_locked(cargo_repo, 
     assert subprocess.check_output([debug / "app"], text=True).strip() == "built in sibling"
 
 
-def test_a_failed_clone_leaves_no_target(cargo_repo, tmp_path, monkeypatch):
-    tree = tmp_path / "new tree"
-    _git(cargo_repo, "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", str(tree))
+def test_a_failed_clone_leaves_no_target(cargo_repo, monkeypatch):
+    tree = _add_worktree(cargo_repo, "new tree")
     clone = build_cache._clone
-    calls = []
 
     def clone_once(source, destination):
-        if calls:
+        if any(destination.parent.iterdir()):
             raise OSError(errno.EXDEV, "cross-device", str(source))
-        calls.append(source)
         clone(source, destination)
 
     monkeypatch.setattr(build_cache, "_clone", clone_once)
     with pytest.raises(OSError):
         build_cache.seed_target(tree)
-    assert calls and not (tree / "target").exists()
+    assert not (tree / "target").exists()
     assert _cargo_build(tree)["app"] is False
 
 
-def test_an_existing_target_is_never_replaced(cargo_repo, tmp_path):
-    tree = tmp_path / "new tree"
-    _git(cargo_repo, "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", str(tree))
+def test_an_existing_target_is_never_replaced(cargo_repo):
+    tree = _add_worktree(cargo_repo, "new tree")
     (tree / "target").mkdir()
     assert build_cache.seed_target(tree) is None
     assert list((tree / "target").iterdir()) == []
 
 
-def test_an_unbuilt_seed_ranks_as_old_as_its_source(cargo_repo, tmp_path):
+def test_an_unbuilt_seed_ranks_as_old_as_its_source(cargo_repo):
     # Directory clones get fresh mtimes; a seed that never built must not
     # outrank the sibling that last did.
-    built = tmp_path / "built"
-    _git(cargo_repo, "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", str(built))
+    built = _add_worktree(cargo_repo, "built")
     _cargo_build(built)
     install_hook(cargo_repo)
-    _git(cargo_repo, "worktree", "add", "--detach", str(tmp_path / "seeded"))
-    later = tmp_path / "later"
-    _git(cargo_repo, "worktree", "add", "--detach", str(later))
+    _add_worktree(cargo_repo, "seeded")
+    later = _add_worktree(cargo_repo, "later")
     assert json.loads(_cache_command(later, "status", "--json").stdout)["seed"]["source"] == str(
         built.resolve()
     )

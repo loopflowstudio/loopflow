@@ -12,9 +12,9 @@ thead {background:#f4f5f6} small {color:#626970;white-space:nowrap} a {color:#14
 </style>
 <h1>LOO-922: a new worktree seeded from a sibling's target, against a cold one</h1>
 <p>3 cohorts alternating which arm goes first. Each sample adds a
-worktree through the installed post-checkout hook, builds <code>lf</code>, then passes
-<code>lf::tests::task_deletion_accepts_issue_identity</code>. The cold arm runs <code>rm -rf target</code>
-right after the add, and that removal counts toward its add. Values are
+worktree through the installed post-checkout hook, builds <code>lf</code>, then runs
+<code>cargo test --locked -v -p loopflow --lib lf::tests::task_deletion_accepts_issue_identity -- --exact</code>. The cold arm removes the target
+right after checkout and includes that time in the add. Values are
 <strong>median [minimum–maximum]</strong>; lower is better.</p>
 <p>Revision <code>bb939942b04d22882b62c7d97e0b6fd6cddaecf9</code>. The Machine's shared cache and Cargo
 jobs. One-minute load average 17–103 on 16 logical

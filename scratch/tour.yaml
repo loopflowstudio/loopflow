@@ -1,21 +1,23 @@
-at: 5336a5ebaf9d51fe1f890e86926e19e154780d26
+at: 5e305e63c7d696065d5cbab24601cbf3755a2b8f
 first:
   - path: scripts/testing.md
-    why: Install the hook and inspect a new worktree
-  - path: scripts/benchmarks/crate-rebuild/results/loo-922.html
-    why: Compare first builds through a passing test
+    why: Install seeding and inspect Cargo freshness
   - path: scripts/build_cache.py
-    why: Select, lock, clone and report a sibling target
+    why: Select and lock a source, then publish its clone
   - path: python/tests/test_build_cache.py
-    why: See Cargo wait during a seeded sibling’s first build
+    why: Exercise reuse, concurrent builds and failed clones
   - path: .lf/qa/build-cache.md
-    why: Replay the ready checkout and cross-volume fallback
+    why: Replay Task checkout and cross-volume fallback
   - path: scripts/benchmarks/crate-rebuild/README.md
-    why: Reproduce the alternating benchmark
+    why: Reproduce the seeded and cold comparison
   - path: scripts/benchmarks/crate-rebuild/seed_probe.py
-    why: Collect timings and file allocations
+    why: Measure both builds and count changed files
+  - path: scripts/benchmarks/crate-rebuild/test_loop.py
+    why: Share benchmark options and lock the output directory
   - path: scripts/benchmarks/crate-rebuild/report.py
-    why: Derive comparisons from each cohort
+    why: Calculate paired totals and render cohort ranges
+  - path: scripts/benchmarks/crate-rebuild/results/loo-922.html
+    why: Compare the measured time, memory and disk costs
   - path: scripts/benchmarks/crate-rebuild/results/loo-922.json
-    why: Inspect individual samples and seed revisions
+    why: Inspect each sample and its seed source
 hide: []

@@ -342,32 +342,27 @@ keeps its own target. `cargo test` shares registry dependencies and keeps
 incremental state for workspace crates. The application's `test-support`
 libraries embed checkout paths and also compile in each root.
 
-**New worktrees start warm.** `git worktree add` clones `target/debug` from the
-newest sibling worktree whose Cargo isn't running, so registry crates, their
-build scripts and proc macros come back `Fresh` instead of compiling:
+**New worktrees start warm.** The installed hook seeds the new worktree from
+a sibling's `target/debug`. To see which crates Cargo reuses, run:
 
 ```bash
-git worktree add ../loopflow.my-change main && cd ../loopflow.my-change
-cargo build -p loopflow --bin lf     # 7 Compiling lines (workspace crates), not 256
+git worktree add --detach ../loopflow.my-change HEAD && cd ../loopflow.my-change
+cargo build -v -p loopflow --bin lf
 ```
 
-If a build starts in the source worktree during cloning, Cargo waits for the
-clone to finish, even on that worktree's first build.
+The hook tries siblings in order of `.fingerprint` directory mtime, newest
+first. It holds Cargo's locks while cloning `.fingerprint`, `build` and `deps`.
+A build starting in the source waits until the clone finishes. Each worktree
+builds its own top-level binaries and keeps its own incremental state. If every
+source is busy or the filesystem lacks copy-on-write clones, Cargo builds cold.
 
-A seed from a sibling whose `Cargo.lock` has drifted recompiles the units that
-changed: one 140 commits away compiled 31.
-
-Cargo still decides what is fresh; the seed only gives it a target to look at.
-Every workspace crate rebuilds, because checkout gives its sources new mtimes,
-and the shared cache serves the eligible ones. The seed is a copy-on-write clone
-(APFS on macOS, reflink on Linux) of `.fingerprint`, `build` and `deps`; it never
-copies `incremental/`, lock files or a built `lf`. Clone blocks are shared until
-a build rewrites them: the first `lf` build wrote 1.7 GiB into a seeded target
-(2.0 cold), and after a focused test about half of the target's allocated bytes
-were still cloned. Where the filesystem can't clone, or every sibling is building, the
-worktree starts with no target and builds cold. A focused `cargo test` still
-compiles the workspace libraries in the incremental test profile, about 200
-CPU-seconds that neither the seed nor the cache serves.
+In the [measured builds](benchmarks/crate-rebuild/results/loo-922.html), Cargo
+reused registry crates, build scripts and proc macros. Two seeded builds compiled
+7 units, all workspace crates. A seed with different dependencies compiled 31.
+Cold builds compiled 256. The first `lf` build wrote 1.7 GiB into a seeded
+target (2.0 GiB cold). After a focused test about half the target still shared
+its original files. Incremental workspace libraries accounted for about 200
+CPU-seconds in a fresh test build.
 
 To build a new worktree cold, `rm -rf target` before the first build. A target
 that already exists is never replaced. `lf wt prune --builds` counts a seeded
@@ -385,10 +380,9 @@ configuration.
 
 Git's `post-checkout` hook seeds a new worktree's target, then registers the
 worktree in `~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set).
-The hook carries a copy of the script so older revisions can register; an
-existing installation seeds after one more `install`. Both steps are
-best-effort and silent. It retains other
-repositories' roots and lets Git finish checkout if registration fails.
+The hook carries its own script so it works in older checkouts. Rerun
+`install` to refresh an existing hook. Both steps run silently and let Git
+finish checkout on failure. Registration retains other repositories' roots.
 Installation keeps an existing shell hook in place when it can insert the
 registration command. Other hooks move beside it to `post-checkout.before-loopflow`.
 Git runs the saved hook with its original arguments if it is executable.

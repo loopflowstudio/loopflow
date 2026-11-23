@@ -1,22 +1,20 @@
 """Compare a seeded new worktree with a cold one through an `lf` build and a focused test."""
 
-import argparse
-import fcntl
 import json
 import os
 import re
 import shutil
 import stat
-import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from run import _timing
-from test_loop import FILTERS, _require_disk, _time_command, _write
+from test_loop import FILTERS, _require_disk, _run, _time_command, _write, measurement_run
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from build_cache import SEED_RECORD  # noqa: E402
+from build_cache import seed_record  # noqa: E402
 from resource_envelope import load_policy  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -37,44 +35,31 @@ def _env() -> dict:
     return {k: v for k, v in os.environ.items() if not k.startswith("LF_")}
 
 
-def _run(argv: list[str], cwd: Path) -> str:
-    result = subprocess.run(
-        argv, cwd=cwd, env=_env(), text=True, capture_output=True, stdin=subprocess.DEVNULL
-    )
-    if result.returncode:
-        raise RuntimeError(f"{argv}: {result.stdout}\n{result.stderr}")
-    return result.stdout.strip()
+@dataclass(frozen=True)
+class TargetFile:
+    path: Path
+    inode: int
+    mtime_ns: int
+    allocated_bytes: int = field(compare=False)
 
 
-def _files(debug: Path) -> dict[str, tuple[int, int, int]]:
-    """Path → (inode, mtime, allocated bytes) for every regular file under the target."""
-    rows = {}
-    for directory, _, names in os.walk(debug):
-        for name in names:
-            path = os.path.join(directory, name)
-            info = os.lstat(path)
-            if stat.S_ISREG(info.st_mode):
-                rows[os.path.relpath(path, debug)] = (
-                    info.st_ino,
-                    info.st_mtime_ns,
-                    info.st_blocks * 512,
-                )
-    return rows
+def _files(debug: Path) -> set[TargetFile]:
+    files = set()
+    for path in debug.rglob("*"):
+        info = path.lstat()
+        if stat.S_ISREG(info.st_mode):
+            files.add(TargetFile(path, info.st_ino, info.st_mtime_ns, info.st_blocks * 512))
+    return files
 
 
-def _allocated(rows: dict, keys) -> int:
+def _allocated(files: set[TargetFile]) -> int:
     # Uplifted files are hard links to their deps/ originals; count each inode once.
-    return sum({rows[k][0]: rows[k][2] for k in keys}.values())
-
-
-def _written(before: dict, after: dict) -> int:
-    """Allocated bytes of files a command created or replaced."""
-    return _allocated(after, [k for k, v in after.items() if before.get(k, (0, 0))[:2] != v[:2]])
+    return sum({file.inode: file.allocated_bytes for file in files}.values())
 
 
 def _remove_tree(tree: Path) -> None:
     if tree.exists():
-        _run(["git", "worktree", "remove", "--force", str(tree)], ROOT)
+        _run(["git", "worktree", "remove", "--force", str(tree)], ROOT, _env())
 
 
 def validate(receipts: list[dict], cohorts: int) -> None:
@@ -94,23 +79,22 @@ def _sample(output: Path, root: Path, revision: str, cohort: int, arm: str, rese
     _remove_tree(tree)  # An interrupted attempt's checkout.
     start = time.monotonic()
     # The installed post-checkout hook seeds and registers, as for any new worktree.
-    _run(["git", "worktree", "add", "--detach", str(tree), revision], ROOT)
-    add_seconds = time.monotonic() - start
+    env = _env()
+    _run(["git", "worktree", "add", "--detach", str(tree), revision], ROOT, env)
     try:
-        seed = None
-        if arm == "cold":
-            # The documented way to build a new worktree cold; its time counts toward the add.
-            shutil.rmtree(tree / "target", ignore_errors=True)
-            add_seconds = time.monotonic() - start
-        elif (tree / "target" / SEED_RECORD).exists():
-            seed = json.loads((tree / "target" / SEED_RECORD).read_text())
+        if arm == "cold" and (tree / "target").exists():
+            shutil.rmtree(tree / "target")
+        add_seconds = time.monotonic() - start
+        seed = seed_record(tree)
+        if arm == "seeded" and seed is None:
+            raise RuntimeError("no quiescent sibling target to seed from; rerun with --resume")
+        if seed:
+            revisions = f"{seed['commit']}...{revision}"
             seed["commits_apart"] = (
-                int(_run(["git", "rev-list", "--count", f"{seed['commit']}...{revision}"], ROOT))
+                int(_run(["git", "rev-list", "--count", revisions], ROOT, env))
                 if seed["commit"]
                 else None
             )
-        else:
-            raise RuntimeError("no quiescent sibling target to seed from; rerun with --resume")
         debug = tree / "target/debug"
         seeded_files = _files(debug)
         receipt = {
@@ -118,14 +102,14 @@ def _sample(output: Path, root: Path, revision: str, cohort: int, arm: str, rese
             "arm": arm,
             "seed": seed,
             "add": {"wall_seconds": add_seconds},
-            "seed_bytes": _allocated(seeded_files, seeded_files),
+            "seed_bytes": _allocated(seeded_files),
         }
         before = seeded_files
         for step, command in COMMANDS.items():
             stem = f"{cohort}_{arm}_{step}"
             load_before = os.getloadavg()
             begin = time.monotonic()
-            exit_code, memory = _time_command(command, tree, _env(), output, stem, begin, reserve)
+            exit_code, memory = _time_command(command, tree, env, output, stem, begin, reserve)
             wall = time.monotonic() - begin
             log = (output / f"{stem}.log").read_text()
             stdout = (output / f"{stem}.jsonl").read_text()
@@ -142,7 +126,7 @@ def _sample(output: Path, root: Path, revision: str, cohort: int, arm: str, rese
                 "tests_passed": sum(
                     int(n) for n in re.findall(r"test result: ok\. (\d+) passed", stdout)
                 ),
-                "written_bytes": _written(before, after),
+                "written_bytes": _allocated(after - before),
                 "load_before": load_before,
                 "load_after": os.getloadavg(),
             }
@@ -150,41 +134,24 @@ def _sample(output: Path, root: Path, revision: str, cohort: int, arm: str, rese
             print(f"{stem}: exit {exit_code}, {wall:.1f}s", flush=True)
             if exit_code:
                 raise RuntimeError(f"{step} failed: {output / (stem + '.log')}")
-        unchanged = [k for k, v in seeded_files.items() if before.get(k, (0, 0))[:2] == v[:2]]
-        receipt["target_bytes"] = _allocated(before, before)
-        receipt["still_seeded_bytes"] = _allocated(before, unchanged)
+        receipt["target_bytes"] = _allocated(after)
+        receipt["still_seeded_bytes"] = _allocated({file for file in after if file in seeded_files})
         return receipt
     finally:
         _remove_tree(tree)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--cohorts", type=int, default=3)
-    parser.add_argument("--resume", action="store_true")
-    args = parser.parse_args()
-    if args.cohorts < 3:
-        parser.error("at least three cohorts are required")
-    output = args.output.resolve()
-    output.mkdir(parents=True, exist_ok=True)
+def _measure(output: Path, cohorts: int, resume: bool) -> None:
     state, receipts_path = output / "configuration.json", output / "receipts.json"
-    if state.exists() != args.resume:
-        parser.error("use --resume with an existing output directory, and only then")
-    lock = os.open(output, os.O_RDONLY)
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        parser.error(f"measurement already running in {output}")
     reserve = load_policy().minimum_free_disk_bytes
     _require_disk(output, reserve)
-    if args.resume:
+    if resume:
         config = json.loads(state.read_text())
     else:
         config = {
-            "revision": _run(["git", "rev-parse", "HEAD"], ROOT),
-            "cohorts": args.cohorts,
-            "rustc": _run(["rustc", "-Vv"], ROOT),
+            "revision": _run(["git", "rev-parse", "HEAD"], ROOT, _env()),
+            "cohorts": cohorts,
+            "rustc": _run(["rustc", "-Vv"], ROOT, _env()),
             "cpus": os.cpu_count(),
             "machine": list(os.uname()),
             "commands": COMMANDS,
@@ -203,6 +170,11 @@ def main() -> None:
     validate(receipts, config["cohorts"])
     root.rmdir()
     print(f"Receipts: {output}")
+
+
+def main() -> None:
+    with measurement_run(__doc__) as (output, cohorts, resume):
+        _measure(output, cohorts, resume)
 
 
 if __name__ == "__main__":

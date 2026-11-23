@@ -222,3 +222,7 @@ Peak memory attribution is tracked separately in LOO-1070.
 
 After verify: check LOO-923 status/liveness, `lf task checkout LOO-923` if
 absent, then `lf ship LOO-923` with these measurements in its context.
+
+Compress checks on macOS:
+- `uv run pytest -q python/tests/test_build_cache.py python/tests/test_crate_test_loop.py` — 40 passed. Gate runs the focused checks again.
+- `report.py --seed-probe` on the six original samples — all table values matched.

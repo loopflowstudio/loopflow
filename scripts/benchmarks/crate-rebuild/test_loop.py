@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 import tomllib
@@ -220,8 +221,9 @@ def _time_command(
     return child.returncode, memory
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+@contextmanager
+def measurement_run(description: str) -> Iterator[tuple[Path, int, bool]]:
+    parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cohorts", type=int, default=3)
     parser.add_argument("--resume", action="store_true")
@@ -236,20 +238,23 @@ def main() -> None:
             fcntl.flock(directory, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             parser.error(f"measurement already running in {output}")
-        # Only the Unix socket needs a short, temporary pathname.
-        with tempfile.TemporaryDirectory(prefix="lf921-", dir="/tmp") as short:
-            _measure(output, args.cohorts, args.resume, Path(short) / "cache.sock")
+        if (output / "configuration.json").exists() != args.resume:
+            parser.error("use --resume with an existing measurement, and only then")
+        yield output, args.cohorts, args.resume
     finally:
         os.close(directory)
+
+
+def main() -> None:
+    with measurement_run(__doc__) as (output, cohorts, resume):
+        # Only the Unix socket needs a short, temporary pathname.
+        with tempfile.TemporaryDirectory(prefix="lf921-", dir="/tmp") as short:
+            _measure(output, cohorts, resume, Path(short) / "cache.sock")
 
 
 def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
     state = output / "configuration.json"
     receipts_path = output / "receipts.json"
-    if state.exists() and not resume:
-        raise SystemExit("output already exists; use --resume")
-    if resume and not state.exists():
-        raise SystemExit(f"no measurement configuration to resume in {output}")
     if resume:
         config = json.loads(state.read_text())
         passed = output / "passed.json"

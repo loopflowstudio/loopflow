@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Settings concept review · LOO-1066</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f3f4f6;
+    --panel: #fff;
+    --ink: #17191d;
+    --muted: #525b68;
+    --line: #d5d9e0;
+    --blue: #184f9b;
+    --accent: #e6effd;
+    --green: #176047;
+    --red: #942f28;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #131518;
+      --panel: #1c2025;
+      --ink: #f3f5f8;
+      --muted: #b5beca;
+      --line: #404751;
+      --blue: #a8ccff;
+      --accent: #202f47;
+      --green: #8fddbe;
+      --red: #ffaea6;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 1rem/1.55 system-ui, sans-serif; }
+  main { max-width: 74rem; margin: auto; padding: clamp(1rem, 4vw, 3rem); }
+  h1, h2, h3, p, figure, dl, pre { margin: 0; }
+  h1, h2, h3 { line-height: 1.2; }
+  h1 { font-size: clamp(2rem, 5vw, 3.2rem); max-width: 22ch; }
+  h2 { font-size: 1.5rem; margin-bottom: .7rem; }
+  h3 { font-size: 1.05rem; }
+  .overline { color: var(--blue); font-weight: 650; margin-bottom: .4rem; }
+  .lede { font-size: 1.12rem; max-width: 68ch; margin-top: .9rem; }
+  .note, figcaption { color: var(--muted); font-size: .92rem; }
+  section { margin-top: 2.4rem; }
+  .compare { display: grid; grid-template-columns: 2fr 3fr; gap: 1rem; align-items: start; }
+  .card { padding: 1rem; border: 1px solid var(--line); background: var(--panel); border-radius: .85rem; min-width: 0; }
+  .card p + p, .card h3 + p, .card h3 + dl { margin-top: .55rem; }
+  .before { display: grid; gap: 1rem; }
+  .row { padding: .65rem 0; border-top: 1px solid var(--line); }
+  .pair { display: flex; gap: .5rem 1rem; justify-content: space-between; align-items: baseline; flex-wrap: wrap; }
+  .sim { display: grid; gap: .75rem; }
+  .selectors, .actions { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+  .selectors { justify-content: space-between; }
+  .label { font-weight: 650; }
+  button, select {
+    font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+    border-radius: .45rem; padding: .22rem .55rem; max-width: 100%;
+  }
+  button:enabled { cursor: pointer; }
+  button:disabled { color: var(--muted); opacity: .7; }
+  button.primary { background: var(--accent); color: var(--blue); font-weight: 650; }
+  :focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+  output { background: var(--bg); border-radius: .45rem; padding: .55rem .7rem; min-height: 3.75rem; }
+  summary { color: var(--blue); cursor: pointer; font-weight: 650; }
+  .ladder { margin: .45rem 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .2rem .65rem; }
+  dt { font-weight: 600; }
+  dd { margin: 0; color: var(--muted); }
+  .result { background: var(--accent); padding: .6rem .7rem; border-radius: .5rem; }
+  .yes { color: var(--green); font-weight: 700; }
+  .no { color: var(--red); font-weight: 700; }
+  [hidden] { display: none !important; }
+  pre { border: 1px solid var(--line); border-radius: .45rem; padding: .65rem; overflow-wrap: anywhere; white-space: pre-wrap; }
+  code, pre { font-family: ui-monospace, monospace; font-size: .92em; }
+  a { color: var(--blue); text-underline-offset: .15em; }
+  .cases { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+  .cases .card p { margin-top: .45rem; }
+  .cases + .card { margin-top: .75rem; }
+  .map { display: grid; gap: .75rem; }
+  .mapping { display: grid; grid-template-columns: minmax(9rem, 1fr) minmax(0, 3fr); gap: .4rem 1.2rem; }
+  .mapping h3 { padding-top: .2rem; }
+  .mapping ul { margin: 0; padding-left: 1.2rem; }
+  .mapping li + li { margin-top: .3rem; }
+  ol, ul { padding-left: 1.5rem; }
+  li + li { margin-top: .4rem; }
+  .choices > li { margin-bottom: 1rem; }
+  .choices ul { margin-top: .25rem; list-style: none; padding: 0; }
+  @media (max-width: 46rem) {
+    .compare, .cases, .mapping { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="overline">LOO-1066 · macOS Settings</p>
+    <h1>Do the product and code concepts line up?</h1>
+    <p class="lede">Settings brings app preferences, preferences for new work and live connection status into one window. The largest mismatch is in the override lens. <strong>The work you’re inspecting and the file you’re editing are two choices.</strong></p>
+  </header>
+
+  <section aria-labelledby="walk-heading">
+    <h2 id="walk-heading">Change the repository’s diff setting</h2>
+    <div class="compare">
+      <div class="before">
+        <article class="card">
+          <p class="overline">Existing app</p>
+          <h3>Configuration</h3>
+          <dl class="ladder">
+            <dt>Save in</dt><dd>Shared project preferences</dd>
+            <dt>Project checkout</dt><dd><code>~/src/loopflow</code></dd>
+            <dt>Setting key</dt><dd><code>context.diff</code></dd>
+            <dt>YAML</dt><dd><code>true</code></dd>
+          </dl>
+          <p class="note">Apply writes the declaration. Explain effective value opens a separate read.</p>
+        </article>
+        <article class="card">
+          <p class="overline">Earlier Vision C plan</p>
+          <h3>Context</h3>
+          <dl class="ladder">
+            <dt>Scope</dt><dd>loopflow · Shared</dd>
+            <dt>Saved here</dt><dd>On</dd>
+            <dt>In effect</dt><dd>Off · Personal repository</dd>
+          </dl>
+          <p>Switching to Shared also changes the “scope” label, even though the same checkout and its private override still apply. The planned read is keyed by the file destination.</p>
+        </article>
+      </div>
+      <figure class="card sim">
+        <figcaption>Proposed interaction · interactive example</figcaption>
+        <div class="selectors">
+          <span><span class="label">Applies to</span> · loopflow checkout</span>
+          <label for="destination"><span class="label">Save in</span>
+            <select id="destination">
+              <option value="mine">My repository settings</option>
+              <option value="shared">Shared repository settings</option>
+            </select>
+          </label>
+        </div>
+        <div class="row pair">
+          <div>
+            <h3>Include diff in agent context</h3>
+            <span id="authored" class="note">Inherited · a change saves to My repository settings</span>
+          </div>
+          <button type="button" role="switch" aria-label="Include diff in agent context in the selected save destination" aria-describedby="authored" aria-checked="true" id="toggle">On</button>
+        </div>
+        <p class="result"><strong>In effect for this checkout</strong> · <span id="effective">On · Shared repository settings</span></p>
+        <details open>
+          <summary>Why this applies</summary>
+          <dl class="ladder">
+            <dt>Built-in</dt><dd id="builtin-slot">Off</dd>
+            <dt>Shared repository</dt><dd id="shared-slot">On · applies</dd>
+            <dt>My global settings</dt><dd>No declaration</dd>
+            <dt>My repository</dt><dd id="mine-slot">No declaration</dd>
+          </dl>
+          <div class="actions">
+            <button type="button" id="reset">Preview reset</button>
+            <button type="button" id="move">Move to Shared Repository…</button>
+          </div>
+          <div id="preview-box" hidden>
+            <h3 id="preview-title">YAML preview</h3>
+            <pre id="patch"></pre>
+            <p class="note" id="projected"></p>
+            <div class="actions">
+              <button type="button" class="primary" id="apply">Apply preview</button>
+              <button type="button" id="cancel">Cancel</button>
+            </div>
+          </div>
+        </details>
+        <output id="notice" aria-live="polite">Try turning My setting off, then switch Save in to Shared. The Shared switch shows On while this checkout stays Off.</output>
+        <div class="actions">
+          <button type="button" id="undo">Undo</button>
+          <button type="button" id="external">Simulate a file edit</button>
+          <button type="button" id="refresh">Refresh preview</button>
+          <button type="button" id="restart">Restart example</button>
+        </div>
+        <p class="note">For a conflict, turn My setting off, preview its reset, simulate a file edit, then choose Reset Layer. Refresh to review the new file state.</p>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="cases-heading">
+    <h2 id="cases-heading">What survives the edit</h2>
+    <div class="cases">
+      <article class="card">
+        <h3>Normal path</h3>
+        <p>Shared is On. Turn My setting Off and the next ordinary launch omits the diff. Save Shared Off, then On. Both edits stick in the shared YAML and the launch stays Off. Reset My and the next launch includes the diff. Undo puts My Off back.</p>
+      </article>
+      <article class="card">
+        <h3>Save fails</h3>
+        <p>Preview the reset of My Off, then a hand edit sets it to On. The expected declaration has changed. Apply keeps the hand edit and the reset draft. Refresh shows On; review the new patch before removing it.</p>
+        <p>If the connection drops during a save, refresh before replaying it. Offer Undo when the window can confirm its own commit.</p>
+      </article>
+      <article class="card">
+        <h3>Move is interrupted</h3>
+        <p>With Shared empty, preview moving My Off to Shared. If the process stops after installing Shared Off, My Off is still present. Resume only when both slots match the recorded move. If Shared has since changed, keep both and show the file that needs attention.</p>
+      </article>
+    </div>
+    <div class="card">
+      <h3>Two cases defeat a single “effective value” control</h3>
+      <p><strong>Append and clear.</strong> A shared <code>context.docs: [README.md]</code> and a private <code>[notes.md]</code> combine. The private editor shows only <code>[notes.md]</code>. Explicit <code>[]</code> clears earlier contributions; Reset removes the private declaration and exposes <code>[README.md]</code> again.</p>
+      <p><strong>Pin and fallback.</strong> A shared <code>agent: claude</code> can beat a private <code>default_agent: codex</code>. The private control shows Codex as its saved starting preference. The Agents pane reports Claude as the effective pin using the same resolver as launch.</p>
+    </div>
+  </section>
+
+  <section aria-labelledby="map-heading">
+    <h2 id="map-heading">What a person does and what owns it</h2>
+    <div class="map">
+      <article class="card mapping">
+        <h3>Find a setting</h3>
+        <ul>
+          <li><span class="yes">Yes</span> · <code>config.catalog</code> owns the key, aliases, schema, and policy. Settings owns its label and pane.</li>
+          <li><span class="no">No</span> · The existing free-form key field leaves discovery and editing in separate controls. Proposed search indexes the same row descriptors as the forms. Editing a boolean result uses the same address and operation as editing its row.</li>
+        </ul>
+      </article>
+      <article class="card mapping">
+        <h3>See what applies</h3>
+        <ul>
+          <li><span class="yes">Yes</span> · <code>SettingScope</code>, <code>SettingTarget</code> and the resolver describe where work runs and which declarations contribute. <code>EffectiveSetting</code> carries the result and its candidates.</li>
+          <li><span class="no">No</span> · The earlier plan uses <code>Destination</code> as the identity of an inspection. “Scope” then means both the work and the file. Proposed <code>config.scope</code> reads by checkout, Wave and optional target. The read includes all available edit slots; swapping My and Shared needs no new reading.</li>
+        </ul>
+      </article>
+      <article class="card mapping">
+        <h3>Save a value</h3>
+        <ul>
+          <li><span class="yes">Yes</span> · <code>Destination</code> and the typed key identify a declaration. The Rust writer owns canonical YAML and locators. Shared files follow the selected checkout. The private file follows the clone across linked worktrees.</li>
+          <li><span class="no">No</span> · The current one-key response uses null for both an absent declaration and a YAML null. The projection carries explicit presence. The editor binds to that slot and separately shows what the resolver uses. The tracker remains one tagged value.</li>
+        </ul>
+      </article>
+      <article class="card mapping">
+        <h3>Review, reset, move or undo</h3>
+        <ul>
+          <li><span class="no">No</span> · The existing window sends <code>config.set</code> or <code>config.unset</code>, then asks Explain what happened. A preview, commit and Undo need one edit description that identifies the affected declarations and expected values.</li>
+          <li><span class="yes">Yes</span> · <code>files::edit</code>, <code>LockedFile</code> and the canonical YAML patcher already own file replacement. Extend that owner. Keep only a short-lived recovery record for a move involving two physical files. Derive the status and sidebar dots from the resulting readings.</li>
+        </ul>
+      </article>
+      <article class="card mapping">
+        <h3>Choose or customize a theme</h3>
+        <ul>
+          <li><span class="no">No</span> · <code>AppearanceDraft</code> currently holds a theme pick and edited assets in the same chooser transaction. Proposed theme picks commit through <code>AppearanceStore</code> with Undo. The editor holds the draft for a custom theme or import.</li>
+          <li><span class="yes">Yes</span> · The <code>theme:</code> declaration and the theme assets identify the saved choices. <code>AppearanceStore</code> resolves and publishes them to Desktop, Ghostty and the existing iPhone appearance path.</li>
+        </ul>
+      </article>
+      <article class="card mapping">
+        <h3>Set autosave or look up a shortcut</h3>
+        <ul>
+          <li><span class="yes">Yes</span> · <code>taskFilesAutosave</code> is a Desktop preference. The shortcut rows describe <code>DesktopAction</code> and the window commands. Move the toggle and reuse one reference in both Shortcuts surfaces.</li>
+        </ul>
+      </article>
+      <article class="card mapping">
+        <h3>Pair a phone or check a Machine</h3>
+        <ul>
+          <li><span class="yes">Yes</span> · Mobile setup changes access and reports current status; the Machine probe verifies durable identity and distinguishes an ended rental. These are domain operations with existing owners.</li>
+          <li><span class="no">No</span> · <code>MobileSetup</code> lives inside the old pane. The new sidebar and QR card need the same current status. Lift that reading to Settings and let the Machines pane load reachability independently from placement preferences.</li>
+        </ul>
+      </article>
+    </div>
+    <p class="note">Read against the Task branch and its base. <a href="../swift/LoopflowMac/Views/ConfigurationSettingsView.swift">Existing Configuration view</a> · <a href="../rust/loopflow-execution/src/engine/config.rs">Config facade</a> · <a href="../rust/loopflow-execution/src/config/files.rs">File owner</a> · <a href="../rust/loopflow-execution/src/config/settings.rs">Resolver</a> · <a href="../docs/dev/settings.md">Ownership contract</a></p>
+  </section>
+
+  <section aria-labelledby="choices-heading">
+    <h2 id="choices-heading">Choices for review</h2>
+    <p>The selected options are recorded in the build plan. The first slice exercises one row from the actual Settings scene through the file writer and into launch.</p>
+    <ol class="choices">
+      <li><strong>How should you choose what to edit?</strong>
+        <ul>
+          <li><strong>1a · In plan.</strong> Keep Applies to fixed and switch Save in among the declarations in view.</li>
+          <li><strong>1b.</strong> Use one combined picker for the work and file, as in the earlier plan.</li>
+        </ul>
+      </li>
+      <li><strong>What should a control show when its saved value loses?</strong>
+        <ul>
+          <li><strong>2a · In plan.</strong> Edit the value saved there, with the effective result and source visible alongside it.</li>
+          <li><strong>2b.</strong> Lead with the effective value and put all file editing inside the provenance disclosure.</li>
+        </ul>
+      </li>
+      <li><strong>What should happen when you move a declaration into Shared settings?</strong>
+        <ul>
+          <li><strong>3a · In plan.</strong> Name the receiving scope and confirm the exact move in a preview.</li>
+          <li><strong>3b.</strong> Commit immediately and offer Undo after the move.</li>
+        </ul>
+      </li>
+    </ol>
+  </section>
+</main>
+<script>
+  const element = id => document.getElementById(id);
+  const destination = element("destination");
+  const label = { mine: "My repository settings", shared: "Shared repository settings", builtin: "Built-in default" };
+  const path = { mine: ".lf/config.local.yaml", shared: ".lf/config.yaml" };
+  const display = value => value === null ? "No declaration" : value ? "On" : "Off";
+  const files = { shared: true, mine: null };
+  const values = { ...files };
+  const history = [];
+  let draft = null;
+  let stale = false;
+
+  function effective(snapshot) {
+    if (snapshot.mine !== null) return [snapshot.mine, "mine"];
+    if (snapshot.shared !== null) return [snapshot.shared, "shared"];
+    return [false, "builtin"];
+  }
+
+  function announce(message) {
+    element("notice").textContent = message;
+  }
+
+  function draftEdit(kind, slot) {
+    const before = kind === "move" ? { mine: values.mine, shared: values.shared } : { [slot]: values[slot] };
+    const after = kind === "move" ? { mine: null, shared: values.mine } : { [slot]: null };
+    return { kind, slot, before, after };
+  }
+
+  function canPreview(kind, slot) {
+    return values[slot] !== null && (kind === "reset" || (slot === "mine" && values.shared === null));
+  }
+
+  function commit(edit) {
+    if (Object.entries(edit.before).some(([slot, expected]) => files[slot] !== expected)) {
+      stale = true;
+      announce("Save paused. A declaration changed in the file. Your preview is kept. Refresh to review the current state.");
+      render();
+      return;
+    }
+    Object.assign(files, edit.after);
+    Object.assign(values, files);
+    history.push(edit);
+    draft = null;
+    const slot = edit.kind === "move" ? "shared" : edit.slot;
+    announce(`Saved to ${label[slot]}. Undo is available.`);
+    render();
+  }
+
+  function yamlPreview(edit) {
+    return Object.keys(edit.before).map(slot => {
+      const before = edit.before[slot];
+      const after = edit.after[slot];
+      const removed = before === null ? "" : `\n− context: {diff: ${before}}`;
+      const added = after === null ? "" : `\n+ context: {diff: ${after}}`;
+      return path[slot] + removed + added;
+    }).join("\n\n");
+  }
+
+  function render() {
+    const slot = destination.value;
+    const [applies, source] = effective(values);
+    const authored = values[slot];
+    const switchValue = authored ?? applies;
+    const blocked = stale || draft !== null;
+    element("toggle").textContent = display(switchValue);
+    element("toggle").setAttribute("aria-checked", String(switchValue));
+    element("toggle").disabled = blocked;
+    element("authored").textContent = authored === null
+      ? `Inherited · a change saves to ${label[slot]}`
+      : `Saved here · ${display(authored)}`;
+    element("effective").textContent = `${display(applies)} · ${label[source]}`;
+    element("builtin-slot").textContent = source === "builtin" ? "Off · applies" : "Off";
+    for (const candidate of ["mine", "shared"]) {
+      element(`${candidate}-slot`).textContent =
+        display(values[candidate]) + (source === candidate ? " · applies" : "");
+    }
+    element("reset").disabled = blocked || !canPreview("reset", slot);
+    element("move").disabled = blocked || !canPreview("move", slot);
+    element("undo").disabled = blocked || history.length === 0;
+    element("refresh").disabled = !stale;
+    element("external").disabled = draft === null || stale;
+    element("preview-box").hidden = draft === null;
+    element("apply").disabled = stale;
+    if (draft) {
+      element("preview-title").textContent = draft.kind === "move" ? "Move to Shared Repository" : `Reset · ${label[draft.slot]}`;
+      element("apply").textContent = draft.kind === "move" ? "Move declaration" : "Reset Layer";
+      element("patch").textContent = yamlPreview(draft);
+      const [projected] = effective({ ...values, ...draft.after });
+      element("projected").textContent = `Projected for this checkout · ${display(projected)}`;
+    }
+  }
+
+  destination.addEventListener("change", render);
+  element("toggle").addEventListener("click", () => {
+    const slot = destination.value;
+    const after = !(values[slot] ?? effective(values)[0]);
+    commit({ kind: "set", slot, before: { [slot]: values[slot] }, after: { [slot]: after } });
+  });
+  for (const kind of ["reset", "move"]) {
+    element(kind).addEventListener("click", () => {
+      draft = draftEdit(kind, destination.value);
+      announce("Review the YAML patch, then apply or cancel.");
+      render();
+      element("apply").focus();
+    });
+  }
+  element("apply").addEventListener("click", () => {
+    commit(draft);
+    element(stale ? "refresh" : "undo").focus();
+  });
+  element("cancel").addEventListener("click", () => {
+    const kind = draft.kind;
+    draft = null;
+    announce(stale ? "Preview cancelled. Refresh to read the changed file." : "Preview cancelled.");
+    render();
+    element(stale ? "refresh" : kind).focus();
+  });
+  element("external").addEventListener("click", () => {
+    files[draft.slot] = !files[draft.slot];
+    announce("The fixture file changed. Settings still has the old preview.");
+    element("apply").focus();
+  });
+  element("refresh").addEventListener("click", () => {
+    stale = false;
+    Object.assign(values, files);
+    if (draft && canPreview(draft.kind, draft.slot)) {
+      draft = draftEdit(draft.kind, draft.slot);
+      announce("Refreshed. Review the updated patch before applying.");
+    } else {
+      draft = null;
+      announce("Refreshed. The previous action is unavailable at the current values.");
+    }
+    render();
+    element(draft ? "apply" : "toggle").focus();
+  });
+  element("undo").addEventListener("click", () => {
+    const edit = history.pop();
+    if (Object.entries(edit.after).some(([slot, saved]) => files[slot] !== saved)) {
+      announce("Undo kept the newer file value.");
+    } else {
+      Object.assign(files, edit.before);
+      announce("Undone. The previous declarations are restored.");
+    }
+    Object.assign(values, files);
+    render();
+    element("toggle").focus();
+  });
+  element("restart").addEventListener("click", () => {
+    Object.assign(files, { shared: true, mine: null });
+    Object.assign(values, files);
+    history.length = 0;
+    draft = null;
+    stale = false;
+    destination.value = "mine";
+    announce("Example reset. Shared is On and My repository has no declaration.");
+    render();
+  });
+
+  render();
+</script>
+</body>
+</html>

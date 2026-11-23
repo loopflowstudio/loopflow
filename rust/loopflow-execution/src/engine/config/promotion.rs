@@ -345,7 +345,9 @@ pub fn run(
         .into_iter()
         .collect::<BTreeSet<_>>();
     for path in &paths {
-        if path.ends_with(files::PRIVATE_FILE) && !matches!(action, Action::Preview) {
+        if path.ends_with(files::PRIVATE_FILE)
+            && !matches!(action, Action::Preview | Action::Dismiss)
+        {
             files::protect_private_file(path)?;
         }
     }
@@ -452,13 +454,15 @@ mod tests {
         set(&shared, key, "false").unwrap();
         assert!(run(&mine, key, None, &Action::Resume).is_err());
         let journal_bytes = std::fs::read(&record).unwrap();
+        let contents =
+            || [&mine, &shared].map(|file| std::fs::read(file.resolve().unwrap().path).unwrap());
+        let diverged = contents();
         assert!(matches!(
             run(&mine, key, None, &Action::Dismiss).unwrap(),
             Outcome::Dismissed
         ));
         assert!(!record.exists());
-        assert_eq!(get(&shared, key).unwrap().value, false);
-        assert_eq!(get(&mine, key).unwrap().value, true);
+        assert_eq!(contents(), diverged);
         std::fs::write(&record, journal_bytes).unwrap();
         assert_eq!(get(&mine, key).unwrap().value, true);
         set(&shared, key, "true").unwrap();

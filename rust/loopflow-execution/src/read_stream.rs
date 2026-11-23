@@ -508,6 +508,11 @@ where
     ) -> Result<Self> {
         let database = crate::store::database_path_from_env()?;
         let inbox: Arc<dyn Inbox> = shared.clone();
+        if watch == Watch::Files {
+            let mut readers = FILE_READERS.lock().expect("file subscriptions");
+            readers.retain(|reader| reader.strong_count() > 0);
+            readers.push(Arc::downgrade(&inbox));
+        }
         // Stdio uses the same observer to notice its parent exiting.
         if watch != Watch::Files || parent.is_some() {
             follow_store(&database, &inbox, parent);
@@ -762,6 +767,16 @@ fn accept<A: DeserializeOwned>(mailbox: &mut Mailbox<A>, line: &[u8]) {
     }
 }
 
+/// File-only subscriptions have no store event to wake them after a config write.
+static FILE_READERS: Mutex<Vec<Weak<dyn Inbox>>> = Mutex::new(Vec::new());
+
+pub(crate) fn wake_file_readers() {
+    FILE_READERS
+        .lock()
+        .expect("file subscriptions")
+        .retain(|reader| reader.upgrade().is_some_and(|reader| reader.look()));
+}
+
 /// The subscriptions of one store in this process, and the parent each follows.
 type Followers = Vec<(Weak<dyn Inbox>, Option<u32>)>;
 
@@ -911,6 +926,25 @@ mod tests {
             assert_eq!(next_frame(&second, &second_wakes)["body"], changed["body"]);
         }
         assert!(!home.path().join("loopflow.db").exists());
+    }
+
+    #[test]
+    fn a_config_write_wakes_a_file_subscription_between_polls() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.yaml");
+        let mailbox = super::mailbox();
+        let mut reader = super::Reader::new(
+            mailbox.clone(),
+            None,
+            Watch::Files,
+            (),
+            |_, ()| async { crate::config::files::read_text(&path) },
+            None,
+        )
+        .unwrap();
+        assert!(reader.step().unwrap().update.frame.is_some());
+        crate::config::files::atomic_write(&path, "chrome: false").unwrap();
+        assert!(super::lock(&mailbox).asked());
     }
 
     #[test]

@@ -171,12 +171,14 @@ struct Entry {
 }
 
 impl Entry {
-    fn update(&mut self, answer: Answer) {
-        if self.answer.as_ref() != Some(&answer) {
+    fn update(&mut self, answer: Answer) -> bool {
+        let changed = self.answer.as_ref() != Some(&answer);
+        if changed {
             self.answer = Some(answer);
             self.revision += 1;
         }
         self.checked = SystemTime::now();
+        changed
     }
 }
 
@@ -467,6 +469,7 @@ pub(crate) fn invalidate_path(path: &Path) {
         path.parent()
             .map(|parent| Fact::Directory(parent.to_owned())),
     ];
+    let mut changed = false;
     for fact in facts.into_iter().flatten() {
         let entry = cache
             .entries
@@ -476,8 +479,11 @@ pub(crate) fn invalidate_path(path: &Path) {
             .cloned();
         if let Some(entry) = entry {
             let mut entry = entry.lock().expect("observed fact");
-            entry.update(fact.observe());
+            changed |= entry.update(fact.observe());
         }
+    }
+    if changed {
+        crate::read_stream::wake_file_readers();
     }
 }
 

@@ -459,7 +459,7 @@ needs an unlocked display but no keyboard or focus.
 - `lf --task <id> desktop run "sh <script>"` (from the checkout, with
   `LF_DESKTOP` set) opens a Shell tab and runs the script in it. `desktop
   capture -p shell` answers "not a terminal"; take pixels instead.
-- `screencapture -x -o -l <n>` with `<n>` from `CGWindowListCopyWindowInfo`
+- `screencapture -x -o -l <n> terminal.png` with `<n>` from `CGWindowListCopyWindowInfo`
   (owner = bundle name, onscreen, titled with the repository). Once the
   screen locks it fails with "could not create image from window".
 - Personal Ghostty settings come from `$HOME/.config/ghostty/config` of the

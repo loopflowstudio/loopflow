@@ -5,6 +5,7 @@ import Loopflow
 struct ThemeChooser: View {
     let appearance: AppearanceStore
     let notices: NoticeCenter
+    var highlightedKey: String?
     @Environment(\.undoManager) private var undoManager
     @Environment(\.palette) private var palette
 
@@ -12,6 +13,7 @@ struct ThemeChooser: View {
         Form {
             if appearance.editing {
                 ThemeEditor(appearance: appearance)
+                    .settingsRow(SettingsMatch.theme.id, highlighted: highlightedKey)
             } else {
                 Picker("Appearance", selection: Binding(get: { appearance.selection.mode }, set: { mode in
                     Task { await appearance.applyMode(mode, notices: notices, manager: undoManager) }
@@ -20,9 +22,11 @@ struct ThemeChooser: View {
                 }
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier("appearance-mode")
+                .settingsRow(SettingsMatch.appearanceMode.id, highlighted: highlightedKey)
 
                 Button("Customize \(appearance.selectedName)") { appearance.customize() }
                     .accessibilityIdentifier("appearance-customize-theme")
+                    .settingsRow(SettingsMatch.theme.id, highlighted: highlightedKey)
 
                 let sides: [AppearanceMode] = appearance.selection.mode == .system ? [.light, .dark] : [appearance.selection.mode]
                 ForEach(sides, id: \.self) { side in

@@ -5,16 +5,14 @@ import SwiftUI
 
 struct MobileSettings: View {
     let setup: MobileSetup
+    var highlightedKey: String?
     @Environment(\.palette) private var palette
 
     var body: some View {
         Form {
             Section {
-                Toggle("Mobile access", isOn: Binding(get: { setup.configuration?.enabled == true }, set: { enabled in
-                    Task { await setup.change(enabled: enabled) }
-                }))
-                .toggleStyle(.switch)
-                .disabled(setup.busy)
+                MobileAccessToggle(setup: setup)
+                    .settingsRow(SettingsMatch.mobileAccess.id, highlighted: highlightedKey)
                 Text("Sign in to the same Tailscale account on this Machine and your iPhone.")
                     .foregroundStyle(.secondary)
             }
@@ -58,6 +56,18 @@ struct MobileSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+struct MobileAccessToggle: View {
+    let setup: MobileSetup
+
+    var body: some View {
+        Toggle(SettingsMatch.mobileAccess.title, isOn: Binding(get: { setup.configuration?.enabled == true }, set: { enabled in
+            Task { await setup.change(enabled: enabled) }
+        }))
+        .toggleStyle(.switch)
+        .disabled(setup.busy)
     }
 }
 

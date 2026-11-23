@@ -1,7 +1,7 @@
 import Loopflow
 import SwiftUI
 
-struct GeneralSettings: View {
+struct AutosaveToggle: View {
     let notices: NoticeCenter
     private let defaults: UserDefaults
     @AppStorage private var savedAutosave: Bool?
@@ -15,13 +15,11 @@ struct GeneralSettings: View {
     }
 
     var body: some View {
-        Section("Task Files") {
-            Toggle("Autosave Task Files", isOn: Binding(
-                get: { savedAutosave ?? true },
-                set: { saveAutosave($0) }
-            ))
-            .toggleStyle(.switch)
-        }
+        Toggle(SettingsMatch.autosave.title, isOn: Binding(
+            get: { savedAutosave ?? true },
+            set: { saveAutosave($0) }
+        ))
+        .toggleStyle(.switch)
     }
 
     private func saveAutosave(_ enabled: Bool) {

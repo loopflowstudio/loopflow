@@ -362,9 +362,10 @@ comments intact ([Configuration](config.md)).
   **Pin** (`agent`), **Starting preference** (`default_agent`), and **Fallback
   order** (`agents`) show their resolved order together.
 - **Search.** Typing in the sidebar searches pane names, setting labels, config
-  keys, aliases, and descriptions. Selecting a match opens its pane, scrolls to
-  the row, and highlights it. Boolean matches can be toggled directly in the
-  results when the save destination is clear.
+  keys, aliases, and descriptions. Search for **Diff**, then click **Include diff
+  in agent context** or use ↑/↓ and Return to reveal the highlighted row. The
+  switch beside the result edits the file named below its label. **Undo** works
+  after opening the pane or switching destinations.
 - **Status dots.** **Mobile** shows a green dot in the sidebar when Tailscale
   remote access is ready. Scoped panes show a dot when the selected non-global
   **Save in** file holds declarations there, including ones overridden by a

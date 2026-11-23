@@ -99,18 +99,45 @@ struct ContextSettingsWorkflowTests {
             let picker = try view.inspect().find(ViewType.Picker.self)
             try picker.select(value: ConfigurationDestination.sharedRepository)
             #expect(try view.inspect().find(ViewType.Toggle.self).isOn())
+            var navigation = SettingsNavigation(search: " Diff ")
+            let window = SettingsWindow(navigation: Binding(get: { navigation }, set: { navigation = $0 }),
+                                        appearance: AppearanceStore(paths: .temporary(), systemDark: false),
+                                        checkout: repo.path, portfolio: PortfolioService(), scope: model)
+            func diffResult() throws -> InspectableView<ViewType.ClassifiedView> {
+                try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView().find(viewWithId: "context.diff")
+            }
+            // My Off wins, but the search switch edits Shared On.
+            _ = try diffResult().find(text: "Shared repository settings · checkout")
+            #expect(try diffResult().find(ViewType.Toggle.self).isOn())
             let sharedFile = try #require(model.file)
             #expect(try await model.preview(.reset, key: "context.diff", file: sharedFile) == "- diff: true")
-            try view.inspect().find(ViewType.Toggle.self).tap()
+            try diffResult().find(ViewType.Toggle.self).tap()
+            #expect(navigation.search == " Diff ")
             try await awaitReading { model.file?.slots["context.diff"]?.value == .bool(false) }
             #expect(try String(contentsOf: shared, encoding: .utf8) == original.replacingOccurrences(of: "true", with: "false"))
-            try view.inspect().find(ViewType.Toggle.self).tap()
+            try diffResult().find(ViewType.Button.self).tap()
+            #expect(navigation.search.isEmpty)
+            #expect(navigation.pane == .context)
+            let detail = try window.inspect().find(ViewType.NavigationSplitView.self).detailView()
+            let revealed = try detail.find(viewWithId: "context.diff")
+            #expect(try revealed.accessibilityTraits().contains(.isSelected))
+            #expect(try !revealed.find(ViewType.Toggle.self).isOn())
+            try detail.find(button: "Undo").tap()
             try await awaitReading { model.file?.slots["context.diff"]?.value == .bool(true) }
             #expect(try #require(model.file).hasOverrides(in: .context, catalog: model.catalogue))
             #expect(model.reading.value?.source("context.diff") == ConfigurationDestination.personalRepository.title)
             #expect(try await !launchHasDiff(in: repo))
 
             try picker.select(value: ConfigurationDestination.personalRepository)
+            for (query, key) in [("linear.team", "repo.tracker"), ("branch diff", "context.diff"),
+                                 ("context.diff_files", "context.diff_files"), ("Starting preference", "default_agent")] {
+                navigation.search = query
+                #expect(navigation.matches(in: model.catalogue).contains { $0.id == key })
+            }
+            navigation.search = "nothing matches this"
+            let empty = try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView()
+            _ = try empty.find(text: "No matching settings")
+            #expect(try empty.findAll(SettingsSearchRow.self).isEmpty)
             let privateOff = try #require(model.file)
             await model.apply(.reset, key: "context.diff", to: privateOff, notices: notices, manager: nil)
             try await awaitReading { model.file?.slots["context.diff"]?.entries.isEmpty == true }
@@ -129,13 +156,33 @@ struct ContextSettingsWorkflowTests {
             #expect(try String(contentsOf: mine, encoding: .utf8) == external)
             try picker.select(value: ConfigurationDestination.personalRepository)
             try await awaitReading { model.file?.slots["context.diff"]?.value == .bool(true) }
+            navigation.search = "diff"
+            #expect(try diffResult().find(ViewType.Toggle.self).isDisabled())
             watch.cancel()
             await watch.value
-            model.refresh()
+            try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView().find(button: "Refresh settings").tap()
             watch = Task { await model.observe() }
             try await awaitReading { model.editError == nil && model.file?.slots["context.diff"]?.value == .bool(true) }
+            #expect(try !diffResult().find(ViewType.Toggle.self).isDisabled())
             await model.apply(.reset, key: "context.diff", to: try #require(model.file), notices: notices, manager: nil)
             try await awaitReading { model.file?.slots["context.diff"]?.entries.isEmpty == true }
+
+            // A malformed file keeps the last reading visible until Refresh can read it.
+            try Data("context: [".utf8).write(to: shared, options: .atomic)
+            try await awaitReading { model.reading.failure != nil }
+            #expect(try diffResult().find(ViewType.Toggle.self).isOn())
+            #expect(try diffResult().find(ViewType.Toggle.self).isDisabled())
+            watch.cancel()
+            await watch.value
+            try original.write(to: shared, atomically: true, encoding: .utf8)
+            try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView().find(button: "Refresh settings").tap()
+            watch = Task { await model.observe() }
+            let recoveryDeadline = ContinuousClock.now + .seconds(10)
+            while model.reading.failure != nil {
+                try #require(ContinuousClock.now < recoveryDeadline)
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(try !diffResult().find(ViewType.Toggle.self).isDisabled())
 
             _ = try await lf.run(["config", "set", "context.diff", "false", "--shared"], cwd: linked)
             _ = try await lf.run(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.org", "commit", "-am", "Set linked Diff"], cwd: linked, executable: "/usr/bin/git")

@@ -79,9 +79,15 @@ Mobile shares one readiness reading and QR code across Settings. Machines reads
 registered names from global configuration and checks the corresponding identities
 with the CLI probe, four at a time, independently of the editable settings.
 
-## Remaining slices
+Sidebar search uses the open window’s catalog. Return opens the selected result,
+scrolls the detail form and briefly highlights the control. Search switches share
+the pane’s edit destination, saved value and Undo. When a settings read fails,
+the sidebar keeps the last reading visible and offers Refresh.
 
-1. **Search across panes.** Sidebar search still matches pane names only (`SettingsNavigation.matches` in `swift/LoopflowMac/Views/SettingsWindow.swift`). Match row labels, catalog keys, aliases and descriptions from the cached `scope.catalogue`, plus App rows (autosave, theme, Mobile), routing `theme` to Appearance. Wire keyboard selection, row highlighting and in-place edits to the same address and edit state. Verify no-results, a stale reading, error recovery, accessibility, window resizing and light/dark.
+## Remaining work
+
+Gate and demo cover the rendered scroll position, resizing, keyboard focus, and
+light and dark appearance on the Mac.
 
 ## Sidebar checks
 
@@ -109,6 +115,11 @@ with the CLI probe, four at a time, independently of the editable settings.
 - The focused Rust nextest run passed all eight tests covering Machine status at the CLI, the Desktop and theme wire fixtures, the server schema and documented commands.
 - `cargo clippy --all-targets -- -D warnings` passed.
 - Gate covers the shared iOS protocol and the visual demo.
+
+## Search checks
+
+- `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ContextSettingsWorkflowTests|DesignDisciplineTests'` passed 11 tests in 55.2 seconds. Searching Diff showed Shared On while My Off applied. Toggling the result edited the Shared file, selecting it highlighted the Context switch, and Undo restored Shared On.
+- A malformed checkout file left the last value visible with editing disabled. Refresh restored the search switch after the file was repaired. The same run checked keyboard submission, alias and description matches, App rows before catalog loading, and an empty result list.
 
 ## Gate and demo
 

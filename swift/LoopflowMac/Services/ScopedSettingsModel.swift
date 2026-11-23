@@ -20,6 +20,12 @@ final class ScopedSettingsModel {
 
     var file: ConfigurationScope.File? { reading.value?.files.first { $0.owner == destination } }
 
+    func file(for pane: SettingsPane) -> ConfigurationScope.File? {
+        pane == .general ? reading.value?.files.first { $0.owner == .personalGlobal } : file
+    }
+
+    var editsDisabled: Bool { saving || editError != nil || reading.failure != nil }
+
     func select(checkout: String?, wave: String? = nil) {
         guard self.checkout != checkout || self.wave != wave else { return }
         target = .general

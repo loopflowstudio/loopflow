@@ -25,18 +25,37 @@ struct SettingsWorkflowTests {
         let results = try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView()
         #expect(try results.find(text: "Shortcuts").string() == "Shortcuts")
         #expect(throws: (any Error).self) { try results.find(text: "Appearance") }
-        navigation.open(.shortcuts)
+        try results.find(ViewType.TextField.self).callOnSubmit()
         let detail = try window.inspect().find(ViewType.NavigationSplitView.self).detailView()
         _ = try detail.find(KeyboardShortcutsView.self)
         navigation.open(.mobile)
         _ = try window.inspect().find(MobileSettings.self)
         navigation.open(.machines)
         _ = try window.inspect().find(ScopedSettings.self)
-        navigation.search = "missing"
-        #expect(try window.inspect().find(text: "No matching panes").string() == "No matching panes")
         navigation.open(.appearance)
         #expect(navigation.search.isEmpty)
         _ = try window.inspect().find(ThemeChooser.self)
+    }
+
+    @Test func appSearchFindsAutosaveAppearanceAndPairingWithoutWaitingForTheCatalog() throws {
+        var navigation = SettingsNavigation()
+        let window = SettingsWindow(navigation: Binding(get: { navigation }, set: { navigation = $0 }),
+                                    appearance: AppearanceStore(paths: .temporary(), systemDark: false),
+                                    checkout: nil, portfolio: PortfolioService())
+        for (query, result) in [("automatically", SettingsMatch.autosave), ("theme", .theme), ("QR", .mobileAccess)] {
+            navigation.search = query
+            let sidebar = try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView()
+            try sidebar.find(ViewType.TextField.self).callOnSubmit()
+            #expect(navigation.pane == result.pane)
+            let detail = try window.inspect().find(ViewType.NavigationSplitView.self).detailView()
+            _ = try detail.find(viewWithId: result.id)
+        }
+        navigation.search = "appear"
+        navigation.move(1, in: navigation.matches(in: []))
+        let sidebar = try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView()
+        try sidebar.find(ViewType.TextField.self).callOnSubmit()
+        #expect(navigation.highlightedKey == SettingsMatch.appearanceMode.id)
+
     }
 
     @Test(arguments: [true, false])
@@ -48,13 +67,13 @@ struct SettingsWorkflowTests {
         let manager = UndoManager()
         manager.groupsByEvent = false
         manager.beginUndoGrouping()
-        let view = GeneralSettings(notices: notices, undoManager: manager, defaults: defaults)
+        let view = AutosaveToggle(notices: notices, undoManager: manager, defaults: defaults)
         let toggle = try view.inspect().find(ViewType.Toggle.self)
         #expect(try toggle.isOn())
         try toggle.tap()
         manager.endUndoGrouping()
         #expect(!defaults.savesTaskFilesAutomatically)
-        #expect(try !GeneralSettings(notices: notices, undoManager: manager, defaults: defaults).inspect().find(ViewType.Toggle.self).isOn())
+        #expect(try !AutosaveToggle(notices: notices, undoManager: manager, defaults: defaults).inspect().find(ViewType.Toggle.self).isOn())
         let undo = try #require(notices.current?.action)
         #expect(undo.title == "Undo")
         if keyboard { manager.undo() } else { undo.perform() }

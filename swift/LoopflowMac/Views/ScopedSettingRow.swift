@@ -9,6 +9,7 @@ struct ScopedSettingRow: View {
     let source: String?
     let notices: NoticeCenter
     let manager: UndoManager?
+    var highlightedKey: String?
     @State private var draft: String?
     @State private var draftObservation: UUID?
     @State private var editingFile: ConfigurationScope.File?
@@ -21,20 +22,6 @@ struct ScopedSettingRow: View {
     private var key: String { definition.key }
     private var slot: ConfigurationScope.Slot? { file.slots[key] }
     private var authored: JSONValue? { slot?.value }
-    private var schema: [String: JSONValue] {
-        guard case .object(let root) = definition.schema else { return [:] }
-        if case .array(let options) = root["anyOf"], case .object(let first) = options.first,
-           case .string(let reference) = first["$ref"], case .object(let defs) = root["$defs"],
-           case .object(let choice) = defs[String(reference.split(separator: "/").last ?? "")] { return choice }
-        return root
-    }
-    private var type: String? {
-        switch schema["type"] {
-        case .string(let name): name
-        case .array(let names): names.compactMap { if case .string(let name) = $0, name != "null" { name } else { nil } }.first
-        default: nil
-        }
-    }
     private var input: Binding<String> {
         Binding(get: { draft ?? initialText }, set: {
             if editingFile == nil { editingFile = file; draftObservation = model.observation }
@@ -46,12 +33,12 @@ struct ScopedSettingRow: View {
         if key == "automation", case .object(let fields) = authored {
             return fields["retries"]?.settingsText ?? ""
         }
-        return type == "string" ? authored.settingsText : authored.settingsYAML
+        return definition.controlType == "string" ? authored.settingsText : authored.settingsYAML
     }
 
     var body: some View {
         Section {
-            control
+            control.settingsRow(key, highlighted: highlightedKey)
             DisclosureGroup {
                 ForEach(Array(effective.candidates.enumerated()), id: \.offset) { _, candidate in
                     LabeledContent(candidate.locator) {
@@ -125,21 +112,21 @@ struct ScopedSettingRow: View {
     }
 
     private var usesYAML: Bool {
-        type != "string" && type != "integer" && key != "automation"
+        definition.controlType != "string" && definition.controlType != "integer" && key != "automation"
     }
 
     @ViewBuilder private var control: some View {
-        if type == "boolean" {
-            Toggle(definition.title, isOn: Binding(get: { (authored ?? effective.value) == .bool(true) },
-                set: { save(.set($0 ? "true" : "false"), to: file) })).toggleStyle(.switch)
-        } else if case .array(let choices) = schema["enum"] {
+        if definition.controlType == "boolean" {
+            ScopedBooleanToggle(model: model, definition: definition, effective: effective,
+                                file: file, notices: notices, manager: manager)
+        } else if case .array(let choices) = definition.controlSchema["enum"] {
             Picker(definition.title, selection: Binding(get: { authored ?? .null }, set: {
                 save($0 == .null ? .reset : .set($0.settingsYAML), to: file)
             })) {
                 Text("Inherited").tag(JSONValue.null)
                 ForEach(choices, id: \.self) { Text($0.settingsText).tag($0) }
             }
-        } else if type == "array", case .object(let item) = schema["items"], item["type"] == .string("string") {
+        } else if definition.controlType == "array", case .object(let item) = definition.controlSchema["items"], item["type"] == .string("string") {
             OrderedSetting(title: definition.title, value: authored, save: { values in
                 await model.apply(.set(JSONValue.array(values.map(JSONValue.string)).settingsYAML), key: key, to: file, notices: notices, manager: manager)
             })
@@ -180,7 +167,7 @@ struct ScopedSettingRow: View {
             let retries = Int64(draft).map(JSONValue.integer) ?? .string(draft)
             text = JSONValue.object(["retries": retries]).settingsYAML
         } else {
-            text = type == "string" ? JSONValue.string(draft).settingsYAML : draft
+            text = definition.controlType == "string" ? JSONValue.string(draft).settingsYAML : draft
         }
         save(.set(text), to: draftObservation == model.observation ? editingFile : file)
     }
@@ -190,6 +177,44 @@ struct ScopedSettingRow: View {
                 discard()
                 reset = nil
             }
+        }
+    }
+}
+
+struct ScopedBooleanToggle: View {
+    let model: ScopedSettingsModel
+    let definition: ConfigurationDefinition
+    let effective: ConfigurationValue
+    let file: ConfigurationScope.File
+    let notices: NoticeCenter
+    let manager: UndoManager?
+
+    var body: some View {
+        let key = definition.key
+        Toggle(definition.title, isOn: Binding(
+            get: { (file.slots[key]?.value ?? effective.value) == .bool(true) },
+            set: { enabled in
+                Task { await model.apply(.set(enabled ? "true" : "false"), key: key, to: file, notices: notices, manager: manager) }
+            }
+        ))
+        .toggleStyle(.switch)
+        .disabled(model.editsDisabled)
+    }
+}
+
+extension ConfigurationDefinition {
+    var controlSchema: [String: JSONValue] {
+        guard case .object(let root) = schema else { return [:] }
+        if case .array(let options) = root["anyOf"], case .object(let first) = options.first,
+           case .string(let reference) = first["$ref"], case .object(let defs) = root["$defs"],
+           case .object(let choice) = defs[String(reference.split(separator: "/").last ?? "")] { return choice }
+        return root
+    }
+    var controlType: String? {
+        switch controlSchema["type"] {
+        case .string(let name): name
+        case .array(let names): names.compactMap { if case .string(let name) = $0, name != "null" { name } else { nil } }.first
+        default: nil
         }
     }
 }

@@ -37,16 +37,32 @@ enum SettingsPane: String, CaseIterable, Identifiable {
 
 struct SettingsNavigation {
     var pane = SettingsPane.general
-    var search = ""
+    var search = "" {
+        didSet {
+            guard search != oldValue else { return }
+            selectedResult = nil
+            highlightedKey = nil
+        }
+    }
+    var selectedResult: String?
+    var highlightedKey: String?
 
-    var matches: [SettingsPane] {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        return SettingsPane.allCases.filter { query.isEmpty || $0.rawValue.localizedCaseInsensitiveContains(query) }
+    var isSearching: Bool { !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    func selection(in matches: [SettingsMatch]) -> SettingsMatch? {
+        matches.first { $0.id == selectedResult } ?? matches.first
     }
 
-    mutating func open(_ pane: SettingsPane) {
+    mutating func move(_ offset: Int, in matches: [SettingsMatch]) {
+        guard !matches.isEmpty else { return }
+        let current = matches.firstIndex { $0.id == selectedResult } ?? 0
+        selectedResult = matches[min(max(current + offset, 0), matches.count - 1)].id
+    }
+
+    mutating func open(_ pane: SettingsPane, row: String? = nil) {
         self.pane = pane
         search = ""
+        highlightedKey = row
     }
 }
 
@@ -56,39 +72,67 @@ struct SettingsWindow: View {
     let checkout: String?
     let portfolio: PortfolioService
     @State var mobile = MobileSetup()
-    @State private var scope = ScopedSettingsModel()
+    @State var scope = ScopedSettingsModel()
     @State private var waves: [Wave] = []
     @State private var notices = NoticeCenter()
     @Environment(\.undoManager) private var undoManager
 
     var body: some View {
         NavigationSplitView {
-            List(selection: Binding<SettingsPane?>(
-                get: { navigation.pane },
-                set: { if let pane = $0 { navigation.open(pane) } }
-            )) {
-                let panes = navigation.matches
-                ForEach(["App", "Workflow", "Infrastructure"], id: \.self) { group in
-                    sidebarSection(group, panes: panes.filter { $0.group == group })
+            VStack(spacing: 0) {
+                let matches = navigation.matches(in: scope.catalogue)
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Search settings", text: $navigation.search)
+                        .textFieldStyle(.plain)
+                        .onKeyPress(.downArrow) { move(1, in: matches) }
+                        .onKeyPress(.upArrow) { move(-1, in: matches) }
+                        .onExitCommand { navigation.search = "" }
+                        .onSubmit {
+                            if let match = navigation.selection(in: matches) { open(match) }
+                        }
+                    if !navigation.search.isEmpty {
+                        Button { navigation.search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain).accessibilityLabel("Clear search")
+                    }
+                }
+                .padding(Spacing.sm)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: CornerRadius.control))
+                .padding(Spacing.sm)
+                if navigation.isSearching {
+                    searchResults(matches)
+                } else {
+                    List(selection: Binding<SettingsPane?>(
+                        get: { navigation.pane },
+                        set: { if let pane = $0 { navigation.open(pane) } }
+                    )) {
+                        ForEach(["App", "Workflow", "Infrastructure"], id: \.self) { group in
+                            sidebarSection(group, panes: SettingsPane.allCases.filter { $0.group == group })
+                        }
+                    }
+                    .listStyle(.sidebar)
                 }
             }
-            .listStyle(.sidebar)
-            .overlay {
-                if navigation.matches.isEmpty { EmptyState(title: "No matching panes") }
-            }
-            .searchable(text: $navigation.search, placement: .sidebar, prompt: "Search")
             .frame(minWidth: 210)
             .navigationSplitViewColumnWidth(min: 210, ideal: 220, max: 280)
         } detail: {
-            Group {
-                switch navigation.pane {
-                case .general, .agents, .context, .git, .machines:
-                    ScopedSettings(model: scope, pane: navigation.pane,
-                        checkouts: Array(Set(portfolio.repos.map(\.path) + [checkout, scope.checkout].compactMap { $0 })).sorted(),
-                        waves: waves, notices: notices)
-                case .appearance: ThemeChooser(appearance: appearance, notices: notices)
-                case .shortcuts: KeyboardShortcutsView()
-                case .mobile: MobileSettings(setup: mobile)
+            ScrollViewReader { proxy in
+                Group {
+                    switch navigation.pane {
+                    case .general, .agents, .context, .git, .machines:
+                        ScopedSettings(model: scope, pane: navigation.pane,
+                            checkouts: Array(Set(portfolio.repos.map(\.path) + [checkout, scope.checkout].compactMap { $0 })).sorted(),
+                            waves: waves, notices: notices, highlightedKey: navigation.highlightedKey)
+                    case .appearance: ThemeChooser(appearance: appearance, notices: notices, highlightedKey: navigation.highlightedKey)
+                    case .shortcuts: KeyboardShortcutsView()
+                    case .mobile: MobileSettings(setup: mobile, highlightedKey: navigation.highlightedKey)
+                    }
+                }
+                .task(id: scrollTarget) {
+                    guard let key = scrollTarget else { return }
+                    proxy.scrollTo(key, anchor: .center)
+                    do { try await Task.sleep(for: .seconds(1.5)) } catch { return }
+                    if navigation.highlightedKey == key { navigation.highlightedKey = nil }
                 }
             }
             .navigationTitle(navigation.pane.rawValue)
@@ -102,6 +146,49 @@ struct SettingsWindow: View {
         .environment(\.palette, appearance.effectiveTheme.palette)
         .environment(\.theme, appearance.effectiveTheme)
         .preferredColorScheme(appearance.effectiveTheme.colorScheme)
+    }
+
+    private var scrollTarget: String? {
+        guard let key = navigation.highlightedKey else { return nil }
+        if key == SettingsMatch.appearanceMode.id && appearance.editing { return nil }
+        if scope.catalogue.contains(where: { $0.key == key && $0.pane != .appearance }),
+           scope.reading.value?.settings[key] == nil { return nil }
+        return key
+    }
+
+    private func open(_ match: SettingsMatch) { navigation.open(match.pane, row: match.key) }
+
+    private func move(_ offset: Int, in matches: [SettingsMatch]) -> KeyPress.Result {
+        guard !matches.isEmpty else { return .ignored }
+        navigation.move(offset, in: matches)
+        return .handled
+    }
+
+    private func searchResults(_ matches: [SettingsMatch]) -> some View {
+        let selection = navigation.selection(in: matches)?.id
+        return ScrollViewReader { proxy in
+            List {
+                if let error = scope.editError ?? scope.reading.failure {
+                    Text(error).foregroundStyle(.secondary)
+                    Button("Refresh settings") { scope.refresh() }
+                }
+                ForEach(matches) { result in
+                    SettingsSearchRow(result: result, scope: scope, mobile: mobile, notices: notices,
+                                      manager: undoManager, selected: result.id == selection) {
+                        open(result)
+                    }
+                    .id(result.id)
+                    .listRowBackground(result.id == selection ? Color.accentColor.opacity(0.18) : .clear)
+                }
+                if scope.catalogue.isEmpty && scope.reading.isLoading {
+                    ProgressView("Loading settings").controlSize(.small)
+                } else if matches.isEmpty {
+                    EmptyState(title: "No matching settings").environment(\.compactPanes, true)
+                }
+            }
+            .listStyle(.sidebar)
+            .onChange(of: selection) { _, id in if let id { proxy.scrollTo(id) } }
+        }
     }
 
     @ViewBuilder

@@ -8,12 +8,16 @@ struct ScopedSettings: View {
     let checkouts: [String]
     let waves: [Wave]
     let notices: NoticeCenter
+    var highlightedKey: String?
     @Environment(\.undoManager) private var undoManager
 
     var body: some View {
         Form {
             if pane == .general {
-                GeneralSettings(notices: notices, undoManager: undoManager)
+                Section("Task Files") {
+                    AutosaveToggle(notices: notices, undoManager: undoManager)
+                        .settingsRow(SettingsMatch.autosave.id, highlighted: highlightedKey)
+                }
             } else {
                 Section {
                     Menu {
@@ -58,18 +62,19 @@ struct ScopedSettings: View {
             }
             if pane == .machines { MachineConnections(location: model.location) }
 
-            if let scope = model.reading.value, let file = pane == .general ? scope.files.first(where: { $0.owner == .personalGlobal }) : model.file {
+            if let scope = model.reading.value, let file = model.file(for: pane) {
                 let definitions = model.catalogue.filter { $0.pane == pane && !$0.isContainer }
                 ForEach(definitions, id: \.key) { definition in
                     if let effective = scope.settings[definition.key] {
                         if file.slots[definition.key] != nil {
                             ScopedSettingRow(model: model, definition: definition, effective: effective,
-                                file: file, source: scope.source(definition.key), notices: notices, manager: undoManager)
+                                file: file, source: scope.source(definition.key), notices: notices, manager: undoManager, highlightedKey: highlightedKey)
                                 .id(RowAddress(key: file.slots[definition.key]?.key ?? definition.key, destination: file.destination))
-                                .disabled(model.saving || model.editError != nil || model.reading.failure != nil)
+                                .disabled(model.editsDisabled)
                         } else {
                             Section {
                                 LabeledContent(definition.title, value: effective.value.settingsText)
+                                    .settingsRow(definition.key, highlighted: highlightedKey)
                                 ForEach(scope.files.filter { $0.slots[definition.key] != nil }) { other in
                                     if let owner = other.owner {
                                         Button("Edit in \(owner.title)") { model.destination = owner }

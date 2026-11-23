@@ -1,4 +1,4 @@
-at: 1f67a7e742708b92da94172d12edefcc53425ca4
+at: 06566fd47b5003e73c33c4c15a874c690b0348c5
 first:
   - path: swift/README.md
     why: Keyboard behavior in focused Session and Shell panes
@@ -11,8 +11,12 @@ first:
   - path: swift/LoopflowMac/Views/WorkPalette.swift
   - path: swift/LoopflowTests/GhosttyModifierInputTests.swift
     why: Exact terminal bytes and focused menu dispatch
+  - path: swift/LoopflowTests/SessionModifierInputTests.swift
+    why: Provider bytes before and after reopening a held Session
+  - path: swift/LoopflowTests/SessionConnectionProofTests.swift
+    why: Private Machine and mounted Session recovery
   - path: swift/LoopflowTests/GhosttyTerminalInputTests.swift
     why: Mounted typing and paste in a split
   - path: scratch/plan.md
-    why: Remaining held Session reattachment check
+    why: Verification results and remaining physical keyboard checks
 hide: []

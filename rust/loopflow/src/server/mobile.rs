@@ -225,7 +225,7 @@ fn permits_peer(
 mod localapi_fixture;
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::{owner_from_status, permits_peer, Configuration};
     use serde_json::json;
 
@@ -326,11 +326,11 @@ mod tests {
         }
     }
 
-    fn status(user: u64) -> serde_json::Value {
+    pub(super) fn status(user: u64) -> serde_json::Value {
         json!({"BackendState":"Running", "Self":{"ID":"node1", "DNSName":"fixture.tail.ts.net.", "UserID":user, "TailscaleIPs":["127.0.0.1"]}, "User":{user.to_string():{"LoginName":"owner@example.com"}}})
     }
 
-    fn approval(port: u16) -> Configuration {
+    pub(in crate::server) fn approval(port: u16) -> Configuration {
         Configuration {
             enabled: true,
             endpoint: format!("https://fixture.tail.ts.net:{port}"),
@@ -395,26 +395,37 @@ mod tests {
         requests: tokio::sync::mpsc::Sender<Control>,
     }
 
+    pub(in crate::server) fn start_manager() -> (
+        tokio::sync::mpsc::Sender<Control>,
+        tokio::task::JoinHandle<anyhow::Result<()>>,
+    ) {
+        let (requests, received) = tokio::sync::mpsc::channel(4);
+        let task = tokio::spawn(manage(
+            configured(),
+            received,
+            Arc::from("instance"),
+            Arc::new("executable".to_owned()),
+            Arc::new(tokio::sync::Semaphore::new(
+                crate::server::wire::MAX_CONNECTIONS,
+            )),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            None,
+        ));
+        (requests, task)
+    }
+
     impl Manager {
         fn start() -> Self {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .unwrap();
-            let (requests, received) = tokio::sync::mpsc::channel(4);
-            runtime.spawn(manage(
-                configured(),
-                received,
-                Arc::from("instance"),
-                Arc::new("executable".to_owned()),
-                Arc::new(tokio::sync::Semaphore::new(
-                    crate::server::wire::MAX_CONNECTIONS,
-                )),
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                None,
-            ));
+            let (requests, _task) = {
+                let _entered = runtime.enter();
+                start_manager()
+            };
             Self {
                 _runtime: runtime,
                 requests,

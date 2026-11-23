@@ -84,24 +84,43 @@ impl HostStatus {
     }
 }
 
+fn endpoints() -> Vec<Endpoint> {
+    #[cfg(test)]
+    if let Ok(paths) =
+        tests::SOCKETS.try_with(|paths| paths.iter().cloned().map(Endpoint::Unix).collect())
+    {
+        return paths;
+    }
+    if let Some(socket) = std::env::var_os("TS_SOCKET").filter(|s| !s.is_empty()) {
+        return vec![Endpoint::Unix(socket.into())];
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos::endpoints()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        vec![Endpoint::Unix("/var/run/tailscale/tailscaled.sock".into())]
+    }
+}
+
+fn installed_on_machine() -> bool {
+    #[cfg(test)]
+    if tests::SOCKETS.try_with(|_| ()).is_ok() {
+        // Discovery fixtures have only the supplied Unix sockets.
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    if macos::app_installed() {
+        return true;
+    }
+    loopflow_execution::os_process::which_on_path(Path::new("tailscale")).is_some()
+}
+
 impl Tailscale {
     pub(in crate::server) async fn discover() -> Result<(Self, HostStatus)> {
-        // An explicitly selected daemon also isolates private Machine fixtures.
-        let candidates =
-            if let Some(socket) = std::env::var_os("TS_SOCKET").filter(|s| !s.is_empty()) {
-                vec![Endpoint::Unix(socket.into())]
-            } else {
-                #[cfg(target_os = "macos")]
-                {
-                    macos::endpoints()
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    vec![Endpoint::Unix("/var/run/tailscale/tailscaled.sock".into())]
-                }
-            };
         let mut installed = false;
-        for endpoint in candidates {
+        for endpoint in endpoints() {
             let api = Self::new(endpoint)?;
             let Ok(status) = api.status(true).await else {
                 continue;
@@ -111,13 +130,7 @@ impl Tailscale {
                 return Ok((api, HostStatus::parse(&status, true)?));
             }
         }
-        #[cfg(target_os = "macos")]
-        {
-            installed |= macos::app_installed();
-        }
-        installed |=
-            loopflow_execution::os_process::which_on_path(Path::new("tailscale")).is_some();
-        anyhow::bail!(if installed {
+        anyhow::bail!(if installed || installed_on_machine() {
             "Open Tailscale and sign in on this Machine, then try again"
         } else {
             "Install and open Tailscale on this Machine, then try again"
@@ -227,5 +240,94 @@ impl Tailscale {
             .with_single_cert(certificates, key)
             .context("Tailscale certificate does not match its key")?;
         Ok(TlsAcceptor::from(Arc::new(config)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Tailscale;
+    use crate::server::mobile::localapi_fixture::Daemon;
+    use crate::server::mobile::tests::{approval, status};
+    use serde_json::json;
+    use std::os::unix::net::UnixListener;
+    use std::path::PathBuf;
+
+    tokio::task_local! {
+        pub(super) static SOCKETS: Vec<PathBuf>;
+    }
+
+    #[test]
+    fn discovery_skips_a_refused_socket_and_stops_at_the_first_running_host() {
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
+        let stale = dir.path().join("stale.sock");
+        drop(UnixListener::bind(&stale).unwrap());
+        let first = tempfile::tempdir_in("/tmp").unwrap();
+        let host = Daemon::start(first.path(), &status(1), String::new());
+        let _other = Daemon::start(dir.path(), &status(1), String::new());
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(SOCKETS.scope(
+            vec![
+                stale,
+                first.path().join("tailscaled.sock"),
+                dir.path().join("tailscaled.sock"),
+            ],
+            async {
+                let saved = approval(8443);
+                let discover = || async {
+                    let (_, observed) = Tailscale::discover().await?;
+                    observed.verify(&saved)
+                };
+                discover().await.unwrap();
+                host.status.send_replace(status(2));
+                assert!(discover()
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains("Tailscale account changed"));
+                let mut no_dns = status(1);
+                no_dns["Self"]["DNSName"] = json!("");
+                host.status.send_replace(no_dns);
+                assert!(discover()
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains("Enable Tailscale MagicDNS"));
+            },
+        ));
+    }
+
+    #[test]
+    fn setup_distinguishes_a_missing_installation_from_a_signed_out_daemon() {
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
+        let socket = dir.path().join("tailscaled.sock");
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let message = || {
+            rt.block_on(SOCKETS.scope(vec![socket.clone()], async {
+                Tailscale::discover()
+                    .await
+                    .err()
+                    .expect("no running host")
+                    .to_string()
+            }))
+        };
+        assert_eq!(
+            message(),
+            "Install and open Tailscale on this Machine, then try again"
+        );
+        let _signed_out = Daemon::start(
+            dir.path(),
+            &json!({"BackendState":"NeedsLogin"}),
+            String::new(),
+        );
+        assert_eq!(
+            message(),
+            "Open Tailscale and sign in on this Machine, then try again"
+        );
     }
 }

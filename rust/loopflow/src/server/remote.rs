@@ -545,6 +545,144 @@ mod tests {
     use tokio::net::{TcpListener, UnixStream};
     use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 
+    // Kernel socket I/O and the manager's control replies should finish at the
+    // current tick. Keep Tokio from auto-advancing to an HTTP timeout meanwhile.
+    async fn at_current_tick<T>(event: impl std::future::Future<Output = T>) -> T {
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let mut watchdog =
+            tokio::task::spawn_blocking(move || held.recv_timeout(Duration::from_secs(5)));
+        let result = tokio::select! {
+            result = event => result,
+            _ = &mut watchdog => panic!("expected progress without advancing the clock"),
+        };
+        drop(release);
+        let _ = watchdog.await.unwrap();
+        result
+    }
+
+    async fn mobile_status(
+        requests: &tokio::sync::mpsc::Sender<super::Control>,
+    ) -> crate::server::mobile::Status {
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        requests
+            .send(super::Control::Status { reply })
+            .await
+            .unwrap();
+        answer.await.unwrap()
+    }
+
+    async fn next_restore_error(
+        requests: &tokio::sync::mpsc::Sender<super::Control>,
+        previous: Option<&str>,
+    ) -> String {
+        at_current_tick(async {
+            loop {
+                if let Some(error) = mobile_status(requests).await.error {
+                    if Some(error.as_str()) != previous {
+                        return error;
+                    }
+                }
+            }
+        })
+        .await
+    }
+
+    #[test]
+    fn saved_restores_back_off_from_completion_and_off_cancels_a_pending_request() {
+        use crate::server::mobile::{
+            configured, save,
+            tests::{approval, start_manager},
+        };
+        use axum::{routing::get, Json, Router};
+        use loopflow_execution::config::environment::EnvVarGuard;
+        use serde_json::{json, Value};
+        use tokio::net::UnixListener;
+        use tokio::sync::{mpsc, oneshot};
+        use tokio::time::{advance, timeout};
+
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
+        let path = dir.path().join("tailscaled.sock");
+        let _home = EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap());
+        let _socket = EnvVarGuard::set("TS_SOCKET", path.to_str().unwrap());
+        save(&approval(8443)).unwrap();
+
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .start_paused(true)
+            .build()
+            .unwrap()
+            .block_on(async {
+                let (requests, manager) = start_manager();
+                let mut previous = next_restore_error(&requests, None).await;
+                // The first attempt found no socket. Hold each subsequent status
+                // request at the same address until the test supplies its answer.
+                let daemon = UnixListener::bind(path).unwrap();
+                let (incoming, mut attempts) = mpsc::unbounded_channel();
+                let status = Router::new().route(
+                    "/localapi/v0/status",
+                    get(move || {
+                        let (respond, answer) = oneshot::channel::<Value>();
+                        incoming.send(respond).unwrap();
+                        async move { Json(answer.await.unwrap_or_default()) }
+                    }),
+                );
+                let server =
+                    tokio::spawn(async move { axum::serve(daemon, status).await.unwrap() });
+                let tick = Duration::from_millis(1);
+                for (i, seconds) in [5, 10, 20, 30, 30].into_iter().enumerate() {
+                    assert!(
+                        timeout(Duration::from_secs(seconds) - tick, attempts.recv())
+                            .await
+                            .is_err(),
+                        "retried before {seconds}s"
+                    );
+                    advance(tick).await;
+                    let mut respond = at_current_tick(attempts.recv()).await.unwrap();
+                    advance(Duration::from_secs(2)).await;
+                    let pending = at_current_tick(mobile_status(&requests)).await;
+                    assert!(!pending.ready);
+                    assert_eq!(pending.error.as_deref(), Some(previous.as_str()));
+
+                    if i == 4 {
+                        let (reply, answer) = tokio::sync::oneshot::channel();
+                        requests
+                            .send(super::Control::Configure {
+                                configuration: None,
+                                reply,
+                            })
+                            .await
+                            .unwrap();
+                        assert!(at_current_tick(answer).await.unwrap().unwrap().is_none());
+                        at_current_tick(respond.closed()).await;
+                        break;
+                    }
+
+                    // Distinct errors acknowledge completion before timing the next retry.
+                    let node = if i % 2 == 0 {
+                        json!({"Tags":["tag:ci"]})
+                    } else {
+                        json!({})
+                    };
+                    respond
+                        .send(json!({"BackendState":"Running", "Self":node}))
+                        .unwrap();
+                    previous = next_restore_error(&requests, Some(&previous)).await;
+                }
+                assert!(!configured().unwrap().unwrap().enabled);
+                assert!(
+                    timeout(Duration::from_secs(60), attempts.recv())
+                        .await
+                        .is_err(),
+                    "disable cancels future retries"
+                );
+                drop(requests);
+                manager.await.unwrap().unwrap();
+                server.abort();
+                assert!(server.await.unwrap_err().is_cancelled());
+            });
+    }
+
     #[tokio::test]
     async fn completed_terminal_stream_sends_websocket_close_after_its_last_bytes() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

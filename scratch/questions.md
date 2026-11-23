@@ -17,3 +17,9 @@
 - OpenCode wakes from its own plugin (`session.synthetic`), not by posting to the TUI's
   `serve --stdio` child: that child's port and password are published nowhere. No lf-owned
   OpenCode server returns.
+- Concept review: Antigravity's wake file is recorded as `agent_inbox` by its launch, as Codex's
+  endpoint is, not reported by its hook through an env var. Passed over: the hook route, which
+  sends back to the store an address the launch already made, and records nothing when the hook
+  can't reach the server.
+- Pi's `stop {}` stays: Pi already records idle from `agent_settled`. Passed over: a named Stop
+  for Pi, which would add a second idle writer.

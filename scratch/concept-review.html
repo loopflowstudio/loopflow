@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LOO-1002 concept review: waking an idle work session</title>
+<style>
+  :root { color-scheme: light dark; --fg:#1d1f23; --bg:#fbfaf7; --muted:#6a6f78; --line:#dcd8cf;
+    --yes:#2f7d4f; --no:#b2452f; --prop:#2f5fb2; --card:#f2efe8; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e6e3dc; --bg:#16181c; --muted:#9aa0a8; --line:#33363d;
+    --yes:#6cc28f; --no:#e5866f; --prop:#86a9ec; --card:#1f2228; } }
+  body { font: 15px/1.55 ui-sans-serif, -apple-system, system-ui, sans-serif; color:var(--fg); background:var(--bg);
+    max-width: 980px; margin: 2.5rem auto; padding: 0 1.25rem; }
+  h1 { font-size: 1.5rem; margin-bottom: .2rem; } h2 { font-size: 1.15rem; margin-top: 2.2rem; }
+  p.lede { color: var(--muted); margin-top: 0; }
+  code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  table { border-collapse: collapse; width: 100%; margin: .8rem 0; font-size: 14px; }
+  th, td { text-align: left; vertical-align: top; padding: .45rem .55rem; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; }
+  .yes { color: var(--yes); font-weight: 600; } .no { color: var(--no); font-weight: 600; }
+  .prop { border-left: 3px solid var(--prop); padding-left: .6rem; }
+  .tag { font-size: 12px; padding: 0 .35rem; border-radius: 3px; border: 1px solid var(--prop); color: var(--prop); }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .card { background: var(--card); border-radius: 6px; padding: .8rem 1rem; }
+  .card h3 { margin: 0 0 .4rem; font-size: 1rem; }
+  pre { background: var(--card); padding: .7rem .9rem; border-radius: 6px; overflow-x: auto; font-size: 13px; line-height: 1.45; }
+  del { color: var(--no); } ins { color: var(--yes); text-decoration: none; }
+  ol li { margin-bottom: .55rem; }
+  @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<h1>Waking an idle work session: do the concepts line up?</h1>
+<p class="lede">LOO-1002, reviewed before anything is built, against <code>scratch/plan.md</code> at 8fc8bdf64c.
+Area taken: how a steer or Task update reaches a work session that has finished its turn, for all five harnesses:
+the idle recording, the store's wake address, the server's watcher and each provider's reach. That is the whole
+"hears a steer while idle" row, not only the three new harnesses, because the new reaches reuse the Claude/Codex
+model and should fit it rather than extend it.</p>
+
+<h2>The interaction</h2>
+<p>You run <code>lf steer LOO-12 'use the new API'</code>. The work session for LOO-12 sits idle in an OpenCode TUI.
+Within a second a turn starts there showing lf's message, and <code>lf session steers</code> says delivered.
+If the wake fails (provider refused, socket gone, <code>agy</code> changed its RPC), nothing breaks: the steer waits and
+the session hears it at its next boundary, as it does today. A person learns one thing — <em>an idle session hears
+lf</em> — and nothing about sockets, tokens or providers.</p>
+
+<h2>Product concepts and code concepts</h2>
+<table>
+<tr><th>What a person knows</th><th>Behind it in code</th><th>Lines up?</th><th>Where it doesn't</th></tr>
+<tr><td>A steer / Task update</td><td><code>steers</code>, <code>steer::claim</code>, <code>steer_delivered</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>The work session is idle</td><td><code>session_activity.yielded</code>, written by the Stop boundary (<code>record_native_turn</code>) or by Pi's event facts</td>
+  <td class="no">no, for OpenCode</td><td>OpenCode's turn end sends <code>stop {}</code>, so <code>boundary.rs</code> records no turn: an idle OpenCode session never reads as idle. The plan fixes it. Pi records idle from <code>agent_settled</code> through <code>AvailabilityReading</code>; its <code>stop {}</code> is harmless and stays.</td></tr>
+<tr><td>"lf can reach it" (implicit)</td><td><code>agent_sessions.agent_inbox</code> + <code>agent_endpoint</code> → <code>IdleReach</code></td>
+  <td class="no">no</td><td>One idea, "where this idle conversation takes a message", is documented as Claude-only (<code>record_agent_inbox</code>: "an idle Claude conversation… the inbox key file its hook found") and decoded as "endpoint means Codex, else Claude". The plan widens it per provider — right — but leaves the docs saying Claude.</td></tr>
+<tr><td>A wake</td><td><code>server::wake::wake</code>: connect, claim, send, <code>record_woken</code>, <code>delivered</code></td><td class="yes">yes</td><td>One owner. New reaches add a send arm, not a second watcher.</td></tr>
+<tr><td>Delivered vs waiting</td><td><code>steer_delivered.delivered_at</code></td><td class="yes">yes</td><td>Plugin reach is better than Claude's: it answers <code>accepted</code>/<code>error</code>, so a refusal leaves the claim to lapse.</td></tr>
+<tr><td>lf's message, not mine</td><td>Pi <code>customType: loopflow-steer</code>; OpenCode <code>session.synthetic</code>; Antigravity <code>SendUserCascadeMessage</code></td>
+  <td class="no">partly</td><td>Antigravity renders it as a typed prompt. Accepted cost: <code>agy</code> offers no other idle entry (questions.md).</td></tr>
+<tr><td>(nothing)</td><td>Antigravity wake file <code>{log, token}</code> + an env var + a hook change</td>
+  <td class="no">no</td><td>The biggest mismatch, below.</td></tr>
+</table>
+
+<h2>Biggest mismatch: who reports the address</h2>
+<p>The store's wake address has two sources today, and they are honest about it:</p>
+<div class="cols">
+  <div class="card"><h3>The provider makes it → a boundary reports it</h3>
+  Claude creates its inbox key; lf only finds it from a hook (<code>claude_inbox()</code>). The OpenCode/Pi plugin binds its
+  socket inside the provider process and reports it on each boundary. Reporting from inside is the only way lf learns these.</div>
+  <div class="card"><h3>lf makes it → the launch records it</h3>
+  Codex's app-server is spawned by lf; <code>codex.rs</code> calls <code>record_agent_endpoint</code> during <code>open()</code>.
+  No hook involved.</div>
+</div>
+<p>The plan's Antigravity reach is the second kind wearing the first kind's route. lf creates the token, picks the log file and
+writes the wake file in <code>antigravity.rs open()</code> — then puts the file's path in an env var so <code>agy</code>'s hook
+can read it back and send it to the server as <code>inbox</code>, which the server stores. That's a round trip through the
+agent's environment to tell the store something the launch already knew.</p>
+
+<div class="cols">
+<div><strong>Before (plan as written)</strong>
+<pre>antigravity open():  token, --log-file, write wake file
+                     <del>set LF_AGY_WAKE=&lt;file&gt; in child env</del>
+agy hook (every boundary):
+  <del>context.rs: inbox = env(LF_AGY_WAKE)</del>
+server boundary.rs:  record_agent_inbox(adapter, inbox)</pre></div>
+<div class="prop"><strong>After <span class="tag">proposed</span></strong>
+<pre>antigravity open():  token, --log-file, write wake file
+                     <ins>store.record_agent_inbox(attachment, file)</ins>
+                     (as codex.rs records agent_endpoint)
+agy hook:            unchanged
+server boundary.rs:  unchanged for agy</pre></div>
+</div>
+<p>Deletes the env var and the <code>context.rs</code> hook change; the address lives exactly as long as the AgentProcess that
+owns it (the bind already nulls <code>agent_inbox</code>, <code>processes.rs:579</code>). Counterexamples tried:
+<code>/resume</code> inside <code>agy</code> — same process, same server, thread follows via <code>hook_callback</code>, address unchanged ✓;
+<code>lf resume</code> — new AgentProcess, new launch, new file ✓; a released <code>lf</code> launch — no file, no row, next-turn only ✓;
+a hook that never fires (store down) — the hook route would leave no address, the launch route still has one ✓.</p>
+
+<h2>Smaller findings, written into the plan</h2>
+<ol>
+<li><strong>One concept, one description.</strong> <code>agent_inbox</code> is "where the conversation's own process takes a wake";
+<code>IdleReach</code>'s doc lists the four formats in one place and <code>record_agent_inbox</code>'s doc stops saying Claude.
+<code>agent_endpoint</code> stays Codex's app-server: <code>saved_session_connection</code> and <code>AfterStop</code> read it as one, so
+Antigravity must not go there.</li>
+<li><strong>Pi idle is already recorded</strong> through <code>agent_settled</code> → <code>AvailabilityReading</code>. The plan should say so, so the
+build fixes OpenCode's Stop only and doesn't add a second Pi idle writer.</li>
+<li><strong>OpenCode's typed prompt</strong> reports moment <code>tool</code> with <code>hook_event_name: "UserPromptSubmit"</code>: that pair is what
+<code>boundary.rs</code> maps to <code>yielded=false</code>.</li>
+</ol>
+
+<h2>What stays as planned</h2>
+<p>The watcher, claim/send/delivered order, one store column read by provider, the plugin wake socket with a real answer,
+Pi <code>followUp + triggerTurn</code>, OpenCode <code>synthetic/queue</code>, Antigravity over its loopback language server, the slice order
+(OpenCode end to end first, because the TUI rendering is the risk that could sink the approach).</p>
+
+<h2>Questions</h2>
+<ol>
+<li>Antigravity's wake address: (a) recorded by the launch, as Codex's endpoint is <span class="tag">chosen</span>; (b) reported by its hook from an env var, as the kickoff planned.</li>
+<li>Antigravity shows lf's message as a typed prompt: (a) accept, the only idle entry <code>agy</code> has <span class="tag">chosen</span>; (b) leave Antigravity next-turn-only until it offers a non-user message.</li>
+<li>Pi's turn end <code>stop {}</code>: (a) leave it, idle comes from <code>agent_settled</code> <span class="tag">chosen</span>; (b) send a named Stop like every other harness and drop Pi's activity reading for yielded.</li>
+</ol>
+</body>
+</html>

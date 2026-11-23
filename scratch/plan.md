@@ -38,11 +38,19 @@ messages", already written from the boundary's `inbox` field (`server/boundary.r
 | claude | Claude's peer key file (unchanged) | hook (`claude_inbox()`, `lf/commands/context.rs:500`) | `Claude(key)`: cross-session inbox |
 | codex | unused; `agent_endpoint` (unchanged) | launch | `Codex(endpoint)`: `turn/start` |
 | opencode, pi | the plugin's wake socket | plugin boundary (`server_connection.js`, today `inbox: null`) | `Plugin(socket)` |
-| antigravity | the launch's wake file `{log, token}` (0600) | hook, from an env var lf sets at launch | `Antigravity(file)` |
+| antigravity | the launch's wake file `{log, token}` (0600) | launch (`antigravity.rs` `open()`), as Codex's endpoint is | `Antigravity(file)` |
 
 `idle_conversation_candidates` (`loopflow-storage/src/sqlite/steers.rs:249`) selects
 `s.provider` and builds the reach from it, rather than "endpoint means Codex, otherwise
 Claude". No migration: every column exists.
+
+Two sources, by who makes the address: one the provider makes (Claude's key, the plugin's
+socket) is reported from inside it on a boundary; one lf makes (Codex's app-server,
+Antigravity's wake file) is recorded by the launch. `agent_inbox` means "where the
+conversation's own process takes a wake" for every provider: `record_agent_inbox`'s and
+`IdleReach`'s docs say so and list the formats once, instead of naming Claude.
+`agent_endpoint` stays Codex's app-server only: `saved_session_connection` and `AfterStop`
+read it as one.
 
 ### Plugin wake socket (OpenCode and Pi)
 
@@ -73,7 +81,11 @@ turns (`spec.turns` false: chats, batches) binds nothing.
   `boundary.rs:77` records no turn for it ("OpenCode's turn end names no conversation"), so
   an OpenCode work session never shows as idle and the watcher would never find it. The
   plugin's `stop` sends `{session_id: owner, hook_event_name: "Stop"}`, and its `prompt` hook
-  reports a `UserPromptSubmit` so a typed turn is recorded as running. That comment goes.
+  reports moment `tool` with `hook_event_name: "UserPromptSubmit"` (the pair `boundary.rs` maps
+  to `yielded=false`) so a typed turn is recorded as running. That comment goes.
+- **Pi idle recording** needs no change: `agent_settled` reaches the store as an
+  `AvailabilityReading` through `pi::observe_native`, which writes `yielded`. Its `stop {}`
+  stays; no second Pi idle writer.
 
 ### Antigravity: its language server
 
@@ -87,8 +99,10 @@ with header `x-codeium-csrf-token: <token>` and body `{"cascadeId": <conversatio
 
 For a work session `antigravity.rs` `open()` creates a random token, passes
 `--log-file <prompts dir>/<launch>.agy.log`, sets the token in the child's environment, and
-writes the wake file `{log, token}` (0600) beside the delivery. Its path rides in an env var
-the hook reads into the boundary's `inbox`, as `claude_inbox()` does for Claude. The server reads the
+writes the wake file `{log, token}` (0600) beside the delivery, then records its path as the
+AgentProcess's `agent_inbox` (a store call keyed by the attachment, as `record_agent_endpoint`
+is for Codex; the bind already nulls it for each new AgentProcess). No env var, no hook change:
+the launch made the address, so the launch records it. The server reads the
 port from the log at wake time (`agy` can move its port across a restart), then posts.
 Hooks never see the token (probe: it is absent from hook environments). The agent's own shell
 already receives Antigravity's server address and token from `agy`; lf adds nothing there.
@@ -122,8 +136,8 @@ The provider thread is already the conversation `/new`, `/fork` and `/resume` mo
 - `rust/loopflow-execution/src/harness/server_connection.js`: wake socket, `inbox` reported.
 - `context_pi.mjs`, `context_opencode.js`: accept a wake; OpenCode stop/prompt name the conversation.
 - `rust/loopflow-execution/src/harness/context.rs`: spec carries the wake directory.
-- `rust/loopflow-execution/src/harness/antigravity.rs`: token, log file, wake file, env var.
-- `rust/loopflow/src/lf/commands/context.rs`: hook's `inbox` reports Antigravity's wake file.
+- `rust/loopflow-execution/src/harness/antigravity.rs`: token, log file, wake file, recorded as `agent_inbox`.
+- `rust/loopflow-storage/src/sqlite/steers.rs`: `record_agent_inbox` doc generalized; an attachment-keyed write for the launch.
 - `rust/loopflow/src/server/boundary.rs`: OpenCode Stop records a turn.
 - Docs: `server/README.md` "Waking an idle conversation" lists all reaches; harness README row → yes.
 
@@ -154,8 +168,8 @@ a log naming its port, a wake file) receives the token header and its `cascadeId
    `opencode --standalone` work session in this checkout, idle, `lf steer`: the TUI must show the
    turn (risk 1).
 2. **Pi:** the extension's wake handler (`sendMessage` followUp + triggerTurn), Node test, wake test.
-3. **Antigravity:** launch token, log file, wake file, hook `inbox`, HTTP send, stand-in test; a
+3. **Antigravity:** launch token, log file, wake file recorded at launch, HTTP send, stand-in test; a
    real `agy` work session woken by `lf steer`.
 4. **Docs:** both READMEs; the table row says `yes` and names the tests.
 
-Choices made for review are in `scratch/questions.md`.
+Choices made for review are in `scratch/questions.md`; the concept review is `scratch/concept-review.html`.

@@ -81,7 +81,7 @@ with the CLI probe, four at a time, independently of the editable settings.
 
 ## Remaining slices
 
-1. **Search across panes.** Wire keyboard selection, row highlighting and in-place edits to the same address and edit state. Verify no-results, a stale reading, error recovery, accessibility, window resizing and light/dark.
+1. **Search across panes.** Sidebar search still matches pane names only (`SettingsNavigation.matches` in `swift/LoopflowMac/Views/SettingsWindow.swift`). Match row labels, catalog keys, aliases and descriptions from the cached `scope.catalogue`, plus App rows (autosave, theme, Mobile), routing `theme` to Appearance. Wire keyboard selection, row highlighting and in-place edits to the same address and edit state. Verify no-results, a stale reading, error recovery, accessibility, window resizing and light/dark.
 
 ## Sidebar checks
 

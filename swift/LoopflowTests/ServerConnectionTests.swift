@@ -17,12 +17,7 @@ struct ServerConnectionTests {
         defer { connection.stop() }
         try connection.start { _ in }
         var relay: Relay? = try Relay(connection)
-        var bytes = try JSONSerialization.data(withJSONObject: [
-            "generation": 1, "state": "ended", "native_ready": false,
-            "message": message as Any? ?? NSNull()
-        ])
-        bytes.append(10)
-        try relay?.write(bytes)
+        try relay?.write(Relay.reading(generation: 1, state: "ended", nativeReady: false, message: message))
         try await wait { connection.reading.state == .ended }
         #expect(connection.reading.title == (message ?? "Session ended."))
         #expect(!connection.reading.acceptsInput)
@@ -58,31 +53,6 @@ struct ServerConnectionTests {
         try await wait { connection.reading.acceptsInput }
         #expect(connection.reading.title == nil)
         #expect(connection.reading.attachment == .usable)
-    }
-
-    @Test func resumedRelayPayloadKeepsHeaderHiddenAcrossNativeReadiness() async throws {
-        let connection = ServerConnection()
-        defer { connection.stop() }
-        try connection.start { _ in }
-        let relay = try Relay(connection)
-        let transition: [String: Any] = [
-            "kind": "resumed", "from_provider_session": "thread", "to_provider_session": "thread",
-            "from_agent_process": "44444444-4444-4444-8444-444444444444",
-            "to_agent_process": "55555555-5555-4555-8555-555555555555",
-            "original_running": NSNull(), "seed": NSNull(), "observed_at": 1794100000,
-        ]
-        for ready in [false, true] {
-            var bytes = try JSONSerialization.data(withJSONObject: [
-                "generation": 1, "state": "connected", "native_ready": ready,
-                "message": NSNull(), "transition": transition,
-            ])
-            bytes.append(10)
-            try relay.write(bytes)
-            try await wait { connection.reading.state == .connected && connection.reading.nativeReady == ready }
-            #expect(connection.reading.title == nil)
-            #expect(connection.reading.acceptsInput == ready)
-            #expect(connection.reading.attachment == (ready ? .usable : .opening))
-        }
     }
 
     @Test func brokenStatusStreamPausesInputAndFreshStreamRestoresIt() async throws {
@@ -177,9 +147,13 @@ struct ServerConnectionTests {
         }
         deinit { close(fd) }
 
-        static func reading(generation: UInt64, state: String, nativeReady: Bool = true) throws -> Data {
-            var bytes = try JSONSerialization.data(withJSONObject: ["generation": generation, "state": state,
-                "native_ready": nativeReady, "message": NSNull()])
+        static func reading(generation: UInt64, state: String, nativeReady: Bool = true, message: String? = nil) throws -> Data {
+            // The relay still sends provider history for older Desktop clients.
+            let payload: [String: Any] = [
+                "generation": generation, "state": state, "native_ready": nativeReady,
+                "message": message as Any, "transition": try loadFixture("provider_transition.json"),
+            ]
+            var bytes = try JSONSerialization.data(withJSONObject: payload)
             bytes.append(10)
             return bytes
         }

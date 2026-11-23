@@ -228,32 +228,23 @@ New Sessions take their title from the request, Skill, or Task (a name you set
 is never overwritten by `--suggest`). Titles propagate via OSC terminal titles
 and host-specific tabs (cmux, tmux).
 
-Open a Task in Desktop and the pane shows a quiet spinner (over any retained
-screen) while preparing, pausing input until the provider accepts it. There is
-no opening or transition header below the toolbar strip: the terminal starts
-directly below the provider and status strip—after a reattach, a resume in a
-new process, a fork, or a fresh start.
+When you open a Task, Desktop shows a spinner over any saved screen. The
+terminal opens directly below the provider and status strip. You can type once
+the terminal is attached and the provider is ready. After a Desktop restart,
+selecting the Task reattaches to its running provider with your draft intact.
 
-A connection bar appears over the terminal only when a connection drops,
-becomes unavailable, or ends:
+If the connection drops, the last screen stays visible. The message over the
+terminal tells you how to continue.
 
-| Message | What happened | What to do |
-|---|---|---|
-| **Reconnecting… Input paused; last screen may be stale.** | Connection dropped while the held provider keeps running | Keep working in other panes; output catches up with your draft intact |
-| **Session unavailable. Input paused; last screen may be stale.** | Automatic retries stopped (or a specific relay error appeared) | Click **Retry connection** in the bar to ask the relay to reconnect |
-| **Connection status unavailable. Input paused.** | The viewer lost its status channel to the relay | Click **Refresh session** in the pane strip to reopen the viewer |
-| **Session ended.** (or a retirement or takeover reason) | The terminal closed cleanly or another client took over | Click **Refresh session** in the pane strip to reopen the conversation |
+| Message | What to do |
+|---|---|
+| **Reconnecting…** | Leave the pane open. If the provider is still running, your draft survives and buffered output catches up. |
+| **Session unavailable** or a relay error | Click **Retry connection** to reconnect through the relay. |
+| **Connection status unavailable** | Click **Refresh session** in the pane strip to reopen the viewer. |
+| **Session ended** or a specific close reason | Read the reason. Use **Refresh session** to reopen the conversation. |
 
-**Retry connection** appears only while the relay can still receive it. Neither
-**Retry connection** nor **Refresh session** resends input or restarts Graphs.
-See [Connect clients](server.md) for server recovery details.
-
-To inspect recorded provider changes (starts, resumes in a new process, forks,
-or provider switches):
-
-```bash
-lf session history <session>
-```
+Retry and refresh leave Graphs running and never replay keystrokes.
+See [Connect clients](server.md) for server recovery.
 
 Interactive Sessions keep provider auth or capacity refusals visible and never
 auto-retry; resolve the login or switch harnesses with `-a` on `lf resume`.

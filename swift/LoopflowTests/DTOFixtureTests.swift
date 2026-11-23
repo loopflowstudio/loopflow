@@ -1139,12 +1139,11 @@ struct DTOFixtureTests {
                 from: JSONSerialization.data(withJSONObject: task))
         }
     }
+}
 
-    private func loadFixture(_ name: String) throws -> [String: Any] {
-        let data = try loadFixtureData(name)
-        let json = try JSONSerialization.jsonObject(with: data)
-        return try #require(json as? [String: Any])
-    }
+func loadFixture(_ name: String) throws -> [String: Any] {
+    let json = try JSONSerialization.jsonObject(with: loadFixtureData(name))
+    return try #require(json as? [String: Any])
 }
 
 func loadFixtureData(_ name: String) throws -> Data {

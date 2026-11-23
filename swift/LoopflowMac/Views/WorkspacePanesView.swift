@@ -75,7 +75,6 @@ struct ConversationOpenButton: View {
 /// offers the one next action. An unstarted Task has no checkout and so no
 /// conversation: it says what Start will run.
 struct ConversationPlaceholder: View {
-    @Environment(\.theme) private var theme
     let workspace: SessionsWorkspace
     let model: WorkModel
     let sessions: SessionsStore
@@ -83,7 +82,6 @@ struct ConversationPlaceholder: View {
     var body: some View {
         if model.conversationIsOpening(workspace) {
             SessionOpeningView(screen: nil)
-                .foregroundStyle(theme.palette.text)
         } else if workspace.key.kind == .task, let task = model.task(id: workspace.key.id)?.task, task.awaitsStart {
             TaskStartOffer(model: model, task: task)
         } else {
@@ -123,10 +121,10 @@ struct SessionOpeningView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            Color.clear
             if let screen {
                 ScrollView {
                     Text(screen).font(Typography.mono)
+                        .foregroundStyle(palette.text)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -135,7 +133,7 @@ struct SessionOpeningView: View {
                 .accessibilityLabel("Opening session")
                 .controlSize(.small).padding(Spacing.sm).background(palette.background)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -842,9 +840,9 @@ struct SessionPaneView: View {
     @ViewBuilder
     func _sessionPlaceholder(_ item: SessionItem) -> some View {
         switch item.state {
-        case .opening, .prepared:
+        case .opening, .prepared,
+             .pending where model.conversationIsOpening(workspace):
             SessionOpeningView(screen: item.lastScreen)
-                .foregroundStyle(theme.palette.text)
         case .ended(let output):
             VStack(alignment: .leading, spacing: Spacing.md) {
                 Text("No longer open here").foregroundStyle(theme.palette.text)
@@ -859,9 +857,6 @@ struct SessionPaneView: View {
             EmptyState(title: "Session failed to open", machine: message) {
                 openButton(item)
             }
-        case .pending where model.conversationIsOpening(workspace):
-            SessionOpeningView(screen: item.lastScreen)
-                .foregroundStyle(theme.palette.text)
         case .pending, .live:
             EmptyState(title: "Not running here", sentence: "This Session has no live terminal in this pane yet.") {
                 openButton(item)

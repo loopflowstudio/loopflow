@@ -24,7 +24,8 @@ struct ServerConnectionReading: Decodable, Equatable {
         }
     }
 
-    var acceptsInput: Bool { state == .connected && nativeReady }
+    var acceptsInput: Bool { attachment == .usable }
+
     var title: String? {
         switch state {
         case .connecting, .connected: return nil
@@ -139,17 +140,11 @@ final class ServerConnection {
         changed?(reading)
     }
 
-    private func send(_ action: [String: Any]) -> Bool {
-        guard channel.fd >= 0, var bytes = try? JSONSerialization.data(withJSONObject: action) else { return false }
-        bytes.append(10)
-        let sent = bytes.withUnsafeBytes { Darwin.send(channel.fd, $0.baseAddress, $0.count, 0) }
-        guard sent == bytes.count else { statusUnavailable(); return false }
-        return true
-    }
-
     func retry() {
         guard canRetry else { return }
-        _ = send(["kind": "retry"])
+        let action = Data("{\"kind\":\"retry\"}\n".utf8)
+        let sent = action.withUnsafeBytes { Darwin.send(channel.fd, $0.baseAddress, $0.count, 0) }
+        if sent != action.count { statusUnavailable() }
     }
 
     func stop() {

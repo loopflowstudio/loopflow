@@ -12,10 +12,7 @@ struct WorkspacePanesTests {
     private let location = WorkspaceIdentity(machineId: "fixture", worktree: "/fixture/task-a")
 
     private func session(_ id: String, _ fields: [String: Any] = [:]) throws -> SessionRecord {
-        let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto/session.json")
-        var wire = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        var wire = try loadFixture("session.json")
         wire["id"] = id
         wire["task_primary"] = true
         wire["state"] = "unknown"
@@ -300,11 +297,7 @@ struct WorkspacePanesTests {
         ("resumed", "Resumed in a new process"),
     ])
     func sessionStripShowsProviderWithoutTransitionHeader(kind: String, header: String) throws {
-        let query = RegistryQuery { _, _ in throw RegistryQueryError("Rendering cannot open work") }
-        let model = WorkModel(query: query, repoPath: location.worktree)
-        let workspace = SessionsWorkspace(key: .init(repository: "repo", kind: .task, id: "task-a"),
-            title: "Task A", location: location, localMachineId: location.machineId)
-        let sessions = workspace.sessionStore(repoPath: location.worktree, query: query)
+        let (workspace, view) = taskPanes()
         let transition: [String: Any] = [
             "kind": kind, "from_provider_session": kind == "resumed" ? "thread" as Any : NSNull(),
             "to_provider_session": "thread", "from_agent_process": NSNull(),
@@ -312,12 +305,9 @@ struct WorkspacePanesTests {
             "original_running": NSNull(), "seed": NSNull(), "observed_at": 1794100000,
         ]
         let record = try session("primary", ["provider": "claude", "transition": transition])
-        sessions.reconcile([record])
+        view.sessions.reconcile([record])
         workspace.multiplexer.load(sessionId: record.id, location: location)
         let pane = workspace.multiplexer.focusedPane
-        let view = SessionPaneView(pane: pane, isFocused: true, sessions: sessions, workspace: workspace,
-                                   model: model, onFocus: { _, _ in })
-        // The label is the word alone: Text, not a Label with the provider's symbol.
         let program = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-program-\(pane.id)")
             .find(ViewType.Menu.self).labelView()
         #expect(try program.text().string() == "Claude")
@@ -327,7 +317,8 @@ struct WorkspacePanesTests {
     @Test func openingSessionShowsProgressOverItsRetainedScreen() throws {
         let view = SessionOpeningView(screen: "Last terminal line")
         _ = try view.inspect().find(text: "Last terminal line")
-        _ = try view.inspect().find(ViewType.ProgressView.self)
+        let spinner = try view.inspect().find(ViewType.ProgressView.self)
+        #expect(try spinner.accessibilityLabel().string() == "Opening session")
         #expect(throws: (any Error).self) { try view.inspect().find(text: "Opening… Input paused.") }
     }
 

@@ -359,11 +359,8 @@ the view quits in the same instant.
 
 ### Desktop status
 
-Desktop pauses input until attachment and native input readiness are
-acknowledged, showing a quiet spinner (over any retained screen) before mount
-and no header text on the mounted terminal. Initial retries stay quiet without
-a banner; **Reconnecting…** follows a previously acknowledged connection.
-Workspace preparation keeps its last available screen.
+Initial connection attempts keep the pane quiet. **Reconnecting…** follows
+a previously acknowledged connection.
 Connection feedback overlays the screen without changing the terminal's size;
 the first retained screen uses the new pane's dimensions and cursor position.
 The relay stays alive when its server connection drops. Its native status row

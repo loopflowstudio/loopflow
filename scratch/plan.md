@@ -100,6 +100,12 @@ the Notice, and a later successful reading. Include a confirmed frame arriving
 before the write answer to catch a double-applied move. Update the sidebar docs
 with the default, filter behavior and repository drag.
 
+## Docs
+
+- `docs/surfaces.md`
+- `docs/work.md`
+- `swift/README.md`
+
 ## Gate
 
 Run Cargo with the Task's `LF_*` variables cleared and stdin closed.

@@ -70,7 +70,7 @@ claims and runs. To jump into the conversation directly, run
 ## See where everything stands
 
 ```bash
-lf wave show                                   # each Wave's plan and Tasks, sorted by what needs attention
+lf wave show                                   # each Wave's plan and Tasks in shared order
 lf task status LOO-12                          # state, Graph step, PR, Sessions, and Graph runs
 lf task changes LOO-12                         # diff summary so far
 lf task wait LOO-13                            # block until done or abandoned

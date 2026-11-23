@@ -49,8 +49,8 @@ own settings.
 
 The native macOS app reads the same local store as `lf`; it keeps no copy of its own:
 
-- **Sidebar (⌘1–9):** your working Tasks in shared order (dragging reorders
-  them for CLI lists too).
+- **Sidebar (⌘1–9):** your [Working Tasks](#working-tasks-in-the-sidebar) in
+  shared order (dragging reorders them for Wave views and CLI lists too).
 - **Task workspace:** three resizable panes: `session` (conversation), `shell`
   (at the Task's worktree), and `browser` (Files, Graph log, local dev URLs).
 - **Dashboards:** saved side-by-side grids of Tasks selected by query. Each
@@ -90,6 +90,42 @@ which turns auto off).
 If the Machine pauses briefly, edits still show immediately and flush once it
 reconnects. After ~10 seconds offline, mutation controls disable until the
 connection returns. See [Connect clients](server.md) for connection recovery.
+
+### Working Tasks in the sidebar
+
+Open a Task in the sidebar, send a prompt, and let the agent hand back. Its
+status changes, its conversation stays open, and the row stays where it is:
+
+```text
+loopflow
+  Review invoice                  LOO-410  Idle
+▸ Fix release notes               LOO-412  Busy        ← stays second while working
+```
+
+When `LOO-412` finishes its turn and becomes **Available** again, it is still
+second (`⌘2`), and opening its Wave shows the same relative order.
+
+- **Default order.** Before any drag, Working Tasks follow their planning rank,
+  with canonical Task ID breaking ties. Conversation activity (**Available**,
+  **Busy**, **Blocked**) updates a row's status word and filter membership,
+  never its position.
+- **Drag to reorder.** Drag a row in the repository sidebar or the Working Tasks
+  grid to place it where you want. The move shows at once while the Machine
+  saves the repository's Working order, and Wave views, `lf task list`,
+  `lf wave show`, and the phone feed keep that same relative order. New Working
+  Tasks without a saved position appear after saved rows (by planning rank, then
+  Task ID); changing a Task's planning rank moves it only among unsaved rows and
+  leaves saved drag positions alone. (The [backlog](#the-backlog) still sorts by
+  planning rank.) If the Machine refuses a drop—for example, when the target
+  Task has left Working—the preview clears at once and a bottom Notice says why,
+  showing the last confirmed order even if the follow-up read fails.
+- **Filters and shortcuts.** In **⌘K**, **Sidebar shows** filters the sidebar to
+  **Working tasks**, **Available**, or **Busy** in the full Working list's
+  relative order. Changing the filter or sending a prompt leaves the open Task
+  selected even when its row leaves the filtered list (for example, moving from
+  **Available** to **Busy**). A Task with one available conversation and one
+  busy conversation matches both filters. **⌘1–9** and **⌃Tab / ⌃⇧Tab** follow
+  the visible rows.
 
 ### The backlog
 

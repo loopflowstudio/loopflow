@@ -122,11 +122,8 @@ script). It checks that:
 
 Breaking the lock check or the freshness claim fails one of these.
 
-Machine check, run once by implement and recorded in the PR: a
-`test_loop.py`-style arm, a new worktree then `cargo build -p loopflow --bin lf`
-and `cargo test -p loopflow --lib <filter>` passing, seeded vs `rm -rf target`
-after the add,
-three alternating samples each, reporting wall, CPU, RSS and rewritten bytes.
+Machine check, run once by implement and recorded in the PR: slice 2's
+`seed_probe.py` results.
 
 ## Absent and error states
 
@@ -136,7 +133,7 @@ three alternating samples each, reporting wall, CPU, RSS and rewritten bytes.
   there's no seed.
 - Different Cargo.lock or toolchain in the source: units that don't match
   simply aren't reused (they compile). The stale units share blocks until
-  `lf wt clean --builds` reaps the target.
+  `lf wt prune --builds` reaps the target.
 - `build_cleanup` measures `st_blocks`, so it counts a clone at full size.
   It caps bytes removed per run (64 GiB), so it reaps fewer roots per pass and
   overstates what it freed. Nothing is deleted wrongly. This is noted in
@@ -174,10 +171,15 @@ and build scripts" becomes the seeded behaviour plus what still compiles.
    --bin lf` printed 7 `Compiling` lines, 76.5 s wall, 85 CPU-s, 2.24 GB RSS,
    and the built `lf --version` named this checkout's commit. Cargo agreed with
    the probe; nothing in the plan changed.
-2. **Measured arm.** Add the seeded/unseeded arm to
-   `scripts/benchmarks/crate-rebuild/test_loop.py` (or a sibling driver), run
-   three cohorts, and render results with `report.py` as
-   `results/loo-922.html`.
+2. **Measured arm (next).** Write `scripts/benchmarks/crate-rebuild/seed_probe.py`
+   (the README already documents it and `report.py --seed-probe`; neither
+   exists yet). Each sample: `git worktree add` from a fixed base, then
+   `cargo build -p loopflow --bin lf` and one focused
+   `cargo test -p loopflow --lib <filter>`, seeded vs `rm -rf target` after
+   the add, three alternating samples each. Record wall, CPU, peak RSS,
+   compiled/fresh unit counts from `-v`, the seed source, and rewritten bytes
+   by one stated method (open choice in `scratch/questions.md`). Render
+   `results/loo-922.html` and paste the table into this plan.
 3. **Docs.** Written ahead of the code: `scripts/testing.md` (Shared
    compilation cache: `seed` status line, "New worktrees start warm", hook
    paragraph, `lf wt prune --builds` overcount) and

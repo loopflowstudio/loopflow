@@ -1,4 +1,4 @@
-at: c3a44d5a6a610547f12ff5dd6e2176c7c07dc4ac
+at: f6e806d4668341e4dc9167379dd0c62f242792ea
 first:
   - path: docs/work.md
     why: What pausing and unpausing do
@@ -6,6 +6,8 @@ first:
     why: Scope, macOS checks, and remaining work
   - path: rust/loopflow-storage/src/sqlite/task_pause.rs
     why: The hold and the worker identities it protects
+  - path: rust/loopflow/src/lf/commands/write.rs
+    why: Send pause and unpause to the execution Machine
   - path: rust/loopflow-execution/src/ops/task/pause.rs
     why: Stop a Task and finish interrupted cleanup
   - path: rust/loopflow-execution/src/harness/native_exit.rs
@@ -16,6 +18,16 @@ first:
     why: Leave steers unread while their target is paused
   - path: rust/loopflow-execution/src/ops/human_session/moves.rs
     why: Carry the pause across Machines and acknowledge retries
+  - path: rust/loopflow-execution/src/task_graph.rs
+    why: Name the held step from its saved cursor
+  - path: rust/loopflow-execution/src/ops/task_run.rs
+    why: Explain when execution can resume
+  - path: rust/loopflow/src/lf/commands/waves.rs
+    why: Project the hold into board and status
+  - path: rust/loopflow/tests/machine_commands.rs
+    why: Pause remotely and read the owner's answer
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
     why: Exercise teardown, quiet wakes, Backlog, and unpause
-hide: []
+hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: Generated from the Rust protocol and request fixtures

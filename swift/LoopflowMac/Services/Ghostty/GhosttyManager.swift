@@ -112,7 +112,20 @@ final class GhosttyManager: ObservableObject {
     // Current preview plus applied candidate; cancel reuses validated config.
     private nonisolated(unsafe) var themeConfigs: [String: (TerminalPalette, ghostty_config_t)] = [:]
     private(set) var theme = ThemeDefinition.light
-    /// Scalar defaults, loaded before the person's files so their values win.
+    // These bindings operate Ghostty's standalone window, tabs, splits and app chrome.
+    // Ghostty binds tab numbers 1–8 by both character and physical key for non-US layouts.
+    private static let standaloneShortcuts = [
+        "super+n", "super+w", "super+alt+w", "super+alt+shift+w",
+        "super+t", "super+shift+t", "super+z", "super+shift+z",
+        "ctrl+tab", "ctrl+shift+tab", "super+shift+[", "super+shift+]",
+        "super+d", "super+shift+d", "super+[", "super+]",
+        "super+alt+arrow_up", "super+alt+arrow_down", "super+alt+arrow_left", "super+alt+arrow_right",
+        "super+ctrl+arrow_up", "super+ctrl+arrow_down", "super+ctrl+arrow_left", "super+ctrl+arrow_right",
+        "super+ctrl+=", "super+enter", "super+ctrl+f", "super+shift+enter",
+        "super+shift+p", "super+alt+i", "super+shift+,", "super+9",
+    ] + (1...8).flatMap { ["super+\($0)", "super+digit_\($0)"] }
+
+    /// Loaded before the person's files so their bindings and values win.
     static let loopflowConfig = """
     font-size = \(Int(Typography.terminalSize))
     adjust-cell-height = 10%
@@ -120,6 +133,7 @@ final class GhosttyManager: ObservableObject {
     font-feature = -liga
     font-thicken = true
     minimum-contrast = 3
+    \(standaloneShortcuts.map { "keybind = \($0)=unbind" }.joined(separator: "\n"))
 
     """
 
@@ -174,6 +188,10 @@ final class GhosttyManager: ObservableObject {
     image-storage-limit = 67108864
     keybind = super+arrow_up=jump_to_prompt:-1
     keybind = super+arrow_down=jump_to_prompt:1
+    keybind = super+q=unbind
+    keybind = super+,=unbind
+    keybind = super+comma=unbind
+    keybind = super+shift+w=unbind
     """
 
     /// Ghostty's process-wide state is set up once, however many callers ask.
@@ -388,8 +406,14 @@ final class GhosttyManager: ObservableObject {
         }
 
         self.app = ghosttyApp
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardSelectionChanged),
+            name: NSTextInputContext.keyboardSelectionDidChangeNotification, object: nil)
         ghostty_app_set_color_scheme(ghosttyApp, theme.isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
         state = .ready
+    }
+
+    @objc private func keyboardSelectionChanged(_ notification: Notification) {
+        if let app { ghostty_app_keyboard_changed(app) }
     }
 
     func tick() {

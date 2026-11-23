@@ -6,3 +6,4 @@
 - Keep Ghostty's effective `macos-option-as-alt` setting (layout-dependent default + `~/.config/ghostty/config`) and call `ghostty_app_keyboard_changed` on input-source changes, rather than forcing a Desktop-wide Alt default.
 - Fix both `DesktopActionMonitor` and `WorkPaletteShortcut` to check `NSTextInputClient.hasMarkedText()` instead of `NSTextView`, leaving monitor consolidation as separate cleanup.
 - For the Option-B fixture, enable bracketed paste and follow both keypresses with a terminal status query. Its reply marks the end of the byte stream for that pair.
+- Match the pinned Ghostty defaults for Settings and numbered tabs. Settings uses the comma character, while `comma` names a physical key. Tabs 1–8 bind both characters and physical digits.

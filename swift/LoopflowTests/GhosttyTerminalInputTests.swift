@@ -839,16 +839,25 @@ struct GhosttyTerminalInputTests {
         window.contentView = root
         let left = GhosttyMetalView(terminal: .session("left", machineId: fixtureMachineId), frame: CGRect(x: 0, y: 0, width: 400, height: 300))
         let right = GhosttyMetalView(terminal: .shell("right", machineId: fixtureMachineId), frame: CGRect(x: 400, y: 0, width: 400, height: 300))
+        // The Session relay keeps its status connection open while echoing terminal input.
+        left.command = buildGhosttyShellCommand(argv: ["/bin/sh", "-c", #"""
+            { printf '%s\n' '{"generation":1,"state":"connected","native_ready":true,"message":null}'; /bin/cat >/dev/tty; } | /usr/bin/nc -U "$LF_SERVER_STATUS"
+            """#], env: [:])
+        right.command = "/bin/cat"
         for view in [left, right] {
             root.addSubview(view)
             view.workingDirectory = NSTemporaryDirectory()
-            view.command = "/bin/cat"
             view.createSurface(manager: manager)
             _ = try #require(view.surface)
         }
         defer {
             left.handleSurfaceClose()
             right.handleSurfaceClose()
+        }
+        let readyDeadline = ContinuousClock.now + .seconds(3)
+        while !left.connectionAcceptsInput {
+            try #require(ContinuousClock.now < readyDeadline, "Session relay did not report ready")
+            try await Task.sleep(for: .milliseconds(10))
         }
         let pasteboard = NSPasteboard.general
         let savedItems = (pasteboard.pasteboardItems ?? []).map { item in

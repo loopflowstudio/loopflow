@@ -43,20 +43,18 @@ Clipboard paste, `lf desktop send`/`send-key`, selection, focus, connection reco
 ## Build and check
 
 1. **Built the Option-B slice.** Desktop key equivalents now probe for a binding before sending a key. The shared Session and Shell responder lets AppKit interpret Option on the side Ghostty selected, then encodes committed text with the original key. Clipboard paste still uses the paste API.
-2. **Next, finish keyboard, IME, and shortcut ownership.** Slice 1 already shipped side masks in `translateMods`, `isARepeat` → `GHOSTTY_ACTION_REPEAT`, `unshifted_codepoint` from `characters(byApplyingModifiers: [])`, the `key_is_binding` probe and empty-`setMarkedText` unmark. Still missing in code (checked 2026-11-22):
-   - `GhosttyTerminalView.flagsChanged` (`GhosttyTerminalView.swift:1308`): skip while `hasMarkedText()`; press/release from the keycode's `NX_DEVICE*` bit, not generic `.shift`/`.option`.
-   - `DesktopActions.swift:672` and `WorkPalette.swift:315` still cast to `NSTextView`; change to `NSTextInputClient`.
-   - `GhosttyManager.swift`: no `keyboardSelectionDidChangeNotification` → `ghostty_app_keyboard_changed`; no unbinds of standalone defaults.
-   - No `selectAll(_:)` responder on `GhosttyMetalView`.
-   Check them alongside the new key path.
-   - Kitty mode: distinct bytes for `Return`, `Shift-Return`, and `Control-Return`; shifted printable keys (`Shift-A`, `Shift-/`) proving `unshifted_codepoint` and `consumed_mods`; Control letter; modified navigation (`Option-Left`, `Shift-Tab`); repeat (`isARepeat` -> `GHOSTTY_ACTION_REPEAT`) and release (`keyUp`, side-aware `flagsChanged`).
-   - IME & dead keys: composed text commits once without triggering-chord modifiers; `setMarkedText("")` clears `hasMarkedText()` and emits zero bytes; `DesktopActionMonitor` / `WorkPaletteShortcut` defer when `GhosttyMetalView.hasMarkedText()` is `true`; `flagsChanged` is ignored while composing.
-   - Shortcut ownership & config: in Kitty mode, `performKeyEquivalent` returns `false` for `⌘Q`, `⌘,`, `⌘⇧W`, `⌘H`, `⌘/` (AppKit menus remain reachable) and dispatches real Ghostty bindings (`⌘↑`/`⌘↓`, `⌘A`, and an `unconsumed:` binding) once; `GhosttyManager` updates Ghostty on `keyboardSelectionDidChangeNotification`; mounted split shortcut test keeps focus routing intact.
+2. **Built modifier, composition and shortcut ownership.** Each modifier release follows its physical key. Both Desktop shortcut monitors and the terminal's modifier handler defer during marked text. Input-source changes refresh Ghostty's keymap, and Edit → Select All selects terminal output. Ghostty's standalone shortcuts are removed before loading personal bindings. The Desktop menu keys for Quit, Settings and Close Window are unbound after loading them.
 3. **Exercise the held Session.** Reuse the isolated provider and private Machine setup from `SessionConnectionProofTests.swift`. An input fixture switches its PTY to raw mode, requests Kitty keyboard mode, signals readiness, and reports the bytes it reads. Run the sequence through the Desktop Session surface, then reattach to that PTY and repeat after mode restore. Verify provider bytes, not handler return values, using a readiness signal and bounded reads. Gate target: `scripts/test_desktop.sh --filter 'GhosttyModifierInputTests|SessionModifierInputTests'`, with renderer and PTY checks off-window and mounted/physical-keyboard checks in the optional mounted lane.
 
 **Slice 1 checks**
 - `scripts/test_desktop.sh --skip-build --filter GhosttyModifierInputTests` after `swift build --build-tests --package-path swift` passed all four settings headless. With bracketed paste enabled, each side wrote exactly `1b 62` or `e2 88 ab`. CI repeats this check.
 - `LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --skip-build --no-parallel --filter typingAfterKeyboardRestore` passed both Kitty modes on the Mac. The mounted fixture now waits for the top history line before typing and reads the literal `x` at the live prompt. This stays in the optional display lane.
+
+**Slice 2 checks**
+
+- `scripts/test_desktop.sh --filter GhosttyModifierInputTests` passed all seven headless tests. In Kitty disambiguation mode the surface wrote exactly CR, CSI 13;2u and CSI 13;5u for Return, Shift-Return and Control-Return. CI repeats the byte checks.
+- With `LOOPFLOW_NATIVE_TESTS=1`, `swift test --package-path swift --no-parallel --filter focusedKeyEquivalents` verified menu fallthrough, Control-Return dispatch, selection and a personal unconsumed binding. The mounted checks `composingInFocusedTerminal` and `pasteShortcutFollowsFirstResponder` passed after fixing their fixtures. The first dispatches through both local monitors in a test key window. The second waits for the Session relay's ready message before pasting.
+- Switching physical input sources and typing with a real IME remain manual checks. Slice 3 still needs the same byte comparison across held-Session reattachment.
 
 **Demo.** Open the isolated Session in Loopflow Desktop. Press Return, Shift-Return, and Control-Return; the fixture shows `0d`, `1b 5b 31 33 3b 32 75`, and `1b 5b 31 33 3b 35 75` once each. Close and reopen the pane and repeat. In legacy mode, Option-B shows `1b 62` with Option-as-Alt enabled and `∫` with it disabled on a US layout. Confirm `⌘Q`, `⌘,`, and `⌘⇧W` still reach Loopflow Desktop menus while the Kitty-mode Session is focused.
 

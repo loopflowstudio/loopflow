@@ -1306,35 +1306,31 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func flagsChanged(with event: NSEvent) {
-        guard connectionAcceptsInput else { return }
+        guard connectionAcceptsInput, !hasMarkedText() else { return }
         guard let surface else {
             super.flagsChanged(with: event)
             return
         }
 
-        // Detect which modifier changed and send appropriate key event
+        // The aggregate Shift flag stays set when just one of two held Shifts lifts.
+        let mask: UInt
+        switch event.keyCode {
+        case 0x38: mask = UInt(NX_DEVICELSHIFTKEYMASK)
+        case 0x3C: mask = UInt(NX_DEVICERSHIFTKEYMASK)
+        case 0x3B: mask = UInt(NX_DEVICELCTLKEYMASK)
+        case 0x3E: mask = UInt(NX_DEVICERCTLKEYMASK)
+        case 0x3A: mask = UInt(NX_DEVICELALTKEYMASK)
+        case 0x3D: mask = UInt(NX_DEVICERALTKEYMASK)
+        case 0x37: mask = UInt(NX_DEVICELCMDKEYMASK)
+        case 0x36: mask = UInt(NX_DEVICERCMDKEYMASK)
+        case 0x39: mask = NSEvent.ModifierFlags.capsLock.rawValue
+        case 0x3F: mask = NSEvent.ModifierFlags.function.rawValue
+        default: return
+        }
         var key = ghostty_input_key_s()
         key.mods = translateMods(event.modifierFlags)
         key.keycode = UInt32(event.keyCode)
-
-        // Determine if this is a press or release based on the specific flag
-        let isPress: Bool
-        switch event.keyCode {
-        case 0x39: // Caps Lock
-            isPress = event.modifierFlags.contains(.capsLock)
-        case 0x38, 0x3C: // Shift
-            isPress = event.modifierFlags.contains(.shift)
-        case 0x3B, 0x3E: // Control
-            isPress = event.modifierFlags.contains(.control)
-        case 0x3A, 0x3D: // Option
-            isPress = event.modifierFlags.contains(.option)
-        case 0x37, 0x36: // Command
-            isPress = event.modifierFlags.contains(.command)
-        default:
-            isPress = true
-        }
-
-        key.action = isPress ? GHOSTTY_ACTION_PRESS : GHOSTTY_ACTION_RELEASE
+        key.action = event.modifierFlags.rawValue & mask != 0 ? GHOSTTY_ACTION_PRESS : GHOSTTY_ACTION_RELEASE
         _ = ghostty_surface_key(surface, key)
     }
 
@@ -1645,6 +1641,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     func performBinding(_ action: String) {
         guard let surface else { return }
         action.withCString { _ = ghostty_surface_binding_action(surface, $0, UInt(action.utf8.count)) }
+    }
+
+    @objc override func selectAll(_ sender: Any?) {
+        performBinding("select_all")
     }
 
     private func focusForPointerInput() {

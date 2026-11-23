@@ -2,6 +2,8 @@
 import AppKit
 import GhosttyKit
 import IOKit
+import Loopflow
+import SwiftUI
 import Synchronization
 import Testing
 @testable import LoopflowMac
@@ -17,12 +19,168 @@ struct GhosttyModifierInputTests {
         ("true", "\u{1b}b\u{1b}b"), ("left", "\u{1b}b∫"), ("right", "∫\u{1b}b"), ("false", "∫∫"),
     ])
     func optionB(setting: String, expected: String) async throws {
+        // Bracketed paste makes a mistaken trip through the clipboard API visible.
+        try await expectInput(expected, after: "\u{1b}[?2004h", userConfig: "macos-option-as-alt = \(setting)") { view in
+            for side in [NX_DEVICELALTKEYMASK, NX_DEVICERALTKEYMASK] {
+                let flags = NSEvent.ModifierFlags.option.union(.init(rawValue: UInt(side)))
+                view.keyDown(with: try event("∫", 0x0B, flags, unmodified: "b"))
+            }
+        }
+    }
+
+    @Test("Kitty disambiguates modified Return, Tab and Control letters")
+    func kittyChords() async throws {
+        try await expectInput("\r\u{1b}[13;2u\u{1b}[13;5u\u{1b}[9;2u\u{1b}[100;5u\u{1b}b", after: "\u{1b}[>1u") { view in
+            for mods: NSEvent.ModifierFlags in [[], .shift, .control] {
+                view.keyDown(with: try event("\r", 36, mods))
+            }
+            view.keyDown(with: try event("\u{19}", 48, .shift))
+            view.keyDown(with: try event("\u{4}", 2, .control, unmodified: "d"))
+            view.keyDown(with: try event("\u{f702}", 123, .option))
+        }
+    }
+
+    @Test("Kitty reports shifted text, repeats and key releases")
+    func kittyEventTypes() async throws {
+        try await expectInput("\u{1b}[97:65;2u\u{1b}[47:63;2u\u{1b}[13;5:2u\u{1b}[13;5:3u", after: "\u{1b}[>15u") { view in
+            view.keyDown(with: try event("A", 0, .shift))
+            view.keyDown(with: try event("?", 44, .shift))
+            view.keyDown(with: try event("\r", 36, .control, repeating: true))
+            view.keyUp(with: try event("\r", 36, .control, type: .keyUp))
+        }
+    }
+
+    @Test("Lifting left Shift while right Shift is held sends a release")
+    func sideAwareRelease() async throws {
+        let left = NSEvent.ModifierFlags(rawValue: UInt(NX_DEVICELSHIFTKEYMASK))
+        let right = NSEvent.ModifierFlags(rawValue: UInt(NX_DEVICERSHIFTKEYMASK))
+        try await expectInput("\u{1b}[57441;2u\u{1b}[57447;2u\u{1b}[57441;2:3u\u{1b}[57447;1:3u", after: "\u{1b}[>11u") { view in
+            view.flagsChanged(with: try event("", 0x38, [.shift, left], type: .flagsChanged))
+            view.flagsChanged(with: try event("", 0x3C, [.shift, left, right], type: .flagsChanged))
+            view.flagsChanged(with: try event("", 0x38, [.shift, right], type: .flagsChanged))
+            view.flagsChanged(with: try event("", 0x3C, [], type: .flagsChanged))
+        }
+    }
+
+    @Test("Standalone split and tab defaults leave their chords available to the terminal")
+    func standaloneShortcuts() async throws {
+        try await expectInput("\u{1b}[100;9u\u{1b}[13;9u\u{1b}[9;5u\u{1b}[49;9u", after: "\u{1b}[>11u") { view in
+            view.keyDown(with: try event("d", 2, .command))
+            view.keyDown(with: try event("\r", 36, .command))
+            view.keyDown(with: try event("\t", 48, .control))
+            view.keyDown(with: try event("1", 18, .command))
+        }
+    }
+
+    @Test("Committing marked text writes it once and canceling writes nothing")
+    func composition() async throws {
+        try await expectInput("日本", after: "\u{1b}[>11u") { view in
+            let range = NSRange(location: 0, length: 0)
+            view.setMarkedText("に", selectedRange: range, replacementRange: range)
+            try #require(view.hasMarkedText())
+            let shift = NSEvent.ModifierFlags(rawValue: UInt(NX_DEVICELSHIFTKEYMASK))
+            view.flagsChanged(with: try event("", 0x38, [.shift, shift], type: .flagsChanged))
+            view.setMarkedText("", selectedRange: range, replacementRange: range)
+            #expect(!view.hasMarkedText())
+            view.setMarkedText("にほん", selectedRange: range, replacementRange: range)
+            view.insertText("日本", replacementRange: range)
+            #expect(!view.hasMarkedText())
+        }
+    }
+
+    @Test("A focused terminal leaves app menus available and runs each binding once", .requiresDisplay)
+    func focusedKeyEquivalents() async throws {
+        let bindings = """
+        keybind = super+q=text:quit
+        keybind = super+,=text:settings
+        keybind = super+shift+w=text:close
+        keybind = unconsumed:super+d=text:split
+        """
+        try await expectInput("\u{1b}[13;5usplit\u{1b}[100;9u", after: "\u{1b}[>11uhello", userConfig: bindings) { view in
+            let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+            window.contentView = view
+            defer { window.contentView = nil }
+            try #require(window.makeFirstResponder(view))
+
+            for (key, code): (String, UInt16) in [("q", 12), (",", 43), ("h", 4), ("m", 46), ("/", 44), ("n", 45)] {
+                #expect(try !view.performKeyEquivalent(with: event(key, code, .command)))
+            }
+            #expect(try !view.performKeyEquivalent(with: event("W", 13, [.command, .shift])))
+            #expect(try view.performKeyEquivalent(with: event("\r", 36, .control)))
+            #expect(try view.performKeyEquivalent(with: event("d", 2, .command)))
+            #expect(try view.performKeyEquivalent(with: event("a", 0, .command)))
+            let surface = try #require(view.surface)
+            #expect(ghostty_surface_has_selection(surface))
+        }
+    }
+
+    @Test("Edit → Select All selects terminal output")
+    func selectAll() async throws {
+        try await expectInput("", after: "hello") { view in
+            let surface = try #require(view.surface)
+            #expect(!ghostty_surface_has_selection(surface))
+            view.selectAll(nil)
+            #expect(ghostty_surface_has_selection(surface))
+        }
+    }
+
+    @Test("Desktop and palette shortcuts wait for terminal composition", .requiresDisplay)
+    func composingInFocusedTerminal() throws {
+        // Dispatch through both real monitors without activating the test process over another app.
+        final class KeyWindow: NSWindow {
+            override var isKeyWindow: Bool { true }
+        }
+        _ = NSApplication.shared
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected query") }, repoPath: "/tmp")
+        let context = DesktopActionContext(model: model, workspaces: SessionsWorkspaceRegistry(localMachineId: fixtureMachineId),
+                                          workspace: nil, pane: nil)
+        let monitors = ZStack {
+            DesktopActionMonitor(context: { context }, failed: { Issue.record($0) })
+            WorkPaletteShortcut(presented: false, restoreFocus: false, toggleSidebar: {},
+                                open: { model.navigation.palette = .search })
+        }
+        let view = GhosttyMetalView(terminal: .shell("composing", machineId: fixtureMachineId),
+                                   frame: CGRect(x: 0, y: 0, width: 400, height: 200))
+        let window = KeyWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: monitors)
+        window.contentView = host
+        host.addSubview(view)
+        defer { window.contentView = nil }
+        host.layoutSubtreeIfNeeded()
+        try #require(window.makeFirstResponder(view))
+        for (text, code): (String, UInt16) in [("n", 45), ("k", 40)] {
+            let key = try event(text, code, .command, windowNumber: window.windowNumber)
+            let range = NSRange(location: 0, length: 0)
+            view.setMarkedText("に", selectedRange: range, replacementRange: range)
+            try #require(view.hasMarkedText())
+            NSApp.sendEvent(key)
+            #expect(model.navigation.palette == nil)
+            view.unmarkText()
+            NSApp.sendEvent(key)
+            #expect(model.navigation.palette == (text == "n" ? .newTask : .search))
+            model.navigation.palette = nil
+        }
+    }
+
+    private func event(_ text: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags,
+                       type: NSEvent.EventType = .keyDown, unmodified: String? = nil,
+                       repeating: Bool = false, windowNumber: Int = 0) throws -> NSEvent {
+        try #require(NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags,
+            timestamp: 1, windowNumber: windowNumber, context: nil, characters: text, charactersIgnoringModifiers: unmodified ?? text,
+            isARepeat: repeating, keyCode: code))
+    }
+
+    private func expectInput(_ expected: String, after terminalOutput: String, userConfig: String = "",
+                             send: (GhosttyMetalView) throws -> Void) async throws {
         _ = NSApplication.shared
         try #require(GhosttyManager.libraryReady)
         let config = try #require(ghostty_config_new())
         defer { ghostty_config_free(config) }
-        try GhosttyThemeConfiguration.load("macos-option-as-alt = \(setting)\nwindow-vsync = false", into: config)
+        try GhosttyThemeConfiguration.load(GhosttyManager.loopflowConfig, into: config)
+        try GhosttyThemeConfiguration.load(userConfig + "\nwindow-vsync = false", into: config)
+        try GhosttyThemeConfiguration.load(GhosttyManager.embeddedConfig, into: config)
         ghostty_config_finalize(config)
+        try #require(ghostty_config_diagnostics_count(config) == 0)
         var runtime = ghostty_runtime_config_s()
         runtime.wakeup_cb = { @Sendable _ in }
         runtime.action_cb = { @Sendable _, _, _ in false }
@@ -32,7 +190,7 @@ struct GhosttyModifierInputTests {
         let app = try #require(ghostty_app_new(&runtime, config))
         defer { ghostty_app_free(app) }
 
-        let view = GhosttyMetalView(terminal: .shell("option-b", machineId: fixtureMachineId),
+        let view = GhosttyMetalView(terminal: .shell("modifiers", machineId: fixtureMachineId),
                                    frame: CGRect(x: 0, y: 0, width: 400, height: 200))
         let output = Output()
         var options = ghostty_surface_config_new()
@@ -50,18 +208,10 @@ struct GhosttyModifierInputTests {
             view.destroySurface()
             withExtendedLifetime(output) {}
         }
-        // Paste wrappers make a mistaken trip through the clipboard API visible.
-        ghostty_surface_process_output(surface, "\u{1b}[?2004h", 8)
+        ghostty_surface_process_output(surface, terminalOutput, UInt(terminalOutput.utf8.count))
+        try send(view)
 
-        for side in [NX_DEVICELALTKEYMASK, NX_DEVICERALTKEYMASK] {
-            let flags = NSEvent.ModifierFlags.option.union(.init(rawValue: UInt(side)))
-            let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
-                timestamp: 1, windowNumber: 0, context: nil, characters: "∫", charactersIgnoringModifiers: "b",
-                isARepeat: false, keyCode: 0x0B))
-            view.keyDown(with: event)
-        }
-
-        // Ghostty replies on the same IO queue, after both key events.
+        // Ghostty replies on the same IO queue, after the input events.
         ghostty_surface_process_output(surface, "\u{1b}[5n", 4)
         let reply = Data("\u{1b}[0n".utf8)
         let deadline = ContinuousClock.now + .seconds(5)

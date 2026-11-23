@@ -89,14 +89,10 @@ public final class PendingChanges {
         let requestID = UUID().uuidString
         changes.append(Change(requestID: requestID, command: command, answer: nil))
         return Task {
-            switch await deliver(write, requestID: requestID) {
-            case .success(let revisions):
-                if let revisions { recordAnswer(revisions, for: requestID) }
-                do { try await answered() }
-                catch { notices.post(Notice(error.localizedDescription)) }
-                // A one-shot transport has no revisions. Keep the preview through its reread.
-                if revisions == nil { changes.removeAll { $0.requestID == requestID } }
-            case .failure(let error):
+            let revisions: Revisions?
+            do {
+                revisions = try await deliver(write, requestID: requestID)
+            } catch {
                 let notice = Notice("\(subject) couldn't be \(verb): \(message(for: error))", key: requestID, action: show)
                 notices.post(notice)
                 let failure = error as? ServerError
@@ -108,7 +104,13 @@ public final class PendingChanges {
                     recordAnswer(failure?.revisions, for: requestID)
                     if failure?.revisions != nil { try? await answered() }
                 }
+                return
             }
+            if let revisions { recordAnswer(revisions, for: requestID) }
+            do { try await answered() }
+            catch { notices.post(Notice(error.localizedDescription)) }
+            // A one-shot transport has no revisions. Keep the preview through its reread.
+            if revisions == nil { recordAnswer(nil, for: requestID) }
         }
     }
 
@@ -121,10 +123,10 @@ public final class PendingChanges {
         let requestID = UUID().uuidString
         notices.post(Notice("\(subject) \(name) requested", key: requestID, action: undo))
         Task {
-            switch await deliver(write, requestID: requestID) {
-            case .success:
+            do {
+                _ = try await deliver(write, requestID: requestID)
                 await answered()
-            case .failure(let error):
+            } catch {
                 notices.post(Notice("\(subject) \(name) couldn't be requested: \(message(for: error))", key: requestID))
                 refused()
             }
@@ -137,22 +139,20 @@ public final class PendingChanges {
 
     /// Send `write` until the Machine answers it. A lost link sends it again under
     /// the same request ID, so the Machine runs it once.
-    private func deliver(_ write: ServedWrite, requestID: String) async -> Result<Revisions?, any Error> {
+    private func deliver(_ write: ServedWrite, requestID: String) async throws -> Revisions? {
         var delay = Duration.milliseconds(250)
         while true {
             do {
                 let revisions = try await send(write, requestID)
                 linkReturned()
-                return .success(revisions)
+                return revisions
             } catch let error as ServerError {
                 linkReturned()
-                return .failure(error)
+                throw error
             } catch where ServerLink.lostLink(error) && !Task.isCancelled {
                 linkLost()
                 try? await Task.sleep(for: delay)
                 delay = min(delay * 2, .seconds(4))
-            } catch {
-                return .failure(error)
             }
         }
     }

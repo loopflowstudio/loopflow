@@ -14,3 +14,5 @@
   newer, use the same side against that order. A destination-only command
   still moves into the target's current slot. The CLI spells the optional side
   `--side before` or `--side after`.
+- Keep saved Dashboard moves on their existing revision-checked save path. A
+  shared Working Task move still resolves its target on each retry.

@@ -1119,52 +1119,6 @@ pub enum DashboardCommand {
     },
 }
 
-impl DashboardCommand {
-    pub(crate) fn move_args(
-        destination: &str,
-        side: Option<DropSide>,
-    ) -> std::collections::BTreeMap<String, String> {
-        let mut args =
-            std::collections::BTreeMap::from([("destination".into(), destination.into())]);
-        if let Some(side) = side {
-            args.insert("side".into(), side.as_str().into());
-        }
-        args
-    }
-
-    /// The verb a saved tile edit names, with its arguments, or none for a
-    /// Dashboard record edit.
-    pub fn tile_verb(&self) -> Option<(&str, &str, std::collections::BTreeMap<String, String>)> {
-        match self {
-            Self::Hide { tile } => Some(("hide", tile, Default::default())),
-            Self::Show { tile } => Some(("show", tile, Default::default())),
-            Self::Move {
-                tile,
-                destination,
-                side,
-            } => Some(("move", tile, Self::move_args(destination, *side))),
-            Self::Resize {
-                tile,
-                toward,
-                ratio,
-            } => Some((
-                "resize",
-                tile,
-                [
-                    ("toward".to_owned(), toward.clone()),
-                    ("ratio".to_owned(), ratio.to_string()),
-                ]
-                .into(),
-            )),
-            Self::Query { .. }
-            | Self::Pin { .. }
-            | Self::Unpin { .. }
-            | Self::Rename { .. }
-            | Self::Slots { .. } => None,
-        }
-    }
-}
-
 // ── Which commands change state ─────────────────────────────────────────────
 // Only a command that changes state writes a journal trace. A read (status, list,
 // show, diff, file, every `--subscribe` reader) writes none, and it never wakes a

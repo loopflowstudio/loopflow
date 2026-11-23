@@ -428,15 +428,6 @@ pub enum DropSide {
     After,
 }
 
-impl DropSide {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Before => "before",
-            Self::After => "after",
-        }
-    }
-}
-
 /// Place the member on the chosen side, or in the target's slot for a destination-only move.
 pub fn move_into_place<T>(order: &mut Vec<T>, from: usize, target: usize, side: Option<DropSide>) {
     let moved = order.remove(from);

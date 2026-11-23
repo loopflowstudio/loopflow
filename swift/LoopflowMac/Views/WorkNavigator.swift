@@ -634,6 +634,7 @@ private struct TaskOrderDragging: ViewModifier {
     func body(content: Content) -> some View {
         if !order.isEmpty {
             let dragging = drag.source == work.id
+            let landing = drag.landing(on: work.id)
             content
                 .background(dragging ? palette.surfaceMuted : .clear)
                 .shadow(color: .black.opacity(dragging ? 0.18 : 0), radius: 6, y: 2)
@@ -649,8 +650,8 @@ private struct TaskOrderDragging: ViewModifier {
                         guard let (target, side) = drag.end() else { return }
                         model.reorderWorkingTask(work, to: target, side: side)
                     })
-                .overlay(alignment: drag.landing(on: work.id) ?? .top) {
-                    if drag.landing(on: work.id) != nil {
+                .overlay(alignment: landing ?? .top) {
+                    if landing != nil {
                         Rectangle().fill(palette.accent).frame(height: 2)
                             .allowsHitTesting(false).accessibilityIdentifier("task-order-insertion")
                     }
@@ -667,32 +668,34 @@ extension TaskOrderDrag {
     /// The sidebar row being dragged and the row it would take the place of.
     @MainActor @Observable final class State {
         var source: String?
-        var target: String?
-        /// The dragged row lands after the target when it comes from above.
-        var side: DropSide?
+        private var drop: (target: String, side: DropSide)?
         var offset: CGFloat = 0
         /// Each row's frame in the list, read only while a drag picks its target.
         @ObservationIgnored var frames: [String: CGRect] = [:]
 
         func landing(on row: String) -> Alignment? {
-            guard target == row, let side else { return nil }
-            return side == .after ? .bottom : .top
+            guard let drop, drop.target == row else { return nil }
+            return drop.side == .after ? .bottom : .top
         }
 
         func move(_ row: String, by translation: CGFloat, at y: CGFloat, order: [String]) {
             source = row
             offset = translation
             let under = { (id: String) in self.frames[id].map { $0.minY <= y && y < $0.maxY } == true }
-            // Another row under the pointer is the target; back over its own row, none.
-            if let over = order.first(where: { $0 != row && under($0) }) { target = over } else if under(row) { target = nil }
-            side = target.flatMap { TaskOrderDrag.side(moving: row, onto: $0, in: order) }
+            // Keep the insertion line between rows. Returning to the source cancels the drop.
+            let hovered = order.first { $0 != row && under($0) }
+            guard let target = hovered ?? (under(row) ? nil : drop?.target),
+                  let side = TaskOrderDrag.side(moving: row, onto: target, in: order) else {
+                drop = nil
+                return
+            }
+            drop = (target, side)
         }
 
         /// Clears the drag in the same frame the caller moves the row.
         func end() -> (target: String, side: DropSide)? {
-            defer { source = nil; target = nil; side = nil; offset = 0 }
-            guard let target, let side else { return nil }
-            return (target, side)
+            defer { source = nil; drop = nil; offset = 0 }
+            return drop
         }
     }
 }

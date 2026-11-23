@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::desktop::TileEdit;
 use anyhow::anyhow;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -974,8 +975,7 @@ writes! {
         directory,
         &format!("query:{id}"),
         member,
-        "hide",
-        &Default::default(),
+        TileEdit::Hide,
     )?,
 
     /// `lf desktop dashboard show query:<id>/<member>`.
@@ -990,8 +990,7 @@ writes! {
         directory,
         &format!("query:{id}"),
         member,
-        "show",
-        &Default::default(),
+        TileEdit::Show,
     )?,
 
     /// `lf desktop dashboard slots query:<id> --revision <revision>`, with
@@ -1039,8 +1038,7 @@ writes! {
         directory,
         board,
         member,
-        "move",
-        &crate::lf::DashboardCommand::move_args(destination, *side),
+        TileEdit::Move { to: destination, side: *side },
     )?,
 
     /// `lf config set <key> <value> <destination flags> --json`: declare a

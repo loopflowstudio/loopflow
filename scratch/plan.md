@@ -105,7 +105,12 @@ navigation and the key-window sidebar filters. [Pre-implementation review](conce
   The grid displayed the saved order. The live grid drag, keyboard shortcuts
   and key-window filter still need an unlocked walkthrough.
 - `cargo test -p loopflow --test served_reads working_task_drop_keeps_its_side_after_another_window_reorders`
-  reproduced C, A, B before the fix and passed both sides after it.
+  reproduced C, A, B before the fix and passed both sides after it. Moving B
+  to C's slot on a saved Dashboard then produced B, C, A on that Dashboard
+  while the Working list stayed C, A, B.
+- `cargo test -p loopflow-execution --lib dashboard_order_moves_under_its_revision_and_only_reordering_touches`
+  passed. Desktop passed 24 focused tests covering drag feedback, write
+  receipts, refusals, conversation turns and Dashboard navigation.
 - `scripts/test_desktop.sh --filter 'workingTaskDropAcrossReceipt|refusedWorkingTaskDrop|sidebarAndGridShareTheOrderTheRustWriterReturns|draggedRowLandsOnRelease|droppingTileCOnAMovesItThroughTheSharedOrderCommand'`
   passed all five tests, including the grid drop with an absent source and the
   destination-only saved Dashboard move.

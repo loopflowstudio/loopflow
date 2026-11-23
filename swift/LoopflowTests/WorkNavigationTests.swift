@@ -253,19 +253,23 @@ struct WorkNavigationTests {
         }
     }
 
+    private func dropModel(machine: HeldMachine, feed: WorkFeed, side: DropSide) -> WorkModel {
+        let query = RegistryQuery(change: { write, requestID in
+            let json = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(write))
+            #expect(json["side"] == .string(side.rawValue))
+            return try await machine.send(write, requestID)
+        }, subscribeWork: { await feed.open() }) { _, _ in
+            throw RegistryQueryError("Unexpected one-shot read")
+        }
+        return WorkModel(query: query, repoPath: "/repo")
+    }
+
     @Test("A refused drop reveals the last reading in the sidebar and grid even when the reread fails",
           arguments: [nil, Revisions(["planning": 5])])
     func refusedWorkingTaskDrop(concurrentWrite: Revisions?) async throws {
         let machine = HeldMachine()
         let feed = WorkFeed()
-        let query = RegistryQuery(change: { write, requestID in
-            let json = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(write))
-            #expect(json["side"] == .string("before"))
-            return try await machine.send(write, requestID)
-        }, subscribeWork: { await feed.open() }) { _, _ in
-            throw RegistryQueryError("Unexpected one-shot read")
-        }
-        let model = WorkModel(query: query, repoPath: "/repo")
+        let model = dropModel(machine: machine, feed: feed, side: .before)
         let observing = Task { await model.keepWorkCurrent() }
         defer { observing.cancel() }
         let scope = try await feed.request(1)
@@ -308,14 +312,7 @@ struct WorkNavigationTests {
     func workingTaskDropAcrossReceipt() async throws {
         let machine = HeldMachine()
         let feed = WorkFeed()
-        let query = RegistryQuery(change: { write, requestID in
-            let json = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(write))
-            #expect(json["side"] == .string("after"))
-            return try await machine.send(write, requestID)
-        }, subscribeWork: { await feed.open() }) { _, _ in
-            throw RegistryQueryError("Unexpected one-shot read")
-        }
-        let model = WorkModel(query: query, repoPath: "/repo")
+        let model = dropModel(machine: machine, feed: feed, side: .after)
         let observing = Task { await model.keepWorkCurrent() }
         defer { observing.cancel() }
         let scope = try await feed.request(1)
@@ -404,14 +401,14 @@ struct WorkNavigationTests {
                        "b": CGRect(x: 0, y: 65, width: 200, height: 60),
                        "c": CGRect(x: 0, y: 130, width: 200, height: 60)]
         drag.move("a", by: 10, at: 40, order: ["a", "b", "c"])
-        #expect(drag.target == nil)
+        #expect(drag.landing(on: "a") == nil)
         drag.move("a", by: 120, at: 150, order: ["a", "b", "c"])
         #expect(drag.landing(on: "c") == .bottom)
         drag.move("a", by: 80, at: 90, order: ["a", "b", "c"])
         #expect(drag.landing(on: "b") == .bottom)
         let landed = drag.end()
         #expect(landed?.target == "b" && landed?.side == .after)
-        #expect(drag.source == nil && drag.target == nil && drag.offset == 0)
+        #expect(drag.source == nil && drag.landing(on: "b") == nil && drag.offset == 0)
     }
 
     @Test("The sidebar header names the Dashboard as written under the repository, and ⌘1 marks its first member")

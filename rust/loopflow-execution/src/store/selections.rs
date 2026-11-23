@@ -6,7 +6,7 @@ use loopflow_storage::sqlite::selections::{repository_default, TaskSelectionRead
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::selection::{
     move_into_place, Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId,
-    DashboardReading, DropSide, Selection, SelectionResolution, ViewPlan, WorkWorkspaceKey,
+    DashboardReading, DropSide, Selection, SelectionResolution, ViewPlan,
 };
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
@@ -167,31 +167,6 @@ pub fn edit_dashboard(
         id,
         expected_revision,
         &selection,
-        &arrangement.to_edit(),
-    )
-}
-
-pub fn reorder_dashboard(
-    store: &SqliteStore,
-    repository: &RepositoryId,
-    id: &DashboardId,
-    expected_revision: i64,
-    work: &WorkWorkspaceKey,
-    to: &WorkWorkspaceKey,
-    side: Option<DropSide>,
-) -> StoreResult<Dashboard> {
-    let reading = read_dashboard(store, repository, id)?.ok_or(StoreError::NotFound)?;
-    let mut arrangement = reading.arrangement;
-    let from = arrangement.winner(work).ok_or(StoreError::NotFound)?;
-    let target = arrangement.winner(to).ok_or(StoreError::NotFound)?;
-    move_into_place(&mut arrangement.order, from, target, side);
-    // A concurrent edit since this read advances the revision and is rejected there.
-    save_dashboard(
-        store,
-        repository,
-        id,
-        Some(expected_revision),
-        &reading.saved.selection,
         &arrangement.to_edit(),
     )
 }

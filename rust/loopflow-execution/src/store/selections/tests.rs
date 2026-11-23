@@ -184,31 +184,25 @@ fn dashboard_order_moves_under_its_revision_and_only_reordering_touches() {
     .unwrap();
     assert_eq!(restored.arrangement.mode, ArrangementMode::Auto);
 
-    let moved = selections::reorder_dashboard(
-        &store,
-        &repo,
-        &id,
-        restored.revision,
-        &c.work,
-        &a.work,
-        None,
-    )
-    .unwrap();
+    let mut edit = restored.arrangement.to_edit();
+    edit.order.rotate_right(1);
+    let save_order = || {
+        selections::save_dashboard(
+            &store,
+            &repo,
+            &id,
+            Some(restored.revision),
+            &restored.selection,
+            &edit,
+        )
+    };
+    let moved = save_order().unwrap();
     assert_eq!(moved.arrangement.order, [c.clone(), a.clone(), b.clone()]);
     assert_eq!(moved.arrangement.mode, ArrangementMode::Touched);
     assert_eq!(moved.revision, restored.revision + 1);
 
     let revisions = store.revisions().unwrap();
-    assert!(selections::reorder_dashboard(
-        &store,
-        &repo,
-        &id,
-        restored.revision,
-        &a.work,
-        &c.work,
-        None
-    )
-    .is_err());
+    assert!(save_order().is_err());
     assert_eq!(store.revisions().unwrap(), revisions);
     assert_eq!(
         selections::read_dashboard(&store, &repo, &id)

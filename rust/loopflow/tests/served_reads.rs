@@ -210,6 +210,31 @@ fn working_task_drop_keeps_its_side_after_another_window_reorders() {
         assert_eq!(serde_json::from_str::<Vec<String>>(&cli).unwrap(), expected);
         assert_eq!(working(), expected);
     }
+
+    // A saved board can move the same Tasks without changing their shared order.
+    server_write(Write::DesktopDashboardQuery {
+        directory: repo.path().to_owned(),
+        id: "board".into(),
+        expression: "kind:task state:working".into(),
+        revision: None,
+    });
+    let board = server_write(Write::DesktopDashboardMove {
+        directory: repo.path().to_owned(),
+        board: "query:board".into(),
+        member: format!("task:{b}"),
+        destination: format!("task:{c}"),
+        side: None,
+    });
+    let board: loopflow_storage::work::selection::Dashboard =
+        serde_json::from_value(board).unwrap();
+    let order: Vec<_> = board
+        .arrangement
+        .order
+        .iter()
+        .map(|tile| &tile.work.id)
+        .collect();
+    assert_eq!(order, [&b, &c, &a]);
+    assert_eq!(working(), [c, a, b]);
 }
 
 #[test]
@@ -2892,7 +2917,14 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 destination,
             ]);
             if let Some(side) = side {
-                args.extend(words(&["--side", side.as_str()]));
+                use loopflow_storage::work::selection::DropSide;
+                args.extend(words(&[
+                    "--side",
+                    match side {
+                        DropSide::Before => "before",
+                        DropSide::After => "after",
+                    },
+                ]));
             }
             (path(directory), args)
         }

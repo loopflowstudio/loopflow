@@ -208,6 +208,13 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
         case viewer
     }
 
+    /// Task tiles follow a saved Dashboard's visible arrangement or the built-in plan's member order.
+    public var taskTiles: [WorkMemberRef] {
+        let members = dashboardID == nil ? resolution.members : projection.visible
+        var seen = Set<WorkWorkspaceKey>()
+        return members.filter { $0.work.kind == .task && seen.insert($0.work).inserted }
+    }
+
     /// The name people see for the repository: its directory's.
     public var repositoryName: String { URL(fileURLWithPath: repositoryPath).lastPathComponent }
 }

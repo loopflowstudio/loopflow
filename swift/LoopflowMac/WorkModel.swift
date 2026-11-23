@@ -966,8 +966,9 @@ final class WorkModel {
     /// A Wave view's backlog, conversation and strip; other views have no named parts yet.
     func desktopViewParts(repository: String) -> [DesktopViewPart] {
         guard let view = navigation.waveView else { return [] }
-        let tiles = boardTiles(view)
-        let pages = boardPlan(view)?.slots.pages(tiles) ?? [tiles]
+        let plan = boardPlan(view)
+        let tiles = plan?.taskTiles ?? []
+        let pages = plan?.slots.pages(tiles) ?? [tiles]
         let page = pageIndex(view, of: pages)
         let ratios = navigation.waveRatios[view] ?? WaveViewRatios()
         let zoomed = zoomedPart(in: view)
@@ -2137,7 +2138,7 @@ final class WorkModel {
     }
 
     /// Working Tasks: the repository plan's started, uncompleted Tasks, in plan order.
-    var workingTaskIDs: [String] { taskIDs(in: builtInPlan(.repository)?.resolution.members ?? []) }
+    var workingTaskIDs: [String] { taskIDs(on: .workingTasks) }
 
     /// The Wave the sidebar lists, while its planning is current.
     var sidebarWave: WaveRoadmap? {
@@ -2175,8 +2176,7 @@ final class WorkModel {
     /// Members name Tasks by Work ID; rows use the planning ID when it is known.
     private func taskIDs(in members: [WorkMemberRef]) -> [String] {
         var seen = Set<String>()
-        return members.filter { $0.work.kind == .task }
-            .map { task(id: $0.work.id)?.task.id ?? $0.work.id }
+        return members.map { task(id: $0.work.id)?.task.id ?? $0.work.id }
             .filter { seen.insert($0).inserted }
     }
 
@@ -2186,12 +2186,11 @@ final class WorkModel {
         let states: [WorkSelectionState]
     }
 
-    private func taskRows(_ plan: WorkViewPlan?, visibleOnly: Bool = false) -> [SidebarTaskRow] {
+    private func taskRows(_ plan: WorkViewPlan?) -> [SidebarTaskRow] {
         guard let plan else { return [] }
-        let members = visibleOnly ? plan.projection.visible : plan.resolution.members
         let states = Dictionary(plan.contents.map { ($0.work, $0.states) }, uniquingKeysWith: { first, _ in first })
         var seen = Set<String>()
-        return members.filter { $0.work.kind == .task }.compactMap { member in
+        return plan.taskTiles.compactMap { member in
             let id = task(id: member.work.id)?.task.id ?? member.work.id
             guard seen.insert(id).inserted else { return nil }
             return SidebarTaskRow(id: id, work: member.work, states: states[member.work] ?? [])
@@ -2204,7 +2203,7 @@ final class WorkModel {
         let rows: [SidebarTaskRow]
         switch navigation.sidebarScope {
         case .repository, .wave: rows = taskRows(taskList).filter { $0.states.contains(.working) }
-        case .dashboard(let id): rows = taskRows(dashboard(id), visibleOnly: true)
+        case .dashboard(let id): rows = taskRows(dashboard(id))
         }
         return rows.filter { row in
             switch navigation.sidebarFilter {
@@ -3442,7 +3441,7 @@ extension WorkModel {
     /// Turn a Wave view's footer to the page holding `work`; positions count the whole list.
     private func showWaveTile(_ work: WorkReference, in view: WorkNavigation.Board) {
         guard let plan = boardPlan(view),
-              let index = taskIDs(in: boardTiles(view)).firstIndex(of: task(id: work.id)?.task.id ?? work.id) else { return }
+              let index = taskIDs(in: plan.taskTiles).firstIndex(of: task(id: work.id)?.task.id ?? work.id) else { return }
         navigation.boardPages[view] = index / max(1, plan.slots.count)
     }
 
@@ -3459,9 +3458,7 @@ extension WorkModel {
     /// A board's Task tiles: a Dashboard's visible ones in arrangement order, a Wave's
     /// in the shared order; the repository page's are its Working Tasks.
     func boardTiles(_ board: WorkNavigation.Board) -> [WorkMemberRef] {
-        let members = if case .saved = board { boardPlan(board)?.projection.visible } else { boardPlan(board)?.resolution.members }
-        var seen = Set<WorkWorkspaceKey>()
-        return (members ?? []).filter { $0.work.kind == .task && seen.insert($0.work).inserted }
+        boardPlan(board)?.taskTiles ?? []
     }
 
     func boardPlan(_ board: WorkNavigation.Board) -> WorkViewPlan? {
@@ -3477,12 +3474,12 @@ extension WorkModel {
     private func presentWaveTiles() {
         guard let view = navigation.waveView, let key = workspaceRegistry?.selectedWork, key.kind != .task,
               let plan = boardPlan(view) else { return }
-        presentBoard(plan, boardTiles(view), on: view, after: [key])
+        presentBoard(plan, plan.taskTiles, on: view, after: [key])
     }
 
     private func presentView(_ plan: WorkViewPlan) {
         // Working Tasks renders the repository plan's Tasks; its Waves stay in the sidebar.
-        let members = if case .workingTasks = navigation.destination { workingTaskMembers } else { plan.projection.visible }
+        let members = if case .workingTasks = navigation.destination { plan.taskTiles } else { plan.projection.visible }
         presentBoard(plan, members, on: navigation.trailBoard)
     }
 
@@ -3568,7 +3565,7 @@ extension WorkModel {
         let scope = repositoryReadingKey(repoPath)
         let move = PendingCommand.reorder(machine: scope.machineId, member: member, target: target, side: side)
         let write = pendingChanges.make(move, subject: taskPresentation(id: member.id).identifier ?? member.id, verb: "reordered",
-            write: .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: "task:" + member.id,
+            write: .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: member.selector,
                                          destination: "task:" + target, side: side),
             notices: navigation.notices, show: nil) { [self] in
             guard self.repoPath.map(repositoryReadingKey) == scope else { return }

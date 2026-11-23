@@ -1,23 +1,25 @@
-at: 2e4e3ec6eda70175081efd3397d7f563bc25f526
+at: 33d075aaffe6f8ff2122a935633884c817e4f24d
 first:
   - path: docs/surfaces.md
-    why: Follow a Working row through turns and competing drags.
+    why: Follow a Working row through a turn and drag.
   - path: rust/loopflow-storage/src/sqlite/selections.rs
-    why: Sort Working Tasks independently of conversation activity.
+    why: Read the shared order independent of activity.
   - path: rust/loopflow-storage/src/work/selection.rs
-    why: Place a member beside its target.
-  - path: rust/loopflow/src/lf/commands/write.rs
-    why: See how the Machine receives a drop.
+    why: Place a member before or after its target.
+  - path: rust/loopflow/src/lf/commands/desktop.rs
+    why: CLI and served writes resolve the same tile edit.
   - path: rust/loopflow-execution/src/store/selections.rs
-    why: Apply the chosen side against the latest saved order.
+    why: Retry the drop against the latest Working order.
+  - path: swift/Loopflow/Models/WorkSelection.swift
+    why: Read Task tiles from one plan.
   - path: swift/LoopflowMac/WorkModel.swift
-    why: Send the same side the sidebar and grid preview.
+    why: Share the drop between the sidebar and grid.
   - path: swift/Loopflow/Services/PendingChanges.swift
-    why: Keep each preview until its reading covers the receipt.
+    why: Show the drop until each reading confirms it.
   - path: rust/loopflow/tests/served_reads.rs
-    why: Read the committed order after two windows disagree.
+    why: Check competing moves through the server and CLI.
   - path: swift/LoopflowTests/WorkNavigationTests.swift
-    why: Follow the rows through a receipt or refusal.
+    why: Follow both lists through confirmation and refusal.
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Generated from the Rust protocol types.

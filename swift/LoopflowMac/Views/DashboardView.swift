@@ -115,7 +115,7 @@ struct DashboardView: View {
                 }
                 // Working Tasks fill in the shared Task order; a saved Dashboard's
                 // visible occurrences fill in its arrangement order.
-                DashboardSlotGrid(members: workingTasks ? model.workingTaskMembers : plan.projection.visible,
+                DashboardSlotGrid(members: workingTasks ? plan.taskTiles : plan.projection.visible,
                                   focused: workspaces.selectedWork, layout: plan.slots,
                                   editing: editingSlots && plan.dashboardID != nil && !model.dashboardSaving
                                       ? DashboardSlotEditing { writeSlots(plan, $0) } : nil,
@@ -176,7 +176,7 @@ struct WaveTiles: View {
 
     var body: some View {
         if let plan = model.boardPlan(view) {
-            let members = model.boardTiles(view)
+            let members = plan.taskTiles
             if members.isEmpty {
                 HStack(spacing: Spacing.sm) {
                     Text("No planned or started Tasks.").emptyLine()

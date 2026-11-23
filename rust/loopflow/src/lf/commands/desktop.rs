@@ -2,7 +2,9 @@
 use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
 use loopflow_execution::store::selections;
-use loopflow_storage::work::selection::{DropSide, WorkWorkspaceKey, WorkWorkspaceKind};
+use loopflow_storage::work::selection::{
+    move_into_place, DropSide, WorkWorkspaceKey, WorkWorkspaceKind,
+};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -978,26 +980,48 @@ pub fn save_arrangement(
     input: &mut dyn std::io::Read,
 ) -> Result<serde_json::Value> {
     use crate::lf::{DashboardCommand, DesktopCommand};
-    if let DesktopCommand::Dashboard { cmd } = command {
-        if let Some((verb, tile, args)) = cmd.tile_verb() {
-            let (board, member) = tile.split_once('/').ok_or_else(|| {
-                DesktopError::Argument(format!(
-                    "`{tile}` names no saved board tile; use query:ID/<tile> or working-tasks/<tile>."
-                ))
-            })?;
-            return Ok(serde_json::to_value(DesktopTileOutput::Record(
-                &save_tile(selected, directory, board, member, verb, &args)?,
-            ))?);
-        }
-    }
-    match command {
-        DesktopCommand::Dashboard {
-            cmd:
-                DashboardCommand::Rename {
-                    target,
-                    name,
-                    revision,
-                },
+    let DesktopCommand::Dashboard { cmd } = command else {
+        bail!("not a saved arrangement");
+    };
+    let save = |tile: &str, edit: TileEdit<&str>| -> Result<serde_json::Value> {
+        let (board, member) = tile.split_once('/').ok_or_else(|| {
+            DesktopError::Argument(format!(
+                "`{tile}` names no saved board tile; use query:ID/<tile> or working-tasks/<tile>."
+            ))
+        })?;
+        Ok(serde_json::to_value(DesktopTileOutput::Record(
+            &save_tile(selected, directory, board, member, edit)?,
+        ))?)
+    };
+    match cmd {
+        DashboardCommand::Hide { tile } => save(tile, TileEdit::Hide),
+        DashboardCommand::Show { tile } => save(tile, TileEdit::Show),
+        DashboardCommand::Move {
+            tile,
+            destination,
+            side,
+        } => save(
+            tile,
+            TileEdit::Move {
+                to: destination,
+                side: *side,
+            },
+        ),
+        DashboardCommand::Resize {
+            tile,
+            toward,
+            ratio,
+        } => save(
+            tile,
+            TileEdit::Resize {
+                toward,
+                ratio: *ratio,
+            },
+        ),
+        DashboardCommand::Rename {
+            target,
+            name,
+            revision,
         } if target.starts_with("task:") => {
             let reader = loopflow_execution::store::read_existing_registry()?
                 .ok_or(loopflow_execution::store::StoreError::NotFound)
@@ -1032,10 +1056,9 @@ pub fn save_arrangement(
                 },
             )?)?)
         }
-        DesktopCommand::Dashboard { cmd } => Ok(serde_json::to_value(save_dashboard(
+        _ => Ok(serde_json::to_value(save_dashboard(
             selected, directory, cmd, input,
         )?)?),
-        _ => bail!("not a saved arrangement"),
     }
 }
 
@@ -1047,16 +1070,26 @@ pub(crate) fn save_tile(
     directory: &std::path::Path,
     board: &str,
     tile: &str,
-    verb: &str,
-    args: &std::collections::BTreeMap<String, String>,
+    edit: TileEdit<&str>,
 ) -> Result<DesktopTileRecord> {
-    let path = format!("{board}/{tile}");
-    let (board, tile) = saved_tile(verb, Some(&path)).ok_or_else(|| {
+    let board = TileBoard::parse(board).ok_or_else(|| {
         DesktopError::Argument(format!(
-            "`{verb}` names no saved board in {path}; nothing changed."
+            "`{board}` names no saved board; use query:ID or working-tasks."
         ))
     })?;
-    edit_saved_tile(selected, directory, board, tile, verb, args)
+    let repository = {
+        let reader = loopflow_execution::store::read_existing_registry()?
+            .ok_or(loopflow_execution::store::StoreError::NotFound)
+            .context("Work registry is unavailable")?;
+        repository_in(selected, directory, &reader.sqlite)?
+    };
+    let key = |selector: &str| work_key(&repository, selector);
+    let request = TileRequest {
+        board,
+        member: key(tile)?,
+        edit: edit.resolve(key)?,
+    };
+    edit_tiles(&repository, &request)
 }
 
 pub(crate) fn save_dashboard(
@@ -1885,26 +1918,40 @@ impl TileBoard {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum TileEdit {
+pub(crate) enum TileEdit<T> {
     Hide,
     Show,
     Move {
-        to: WorkWorkspaceKey,
+        to: T,
         side: Option<DropSide>,
     },
     /// The tile's share of the space it divides with `toward`.
     Resize {
-        toward: WorkWorkspaceKey,
+        toward: T,
         ratio: f64,
     },
 }
 
-impl TileEdit {
-    fn parse(
-        name: &str,
-        args: &std::collections::BTreeMap<String, String>,
+impl<'a> TileEdit<&'a str> {
+    fn resolve(
+        self,
         peer: impl Fn(&str) -> Result<WorkWorkspaceKey>,
-    ) -> Result<Self> {
+    ) -> Result<TileEdit<WorkWorkspaceKey>> {
+        Ok(match self {
+            Self::Hide => TileEdit::Hide,
+            Self::Show => TileEdit::Show,
+            Self::Move { to, side } => TileEdit::Move {
+                to: peer(to)?,
+                side,
+            },
+            Self::Resize { toward, ratio } => TileEdit::Resize {
+                toward: peer(toward)?,
+                ratio,
+            },
+        })
+    }
+
+    fn parse(name: &str, args: &'a std::collections::BTreeMap<String, String>) -> Result<Self> {
         let arg = |key: &str| {
             args.get(key).ok_or_else(|| {
                 DesktopError::Argument(format!("{name} needs --{key}; nothing changed."))
@@ -1914,7 +1961,7 @@ impl TileEdit {
             "hide" => Self::Hide,
             "show" => Self::Show,
             "move" => Self::Move {
-                to: peer(arg("destination")?)?,
+                to: arg("destination")?,
                 side: args
                     .get("side")
                     .map(|side| DropSide::from_str(side, false))
@@ -1922,7 +1969,7 @@ impl TileEdit {
                     .map_err(DesktopError::Argument)?,
             },
             "resize" => Self::Resize {
-                toward: peer(arg("toward")?)?,
+                toward: arg("toward")?,
                 ratio: arg("ratio")?.parse()?,
             },
             _ => unreachable!("{name} is not a tile verb"),
@@ -1950,7 +1997,7 @@ enum DesktopTileOutput<'a> {
 struct TileRequest {
     board: TileBoard,
     member: WorkWorkspaceKey,
-    edit: TileEdit,
+    edit: TileEdit<WorkWorkspaceKey>,
 }
 
 /// Commands that never contact the app: saved intent, view plans, the
@@ -1965,38 +2012,6 @@ pub fn runs_without_desktop(command: &crate::lf::DesktopCommand) -> bool {
             | DesktopCommand::Portfolio { .. }
             | DesktopCommand::Layout { .. }
     )
-}
-
-/// `query:ID/TILE` or `working-tasks/TILE`: a saved record's tile by Work key.
-fn saved_tile<'p>(name: &str, path: Option<&'p str>) -> Option<(TileBoard, &'p str)> {
-    if !TILE_VERBS.contains(&name) {
-        return None;
-    }
-    let (board, tile) = path?.split_once('/')?;
-    Some((TileBoard::parse(board)?, tile))
-}
-
-fn edit_saved_tile(
-    selected: Option<&loopflow_model::durable::RepositoryId>,
-    directory: &std::path::Path,
-    board: TileBoard,
-    tile: &str,
-    name: &str,
-    args: &std::collections::BTreeMap<String, String>,
-) -> Result<DesktopTileRecord> {
-    let repository = {
-        let reader = loopflow_execution::store::read_existing_registry()?
-            .ok_or(loopflow_execution::store::StoreError::NotFound)
-            .context("Work registry is unavailable")?;
-        repository_in(selected, directory, &reader.sqlite)?
-    };
-    let key = |selector: &str| work_key(&repository, selector);
-    let request = TileRequest {
-        board,
-        member: key(tile)?,
-        edit: TileEdit::parse(name, args, key)?,
-    };
-    edit_tiles(&repository, &request)
 }
 
 fn edit_shown_tile(
@@ -2084,7 +2099,7 @@ fn edit_tiles(
     let reading = selections::read_dashboard(&store, repository, id)?
         .ok_or_else(|| DesktopError::Target(format!("No Dashboard {}; nothing changed.", id.0)))?;
     let revision = reading.saved.revision;
-    let mut arrangement = reading.arrangement.clone();
+    let mut arrangement = reading.arrangement;
     let save = |arrangement: &loopflow_storage::work::selection::Arrangement| {
         selections::save_dashboard(
             &store,
@@ -2097,14 +2112,10 @@ fn edit_tiles(
     };
     let dashboard = match edit {
         TileEdit::Move { to, side } => {
-            if arrangement.winner(to).is_none() {
-                return Err(absent(to));
-            }
-            selections::reorder_dashboard(&store, repository, id, revision, member, to, *side)
-                .map_err(|error| match error {
-                    loopflow_execution::store::StoreError::NotFound => absent(member),
-                    error => error.into(),
-                })?
+            let target = arrangement.winner(to).ok_or_else(|| absent(to))?;
+            let from = arrangement.winner(member).ok_or_else(|| absent(member))?;
+            move_into_place(&mut arrangement.order, from, target, *side);
+            save(&arrangement)?
         }
         TileEdit::Hide => {
             let index = arrangement.winner(member).ok_or_else(|| absent(member))?;
@@ -2113,21 +2124,14 @@ fn edit_tiles(
             save(&arrangement)?
         }
         TileEdit::Show => {
-            let hidden = arrangement
-                .hidden
-                .iter()
-                .filter(|hidden| hidden.work == *member)
-                .cloned()
-                .collect::<Vec<_>>();
-            if hidden.is_empty() {
+            let before = arrangement.hidden.len();
+            arrangement.hidden.retain(|hidden| hidden.work != *member);
+            if arrangement.hidden.len() == before {
                 return Err(DesktopError::Target(format!(
                     "{} is not hidden on this Dashboard; nothing changed.",
                     member.id
                 ))
                 .into());
-            }
-            for occurrence in &hidden {
-                arrangement.hide(occurrence, false)?;
             }
             save(&arrangement)?
         }
@@ -2135,7 +2139,6 @@ fn edit_tiles(
             let slots = reading
                 .saved
                 .slots
-                .clone()
                 .unwrap_or_else(loopflow_storage::work::selection::SlotLayout::golden);
             let count = slots.slots().len();
             let visible = arrangement.project().visible;
@@ -2675,7 +2678,7 @@ impl<'a> Scope<'a> {
         Ok(Some(TileRequest {
             member: work(tile)?,
             board: TileBoard::shown(window)?,
-            edit: TileEdit::parse(name, args, work)?,
+            edit: TileEdit::parse(name, args)?.resolve(work)?,
         }))
     }
 

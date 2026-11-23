@@ -1,6 +1,6 @@
 use crate::test_linear_input::SeedLinear;
 use crate::test_support as support;
-use loopflow_execution::test_support::task_graph::holding_claude;
+use loopflow_execution::test_support::task_graph::{hold_build_jobs, holding_claude, worker_job};
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -2213,59 +2213,65 @@ fn a_question_with_nobody_there_ends_the_step() {
 /// Only the worker's OS session still ties that build to the Task.
 #[test]
 fn interrupt_stops_a_reparented_build_in_the_workers_session() {
+    interrupt_worker_build(false);
+}
+
+#[test]
+fn pause_during_interrupt_holds_the_interrupted_step() {
+    interrupt_worker_build(true);
+}
+
+fn interrupt_worker_build(pause: bool) {
     use loopflow_execution::process::OsProcess;
     use loopflow_execution::store::ProcessIdentityEvidence;
 
     let task = GraphTask::with_tools(&[("claude", &holding_claude())]);
     define_worker_graph(&task);
     let home = task.home.path();
-    let pipe = home.join("build-input");
-    assert!(Command::new("mkfifo")
-        .arg(&pipe)
-        .status()
-        .unwrap()
-        .success());
-    // Closing the test's writer releases the job even if an assertion fails.
-    let _writer = fs::File::options()
-        .read(true)
-        .write(true)
-        .open(&pipe)
-        .unwrap();
-    fs::write(home.join("release"), "").unwrap();
-    fs::write(home.join("hold-turn"), "").unwrap();
-    fs::write(
-        home.join("tool_turn.py"),
-        r#"import os, signal, subprocess
-from pathlib import Path
-home = Path(os.environ['LF_HOME'])
-# Both processes ignore TERM and stay alive until the test closes its writer.
-signal.signal(signal.SIGTERM, signal.SIG_IGN)
-with (home / 'build-input').open('rb') as pipe:
-    def start(**group):
-        return subprocess.Popen(['/bin/cat'], stdin=pipe, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL, **group).pid
-    (home / 'build').write_text(str(start(preexec_fn=os.setpgrp)))
-    (home / 'daemon').write_text(str(start(start_new_session=True)))
-"#,
-    )
-    .unwrap();
+    let _writer = hold_build_jobs(home);
 
     let started = task.run(&["task", "run", "INF-123", "worker", "-a", "claude"]);
     assert!(started.status.success(), "{started:?}");
     // The provider reports "holding" after the tool's shell has exited.
     wait_for("the worker's turn", || home.join("holding").exists());
-    let job = |name| {
-        let pid = fs::read_to_string(home.join(name))
-            .unwrap()
-            .parse()
-            .unwrap();
-        OsProcess::read(pid).unwrap().unwrap()
-    };
-    let build = job("build");
-    let daemon = job("daemon");
+    let build = worker_job(home, "build");
+    let daemon = worker_job(home, "daemon");
     assert_eq!(build.pgid, build.pid);
 
-    task.ok(&["task", "interrupt", "INF-123"]);
+    let store = &task.registered.store.sqlite;
+    let id = &task.registered.task.id;
+    let cursor = store.task_graph_record(id).unwrap().unwrap();
+    if pause {
+        // The interrupt is recorded, but its provider cannot close until
+        // the attachment fence opens. Start pause inside that interval.
+        let workers = store.task_worker_agents(id).unwrap();
+        let worker = store
+            .agent_processes()
+            .unwrap()
+            .into_iter()
+            .find(|agent| workers.contains(&agent.id))
+            .unwrap();
+        let fence = store.begin_agent_settlement(&worker).unwrap().unwrap();
+        let before = interrupt_rows(home);
+        task.ok(&["task", "interrupt", "INF-123"]);
+        assert_eq!(interrupt_rows(home), before + 1);
+        let mut pausing = command(task.repo.path(), home, &["task", "pause", "INF-123"])
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let lock = home
+            .join("workspace-locks")
+            .join(format!("pause-{id}.lock"));
+        wait_for("pause to reach the stopping worker", || {
+            assert!(pausing.try_wait().unwrap().is_none());
+            lock.exists()
+        });
+        drop(fence);
+        let output = pausing.wait_with_output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+    } else {
+        task.ok(&["task", "interrupt", "INF-123"]);
+    }
     let stopped = task.ran(started);
     assert_eq!(stopped.code, Some(130), "{}", stopped.text);
     let live = |job: &OsProcess| {
@@ -2275,6 +2281,13 @@ with (home / 'build-input').open('rb') as pipe:
     };
     assert!(!live(&build), "build survived the worker");
     assert!(live(&daemon), "interrupt stopped a detached service");
+    if pause {
+        assert_eq!(task.state(), "paused");
+        assert_eq!(store.task_graph_record(id).unwrap().unwrap(), cursor);
+        assert!(refusal(task.run(&["task", "run", "INF-123"])).contains("lf task unpause"));
+        task.ok(&["task", "unpause", "INF-123"]);
+        assert!(store.task_pause(id).unwrap().is_none());
+    }
 }
 
 /// Invoke pause from an independent CLI while the process being paused is

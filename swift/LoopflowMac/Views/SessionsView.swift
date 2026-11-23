@@ -1672,8 +1672,8 @@ struct SessionsContentView: View {
                 EmptyView()
             }
         }
-        .sheet(item: $model.projectsWave) { wave in
-            WaveProjectsView(wave: wave.name, repo: wave.repo)
+        .sheet(item: $model.projectWave) { wave in
+            WaveProjectSheet(wave: wave.name, repo: wave.repo)
         }
         .modifier(TaskAbandonConfirmation(model: model))
         .modifier(TaskCompleteConfirmation(model: model))

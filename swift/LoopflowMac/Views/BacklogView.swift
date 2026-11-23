@@ -719,7 +719,7 @@ struct BacklogView: View {
 
     private func waveMenu(_ roadmap: WaveRoadmap) -> some View {
         Menu {
-            Button("Project") { model.projectsWave = roadmap.wave }.accessibilityIdentifier("wave-projects")
+            Button("Project") { model.projectWave = roadmap.wave }.accessibilityIdentifier("wave-project")
             if let workflow = roadmap.graph {
                 Button("Workflow: \(workflow)") {
                     Task {

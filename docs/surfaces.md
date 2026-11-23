@@ -118,8 +118,8 @@ stands: the status word its sidebar row would show, then its step and its PR.
 A Task that is blocked or waiting adds a line with the reason. The backlog
 doesn't run a started Task: its button reads **Open**.
 
-**Objective ›** opens the Wave's Project: its objective and key results, drawn
-as they are on the Wave's Portfolio page.
+**Objective ›** expands the Wave's objective and shows its Project's name,
+status and tracker sync, as on the Portfolio page.
 
 - **Find.** Search matches titles and briefs. **Mine** is what you've claimed;
   **Available** is everything not claimed by someone else. Changing the filter

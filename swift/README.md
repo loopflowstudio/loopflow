@@ -203,8 +203,8 @@ open only a Task's conversation and never read Desktop's layouts.
 Repository and Wave
 entry shows their conversation, opened on load or on selection.
 Waves pair that conversation with their objective, status, planning and
-full Task inventory. **Projects** shows the Wave's Project with its
-name, status and tracker sync; **Workflow** opens the
+full Task inventory. In the Wave backlog menu, **Project** shows the Project's
+name, status and tracker sync. **Workflow** opens the
 Wave's default Graph in the catalogue inspector. The sidebar starts at 240 points wide;
 drag its edge to resize or use the title-bar button or **⌘\** to toggle it.
 Its scroll position survives Wave and Task navigation. Working order survives
@@ -1011,9 +1011,7 @@ Portfolio retains the Wave inspectors. A click on a Task's row there, on the
 roadmap, the Now list or a Wave's page, opens it in its
 repository window rather than creating another Task workspace in a sheet.
 A Wave on the roadmap is a section under its name, divided from the next by a
-line. A Wave's page shows its name, objective and key results, every Task, then
-its metric table. A metric whose contract has an issue shows a notice above the
-table with the count and each issue's summary; **Copy** copies the summaries.
+line. A Wave's page shows its name and objective, followed by its Project and Tasks.
 Wave Chat loads the active backing's bounded history before SSE, keeps it visible
 through reconnects, and rolls equivalent operational failures into one
 disclosed notice. Cold launch does not start a chat transcript read.
@@ -1290,8 +1288,8 @@ launching a window. Display/terminal integration is opt-in with
 `LOOPFLOW_NATIVE_TESTS=1`; use it for configured-host diagnostics or demo.
 See [Testing](#testing) for the full commands and CLI prerequisite.
 
-Opening a Wave runs no planning command: it shows the Projects and Tasks the
-Work stream supplies, and a Wave with no Project shows an empty Projects list.
+Opening a Wave reads its Project and Tasks from the Work stream without running
+a planning command.
 Empty default Graphs render no template section. Command transport errors remain
 scoped to the Wave.
 

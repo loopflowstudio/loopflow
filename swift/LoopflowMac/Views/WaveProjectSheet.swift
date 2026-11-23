@@ -2,7 +2,7 @@
 import Loopflow
 import SwiftUI
 
-struct WaveProjectsView: View {
+struct WaveProjectSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let wave: String

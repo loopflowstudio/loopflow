@@ -132,8 +132,8 @@ struct WorkModelTests {
         #expect(model.task(id: "issue-now")?.task.task.identifier == "W2-144")
     }
 
-    @Test("Projects remain reachable when planning is unavailable")
-    func projectsOpenWhenPlanningIsUnavailable() throws {
+    @Test("The Project sheet opens when planning is unavailable")
+    func projectSheetOpensWhenPlanningIsUnavailable() throws {
         let fixture = try WorkTestFixture.load()
         var wire = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
         var waves = try #require(wire["waves"] as? [[String: Any]])
@@ -146,9 +146,11 @@ struct WorkModelTests {
         model.select(.wave(id: "wave-1"))
 
         let view = WorkSurfaceView(model: model)
-        try view.inspect().find(button: "Project").tap()
+        let button = try view.inspect().find(button: "Project")
+        #expect(try button.accessibilityIdentifier() == "wave-project")
+        try button.tap()
 
-        #expect(model.projectsWave?.id == "wave-1")
+        #expect(model.projectWave?.id == "wave-1")
         #expect(model.selection == .wave(id: "wave-1"))
     }
 
@@ -177,14 +179,14 @@ struct WorkModelTests {
         switch destination {
         case "history":
             #expect(model.selection == .wave(id: "wave-1"))
-            #expect(model.projectsWave?.id == "wave-1")
+            #expect(model.projectWave?.id == "wave-1")
         case "task":
             #expect(model.selection == .task(id: "issue-now"))
-            #expect(model.projectsWave == nil)
+            #expect(model.projectWave == nil)
         default:
             #expect(model.repoPath == "/src/context")
             #expect(model.selection == nil)
-            #expect(model.projectsWave == nil)
+            #expect(model.projectWave == nil)
         }
     }
 

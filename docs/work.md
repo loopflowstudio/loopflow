@@ -132,9 +132,10 @@ lf session bind SESSION --task LOO-12          # make SESSION this Task's primar
 Adopting preserves the branch, uncommitted and untracked files, and the
 Session's provider history and live terminal attachment.
 
-- Plain `lf task create` always files new work, even inside an existing Task
-  checkout or Session. Run from a Task's conversation, the new Task is that
-  Task's [follow-up](#file-follow-ups-from-a-task). Pass `--worktree` or `--session` explicitly to adopt.
+- Plain `lf task create` always files new top-level work, even inside an
+  existing Task checkout or Session. Pass `--parent <ID>` to file a
+  [child Task](#file-follow-ups-from-a-task), or `--worktree` / `--session`
+  explicitly to adopt.
 - `--worktree` without `--run` adopts the checkout only; adding `--run` also
   starts the Task's conversation and Graph.
 - Main and Wave checkouts stay shared: binding a Session there transfers the
@@ -150,13 +151,14 @@ Session's provider history and live terminal attachment.
 
 ## File follow-ups from a Task
 
-In LOO-12's conversation, say "file the follow-ups", or run it yourself there:
+In LOO-12's conversation, say "file the follow-ups", or run it yourself:
 
 ```bash
-lf task create --title "Retry budget per host"      # a child of LOO-12: no flag
-lf task create --title "Unrelated cleanup" --parent none    # top-level instead
-lf task create --title "Jitter the backoff" --parent LOO-30 # under another Task
-lf task status LOO-12                               # LOO-12 and its children
+lf task create --title "Retry budget per host" --parent LOO-12  # child of LOO-12
+lf task create --title "Unrelated cleanup"                      # top-level work
+lf task update LOO-30 --parent LOO-12                           # adopt existing Task
+lf task update LOO-30 --parent none                             # clear parent
+lf task status LOO-12                                           # LOO-12 and its children
 ```
 
 ```text
@@ -170,26 +172,22 @@ LOO-12  idle
   child: LOO-16  Document the budget    unstarted
 ```
 
-The receipt of a follow-up names the Task it went under:
+The receipt of a child names its parent:
 
 ```text
-$ lf task create --title "Retry budget per host"
+$ lf task create --title "Retry budget per host" --parent LOO-12
 Retry budget per host · LOO-14
   parent: LOO-12
 ```
 
-A Task filed from a Task's conversation is its child, whether you typed the
-command, the agent did, or a step of its Graph did. Each child is an ordinary
-Task with its own worktree, branch and pull request; it joins its parent's
-Wave unless you pass `--wave`. A parent says where a Task came from, a stack
-says which branch it starts from, and neither sets the other: add
-`--stack-on LOO-12` when the follow-up needs LOO-12's unmerged code.
-
-Follow-ups stay flat. Filed from LOO-14's conversation, a new Task is a
-sibling under LOO-12; `--parent LOO-14` nests it. Once LOO-12 is done or
-abandoned, a Task filed from LOO-14's conversation is LOO-14's child.
-Outside a Task's conversation, `lf task create` files top-level work as
-before.
+Passing `--parent <ID>` on `lf task create` (or `lf task update <ID> --parent
+<parent|none>`) links a child Task under its parent. Plain `lf task create`
+always files top-level work, even inside an existing Task's conversation or
+worktree. Each child is an ordinary Task with its own worktree, branch and pull
+request; on creation it joins its parent's Wave unless you pass `--wave`.
+Nesting is unrestricted and cycles are refused. A parent says who conducts the
+work, a stack says which branch it starts from, and neither sets the other: add
+`--stack-on LOO-12` when a child needs LOO-12's unmerged code.
 
 LOO-12's conversation conducts its children. It is told, and woken if idle,
 when a child stops at an interactive step, a child's run fails or stops, a
@@ -584,8 +582,9 @@ answer back to the channel.
 **Task identifiers.** Ticket aliases (`LOO-12`, case-insensitive), full IDs, or
 unique prefixes of four or more hex digits (`abcd`, `lf-abcd`, `task_abcd`).
 
-**Parent.** `--parent <ID>` on `lf task create` names the parent;
-`--parent none` files top-level; an unknown ID is an error naming it, and so
+**Parent.** `--parent <ID>` on `lf task create` or `lf task update` names the
+parent; plain `lf task create` files top-level work, and `--parent none` on
+`lf task update` clears the parent. An unknown ID is an error naming it, and so
 is a parent that would be its own descendant. `lf task create --json`,
 `lf task status --json` and `lf task show --json` carry `parent`, the
 parent's row as `lf task list --json` prints it, or `null`, so

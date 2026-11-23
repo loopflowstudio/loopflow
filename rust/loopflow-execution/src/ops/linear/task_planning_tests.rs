@@ -591,7 +591,6 @@ fn a_follow_up_is_created_in_linear_under_its_parents_issue() {
                 crate::ops::task::TaskAdoptionOptions::default(),
                 crate::ops::task::TaskParentChoice {
                     named: parent.map(|parent| parent.identifier.clone()),
-                    caller: None,
                 },
                 None,
             )
@@ -611,7 +610,67 @@ fn a_follow_up_is_created_in_linear_under_its_parents_issue() {
             parent.tracker_id.as_ref().unwrap().as_str()
         );
         // What Linear answered names the same parent, so the link stands.
-        assert_eq!(child.parent_task_id, Some(parent.id));
+        assert_eq!(child.parent_task_id, Some(parent.id.clone()));
+
+        // Reparenting via `task_edit` refuses cycles and syncs clear/set to Linear.
+        let cycle = crate::ops::task::task_edit(
+            repo,
+            &parent.identifier,
+            None,
+            loopflow_storage::work::task::TaskUpdate::default(),
+            Some(&child.identifier),
+        );
+        assert!(cycle
+            .unwrap_err()
+            .to_string()
+            .contains("cannot be its own ancestor"));
+
+        crate::ops::task::task_edit(
+            repo,
+            &child.identifier,
+            None,
+            loopflow_storage::work::task::TaskUpdate::default(),
+            Some("none"),
+        )
+        .unwrap();
+        let unparented = runtime
+            .block_on(fixture.store.get_task(&child.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(unparented.parent_task_id, None);
+        let remote = runtime
+            .block_on(state.lock())
+            .issues
+            .iter()
+            .find(|issue| issue["id"] == child.tracker_id.as_ref().unwrap().as_str())
+            .cloned()
+            .unwrap();
+        assert!(remote["parent"].is_null(), "{remote}");
+
+        crate::ops::task::task_edit(
+            repo,
+            &child.identifier,
+            None,
+            loopflow_storage::work::task::TaskUpdate::default(),
+            Some(&parent.identifier),
+        )
+        .unwrap();
+        let adopted = runtime
+            .block_on(fixture.store.get_task(&child.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(adopted.parent_task_id, Some(parent.id));
+        let remote = runtime
+            .block_on(state.lock())
+            .issues
+            .iter()
+            .find(|issue| issue["id"] == child.tracker_id.as_ref().unwrap().as_str())
+            .cloned()
+            .unwrap();
+        assert_eq!(
+            remote["parent"]["id"],
+            parent.tracker_id.as_ref().unwrap().as_str()
+        );
     });
 }
 

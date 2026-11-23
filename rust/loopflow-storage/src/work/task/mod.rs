@@ -25,6 +25,8 @@ pub struct TaskUpdate {
     pub assignee: Option<Option<String>>,
     pub title: Option<String>,
     pub description: Option<String>,
+    /// Omitted preserves parent; explicit None clears it.
+    pub parent: Option<Option<TaskId>>,
 }
 
 /// The caller retains this identity across a retry; a separate create mints another.

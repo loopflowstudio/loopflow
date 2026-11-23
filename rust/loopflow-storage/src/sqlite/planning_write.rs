@@ -291,7 +291,7 @@ fn write_record(
 
 /// Why `task` cannot be filed under `parent`: the parent is unknown here, or
 /// is `task` itself or one of its descendants.
-fn parent_refusal(
+pub(super) fn parent_refusal(
     conn: &Connection,
     task: &str,
     parent: &str,

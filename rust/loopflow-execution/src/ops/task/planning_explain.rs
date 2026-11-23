@@ -14,7 +14,10 @@ pub enum TaskPlanningRequest<'a> {
         title: Option<&'a str>,
         notes: Option<&'a str>,
     },
-    Edit(TaskUpdate),
+    Edit {
+        update: TaskUpdate,
+        parent: Option<&'a str>,
+    },
     Move {
         wave: Option<&'a str>,
     },
@@ -160,15 +163,25 @@ async fn read_planning(
         TaskPlanningRequest::Create { title, notes } => {
             read_creation(store, cwd, selection.wave, *title, *notes, report).await?;
         }
-        TaskPlanningRequest::Edit(update) => {
-            if let Err(error) = super::validate_task_edit_input(update) {
+        TaskPlanningRequest::Edit { update, parent } => {
+            if let Err(error) = super::validate_task_edit_input(update, *parent) {
                 report.impediments.push(error.to_string());
                 return Ok(());
             }
             let task = read_saved_task(store, cwd, selection.wave, &report.resolution).await?;
+            let mut update = update.clone();
+            if update.parent.is_none() {
+                match super::resolve_parent_update(store, *parent).await {
+                    Ok(resolved) => update.parent = resolved,
+                    Err(error) => {
+                        report.impediments.push(error.to_string());
+                        return Ok(());
+                    }
+                }
+            }
             if let Err(error) = store
                 .sqlite
-                .validate_task_edit(&task.id, task.revision, update)
+                .validate_task_edit(&task.id, task.revision, &update)
             {
                 report.impediments.push(error.to_string());
                 return Ok(());
@@ -178,6 +191,7 @@ async fn read_planning(
                 ("description", update.description.is_some()),
                 ("rank", update.rank.is_some()),
                 ("assignee", update.assignee.is_some()),
+                ("parent", update.parent.is_some()),
             ]
             .into_iter()
             .filter(|(_, present)| *present)

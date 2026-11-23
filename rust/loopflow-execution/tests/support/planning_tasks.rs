@@ -480,6 +480,13 @@ pub async fn planning_response(
                         json!({"id":value,"name":"Project"})
                     }
                 }
+                "parentId" => {
+                    target["parent"] = if value.is_null() {
+                        json!(null)
+                    } else {
+                        json!({"id":value})
+                    }
+                }
                 _ => target[field] = value.clone(),
             }
         }

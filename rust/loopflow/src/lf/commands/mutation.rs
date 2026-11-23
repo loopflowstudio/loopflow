@@ -274,6 +274,7 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             notes,
             rank,
             assignee,
+            parent,
             wave,
             json,
         } => {
@@ -282,6 +283,7 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
                 issue,
                 wave.as_deref(),
                 task_edit_update(title, notes, *rank, assignee),
+                parent.as_deref(),
             )?;
             print_edit(&result, *json, "updated", io)
         }
@@ -349,6 +351,7 @@ pub fn task_edit_update(
         description: notes.clone(),
         rank,
         assignee: assignee.clone().map(Some),
+        parent: None,
     }
 }
 

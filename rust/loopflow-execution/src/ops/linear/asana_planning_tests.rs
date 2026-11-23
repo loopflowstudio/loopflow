@@ -330,7 +330,6 @@ fn asana_follow_up_is_created_as_a_subtask_of_its_parent() {
                 crate::ops::task::TaskAdoptionOptions::default(),
                 crate::ops::task::TaskParentChoice {
                     named: parent.map(|parent| parent.identifier.clone()),
-                    caller: None,
                 },
                 None,
             )
@@ -376,6 +375,7 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
                 title: Some("Write back, renamed".into()),
                 ..Default::default()
             },
+            None,
         )
         .unwrap();
         assert_eq!(mirrored(runtime, &state, id)["name"], "Write back, renamed");

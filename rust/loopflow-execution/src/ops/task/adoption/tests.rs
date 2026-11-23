@@ -112,15 +112,8 @@ impl Table {
         .map(|created| created.receipt.task)
     }
 
-    /// `lf task create --title TITLE [--wave WAVE] [--parent PARENT]`, run by
-    /// `caller`'s agent.
-    fn file(
-        &self,
-        title: &str,
-        wave: Option<&str>,
-        parent: Option<&str>,
-        caller: Option<&LfSession>,
-    ) -> anyhow::Result<Task> {
+    /// `lf task create --title TITLE [--wave WAVE] [--parent PARENT]`.
+    fn file(&self, title: &str, wave: Option<&str>, parent: Option<&str>) -> anyhow::Result<Task> {
         creation::create(
             &uuid::Uuid::new_v4().to_string(),
             TaskCreation {
@@ -130,7 +123,6 @@ impl Table {
                 wave: wave.map(str::to_owned),
                 parent: crate::ops::task::TaskParentChoice {
                     named: parent.map(str::to_owned),
-                    caller: caller.map(|session| session.id.clone()),
                 },
                 graph: None,
                 session: None,
@@ -248,18 +240,19 @@ fn creation_adopts_only_the_selected_work() {
 }
 
 #[test]
-fn a_task_filed_from_a_tasks_conversation_is_its_child() {
+fn explicit_parent_files_children_at_any_depth_without_auto_parenting() {
     let table = Table::new(false);
     // Naming a Wave that does not exist makes it, with its first Project.
-    let parent = table
-        .file("Retry requests", Some("billing"), None, None)
-        .unwrap();
+    let parent = table.file("Retry requests", Some("billing"), None).unwrap();
     assert_eq!(parent.parent_task_id, None);
-    let conducting = table.conversation(&table.main(), "tui", Some(&parent));
 
-    // No flag: the caller's Task is the parent, and its Wave and Project come along.
+    // No `--parent`: top-level work even when another Task exists.
+    let plain = table.file("Unrelated cleanup", None, None).unwrap();
+    assert_eq!((plain.parent_task_id, plain.project_id), (None, None));
+
+    // Explicit `--parent`: becomes a child and inherits the parent's Wave and Project.
     let child = table
-        .file("Retry budget per host", None, None, Some(&conducting))
+        .file("Retry budget per host", None, Some(&parent.identifier))
         .unwrap();
     assert_eq!(child.parent_task_id.as_ref(), Some(&parent.id));
     assert!(parent.project_id.is_some());
@@ -268,47 +261,23 @@ fn a_task_filed_from_a_tasks_conversation_is_its_child() {
         (&parent.project_id, &parent.wave_id)
     );
 
-    // Follow-ups stay flat: filed from the child's conversation, a sibling.
-    let from_child = table.conversation(&table.main(), "tui", Some(&child));
-    let sibling = table
-        .file("Log each retry", None, None, Some(&from_child))
-        .unwrap();
-    assert_eq!(sibling.parent_task_id.as_ref(), Some(&parent.id));
-    let nested = table
-        .file("Jitter", None, Some(&child.identifier), Some(&from_child))
-        .unwrap();
+    // Explicit `--parent` nests without flattening into siblings.
+    let nested = table.file("Jitter", None, Some(&child.identifier)).unwrap();
     assert_eq!(nested.parent_task_id.as_ref(), Some(&child.id));
 
     let apart = table
-        .file("Unrelated cleanup", None, Some("none"), Some(&conducting))
+        .file("Top-level explicit", None, Some("none"))
         .unwrap();
     assert_eq!((apart.parent_task_id, apart.project_id), (None, None));
-    let outside = table.conversation(&table.main(), "tui", None);
-    let plain = table.file("Plain", None, None, Some(&outside)).unwrap();
-    assert_eq!(plain.parent_task_id, None);
 
-    let error = refusal(table.file("Lost", None, Some("LOO-404"), Some(&conducting)));
+    let error = refusal(table.file("Lost", None, Some("LOO-404")));
     assert!(error.contains("LOO-404"), "{error}");
 
     let children = table.store.sqlite.task_children(&parent.id).unwrap();
     assert_eq!(
         children.iter().map(|task| &task.id).collect::<Vec<_>>(),
-        [&child.id, &sibling.id]
+        [&child.id]
     );
-
-    // Once the parent closes, nobody conducts under it: a follow-up filed
-    // from the child's conversation is that child's child.
-    table
-        .db()
-        .execute(
-            "UPDATE tasks SET planning_completed=1,planning_state='completed' WHERE id=?1",
-            [parent.id.as_str()],
-        )
-        .unwrap();
-    let after = table
-        .file("Cap the budget", None, None, Some(&from_child))
-        .unwrap();
-    assert_eq!(after.parent_task_id.as_ref(), Some(&child.id));
 }
 
 #[test]

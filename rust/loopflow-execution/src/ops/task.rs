@@ -2458,55 +2458,32 @@ async fn file_task_in(
         .ok_or_else(|| task_error("Created Task is missing"))
 }
 
-/// Which Task a new one is filed under.
+/// Which Task a new one is filed under (`--parent`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskParentChoice {
-    /// `--parent`: a Task, or `none` for top-level work.
+    /// `--parent`: a Task ID or identifier. Omitted or `none` files top-level work.
     pub named: Option<String>,
-    /// The conversation that ran the command. Its Task is the parent when
-    /// none is named.
-    pub caller: Option<loopflow_model::id::LfSessionId>,
 }
 
 impl TaskParentChoice {
-    /// Follow-ups stay flat: filed from a child's conversation, the new Task
-    /// is that child's sibling while their parent is open on this Machine.
-    /// Under a parent that closed or is not here, it would be filed under
-    /// work whose conversation nobody has open, so it is the caller's child.
     async fn resolve(&self, store: &SharedStore) -> OpsResult<Option<Task>> {
-        let caller = match (self.named.as_deref(), &self.caller) {
-            (Some("none"), _) | (None, None) => return Ok(None),
-            (Some(named), _) => {
-                let unknown = || task_error(format!("--parent names an unknown Task: {named}"));
-                let id = crate::store::children::resolve_task_id(&store.sqlite, named, None)
-                    .map_err(task_error)?
-                    .ok_or_else(unknown)?;
-                let parent = store.get_task(&id).await.map_err(task_error)?;
-                return Ok(Some(parent.ok_or_else(unknown)?));
-            }
-            (None, Some(caller)) => caller,
-        };
-        let Some(own) =
-            crate::ops::human_session::moves::conversation_task(&store.sqlite, caller.as_str())
-                .map_err(task_error)?
-        else {
-            return Ok(None);
-        };
-        let Some(own) = store.get_task(&own).await.map_err(task_error)? else {
-            return Ok(None);
-        };
-        let Some(parent) = &own.parent_task_id else {
-            return Ok(Some(own));
-        };
-        let parent = match store.get_task(parent).await.map_err(task_error)? {
-            Some(parent) => {
-                let state = store.sqlite.task_state(&parent.id).map_err(task_error)?;
-                (!matches!(state, TaskState::Done | TaskState::Abandoned)).then_some(parent)
-            }
-            None => None,
-        };
-        Ok(Some(parent.unwrap_or(own)))
+        match self.named.as_deref() {
+            None | Some("none") => Ok(None),
+            Some(named) => resolve_parent_task(store, named).await.map(Some),
+        }
     }
+}
+
+pub(crate) async fn resolve_parent_task(store: &SharedStore, named: &str) -> OpsResult<Task> {
+    let unknown = || task_error(format!("--parent names an unknown Task: {named}"));
+    let id = crate::store::children::resolve_task_id(&store.sqlite, named, None)
+        .map_err(task_error)?
+        .ok_or_else(unknown)?;
+    store
+        .get_task(&id)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(unknown)
 }
 
 pub fn resolve_task_create_input(
@@ -3304,10 +3281,11 @@ pub struct TaskEdit {
 
 pub(crate) fn validate_task_edit_input(
     update: &loopflow_storage::work::task::TaskUpdate,
+    parent: Option<&str>,
 ) -> OpsResult<()> {
-    if *update == loopflow_storage::work::task::TaskUpdate::default() {
+    if *update == loopflow_storage::work::task::TaskUpdate::default() && parent.is_none() {
         return Err(task_error(
-            "task edit requires --title, --notes, --rank or --assignee",
+            "task update requires --title, --notes, --rank, --assignee or --parent",
         ));
     }
     if update
@@ -3320,15 +3298,32 @@ pub(crate) fn validate_task_edit_input(
     Ok(())
 }
 
+pub(crate) async fn resolve_parent_update(
+    store: &SharedStore,
+    parent: Option<&str>,
+) -> OpsResult<Option<Option<loopflow_model::durable::TaskId>>> {
+    match parent {
+        None => Ok(None),
+        Some("none") => Ok(Some(None)),
+        Some(named) => resolve_parent_task(store, named)
+            .await
+            .map(|task| Some(Some(task.id))),
+    }
+}
+
 pub fn task_edit(
     repo: &Path,
     issue: &str,
     wave: Option<&str>,
-    update: loopflow_storage::work::task::TaskUpdate,
+    mut update: loopflow_storage::work::task::TaskUpdate,
+    parent: Option<&str>,
 ) -> OpsResult<TaskEdit> {
-    validate_task_edit_input(&update)?;
+    validate_task_edit_input(&update, parent)?;
     block_on_task(async {
         let (store, task) = resolve_saved_task(repo, wave, issue).await?;
+        if update.parent.is_none() {
+            update.parent = resolve_parent_update(&store, parent).await?;
+        }
         let edited = store
             .edit_task(&task.id, task.revision, &update)
             .await

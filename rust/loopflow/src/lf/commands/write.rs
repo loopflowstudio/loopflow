@@ -112,7 +112,6 @@ writes! {
             wave: wave.clone(),
             parent: loopflow_execution::ops::task::TaskParentChoice {
                 named: parent.clone(),
-                caller: None,
             },
             graph: graph.clone(),
             session: session.clone(),
@@ -151,6 +150,7 @@ writes! {
         issue,
         None,
         super::mutation::task_edit_update(&None, notes, *rank, &None),
+        None,
     )?,
 
     /// `lf task abandon <issue>`: cancels the Task and removes its PRs and

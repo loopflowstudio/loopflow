@@ -91,7 +91,6 @@ pub fn create(
             wave: if *no_wave { None } else { wave.clone() },
             parent: loopflow_execution::ops::task::TaskParentChoice {
                 named: parent.clone(),
-                caller: loopflow_execution::journal::caller_session_id(),
             },
             graph: graph.clone(),
             session: session.clone(),

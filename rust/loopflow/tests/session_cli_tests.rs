@@ -640,7 +640,7 @@ fn json(text: String) -> serde_json::Value {
 }
 
 #[test]
-fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
+fn explicit_parent_shows_under_parent_and_update_reparents_without_cycles() {
     let home = tempfile::tempdir().unwrap();
     let repo = loopflow_test_support::TestRepo::new();
     let lf = |args: &[&str], caller: Option<&str>| lf_in(home.path(), repo.path(), args, caller);
@@ -652,7 +652,7 @@ fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
     let parent_name = parent["task"]["identifier"].as_str().unwrap().to_owned();
     assert!(parent["task"]["parent_task_id"].is_null());
 
-    // An agent in the Task's conversation runs the command.
+    // Even inside the parent Task's conversation, plain `lf task create` stays top-level.
     let (session, _, _) = prepare_conversation(home.path(), repo.path(), "claude", "Parent");
     let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let launcher = loopflow_model::id::LfProcessId::new();
@@ -673,39 +673,44 @@ fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
         attachment::claim_session_attachment(&store, &session, None, &launcher).unwrap();
     let caller = serde_json::to_string(&attachment.caller(session.clone().into(), None)).unwrap();
 
+    let apart = json(lf(
+        &["task", "create", "--title", "Unrelated", "--json"],
+        Some(&caller),
+    ));
+    assert!(apart["task"]["parent_task_id"].is_null());
+    assert!(apart["parent"].is_null());
+    let apart_name = apart["task"]["identifier"].as_str().unwrap().to_owned();
+
+    // Explicit `--parent` links the new Task under the parent.
     let child = json(lf(
         &[
             "task",
             "create",
             "--title",
             "Retry budget per host",
+            "--parent",
+            &parent_name,
             "--json",
         ],
         Some(&caller),
     ));
     assert_eq!(child["task"]["parent_task_id"], parent_id);
-    // The receipt names the Task it was filed from as a list would show it.
+    // The receipt names the parent Task as a list would show it.
     assert_eq!(child["parent"]["identifier"], parent_name);
     assert_eq!(child["parent"]["state"], "unstarted");
     assert!(parent["parent"].is_null());
-    let child_name = child["task"]["identifier"].as_str().unwrap();
-    let apart = json(lf(
+    let child_name = child["task"]["identifier"].as_str().unwrap().to_owned();
+
+    // Without `--json` the receipt says where the child went.
+    let receipt = lf(
         &[
             "task",
             "create",
             "--title",
-            "Unrelated",
+            "Log each retry",
             "--parent",
-            "none",
-            "--json",
+            &parent_name,
         ],
-        Some(&caller),
-    ));
-    assert!(apart["task"]["parent_task_id"].is_null());
-    assert!(apart["parent"].is_null());
-    // Without `--json` the receipt says where the follow-up went.
-    let receipt = lf(
-        &["task", "create", "--title", "Log each retry"],
         Some(&caller),
     );
     assert!(
@@ -713,11 +718,33 @@ fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
         "{receipt}"
     );
 
+    // `lf task update --parent` adopts an existing Task, refuses cycles, and clears with `none`.
+    lf(
+        &["task", "update", &apart_name, "--parent", &parent_name],
+        None,
+    );
+    let adopted = json(lf(&["task", "status", &apart_name, "--json"], None));
+    assert_eq!(adopted["parent"]["identifier"], parent_name);
+
+    let mut cycle = command(
+        home.path(),
+        &["task", "update", &parent_name, "--parent", &apart_name],
+    );
+    cycle.current_dir(repo.path()).env("HOME", home.path());
+    let cycle = cycle.output().unwrap();
+    assert!(!cycle.status.success());
+    let stderr = String::from_utf8_lossy(&cycle.stderr);
+    assert!(stderr.contains("cannot be its own ancestor"), "{stderr}");
+
+    lf(&["task", "update", &apart_name, "--parent", "none"], None);
+    let cleared = json(lf(&["task", "status", &apart_name, "--json"], None));
+    assert!(cleared["parent"].is_null());
+
     // `lf task show` carries the same two keys as `lf task status`.
     let shown = json(lf(&["task", "show", &parent_name, "--json"], None));
     assert!(shown["parent"].is_null());
     assert_eq!(shown["children"][0]["identifier"], child_name);
-    let shown = json(lf(&["task", "show", child_name, "--json"], None));
+    let shown = json(lf(&["task", "show", &child_name, "--json"], None));
     assert_eq!(shown["parent"]["identifier"], parent_name);
     assert_eq!(shown["children"], serde_json::json!([]));
 
@@ -727,7 +754,7 @@ fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
     assert_eq!(children.len(), 2, "{children:?}");
     assert_eq!(children[0]["identifier"], child_name);
     assert_eq!(children[0]["state"], "unstarted");
-    let status = json(lf(&["task", "status", child_name, "--json"], None));
+    let status = json(lf(&["task", "status", &child_name, "--json"], None));
     // The same row the creation receipt carried, wherever a parent is read.
     assert_eq!(status["parent"]["identifier"], parent_name);
     assert_eq!(status["parent"]["id"], parent_id);
@@ -741,7 +768,7 @@ fn a_task_filed_from_a_tasks_conversation_shows_under_it() {
         )),
         "{shown}"
     );
-    let shown = lf(&["task", "status", child_name], None);
+    let shown = lf(&["task", "status", &child_name], None);
     assert!(shown.contains(&format!("parent: {parent_name}")), "{shown}");
 }
 

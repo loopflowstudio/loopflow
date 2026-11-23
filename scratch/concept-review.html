@@ -6,9 +6,9 @@
 <title>LOO-922 concept review: seeding a new worktree's target</title>
 <style>
 :root { color-scheme: light dark; --bg:#fbfaf7; --fg:#1d1c1a; --mute:#6b675f; --line:#dedad2;
-  --yes:#1f7a3f; --no:#b3261e; --prop:#2f5fb3; --propbg:#eaf0fb; --warn:#9a5b13; --warnbg:#fdf3e3; --card:#ffffff; }
+  --yes:#1f7a3f; --no:#b3261e; --prop:#2f5fb3; --propbg:#eaf0fb; --okbg:#e9f6ee; --card:#ffffff; }
 @media (prefers-color-scheme: dark) { :root { --bg:#161513; --fg:#ebe8e2; --mute:#9d988e; --line:#34312c;
-  --yes:#5cc27f; --no:#f07a70; --prop:#86a9f0; --propbg:#1c2433; --warn:#f0b265; --warnbg:#2d2214; --card:#1e1d1a; } }
+  --yes:#5cc27f; --no:#f07a70; --prop:#86a9f0; --propbg:#1c2433; --okbg:#16291e; --card:#1e1d1a; } }
 body { background:var(--bg); color:var(--fg); font:16px/1.55 ui-sans-serif, -apple-system, "Helvetica Neue", sans-serif;
   max-width: 980px; margin: 2.5rem auto; padding: 0 1.25rem; }
 h1 { font-size:1.65rem; margin-bottom:.2rem } h2 { font-size:1.2rem; margin-top:2.4rem }
@@ -18,10 +18,9 @@ th, td { text-align:left; vertical-align:top; padding:.55rem .6rem; border-botto
 th { font-weight:600 }
 .yes { color:var(--yes); font-weight:700 } .no { color:var(--no); font-weight:700 }
 code { font: .88em ui-monospace, "SF Mono", Menlo, monospace }
-.prop { background:var(--propbg); border-left:3px solid var(--prop); padding:.15rem .45rem; display:inline-block; margin-top:.25rem }
-.callout { background:var(--warnbg); border-left:3px solid var(--warn); padding:.75rem 1rem; border-radius:4px; margin:1rem 0 }
-.tag { font-size:.76rem; color:var(--prop); font-weight:700; letter-spacing:.03em; text-transform:uppercase; vertical-align:middle; margin-left:.35rem }
-.tag.ex { color:var(--mute) }
+.callout { background:var(--okbg); border-left:3px solid var(--yes); padding:.75rem 1rem; border-radius:4px; margin:1rem 0 }
+.tag { font-size:.76rem; color:var(--mute); font-weight:700; letter-spacing:.03em; text-transform:uppercase; vertical-align:middle; margin-left:.35rem }
+.tag.done { color:var(--yes) }
 .cols { display:grid; grid-template-columns:1fr 1fr; gap:1rem }
 .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:.9rem 1rem }
 .card h3 { margin:.1rem 0 .5rem; font-size:1rem }
@@ -34,180 +33,176 @@ ol.q > li { margin-bottom:.85rem } ol.q ol { list-style:lower-alpha; margin-top:
 </head>
 <body>
 <h1>Seeding a new worktree's Rust target</h1>
-<p class="lede">LOO-922, full post-build concept review against base <code>f4b74bc8eb</code> at head <code>c675ac0b77</code> (2026-11-22).
+<p class="lede">LOO-922, full post-build concept review against base <code>3578f78f6d</code> at head <code>6dbc23b366</code> (2026-11-22).
 Area taken: the whole life of a worktree's Rust build outputs for a Loopflow developer and Machine agents —
-cache install, worktree creation (cold or seeded), source selection and quiescence, first and later builds,
-benchmark isolation, <code>status</code> readout, and reclaim by <code>lf wt prune --builds</code>.</p>
+cache install, worktree creation (cold or seeded), source selection across Cargo target layouts, quiescence,
+first and later builds, benchmark isolation, <code>status</code> readout, and reclaim by <code>lf wt prune --builds</code>.</p>
 
 <div class="callout">
-<strong>Outcome: the plan changed.</strong> The built implementation matches the first review's seed layout
-(<code>.fingerprint</code>, <code>build</code>, <code>deps</code>, atomic rename, no knob), but the three follow-up
-patches (<code>c67fb141a6</code>, <code>5336a5ebaf</code>, <code>5e305e63c7</code>) all worked around one missing
-concept: <strong>the code does not distinguish a built target from an unbuilt seed</strong>. Its tie-breaker
-(<code>not .loopflow-seed.exists()</code>) breaks in steady state once active worktrees start seeded, and its lock
-fix creates Cargo's private lock files inside unbuilt siblings. A second mismatch: <code>test_loop.py</code> creates
-worktrees through the hook without discarding the seed, violating the "cold target = <code>rm -rf target</code>" contract.
+<strong>Outcome: nothing to change.</strong> The product concepts and code concepts now line up across the whole area.
+Both mismatches from the earlier pass are resolved in the built tree: only targets Cargo has actually built can seed
+a new worktree (unbuilt seeds stay untouched and never supply false provenance), and <code>test_loop.py</code> shares
+<code>seed_probe.py</code>'s single cold-target contract (<code>add_worktree(..., cold=True)</code> removes
+<code>target/</code>). QA run 3's Cargo 1.100 layout support (<code>SEED_LAYOUTS</code>) fits the same seed model
+without introducing a second concept: Cargo 1.100 unifies <code>.fingerprint</code>, <code>build</code>, and
+<code>deps</code> into <code>build/&lt;package&gt;/&lt;hash&gt;/</code> while keeping binaries,
+<code>incremental/</code>, and Cargo locks outside it. No proposed changes remain.
 </div>
 
 <h2>The interaction</h2>
 <p>You (or <code>lf</code>, preparing <code>loopflow.ready</code> or a Task checkout) run
-<code>git worktree add ../x main</code>. The installed <code>post-checkout</code> hook fires with a null old OID,
-finds the most recently built quiet sibling worktree, clones its <code>.fingerprint</code>, <code>build</code>, and
-<code>deps</code> into <code>target/debug.seeding</code>, and atomically renames it to <code>target/debug</code>.
+<code>git worktree add ../x main</code>. The installed <code>post-checkout</code> hook fires on a null old OID
+(<code>$3=1</code>, <code>$1</code> all zeros), finds the newest idle sibling worktree that Cargo has actually built,
+clones its reusable Cargo state into <code>target/debug.seeding</code> while holding Cargo's locks on the source,
+preserves the ranking directory's mtime, and atomically renames <code>debug.seeding</code> to <code>target/debug</code>.
 Your first <code>cargo build -p loopflow --bin lf</code> compiles only the workspace crates (7 units instead of 256
 when <code>Cargo.lock</code> matches). <code>uv run python scripts/build_cache.py status</code> prints which built
 sibling and commit produced the seed.</p>
 <p><strong>Failure &amp; recovery:</strong> every built sibling is mid-build, none exists, or the target volume cannot
 copy-on-write clone &rarr; the hook stays silent, <code>target/</code> is absent, <code>status</code> prints
 <code>seed     none</code>, and Cargo builds cold as before. Partial clone failure deletes <code>debug.seeding</code>
-and never exposes a half target. To force a cold build in a seeded checkout: <code>rm -rf target</code>.</p>
+and removes empty <code>target/</code> without touching any concurrent Cargo build. To force a cold build in a seeded
+checkout: <code>rm -rf target</code> (which removes <code>target/.loopflow-seed</code> with it).</p>
 
 <h2>Do the concepts line up?</h2>
 <table>
-<tr><th>What a person knows / does</th><th>What the code has <span class="tag ex">EXISTING AT c675ac0b77</span></th><th></th><th>Note</th></tr>
+<tr><th>What a person knows / does</th><th>What the code has <span class="tag done">EXISTING AT 6dbc23b366</span></th><th></th><th>Note</th></tr>
 <tr>
   <td>"Make a new worktree"</td>
   <td><code>git worktree add</code> &rarr; <code>post-checkout</code> when <code>$3=1</code> and <code>$1</code> is all zeros</td>
   <td class="yes">yes</td>
-  <td>One trigger covers hand-made worktrees and <code>lf</code>'s <code>prepare_ready_checkout</code> / <code>take_ready_checkout</code> sequence (which moves and switches with a non-null old OID).</td>
+  <td>One trigger covers hand-made worktrees and <code>lf</code>'s <code>prepare_ready_checkout</code> / <code>take_ready_checkout</code> (move + switch has a non-null old OID and never re-seeds).</td>
 </tr>
 <tr>
   <td>"The build cache": <code>install</code> once, <code>status</code> to inspect</td>
-  <td><code>scripts/build_cache.py</code> owns sccache roots and target seeding</td>
+  <td><code>scripts/build_cache.py</code> owns sccache roots and target seeding; hook runs <code>.git/hooks/loopflow-build-cache.py</code> refreshed by <code>install</code></td>
   <td class="yes">yes</td>
-  <td>One opt-in, one readout. The hook runs a copy in <code>.git/hooks/loopflow-build-cache.py</code>, refreshed by <code>install</code> (documented in <code>scripts/testing.md</code>).</td>
+  <td>One opt-in, one readout (<code>status</code> / <code>status --json</code>). Existing installs refresh with one <code>install</code> run.</td>
 </tr>
 <tr>
   <td>"A seed": the reusable part of another worktree's build</td>
-  <td><code>SEED_ENTRIES = (".fingerprint", "build", "deps")</code> cloned via <code>clonefile(2)</code> / <code>cp -a --reflink=always</code> into <code>debug.seeding</code>, atomic rename</td>
+  <td><code>SEED_LAYOUTS = ((".fingerprint", "build", "deps"), ("build",))</code> cloned via <code>clonefile(2)</code> / <code>cp -a --reflink=always</code> into <code>debug.seeding</code>, atomic rename</td>
   <td class="yes">yes</td>
-  <td>No delete list, no uplifted binaries from another branch, no path-bound <code>incremental/</code>, never a full byte copy.</td>
+  <td>Names what goes in for both Cargo &lt; 1.100 and Cargo 1.100 (where <code>build/&lt;pkg&gt;/&lt;hash&gt;/</code> holds fingerprints, outputs, and build-script runs). Never copies uplifted binaries, path-bound <code>incremental/</code>, or lock files; never falls back to a full byte copy.</td>
 </tr>
 <tr>
   <td>"A seed source": a sibling that Cargo has built</td>
-  <td><code>_seed_sources</code> admits any sibling with <code>.fingerprint</code>, <code>build</code>, <code>deps</code> (including unbuilt seeds), ranks by <code>(.fingerprint mtime, not .loopflow-seed.exists())</code>, and <code>_quiescent</code> creates Cargo's lock files inside unbuilt siblings</td>
-  <td class="no">no</td>
-  <td><strong>Biggest mismatch.</strong> Conflates a <em>built target</em> with an <em>unbuilt seed</em>, and conflates <em>ever seeded</em> (<code>.loopflow-seed</code>, permanent provenance) with <em>unbuilt</em>. Fails in steady state when a built sibling was itself seeded (e.g. <code>loopflow.loo-1068</code> on this Machine right now).<br>
-  <span class="prop">Proposed: a seed source is a built target — has <code>SEED_ENTRIES</code> and a Cargo lock file. Delete the <code>SEED_RECORD</code> tie-breaker. Unbuilt seeds are never cloned from and never mutated.</span></td>
+  <td><code>_seed_sources</code> requires a matching <code>SEED_LAYOUTS</code> layout <strong>and</strong> at least one Cargo lock file (<code>CARGO_LOCKS</code>), ranked by <code>entries[0]</code> mtime</td>
+  <td class="yes">yes</td>
+  <td>Cleanly separates a <em>built target</em> from an <em>unbuilt seed</em>. Unbuilt seeds (such as <code>loopflow.ready</code>) are never selected, never mutated with lock files, and become eligible once Cargo builds inside them.</td>
 </tr>
 <tr>
   <td>"Where did this seed come from?"</td>
-  <td><code>target/.loopflow-seed</code> &rarr; <code>status</code> prints <code>seed     from &lt;sibling&gt; at &lt;sha&gt;</code></td>
-  <td class="no">no</td>
-  <td>When an unbuilt seed like <code>loopflow.ready</code> is picked as a source, <code>.loopflow-seed</code> records <code>loopflow.ready</code>'s HEAD commit, where nothing was built, and a path <code>lf</code> moves away.<br>
-  <span class="prop">Proposed: resolved automatically once only built targets can be seed sources.</span></td>
+  <td><code>target/.loopflow-seed</code> &rarr; <code>status</code> prints <code>seed     from &lt;sibling&gt; at &lt;sha&gt;</code> or <code>seed     none</code></td>
+  <td class="yes">yes</td>
+  <td>Always names a sibling and commit where Cargo actually built; its lifetime is tied 1:1 to <code>target/</code>.</td>
 </tr>
 <tr>
   <td>"Don't copy a build in progress"</td>
-  <td><code>_quiescent</code> takes <code>flock(LOCK_EX|LOCK_NB)</code> on <code>.cargo-lock</code>, <code>.cargo-build-lock</code>, <code>.cargo-artifact-lock</code></td>
-  <td class="yes">yes*</td>
-  <td>Matches Cargo 1.98's lock files. *Only needed <code>open("a")</code> on missing locks because unbuilt seeds had none; restricting sources to built targets keeps <code>open("a")</code> safe for mid-first-build and older-Cargo upgrades while never creating files in unbuilt siblings.</td>
+  <td><code>_quiescent</code> holds <code>flock(LOCK_EX|LOCK_NB)</code> on <code>.cargo-lock</code>, <code>.cargo-build-lock</code>, <code>.cargo-artifact-lock</code> while cloning</td>
+  <td class="yes">yes</td>
+  <td>Matches both Cargo 1.98 and Cargo 1.100 (verified live: Cargo 1.100 keeps all three lock files under <code>target/debug/</code>). Tested in both directions: busy built sibling is skipped, and Cargo starting on a locked source waits with <code>Blocking waiting for file lock</code>.</td>
 </tr>
 <tr>
   <td>"Give me a cold target"</td>
-  <td>No env knob; <code>rm -rf target</code> after <code>git worktree add</code>. <code>seed_probe.py</code> does this; <code>test_loop.py</code> does not</td>
-  <td class="no">no</td>
-  <td><code>test_loop.py</code> creates worktrees via the installed hook (isolating only <code>XDG_CACHE_HOME</code>), so a rerun on this Machine silently seeds targets it expects to build cold against its private sccache.<br>
-  <span class="prop">Proposed: remove <code>tree / "target"</code> right after <code>git worktree add</code> in <code>test_loop.py</code>, keeping one contract everywhere.</span></td>
+  <td>No env knob; <code>rm -rf target</code> after <code>git worktree add</code>. Shared <code>add_worktree(..., cold=True)</code> in <code>test_loop.py</code> and <code>seed_probe.py</code></td>
+  <td class="yes">yes</td>
+  <td>One contract across user docs and both benchmark drivers. An existing <code>target/</code> is never replaced.</td>
 </tr>
 <tr>
   <td>"Is it fresh?"</td>
-  <td>Cargo fingerprints; seeder never touches file mtimes inside the seed (only <code>copystat</code> on <code>.fingerprint</code> dir for rank)</td>
+  <td>Cargo fingerprints; seeder never edits file mtimes inside the seed (only <code>copystat</code> on <code>entries[0]</code> for rank)</td>
   <td class="yes">yes</td>
-  <td>One source of truth: Cargo. Keeping <code>copystat</code> on <code>.fingerprint</code> preserves "when this target last gained a unit" even after a seeded worktree builds.</td>
+  <td>One source of truth: Cargo. Preserving <code>entries[0]</code> mtime keeps a seeded worktree ranked by when its target last gained a unit rather than when it was cloned.</td>
 </tr>
 <tr>
   <td>"Free disk" (<code>lf wt prune --builds</code>)</td>
-  <td><code>build_cleanup.rs</code> sums <code>st_blocks</code> and checks file mtimes against retention grace</td>
+  <td><code>build_cleanup.rs</code> sums <code>st_blocks</code> and checks mtime against retention grace</td>
   <td class="yes">yes*</td>
-  <td>Overstates bytes freed on clones (documented, deletes nothing wrongly). *Not creating lock files in unbuilt siblings also avoids bumping their <code>target/debug</code> mtime and resetting retention grace.</td>
+  <td>*Shared clone blocks are counted at full size, so prune reports more space freed than disk recovers (documented in <code>scripts/testing.md</code>; deletes nothing wrongly). Leaving unbuilt seeds untouched also avoids bumping their retention mtime.</td>
 </tr>
 </table>
 
-<h2>Biggest mismatch: "built target" vs "unbuilt seed"</h2>
-<p>Live state observed on this Machine during review (16 worktrees with <code>target/debug/.fingerprint</code>):</p>
-<pre class="tree">1795415951  <span class="good">built</span>    loopflow.loo-1068-a-reopened-work   locks=[all 3]   .loopflow-seed=<span class="bad">present</span>
-1795415951  <span class="good">built</span>    loopflow.534d53-at-least-in         locks=[all 3]   .loopflow-seed=absent
-1795414892  <span class="bad">unbuilt</span>  loopflow.ready                      locks=[]        .loopflow-seed=<span class="bad">present</span>
-1795413870  <span class="bad">unbuilt</span>  loopflow.wave-f6c98c70-...          locks=[]        .loopflow-seed=<span class="bad">present</span></pre>
-<p>Every one of the 14 built worktrees holds Cargo's three lock files; both unbuilt seeds hold none.
-Meanwhile, <code>loopflow.loo-1068</code> is already <strong>both built and seeded</strong> — which is the steady state
-for every active worktree once the hook is installed.</p>
+<h2>How the pass-1 mismatch was resolved</h2>
+<p>Pass 1 flagged two mismatches at <code>c675ac0b77</code>: admitting unbuilt seeds as sources (with a broken
+<code>.loopflow-seed</code> tie-breaker and lock-file creation inside unbuilt siblings) and missing cold-target removal
+in <code>test_loop.py</code>. Both are resolved in the built tree, and QA run 3 extended the same model to Cargo 1.100:</p>
 
 <div class="cols">
-<div class="card"><h3>Before <span class="tag ex">EXISTING AT c675ac0b77</span></h3>
-<pre class="tree"><span class="dim"># Admits unbuilt seeds as candidates</span>
+<div class="card"><h3>Before <span class="tag">AT c675ac0b77</span></h3>
+<pre class="tree"><span class="dim"># Admitted unbuilt seeds; only supported Cargo &lt; 1.100</span>
+SEED_ENTRIES = (".fingerprint", "build", "deps")
 candidates = [t for t in worktrees
     if all((t/"target/debug"/e).is_dir() for e in SEED_ENTRIES)]
 
-<span class="dim"># Sort key tries to break ties with .loopflow-seed</span>
-key = (mtime, not (t/"target/.loopflow-seed").exists())
+<span class="bad">key = (mtime, not (t/"target/.loopflow-seed").exists())</span>
+<span class="bad"># Broke once active built worktrees started seeded;</span>
+<span class="bad"># created .cargo*lock inside unbuilt loopflow.ready;</span>
+<span class="bad"># ruled out every Cargo 1.100 target.</span>
 
-<span class="bad">loo-1068 (built, seeded)   -&gt; (1795415951, False)</span>
-<span class="bad">ready    (unbuilt, seeded) -&gt; (1795415951, False)  # TIE!</span>
-
-<span class="dim"># When ready wins the tie:</span>
-<span class="bad">1. _quiescent creates .cargo*lock inside ready/target/debug</span>
-<span class="bad">2. next worktree records: seed from ../loopflow.ready at &lt;ready HEAD&gt;</span></pre>
-<p>Three patches (<code>copystat</code>, lock creation in unbuilt siblings, <code>SEED_RECORD</code> tie-breaker)
-all defended against unbuilt seeds being treated as sources, and the tie-breaker still fails as soon as the source
-itself started from a seed. The existing test passed only because it installed the hook <em>after</em> creating
-<code>built</code>.</p>
+<span class="dim"># test_loop.py left hook-seeded targets in place</span>
+<span class="bad">git worktree add ...  # silently seeded cold arm</span></pre>
 </div>
 
-<div class="card"><h3>After <span class="tag">PROPOSED</span></h3>
-<pre class="tree"><span class="dim"># Only targets Cargo has built can seed another worktree</span>
-def _is_built(debug: Path) -&gt; bool:
-    return (
-        all((debug / e).is_dir() for e in SEED_ENTRIES)
-        and any((debug / lock).exists() for lock in CARGO_LOCKS)
-    )
+<div class="card"><h3>After <span class="tag done">EXISTING AT 6dbc23b366</span></h3>
+<pre class="tree"><span class="dim"># Both Cargo layouts; only targets Cargo has built</span>
+SEED_LAYOUTS = ((".fingerprint", "build", "deps"), ("build",))
+entries = _seed_entries(debug)
+if entries and any((debug / n).is_file() for n in CARGO_LOCKS):
+    candidates.append((tree, entries))
 
-<span class="dim"># One rank, no fake tie-breaker</span>
-key = lambda t: (t / "target/debug/.fingerprint").stat().st_mtime_ns
+<span class="good">key = lambda c: (c[0]/"target/debug"/c[1][0]).stat().st_mtime_ns</span>
+<span class="good"># Built worktrees eligible, locks exist, truthful commit;</span>
+<span class="good"># unbuilt seeds skipped &amp; untouched; Cargo 1.98 &amp; 1.100 covered.</span>
 
-<span class="good">loo-1068 (built)   -&gt; eligible, locks exist, truthful commit</span>
-<span class="good">ready    (unbuilt) -&gt; skipped, untouched, never false provenance</span></pre>
-<p>One concept, one predicate. An unbuilt seed is never selected, never mutated with lock files, and never recorded
-in another checkout's <code>.loopflow-seed</code>. <code>copystat</code> on <code>.fingerprint</code> stays so that
-a seeded worktree, once built, still ranks by when it last gained a unit. <code>_quiescent</code> still locks all
-three <code>CARGO_LOCKS</code> on the built candidate, closing any race with Cargo's first lock creation or across
-Cargo versions.</p>
+<span class="dim"># Shared helper in test_loop.py and seed_probe.py</span>
+<span class="good">add_worktree(tree, rev, env, cold=True)  # rm -rf target</span></pre>
 </div>
 </div>
 
 <h2>Counterexamples checked</h2>
 <ul>
-  <li><strong>Cargo starts its first build in an unbuilt seed at the exact moment another worktree runs <code>seed</code>:</strong>
-    before Cargo creates a lock file, the unbuilt seed is excluded by <code>_seed_sources</code>; once Cargo creates its first
-    lock file, Cargo holds a lock on it before touching <code>.fingerprint</code>/<code>build</code>/<code>deps</code>,
-    and <code>_quiescent</code> takes all three <code>CARGO_LOCKS</code> non-blocking, hits <code>EWOULDBLOCK</code>,
-    and skips it. Neither side can race.</li>
-  <li><strong>Only built worktree is deleted (or busy), leaving only an unbuilt seed:</strong>
-    the new worktree falls back to a cold build (with sccache still warm). Giving up chaining off an unbuilt seed in
-    that corner case is the right trade to keep siblings read-only and provenance truthful.</li>
-  <li><strong>Older Cargo without fine-grained locking (creates only <code>.cargo-lock</code>):</strong>
-    checking <code>any((debug / lock).exists() for lock in CARGO_LOCKS)</code> accepts it as built while still
-    excluding every unbuilt seed (which has none).</li>
-  <li><strong>Aborted partial build ranked newest (observed live):</strong>
-    <code>loopflow.8cb300-get-rid-of</code> stopped after 11 <code>.rlib</code>s (342 <code>.fingerprint</code> dirs)
-    and seeded <code>loopflow.ready</code> because its <code>.fingerprint</code> mtime was newest. Cargo still builds
-    the missing ~245 crates safely. Avoiding a repo-specific crate-count threshold keeps ranking simple and portable;
-    flagged as Question 3 below.</li>
-  <li><strong>Benchmark isolation (<code>test_loop.py</code>):</strong>
-    without removing <code>tree / "target"</code> after <code>git worktree add</code>, rerunning LOO-921's
-    private-cache benchmark with the seeding hook installed silently seeds targets from random siblings. Removing
-    <code>tree / "target"</code> keeps one "cold target" mechanism across docs and benchmarks.</li>
+  <li><strong>Cargo 1.100 unit-directory layout (probed live against Cargo 1.100.0):</strong>
+    <code>target/debug/</code> holds <code>build/&lt;pkg&gt;/&lt;hash&gt;/{fingerprint,out,run}</code>,
+    <code>examples/</code>, <code>incremental/</code>, uplifted binaries, and all three <code>.cargo*lock</code> files.
+    Cloning <code>build</code> alone carries fingerprints, build-script outputs, and compiled units while leaving
+    uplifted binaries, <code>incremental/</code>, and locks behind — the exact same boundary as Cargo 1.98.</li>
+  <li><strong>Cargo 1.100 ranking when an existing package updates version:</strong>
+    in Cargo 1.100, a new hash for an already-present package writes under <code>build/&lt;pkg&gt;/</code> rather than
+    directly under <code>build/</code>, so <code>build/</code>'s mtime only advances when a new package directory appears
+    (for instance, adding dev-dependencies or a new crate). Walking <code>build/*/</code> would hit macOS
+    <code>clonefile(2)</code> resetting every cloned subdirectory's mtime to clone time unless every subdir were
+    <code>copystat</code>ed. Keeping single-directory <code>entries[0]</code> mtime is simple and safe: stale units
+    compile on demand.</li>
+  <li><strong>Mixed Cargo 1.98 and Cargo 1.100 siblings on one Machine:</strong>
+    if a checkout seeded from one layout runs the other Cargo version, the two layouts do not collide
+    (<code>build/&lt;pkg&gt;-&lt;hash&gt;</code> vs <code>build/&lt;pkg&gt;/&lt;hash&gt;</code>); Cargo compiles
+    cold safely, and stale files are reaped by <code>lf wt prune --builds</code>.</li>
+  <li><strong>First build racing a concurrent <code>seed</code> on an unbuilt seed:</strong>
+    before Cargo creates its lock file, <code>_seed_sources</code> excludes the unbuilt seed; once Cargo creates and
+    locks it before writing units, <code>_quiescent</code> gets <code>EWOULDBLOCK</code> and skips it.</li>
+  <li><strong>Concurrent Cargo creating <code>target/</code> during <code>_clone_debug</code>:</strong>
+    <code>target.mkdir()</code> runs outside the cleanup <code>try</code> block, so a <code>FileExistsError</code>
+    never deletes a concurrent Cargo's <code>target/</code>; cleanup only removes <code>debug.seeding</code> and an
+    empty <code>target/</code> that the seeder created.</li>
+  <li><strong>Only built sibling is busy or deleted, leaving only an unbuilt seed:</strong>
+    the new worktree falls back to a cold build (with sccache still warm), keeping unbuilt siblings read-only and
+    provenance truthful.</li>
+  <li><strong>Benchmark isolation:</strong>
+    <code>test_loop.py</code> and <code>seed_probe.py</code> share <code>add_worktree(..., cold=...)</code> so cold
+    measurements remove any hook-seeded <code>target/</code> immediately after checkout; <code>seed_probe.py</code>
+    deduplicates hard-linked Cargo artifacts by <code>(inode, mtime_ns)</code>.</li>
 </ul>
 
 <h2>Outside this work</h2>
 <ul>
-  <li><strong>Peak RSS on seeded <code>lf</code> builds (3.17 vs 2.09 GiB in slice 2 medians, 2.27–2.28 GB in QA):</strong>
-    tracked in LOO-1070 with matched private caches.</li>
+  <li><strong>Peak RSS on seeded <code>lf</code> builds (3.17 vs 2.09 GiB in slice 2 medians, 2.27–3.28 GB in QA):</strong>
+    tracked separately in LOO-1070 with matched private caches.</li>
   <li><strong>Test-profile workspace libraries (~200 CPU-s):</strong>
     kept incremental per LOO-921's measured edit loop; handed to LOO-923 after verification.</li>
   <li><strong>Linux reflink verification &amp; live <code>lf task create --run</code> check:</strong>
-    carried to verification / CI (cannot run Linux reflink on this macOS host).</li>
+    carried to verification / CI (macOS host cannot exercise Linux <code>cp -a --reflink=always</code>; CI's
+    <code>ubuntu-latest</code> ext4 filesystem skips the real-clone seeding tests).</li>
 </ul>
 
 <h2>Questions</h2>
@@ -219,16 +214,16 @@ Cargo versions.</p>
       <li>Yes — allow chaining off unbuilt seeds, create Cargo lock files inside them during cloning, and copy the original built source's provenance record forward.</li>
     </ol>
   </li>
-  <li>How should <code>test_loop.py</code> get cold targets now that the installed hook seeds new worktrees?
+  <li>How should a developer or benchmark get a cold target once the hook is installed?
     <ol>
-      <li class="chosen">Delete <code>tree / "target"</code> right after <code>git worktree add</code>, matching <code>seed_probe.py</code> and the no-knob contract.</li>
+      <li class="chosen">Delete <code>target/</code> right after <code>git worktree add</code> (no env-var opt-out knob), shared by docs, <code>seed_probe.py</code>, and <code>test_loop.py</code>.</li>
       <li>Add an opt-out environment variable (e.g. <code>LOOPFLOW_SEED_TARGET=0</code>) to skip the 2–5 s clone in benchmarks and scripts.</li>
     </ol>
   </li>
-  <li>Ranking built siblings when an aborted partial build has the newest <code>.fingerprint</code> mtime:
+  <li>Ranking built siblings when an aborted partial build or Cargo 1.100 version bump has a non-monotonic top-level mtime:
     <ol>
-      <li class="chosen">Keep newest <code>.fingerprint</code> mtime; Cargo compiles whatever units the partial build lacked.</li>
-      <li>Add a completeness heuristic (e.g. require a built binary or minimum artifact count) to skip aborted builds.</li>
+      <li class="chosen">Keep single-directory <code>entries[0]</code> mtime (<code>.fingerprint</code> or <code>build</code>); Cargo compiles whatever units are missing or stale.</li>
+      <li>Add a completeness heuristic or recursive mtime walk (with recursive <code>copystat</code> on clones) to rank partial builds and Cargo 1.100 package updates finer.</li>
     </ol>
   </li>
 </ol>

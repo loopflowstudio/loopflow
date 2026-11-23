@@ -197,7 +197,7 @@ high as `agents`.
 | Run mode | `-i` (interactive) / `-b` (headless) | Interactive on direct TTY; headless in Graphs |
 | Include docs | `--docs README.md,docs/` | `context: {docs: [README.md, docs/]}` |
 | Changed file paths | `--diff files` | `context: {diff_files: true}` |
-| Raw diff reference | `--diff patch` | `context: {diff: true}` |
+| Changed paths, line counts and patch when it fits | `--diff patch` | `context: {diff: true}` |
 | Exclude from LF context | — | `context: {exclude: ["*.test.ts", dist]}` |
 | Hide from a Task's Diff in Desktop | — | `diff_hidden: [vendor/]` (path substrings; adds across layers, `[]` clears) |
 | Headings of a Task's Diff in Desktop | — | `diff_groups` (replaces as a unit) |
@@ -359,9 +359,16 @@ What enters a launch:
 - Loopflow adds `LOOPFLOW.md` (the operating contract), `scratch/` Markdown,
   and the active Wave's `GOAL.md`/`MEMORY.md` (plus ancestor Waves) in a
   refreshed block that survives compaction.
-- `--docs` / `context.docs` enter as complete UTF-8 bodies;
-  `--diff` references Git inspection commands; `-c` appends the clipboard.
+- `--docs` / `context.docs` enter as complete UTF-8 bodies. `-c` appends the clipboard.
   Documents selected with `lf -b --docs PATH steer SESSION TEXT` enter that turn.
+- `--diff files` lists changed paths in a reference file. `--diff patch`
+  puts every changed path, its line counts (or a binary marker), and a Git
+  command to read its patch in the first turn. For a rename, the command
+  takes both paths. The whole patch follows when it fits under 15,000 tokens.
+  For larger changes, the agent chooses which files to read. `--diff both`
+  includes the reference file and the first-turn block.
+- On a branch with no commits beyond its base, `--diff patch` shows
+  uncommitted changes and lists untracked files for the agent to read directly.
 - `scratch/` notes written during a branch are cleaned up automatically by
   `lf pr submit` and `lf land` (`lf scratch clear` removes added files while
   keeping pre-existing files, edits, and `.gitkeep`).

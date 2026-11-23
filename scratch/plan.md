@@ -389,7 +389,7 @@ create starts at main, a later parent commit arrives through `lf sync`);
 here: clippy, Swift `ServerProtocolTests` (the change touched
 `RegistryQuery.swift`) — gate runs both. Next: "one answer for a checkout's base" below, then gate.
 
-## Next: one answer for a checkout's base (concept review on f07ab06545)
+## Built: one answer for a checkout's base (concept review on f07ab06545)
 
 Choice made for review (page `scratch/concept-review.html`, question 1a):
 "what this checkout builds on" has three homes and `lf sync` and

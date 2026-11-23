@@ -1,4 +1,4 @@
-at: a3f40f5bb687cd1fad99f8d7f55cad01c85e8462
+at: 7effde225416565d9e2fe5776a30f9c968b870d1
 first:
   - path: docs/surfaces.md
     why: Follow a setting from search through Undo
@@ -8,6 +8,8 @@ first:
     why: Design choices, measurements and remaining visual checks
   - path: rust/loopflow-execution/src/engine/config/scope.rs
     why: Effective values, editable slots and move projections
+  - path: rust/loopflow-execution/src/observe.rs
+    why: Make writes visible to the next settings read
   - path: rust/loopflow-execution/src/config/files/edit.rs
     why: Check and restore the affected YAML entries
   - path: rust/loopflow-execution/src/engine/config/promotion.rs
@@ -18,6 +20,8 @@ first:
     why: Navigate panes and reveal search results
   - path: swift/LoopflowMac/Services/ScopedSettingsModel.swift
     why: Observe the selected work and edit its declarations
+  - path: swift/LoopflowMac/Views/ScopedSettings.swift
+    why: See grouped controls and where each declaration lives
   - path: swift/LoopflowMac/Views/ScopedSettingRow.swift
     why: Edit the saved value and inspect its source
   - path: swift/LoopflowMac/Views/SettingsSearch.swift
@@ -32,6 +36,8 @@ first:
     why: Display each registered Machine’s connection health
   - path: swift/LoopflowTests/ContextSettingsWorkflowTests.swift
     why: Follow an edit through launch, Reset and Undo
+  - path: swift/LoopflowTests/SettingsWorkflowTests.swift
+    why: Exercise nullable choices, scoped writes and native scrolling
   - path: swift/LoopflowTests/ThemeWorkflowTests.swift
     why: Exercise theme writes, hand edits and Undo
 hide:

@@ -45,7 +45,8 @@ Each row edits the declaration in its file, preserving the three-way distinction
   - **Hide inactive and internal keys from primary forms.** Keep `Lifecycle::Inactive` keys (`isolate`, `summaries`, `summary_tokens`), internal Desktop state (`portfolio`), and `Category::Accounts` (`auth_browsers`, no longer falling into `Agents`) out of the primary forms. Expose any authored inactive/other catalog keys in a collapsed **Advanced** section (and keep them searchable with an `Inactive` tag for inactive entries).
   - **Compact rows when clean.** On **General** (single file), omit provenance disclosures entirely and show a quiet Reset button only when declared. On **Global** in scoped panes, keep rows compact without duplicating every value in a second line; show provenance on demand or when inspecting a checkout/Wave where layers interact.
 - **Preserve `Authored::{Absent, Present(Value)}` end-to-end in Swift.** Decode `ConfigurationScope.Slot.declared` into a typed `enum Authored { case absent; case present(JSONValue) }` instead of collapsing into `JSONValue?`:
-  - **`Option<bool>` (`chrome`):** render a 3-way `Picker` (`Inherited`, `Claude default (null)`, `On`, `Off`) rather than a 2-state `Toggle` that conflates `null` with `false`.
+  - **Null on disk.** The existing resolver skips null declarations, and the setter used to reject them even for nullable types. Accept explicit null for nullable declarations, label it **Explicit null**, and show the resolver’s effective value separately. Reset still removes the key.
+  - **`Option<bool>` (`chrome`):** render a 3-way `Picker` (`Inherited`, `Explicit null`, `On`, `Off`) rather than a 2-state `Toggle` that conflates `null` with `false`.
   - **`Option<Enum>` (`codex.service_tier`, `auto`, `merge_method`):** use a 3-case selection tag (`inherited`, `clear` for explicit `null`, `value(JSONValue)`) so explicit `null` is never mislabeled `"Inherited"`.
   - **`land`:** type `land` as a 2-variant enum (`gh` | `local`) in `catalog.rs` (or map its two choices to a `Picker` in Swift; typing it in Rust keeps CLI and catalog validation aligned).
   - **`Option<String>` (`agent`, `default_agent`, `claude.model`, `wave.graph`, `repo_root`, `stream`):** never convert `.present(.null)` to literal `"None"` in a `TextField`; show an explicit cleared state, and treat clearing a text field to empty as `.reset` (removing the declaration) rather than writing `""`.
@@ -62,33 +63,21 @@ Each row edits the declaration in its file, preserving the three-way distinction
 - **Fix Search → Scroll to Row.** Place `ScrollViewReader` *inside* `ScopedSettings`, `ThemeChooser`, and `MobileSettings` around their `Form` (not outside the pane switch in `SettingsWindow`). Remove the conflicting `.id(RowAddress(...))` wrapper around `ScopedSettingRow`’s `Section` (bind per-row draft state to destination/key changes via `.onChange` so `.id(definition.key)` stays the sole scroll identity inside `Form`). When switching panes from search, yield one layout turn (`await Task.yield()`) before calling `proxy.scrollTo(key, anchor: .center)`.
 - **Group `ThemeChooser` controls in `Section`s.** Wrap the Appearance mode picker and Customize button in a `Section`, and move `appearance.readFailure` / `appearance.notice` into a leading error `Section` at the top of the `Form` (matching `ScopedSettings`) so errors never scroll off-screen.
 
-## Build order
+## Implementation
 
-Start with the slice that proves the core model fixes fastest, then layer the UI structure and recovery:
-
-1. **Slice 1 — Rust cache invalidation, `Action::Dismiss`, and `land` enum:**
-   - `observe::invalidate_path` called from `config::files::atomic_write` and `promotion.rs`.
-   - `promotion::Action::Dismiss` + `Outcome::Dismissed` + Rust unit test covering diverged interrupted move → `Resume` fails → `Dismiss` clears journal while keeping both files.
-   - Type `land` as an enum (`gh` | `local`) in `catalog.rs` (keeping `serde` string compatibility) and update DTO/server schema fixtures (`tests/fixtures/dto/server_schema.json`).
-   - Verify with focused Rust tests (`promotion::tests`, `config::files::edit::tests`, `served_reads`, `the_checked_in_schema_is_what_describe_prints`) and confirm rapid back-to-back writes reflect immediately in `config.scope`.
-2. **Slice 2 — Swift `Authored` model, row-scoped errors, honest `Save in` / `Applies to`, and `MachineConnections`:**
-   - Replace `Slot.value: JSONValue?` with `enum Authored { case absent; case present(JSONValue) }`.
-   - Remove `editError` from `ScopedSettingsModel.editsDisabled`; move validation/conflict errors to per-row state.
-   - Show active `model.target` and repository display names in `Applies to`; remove the ghost `Save in` fallback; give `Machines` its **This Machine (Global)** section and `Git & Release` its Wave-scope banner; add provenance + read-only explanation for unnamed Graph steps.
-   - Drive `MachineConnections` from `config.scope`’s `PersonalGlobal` `machines` slot and preserve previous health states across 30s refreshes.
-3. **Slice 3 — Grouped Apple Settings forms, faithful nullable controls, Agent Policy section, Search scroll, and `ThemeChooser` sections:**
-   - Group rows into semantic `Section`s per pane; hide `Lifecycle::Inactive` (`isolate`, `summaries`, `summary_tokens`), `portfolio`, and move `auth_browsers` out of `Agents` into Advanced/collapsed catalog access.
-   - Implement 3-state `chrome` picker, 3-state nullable enum pickers, clean nullable string TextFields, native `user.name` / `logs.linear_requests` controls, contextual `Save empty list`, and the grouped **Agent Policy** section.
-   - Surface pending moves + **Dismiss pending move**, audience text, and refreshed-preview notice in `ScopedSettingRow`.
-   - Fix `ScrollViewReader` inside `Form` and group `ThemeChooser` sections with leading errors.
-   - Update tests (`SettingsWorkflowTests`, `ContextSettingsWorkflowTests`, `ConfigurationSettingsTests`, `ThemeWorkflowTests`, `DesignDisciplineTests`) to exercise every fixed interaction, including rapid toggles, row-scoped typo recovery, Machines Global edit without hijacking `Save in`, diverged move dismiss, nullable controls, and Search scroll.
+- **Live configuration.** Atomic writes and removal of move journals refresh observed files, metadata and parent-directory listings, then wake file subscriptions. `config.promote` accepts `dismiss` under the move locks. The catalog supplies the two landing methods. Three successive checked writes are covered through `config.scope`.
+- **Scope and destination.** Each file carries typed absent/present declarations. A rejected write stays on its addressed row. The header shows the active Skill or step. Machine health reads the global declaration from the scope and keeps each identity’s last check while probing. Global Machine edits leave the chosen audience intact.
+- **Forms and recovery.** Grouped sections share one Agent Policy result. Nullable pickers, native General fields and ordered lists edit the selected file. Search reveals the row inside its form. Pending moves expose recovery actions and changed confirmations require another review.
+- **What the integration tests exposed.** YAML deserialization alone accepts null as an empty map. Only nullable fields can save an explicit null. The resolver continues to skip that declaration. A separate read after saving could leave Desktop showing an intermediate value after Undo because the subscription suppresses identical frames. The editor now confirms writes on its existing subscription.
 
 ## Built (from earlier passes)
 
 The split window, sidebar groups, `AutosaveToggle`, shared `KeyboardShortcutsView`, lifted `MobileSetup`, `AppearanceStore` instant-apply + Undo + `ThemeEditor` drafts, `config.scope` subscription (median 16.4 ms, p95 125.6 ms across 47 entries), `config::files::edit` checked YAML patching, `promotion` locked 2-file move, `machine.status` served identity/rental probe, legacy Wave `GOAL.md` adoption, and sidebar search matching are built and passing their existing tests.
 
-## Gate and demo
+## Checks and remaining demo
 
-Run `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ContextSettingsWorkflowTests|ConfigurationSettingsTests|ThemeWorkflowTests|MobilePairingTests|DesignDisciplineTests'` and focused Rust checks (`promotion`, `edit`, `served_reads`, `server_schema`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`). Run the iOS protocol check if `ServerProtocol.swift` changes.
-
-For the visual demo, run `uv run python scripts/loopflow-dev.py run` against the branch server on a private Machine. Verify Search actually scrolls to bottom rows (`context.budgets`, `context.paste`), verify `Machines` edits Global settings without mutating `Save in`, verify a typo error keeps the field editable and other panes unlocked, verify Agent Policy grouping and 3-state `chrome`, and check Light and Dark appearance with resizing.
+- The Rust checked-edit, promotion, schema, shared DTO, nullable declaration, cache invalidation, file subscription, served configuration, and documented-command tests passed.
+- The headless Desktop Settings, Context, Configuration, Theme, Mobile and Design Discipline suites passed against the branch server on a private Machine.
+- `LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --filter searchScrollsToTheLastContextRowInACompactWindow` passed. The mounted 520 × 240 form scrolled to the last Context row and back to the first group.
+- Native window appearance checks passed in System, Light and Dark modes. Rust formatting and Clippy passed with warnings denied.
+- Gate owns hosted CI. The remaining visual review is the full split window in Light and Dark at different sizes. Run `uv run python scripts/loopflow-dev.py run` against the branch server on a private Machine for that demo.

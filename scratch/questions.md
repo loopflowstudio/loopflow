@@ -15,3 +15,5 @@
 - Edit Global-only Machine settings (`hub`, `machines`, `connections`, `pools`, `ondemands`, `forward.*`) directly in a clearly labeled **This Machine (Global)** section instead of switching `Save in` to a ghost global destination.
 - Hide `Lifecycle::Inactive` keys (`isolate`, `summaries`, `summary_tokens`) and internal Desktop state (`portfolio`) from primary Settings forms; keep authored or advanced catalog entries reachable through a collapsed Advanced section and search.
 - Require an explicit **Dismiss pending move** action (`Action::Dismiss`) to clear an interrupted 2-file move journal whose files diverged, keeping both config files intact.
+- Label a saved YAML null **Explicit null**. The resolver skips that layer when selecting an effective value, so a lower declaration can still supply the value.
+- Place account browser profiles in General → Advanced alongside other global preferences. Search can reveal an advanced setting before it has an authored value.

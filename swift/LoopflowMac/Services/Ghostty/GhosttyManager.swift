@@ -112,13 +112,45 @@ final class GhosttyManager: ObservableObject {
     // Current preview plus applied candidate; cancel reuses validated config.
     private nonisolated(unsafe) var themeConfigs: [String: (TerminalPalette, ghostty_config_t)] = [:]
     private(set) var theme = ThemeDefinition.light
-    /// Scalar defaults, loaded before the person's files so their values win.
+
+    /// Loaded before the person's files so their bindings and values win.
     static let loopflowConfig = """
     font-size = \(Int(Typography.terminalSize))
     adjust-cell-height = 10%
     font-feature = -calt
     font-feature = -liga
     minimum-contrast = 3
+    keybind = clear
+    keybind = alt+arrow_left=esc:b
+    keybind = alt+arrow_right=esc:f
+    keybind = super+arrow_left=text:\\x01
+    keybind = super+arrow_right=text:\\x05
+    keybind = super+backspace=text:\\x15
+    keybind = super+shift+arrow_up=jump_to_prompt:-1
+    keybind = super+shift+arrow_down=jump_to_prompt:1
+    keybind = super+a=select_all
+    keybind = performable:shift+arrow_left=adjust_selection:left
+    keybind = performable:shift+arrow_right=adjust_selection:right
+    keybind = performable:shift+arrow_up=adjust_selection:up
+    keybind = performable:shift+arrow_down=adjust_selection:down
+    keybind = performable:shift+page_up=adjust_selection:page_up
+    keybind = performable:shift+page_down=adjust_selection:page_down
+    keybind = performable:shift+home=adjust_selection:home
+    keybind = performable:shift+end=adjust_selection:end
+    keybind = super+home=scroll_to_top
+    keybind = super+end=scroll_to_bottom
+    keybind = super+page_up=scroll_page_up
+    keybind = super+page_down=scroll_page_down
+    keybind = performable:super+j=scroll_to_selection
+    keybind = super+==increase_font_size:1
+    keybind = super++=increase_font_size:1
+    keybind = super+-=decrease_font_size:1
+    keybind = super+0=reset_font_size
+    keybind = performable:super+e=search_selection
+    keybind = performable:super+g=navigate_search:next
+    keybind = performable:super+shift+g=navigate_search:previous
+    keybind = performable:super+shift+f=end_search
+    keybind = performable:escape=end_search
 
     """
 
@@ -168,6 +200,10 @@ final class GhosttyManager: ObservableObject {
     image-storage-limit = 67108864
     keybind = super+arrow_up=jump_to_prompt:-1
     keybind = super+arrow_down=jump_to_prompt:1
+    keybind = super+q=unbind
+    keybind = super+,=unbind
+    keybind = super+comma=unbind
+    keybind = super+shift+w=unbind
     theme =
 
     """
@@ -382,8 +418,14 @@ final class GhosttyManager: ObservableObject {
         }
 
         self.app = ghosttyApp
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardSelectionChanged),
+            name: NSTextInputContext.keyboardSelectionDidChangeNotification, object: nil)
         ghostty_app_set_color_scheme(ghosttyApp, theme.isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
         state = .ready
+    }
+
+    @objc private func keyboardSelectionChanged(_ notification: Notification) {
+        if let app { ghostty_app_keyboard_changed(app) }
     }
 
     func tick() {

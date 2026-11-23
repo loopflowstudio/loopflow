@@ -837,6 +837,30 @@ colors. Faint text may not reach the requested ratio. Graphics, images,
 transparent backdrops and custom postprocessing are outside the opaque-text
 contrast guarantee.
 
+In a focused Session or Shell, **Shift-/** types `?` on a US keyboard.
+Programs that distinguish **Shift-Return** and **Control-Return** receive
+those chords even after you reopen the pane. Sessions launched from Desktop
+advertise true color when the launch environment leaves it unset.
+Desktop shortcuts, app menus and terminal bindings such as **⌘↑** to jump to
+the previous prompt still work. **⌃/** sends the shell's undo character in
+legacy keyboard mode. **⌘.** reaches programs that request modified keys
+when no menu claims it. A menu shortcut that requires Shift leaves the
+unshifted chord available, as with Zoom Pane's **⇧⌘↩** and the program's **⌘↩**.
+While you compose text with an input method or dead key, Desktop shortcuts
+wait. Canceling the composition sends no text.
+
+Option follows Ghostty’s default for your active keyboard layout. To use
+Left Option as Alt and Right Option for text and accents, add this to
+`~/.config/ghostty/config` and reopen Loopflow.
+
+```ini
+macos-option-as-alt = left
+```
+
+On a US layout in a shell, Left Option-B then sends Escape followed by
+`b` to move back a word. Right Option-B types `∫`. Use `right` to swap sides,
+`true` for Alt on both sides, or `false` for text on both.
+
 Files and the Graph process log open beside retained Sessions and shells in the
 same multiplexer. Resize, zoom, close and Reopen preserve each pane’s content.
 Drag any pane divider to resize; it highlights on hover and snaps near 38.2% or

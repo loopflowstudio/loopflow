@@ -17,7 +17,6 @@
       --green-wash: #e7f1e6;
       --red: #8b382a;
       --red-wash: #f9ece4;
-      --on-accent: #fffdf8;
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -30,7 +29,6 @@
         --green-wash: #293e32;
         --red: #ffb39f;
         --red-wash: #47312a;
-        --on-accent: #18251f;
       }
     }
     *, *::before, *::after { box-sizing: border-box; }
@@ -54,7 +52,7 @@
     section { margin-top: 2.5rem; }
     a { color: var(--green); text-underline-offset: .18em; }
     a:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
-    code, kbd { font-family: ui-monospace, monospace; font-size: .9em; overflow-wrap: anywhere; }
+    code { font-family: ui-monospace, monospace; font-size: .9em; overflow-wrap: anywhere; }
     .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: .85rem; }
     figure { display: flex; flex-direction: column; margin: 0; min-width: 0; border: 1px solid var(--line); border-radius: .65rem; overflow: hidden; background: var(--panel); }
     figcaption, .result { padding: .7rem 1rem; }
@@ -62,13 +60,11 @@
     .existing figcaption, .existing .result { background: var(--red-wash); }
     .proposed figcaption, .proposed .result { background: var(--green-wash); }
     .sheet { display: flex; flex: 1; flex-direction: column; gap: .65rem; min-height: 16rem; padding: 1rem; }
-    .sheet > p, .outline > p { margin: 0; }
+    .sheet > p { margin: 0; }
+    .filed-row { border-inline-start: .25rem solid var(--green); padding: .65rem; background: var(--green-wash); }
+    .filed-row p { margin-top: .2rem; }
     .request { border: 1px solid var(--line); border-radius: .25rem; padding: .65rem; }
     .outline { color: var(--muted); font-size: .9rem; }
-    .actions { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: .65rem; margin-top: auto; }
-    .action { display: inline-block; border: 1px solid var(--line); border-radius: .3rem; padding: .25rem .55rem; font-weight: 600; font-size: .9rem; }
-    .primary { color: var(--on-accent); background: var(--green); border-color: var(--green); }
-    .action-note { display: block; color: var(--muted); font-size: .83rem; margin-top: .3rem; }
     .result { border-top: 1px solid var(--line); font-size: .93rem; }
     .evidence { color: var(--muted); font-size: .9rem; margin-top: .75rem; }
     .mapping { margin: 0; }
@@ -95,109 +91,116 @@
 <body>
   <main>
     <header>
-      <p class="kicker">LOO-1065 · Concept review</p>
-      <h1>When does a Task take up its workflow?</h1>
-      <p class="lead">In New Task on Mac, <strong>Start</strong> should use the workflow you chose. <strong>File to backlog</strong> should save your request and leave the workflow choice until first start.</p>
-      <p>The Task brief reads “ui polish dumping ground.” This review takes the New Task sheet through the backlog, first run, and recovery because the workflow preview exposes a difference between what the sheet offers and what the Machine saves.</p>
+      <p class="kicker">LOO-1065 · Built change reviewed against 42d8b45944</p>
+      <h1>Where is the Task I just filed?</h1>
+      <p class="lead">New Task on Mac has two destinations. File opens the brief in its backlog. Start opens the Task’s conversation. Both actions begin with an editable draft and end with a Task the Machine has saved.</p>
+      <p>This review follows both actions from the sheet to the Task and through refusal, reconnect and recovery. The branch already makes the workflow picker a choice for Start.</p>
     </header>
 
     <section aria-labelledby="walkthrough">
-      <h2 id="walkthrough">One workflow picker, two outcomes</h2>
-      <p>The Product scope defaults to <code>feature</code>. You choose <code>sketch</code>, then decide to file the work for later.</p>
+      <h2 id="walkthrough">File shows the result from the answer</h2>
+      <p>You write “Make the Task brief easier to scan” in the repository and click <strong>File to backlog</strong>. The Machine commits the Task and replies while Desktop’s planning subscription is still reconnecting.</p>
       <div class="compare">
         <figure class="existing">
-          <figcaption>Existing · The choice looks like part of the Task</figcaption>
+          <figcaption>Built branch · A confirmation above an empty selection</figcaption>
           <div class="sheet">
-            <h3>What do you want?</h3>
-            <p class="request">Make the Task brief easier to scan.</p>
-            <p>In <strong>Product</strong>, running <strong>sketch</strong>, for this Task only</p>
-            <div class="outline"><p><code>draft → demo</code></p><p>You take part at demo.</p></div>
-            <div class="actions">
-              <span class="action">File</span>
-              <span class="action primary">Start <kbd>⌘↩</kbd></span>
-            </div>
+            <h3>Repository backlog</h3>
+            <p class="outline">The Machine is away; showing what was last read</p>
+            <p>Filed 8747cc</p>
+            <p class="request">Nothing selected</p>
           </div>
-          <p class="result">File sends <code>sketch</code>. The Machine validates it, then saves the Task. When you open the Task, Start offers <code>feature</code>.</p>
+          <p class="result">QA saw the new row and brief about 30 seconds later. The successful answer already carried the row used to draw them.</p>
         </figure>
         <figure class="proposed">
-          <figcaption>Proposed · The choice belongs to Start</figcaption>
+          <figcaption>Proposed · The new brief opens with its row</figcaption>
           <div class="sheet">
-            <h3>What do you want?</h3>
-            <p class="request">Make the Task brief easier to scan.</p>
-            <p>In <strong>Product</strong></p>
-            <p>Workflow for Start <strong>sketch ▾</strong></p>
-            <div class="outline"><p><code>draft → demo</code></p><p>You take part at demo.</p></div>
-            <div class="actions">
-              <div><span class="action">File to backlog</span><span class="action-note">Choose a workflow when you start.</span></div>
-              <span class="action primary">Start with sketch <kbd>⌘↩</kbd></span>
+            <h3>Repository backlog</h3>
+            <p class="outline">The Machine is away; showing what was last read</p>
+            <p>Filed 8747cc</p>
+            <div class="filed-row">
+              <h3>8747cc · Make the Task brief easier to scan</h3>
+              <p class="outline">Selected · Unstarted</p>
+              <p>Make the Task brief easier to scan.</p>
             </div>
           </div>
-          <p class="result">File saves the brief in Product. The Task offers its current default, <code>feature</code>. <strong>Start with…</strong> can pick <code>sketch</code> when the work is ready.</p>
+          <p class="result">The committed row fills the selected brief immediately. Planning takes over as soon as it reports the Task, using the same Task ID.</p>
         </figure>
       </div>
-      <p class="evidence"><a href="../swift/LoopflowMac/Views/NewTaskSheet.swift">Mac sheet</a> · <a href="../rust/loopflow-execution/src/engine/creation.rs">Creation engine</a> · <a href="../docs/surfaces.md#a-task-that-has-not-started">Unstarted Task</a></p>
+      <p class="evidence">The sketches use the status and timing recorded during QA. <a href="qa.html">QA walkthrough</a> · <a href="../rust/loopflow/src/lf/commands/task_create.rs">Machine answer</a> · <a href="../swift/LoopflowMac/WorkModel.swift">Desktop handoff</a></p>
     </section>
 
     <section aria-labelledby="mapping">
-      <h2 id="mapping">Do the concepts line up?</h2>
+      <h2 id="mapping">Do the concepts line up in the built branch?</h2>
       <dl class="mapping">
         <div>
-          <dt>File a request</dt>
-          <dd><span class="no">No</span> <code>NewTaskSheet.file()</code> passes its Start choice through <code>WorkModel.fileTask</code>. The served <code>task.create</code> validates that name even when <code>run</code> is false. The filing operation has no Graph field. An input can stop an action that gains nothing from the input. <a href="../swift/LoopflowMac/WorkModel.swift">WorkModel</a> · <a href="../rust/loopflow-execution/src/ops/task.rs">Task operations</a></dd>
+          <dt>File a brief for later</dt>
+          <dd><span class="yes">Yes</span> Compared with the base, File now sends <code>run: false</code> and <code>graph: null</code>. The filed Task has a scope and brief. At its first run it offers the current default and a choice of other workflows. <a href="../swift/LoopflowMac/WorkModel.swift">WorkModel</a> · <a href="../docs/surfaces.md#a-task-that-has-not-started">Unstarted Task</a></dd>
         </div>
         <div>
-          <dt>Follow a default or pick a name</dt>
-          <dd><span class="no">No</span> The draft stores an optional name, but the sheet names its source by comparing the displayed name to the reported default. After a Wave change, an explicit <code>sketch</code> can look inherited if that Wave defaults to <code>sketch</code>. <a href="../swift/LoopflowMac/Views/NewTaskSheet.swift">NewTaskWorkflow</a></dd>
+          <dt>Follow the default or pick a workflow</dt>
+          <dd><span class="yes">Yes</span> <code>NewTaskDraft.graph</code> carries a named choice or inheritance, even when both show the same name. <code>WaveGraph</code> and <code>WorkflowOutline</code> provide the preview. With <strong>Use default</strong> the Machine resolves the current default at Start. A named choice goes to admission by name. <a href="../swift/LoopflowMac/Views/NewTaskSheet.swift">New Task sheet</a> · <a href="../docs/surfaces.md#start-picks-a-workflow">Workflow choices</a></dd>
         </div>
         <div>
-          <dt>See where you take part</dt>
-          <dd><span class="yes">Yes</span> Rust sends the catalog’s <code>WorkflowOutline</code>. New Task and the unstarted Task draw its steps and participation sentence. Once the Task takes up a Graph, its workflow bar shows the captured Graph and position. <a href="../rust/loopflow-execution/src/task_graph.rs">Workflow and position types</a> · <a href="../swift/LoopflowMac/Views/TaskWorkView.swift">Task workspace</a></dd>
+          <dt>Where the Task goes</dt>
+          <dd><span class="no">No</span> The draft stores a Wave ID, but <code>NewTaskSheet.wave</code> returns <code>nil</code> both for a deliberate repository choice and when the chosen Wave stops resolving. Both actions send repository in that case. QA removed the chosen Wave and watched the sheet switch to the repository without a selection. <a href="../swift/LoopflowMac/Views/NewTaskSheet.swift">Scope lookup</a> · <a href="qa.html">QA walkthrough, case 4</a></dd>
         </div>
         <div>
-          <dt>Start work</dt>
-          <dd><span class="yes">Yes</span> New Task uses <code>task.create</code> with <code>run: true</code>. Admission records the selected Graph and primary Session with the Task. Starting a filed Task uses <code>task.run</code>. The first run takes up a Graph, and subsequent runs use its recorded position. <a href="../docs/dev/reference-models.md#graph-outcomes-and-authority">Graph outcomes and authority</a></dd>
+          <dt>See the newly filed Task</dt>
+          <dd><span class="no">No</span> The Machine returns the receipt and a committed <code>TaskCreated.row</code>. <code>fileTask</code> keeps its ID and shows a success notice. <code>BacklogList</code> can only select a row it received from planning. It loses the answer’s Task between successful creation and visible selection. <a href="../swift/Loopflow/Services/RegistryQuery.swift">TaskCreated</a> · <a href="../swift/LoopflowMac/Views/BacklogView.swift">BacklogList</a></dd>
         </div>
         <div>
-          <dt>Recover a submitted request</dt>
-          <dd><span class="yes">Yes</span> A creation receipt identifies the submitted action on its Machine. An unread answer can be reconciled with the original request identity and payload. After admission, setup can continue in the Task’s conversation. <a href="../rust/loopflow/src/server/README.md#creation-receipts">Creation receipts</a> · <a href="../swift/LoopflowMac/CreationSubmissions.swift">Desktop recovery</a></dd>
+          <dt>Start work and see where it stands</dt>
+          <dd><span class="yes">Yes</span> Start submits <code>run: true</code>. The Machine commits the Task, Graph, claim and primary Session together. Desktop uses the returned row and Session to open the workspace immediately. First start from the backlog uses <code>task.run</code>. The captured Graph and its position then describe the work, and checkout or launch failures belong to that Task. <a href="../rust/loopflow-execution/src/engine/creation.rs">Creation engine</a> · <a href="../swift/LoopflowMac/WorkModel.swift">Start workspace handoff</a></dd>
+        </div>
+        <div>
+          <dt>Correct a refused request</dt>
+          <dd><span class="no">No</span> File returns a refusal to <code>NewTaskDraft</code>, with the form still editable. Start has already dismissed that form. <code>StartingTask</code> retains the text, scope and workflow, but <strong>Try again</strong> repeats the inputs unchanged and <strong>Discard</strong> drops them. When a named workflow disappears, the person needs the picker to correct the draft. <a href="../swift/LoopflowMac/Views/NewTaskSheet.swift">File and Start controls</a> · <a href="../swift/Loopflow/Services/CreationJournal.swift">Receipt check before retry</a></dd>
+        </div>
+        <div>
+          <dt>Find a Task after losing its answer</dt>
+          <dd><span class="yes">Yes</span> Disk holds the exact <code>SubmittedCreation</code> and its destination. <code>creation.get</code> resolves the outcome on the original Machine. Recovery can show the existing resource, and a mounted result retires the local submission. <a href="../rust/loopflow/src/server/README.md#creation-receipts">Creation receipts</a> · <a href="../swift/LoopflowMac/CreationSubmissions.swift">Desktop recovery</a></dd>
         </div>
       </dl>
     </section>
 
     <section aria-labelledby="ownership">
-      <h2 id="ownership">Let the choice live in the draft until Start</h2>
-      <p>The picker offers <strong>Use default</strong> and named workflows. The draft’s optional name expresses the choice. When the scope changes, the default can change and an explicit choice stays selected. The Machine supplies the outline and resolves the current default at admission or first run.</p>
-      <p>File sends <code>run: false</code> and <code>graph: null</code>. Start sends <code>run: true</code> with the name or <code>null</code> for the default. The filed Task keeps its brief and scope. The started Task keeps its captured Graph and position in <code>task_graphs</code>. Creation recovery keeps its submitted payload and identity. This takes the graph argument out of the Mac filing method and gives the choice a single place to take effect.</p>
-      <p class="evidence"><a href="../rust/loopflow-execution/src/ops/project.rs">Scope default read</a> · <a href="../rust/loopflow-storage/SCHEMA.md">Stored Task Graph</a> · <a href="../swift/Loopflow/Services/RegistryQuery.swift">Swift request API</a></p>
+      <h2 id="ownership">One draft until the Machine answers</h2>
+      <p>Keep the sheet visible for File and Start while the Machine answers. Show which action is in progress. A confirmed refusal leaves the same request, scope and workflow available to edit. A Wave that is known to be gone stays named in <strong>In</strong> until you choose another destination. A saved submission with an uncertain outcome hands off to recovery under its original identity.</p>
+      <p>On successful File, use the existing <code>RoadmapTask</code> from <code>TaskCreated.row</code> as temporary evidence for the open brief in its recorded backlog. Render it once. A current row for the same ID takes precedence, including a change of scope or backlog membership. Release the temporary evidence when the selection leaves it or a current Task read establishes that it has moved or gone. An absent row in stale or partial planning is inconclusive.</p>
+      <p>On successful Start, close the sheet as soon as admission answers and open the returned Task and Session. Its conversation runs checkout and Graph setup. A filed Task has no Graph preference to persist. Both outcomes already fit the existing write, receipt and Work rows. The changes belong in Desktop’s draft and presentation.</p>
+      <p class="evidence">Choice for review. Keep the form through admission and remove the separate read-only Start failure screen. That leaves one place to correct the request and keeps checkout and launch off the submission’s wait. <a href="../swift/LoopflowMac/Views/NewTaskSheet.swift">Current Start screen</a> · <a href="../rust/loopflow/src/server/README.md#creation-receipts">Admission milestones</a></p>
     </section>
 
     <section aria-labelledby="paths">
-      <h2 id="paths">Try the lifecycle</h2>
+      <h2 id="paths">Walk the proposed handoff</h2>
       <div class="scenarios">
         <article>
-          <h3>File today, start tomorrow</h3>
-          <p>File with <code>sketch</code> showing. Open the selected backlog row. If Product has since switched to <code>code</code>, Start offers <code>code</code>. <strong>Start with…</strong> still allows any available named workflow.</p>
+          <h3>Normal</h3>
+          <p>Pick <code>review</code> in Ops and File with planning paused. The response opens the brief immediately. After planning catches up there is one row, and first Start offers the current Ops default. Opening New Task and clicking <strong>Start with review</strong> instead opens the admitted conversation.</p>
         </article>
         <article>
-          <h3>A definition disappears</h3>
-          <p>Remove the <code>sketch</code> definition after opening the sheet. File can still save the brief. Starting with that name still surfaces the Machine’s error. A refused File keeps the draft for correction.</p>
+          <h3>Refusal</h3>
+          <p>Choose <code>review</code>, then remove that definition before Start. Once the Machine refuses and confirms no receipt, the sheet still has the text and the named choice. Pick <strong>Use default</strong> to start, or File the same brief. If the selected Wave disappears, pick where the Task should go.</p>
         </article>
         <article>
-          <h3>The answer gets lost</h3>
-          <p>Drop the response after the Machine saves the Task. Recovery reads its original receipt and presents the same Task. If Start committed before setup failed, opening that Task recovers its conversation and captured Graph.</p>
+          <h3>Lost answer</h3>
+          <p>Drop the connection after commit. Recovery reads the receipt for the saved request on the original Machine, finds the same Task and presents it. Before commit, recovery can resend the saved payload under that ID if the Machine confirms absence. An unavailable lookup leaves the submission saved.</p>
         </article>
       </div>
-      <p class="evidence">Counterexample checked against the design. Moving from Product to a Wave whose default is <code>sketch</code> keeps an explicit <code>sketch</code> choice, even if that Wave later changes its default. Choosing <strong>Use default</strong> resumes following the Wave.</p>
+      <p class="evidence">Counterexamples. A planning frame can arrive before the create reply and already have a newer row. Use that row once, even if the Task has moved or started. If the person changes windows, scope or Machine while the reply is in flight, leave the result recoverable without taking over a newer destination. <a href="../swift/LoopflowTests/NewTaskTests.swift">Existing New Task tests</a> · <a href="../rust/loopflow/tests/task_create_tests.rs">Start after a lost reply</a></p>
     </section>
 
     <section aria-labelledby="decisions">
       <h2 id="decisions">Questions for review</h2>
       <ol class="questions">
-        <li><strong>When should a named workflow take effect?</strong>
-          <p><strong>1a</strong> On Start, as shown here. <strong>1b</strong> Save a workflow preference when filing, so it follows the Task when it moves.</p>
+        <li><strong>What should open as soon as File answers?</strong>
+          <p><strong>1a</strong> The selected backlog brief using the committed row. <strong>1b</strong> The Task’s own page using the committed row.</p>
         </li>
-        <li><strong>What should happen when you change scope in the draft?</strong>
-          <p><strong>2a</strong> Keep an explicit choice until you choose <strong>Use default</strong>, as shown here. <strong>2b</strong> Switch to the new scope’s default immediately.</p>
+        <li><strong>Where should a refused Start leave the request?</strong>
+          <p><strong>2a</strong> In the same editable New Task sheet. <strong>2b</strong> In the starting workspace with a way to reopen that draft.</p>
+        </li>
+        <li><strong>What should the sheet do if its Wave disappears?</strong>
+          <p><strong>3a</strong> Keep the missing Wave visible and let you choose the destination. <strong>3b</strong> Switch to the repository immediately.</p>
         </li>
       </ol>
     </section>

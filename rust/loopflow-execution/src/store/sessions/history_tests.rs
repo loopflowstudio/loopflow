@@ -563,6 +563,7 @@ fn task_history_reads_every_row_naming_the_task() {
         let id = loopflow_model::durable::TaskId::new();
         store
             .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: repository.clone(),
                 id: id.clone(),
                 project_id: None,

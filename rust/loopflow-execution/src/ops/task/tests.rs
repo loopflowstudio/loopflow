@@ -735,6 +735,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         updated_at: now,
     };
     let task = Task {
+        parent_task_id: None,
         repository_id: crate::repository::location::ensure_repository(&store.sqlite, wave.repo())
             .unwrap(),
         id: TaskId::new(),

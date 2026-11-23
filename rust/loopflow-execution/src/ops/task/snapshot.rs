@@ -116,6 +116,16 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
                 .as_ref()
                 .filter(|pr| pr.phase() == PrPhase::Open)
                 .map(|pr| pr.presentation().is_some()),
+            at_end: work_set.graph.as_ref().is_some_and(|graph| {
+                matches!(
+                    &graph.position,
+                    crate::task_graph::TaskGraphPosition::At { step } if step == crate::task_graph::END
+                )
+            }),
+            open_children: store
+                .sqlite
+                .open_task_child_count(&task.id)
+                .map_err(task_error)?,
             completion_refusal: completion_refusal.as_deref(),
             run_refusal: run_refusal.as_deref(),
             ci: active.and_then(|pr| pr.fresh_ci()),
@@ -566,6 +576,9 @@ pub(super) fn diff_snapshot(
 }
 
 pub fn task_workspace_context(task: &Task) -> OpsResult<String> {
+    if !task.worktree.as_ref().is_some_and(|path| path.is_dir()) {
+        return Ok("This Task has no checkout here: none was made, or it was retired when the Task closed. Read its changes from its pull request and Git history.".into());
+    }
     if !crate::git::commit_exists(task.worktree()?, &task.base_commit)? {
         return Ok(format!(
             "The recorded Task comparison base {} is unavailable in {}. The saved checkout and its edits remain the working copy. Inspect Git history and the actual files, recover the comparison base through managed sync, and do not treat the missing diff as an empty change.",

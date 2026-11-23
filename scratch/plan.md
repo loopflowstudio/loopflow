@@ -137,6 +137,10 @@ provider. Claude and Codex today claim the steers in their start hook
 (server README, "Every launch reads its own steers") and start no turn. The
 reason that start hook claims them is not recorded; the new Task finds out
 before changing it. Chats keep the start-hook claim: nothing wakes a chat.
+LOO-1068 also removes this Task's `observed_at=0` coupling: today
+`begin_program_status` and `record_agent_inbox` both move `session_activity`
+to a new provider, and the reset trusts a zero reading time to know the status
+stream got there first (`scratch/concept-review.html`).
 
 ## Remaining
 - A provider killed with SIGKILL leaves its empty `/tmp/lf-wake-*` directory.

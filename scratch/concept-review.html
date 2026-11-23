@@ -21,64 +21,56 @@
 </style>
 
 <h1>Do the steering concepts line up?</h1>
-<p class="lede">Area: how a person's steer reaches a managed conversation on each of the four providers, and how a work session is launched to match its worker. The idle-wake diff (<code>git diff 2a3b6d11d8 HEAD</code>) sits in the middle of it; the review covers the area with that diff in it. Second pass, at <code>a886db6eaa</code>: the model fix and the <code>boundary::After</code> split are built and through QA.</p>
+<p class="lede">Area: how a person's steer reaches a managed conversation on each of the four providers, and how a work session's launch (model, reach, idle state) matches its worker. Third pass, at <code>dc8cf24b01</code>, against <code>origin/main</code>: the <code>agent_inbox</code>/<code>agent_socket</code> split, <code>switchModel</code> on reopen and the two reopen QA fixes are built.</p>
 
 <h2>One interaction, walked</h2>
 <div class="existing">
-<p>Someone runs <code>lf steer LOO-974 'use the staging bucket'</code> while the Task's OpenCode work session sits idle in its terminal.</p>
+<p>Someone runs <code>lf steer LOO-974 'use the staging bucket'</code> while the Task's OpenCode work session is closed. Its last turn had failed on quota, so no turn end was ever reported.</p>
 <ol>
-  <li>The steer is stored. The Machine server's watcher sees the revision move and finds the Session idle: <code>session_activity.yielded</code>, recorded at the plugin's <code>Stop</code>.</li>
-  <li>The reach comes from the row: <code>provider = opencode</code> → <code>IdleReach::Extension(agent_inbox)</code>.</li>
-  <li>The server connects to <code>/tmp/lf-wake-*/s</code>, writes <code>{"thread","text"}</code> and waits up to 15s for <code>started</code>. The plugin calls <code>session.synthetic</code>, and the turn runs in the TUI.</li>
-  <li><b>Failure:</b> the socket is gone or answers nothing, so the steers stay undelivered and the next boundary carries them as context. Nothing is stamped read.</li>
-  <li><b>Recovery:</b> the person quits and reopens. The plugin names a new socket as it loads, <code>record_agent_inbox</code> sees a change, marks the new process idle, and the wake runs before anyone types.</li>
+  <li>The steer is stored; nothing is reachable, so it waits.</li>
+  <li>The person reopens. The held terminal's status stream reaches the new provider first: <code>begin_program_status</code> moves <code>session_activity</code> to it and, new in this pass, sets <code>observed_at=0</code>.</li>
+  <li>The plugin loads and names its socket. <code>record_agent_inbox</code> writes <code>agent_socket</code>, sees a change, and resets the row to idle because it belongs to another process <i>or</i> reads <code>observed_at=0</code>.</li>
+  <li>The wake runs: <code>IdleReach::Inbox(Inbox::Socket)</code>, <code>{"thread","text"}</code>, the plugin calls <code>switchModel</code> once (new: the wake path, not only the <code>prompt</code> hook), then <code>session.synthetic</code>. The turn answers on the model in <code>agent:</code>.</li>
+  <li><b>Failure:</b> the socket answers nothing; steers stay undelivered and ride the next boundary as context.</li>
 </ol>
-<p>This holds on the normal path, the failure and the recovery. QA on real models showed the same sequence (<code>scratch/qa.html</code>).</p>
+<p>Normal path, failure and recovery hold. QA on a real TUI 2026-11-22 (<code>scratch/qa.html</code>) showed <code>model-switched</code> then the woken turn; the turn itself failed on quota, as every OpenCode model on the account was out.</p>
 </div>
 
 <h2>Product concepts against code concepts</h2>
 <table>
   <tr><th>What a person knows</th><th>What the code has</th><th>Line up?</th><th>Where it is off</th></tr>
-  <tr><td>A steer</td><td><code>steers</code> rows, <code>steer::claim</code> / <code>delivered</code></td><td class="yes">yes</td><td>One record, shared by all four providers.</td></tr>
-  <tr><td>"It's idle, so my steer starts a turn"</td><td><code>session_activity.yielded</code> per agent process; <code>wake::after_turn</code>, <code>wake_idle</code></td><td class="yes">yes</td><td>The README row now reads "yes" for all four.</td></tr>
-  <tr><td>Where an idle conversation can be reached (never seen)</td><td><code>IdleReach</code> built from <code>agent_endpoint</code>, <code>agent_inbox</code> and <code>provider</code></td><td class="part">partly</td><td>One column, <code>agent_inbox</code>, holds two different things: Claude's key file and an OpenCode or Pi socket. <code>provider</code> picks which one it is, and any other provider falls through to Claude. The enum puts them back together when read, so nobody sees the split.</td></tr>
-  <tr><td>"I reopened it, so it's waiting for me"</td><td>The activity reset inside <code>record_agent_inbox</code></td><td class="part">partly</td><td>The rule "a new provider process is idle until its first turn" lives in a function named for saving an address. It applies only to providers that name an inbox; Codex's reopen goes through its app-server and was not checked against it.</td></tr>
-  <tr><td>Reopen with steers waiting</td><td>Claude: start hook folds them into context, no turn. OpenCode/Pi: the wake starts a turn.</td><td class="no">no</td><td>One action, two outcomes, depending on provider. Larger than this Task (Claude's start path predates it).</td></tr>
-  <tr><td>The model in <code>agent:</code>, new conversation</td><td><code>opencode::environment</code> sets <code>"model"</code> in <code>OPENCODE_CONFIG_CONTENT</code> for workers and work sessions</td><td class="yes">yes</td><td>Was the biggest mismatch on the first pass; built. QA: a new work session and a worker both answered on <code>gemini-4-carbon</code> while the account default is neon.</td></tr>
-  <tr><td>The model in <code>agent:</code>, reopened conversation</td><td>OpenCode keeps the model of the session's last turn; the config only picks a new session's</td><td class="part">partly</td><td>Change <code>agent:</code> and reopen the same OpenCode work session: it stays on the old model, silently (<code>probes.md</code>, questions.md 7). New conversations are right. Reversible, left for review.</td></tr>
-  <tr><td>"After a turn" vs "now reachable"</td><td><code>boundary::After::{TurnEnd, Reachable}</code></td><td class="yes">yes</td><td>The compress replaced a <code>turn_ended: bool</code> with two variants, one per thing that happened. The reopen wake held through QA after it.</td></tr>
-  <tr><td>(nothing)</td><td><code>/tmp/lf-wake-*</code> directory, removed on exit</td><td class="part">partly</td><td>A SIGKILL leaves an empty directory. It is harmless and clears on reboot. Accepted.</td></tr>
+  <tr><td>A steer</td><td><code>steers</code> rows, <code>steer::claim</code> / <code>delivered</code></td><td class="yes">yes</td><td>One record for all four providers.</td></tr>
+  <tr><td>"It's idle, so my steer starts a turn"</td><td><code>session_activity.yielded</code>; <code>wake::after_turn</code>, <code>wake_idle</code></td><td class="yes">yes</td><td>README row "yes" on all four.</td></tr>
+  <tr><td>Where an idle conversation is reached (never seen)</td><td><code>IdleReach::{Codex(endpoint), Inbox(Inbox::{Claude, Socket})}</code> from <code>agent_endpoint</code>, <code>agent_inbox</code>, <code>agent_socket</code></td><td class="yes">yes</td><td>Was "partly": one column held two things, picked by <code>provider</code>. Now one column per thing, and the wire <code>inbox</code> names its kind. Cost: hook and server must be the same build (questions.md 8).</td></tr>
+  <tr><td>The model in <code>agent:</code></td><td><code>OPENCODE_CONFIG_CONTENT</code> <code>"model"</code> for new sessions; plugin <code>takeModel()</code> → <code>switchModel</code> once per launch, before the first turn, typed or woken</td><td class="yes">yes</td><td>Was "partly" on reopen. One setting, one outcome, whatever starts the first turn.</td></tr>
+  <tr><td>"I reopened it, so it's idle"</td><td>Three writers of <code>session_activity</code>: <code>record_session_activity</code> (turn facts), <code>begin_program_status</code> (held terminal), <code>record_agent_inbox</code> (boundary). The reset lives in the third; <code>observed_at=0</code> tells it the second got there first.</td><td class="no">no</td><td>One fact, "which provider process is current and is it in a turn", has no single owner. This pass coupled two writers through a timestamp value meaning "no turn read yet". It is correct (0 is also what a fresh status-stream row starts at, and <code>session_liveness</code> ignores the row once the attachment is cleared), but the next writer to touch the row must know it.</td></tr>
+  <tr><td>Reopen with steers waiting</td><td>Claude/Codex: start hook claims them as context, no turn. OpenCode/Pi: the wake starts a turn.</td><td class="no">no</td><td>One action, two outcomes by provider. Filed as LOO-1068 with the row above.</td></tr>
+  <tr><td>(nothing)</td><td><code>/tmp/lf-wake-*</code>, removed on exit</td><td class="part">partly</td><td>SIGKILL leaves an empty directory. Accepted.</td></tr>
 </table>
 
-<h2>First pass's biggest mismatch: one model setting, two outcomes (now built)</h2>
+<h2>Biggest mismatch: "a new provider is idle" has no owner</h2>
 <div class="cols">
 <div class="existing">
-<p><b>Before</b></p>
-<p>The OpenCode TUI (2.2.1) has no <code>--model</code> flag: <code>opencode --help</code> lists <code>--standalone --server --auto --continue --session --prompt</code>. The worker passes <code>--model</code> to <code>run</code>; the work session drops the setting. Steering, context and resume are the same in both, but the model is not.</p>
+<p><b>Now</b></p>
+<p>Whoever reaches <code>session_activity</code> first with a new <code>agent_process_id</code> decides what the row says. The status stream keeps the earlier process's <code>yielded=0</code>; the boundary resets to idle only on a process change or <code>observed_at=0</code>. Claude and Codex never take the reset (they name no socket on reopen, or claim steers at start). The QA bug this pass fixed was exactly this race.</p>
 </div>
 <div class="proposed">
-<p class="tag">BUILT (7688d7f24f)</p>
-<p><b>After</b></p>
-<p><code>opencode::environment</code> writes <code>"model"</code> into <code>OPENCODE_CONFIG_CONTENT</code>, which both launches already build. <code>run --model</code> is deleted, so the model goes through one place for workers and work sessions alike. A test on <code>environment</code> checks the key; a real TUI run checks that the configured model answers.</p>
+<p class="tag">PROPOSED (LOO-1068, not this Task)</p>
+<p>One store function, called by every writer that changes <code>agent_process_id</code>, sets the fresh-process reading: idle, no open tools, no status, attachment from <code>agent_sessions</code>. The <code>observed_at=0</code> clause and the reset inside <code>record_agent_inbox</code> go away; <code>record_agent_inbox</code> only saves an address and asks for a wake. With it, a reopen with steers waiting starts a turn on every provider (2a), once the reason Claude's start hook claims steers is found.</p>
 </div>
 </div>
-<p>Choice made for review: config over a CLI flag. The other option is to wait for OpenCode to add <code>--model</code> to its TUI, which leaves work sessions on the wrong model until it does. Config is the one path the TUI reads today, and it is reversible.</p>
-
-<h2>Biggest mismatch left: reopen with steers waiting</h2>
-<p>With the model fixed, the widest gap is one action with two outcomes. Reopen a work session that has steers waiting: OpenCode and Pi start a turn on them; Claude folds them into the next typed turn's context. Fixing it belongs to Claude's start hook, which every Claude work session runs, so it is listed below rather than built here. Nothing in this Task's diff makes it worse.</p>
+<p>Why not here: deciding "fresh = idle" for Claude and Codex changes their reopen behavior, which is 3b, already split out by answer and filed. The sentinel is the smallest correct patch inside this Task's scope.</p>
 
 <h2>Larger than this work</h2>
 <ul>
-  <li><b>Reopen semantics across providers.</b> Making Claude start a turn on reopen with steers waiting means changing Claude's start hook so it leaves the steers to the wake instead of folding them into context. That touches every Claude work session.</li>
-  <li><b>An owner for "a new process is idle".</b> This could be one store write at a process's first boundary, used by every provider, with <code>record_agent_inbox</code> back to saving the address. First it needs a check of Codex's reopen and of the opening-prompt race (questions.md 6).</li>
+  <li>LOO-1068 above.</li>
+  <li>GUI chat in Desktop and Mobile (questions.md 3): research, separate.</li>
+  <li>Failed or interrupted turns report no turn end on OpenCode and Claude (questions.md 4): left as is so Esc doesn't start a turn.</li>
 </ul>
 
 <h2>Questions</h2>
 <ol>
-  <li>OpenCode work-session model (built as a): (a) through <code>OPENCODE_CONFIG_CONTENT</code> for both launches; (b) keep <code>run --model</code> for workers and add config only for the TUI; (c) leave it until OpenCode's TUI takes <code>--model</code>.</li>
-  <li>Reopen with steers waiting: (a) a turn starts, on every provider; (b) the steers become context for the next typed turn, on every provider; (c) leave the providers different.</li>
-  <li>The "new process is idle" rule: (a) leave it in <code>record_agent_inbox</code>; (b) move it to a process's first boundary for every provider, as its own Task.</li>
-  <li>A reopened OpenCode work session after <code>agent:</code> changed: (a) stays on its last model, as now; (b) the plugin sets the model each turn; (c) lf starts a new conversation when the model changed.</li>
-  <li><code>agent_inbox</code> holding two shapes: (a) fine, since <code>provider</code> tells them apart; (b) split into a key-file column and a socket column.</li>
+  <li>LOO-1068's single owner for the fresh-process reading: (a) a store function every <code>agent_process_id</code> writer calls, or (b) the status stream alone owns provider changes and the boundary only reports turns?</li>
+  <li>The wake socket takes no key, only a <code>0700</code> directory (questions.md 5): (a) enough, or (b) carry a token the server sends back?</li>
+  <li>A synthetic wake shows the answer in the TUI but not the steer (questions.md 1): (a) acceptable, or (b) use <code>session.prompt</code> so the steer shows as typed?</li>
 </ol>
-</html>

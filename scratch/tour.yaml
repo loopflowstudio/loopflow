@@ -1,15 +1,15 @@
-at: 8f5635d759b2b100b264f39cc01d006b091e4193
+at: d112c4e1cf47168c8b07947f2e25eb7ee9f85aa5
 first:
   - path: docs/server.md
     why: Phone setup, account changes and automatic recovery
   - path: rust/loopflow/src/server/mobile/tailscale.rs
-    why: LocalAPI requests and the approved host identity
+    why: Discovery order, setup messages and host identity
   - path: rust/loopflow/src/server/mobile/tailscale/macos.rs
     why: How each Mac distribution publishes its endpoint
   - path: rust/loopflow/src/server/mobile.rs
     why: Setup and disable from the CLI
   - path: rust/loopflow/src/server/remote.rs
-    why: Listener lifetime, admission and cancellable restoration
+    why: Listener lifetime, retry deadlines and cancellation
   - path: rust/loopflow/tests/transport_tests.rs
     why: A connected phone loses and recovers access
   - path: rust/loopflow/tests/support/tailscale.rs

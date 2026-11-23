@@ -1,4 +1,5 @@
-//! Checkout freshness shared by interactive syncs and unattended installs.
+//! Checkout freshness shared by interactive syncs and unattended installs,
+//! and the one answer for what a checkout builds on.
 
 use std::fs::{File, OpenOptions};
 use std::path::Path;
@@ -11,6 +12,7 @@ use crate::git::{
     intervention_state, is_ancestor, rev_parse,
 };
 use crate::ops::git_operation::begin_sync_operation;
+use crate::ops::task::StackedSync;
 use crate::ops::{OpsError, OpsResult, Progress};
 
 fn git(repo: &Path, args: &[&str]) -> OpsResult<String> {
@@ -101,6 +103,67 @@ fn preserve_untracked_collisions(repo: &Path, stash: &str) -> OpsResult<()> {
         );
     }
     Ok(())
+}
+
+/// What a checkout builds on. `lf sync` merges it and `lf pr open` targets it.
+#[derive(Debug)]
+pub enum CheckoutBase {
+    /// This checkout's Task is stacked on another Task.
+    Stacked(StackedSync),
+    /// The branch `lf wt create --stack` recorded until its PR merges, else
+    /// the default branch.
+    Branch(String),
+}
+
+impl CheckoutBase {
+    pub fn stack(&self) -> Option<&StackedSync> {
+        match self {
+            Self::Stacked(stack) => Some(stack),
+            Self::Branch(_) => None,
+        }
+    }
+
+    /// The branch a PR targets: a stack parent while its PR is open, then the
+    /// default branch.
+    ///
+    /// # Errors
+    /// A stack parent closed without merging, naming both ways out.
+    pub fn branch<'a>(&'a self, default_branch: &'a str) -> OpsResult<&'a str> {
+        match self {
+            Self::Stacked(stack) => Ok(stack
+                .live_parent_branch(default_branch)?
+                .unwrap_or(default_branch)),
+            Self::Branch(branch) => Ok(branch),
+        }
+    }
+
+    /// The ref sync merges: a live stack parent is read from origin, where its
+    /// Task pushes from whichever Machine runs it; any other base is local.
+    ///
+    /// # Errors
+    /// As [`Self::branch`].
+    pub fn sync_ref(&self, default_branch: &str) -> OpsResult<String> {
+        match self {
+            Self::Stacked(stack) => Ok(match stack.live_parent_branch(default_branch)? {
+                Some(parent) => format!("origin/{parent}"),
+                None => default_branch.to_string(),
+            }),
+            Self::Branch(branch) => Ok(branch.clone()),
+        }
+    }
+}
+
+/// The one reader for a checkout's base; sync and publication both call it.
+pub fn checkout_base(repo: &Path, default_branch: &str) -> OpsResult<CheckoutBase> {
+    if let Some(stack) = crate::ops::task::task_stack(repo)? {
+        return Ok(CheckoutBase::Stacked(stack));
+    }
+    Ok(CheckoutBase::Branch(
+        match crate::git::worktrees::stacked_base(repo)? {
+            Some(base) if !crate::ops::pr::branch_pr_merged(repo, &base)? => base,
+            _ => default_branch.to_string(),
+        },
+    ))
 }
 
 const STASH_MESSAGE: &str = "lf checkout update: caller edits in ";

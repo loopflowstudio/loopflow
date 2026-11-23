@@ -415,6 +415,18 @@ too (keeps the broken push), and leaving two readers.
    and the stacked-Task sync/publish tests pass unchanged; `git::worktrees::`
    and `ops::pr::` focused. Then gate.
 
+Built. `ops::checkout::checkout_base(repo, default)` returns
+`CheckoutBase::Stacked(StackedSync)` or `CheckoutBase::Branch(name)` (the
+`loopflow-base` branch until its PR merges, else default). The stack's branch
+is read lazily (`branch()`, `sync_ref()`), so `lf sync main` still detaches a
+child whose parent closed unmerged instead of erroring on the parent first.
+`sync_ref` keeps `origin/<parent>` for a Task parent and the local branch
+otherwise. Publication pushes an unpushed `Branch` base (`push_unpushed_base`)
+and now falls back to the repository's default branch, not a literal `main`.
+Deleted: `pr_target`, `resolve_pr_target`, `WorktreeState.base_branch`,
+`LocalBranch` (now `branch_heads` returning heads), the upstream test and asserts.
+Next: gate.
+
 ## Built: one Git-root rule (human review of the ownership split, 2026-11-23)
 
 Answer on the page's question 1: "i think I prefer (c)": Git-root equality

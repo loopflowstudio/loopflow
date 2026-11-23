@@ -67,7 +67,6 @@ pub enum PlacementError {
 pub struct WorktreeState {
     pub branch: Option<String>,
     pub path: PathBuf,
-    pub base_branch: Option<String>,
     pub merged: bool,
     pub squash_merged: bool,
     /// No commits beyond main and not merged — a brand new worktree.
@@ -800,20 +799,14 @@ fn concurrently<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) ->
     indexed.into_iter().map(|(_, result)| result).collect()
 }
 
-#[derive(Debug)]
-struct LocalBranch {
-    head: String,
-    upstream: Option<String>,
-}
-
-/// Head and configured upstream of every local branch, in one Git process.
-fn local_branches(repo: &Path) -> HashMap<String, LocalBranch> {
+/// Head of every local branch, in one Git process.
+pub(crate) fn branch_heads(repo: &Path) -> HashMap<String, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
         .args([
             "for-each-ref",
-            "--format=%(refname)%00%(objectname)%00%(upstream:short)%00%(upstream:track)",
+            "--format=%(refname)%00%(objectname)",
             "refs/heads",
         ])
         .output();
@@ -823,23 +816,10 @@ fn local_branches(repo: &Path) -> HashMap<String, LocalBranch> {
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| {
-            let mut fields = line.split('\0');
-            let name = fields.next()?.strip_prefix("refs/heads/")?;
-            let head = fields.next()?;
-            let upstream = fields.next().unwrap_or_default();
-            let gone = fields.next() == Some("[gone]");
-            let upstream = (!upstream.is_empty() && !gone).then(|| {
-                upstream
-                    .strip_prefix("origin/")
-                    .unwrap_or(upstream)
-                    .to_string()
-            });
+            let (name, head) = line.split_once('\0')?;
             Some((
-                name.to_string(),
-                LocalBranch {
-                    head: head.to_string(),
-                    upstream,
-                },
+                name.strip_prefix("refs/heads/")?.to_string(),
+                head.to_string(),
             ))
         })
         .collect()
@@ -1041,13 +1021,6 @@ pub fn diff_shortstats(
             let stat = stats.get(heads.get(*branch)?)?;
             Some((branch.to_string(), stat.clone()))
         })
-        .collect()
-}
-
-pub(crate) fn branch_heads(repo: &Path) -> HashMap<String, String> {
-    local_branches(repo)
-        .into_iter()
-        .map(|(name, branch)| (name, branch.head))
         .collect()
 }
 
@@ -1296,7 +1269,7 @@ fn local_states(
     repo: &Path,
     default_branch: &str,
     items: Vec<(PathBuf, Option<String>)>,
-    branches: &HashMap<String, LocalBranch>,
+    branches: &HashMap<String, String>,
 ) -> Vec<WorktreeState> {
     let merge_target = format!("origin/{default_branch}");
     let (dirty, (within, squash_merged)) = thread::scope(|scope| {
@@ -1309,7 +1282,7 @@ fn local_states(
             .iter()
             .filter_map(|(_, branch)| branch.as_deref())
             .filter(|branch| *branch != default_branch && !within.contains(*branch))
-            .filter_map(|branch| branches.get(branch).map(|branch| branch.head.clone()))
+            .filter_map(|branch| branches.get(branch).cloned())
             .collect();
         let squash_merged = match CommitFacts::load(repo, &merge_target) {
             Some(mut facts) => {
@@ -1330,14 +1303,11 @@ fn local_states(
         .zip(dirty)
         .map(|((path, branch), dirty)| {
             let known = branch.as_deref().and_then(|branch| branches.get(branch));
-            let base_branch = known
-                .and_then(|branch| branch.upstream.clone())
-                .filter(|upstream| upstream != default_branch);
             let is_default = branch.as_deref() == Some(default_branch);
             let has_commits = is_default || branch.as_deref().is_some_and(|b| !within.contains(b));
             let squash_merged = !is_default
                 && has_commits
-                && known.is_some_and(|branch| squash_merged.contains(&branch.head));
+                && known.is_some_and(|head| squash_merged.contains(head));
             // "Fresh" means no net content delta against main yet.
             // This includes newly-rotated branches that were forked from a landed
             // branch (commit graph differs, but tree is identical to main).
@@ -1345,7 +1315,6 @@ fn local_states(
             WorktreeState {
                 branch,
                 path,
-                base_branch,
                 merged: false,
                 squash_merged,
                 fresh,
@@ -1375,13 +1344,13 @@ fn remote_facts(
     repo: &Path,
     default_branch: &str,
     items: &[(PathBuf, Option<String>)],
-    branches: &HashMap<String, LocalBranch>,
+    branches: &HashMap<String, String>,
 ) -> RemoteFacts {
     let branch_heads: Vec<(String, String)> = items
         .iter()
         .filter_map(|(_, branch)| branch.as_ref())
         .filter(|b| b.as_str() != default_branch)
-        .filter_map(|b| Some((b.clone(), branches.get(b)?.head.clone())))
+        .filter_map(|b| Some((b.clone(), branches.get(b)?.clone())))
         .collect();
     if branch_heads.is_empty() {
         return RemoteFacts {
@@ -1478,7 +1447,7 @@ pub fn list_worktrees_timed(repo: &Path) -> Result<Listing, GitError> {
     // together.
     let (default_branch, branches, items) = thread::scope(|scope| {
         let default_branch = scope.spawn(|| get_default_branch(repo));
-        let branches = scope.spawn(|| local_branches(repo));
+        let branches = scope.spawn(|| branch_heads(repo));
         let items = list_porcelain(repo);
         (
             default_branch.join().expect("listing worker panicked"),
@@ -2379,7 +2348,6 @@ mod tests {
             WorktreeState {
                 branch: Some("old".to_string()),
                 path: Path::new("/tmp/repo.old").to_path_buf(),
-                base_branch: None,
                 merged: false,
                 squash_merged: true,
                 fresh: true,
@@ -2390,7 +2358,6 @@ mod tests {
             WorktreeState {
                 branch: Some("new".to_string()),
                 path: Path::new("/tmp/repo.new").to_path_buf(),
-                base_branch: None,
                 merged: false,
                 squash_merged: true,
                 fresh: true,
@@ -2673,8 +2640,6 @@ mod tests {
         assert_eq!(flags(state(Some("active"))), (false, false, false, false));
         assert_eq!(flags(state(Some("landed"))), (true, true, false, true));
         assert_eq!(flags(state(None)), (false, true, false, false));
-        assert_eq!(state(Some("active")).base_branch.as_deref(), Some("active"));
-        assert_eq!(state(Some("untouched")).base_branch, None);
         assert!(listed
             .iter()
             .all(|state| !state.merged && state.pull_request.is_none()));

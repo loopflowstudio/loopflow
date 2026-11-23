@@ -333,19 +333,27 @@ also works in older revisions. It lists the root in
 `~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set) and retains
 other repositories' roots. Git can finish the checkout if registration fails.
 
+On this Machine, two fresh worktrees built the same unique edit to
+`loopflow-definitions` through plain Cargo. With dependencies already built
+in each target, the first library build recorded one miss. The second recorded
+one hit, zero misses and produced the byte-identical library.
+
 The pinned daemon reads its roots at startup. When it is serving a client-side
 cache and lacks this root, registration asks it to stop. The next compile
 starts a daemon with the updated list. Rust compiles in the client process
-tree. The daemon gives outstanding connections up to ten seconds to finish,
-so a late cache write can be lost. In the two-worktree check, a
-`rustls` compile continued across the stop and its Cargo invocation passed the
-focused execution test. The [probe](benchmarks/crate-rebuild/README.md#registration-during-a-build)
-exercises this through the installed hook.
+tree. In the two-worktree check, registration and daemon shutdown took 11 seconds.
+The same `loopflow_execution` compiler finished and the focused application test
+passed. Cargo kept the resulting library in its target directory. Its cache write
+was lost, so another worktree would have to compile that library again.
+The replacement daemon loaded the new root.
+[Run the probe](benchmarks/crate-rebuild/README.md#registration-during-a-build).
 
 `scripts/dev-lf` and `status` refresh the inventory. Only `register` asks a
 daemon to stop. `status` reads the executable of the process accepting
 connections on the socket, the loaded roots and cache counters.
 `status --json` returns the same observations. Reading stats resets the idle timer.
+When you select your own `SCCACHE_CONF` or `SCCACHE_BASEDIRS`, that configuration
+owns the root list. Registration leaves its contents and daemon alone.
 
 | `status` exit | Meaning | Next command |
 |---|---|---|

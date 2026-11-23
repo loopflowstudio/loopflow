@@ -71,6 +71,7 @@ def _test_loop(source: Path, output: Path) -> None:
         for owner in ("app", "execution")
     )
     registration = source / "registration" / "stop.json"
+    machine = source / "machine-verification.json"
     interruption = source / "host-interruption.json"
     disk_interruption = source / "disk-interruption.json"
     loads = [
@@ -84,6 +85,7 @@ def _test_loop(source: Path, output: Path) -> None:
     payload = {
         "configuration": config,
         "warm_cohorts": warm_cohorts,
+        "machine_verification": json.loads(machine.read_text()) if machine.exists() else None,
         "registration_during_compile": json.loads(registration.read_text())
         if registration.exists()
         else None,
@@ -202,6 +204,23 @@ def _test_loop(source: Path, output: Path) -> None:
         if jobs is not None
         else "Cargo used the Machine's default job count."
     )
+    stop_note = ""
+    if stop := payload["registration_during_compile"]:
+        cached = sum(stop["interrupted_rlibs"].values())
+        compiler = (
+            "The same compiler was running after the daemon exited."
+            if stop["compiler_outlived_daemon"]
+            else "Compiler survival was unconfirmed."
+        )
+        stop_note = (
+            "<h2>Registration during compilation</h2><p>"
+            "Worktree registration and daemon shutdown took "
+            f"{stop['registration_and_drain_seconds']:.1f} seconds. {compiler} "
+            f"The focused application test {'passed' if stop['test_passed'] else 'failed'}. "
+            f"The replacement {'loaded' if stop['new_root_loaded'] else 'did not load'} "
+            f"the new root. The disk cache received {cached} of "
+            f"{len(stop['interrupted_rlibs'])} interrupted library builds.</p>"
+        )
     document = f"""<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width"><title>LOO-921 edit-to-test loop</title>
 <style>body{{font:16px/1.5 system-ui;max-width:1050px;margin:48px auto;padding:0
@@ -225,6 +244,7 @@ only in cache mode. These totals each contain three semantic edits, including th
 <table><tr><th>Owner</th><th>Mode</th><th>Seconds</th></tr>{totals_html}</table>
 <p>Measured test-profile default: incremental <strong>{"on" if incremental else "off"}</strong>.
 Incremental must win both three-edit totals to become the default.</p>
+{stop_note}
 <h2>Client CPU-seconds</h2>{table("cpu_seconds")}
 <h2>Daemon CPU-seconds (separate)</h2>{table("daemon_cpu_seconds")}
 <h2>Largest process RSS, GiB</h2>{table("rss_bytes", 1024**3)}

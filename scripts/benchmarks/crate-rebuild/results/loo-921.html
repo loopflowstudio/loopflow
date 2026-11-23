@@ -1,0 +1,44 @@
+<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width"><title>LOO-921 edit-to-test loop</title>
+<style>body{font:16px/1.5 system-ui;max-width:1050px;margin:48px auto;padding:0
+24px;color:#20252b}
+table{width:100%;border-collapse:collapse;margin:24px 0}
+th,td{text-align:left;padding:10px;border-bottom:1px solid #ddd}
+th{background:#f4f5f6}td{font-variant-numeric:tabular-nums}</style>
+<h1>A Rust edit through a passing test</h1>
+<p>3 warm alternating cohorts. Cargo used 2 jobs.
+Median [minimum–maximum]. Each sample passes one focused test and includes its link.</p>
+<p>Revision <code>d52cf7179effe810dc3364f6f5a68fd97791f8e3</code>.<br>rustc 1.98.1 (48a229cea 2026-09-01) (Homebrew)
+binary: rustc
+commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985
+commit-date: 2026-09-01
+host: aarch64-apple-darwin
+release: 1.98.1
+LLVM version: 22.1.8</p>
+<p>One-minute load ranged from 15.7 to 68.7 across sample boundaries. These are observations under background work, not a controlled CPU-speed comparison. </p>
+<p>The November 16 private cache and receipts were lost from /tmp. This run used the corrected wrapper and warmed the application and execution tests in each mode before the three measured cohorts.</p>
+<p>The shared Machine cache reached its 10 GiB cap during LOO-921 (2026-11-16). These isolated warm-cache samples measure the cost of a surviving entry; they do not establish that an entry survives eviction between worktrees on the shared cache.</p>
+<h2>Elapsed seconds</h2><table><tr><th>Sample</th><th>Cache</th><th>Incremental</th></tr><tr><th>app new</th><td>213.40 [157.98–276.20]</td><td>210.44 [200.90–306.05]</td></tr><tr><th>app edit 2</th><td>39.53 [31.26–49.23]</td><td>8.62 [7.29–18.64]</td></tr><tr><th>app edit 3</th><td>40.63 [31.60–42.74]</td><td>8.98 [6.54–15.70]</td></tr><tr><th>execution after app</th><td>90.28 [79.98–98.91]</td><td>107.25 [74.85–108.04]</td></tr><tr><th>execution edit 2</th><td>85.72 [78.88–95.01]</td><td>15.34 [11.79–16.87]</td></tr><tr><th>execution edit 3</th><td>73.55 [71.25–83.76]</td><td>16.57 [11.62–19.89]</td></tr><tr><th>execution new</th><td>271.89 [225.62–291.74]</td><td>unmeasured</td></tr></table>
+<h2>Three edits, elapsed seconds</h2><p>Application includes new-worktree creation and its first
+build.
+Execution follows the application tests in the same target; the separate execution-new row is
+measured
+only in cache mode. These totals each contain three semantic edits, including the first build.</p>
+<table><tr><th>Owner</th><th>Mode</th><th>Seconds</th></tr><tr><th>app</th><td>cache</td><td>284.52 [229.87–368.18]</td></tr><tr><th>app</th><td>incremental</td><td>228.03 [214.72–340.39]</td></tr><tr><th>execution</th><td>cache</td><td>259.75 [232.41–265.17]</td></tr><tr><th>execution</th><td>incremental</td><td>131.45 [111.61–139.15]</td></tr></table>
+<p>Measured test-profile default: incremental <strong>on</strong>.
+Incremental must win both three-edit totals to become the default.</p>
+<h2>Registration during compilation</h2><p>Worktree registration and daemon shutdown took 11.0 seconds. The same compiler was running after the daemon exited. The focused application test passed. The replacement loaded the new root. The disk cache received 0 of 1 interrupted library builds.</p>
+<h2>Client CPU-seconds</h2><table><tr><th>Sample</th><th>Cache</th><th>Incremental</th></tr><tr><th>app new</th><td>312.08 [246.81–380.10]</td><td>343.03 [320.00–386.57]</td></tr><tr><th>app edit 2</th><td>65.13 [63.25–79.06]</td><td>8.87 [7.51–13.83]</td></tr><tr><th>app edit 3</th><td>63.05 [61.09–70.11]</td><td>9.04 [6.75–12.19]</td></tr><tr><th>execution after app</th><td>165.41 [144.67–169.03]</td><td>173.07 [141.40–183.72]</td></tr><tr><th>execution edit 2</th><td>151.25 [145.46–156.34]</td><td>14.06 [11.70–15.20]</td></tr><tr><th>execution edit 3</th><td>141.56 [141.17–148.07]</td><td>15.78 [11.51–16.85]</td></tr><tr><th>execution new</th><td>359.29 [334.18–366.45]</td><td>unmeasured</td></tr></table>
+<h2>Daemon CPU-seconds (separate)</h2><table><tr><th>Sample</th><th>Cache</th><th>Incremental</th></tr><tr><th>app new</th><td>0.44 [0.36–0.63]</td><td>0.32 [0.30–0.33]</td></tr><tr><th>app edit 2</th><td>0.00 [0.00–0.00]</td><td>0.00 [0.00–0.01]</td></tr><tr><th>app edit 3</th><td>0.00 [0.00–0.01]</td><td>0.00 [0.00–0.00]</td></tr><tr><th>execution after app</th><td>0.01 [0.00–0.01]</td><td>0.01 [0.00–0.01]</td></tr><tr><th>execution edit 2</th><td>0.00 [0.00–0.00]</td><td>0.00 [0.00–0.00]</td></tr><tr><th>execution edit 3</th><td>0.00 [0.00–0.00]</td><td>0.00 [0.00–0.01]</td></tr><tr><th>execution new</th><td>0.41 [0.40–0.41]</td><td>unmeasured</td></tr></table>
+<h2>Largest process RSS, GiB</h2><table><tr><th>Sample</th><th>Cache</th><th>Incremental</th></tr><tr><th>app new</th><td>3.72 [3.68–3.72]</td><td>3.42 [3.39–3.42]</td></tr><tr><th>app edit 2</th><td>2.65 [2.64–2.67]</td><td>1.63 [1.63–1.63]</td></tr><tr><th>app edit 3</th><td>2.65 [2.60–2.66]</td><td>1.55 [1.55–1.55]</td></tr><tr><th>execution after app</th><td>5.62 [5.59–5.72]</td><td>5.34 [5.31–5.34]</td></tr><tr><th>execution edit 2</th><td>5.59 [5.55–5.59]</td><td>3.32 [3.32–3.32]</td></tr><tr><th>execution edit 3</th><td>5.66 [5.64–5.67]</td><td>3.24 [3.24–3.24]</td></tr><tr><th>execution new</th><td>5.64 [5.61–5.70]</td><td>unmeasured</td></tr></table>
+<h2>Peak sampled process-tree RSS, GiB</h2><table><tr><th>Sample</th><th>Cache</th><th>Incremental</th></tr><tr><th>app new</th><td>3.71 [3.66–3.77]</td><td>3.50 [3.32–3.51]</td></tr><tr><th>app edit 2</th><td>2.68 [2.62–3.00]</td><td>1.64 [1.50–1.76]</td></tr><tr><th>app edit 3</th><td>2.68 [2.67–2.69]</td><td>2.13 [1.76–2.14]</td></tr><tr><th>execution after app</th><td>5.52 [5.49–5.58]</td><td>5.28 [5.27–5.43]</td></tr><tr><th>execution edit 2</th><td>5.62 [5.54–5.62]</td><td>3.33 [3.18–3.41]</td></tr><tr><th>execution edit 3</th><td>5.66 [5.57–5.68]</td><td>3.09 [3.09–3.11]</td></tr><tr><th>execution new</th><td>5.69 [5.67–5.72]</td><td>unmeasured</td></tr></table>
+<p>Workspace wrapper records all compiler intervals. Cache deltas are attributed to a compiler only when no other interval overlaps. Two statistics RPCs per workspace compiler are included in timings. Test compiler time includes linking. Memory is sampled every second; sampled peak can miss shorter peaks. Daemon CPU is separate. Published cache observations count all loaded roots and name the measured worktrees. Concurrent-worktree capacity is unmeasured.
+Both incremental settings need their own third-party cache keys. The medians include only
+complete measured cohorts. The raw file also includes the seed commands for this run.
+Each worktree owns its target; all samples use one private cache.
+New roots are registered before starting its daemon. Worktree creation is timed separately and added
+to the first build; setup overlaps no Cargo command. Registry build scripts and proc macros still
+build.</p>
+<p><a href="loo-921.json">Compiler closures and command counters</a> ·
+<a href="loo-921-raw.json.gz">Raw cache, memory and Cargo unit receipts</a> ·
+<a href="../README.md">Method</a></p></html>

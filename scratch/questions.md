@@ -28,6 +28,5 @@ was full on November 16 and 22. A warm private-cache result measures the cost
 of a surviving entry. Historical alternatives and calibration observations
 are in d52cf7179e:scratch/loo-921-cross-worktree-cache.md.
 
-
 November 22 default choice: apply the measured winner to the test profile.
 Each sample ran `cargo test`; no dev-profile build was timed in this comparison.

@@ -8,12 +8,15 @@ uv run python scripts/benchmarks/crate-rebuild/run.py --base 3fbf3d2ca3 --candid
 uv run python scripts/benchmarks/crate-rebuild/report.py --input /tmp/lf-build-comparison --name loo-923 --output scripts/benchmarks/crate-rebuild/results
 uv run python scripts/benchmarks/crate-rebuild/test_loop.py --output ~/.cache/loopflow/measurements/loo-921
 uv run python scripts/benchmarks/crate-rebuild/report.py --test-loop ~/.cache/loopflow/measurements/loo-921 --output scripts/benchmarks/crate-rebuild/results
+uv run python scripts/benchmarks/crate-rebuild/seed_probe.py --output ~/.cache/loopflow/measurements/loo-922
+uv run python scripts/benchmarks/crate-rebuild/report.py --seed-probe ~/.cache/loopflow/measurements/loo-922 --output scripts/benchmarks/crate-rebuild/results
 ```
 
 [LOO-650 results](results/loo-650.html) compare one application crate with the
 storage and execution split. [LOO-923 results](results/loo-923.html) compare
 that split with `loopflow-harness` beside storage.
 [LOO-921 results](results/loo-921.html) time a new worktree through a passing focused test.
+[LOO-922 results](results/loo-922.html) compare a seeded new worktree with a cold one.
 
 ## Edit-to-test loop
 
@@ -21,7 +24,9 @@ that split with `loopflow-harness` beside storage.
 then a focused `cargo test` that passes. It uses the Machine's own Cargo
 configuration from [`build_cache.py install`](../../testing.md#shared-compilation-cache)
 (the pinned wrapper and the Machine's `jobs`), with a private cache directory
-and socket plus a private root inventory so every counter belongs to the run. Both incremental settings get
+and socket plus a private root inventory so every counter belongs to the run.
+The driver removes any target supplied by the checkout hook before the first build.
+Both incremental settings get
 a seed application test and execution test.
 Switching `CARGO_INCREMENTAL` changes third-party artifact keys too; a seed in
 only one mode leaves the other cold. Seeds are excluded from the samples.
@@ -65,6 +70,28 @@ Concurrent-worktree capacity is unmeasured.
 The shared Machine cache reached its 10 GiB cap during LOO-921 (2026-11-16).
 The private warm-cache rows measure the cost of surviving entries, not their
 survival rate under shared-cache eviction. The cap stays unchanged.
+
+## Seeded worktrees
+
+`seed_probe.py` measures what [target seeding](../../testing.md#shared-compilation-cache)
+saves. Each sample adds a worktree with the installed hook, then runs
+`cargo build -p loopflow --bin lf` and a passing
+`cargo test -p loopflow --lib <filter>`. The cold arm runs `rm -rf target` right
+after the add. Three cohorts alternate which arm goes first, with the Machine's
+shared cache and jobs.
+
+Each sample records wall seconds, CPU-seconds, peak RSS, units compiled and
+fresh from `cargo -v`, and the seed source with its distance in commits. It also
+records the bytes each command wrote into the target: the allocated size of files
+it created or replaced, found by comparing inode and mtime with a walk of
+`target/debug` before the command. Adding a hard link to an unchanged inode
+adds no bytes. The archived LOO-922 run included an inode's allocated size
+if Cargo gave it a new path during a command. The probe counts surviving seed
+allocations by inode and mtime as well. Unlike APFS private-size
+counters, this doesn't change when the source rebuilds. The probe removes each
+worktree after its sample, so its own targets never seed a later one. Shared-cache
+counters include other agents' compiles and are not recorded. The report gives
+the median and range per arm.
 
 ## Registration during a build
 

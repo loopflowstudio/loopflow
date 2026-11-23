@@ -9,10 +9,12 @@ struct ServerConnectionReading: Decodable, Equatable {
     let generation: UInt64
     let state: State
     let nativeReady: Bool
-
-    enum CodingKeys: String, CodingKey { case generation, state, message, transition; case nativeReady = "native_ready" }
     let message: String?
-    let transition: ProviderTransition?
+
+    enum CodingKeys: String, CodingKey {
+        case generation, state, message
+        case nativeReady = "native_ready"
+    }
 
     var attachment: DesktopOpening.Status {
         switch state {
@@ -22,12 +24,11 @@ struct ServerConnectionReading: Decodable, Equatable {
         }
     }
 
-    static let openingTitle = "Opening… Input paused."
-    var acceptsInput: Bool { state == .connected && nativeReady }
+    var acceptsInput: Bool { attachment == .usable }
+
     var title: String? {
         switch state {
-        case .connecting: return Self.openingTitle
-        case .connected: return nativeReady ? transition?.explanation : Self.openingTitle
+        case .connecting, .connected: return nil
         case .reconnecting: return "Reconnecting… Input paused; last screen may be stale."
         case .unavailable: return message ?? "Session unavailable. Input paused; last screen may be stale."
         case .ended: return message ?? "Session ended."
@@ -41,7 +42,7 @@ final class ServerConnection {
     private let channel = Channel()
     var directory: URL { channel.directory }
     var path: String { directory.appendingPathComponent("status.sock").path }
-    private(set) var reading = ServerConnectionReading(generation: 0, state: .connecting, nativeReady: false, message: nil, transition: nil)
+    private(set) var reading = ServerConnectionReading(generation: 0, state: .connecting, nativeReady: false, message: nil)
     private var changed: (@MainActor (ServerConnectionReading) -> Void)?
     private var received = Data()
     var canRetry: Bool { channel.fd >= 0 && reading.state == .unavailable }
@@ -135,21 +136,15 @@ final class ServerConnection {
         received.removeAll()
         guard reading.state != .ended else { return }
         reading = ServerConnectionReading(generation: reading.generation, state: .unavailable, nativeReady: false,
-                                          message: "Connection status unavailable. Input paused.", transition: nil)
+                                          message: "Connection status unavailable. Input paused.")
         changed?(reading)
-    }
-
-    private func send(_ action: [String: Any]) -> Bool {
-        guard channel.fd >= 0, var bytes = try? JSONSerialization.data(withJSONObject: action) else { return false }
-        bytes.append(10)
-        let sent = bytes.withUnsafeBytes { Darwin.send(channel.fd, $0.baseAddress, $0.count, 0) }
-        guard sent == bytes.count else { statusUnavailable(); return false }
-        return true
     }
 
     func retry() {
         guard canRetry else { return }
-        _ = send(["kind": "retry"])
+        let action = Data("{\"kind\":\"retry\"}\n".utf8)
+        let sent = action.withUnsafeBytes { Darwin.send(channel.fd, $0.baseAddress, $0.count, 0) }
+        if sent != action.count { statusUnavailable() }
     }
 
     func stop() {

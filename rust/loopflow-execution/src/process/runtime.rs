@@ -616,6 +616,7 @@ mod tests {
         let (home, store, detached) = resume_fixture();
         let task = store
             .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
                 id: loopflow_model::durable::TaskId::new(),
                 repository_id: crate::repository::location::ensure_repository(
                     &store,

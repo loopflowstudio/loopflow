@@ -422,11 +422,12 @@ fn put_item(
         status_changed = changed;
     }
     conn.execute(
-        "INSERT INTO tracker_items(repo,tracker,id,observed_at,identifier,project_id,revision,branch_name,url,name,description,rank,completed,completed_at,due_date,state,team_id,assignee,claimed_project_id,completed_at_observed,due_date_observed,project_id_observed,assignee_observed)
-         VALUES(:repo,:tracker,:id,:observed_at,:identifier,:project_id,:revision,:branch_name,:url,:name,:description,:rank,:completed,:completed_at,:due_date,:state,:team_id,:assignee,:project_id,1,1,1,1)
+        "INSERT INTO tracker_items(repo,tracker,id,observed_at,identifier,project_id,revision,branch_name,url,name,description,rank,completed,completed_at,due_date,state,team_id,assignee,claimed_project_id,completed_at_observed,due_date_observed,project_id_observed,assignee_observed,parent_id,parent_id_observed)
+         VALUES(:repo,:tracker,:id,:observed_at,:identifier,:project_id,:revision,:branch_name,:url,:name,:description,:rank,:completed,:completed_at,:due_date,:state,:team_id,:assignee,:project_id,1,1,1,1,:parent_id,:parent_observed)
          ON CONFLICT(repo,tracker,id) DO UPDATE SET observed_at=excluded.observed_at,
          identifier=excluded.identifier,project_id=excluded.project_id,revision=excluded.revision,branch_name=excluded.branch_name,url=excluded.url,name=excluded.name,description=excluded.description,rank=excluded.rank,completed=excluded.completed,completed_at=excluded.completed_at,due_date=excluded.due_date,state=excluded.state,team_id=excluded.team_id,assignee=excluded.assignee,
-         claimed_project_id=excluded.claimed_project_id,completed_at_observed=1,due_date_observed=1,project_id_observed=1,assignee_observed=1",
+         claimed_project_id=excluded.claimed_project_id,completed_at_observed=1,due_date_observed=1,project_id_observed=1,assignee_observed=1,
+         parent_id=excluded.parent_id,parent_id_observed=excluded.parent_id_observed",
         named_params! { ":repo": repo, ":tracker": tracker, ":id": &item.id,
             ":observed_at": observed_at, ":rank": item.rank, ":revision": &item.revision,
             ":identifier": &item.identifier,
@@ -441,6 +442,8 @@ fn put_item(
             ":state": &item.state,
             ":team_id": &item.team_id,
             ":assignee": &item.assignee,
+            ":parent_id": &item.parent_id,
+            ":parent_observed": item.parent_observed,
         },
     )?;
     if status_changed {
@@ -736,6 +739,57 @@ fn project_accepted_planning(
             params![id.as_str(), revision, observed_at],
         )?;
     }
+    observe_parents(tx, repo, tracker, &item_ids)
+}
+
+/// Apply observed parent links after both Tasks have arrived, in either order.
+/// A tracker can clear a link only after the parent has a tracker item.
+fn observe_parents(
+    tx: &Transaction<'_>,
+    repo: &str,
+    tracker: &str,
+    item_ids: &str,
+) -> StoreResult<()> {
+    let mut query = tx.prepare(
+        "WITH arriving AS (SELECT value FROM json_each(?3))
+         SELECT t.id, parent.id, i.revision FROM tracker_items i
+         JOIN tasks t ON t.external_issue_id=i.id
+         LEFT JOIN tasks parent ON parent.external_issue_id=i.parent_id
+         LEFT JOIN tasks held ON held.id=t.parent_task_id
+         WHERE i.repo=?1 AND i.tracker=?2 AND i.needs_refresh=0 AND i.parent_id_observed=1
+         AND i.id IN (
+             SELECT value FROM arriving UNION
+             SELECT id FROM tracker_items WHERE repo=?1 AND tracker=?2 AND parent_id IN arriving
+         )
+         AND t.repository_id=(SELECT id FROM repository_plans WHERE repo=?1 AND selected=1)
+         AND t.parent_task_id IS NOT parent.id
+         AND (parent.id IS NOT NULL
+              OR (i.parent_id IS NULL AND held.external_issue_id IS NOT NULL))",
+    )?;
+    let moved = query
+        .query_map(params![repo, tracker, item_ids], |row| {
+            Ok((
+                loopflow_model::durable::TaskId::from_raw(row.get::<_, String>(0)?),
+                Edit::TaskParent(row.get(1)?),
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(query);
+    for (id, parent, revision) in moved {
+        let mut edits = [parent];
+        let resolved = tracker_actions::reconcile_in(
+            tx,
+            &tracker_actions::ActionOwner::Task(id.clone()),
+            revision.as_deref(),
+            &mut edits,
+        )?;
+        record_adoptions(tx, &id, &resolved)?;
+        planning_write::tracker(
+            tx,
+            &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
+        )?;
+    }
     Ok(())
 }
 
@@ -916,6 +970,87 @@ mod tests {
                 "a revisioned read outranks one without"
             );
         }
+    }
+
+    #[test]
+    fn a_trackers_parent_becomes_the_tasks_and_never_makes_a_task_its_own_ancestor() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
+        crate::test_fixture::repository(&store, "/repo");
+        let observe = |at: i64, id: &str, parent: Option<&str>| {
+            let item = TrackerItem {
+                revision: None,
+                id: id.into(),
+                identifier: format!("FIX-{id}"),
+                branch_name: None,
+                url: None,
+                name: id.into(),
+                description: String::new(),
+                rank: 0,
+                completed: false,
+                completed_at: None,
+                due_date: None,
+                state: Some("unstarted".into()),
+                project_id: None,
+                team_id: Some("team".into()),
+                assignee: None,
+                parent_id: parent.map(Into::into),
+                parent_observed: true,
+            };
+            super::accept_linear_issue_in(
+                &store,
+                "/repo",
+                &item,
+                None,
+                at,
+                None,
+                crate::planning_sync::TrackerKind::Linear,
+            )
+            .unwrap();
+        };
+        let parent_of = |id: &str| {
+            let task = store.task_by_issue(&format!("FIX-{id}")).unwrap().unwrap();
+            task.parent_task_id
+                .map(|parent| store.task(&parent).unwrap().unwrap().title)
+        };
+        observe(1, "b", Some("a"));
+        assert_eq!(parent_of("b"), None);
+        observe(2, "a", None);
+        observe(3, "c", Some("b"));
+        assert_eq!(parent_of("b").as_deref(), Some("a"));
+        assert_eq!(parent_of("c").as_deref(), Some("b"));
+
+        // A sub-issue of its own grandchild: the Task keeps the parent it has.
+        observe(4, "a", Some("c"));
+        assert_eq!(parent_of("a"), None);
+        assert_eq!(parent_of("c").as_deref(), Some("b"));
+
+        // Moved and detached in the tracker, so moved and detached here.
+        observe(5, "c", Some("a"));
+        assert_eq!(parent_of("c").as_deref(), Some("a"));
+        observe(6, "b", None);
+        assert_eq!(parent_of("b"), None);
+
+        // A local save that would close the loop is refused outright.
+        let (a, c) = (
+            store.task_by_issue("FIX-a").unwrap().unwrap().id,
+            store.task_by_issue("FIX-c").unwrap().unwrap().id,
+        );
+        let mut conn = store.conn.lock().unwrap();
+        let tx = conn.transaction().unwrap();
+        let refused = crate::sqlite::planning_write::local(
+            &tx,
+            &crate::work::edit::WorkEdit::for_target(
+                a.as_str(),
+                &[crate::work::edit::WorkValue::TaskParent(Some(
+                    c.to_string(),
+                ))],
+            ),
+        );
+        assert!(
+            matches!(&refused, Err(crate::StoreError::InvalidAuthority(why)) if why.contains("own ancestor")),
+            "{refused:?}"
+        );
     }
 
     #[test]

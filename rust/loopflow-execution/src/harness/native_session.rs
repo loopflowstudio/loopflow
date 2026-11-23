@@ -801,6 +801,7 @@ mod tests {
         let repo = repo.to_str().unwrap();
         let task = store
             .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: crate::repository::location::ensure_repository(&store, repo)
                     .unwrap(),
                 due_date: None,

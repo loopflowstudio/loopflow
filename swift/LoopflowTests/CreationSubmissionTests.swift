@@ -95,7 +95,7 @@ struct CreationSubmissionTests {
         let client = CreationSubmissions(directory: root, machine: { "original-machine" },
             lookup: { await server.lookup($0) }, send: { try await server.send($0) })
         let change = ServedWrite.taskCreate(directory: "/repo", requestID: "same", title: "Task", request: nil,
-            wave: nil, graph: nil, session: nil, run: false)
+            wave: nil, parent: nil, graph: nil, session: nil, run: false)
         await #expect(throws: (any Error).self) { try await client.submit(change, requestID: "same") }
         #expect(await server.creations == 0)
         let record = SubmittedCreation(requestID: "same", destination: "machine", payload: Data(), version: 3, submittedAt: Date())
@@ -143,7 +143,7 @@ struct CreationSubmissionTests {
         let client = CreationSubmissions(directory: root, machine: { "machine" },
             lookup: { _ in ReadOutput(other) }, send: { _ in await sent.add(); return "{}" })
         let record = try await client.record(.taskCreate(directory: "/repo", requestID: "not-the-fixture", title: nil,
-            request: "work", wave: nil, graph: nil, session: nil, run: true), requestID: "not-the-fixture")
+            request: "work", wave: nil, parent: nil, graph: nil, session: nil, run: true), requestID: "not-the-fixture")
         await #expect(throws: (any Error).self) { try await client.reconcile(record) }
         #expect(await sent.count == 0)
         #expect(try await client.pending().count == 1)
@@ -184,7 +184,7 @@ struct CreationSubmissionTests {
         let client = CreationSubmissions(directory: root, machine: { "machine" },
             lookup: { await server.lookup($0) }, send: { try await server.send($0) })
         _ = try await client.submit(.taskCreate(directory: "/repo", requestID: "same", title: nil,
-            request: nil, wave: nil, graph: nil, session: nil, run: false), requestID: "same")
+            request: nil, wave: nil, parent: nil, graph: nil, session: nil, run: false), requestID: "same")
         let recovery = CreationRecovery(submissions: client)
         recovery.awaitingPresentation("same", of: resource)
         #expect(try await client.pending().count == 1) // reply and navigation aren't presentation
@@ -206,7 +206,7 @@ struct CreationSubmissionTests {
         let client = CreationSubmissions(directory: root, machine: { "machine" },
             lookup: { await server.lookup($0) }, send: { try await server.send($0) })
         _ = try await client.submit(.taskCreate(directory: "/repo", requestID: "same", title: nil,
-            request: nil, wave: nil, graph: nil, session: nil, run: false), requestID: "same")
+            request: nil, wave: nil, parent: nil, graph: nil, session: nil, run: false), requestID: "same")
         let recovery = CreationRecovery(submissions: client)
         let notices = NoticeCenter()
         recovery.report(to: notices)
@@ -233,19 +233,4 @@ struct CreationSubmissionTests {
         #expect(notices.current == nil)
     }
 
-}
-
-
-@MainActor
-struct ProviderTransitionTests {
-    @Test func theConnectionRowNamesTheObservedForkAndDatesSourceLiveness() throws {
-        let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/provider_transition.json")
-        let transition = try JSONDecoder().decode(ProviderTransition.self, from: Data(contentsOf: path))
-        let row = ProviderTransitionRow(transition: transition)
-        #expect(try row.inspect().find(text: "Forked from earlier; original was running at fork").string() == transition.explanation)
-        let reading = ServerConnectionReading(generation: 2, state: .connected, nativeReady: true, message: nil, transition: transition)
-        #expect(reading.title == transition.explanation)
-        #expect(reading.acceptsInput)
-    }
 }

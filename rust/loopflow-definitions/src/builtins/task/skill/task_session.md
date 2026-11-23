@@ -42,6 +42,16 @@ as posts while the conversation is open.
 changed run by its id, and leave review and the auto setting as they are. Don't
 promise follow-ups for when the conversation is closed.
 
+**Conduct this Task's children.** Pass `--parent <this-task-id>` to
+`lf task create` when filing a child Task (or `lf task update <id> --parent
+<this-task-id>` to adopt an existing one); plain `lf task create` files
+top-level work. A notice arrives when a direct child stops at an interactive
+step, a run of it fails or stops, its PR merges, or it closes; steps passing
+inside its run send nothing. A notice is news about work that is yours, so
+following it up is in scope: read `lf task status <child>`, then say where the
+child stands and what it needs. Direction for a child goes to the child, with
+`lf steer <child> '<direction>'`.
+
 **Wait, don't poll.** Within a turn, `lf task wait <issue> --until submitted`
 (or `terminal`, with `--timeout`) waits for a change.
 

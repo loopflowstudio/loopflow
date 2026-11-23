@@ -562,6 +562,7 @@ fn the_pass_starts_what_the_outlook_says_the_server_starts() {
     let task = loopflow_model::durable::TaskId::new();
     store
         .create_task(&loopflow_storage::work::task::NewTask {
+            parent_task_id: None,
             repository_id: crate::repository::location::ensure_repository(&store, &checkout)
                 .unwrap(),
             id: task.clone(),
@@ -1937,6 +1938,7 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
         .store
         .sqlite
         .create_task(&loopflow_storage::work::task::NewTask {
+            parent_task_id: None,
             repository_id: crate::repository::location::ensure_repository(
                 &logins.store.sqlite,
                 "/fixture",

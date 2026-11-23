@@ -63,3 +63,4 @@ Recorded in `scratch/concept-review.html` and `scratch/questions.md`. All are in
 - With a private home and a socket answering `NeedsLogin`, the branch binary's `lf server mobile` exited 1 and printed “Open Tailscale and sign in on this Machine, then try again”.
 - The focused macOS library runs passed all nine `server::mobile::` tests and all five `server::remote::` tests.
 - `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed. Gate owns the quiet-Mac log measurement and CI owns Linux.
+- After compression, the combined `server::mobile::` and `server::remote::` library run passed 11 tests. Both `server_mobile_` CLI transport tests passed in 41.45 s, including disabled approval persistence and immediate port release.

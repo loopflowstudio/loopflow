@@ -9,3 +9,5 @@ LOO-1080 concept-review choices recorded for review in `scratch/concept-review.h
 6. Exercise the normal CLI and saved phone address through a Unix-socket daemon. Exercise macOS port and proof rotation against private loopback listeners and a temporary Standalone directory. The App Store descriptor check uses an open fixture file in the test process.
 
 7. For the restore timing fixture, leave the selected socket missing on startup, then listen at that same path. Holding and failing each request makes the delay measurable from completion and lets the daemon observe cancellation.
+
+8. Keep overlapping setup and restore checks in the CLI transport fixtures. The virtual-clock manager fixture still owns precise backoff timing and in-flight request cancellation.

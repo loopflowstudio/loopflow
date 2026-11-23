@@ -83,36 +83,22 @@ setting and never re-register it behind your back.
 ## Phone access
 
 ```bash
-lf server mobile
-# {"enabled":true,"endpoint":"https://mac.tailnet.ts.net:51842","owner":{"node":"…","user":12345}}
-
-lf server mobile --status
-# {"configuration":{"enabled":true,"endpoint":"https://mac.tailnet.ts.net:51842","owner":{…}},"ready":true,"error":null}
-
-lf server mobile --off
-# Mobile access is off
+lf server mobile            # approve this Machine and print its HTTPS address
+lf server mobile --status   # show the saved approval and current readiness
+lf server mobile --off      # close phone connections
 ```
 
-A phone signed into the same Tailscale user can attach to running Sessions on
-this Machine. Setup requires a signed-in, user-owned Tailscale node (not a
-tagged device) with MagicDNS and HTTPS certificates enabled on the tailnet.
+A phone signed into the same Tailscale account can attach to running Sessions.
+Setup requires a user-owned, untagged Machine with MagicDNS and HTTPS
+certificates enabled. For a custom daemon socket, set `TS_SOCKET` in both
+the setup command and the server environment.
 
-`lf server` talks directly to Tailscale's LocalAPI without launching the
-`tailscale` app or CLI. It discovers the macOS App Store app, Standalone macOS
-Tailscale, or `tailscaled` over its Unix socket (`/var/run/tailscaled.socket` on
-macOS and `/var/run/tailscale/tailscaled.sock` on Linux). Set `TS_SOCKET` in
-both the setup command and the server's environment to select a particular
-daemon socket.
+The server checks Tailscale directly through its LocalAPI. If Tailscale stops,
+signs out, or changes owner, phone connections close and local Sessions keep
+running. When the approved account returns, the saved QR address works again.
+Retries start after five seconds and back off to once every 30 seconds.
 
-If Tailscale stops, signs out, or changes owner, the server closes active phone
-connections and marks mobile access unavailable while local Sessions keep
-running. Once Tailscale returns on the approved account, the saved endpoint and
-QR address come back automatically (retrying at 5, 10, 20, then every 30
-seconds); `lf server mobile --status` answers immediately from the last state
-without waiting on reconnection.
-
-Enabling local server access or adding SSH Machines does not enable phone
-access. For local-only use, no network port is opened; keep the local Unix
-socket private.
+Local server access and SSH Machines work independently of phone access.
+Keep the local Unix socket private.
 
 Next: [Surfaces](surfaces.md) · [Connection troubleshooting](troubleshooting.md#desktop-cannot-connect).

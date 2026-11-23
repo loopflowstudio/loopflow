@@ -72,7 +72,7 @@ pub(super) async fn manage(
     let mut setup: Option<oneshot::Sender<Result<Option<Configuration>, String>>> = None;
     let mut retry = Duration::from_secs(5);
     if let Some(saved) = status.configuration.as_ref().filter(|c| c.enabled) {
-        bindings.spawn(scheduled_bind(saved.clone(), false, Duration::ZERO));
+        bindings.spawn(bind(saved.clone(), false));
     }
 
     loop {
@@ -95,7 +95,6 @@ pub(super) async fn manage(
                 listeners.shutdown().await;
                 status.ready = false;
                 status.error = None;
-                retry = Duration::from_secs(5);
                 if let Some(config) = &mut status.configuration { config.enabled = false; }
                 match tokio::task::spawn_blocking(super::mobile::save_disabled).await? {
                     Ok(disabled) => status.configuration = disabled,
@@ -107,15 +106,15 @@ pub(super) async fn manage(
                     }
                 }
                 if let Some(config) = requested {
-                    bindings.spawn(scheduled_bind(config, true, Duration::ZERO));
+                    bindings.spawn(bind(config, true));
                     setup = Some(reply);
                 } else {
                     let _ = reply.send(Ok(None));
                 }
                 continue;
             }
-            Some(bound) = bindings.join_next(), if !bindings.is_empty() => bound.map_err(anyhow::Error::from).and_then(|r| r),
-            Some(ended) = listeners.join_next(), if !listeners.is_empty() => {
+            Some(bound) = bindings.join_next() => bound.map_err(anyhow::Error::from).and_then(|r| r),
+            Some(ended) = listeners.join_next() => {
                 status.ready = false;
                 Err(match ended {
                     Ok(Err(error)) => error,
@@ -165,7 +164,11 @@ pub(super) async fn manage(
                     if status.error.as_ref() != Some(&message) {
                         tracing::warn!(%error, "Mobile listener unavailable; retrying the saved approval");
                     }
-                    bindings.spawn(scheduled_bind(saved.clone(), false, retry));
+                    let saved = saved.clone();
+                    bindings.spawn(async move {
+                        tokio::time::sleep(retry).await;
+                        bind(saved, false).await
+                    });
                     retry = (2 * retry).min(Duration::from_secs(30));
                 }
                 status.error = Some(message);
@@ -174,20 +177,9 @@ pub(super) async fn manage(
     }
 }
 
-async fn scheduled_bind(
-    config: Configuration,
-    allow_port_change: bool,
-    delay: Duration,
-) -> Result<Listener> {
-    if !delay.is_zero() {
-        tokio::time::sleep(delay).await;
-    }
-    bind(config, allow_port_change).await
-}
-
 struct Listener {
     sockets: Vec<TcpListener>,
-    host: Tailscale,
+    host: Arc<Tailscale>,
     config: Configuration,
     tls: TlsAcceptor,
 }
@@ -196,9 +188,8 @@ async fn bind(mut config: Configuration, allow_port_change: bool) -> Result<List
     let (host, observed) = Tailscale::discover().await?;
     observed.verify(&config)?;
     let tls = host.certificate(&observed.dns).await?;
-    let addresses = observed.addresses;
     let port = config.port()?;
-    let sockets = match bind_sockets(&addresses, port).await {
+    let sockets = match bind_sockets(&observed.addresses, port).await {
         Ok(sockets) => sockets,
         Err(error)
             if allow_port_change
@@ -209,7 +200,7 @@ async fn bind(mut config: Configuration, allow_port_change: bool) -> Result<List
         {
             // Only explicit setup can change the saved address. Restoration
             // keeps retrying the original port so existing phones can recover.
-            bind_sockets(&addresses, 0).await?
+            bind_sockets(&observed.addresses, 0).await?
         }
         Err(error) => return Err(error),
     };
@@ -218,7 +209,7 @@ async fn bind(mut config: Configuration, allow_port_change: bool) -> Result<List
     config.enabled = true;
     Ok(Listener {
         sockets,
-        host,
+        host: Arc::new(host),
         config,
         tls,
     })
@@ -289,7 +280,7 @@ async fn run(
                 }
                 continue;
             }
-            Some(certificate) = renewals.join_next(), if !renewals.is_empty() => {
+            Some(certificate) = renewals.join_next() => {
                 tls = certificate??;
                 renewed = SystemTime::now();
                 continue;
@@ -589,10 +580,7 @@ mod tests {
 
     #[test]
     fn saved_restores_back_off_from_completion_and_off_cancels_a_pending_request() {
-        use crate::server::mobile::{
-            configured, save,
-            tests::{approval, start_manager},
-        };
+        use crate::server::mobile::{configured, localapi_fixture::approval, save};
         use axum::{routing::get, Json, Router};
         use loopflow_execution::config::environment::EnvVarGuard;
         use serde_json::{json, Value};
@@ -613,7 +601,20 @@ mod tests {
             .build()
             .unwrap()
             .block_on(async {
-                let (requests, manager) = start_manager();
+                let (requests, received) = mpsc::channel(4);
+                let manager = tokio::spawn(super::manage(
+                    configured(),
+                    received,
+                    Arc::from("instance"),
+                    Arc::new("executable".to_owned()),
+                    Arc::new(tokio::sync::Semaphore::new(
+                        crate::server::wire::MAX_CONNECTIONS,
+                    )),
+                    Default::default(),
+                    Default::default(),
+                    Default::default(),
+                    None,
+                ));
                 let mut previous = next_restore_error(&requests, None).await;
                 // The first attempt found no socket. Hold each subsequent status
                 // request at the same address until the test supplies its answer.

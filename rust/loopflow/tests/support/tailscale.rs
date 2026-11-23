@@ -7,8 +7,33 @@ use std::time::{Duration, Instant};
 
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::routing::get;
+use loopflow_execution::machine::mobile::{Configuration, TailscaleIdentity};
 use serde_json::{json, Value};
 use tokio::sync::watch;
+
+pub fn status(user: u64) -> Value {
+    json!({
+        "BackendState": "Running",
+        "Self": {
+            "ID": "node1",
+            "DNSName": "fixture.tail.ts.net.",
+            "UserID": user,
+            "TailscaleIPs": ["127.0.0.1"]
+        },
+        "User": {user.to_string(): {"LoginName": "owner@example.com"}}
+    })
+}
+
+pub fn approval(port: u16) -> Configuration {
+    Configuration {
+        enabled: true,
+        endpoint: format!("https://fixture.tail.ts.net:{port}"),
+        owner: TailscaleIdentity {
+            node: "node1".into(),
+            user: 1,
+        },
+    }
+}
 
 pub struct Daemon {
     _runtime: tokio::runtime::Runtime,

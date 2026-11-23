@@ -1,17 +1,19 @@
-at: d112c4e1cf47168c8b07947f2e25eb7ee9f85aa5
+at: 5eb99bef5f5c78768b87801bb57b1f1e8841920f
 first:
   - path: docs/server.md
-    why: Phone setup, account changes and automatic recovery
+    why: Phone setup and recovery at the saved address
+  - path: rust/loopflow/src/server/README.md
+    why: Mobile listener lifecycle and LocalAPI requests
   - path: rust/loopflow/src/server/mobile/tailscale.rs
-    why: Discovery order, setup messages and host identity
+    why: Daemon selection, host identity and peer admission
   - path: rust/loopflow/src/server/mobile/tailscale/macos.rs
-    why: How each Mac distribution publishes its endpoint
+    why: Native endpoint discovery for both macOS distributions
   - path: rust/loopflow/src/server/mobile.rs
-    why: Setup and disable from the CLI
+    why: CLI setup and saved approval
   - path: rust/loopflow/src/server/remote.rs
-    why: Listener lifetime, retry deadlines and cancellation
+    why: Listener cancellation, ownership checks and retry timing
   - path: rust/loopflow/tests/transport_tests.rs
-    why: A connected phone loses and recovers access
+    why: Phone reconnection, port repair and disabling through lf
   - path: rust/loopflow/tests/support/tailscale.rs
-    why: Private daemon backing the phone tests
+    why: Private daemon shared by discovery and transport tests
 hide: []

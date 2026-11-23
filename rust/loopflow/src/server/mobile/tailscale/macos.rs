@@ -218,9 +218,12 @@ mod tests {
             let file = directory.path().join(format!("sameuserproof-{port}"));
             fs::write(&file, "obsolete").unwrap();
             let api = || Tailscale::new(standalone(directory.path()).unwrap()).unwrap();
-            assert!(api().status(true).await.is_err());
+            assert!(api().json("status").await.is_err());
             fs::write(file, proof).unwrap();
-            assert_eq!(api().status(true).await.unwrap()["BackendState"], "Running");
+            assert_eq!(
+                api().json("status").await.unwrap()["BackendState"],
+                "Running"
+            );
             old = Some((port, server));
         }
         let (_, server) = old.unwrap();

@@ -127,27 +127,26 @@ and its directory are private; remote proxies must never forward this endpoint.
 The remote carrier (`remote.rs`, `lf server mobile`) speaks the same protocol
 over WebSocket on the host's Tailscale address: one text frame per message on
 `/v1/machine`, ticketed connections on `/v1/ticket`, binary frames for terminal
-bytes. `mobile/tailscale.rs` talks directly to Tailscale's LocalAPI over HTTP with zero
-subprocesses: same-UID `IPNExtension` open vnode proof files via `libproc` on
-macOS App Store builds, `/Library/Tailscale/ipnport` and its proof file on macOS
-Standalone, and `tailscaled` Unix sockets (`TS_SOCKET`,
-`/var/run/tailscaled.socket` on macOS, `/var/run/tailscale/tailscaled.sock` on
-Linux). At bind it reads `/localapi/v0/status` once to verify the untagged
-owner, `.ts.net` MagicDNS name and tailnet addresses, and loads TLS credentials
-in memory from `/localapi/v0/cert/<dns>?type=pair&min_validity=24h`. While
-listening it polls `/localapi/v0/status?peers=false` every 5 seconds and renews
-the certificate every 6 hours, stopping the listener and closing active remote
-connections if ownership, login, DNS, certificate or the daemon is lost. Each
-accepted TCP socket admits another untagged node of the approved owner through
-`/localapi/v0/whois?addr=<ip:port>&proto=tcp`. The Machine's own node is refused
-unless `mobile-same-device` exists in the lf home, which is how an iOS Simulator
-on the same Mac connects; create it only on a Mac with one account. Restoration
-runs as a cancellable async task off the control loop with a `5 → 10 → 20 → 30 s`
-backoff from completion, so `mobile.status` answers immediately and `--off`
-aborts any in-flight bind or listener. Setup saves the endpoint, owner and
-enabled choice in Machine-local `mobile.yaml`, using the shared atomic file
-writer. It does not add service state to `config.yaml` or the preferences
-catalogue.
+bytes. Setup saves the endpoint, owner and enabled choice in Machine-local
+`mobile.yaml`.
+
+`mobile/tailscale.rs` uses the Tailscale LocalAPI. On macOS it discovers the
+App Store endpoint via `IPNExtension` and the Standalone endpoint via
+`/Library/Tailscale/ipnport`. The default daemon socket is
+`/var/run/tailscaled.socket` on macOS and `/var/run/tailscale/tailscaled.sock`
+on Linux. An explicit `TS_SOCKET` selects only that socket.
+
+Binding reads full status to verify the saved owner and MagicDNS name, then
+loads the TLS certificate and key into memory. Each TCP connection needs a
+WhoIs result identifying another untagged device of that owner. For an iOS
+Simulator on the same Mac, create `mobile-same-device` in the lf home only if
+the Mac has one account.
+
+Every five seconds the listener checks status with `peers=false` so an account
+change closes active connections. Certificate renewal runs every six hours.
+After failure the manager retries from completion at 5, 10, 20 and then 30
+seconds. Status reads the manager's last result. Disabling cancels the pending
+bind, retry or listener.
 
 Another Machine reaches this server over SSH: `lf server connect` checks
 `LF_EXPECTED_MACHINE_ID`, starts the server when none is running

@@ -23,7 +23,7 @@ struct ThemeWorkflowTests {
         #expect(try editor.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-name").text().string() == "Folio")
         appearance.editTheme { palette, _ in palette.accent = ThemeRGB(0x224466) }
         let revert = try chooser.inspect().find(viewWithAccessibilityIdentifier: "appearance-delete-theme").button()
-        #expect(try revert.labelView().text().string() == "Revert to built-in")
+        #expect(try revert.labelView().text().string() == "Revert Folio to built-in")
         try revert.tap()
         #expect(appearance.selectedSource == .builtin)
         #expect(appearance.selectedTheme.palette.definition == ThemeDefinition.builtins.first { $0.name == "Folio" }?.palette.definition)
@@ -69,19 +69,18 @@ struct ThemeWorkflowTests {
             #expect(appearance.entries(for: .light).builtins.allSatisfy { !$0.theme.isDark })
             #expect(appearance.entries(for: .dark).builtins.count == 12)
             #expect(appearance.entries(for: .dark).builtins.allSatisfy { $0.theme.isDark })
-            // System lists both sides at once; each card assigns its own side. Customize stays in the
-            // bottom bar for whichever card was chosen, so choosing one never grows the grid.
-            func customizeShown(under name: String) -> Bool {
-                (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-\(name)").parent()
-                    .find(viewWithAccessibilityIdentifier: "appearance-customize-theme")) != nil
+            // System lists both sides at once; each card assigns its own side. Customize sits in the
+            // bottom bar and names the card it acts on, the one chosen last.
+            func customizeLabel() throws -> String {
+                try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-customize-theme").button().labelView().text().string()
             }
             try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Fjord Light").button().tap()
             #expect(appearance.selectedName == "Fjord Light")
-            #expect(!customizeShown(under: "Fjord Light"))
             try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Signal").button().tap()
             #expect(appearance.selectedName == "Signal")
-            #expect(!customizeShown(under: "Signal"))
-            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-customize-theme")
+            #expect(try customizeLabel() == "Customize Signal")
+            try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Fjord Light").button().tap()
+            #expect(try customizeLabel() == "Customize Fjord Light")
             #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-heading-light").text().string() == "Light themes · Fjord Light")
             #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-heading-dark").text().string() == "Dark themes · Signal")
             #expect(appearance.themeName(for: .light) == "Fjord Light")

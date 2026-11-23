@@ -52,13 +52,16 @@ struct ThemeChooser: View {
                 if editingYours {
                     Button("Done Editing") { editing = false }
                 } else {
-                    // Here rather than under the chosen card, so choosing a card never moves the grid.
-                    Button("Customize") { appearance.customize(); editing = true }
+                    // Here rather than under the chosen card, so choosing a card never moves the grid;
+                    // the label names the theme, since System mode rings one card per side.
+                    Button("Customize \(appearance.selectedTheme.name)") { appearance.customize(); editing = true }
                         .help(appearance.selectedSource == .yours ? "Edit your theme" : "Make your own copy of \(appearance.selectedTheme.name)")
                         .accessibilityIdentifier("appearance-customize-theme")
                 }
                 if appearance.canDelete {
-                    Button(appearance.deleteRevertsToBuiltin ? "Revert to built-in" : "Delete") { appearance.deleteTheme() }
+                    Button(appearance.deleteRevertsToBuiltin
+                        ? "Revert \(appearance.selectedTheme.name) to built-in"
+                        : "Delete \(appearance.selectedTheme.name)") { appearance.deleteTheme() }
                         .accessibilityIdentifier("appearance-delete-theme")
                 }
                 if let config = appearance.configPath {

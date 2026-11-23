@@ -135,6 +135,15 @@ pub fn resume_session_with_env(
     let sends_first_turn = harness.capabilities().initial_prompt_on_resume && kind.is_managed();
     if provider_session.is_some() && !sends_first_turn {
         config.task_prompt.clear();
+        // A conversation a steer named while it was stopped starts again
+        // reading its steers: a resumed provider waits for input, and no
+        // hook or idle wake reaches it before its first turn.
+        if kind.mode() == super::Mode::Interactive {
+            let steers = store.take_steers_to_start(&session.id)?;
+            if !steers.is_empty() {
+                config.task_prompt = crate::steer::render_complete(&steers);
+            }
+        }
     }
     config.env.extend(extra_environment.clone());
     config.env.insert(
@@ -792,6 +801,7 @@ mod tests {
         let repo = repo.to_str().unwrap();
         let task = store
             .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: crate::repository::location::ensure_repository(&store, repo)
                     .unwrap(),
                 due_date: None,

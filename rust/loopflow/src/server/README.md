@@ -548,7 +548,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
 - A write uses the shared `Write` shape. `Write::run` calls the shared Rust
   function its CLI handler calls and returns the typed value; the CLI prints
   that value with `--json` and renders it as text otherwise. Nothing parses
-  standard output. `task.create {directory,request_id,title,request,wave,graph,session,run}`
+  standard output. `task.create {directory,request_id,title,request,wave,parent,graph,session,run}`
   files a Task or adopts the named Session; `run` admits its conversation,
   which makes the checkout and starts the Graph after the answer.
   A null `wave` selects the repository. Both paths return the same creation
@@ -696,7 +696,7 @@ reported, never started by an attachment attempt.
 `Launch::kind` carries whether a launch is bare or managed and its mode.
 [Work sessions, workers, chats and batches are defined here](../../../../docs/glossary.md#loopflows-words).
 `transport::LaunchInput::kind` selects chats or batches for skill and Graph
-commands launched in the caller's terminal or pipe. `lf -b resume <ID> --message TEXT`
+commands launched in the caller's terminal or pipe. `lf -b steer <ID> TEXT`
 is a batch. A Graph's correction turn in a Task run remains a worker.
 Interactive Task, Wave, repository and bound conversations are work sessions,
 as are conversations opened in a held terminal through Desktop or a framed
@@ -781,8 +781,7 @@ line in `logs/lf.log`; the tool goes on and the next boundary asks again.
 
 The launch carries its capability as `LF_PROVIDER_CONTEXT` when the server
 records its boundaries and as `LF_BARE_STEER` when no one does. For chats and
-batches, tool and prompt hooks run only `--moment steer`, which reports nothing. Nothing wakes a chat or batch: a chat idle at its prompt reads a
-steer when its person next types.
+batches, tool and prompt hooks run only `--moment steer`, which reports nothing. A chat idle at its prompt reads a steer when its person next types.
 
 Every tool hook first compares files and starts `lf` only when a steer may be
 waiting. Saving a steer touches one marker under `steers/` inside the write:
@@ -828,17 +827,30 @@ that lapses for the next boundary:
   A turn already running takes the message as a steer. OpenCode's TUI shows
   the answer but not the message that caused it.
 
-A conversation reopened after it was quit runs no turn until someone types.
+When a conversation reopens without an initial prompt, it waits for input.
 The first boundary that names a new inbox or socket records its provider as
 idle and sends what was saved while it was closed: an OpenCode plugin names
 its socket as it loads, a Pi extension at `session_start`. Claude's start hook
 reads those steers into its context instead, and starts no turn.
 
 A server that restarts reads the same conversations again. An unreachable
-Claude inbox or socket leaves its news unclaimed. After a failed send the steers arrive
-again. Chats and batches are never woken. No
-process or clock runs per Session: the watcher's only clock is the change
-signal's 60 s fallback for a missed checkpoint or a Machine's sleep.
+Claude inbox or extension socket leaves its news unclaimed. After a failed
+send the steers arrive again. One watcher serves every Session, with a 60 s
+fallback for a missed checkpoint or a Machine's sleep.
+
+### Starting a stopped conversation
+
+The watcher reads steers after the cursor in `steer_wake_reading`. A direct
+steer names one interactive Session. A Task steer names its primary
+conversation. If the Session has an unread steer naming it and its agent
+has stopped, the watcher starts it through `session.continue` in its saved
+directory, using the first steer's ID as the request ID. The cursor advances
+once per reading, so a restart does not repeat a start. Wave and repository
+steers, Task updates, workers and batches do not trigger these starts.
+
+A resumed conversation with a saved provider thread takes its unread steers
+as input. Held Codex threads retain their existing first-turn handling.
+Failed starts are logged in `logs/lf.log`.
 
 A managed launch's agent starts only once the server answers. The launch
 opens a connection to the server, as a hook does; when nothing answers it runs `lf install server`

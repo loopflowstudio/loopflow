@@ -89,7 +89,15 @@ fn render(
         let path = path.strip_prefix(repo).unwrap_or(&path);
         // A Task update is a steer lf wrote about what it saw, not direction.
         let update = steer.source.starts_with("update:");
-        let mut item = if update {
+        // A notice is news about a Task this conversation conducts.
+        let notice = steer.source.starts_with("notice:");
+        let mut item = if notice {
+            format!(
+                "Task notice {}. News about work this conversation conducts; following it up is yours. Read the Task's current status before acting. Complete source: {}\n",
+                steer.id,
+                serde_json::to_string(path)?
+            )
+        } else if update {
             format!(
                 "Task update {}. Report this recorded progress briefly. This is observation, not a request or permission to launch work, advance review, publish or merge. Read current Task status before acting. Complete source: {}\n",
                 steer.id,
@@ -105,7 +113,7 @@ fn render(
                 serde_json::to_string(path)?
             )
         };
-        let mut body = excerpt(&steer.text, if update { 600 } else { 400 });
+        let mut body = excerpt(&steer.text, if update || notice { 600 } else { 400 });
         while !body.is_empty()
             && item.len() + crate::prompt::render_reference(body).len() + 32 > 1024
         {
@@ -128,6 +136,22 @@ fn render(
     Ok(text)
 }
 
+/// Steers a turn of its own reads as its prompt: each one's attribution and
+/// complete text, unlike the excerpts a hook prints between tool calls.
+pub fn render_complete(steers: &[Steer]) -> String {
+    let mut text = String::from("<lf:steers>\n");
+    for steer in steers {
+        text.push_str(&format!(
+            "Steer {}; author {}:\n{}\n",
+            steer.id,
+            steer.author,
+            steer.text.trim_end()
+        ));
+    }
+    text.push_str("</lf:steers>\n");
+    text
+}
+
 /// Only confirmed live, managed conversations can be woken.
 pub fn idle_conversations(
     store: &loopflow_storage::sqlite::SqliteStore,
@@ -144,6 +168,26 @@ pub fn idle_conversations(
                         == crate::store::ProcessIdentityEvidence::Live
                 })
                 .then_some(candidate.conversation)
+        })
+        .collect())
+}
+
+/// The stopped Sessions the steers saved since the server last read name,
+/// each once with the first steer naming it. Each steer is read once; a
+/// running Session hears its steers at its boundaries.
+pub fn sessions_to_start(
+    store: &loopflow_storage::sqlite::SqliteStore,
+) -> crate::store::StoreResult<Vec<SteerWake>> {
+    let mut named = std::collections::HashSet::new();
+    Ok(store
+        .read_steer_wakes()?
+        .into_iter()
+        .filter(|wake| {
+            let running = wake.identity.is_some_and(|(pid, start)| {
+                crate::process::os_process::process_identity_evidence(pid, start)
+                    == crate::store::ProcessIdentityEvidence::Live
+            });
+            !running && named.insert(wake.session.clone())
         })
         .collect())
 }

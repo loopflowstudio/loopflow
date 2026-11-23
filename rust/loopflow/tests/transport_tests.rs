@@ -1338,12 +1338,12 @@ fn headless_run(command: &[&str], resume: bool) {
         }
     };
     if resume {
-        // A Run is never resumed or taken over: the step keeps its turn.
+        // A worker is never resumed or taken over: the step keeps its turn.
         let output = fixture.command(&["resume", &session]).output().unwrap();
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(
-            error.contains("is a Run (proof · probe · running)"),
+            error.contains("is a worker (proof · probe · running)"),
             "{error}"
         );
     }

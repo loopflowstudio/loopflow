@@ -20,6 +20,33 @@ PID (find it by `LF_HOME` in `ps -E`) to check news recorded while it was down.
 `ps` matches `__context-block` in Codex app-server argv: those are hook
 declarations, not processes.
 
+Start that private server with `CLAUDECODE`, `CLAUDE_CODE_*` and `AI_AGENT`
+unset as well as `LF_*`: from an agent's shell its held Claudes inherit
+`CLAUDE_CODE_CHILD_SESSION`, write no `~/.claude/sessions/<pid>.json`, so the
+idle wake finds no inbox and skips them silently, and their turns may not reach
+the transcript. A fresh repository's main checkout is not trusted, so every
+Claude lf starts with `--add-dir <main>` stops on Claude's "Adding a new
+directory" dialog and writes no `<pid>.json` until it is answered; trust it once
+by running `claude` there and choosing "Yes, I trust this folder".
+
+# Starting a stopped conversation
+
+Prepare a Session (`lf -a claude session resume --prepare --json`) and give it
+turns with `lf -b steer`; then, with the server running, `lf steer <id> TEXT`
+starts it in a held terminal: `pgrep -f 'resume <thread>'`, its reply in the
+transcript, the steer `delivered` in `lf session steers <id>`. Each steer starts
+its Session once: a second start needs a new steer. For a Task, `lf checkout`
+starts the primary conversation; wait for its first turn, kill its Claude, then
+`lf steer <task> TEXT`. Killing a Claude before its first turn leaves an
+assigned thread Claude never wrote, and every later resume exits with "No
+conversation found with session ID". Attach with the PTY viewer
+(`lf resume <id>`, answering `ESC[6n`/`ESC[5n`) to see a start that is waiting.
+With `LF_BIN` on the branch, `lf checkout` starts that home's server itself
+when none runs, so a "server down" scenario ends at the first checkout. Before
+restarting, find every server for the home (`ps -E -ww -p <pid>` showing
+`LF_HOME=/private/tmp/...`; the macOS path is `/private`): `lf server status`
+stays ready while any one of them runs.
+
 # Native conversation opening
 
 Use the private homes above for native servers too. Start Rex with
@@ -80,9 +107,8 @@ conversation's terminal bytes before the JSON; use `--tab`.
 
 Rebuilding `lf` under a running private server leaves the server on the old
 build's holder: the next open fails with "Holder at … is not answering".
-Restart the server after every rebuild. A headless `lf -b -a <harness> session
-resume <id> --message` is refused while a view is attached ("already has an
-attached LfProcess"); move an attached conversation with `lf resume -a
+Restart the server after every rebuild. A headless `lf -b steer <id> TEXT` saves the steer while the agent is running.
+Move an attached conversation with `lf resume -a
 <harness> <id>` in another pane. `lf install server` with a private `LF_HOME`
 registers `com.loopflow.server.<hash>` (the hash is in the socket path);
 `launchctl print gui/$UID/<label>` shows its environment, `ps eww` of the

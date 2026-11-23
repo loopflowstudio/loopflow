@@ -177,7 +177,7 @@ status itself.
 
 | Piece | Removes | Needs |
 | --- | --- | --- |
-| The server's emulator answers every terminal query, so no view's replies reach the PTY | Desktop's relay status handshake (`LF_SERVER_STATUS`, "Opening… Input paused"), once Reconnecting, Session unavailable and Retry have another carrier | |
+| The server's emulator answers every terminal query, so no view's replies reach the PTY | Desktop's relay status handshake (`LF_SERVER_STATUS`), once Reconnecting, Session unavailable and Retry have another carrier | |
 | Retire leaked processes and find the tests that leak them | Test and demo leftovers | |
 
 Server operations for these pieces are added under one protocol revision

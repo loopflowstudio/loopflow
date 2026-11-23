@@ -332,15 +332,47 @@ uv run python scripts/build_cache.py status    # in any worktree
 wrapper  ~/.local/share/loopflow/sccache/ca81ec2a…/bin/sccache (pinned)
 daemon   pid 4242, /…/ca81ec2a…/bin/sccache, up 3m; configured idle timeout sccache default (600s) (next start)
 roots    61 of 61 loaded; this checkout loaded
+seed     from ../loopflow.loo-917-theme-cards at 42d8b45944
 Rust     258 hits, 1 miss
 cache    6.2 GiB of 10 GiB
 ```
 
 Plain `cargo build` shares eligible libraries across worktrees. Each worktree
 keeps its own target. `cargo test` shares registry dependencies and keeps
-incremental state for workspace crates. A fresh target still compiles and links
-test executables, binaries, proc-macros and build scripts. The application's
-`test-support` libraries embed checkout paths and also compile in each root.
+incremental state for workspace crates. The application's `test-support`
+libraries embed checkout paths and also compile in each root.
+
+**New worktrees start warm.** The installed hook seeds the new worktree from
+a sibling's `target/debug`. To see which crates Cargo reuses, run:
+
+```bash
+git worktree add --detach ../loopflow.my-change HEAD && cd ../loopflow.my-change
+cargo build -v -p loopflow --bin lf
+```
+
+Only siblings where Cargo has run can seed a worktree. A freshly seeded
+checkout becomes eligible when Cargo creates its lock files. The hook tries
+built targets in order of `.fingerprint` directory mtime, newest first.
+It holds Cargo's locks while cloning `.fingerprint`, `build` and `deps`;
+Cargo 1.100 keeps each unit under `build/<package>/<hash>/`, so a target it
+built seeds from `build` alone, ranked by that directory's mtime.
+A build starting in the source waits until the clone finishes. The hook skips
+siblings whose build records are as new as any tracked file in the checkout.
+Otherwise Cargo could treat a sibling's workspace code as fresh. Each worktree
+builds its own top-level binaries and keeps its own incremental state. If no
+source qualifies or the filesystem lacks copy-on-write clones, Cargo builds cold.
+
+In the [measured builds](benchmarks/crate-rebuild/results/loo-922.html), Cargo
+reused registry crates, build scripts and proc macros. Two seeded builds compiled
+7 units, all workspace crates. A seed with different dependencies compiled 31.
+Cold builds compiled 256. The first `lf` build wrote 1.7 GiB into a seeded
+target (2.0 GiB cold). After a focused test about half the target still shared
+its original files. Incremental workspace libraries accounted for about 200
+CPU-seconds in a fresh test build.
+
+To build a new worktree cold, `rm -rf target` before the first build. A target
+that already exists is never replaced. `lf wt prune --builds` counts a seeded
+target at full size, so it reports more space freed than the disk gains back.
 
 The installer builds and checks the pin, then writes `build.rustc-wrapper` and
 `SCCACHE_*` entries in the personal Cargo configuration (`~/.cargo/config.toml`,
@@ -352,10 +384,11 @@ identifies the pin. Installing registers the checkout like the hook does, so
 a daemon already serving other repositories loads it. CI uses its own Cargo
 configuration.
 
-Git's `post-checkout` hook registers the worktree in
-`~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set). The hook
-carries a copy of the script so older revisions can register. It retains other
-repositories' roots and lets Git finish checkout if registration fails.
+Git's `post-checkout` hook seeds a new worktree's target, then registers the
+worktree in `~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set).
+The hook carries its own script so it works in older checkouts. Rerun
+`install` to refresh an existing hook. Both steps run silently and let Git
+finish checkout on failure. Registration retains other repositories' roots.
 Installation keeps an existing shell hook in place when it can insert the
 registration command. Other hooks move beside it to `post-checkout.before-loopflow`.
 Git runs the saved hook with its original arguments if it is executable.

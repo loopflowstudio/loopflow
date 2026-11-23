@@ -95,11 +95,13 @@ writes! {
         title: Option<String>,
         request: Option<String>,
         wave: Option<String>,
+        /// The Task this one is filed from, by ID or identifier; `null` files top-level.
+        parent: Option<String>,
         graph: Option<String>,
         session: Option<String>,
         run: bool,
     } => super::task_create::TaskCreated;
-    { request_id, title, request, wave, graph, session, run, .. } => {
+    { request_id, title, request, wave, parent, graph, session, run, .. } => {
     // Served, planning exchange starts once the answer is written.
     let created = loopflow_execution::engine::creation::create(
         request_id,
@@ -108,6 +110,7 @@ writes! {
             title: title.clone(),
             request: request.clone(),
             wave: wave.clone(),
+            parent: parent.clone(),
             graph: graph.clone(),
             session: session.clone(),
             worktree: None,
@@ -121,10 +124,10 @@ writes! {
 
     /// `lf task complete <issue>`.
     #[serde(rename = "task.complete")]
-    TaskComplete { directory: PathBuf, issue: String } => loopflow_storage::work::task::Task;
-    { issue, .. } => {
-        loopflow_execution::ops::task::task_complete(&task_repo(issue)?, issue, None)?
-    },
+    TaskComplete { directory: PathBuf, issue: String } => super::waves::TaskCompleted;
+    { issue, .. } => super::waves::task_completed(
+        loopflow_execution::ops::task::task_complete(&task_repo(issue)?, issue, None)?,
+    )?,
 
     /// `lf task reopen <issue>`.
     #[serde(rename = "task.reopen")]
@@ -145,6 +148,7 @@ writes! {
         issue,
         None,
         super::mutation::task_edit_update(&None, notes, *rank, &None),
+        None,
     )?,
 
     /// `lf task abandon <issue>`: cancels the Task and removes its PRs and

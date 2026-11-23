@@ -464,7 +464,7 @@ def main() -> None:
         "url": None,
         "updatedAt": "2026-10-08T12:00:00Z",
         "sortOrder": 1,
-        "prioritySortOrder": 1,
+        "parent":None,"prioritySortOrder": 1,
         "assignee": None,
         "completedAt": None,
         "dueDate": None,

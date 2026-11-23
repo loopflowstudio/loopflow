@@ -11,6 +11,7 @@ use super::{
 };
 use crate::session::{conversation, LfSession, PrimaryScope, WorkSource};
 use crate::store::SharedStore;
+use loopflow_model::durable::WorkStatus;
 
 /// Find or admit the primary conversation of a Wave, or of the repository
 /// itself, and prepare its workspace; `true` when it was admitted now. The
@@ -70,7 +71,8 @@ pub(crate) async fn ensure_task(
         .expect("explicit Task selection includes its Task");
     let scope = PrimaryScope::Task(task.id.clone());
     let _lock = lock_scope(&scope).await?;
-    if task.worktree.as_deref().is_some_and(|path| !path.exists()) {
+    let open = crate::ops::task::task_work_status(store, &task).await? == WorkStatus::Ready;
+    if open && task.worktree.as_deref().is_some_and(|path| !path.exists()) {
         // Reuse Task preparation's recorded placement and restoration checks.
         // Opening a conversation does not invent a checkout or start a Graph.
         let repo = repo.to_path_buf();
@@ -80,7 +82,11 @@ pub(crate) async fn ensure_task(
         })
         .await??;
     }
-    let cwd = task.worktree.clone().unwrap_or_else(|| repo.to_path_buf());
+    // A closed Task's checkout is retired and stays gone.
+    let cwd = match &task.worktree {
+        None if open => repo.to_path_buf(),
+        _ => crate::ops::task::task_directory(store, &task).await?,
+    };
     let (session, started) = record_task_primary(store, &cwd, &task, request).await?;
     Ok((prepare(store, &session.id).await?, started))
 }
@@ -251,9 +257,6 @@ fn scope_segment(scope: &PrimaryScope) -> Result<crate::git::worktrees::Worktree
 /// Adapt only at an idle attachment boundary. Historical captures and native
 /// conversation identity remain attached to the same Session.
 pub async fn admit_workspace(store: &SharedStore, session: LfSession) -> Result<LfSession> {
-    let Some(scope) = store.sqlite.primary_scope(&session.id)? else {
-        return Ok(session);
-    };
     let summary = session_projection::session_summary(
         &store.sqlite,
         &session.id,
@@ -265,6 +268,54 @@ pub async fn admit_workspace(store: &SharedStore, session: LfSession) -> Result<
     }) {
         return Ok(session);
     }
+    let session = match store.sqlite.primary_scope(&session.id)? {
+        Some(scope) => admit_scope_workspace(store, session, scope).await?,
+        None => session,
+    };
+    leave_gone_directory(store, session).await
+}
+
+/// A conversation whose directory is gone, such as a closed Task's retired
+/// checkout, continues in its repository's main checkout.
+async fn leave_gone_directory(store: &SharedStore, session: LfSession) -> Result<LfSession> {
+    if session.cwd.is_dir() {
+        return Ok(session);
+    }
+    let recorded = match &session.task_id {
+        Some(task) => match store.get_task(task).await? {
+            Some(task) => store.sqlite.repository_path(&task.repository_id)?,
+            None => None,
+        },
+        None => None,
+    };
+    let recorded = match (recorded.or_else(|| session.repo.clone()), &session.wave_id) {
+        (Some(repo), _) => Some(repo),
+        (None, Some(wave)) => store
+            .get_wave(wave)
+            .await?
+            .map(|wave| wave.repo().to_string()),
+        (None, None) => None,
+    };
+    // With no repository on record the launch reports the missing directory.
+    let Some(root) = recorded
+        .map(std::path::PathBuf::from)
+        .filter(|repo| repo.is_dir())
+        .and_then(|repo| crate::git::worktrees::main_repo_root(&repo).ok())
+    else {
+        return Ok(session);
+    };
+    store.sqlite.relocate_session(&session.id, &root)?;
+    store
+        .session(&session.id)
+        .await?
+        .ok_or_else(|| session_not_found(&session.id))
+}
+
+async fn admit_scope_workspace(
+    store: &SharedStore,
+    session: LfSession,
+    scope: PrimaryScope,
+) -> Result<LfSession> {
     let cwd = match &scope {
         PrimaryScope::Repository(repo) => ensure_scope_worktree(repo.as_path(), &scope)?.path,
         PrimaryScope::Wave(id) => {
@@ -288,8 +339,11 @@ pub async fn admit_workspace(store: &SharedStore, session: LfSession) -> Result<
             }) {
                 return Ok(session);
             }
-            if let Some(cwd) = task.worktree.filter(|cwd| cwd.is_dir()) {
+            if let Some(cwd) = task.worktree.clone().filter(|cwd| cwd.is_dir()) {
                 cwd
+            } else if crate::ops::task::task_work_status(store, &task).await? != WorkStatus::Ready {
+                // A closed Task no longer owns a checkout to rebuild.
+                return Ok(session);
             } else {
                 let task = task.id.to_string();
                 let repo = session

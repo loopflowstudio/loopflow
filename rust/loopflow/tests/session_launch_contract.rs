@@ -616,7 +616,7 @@ fn previews_do_not_start_a_provider_and_terminal_schema_is_explicitly_unsupporte
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("require a headless Run"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("lf -b steer"));
     assert!(!fixture.home.path().join("received.json").exists());
     assert_eq!(fixture.session(), session);
 }
@@ -1240,12 +1240,10 @@ fn provider_switch_imports_session_history_with_current_policy() {
     fixture.settings("claude", true, false);
     let imported = fixture.run(&[
         "-b",
-        "session",
-        "resume",
-        &session,
         "-a",
         "codex:new-model",
-        "--message",
+        "steer",
+        &session,
         "Continue the design",
     ]);
     assert_eq!(imported["method"], "thread/start");
@@ -1462,14 +1460,7 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
         .find(|pair| pair[0] == "--resume")
         .unwrap()[1]
         .to_owned();
-    let continued = fixture.run(&[
-        "-b",
-        "resume",
-        "--wave",
-        wave_id,
-        "--message",
-        "next Wave turn",
-    ]);
+    let continued = fixture.run(&["-b", "steer", id, "next Wave turn"]);
     pair(&continued, "--resume", &native);
     pair(&continued, "--model", "haiku");
     assert!(continued["input"].to_string().contains("next Wave turn"));

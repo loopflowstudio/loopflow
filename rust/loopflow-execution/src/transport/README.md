@@ -30,7 +30,7 @@ caller's process.
 | Command | Launch | Lifetime |
 |---|---|---|
 | Direct `lf`, skill or Graph launch in the caller's terminal or pipe, with or without `--task`, `--wave` or `LF_AS` | chat or batch | its caller or terminal |
-| `lf -b resume <ID> --message TEXT` | batch; a Graph's correction turn inside a Task run is a worker | one turn, then exits |
+| `lf -b steer <ID> TEXT` | batch; a Graph's correction turn inside a Task run is a worker | one turn, then exits |
 | Resume a chat with no message | chat | its terminal |
 | Resume a bound or primary Session, or open a Task, Wave or repository conversation | work session | held interactive terminal, independent of its viewer |
 | Open a conversation in a held terminal through a Desktop pane or framed `lf --machine` view | work session | held interactive terminal, independent of its viewer |
@@ -270,8 +270,8 @@ An exit record the launcher hands over is kept beside it in
 `exit-record.json` until it is settled, and its native client's announcement
 in `native-client.json` until that client ends. A launcher that execs its
 provider never announces it again, so a server that takes the terminal up
-reads it there; without it a Desktop pane would stay **Opening…** after a
-restart.
+reads it there; without it a Desktop pane would stay paused waiting for
+readiness after a restart.
 
 On startup the server greets every `holder-*.sock`, lists it, and hosts each
 running terminal under its existing `TerminalId`. The screen is rebuilt by
@@ -359,10 +359,8 @@ the view quits in the same instant.
 
 ### Desktop status
 
-Desktop shows **Opening… Input paused** until attachment and native input
-readiness are acknowledged. Initial retries keep that label;
-**Reconnecting…** follows a previously acknowledged connection. Workspace
-preparation uses the same display and keeps its last available screen.
+Initial connection attempts keep the pane quiet. **Reconnecting…** follows
+a previously acknowledged connection.
 Connection feedback overlays the screen without changing the terminal's size;
 the first retained screen uses the new pane's dimensions and cursor position.
 The relay stays alive when its server connection drops. Its native status row
@@ -376,8 +374,9 @@ surface cancels recovery. Ordinary explicit Open remains separate.
 The native surface listens on a private Unix socket and passes its path through
 `LF_SERVER_STATUS` to its relay. Newline-delimited JSON readings carry
 generation, state (`connecting`, `reconnecting`, `connected`, `unavailable`,
-`ended`), native readiness and optional explanation; Desktop takes input while
-the state is `connected`. The one action on the same stream is
+`ended`), native readiness, an optional message and the provider transition
+for older clients. Desktop accepts input when the state is `connected` and
+`native_ready` is true. The one action on the same stream is
 `{"kind":"retry"}`, honored only while `unavailable`; lost actions are never
 replayed. Closing the surface removes its private directory and cancels recovery. A
 broken status stream pauses Desktop input immediately; the relay records the

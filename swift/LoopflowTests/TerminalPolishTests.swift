@@ -33,6 +33,24 @@ struct TerminalPolishTests {
         }
     }
 
+    @Test("A long close reason keeps Retry connection inside a narrow pane")
+    @MainActor
+    func longConnectionMessageKeepsRetryVisible() {
+        let terminal = GhosttyMetalView(terminal: .shell("narrow", machineId: "fixture"))
+        let mount = GhosttyTerminalMount(terminal: terminal)
+        mount.frame = NSRect(x: 0, y: 0, width: 420, height: 300)
+        mount.addSubview(terminal)
+        mount.addSubview(terminal.searchBar)
+        mount.addSubview(terminal.connectionBar)
+        terminal.connectionLabel.stringValue = "Session unavailable. Last screen is stale. Loopflow server is not running; run lf server status. Check logs/lf.log for the reason."
+        terminal.retryConnection.isHidden = false
+        terminal.connectionBar.isHidden = false
+        mount.layout()
+        let bar = terminal.connectionBar.bounds
+        #expect(bar.contains(terminal.retryConnection.frame))
+        #expect(terminal.connectionLabel.frame.maxX <= terminal.retryConnection.frame.minX)
+    }
+
     @Test("An unused terminal releases without constructing Find during deinitialization")
     @MainActor
     func unusedTerminalRelease() {

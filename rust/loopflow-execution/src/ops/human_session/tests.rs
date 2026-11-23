@@ -130,10 +130,10 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
             let forked = super::open(&store, home, &session.id, None, None, true, true, Default::default()).await;
             let running = provider.try_wait()?.is_none();
             provider.kill().await?;
-            assert!(running, "resume stopped the Run's provider");
+            assert!(running, "resume stopped the batch's provider");
             for refused in [opened, forked] {
                 let message = refused.unwrap_err().to_string();
-                assert!(message.contains("is a Run (implement · running)"), "{message}");
+                assert!(message.contains("is a batch (implement · running)"), "{message}");
                 assert!(message.contains("`lf resume` opens this checkout's Session"), "{message}");
             }
             assert_eq!(store.sqlite.session_attachment(&session.id)?, Some(first));
@@ -562,6 +562,7 @@ fn the_pass_starts_what_the_outlook_says_the_server_starts() {
     let task = loopflow_model::durable::TaskId::new();
     store
         .create_task(&loopflow_storage::work::task::NewTask {
+            parent_task_id: None,
             repository_id: crate::repository::location::ensure_repository(&store, &checkout)
                 .unwrap(),
             id: task.clone(),
@@ -1937,6 +1938,7 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
         .store
         .sqlite
         .create_task(&loopflow_storage::work::task::NewTask {
+            parent_task_id: None,
             repository_id: crate::repository::location::ensure_repository(
                 &logins.store.sqlite,
                 "/fixture",

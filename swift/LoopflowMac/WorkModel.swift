@@ -2809,6 +2809,35 @@ final class WorkModel {
         }
     }
 
+    func hasOpenChildren(_ task: RoadmapTask) -> Bool {
+        taskIndex.openChildren[task.task.id] != nil
+    }
+
+    func openDescendants(of task: RoadmapTask) -> [RoadmapTask] {
+        let children = taskIndex.openChildren
+        var descendants: [RoadmapTask] = []
+        var seen: Set<String> = [task.task.id]
+        var parents = [task.task.id]
+        var index = 0
+        while index < parents.count {
+            for child in children[parents[index]] ?? [] where seen.insert(child.task.id).inserted {
+                descendants.append(child)
+                parents.append(child.task.id)
+            }
+            index += 1
+        }
+        return descendants
+    }
+
+    /// Complete immediately when no open children exist; confirm first when children will settle.
+    func beginComplete(_ task: RoadmapTask) {
+        if !hasOpenChildren(task) {
+            completeTaskFromInput(task)
+        } else {
+            navigation.completing = task.id
+        }
+    }
+
     /// Put the Task at `rank` in its Project, from 0; Rust renumbers the rest and moves it in Linear.
     func rankTask(_ task: RoadmapTask, rank: Int) async throws {
         let home = workDataDirectory
@@ -3096,6 +3125,7 @@ final class WorkModel {
         let key: (revision: Int, repoPath: String?)
         let tasks: [RoadmapTask]
         let positions: [String: Int]
+        let openChildren: [String: [RoadmapTask]]
         let waves: [String: WaveRoadmap]
     }
     @ObservationIgnored private var taskIndexCache: TaskIndex?
@@ -3110,13 +3140,17 @@ final class WorkModel {
         } ?? tasks
         // The first Task matching any of its keys wins, as a scan in order would.
         var positions: [String: Int] = [:]
+        var openChildren: [String: [RoadmapTask]] = [:]
         for (index, task) in visible.enumerated() {
+            if let parent = task.task.parentId, !task.isCompleted {
+                openChildren[parent, default: []].append(task)
+            }
             for name in [task.id, task.task.identifier] where positions[name] == nil {
                 positions[name] = index
             }
         }
         let waves = Dictionary(visibleRoadmaps.map { ($0.wave.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let index = TaskIndex(key: key, tasks: visible, positions: positions, waves: waves)
+        let index = TaskIndex(key: key, tasks: visible, positions: positions, openChildren: openChildren, waves: waves)
         taskIndexCache = index
         return index
     }

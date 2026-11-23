@@ -1034,7 +1034,12 @@ struct SessionItem: Identifiable, Equatable {
     var state: State
     var agentOverride: String?
     var launchId = UUID()
-    var lastScreen: String?
+    private(set) var lastScreen: String?
+
+    mutating func retainScreen(_ screen: String?) {
+        guard let screen else { return }
+        lastScreen = screen.contains(where: { !$0.isWhitespace }) ? screen : nil
+    }
 
     var attachment: DesktopOpening.Status {
         switch state {
@@ -1115,7 +1120,7 @@ final class SessionsStore {
         if let machine = sessions[index].record.workspace?.machineId {
             // Shells retain their own lifetime, including agents launched inside them.
             let terminal = TerminalIdentity.session(id, machineId: machine)
-            sessions[index].lastScreen = surfaces.screen(terminal) ?? sessions[index].lastScreen
+            sessions[index].retainScreen(surfaces.screen(terminal))
             retirement = surfaces.release(terminal)
         }
         sessions[index].state = .pending
@@ -1375,7 +1380,7 @@ final class SessionsStore {
               !surfaces.hasSurface(terminal),
               let index = _index(id), sessions[index].record.workspace?.machineId == machineId
         else { return }
-        sessions[index].lastScreen = output ?? sessions[index].lastScreen
+        sessions[index].retainScreen(output)
         switch sessions[index].state {
         case .prepared, .live:
             sessions[index].state = .ended(output ?? "Terminal output is unavailable.")
@@ -1679,6 +1684,7 @@ struct SessionsContentView: View {
             ProjectHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
         }
         .modifier(TaskAbandonConfirmation(model: model))
+        .modifier(TaskCompleteConfirmation(model: model))
         .sheet(isPresented: Binding(
             get: { navigation.renaming != nil || navigation.binding != nil },
             set: { if !$0 { model.cancelSessionRename(); model.cancelSessionBinding() } }

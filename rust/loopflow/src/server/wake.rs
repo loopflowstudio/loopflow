@@ -7,16 +7,23 @@
 //! Codex as a turn its app-server starts, OpenCode and Pi as a turn their
 //! plugin or extension starts. A conversation the server cannot reach hears
 //! it at its next boundary.
+//!
+//! A steer naming a stopped interactive Session starts it, once per steer,
+//! in a held terminal as `session.continue` does; the resumed conversation
+//! reads its steers as its first input.
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::json;
 
 use loopflow_execution::steer::{IdleConversation, IdleReach, Inbox};
+use loopflow_execution::transport::registry::Registry;
+use loopflow_model::id::LfSessionId;
 use loopflow_storage::sqlite::SqliteStore;
 
 /// How long the watcher waits for a store change before reading the revision
@@ -32,33 +39,39 @@ pub(super) fn after_turn(store: &SqliteStore, session: &str) {
     wake_idle(store, Some(session));
 }
 
-/// Start the Machine's one watcher. It runs as long as the server.
-pub(super) fn start() {
+/// Start the Machine's one watcher. It runs as long as the server; without
+/// `terminals` it starts no stopped Session.
+pub(super) fn start(terminals: Option<Arc<Registry>>) {
     let spawned = std::thread::Builder::new()
         .name("task-update-wake".into())
         .spawn(|| {
-            loopflow_execution::journal::request::isolate(watch);
+            loopflow_execution::journal::request::isolate(|| watch(terminals));
         });
     if let Err(error) = spawned {
         tracing::warn!(%error, "Task updates wait for each conversation's next turn");
     }
 }
 
-fn watch() {
+fn watch(terminals: Option<Arc<Registry>>) {
     let path = loopflow_execution::store::default_db_path();
     let mut changes = loopflow_storage::changes::StoreChanges::watch(&path);
-    let mut watcher = Watcher::default();
+    let mut watcher = Watcher {
+        terminals,
+        ..Watcher::default()
+    };
     loop {
         watcher.read(&path);
         changes.wait(UNSIGNALLED);
     }
 }
 
-/// The watcher's store and the revisions it last woke conversations for.
+/// The watcher's store, the revisions it last woke conversations for, and
+/// the held terminals it starts stopped Sessions in.
 #[derive(Default)]
 struct Watcher {
     store: Option<SqliteStore>,
     seen: Option<(i64, i64)>,
+    terminals: Option<Arc<Registry>>,
 }
 
 impl Watcher {
@@ -81,6 +94,9 @@ impl Watcher {
         {
             Ok(revision) if self.seen != Some(revision) => {
                 self.seen = Some(revision);
+                if let Some(terminals) = &self.terminals {
+                    start_stopped(store, |session, request| hold(terminals, session, request));
+                }
                 wake_idle(store, None);
             }
             Ok(_) => {}
@@ -90,6 +106,39 @@ impl Watcher {
             }
         }
     }
+}
+
+/// Start each stopped Session the steers saved since the last reading name,
+/// once, with `start(session, request)`: the request is the first steer that
+/// named it. A start that fails is not retried; its steers wait, unread, for
+/// the Session's next start.
+fn start_stopped(store: &SqliteStore, mut start: impl FnMut(&LfSessionId, String) -> Result<()>) {
+    let wakes = match loopflow_execution::steer::sessions_to_start(store) {
+        Ok(wakes) => wakes,
+        Err(error) => {
+            tracing::warn!(%error, "steers unread for stopped Sessions");
+            return;
+        }
+    };
+    for wake in wakes {
+        if let Err(error) = start(
+            &LfSessionId::from(wake.session.as_str()),
+            wake.steer.clone(),
+        ) {
+            tracing::warn!(session = wake.session, steer = wake.steer, error = %format!("{error:#}"), "stopped Session not started; its steers wait for its next start");
+        }
+    }
+}
+
+/// `session.continue`'s held start, unless a held terminal already runs it.
+fn hold(terminals: &Registry, session: &LfSessionId, request: String) -> Result<()> {
+    if terminals.session_terminal(session).is_some() {
+        return Ok(());
+    }
+    let start = super::service::continuing(session.clone(), request, 0, 0)
+        .map_err(|error| anyhow!("{}", error.message))?;
+    terminals.start(start)?;
+    Ok(())
 }
 
 fn wake_idle(store: &SqliteStore, session: Option<&str>) {
@@ -264,7 +313,7 @@ fn send_inbox(socket: &mut UnixStream, token: &str, thread: &str, text: &str) ->
 mod tests {
     use loopflow_execution::process::attachment;
 
-    use super::{after_turn, wake_idle, Watcher};
+    use super::{after_turn, start_stopped, wake_idle, Watcher};
     use crate::server::wire::{BoundaryMoment, SessionBoundary};
     use loopflow_execution::context_block::ContextDelivery;
     use loopflow_execution::steer::{Inbox, NativeBoundary, SteerAdapter};
@@ -317,6 +366,7 @@ mod tests {
         let task = loopflow_model::durable::TaskId::new();
         store
             .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: loopflow_execution::repository::location::ensure_repository(
                     &store, "/wake",
                 )
@@ -754,5 +804,63 @@ mod tests {
         )
         .unwrap()
         .is_empty());
+    }
+
+    /// The steers saved since the last reading start each stopped Session
+    /// they name once, however many name it; a running one and a steer
+    /// already read start nothing.
+    #[test]
+    fn steers_start_a_stopped_session_once() {
+        let fixture = fixture("wake-stopped");
+        let started = |store: &SqliteStore| {
+            let mut starts = Vec::new();
+            start_stopped(store, |session, request| {
+                starts.push((session.to_string(), request));
+                Ok(())
+            });
+            starts
+        };
+        let running = fixture
+            .store
+            .save_session_steer("wake-stopped", "jack", "while running")
+            .unwrap();
+        assert!(
+            started(&fixture.store).is_empty(),
+            "{running:?} is read at a boundary"
+        );
+        fixture
+            .store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET agent_ended_at=unixepoch(), agent_pid=NULL, agent_os_started_at=NULL WHERE agent_process_id=?1",
+                [&fixture.adapter.agent_process_id],
+            )
+            .unwrap();
+        let first = fixture
+            .store
+            .save_session_steer("wake-stopped", "jack", "what word did I give you?")
+            .unwrap();
+        fixture
+            .store
+            .save_session_steer("wake-stopped", "jack", "and spell it backwards")
+            .unwrap();
+        assert_eq!(
+            started(&fixture.store),
+            [("wake-stopped".to_string(), first.id.to_string())]
+        );
+        // A restarted server's first reading starts nothing it read before.
+        let restarted = loopflow_execution::store::open_sqlite(&fixture.store_path()).unwrap();
+        assert!(started(&restarted).is_empty());
+        assert_eq!(
+            fixture
+                .store
+                .session_steers("wake-stopped", 0, 8)
+                .unwrap()
+                .pending,
+            3,
+            "unread until the started conversation takes them"
+        );
     }
 }

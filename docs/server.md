@@ -43,8 +43,10 @@ disk or on GitHub.
   inside it. When `lf install` restarts the server or a connection drops,
   agents keep running, Desktop shows **Reconnecting…**, input pauses, and the
   pane catches up from buffered output once reconnected. Selection, copy, Find,
-  and scrollback stay usable throughout. Click **Retry** if automatic retries
-  stop; it never restarts the agent or replays uncertain keystrokes.
+  and scrollback stay usable throughout. Click **Retry connection** if automatic
+  retries stop, or **Refresh session** in the pane strip if the status
+  connection is lost; neither restarts the agent or replays uncertain
+  keystrokes.
 - **Closing Desktop.** Quitting Desktop leaves the server, holders, and running
   Graphs untouched. After a logout or reboot, the server automatically restarts
   active Task work sessions and runs

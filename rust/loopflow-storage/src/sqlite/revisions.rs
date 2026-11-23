@@ -178,6 +178,8 @@ mod tests {
         "session_moves",
         "steer_adapters",
         "steer_delivered",
+        // Only the Machine server reads this cursor to find Sessions to wake.
+        "steer_wake_reading",
         "store_revisions",
         "task_linear_ingested_comments",
         // A Task's last reading is compared by the next reader; its news is the steers.

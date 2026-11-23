@@ -1843,6 +1843,16 @@ impl SqliteStore {
             .flatten())
     }
 
+    /// The Session continues in `cwd`; its recorded directory is gone.
+    pub fn relocate_session(&self, id: &str, cwd: &Path) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE agent_sessions SET cwd=?2 WHERE id=?1",
+            params![id, cwd.to_string_lossy()],
+        )?;
+        Ok(())
+    }
+
     /// A Session that moved away comes back: open again, in `cwd`.
     pub fn reopen_moved_session(&self, id: &str, cwd: &Path) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");

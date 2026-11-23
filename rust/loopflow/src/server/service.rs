@@ -182,7 +182,6 @@ pub(super) async fn run() -> Result<()> {
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
     let (remote_control, remote_requests) = mpsc::channel(8);
-    super::wake::start();
     super::maintenance::start();
     super::maintenance::start_plan_exchange();
     // Held terminals keep running in their holders whether or not this server
@@ -197,6 +196,7 @@ pub(super) async fn run() -> Result<()> {
             None
         }
     };
+    super::wake::start(terminals.clone());
     let remote = super::remote::manage(
         super::mobile::configured(),
         remote_requests,
@@ -3252,6 +3252,7 @@ mod tests {
             let task = loopflow_model::durable::TaskId::new();
             store
                 .create_task(&loopflow_storage::work::task::NewTask {
+                    parent_task_id: None,
                     repository_id: loopflow_execution::repository::location::ensure_repository(
                         &store,
                         repo.path().to_str().unwrap(),
@@ -3638,6 +3639,7 @@ mod tests {
         let path = repo.path().canonicalize().unwrap();
         let task = store
             .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: loopflow_execution::repository::location::ensure_repository(
                     store,
                     path.to_str().unwrap(),

@@ -523,8 +523,6 @@ pub(super) fn diff_snapshot(
 }
 
 pub fn task_workspace_context(task: &Task) -> OpsResult<String> {
-    const MAX_PATCH_TOKENS: usize = 15_000;
-
     if !task.worktree.as_ref().is_some_and(|path| path.is_dir()) {
         return Ok("This Task has no checkout here: none was made, or it was retired when the Task closed. Read its changes from its pull request and Git history.".into());
     }
@@ -561,7 +559,7 @@ pub fn task_workspace_context(task: &Task) -> OpsResult<String> {
         .join("\n");
     let include_patch = !diff.binary
         && !diff.truncated
-        && crate::prompt::count_tokens(&diff.patch) < MAX_PATCH_TOKENS;
+        && crate::prompt::count_tokens(&diff.patch) < crate::prompt::change::PATCH_INLINE_TOKENS;
     let patch = if include_patch {
         diff.patch.as_str()
     } else {

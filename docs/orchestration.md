@@ -60,6 +60,11 @@ lf set --global skill.commit-message.default_agent claude:haiku
 Using `default_agent` keeps your `agents` failover list behind it if Haiku is
 unavailable. Run the same commit helper manually with `lf commit --step implement`.
 
+Both writers get every changed path, its line counts (or a binary marker),
+and a command to read one file’s patch. Patches under 15,000 tokens appear
+in full. For larger changes, the writer chooses which files to inspect. It
+can read a ten-line retry even when a 200 KB generated file comes first.
+
 ## Pick the agent per Skill or Graph step
 
 Specify `agent:` (pinned) or `default_agent:` (with failover) in Skill

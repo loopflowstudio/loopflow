@@ -1,19 +1,25 @@
-at: 6384dae9865a7731f66ddf4b5a09acf08df99744
+at: 2e4e3ec6eda70175081efd3397d7f563bc25f526
 first:
   - path: docs/surfaces.md
-    why: Follow one Working row through a turn and drag.
+    why: Follow a Working row through turns and competing drags.
   - path: rust/loopflow-storage/src/sqlite/selections.rs
-    why: Sort Tasks before projecting their activity.
-  - path: rust/loopflow/src/lf/commands/waves.rs
-    why: Check roadmap, Wave, repository and phone order together.
-  - path: swift/LoopflowMac/Views/WorkNavigator.swift
-    why: Drag the visible sidebar rows in their displayed order.
+    why: Sort Working Tasks independently of conversation activity.
+  - path: rust/loopflow-storage/src/work/selection.rs
+    why: Place a member beside its target.
+  - path: rust/loopflow/src/lf/commands/write.rs
+    why: See how the Machine receives a drop.
+  - path: rust/loopflow-execution/src/store/selections.rs
+    why: Apply the chosen side against the latest saved order.
   - path: swift/LoopflowMac/WorkModel.swift
-    why: Preview a drop over each list's confirmed reading.
+    why: Send the same side the sidebar and grid preview.
   - path: swift/Loopflow/Services/PendingChanges.swift
-    why: Retire each preview when its reading covers the receipt.
+    why: Keep each preview until its reading covers the receipt.
+  - path: rust/loopflow/tests/served_reads.rs
+    why: Read the committed order after two windows disagree.
   - path: swift/LoopflowTests/WorkNavigationTests.swift
-    why: Exercise out-of-sync lists and failed reads.
+    why: Follow the rows through a receipt or refusal.
 hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: Generated from the Rust protocol types.
   - path: tests/fixtures/dto/task_concepts.json
     why: Rust snapshots replayed by Desktop tests.

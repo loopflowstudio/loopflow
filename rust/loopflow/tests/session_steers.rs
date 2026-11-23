@@ -871,3 +871,106 @@ fn public_commands_save_steers_without_launching_providers() {
         .unwrap();
     assert_eq!(provider_count, 0);
 }
+
+/// A stopped Claude conversation with a saved thread, and a stand-in Claude
+/// on `bin` that appends each launch's first input to `first-input`.
+fn stopped_claude_conversation(home: &std::path::Path) -> String {
+    let (id, input, _) =
+        support::prepare_conversation(home, home, "claude", "Remember the word mango");
+    let native = uuid::Uuid::new_v4().to_string();
+    support::record_native(home, &id, &input, &native);
+    let transcripts = home.join(".claude/projects/fixture");
+    fs::create_dir_all(&transcripts).unwrap();
+    fs::write(
+        transcripts.join(format!("{native}.jsonl")),
+        r#"{"type":"user","userType":"external","message":{"content":"remember the word mango"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        home.join(".claude.json"),
+        serde_json::json!({"projects": {"/": {"hasTrustDialogAccepted": true}}}).to_string(),
+    )
+    .unwrap();
+    let bin = home.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let provider = bin.join("claude");
+    fs::write(
+        &provider,
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+{ cat; printf '\n--launch--\n'; } >> "$LF_HOME/first-input"
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(provider, fs::Permissions::from_mode(0o755)).unwrap();
+    id
+}
+
+/// What the stand-in has been given once it has launched `launches` times.
+fn first_inputs(home: &std::path::Path, launches: usize) -> String {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let text = fs::read_to_string(home.join("first-input")).unwrap_or_default();
+        if text.matches("--launch--").count() >= launches {
+            return text;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{launches} launches; saw {text:?}\n{}",
+            fs::read_to_string(home.join("logs/lf.log")).unwrap_or_default()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// A steer naming a stopped conversation returns at once; the Machine server
+/// starts the conversation in a held terminal, which takes the steer as its
+/// first input. Steers saved while no server runs start it once, together,
+/// when the server is back.
+#[test]
+fn a_steer_starts_a_stopped_conversation_on_the_machine_server() {
+    let home = tempfile::Builder::new()
+        .prefix("lf-steer-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let id = stopped_claude_conversation(home.path());
+    let path = format!("{}:/usr/bin:/bin", home.path().join("bin").display());
+    let lf = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .env_clear()
+            .env("HOME", home.path())
+            .env("LF_HOME", home.path())
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("PATH", "/usr/bin:/bin")
+            .current_dir(home.path())
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let server = MachineServer::start_with_path(env!("CARGO_BIN_EXE_lf"), home.path(), &path);
+    let saved = lf(&["steer", &id, "WHAT_WORD_DIRECTION"]);
+    assert!(
+        saved.contains(&format!("the Machine server starts {id} to read it")),
+        "{saved}"
+    );
+    let given = first_inputs(home.path(), 1);
+    assert!(given.contains("WHAT_WORD_DIRECTION"), "{given}");
+    let page: serde_json::Value =
+        serde_json::from_str(&lf(&["session", "steers", &id, "--json"])).unwrap();
+    assert_eq!(page["pending"], 0, "{page}");
+
+    drop(server);
+    lf(&["steer", &id, "FIRST_WAITING_DIRECTION"]);
+    lf(&["steer", &id, "SECOND_WAITING_DIRECTION"]);
+    let _server = MachineServer::start_with_path(env!("CARGO_BIN_EXE_lf"), home.path(), &path);
+    let given = first_inputs(home.path(), 2);
+    let second = given.split("--launch--").nth(1).unwrap();
+    assert!(
+        second.contains("FIRST_WAITING_DIRECTION") && second.contains("SECOND_WAITING_DIRECTION"),
+        "one start reads both: {given}"
+    );
+    assert!(!second.contains("WHAT_WORD_DIRECTION"), "{given}");
+}

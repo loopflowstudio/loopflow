@@ -431,7 +431,7 @@ Each step is the command a person would type, started as a child of the Graph ru
 ```text
 lf --batch [options] skill <name> [message]       # agent step
 lf <command> <args>                               # operation step
-lf -b resume <session> --message <message>     # correction of an answer
+lf -b steer <session> <message>                   # correction of an answer
 ```
 
 Headless Session correction reserves the next captured input and claims its attachment

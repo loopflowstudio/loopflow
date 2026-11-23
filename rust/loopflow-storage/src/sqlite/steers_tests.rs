@@ -218,6 +218,31 @@ fn a_read_steer_is_not_replayed() {
     assert!(read(&store, &adapter, "native").is_empty());
 }
 
+/// A foreground turn takes its own steer with every earlier unread one, and
+/// its hooks find nothing left to print.
+#[test]
+fn a_turn_takes_its_steer_with_the_unread_ones_before_it() {
+    let (_home, store, adapter) = fixture();
+    let earlier = store
+        .save_session_steer("session", "Author", "First")
+        .unwrap();
+    let taken = store
+        .take_session_steers("session", "Graph", "Second")
+        .unwrap();
+    assert_eq!(taken[0], earlier);
+    assert_eq!(
+        taken
+            .iter()
+            .map(|steer| steer.text.as_str())
+            .collect::<Vec<_>>(),
+        ["First", "Second"]
+    );
+    let page = store.session_steers("session", 0, 32).unwrap();
+    assert_eq!(page.pending, 0);
+    assert!(page.items.iter().all(|row| row.delivered_at.is_some()));
+    assert!(read(&store, &adapter, "native").is_empty());
+}
+
 /// A hook that claims and never prints: the claim hides the steer from a hook
 /// beside it, then lapses, and the steer is claimed again.
 #[test]
@@ -725,4 +750,259 @@ fn a_hook_check_after_the_marker_waits_for_the_steer_commit() {
     );
     tx.commit().unwrap();
     assert_eq!(read(&store, &adapter, "native")[0].text, "keep this");
+}
+
+/// A Task with `primary` as its conversation and `worker` as another of its
+/// interactive Sessions, both in its checkout.
+fn task_with_primary(store: &SqliteStore, primary: &str, worker: &str) {
+    for session in [primary, worker] {
+        store.test_session(session, &crate::session_record::new_artifact_key());
+    }
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(&format!(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000040008000000000000001','/repo',1);
+            INSERT INTO tasks(repository_id,id,issue_identifier,created_at)
+            VALUES('repo_00000000000040008000000000000001','task','T-1',1);
+            INSERT INTO task_checkouts(task_id,worktree) VALUES('task','/task');
+            INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task','{primary}');
+            UPDATE agent_sessions SET cwd='/task',interactive=1 WHERE id IN ('{primary}','{worker}');"
+        ))
+        .unwrap();
+}
+
+fn woken(store: &SqliteStore) -> Vec<(String, bool)> {
+    store
+        .read_steer_wakes()
+        .unwrap()
+        .into_iter()
+        .map(|wake| (wake.session, wake.identity.is_some()))
+        .collect()
+}
+
+/// The server reads each steer once: one naming a Session wakes it, a Task's
+/// wakes only its primary conversation, and a Task update, a Wave's or a
+/// read one wakes no one.
+#[test]
+fn each_steer_wakes_the_session_it_names_once() {
+    let (_home, store, _adapter) = fixture();
+    task_with_primary(&store, "primary", "worker");
+    assert!(woken(&store).is_empty(), "nothing saved yet");
+    store
+        .save_session_steer("worker", "Author", "Direct")
+        .unwrap();
+    store
+        .save_session_steer("worker", "Author", "Again")
+        .unwrap();
+    {
+        let conn = store.conn.lock().unwrap();
+        save_in(
+            &conn,
+            ("task", "task"),
+            "task",
+            "1",
+            &Author::Named("Author".into()),
+            "Task direction",
+        )
+        .unwrap();
+        save_in(
+            &conn,
+            ("task", "task"),
+            "update:-:pr",
+            "1",
+            &Author::Named("Loopflow".into()),
+            "Task update",
+        )
+        .unwrap();
+    }
+    let taken = store
+        .take_session_steers("primary", "Author", "Read in its own turn")
+        .unwrap();
+    assert_eq!(taken.last().unwrap().text, "Read in its own turn");
+    // `primary` read the Task's steer in that turn: nothing wakes it.
+    assert_eq!(
+        woken(&store),
+        [("worker".to_string(), false), ("worker".to_string(), false)]
+    );
+    assert!(woken(&store).is_empty(), "each steer is read once");
+    // A running Session is named with its AgentProcess, for the caller to see.
+    store
+        .save_session_steer("session", "Author", "Running")
+        .unwrap();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET interactive=1 WHERE id='session'",
+            [],
+        )
+        .unwrap();
+    assert_eq!(woken(&store), [("session".to_string(), true)]);
+    {
+        let conn = store.conn.lock().unwrap();
+        save_in(
+            &conn,
+            ("task", "task"),
+            "task-2",
+            "1",
+            &Author::Named("Author".into()),
+            "Task direction",
+        )
+        .unwrap();
+    }
+    assert_eq!(woken(&store), [("primary".to_string(), false)]);
+}
+
+/// The server starts a Session only for a steer its start would take: not a
+/// Task steer a later revision replaced, nor one another Session read before
+/// the primary conversation began.
+#[test]
+fn a_steer_its_start_would_not_take_starts_nothing() {
+    let (_home, store, _adapter) = fixture();
+    task_with_primary(&store, "primary", "worker");
+    {
+        let conn = store.conn.lock().unwrap();
+        for (source, revision, text) in [
+            ("task", "1", "First"),
+            ("task", "2", "Replaced"),
+            ("shared", "1", "Read"),
+        ] {
+            save_in(
+                &conn,
+                ("task", "task"),
+                source,
+                revision,
+                &Author::Named("Author".into()),
+                text,
+            )
+            .unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO steer_delivered(session_id,steer_id,claimed_at,delivered_at)
+               SELECT 'worker',id,1,1 FROM steers WHERE source='shared';
+             INSERT INTO steer_delivered(session_id,steer_id,claimed_at,delivered_at)
+               SELECT 'primary',id,1,1 FROM steers WHERE source='task' AND revision='2';
+             UPDATE agent_sessions SET created_at=(SELECT MAX(created_at)+1 FROM steers)
+               WHERE id='primary';",
+        )
+        .unwrap();
+    }
+    assert!(store.take_steers_to_start("primary").unwrap().is_empty());
+    assert!(woken(&store).is_empty());
+}
+
+/// A conversation starting again takes its unread steers as its first input
+/// only when one names it.
+#[test]
+fn a_starting_conversation_takes_its_steers_when_one_names_it() {
+    let (_home, store, _adapter) = fixture();
+    task_with_primary(&store, "primary", "worker");
+    {
+        let conn = store.conn.lock().unwrap();
+        save_in(
+            &conn,
+            ("task", "task"),
+            "task",
+            "1",
+            &Author::Named("Author".into()),
+            "Task direction",
+        )
+        .unwrap();
+    }
+    assert!(
+        store.take_steers_to_start("worker").unwrap().is_empty(),
+        "a Task steer names only the primary conversation"
+    );
+    assert_eq!(store.session_steers("worker", 0, 32).unwrap().pending, 1);
+    store
+        .save_session_steer("worker", "Author", "Direct")
+        .unwrap();
+    let texts = |steers: Vec<Steer>| {
+        steers
+            .into_iter()
+            .map(|steer| steer.text)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        texts(store.take_steers_to_start("worker").unwrap()),
+        ["Task direction", "Direct"]
+    );
+    assert_eq!(store.session_steers("worker", 0, 32).unwrap().pending, 0);
+    assert_eq!(
+        texts(store.take_steers_to_start("primary").unwrap()),
+        ["Task direction"]
+    );
+    assert!(store.take_steers_to_start("primary").unwrap().is_empty());
+}
+
+/// A Task steer the Task's conversation read when it started is still the
+/// next worker's to read, and the reverse: each kind reads its own copy.
+/// A later conversation starts past what a conversation already read.
+#[test]
+fn a_task_steer_the_conversation_read_still_reaches_the_next_worker() {
+    let (_home, store, _adapter) = fixture();
+    task_with_primary(&store, "primary", "worker");
+    {
+        let conn = store.conn.lock().unwrap();
+        save_in(
+            &conn,
+            ("task", "task"),
+            "task",
+            "1",
+            &Author::Named("Author".into()),
+            "USE_THE_FIXTURE",
+        )
+        .unwrap();
+    }
+    assert_eq!(store.take_steers_to_start("primary").unwrap().len(), 1);
+    for (session, interactive) in [("next-worker", 0), ("next-conversation", 1)] {
+        store.test_session(session, &crate::session_record::new_artifact_key());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET cwd='/task',interactive=?2,
+                 created_at=(SELECT MAX(created_at)+1 FROM steers) WHERE id=?1",
+                params![session, interactive],
+            )
+            .unwrap();
+    }
+    assert_eq!(
+        store.session_steers("next-worker", 0, 32).unwrap().pending,
+        1
+    );
+    assert_eq!(
+        store
+            .session_steers("next-conversation", 0, 32)
+            .unwrap()
+            .pending,
+        0
+    );
+}
+
+/// The server's reading and a starting conversation's check scan no growing
+/// table, and a start that nothing names takes no write lock.
+#[test]
+fn reading_steers_for_starts_scans_nothing_growing() {
+    let (_home, store, _adapter) = fixture();
+    task_with_primary(&store, "primary", "worker");
+    store
+        .save_session_steer("worker", "Author", "Direct")
+        .unwrap();
+    crate::query_plans::assert_no_empty_writes(&store, || {
+        store.take_steers_to_start("primary").unwrap()
+    });
+    let traced = crate::query_plans::statements(&store, || {
+        store.read_steer_wakes().unwrap();
+        store.take_steers_to_start("primary").unwrap();
+        store.take_steers_to_start("worker").unwrap();
+    });
+    assert_eq!(
+        crate::query_plans::growing_scans(&store, &traced),
+        Vec::<String>::new()
+    );
 }

@@ -84,7 +84,9 @@ lf task interrupt INF-123                             # stop its running Graph
 ```
 
 Running Sessions read steers after their next tool call; idle work sessions
-wake automatically. Use `lf task report` for progress notes so they are not
+wake automatically. A steer naming a stopped interactive Session starts it in
+a held terminal. A Task steer also starts its stopped primary conversation.
+Use `lf -b steer SESSION TEXT` to run a stopped conversation’s turn here. Use `lf task report` for progress notes so they are not
 delivered back as steers.
 
 A stopped or crashed Graph stays as history and never resumes. Read

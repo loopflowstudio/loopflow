@@ -71,4 +71,4 @@ Build the **A↔B base layout** layered with **Direction 1 (Telescope / `fzf --p
 Questions 2–3 from [explore.html](explore.html) were not specified separately. Defaults applied above unless steered otherwise (mirrored in [questions.md](questions.md)):
 
 - **Open files when sidebar is collapsed (Q2):** Defaulting to `2a` + `2b` (clickable breadcrumb filename menu for open/recent files, plus open files at the top of `⌘P` and the sidebar; no extra tab row).
-- **Auto-scratch replacement (Q3):** Defaulting to `3a` + explicit `lf open --file` (auto-pick only when empty, quiet update bar/dot on passive FSEvents writes, ~800ms settle debounce for HTML reloads).
+- **Auto-scratch replacement (Q3):** Defaulting to `3a` + explicit `lf desktop files PATH[:LINE[-END]] [--mode read|diff]` (auto-pick only when empty, quiet update bar/dot on passive FSEvents writes, ~800ms settle debounce for HTML reloads).

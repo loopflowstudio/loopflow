@@ -31,19 +31,18 @@ lf open --task LOO-12 --host desktop          # open in Loopflow Desktop
   `lf --task LOO-12 open --link --format markdown` (paste into PRs, Slack, or
   notes; installing `lf` registers the `loopflow:` URL handler).
 
-To present files or review pages in Desktop:
+The planned Desktop presentation command opens a finished page or selects lines
+in a file for review.
 
 ```bash
-lf open --host desktop --file scratch/explore.html --file docs/usage.md
+lf desktop files scratch/explore.html
+lf desktop files src/parser.rs:24-31 --mode diff
 ```
 
-Opens those files in Desktop's Files pane in **Read** mode (rendered Markdown or
-HTML, or line-numbered code), retaining every `--file` path, pushing the prior
-file onto Files' jump stack, and keeping terminal focus, active drafts, and Undo
-intact — without launching a conversation or a new Desktop window. While typing
-or composing in Files' Edit editor, Desktop adds the path to **Open & Scratch**
-and shows a quiet `Presented <path> · Open` bar instead of interrupting
-keystrokes.
+A path opens in **Read** by default. Desktop keeps the prior reading position
+in Files’ jump history and preserves drafts, Undo and terminal focus. During
+active editing or Diff review, the path appears in **Open & Scratch** with a
+`Presented <path> · Open` bar. An unattached Desktop returns exit status 4.
 
 `lf session rename SESSION 'Resume repair'` updates the
 terminal title via standard OSC sequences, plus native cmux tabs/workspaces and

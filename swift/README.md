@@ -711,11 +711,11 @@ writes to `scratch/` (including gitignored paths) badge the file in **Open &
 Scratch** and show a quiet update bar (`Updated scratch/explore.html · Open`),
 leaving your reading position, caret and keyboard focus alone. If the written
 HTML page is already visible, Files waits briefly for writes to settle (~800 ms)
-before reloading once and restoring scroll. To present a finished page
-deliberately, run `lf open --host desktop --file <path>`: it opens in **Read**,
-pushes the prior file onto jump history and leaves terminal focus and drafts
-intact (while typing in Files' Edit editor, it shows a quiet
-`Presented <path> · Open` bar instead of interrupting keystrokes).
+before reloading once and restoring scroll. The planned presentation command,
+`lf desktop files PATH[:LINE[-END]] [--mode read|diff]`, opens a file in Read
+by default and records the prior position in jump history. During active
+editing or Diff review, a quiet `Presented <path> · Open` bar lets you choose
+when to switch.
 
 Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.

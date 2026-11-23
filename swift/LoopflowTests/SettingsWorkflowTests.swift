@@ -112,32 +112,29 @@ struct SettingsWorkflowTests {
             }
         }
         do {
-            try await withThrowingTaskGroup(of: Void.self) { group in
-                group.addTask { await personal.observe() }
-                group.addTask { await project.observe() }
-                defer { group.cancelAll() }
-                try await waitFor { personal.reading.failure != nil && project.reading.failure != nil }
-                _ = try await server.status()
-                try await waitFor { personal.file != nil && project.file != nil }
-                let personalPath = try #require(personal.file).path
-                #expect(!personal.catalogue.isEmpty && !project.catalogue.isEmpty)
-                #expect(project.file?.slots["chrome"]?.declared == .present(.bool(true)))
+            async let _: Void = personal.observe()
+            async let _: Void = project.observe()
+            try await waitFor { personal.reading.failure != nil && project.reading.failure != nil }
+            _ = try await server.status()
+            try await waitFor { personal.file != nil && project.file != nil }
+            let personalPath = try #require(personal.file).path
+            #expect(!personal.catalogue.isEmpty && !project.catalogue.isEmpty)
+            #expect(project.file?.slots["chrome"]?.declared == .present(.bool(true)))
 
-                await server.stop()
-                try await waitFor { personal.reading.failure != nil && project.reading.failure != nil }
-                #expect(personal.editsDisabled && project.editsDisabled)
-                #expect(personal.file?.path == personalPath)
-                #expect(project.file?.slots["chrome"]?.declared == .present(.bool(true)))
+            await server.stop()
+            try await waitFor { personal.reading.failure != nil && project.reading.failure != nil }
+            #expect(personal.editsDisabled && project.editsDisabled)
+            #expect(personal.file?.path == personalPath)
+            #expect(project.file?.slots["chrome"]?.declared == .present(.bool(true)))
 
-                try Data("chrome: false\n".utf8).write(to: config)
-                _ = try await server.status()
-                try await waitFor { !personal.editsDisabled && !project.editsDisabled }
-                let file = try #require(project.file)
-                #expect(file.slots["chrome"]?.declared == .present(.bool(false)))
-                #expect(await project.apply(.reset, key: "chrome", to: file, notices: NoticeCenter(), manager: nil))
-                #expect(project.file?.slots["chrome"]?.declared == .absent)
-                #expect(try !String(contentsOf: config, encoding: .utf8).contains("chrome"))
-            }
+            try Data("chrome: false\n".utf8).write(to: config)
+            _ = try await server.status()
+            try await waitFor { !personal.editsDisabled && !project.editsDisabled }
+            let chrome = try #require(project.file?.declaration("chrome"))
+            #expect(chrome.slot.declared == .present(.bool(false)))
+            #expect(await project.apply(.reset, to: chrome, notices: NoticeCenter(), manager: nil))
+            #expect(project.file?.slots["chrome"]?.declared == .absent)
+            #expect(try !String(contentsOf: config, encoding: .utf8).contains("chrome"))
         } catch { await server.stop(); throw error }
         await server.stop()
     }
@@ -157,9 +154,7 @@ struct SettingsWorkflowTests {
         let model = ScopedSettingsModel(location: server.location())
         model.select(checkout: repo.path)
         let notices = NoticeCenter()
-        let watch = Task { await model.observe() }
         let personal = ScopedSettingsModel(location: server.location())
-        let personalWatch = Task { await personal.observe() }
         var navigation = SettingsNavigation()
         let window = SettingsWindow(navigation: Binding(get: { navigation }, set: { navigation = $0 }),
             appearance: AppearanceStore(paths: .temporary(), systemDark: false), checkout: repo.path,
@@ -169,6 +164,8 @@ struct SettingsWorkflowTests {
             return try window.inspect().find(ScopedSettings.self).actualView()
         }
         do {
+            async let _: Void = model.observe()
+            async let _: Void = personal.observe()
             let deadline = ContinuousClock.now + .seconds(10)
             while model.file == nil || personal.file == nil {
                 try #require(model.reading.failure == nil && ContinuousClock.now < deadline,
@@ -188,9 +185,10 @@ struct SettingsWorkflowTests {
             }
             #expect(try chrome.selectedValue(ConfigurationScope.Authored.self) == .present(.null))
 
-            #expect(await !model.apply(.set("no-such-graph"), key: "wave.graph", to: shared, notices: notices, manager: nil))
+            let defaultGraph = try #require(shared.declaration("wave.graph"))
+            #expect(await !model.apply(.set("no-such-graph"), to: defaultGraph, notices: notices, manager: nil))
             let graph = try pane(.project).inspect().find(viewWithId: "wave.graph")
-            let typo = try #require(model.errors[.init(shared, "wave.graph")])
+            let typo = try #require(model.errors[defaultGraph.id])
             _ = try graph.find(text: typo.message)
             #expect(typo.recovery == nil)
             #expect(try !graph.find(ViewType.TextField.self).isDisabled())
@@ -228,29 +226,29 @@ struct SettingsWorkflowTests {
             #expect(machines.findAll(ViewType.TextEditor.self).isEmpty)
             #expect(try pane(.agents).model.file?.owner == .personalGlobal)
             let hub = try machines.find(viewWithId: "hub").find(ScopedSettingRow.self).actualView()
-            #expect(hub.file.owner == .personalGlobal)
+            #expect(hub.declaration.owner == .personalGlobal)
             let machineID = "home_11111111111111111111111111111111"
-            let saved = await personal.apply(.set(machineID), key: "hub", to: hub.file, notices: notices, manager: nil)
-            try #require(saved, "\(personal.errors[.init(hub.file, "hub")]?.message ?? personal.reading.failure ?? "Plan hub unavailable")")
+            let saved = await personal.apply(.set(machineID), to: hub.declaration, notices: notices, manager: nil)
+            try #require(saved, "\(personal.errors[hub.declaration.id]?.message ?? personal.reading.failure ?? "Plan hub unavailable")")
             #expect(notices.current?.text == "Saved Plan hub")
             #expect(model.destination == .sharedRepository)
             #expect(model.file?.hasOverrides == true)
             #expect(try String(contentsOf: home.appending(path: "config.yaml"), encoding: .utf8).contains(machineID))
-            #expect(model.errors[.init(shared, "wave.graph")] != nil)
-            #expect(await model.apply(.set("code"), key: "wave.graph", to: shared, notices: notices, manager: nil))
+            #expect(model.errors[defaultGraph.id] != nil)
+            #expect(await model.apply(.set("code"), to: defaultGraph, notices: notices, manager: nil))
             #expect(model.errors.isEmpty)
 
             for enabled in [true, false] {
-                let file = try #require(model.file)
-                #expect(await model.apply(.set(String(enabled)), key: "chrome", to: file, notices: notices, manager: nil))
+                let chrome = try #require(model.file?.declaration("chrome"))
+                #expect(await model.apply(.set(String(enabled)), to: chrome, notices: notices, manager: nil))
                 let picker = try pane(.project).inspect().find(viewWithId: "chrome").find(ViewType.Picker.self)
                 #expect(try picker.selectedValue(ConfigurationScope.Authored.self) == .present(.bool(enabled)))
             }
-            let onDisk = try #require(model.file)
-            #expect(await model.apply(.set("null"), key: "chrome", to: onDisk, notices: notices, manager: nil))
+            let onDisk = try #require(model.file?.declaration("chrome"))
+            #expect(await model.apply(.set("null"), to: onDisk, notices: notices, manager: nil))
             #expect(model.file?.slots["chrome"]?.declared == .present(.null))
-            let fresh = try #require(model.file)
-            #expect(await model.apply(.reset, key: "chrome", to: fresh, notices: notices, manager: nil))
+            let fresh = try #require(model.file?.declaration("chrome"))
+            #expect(await model.apply(.reset, to: fresh, notices: notices, manager: nil))
             #expect(model.file?.slots["chrome"]?.declared == .absent)
 
             // An unset control shows the value in effect and where it comes from.
@@ -259,16 +257,16 @@ struct SettingsWorkflowTests {
             #expect(try pane(.general).inspect().find(viewWithId: "repo_root").find(ScopedSettingRow.self).actualView().unsetText == "~/src (Default)")
             let agentsPane = try pane(.agents)
             #expect(try agentsPane.inspect().find(viewWithId: "default_agent").find(ScopedSettingRow.self).actualView().unsetText == "First in fallback order (Default)")
-            #expect(await personal.apply(.set("claude"), key: "default_agent", to: try #require(personal.file), notices: notices, manager: nil))
+            #expect(await personal.apply(.set("claude"), to: try #require(personal.file?.declaration("default_agent")), notices: notices, manager: nil))
             #expect(personal.reading.value?.settings["agent"]?.value == .string("claude"))
             #expect(try agentsPane.inspect().find(viewWithId: "agent").find(ScopedSettingRow.self).actualView().unsetText == "Use starting preference (Default)")
             #expect(try agentsPane.inspect().find(viewWithId: "yolo").find(ScopedSettingRow.self).actualView().unsetText == "On (Default)")
             let retries = try #require(personal.catalogue.first { $0.key == "automation" })
-            let before = try #require(personal.file)
-            #expect(await personal.apply(retries.integerChange("3", in: before), key: retries.key, to: before, notices: notices, manager: nil))
-            let edited = try #require(personal.file)
-            #expect(edited.slots[retries.key]?.declared.value?["retries"] == .integer(3))
-            #expect(await personal.apply(retries.integerChange("  ", in: edited), key: retries.key, to: edited, notices: notices, manager: nil))
+            let before = try #require(personal.file?.declaration(retries.key))
+            #expect(await personal.apply(retries.integerChange("3", in: before), to: before, notices: notices, manager: nil))
+            let edited = try #require(personal.file?.declaration(retries.key))
+            #expect(edited.slot.declared.value?["retries"] == .integer(3))
+            #expect(await personal.apply(retries.integerChange("  ", in: edited), to: edited, notices: notices, manager: nil))
             #expect(personal.file?.slots[retries.key]?.declared == .absent)
             #expect(notices.current?.text == "Reset Automatic retries")
             for settings in [SettingsPane.general, .agents, .machines, .project] {
@@ -277,18 +275,7 @@ struct SettingsWorkflowTests {
                 #expect(rows.allSatisfy { !$0.unsetText.contains("Inherited") })
                 #expect(throws: (any Error).self) { try pane(settings).inspect().find(text: "Inherited") }
             }
-        } catch {
-            watch.cancel()
-            await watch.value
-            personalWatch.cancel()
-            await personalWatch.value
-            await server.stop()
-            throw error
-        }
-        watch.cancel()
-        await watch.value
-        personalWatch.cancel()
-        await personalWatch.value
+        } catch { await server.stop(); throw error }
         await server.stop()
     }
 
@@ -322,25 +309,17 @@ struct SettingsWorkflowTests {
                     window.layoutIfNeeded()
                 }
             }
-            let watch = Task { await model.observe() }
-            do {
-                try await waitFor {
-                    guard let scroll = scrollView(in: host), let document = scroll.documentView else { return false }
-                    return model.file != nil && document.bounds.height > scroll.contentSize.height
-                }
-                let scroll = try #require(scrollView(in: host))
-                let document = try #require(scroll.documentView)
-                host.rootView = pane("configuration-file")
-                try await waitFor { scroll.documentVisibleRect.maxY >= document.bounds.maxY - 45 }
-                host.rootView = pane("agent")
-                try await waitFor { scroll.documentVisibleRect.maxY < document.bounds.midY + scroll.contentSize.height / 2 }
-            } catch {
-                watch.cancel()
-                await watch.value
-                throw error
+            async let _: Void = model.observe()
+            try await waitFor {
+                guard let scroll = scrollView(in: host), let document = scroll.documentView else { return false }
+                return model.file != nil && document.bounds.height > scroll.contentSize.height
             }
-            watch.cancel()
-            await watch.value
+            let scroll = try #require(scrollView(in: host))
+            let document = try #require(scroll.documentView)
+            host.rootView = pane("configuration-file")
+            try await waitFor { scroll.documentVisibleRect.maxY >= document.bounds.maxY - 45 }
+            host.rootView = pane("agent")
+            try await waitFor { scroll.documentVisibleRect.maxY < document.bounds.midY + scroll.contentSize.height / 2 }
         }
     }
 

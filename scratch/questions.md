@@ -23,3 +23,4 @@
 - Appearance shows its selectable configuration path directly. The project pane places its path beside **Open file…**.
 - Search and the form use the same checkout, Wave and target to determine where a preference applies. Changing only the Skill or Graph step keeps the selected file.
 - Each Settings scope retries after 1–30 seconds. One successful reading resets its delay. Work tracks several subscriptions and waits for all of them to stay healthy before resetting its delay.
+- Each editor keeps the selected declaration’s slot and file address. Search and the form use the titles from the same ordered sections.

@@ -1,29 +1,29 @@
-at: a74b556a22f59565717c8de968abd1d99c3e524c
+at: 7460263ba0974dbd7a3cafe52dc5904ffbc2860b
 first:
   - path: docs/surfaces.md
     why: Follow a setting from search through Undo
   - path: docs/config.md
-    why: Read how defaults, explicit null and Reset work
+    why: Defaults, explicit null and Reset
   - path: scratch/plan.md
-    why: Design choices and remaining visual checks
+    why: Design choices and remaining visual check
   - path: rust/loopflow-execution/src/config/catalog.rs
-    why: Each preference names its applicability and fallback
+    why: Each setting’s schema, applicability and fallback
   - path: rust/loopflow-execution/src/engine/config/scope.rs
-    why: Effective values and editable declarations share one reading
+    why: Effective values and editable slots in one reading
   - path: swift/LoopflowMac/Services/ConfigurationScope.swift
-    why: Map declarations to controls and label their sources
+    why: Bind an edit to its original declaration
   - path: swift/Loopflow/Models/ConfigurationEdit.swift
     why: Checked edits, move previews and receipts
-  - path: swift/LoopflowMac/Services/ScopedSettingsModel.swift
-    why: Reconnect scoped readings and confirm checked edits
   - path: swift/LoopflowMac/Views/ScopedSettings.swift
-    why: Place settings in personal and project panes
+    why: Place and name rows once for forms and search
   - path: swift/LoopflowMac/Views/SettingsWindow.swift
-    why: Open search results at their applicable scope
+    why: Navigate between personal and project scopes
   - path: swift/LoopflowMac/Views/SettingsSearch.swift
-    why: Search uses each setting’s pane destinations
+    why: Find a setting or edit its switch
   - path: swift/LoopflowMac/Views/ScopedSettingRow.swift
-    why: Edit a declaration and inspect its provenance
+    why: Edit a declaration and inspect its sources
+  - path: swift/LoopflowMac/Services/ScopedSettingsModel.swift
+    why: Reconnect readings and confirm edits on their subscription
   - path: rust/loopflow/src/lf/commands/setting.rs
     why: Read or subscribe from the CLI
   - path: rust/loopflow-execution/src/engine/config.rs
@@ -31,9 +31,9 @@ first:
   - path: rust/loopflow-execution/src/config/keys.rs
     why: Spellings both readers and writers recognize
   - path: rust/loopflow-execution/src/config/files/edit.rs
-    why: Check and restore entries inside a configuration block
+    why: Check and restore entries within a configuration block
   - path: rust/loopflow-execution/src/engine/config/promotion.rs
-    why: Review, install and recover a declaration move
+    why: Move and recover declarations using both files’ expected entries
   - path: rust/loopflow-execution/src/observe.rs
     why: Deliver writes to live Settings readers
   - path: swift/LoopflowMac/Design/AppearanceStore.swift
@@ -44,12 +44,12 @@ first:
     why: Pairing and sidebar readiness share a status
   - path: swift/LoopflowMac/Views/MachineConnections.swift
     why: Check registered Machines while their pane is open
-  - path: swift/LoopflowTests/ContextSettingsWorkflowTests.swift
-    why: Follow a checkout edit through agent launch
   - path: swift/LoopflowTests/SettingsWorkflowTests.swift
     why: Exercise search, offline settings and writes after reconnect
+  - path: swift/LoopflowTests/ContextSettingsWorkflowTests.swift
+    why: Follow a checkout edit through agent launch
   - path: swift/LoopflowTests/ThemeWorkflowTests.swift
     why: Cover older servers, checked theme writes and Undo
 hide:
   - path: tests/fixtures/dto/server_schema.json
-    why: Regenerated from the typed server operations
+    why: Regenerated from typed server operations

@@ -6,14 +6,14 @@ struct ScopedSettingRow: View {
     let model: ScopedSettingsModel
     let definition: ConfigurationDefinition
     let effective: ConfigurationValue
-    let file: ConfigurationScope.File
+    let declaration: SettingDeclaration
     let source: String?
     let notices: NoticeCenter
     let manager: UndoManager?
     private struct Draft {
         // A nil text previews removing the declaration from this file.
         var text: String?
-        var file: ConfigurationScope.File
+        var declaration: SettingDeclaration
     }
 
     @State private var draft: Draft?
@@ -23,14 +23,14 @@ struct ScopedSettingRow: View {
     @FocusState private var focused: Bool
 
     private var key: String { definition.key }
-    private var slot: ConfigurationScope.Slot? { file.slots[key] }
-    private var declared: ConfigurationScope.Authored { slot?.declared ?? .absent }
+    private var slot: ConfigurationScope.Slot { declaration.slot }
+    private var declared: ConfigurationScope.Authored { slot.declared }
     private var authored: JSONValue? { declared.value }
-    private var editError: ScopedSettingsModel.RowError? { model.errors[.init(file, key)] }
+    private var editError: ScopedSettingsModel.RowError? { model.errors[declaration.id] }
     private var input: Binding<String> {
         Binding(get: { draft?.text ?? initialText }, set: { text in
             preview = .loading
-            if draft?.text == nil { draft = Draft(text: text, file: file) }
+            if draft?.text == nil { draft = Draft(text: text, declaration: declaration) }
             else { draft?.text = text }
         })
     }
@@ -47,7 +47,7 @@ struct ScopedSettingRow: View {
                 Text(editError.message).foregroundStyle(.secondary).textSelection(.enabled)
                 if editError.recovery == .refresh { Button("Refresh") { refreshRow() } }
             }
-            if file.owner != .personalGlobal, definition.section != .policy,
+            if declaration.owner != .personalGlobal, definition.section != .policy,
                declared != .absent || effective.candidates.contains(where: { $0.source != "builtin" }) {
                 SettingProvenance(title: "In effect",
                     value: [effectiveText, source ?? "Default"].joined(separator: " · "),
@@ -57,23 +57,23 @@ struct ScopedSettingRow: View {
                 Text(preview.current ?? preview.failure ?? "Preparing preview…").font(Typography.mono).textSelection(.enabled)
                 HStack {
                     Button("Cancel") { self.draft = nil }
-                    Button("Reset in this file") { save(.reset, to: draft.file) }.disabled(preview.current == nil)
+                    Button("Reset in this file") { save(.reset, to: draft.declaration) }.disabled(preview.current == nil)
                     if preview.failure != nil { Button("Refresh") { refreshRow() } }
                 }
             } else if declared != .absent {
                 if case .yaml = definition.control {
                     Button("Reset…") {
                         preview = .loading
-                        draft = Draft(text: nil, file: file)
+                        draft = Draft(text: nil, declaration: declaration)
                     }.controlSize(.small)
                 } else {
-                    Button("Reset") { save(definition.change(to: nil, in: file), to: file) }.controlSize(.small)
+                    Button("Reset") { save(definition.change(to: nil, in: declaration), to: declaration) }.controlSize(.small)
                 }
             }
             moveControls
         }
         .disabled(model.editsDisabled)
-        .task(id: PreviewInput(text: draft?.text, expected: draft?.file.slots[key]?.entries, entries: slot?.entries)) {
+        .task(id: PreviewInput(text: draft?.text, expected: draft?.declaration.slot.entries, entries: slot.entries)) {
             preview = .loading
             guard let draft else { return }
             do {
@@ -83,7 +83,7 @@ struct ScopedSettingRow: View {
                     try await Task.sleep(for: .milliseconds(150))
                     change = .set(text)
                 } else { change = .reset }
-                let result = try await model.preview(change, key: key, file: draft.file)
+                let result = try await model.preview(change, for: draft.declaration)
                 if !Task.isCancelled { preview = .available(result) }
             } catch {
                 if !Task.isCancelled { preview = .unavailable(lastGood: nil, reason: error.localizedDescription) }
@@ -94,13 +94,13 @@ struct ScopedSettingRow: View {
     private struct PreviewInput: Equatable {
         let text: String?
         let expected: [ConfigurationEntry]?
-        let entries: [ConfigurationEntry]?
+        let entries: [ConfigurationEntry]
     }
 
     @ViewBuilder private var moveControls: some View {
         if let moveReview {
             if updatedReview { Text("The move preview changed. Review it again before confirming.") }
-            Text(file.owner == .personalWave ? "Applies to all work in this checkout." : "Applies to everyone using this repository.")
+            Text(declaration.owner == .personalWave ? "Applies to all work in this checkout." : "Applies to everyone using this repository.")
             ForEach(moveReview.changes, id: \.path) { change in
                 Text(change.path).textSelection(.enabled)
                 Text(change.patch).font(Typography.mono).textSelection(.enabled)
@@ -110,7 +110,7 @@ struct ScopedSettingRow: View {
                 Button("Cancel") { self.moveReview = nil }
                 Button("Confirm move") { promote(.confirm(moveReview)) }
             }
-        } else if case .object(let promotion) = slot?.promotion {
+        } else if case .object(let promotion) = slot.promotion {
             if promotion["kind"] == .string("resume") {
                 Text("A move between files was interrupted.")
                 Button("Finish interrupted move…") { promote(.resume) }
@@ -156,10 +156,10 @@ struct ScopedSettingRow: View {
         switch definition.control {
         case .toggle:
             ScopedBooleanToggle(model: model, definition: definition, effective: effective,
-                                file: file, notices: notices, manager: manager)
+                                declaration: declaration, notices: notices, manager: manager)
         case .choices(let choices):
             Picker(definition.title, selection: Binding(get: { declared }, set: { selection in
-                save(definition.change(to: selection.value, in: file), to: file)
+                save(definition.change(to: selection.value, in: declaration), to: declaration)
             })) {
                 Text(unsetText).tag(ConfigurationScope.Authored.absent)
                 if declared == .present(.null) {
@@ -169,8 +169,8 @@ struct ScopedSettingRow: View {
             }
         case .stringList:
             OrderedSetting(title: definition.title, value: authored, unsetText: unsetText,
-                           canClearInherited: definition.combination == "append_reset" && file.owner != .personalGlobal, save: { values in
-                await model.apply(.set(JSONValue.array(values.map(JSONValue.string)).settingsYAML), key: key, to: file, notices: notices, manager: manager)
+                           canClearInherited: definition.combination == "append_reset" && declaration.owner != .personalGlobal, save: { values in
+                await model.apply(.set(JSONValue.array(values.map(JSONValue.string)).settingsYAML), to: declaration, notices: notices, manager: manager)
             })
         case .text, .integer:
             TextField(definition.title, text: input, prompt: Text(declared == .present(.null) ? "Explicit null" : unsetText))
@@ -195,7 +195,7 @@ struct ScopedSettingRow: View {
 
     private func promote(_ action: MoveAction) {
         Task {
-            let review = await model.promote(action, key: key, file: file, notices: notices, manager: manager)
+            let review = await model.promote(action, for: declaration, notices: notices, manager: manager)
             moveReview = review
             if case .confirm = action { updatedReview = review != nil } else { updatedReview = false }
         }
@@ -203,8 +203,8 @@ struct ScopedSettingRow: View {
 
     private func refreshRow() {
         Task {
-            guard let fresh = await model.refresh(key: key, file: file) else { return }
-            draft?.file = fresh
+            guard let fresh = await model.refresh(declaration) else { return }
+            draft?.declaration = fresh
         }
     }
 
@@ -213,18 +213,18 @@ struct ScopedSettingRow: View {
         let change: ConfigurationChange
         switch definition.control {
         case .text:
-            change = definition.change(to: text.isEmpty ? nil : .string(text), in: draft.file)
+            change = definition.change(to: text.isEmpty ? nil : .string(text), in: draft.declaration)
         case .integer:
-            change = definition.integerChange(text, in: draft.file)
+            change = definition.integerChange(text, in: draft.declaration)
         default:
             change = .set(text)
         }
-        save(change, to: draft.file)
+        save(change, to: draft.declaration)
     }
 
-    private func save(_ change: ConfigurationChange, to file: ConfigurationScope.File) {
+    private func save(_ change: ConfigurationChange, to declaration: SettingDeclaration) {
         Task {
-            if await model.apply(change, key: key, to: file, notices: notices, manager: manager) {
+            if await model.apply(change, to: declaration, notices: notices, manager: manager) {
                 draft = nil
             }
         }
@@ -235,17 +235,16 @@ struct ScopedBooleanToggle: View {
     let model: ScopedSettingsModel
     let definition: ConfigurationDefinition
     let effective: ConfigurationValue
-    let file: ConfigurationScope.File
+    let declaration: SettingDeclaration
     let notices: NoticeCenter
     let manager: UndoManager?
 
     var body: some View {
-        let key = definition.key
         Toggle(definition.title, isOn: Binding(
-            get: { (definition.fieldValue(in: file.slots[key]?.declared.value) ?? definition.fieldValue(in: effective.value)) == .bool(true) },
+            get: { (definition.fieldValue(in: declaration.slot.declared.value) ?? definition.fieldValue(in: effective.value)) == .bool(true) },
             set: { enabled in
-                let change = definition.change(to: .bool(enabled), in: file)
-                Task { await model.apply(change, key: key, to: file, notices: notices, manager: manager) }
+                let change = definition.change(to: .bool(enabled), in: declaration)
+                Task { await model.apply(change, to: declaration, notices: notices, manager: manager) }
             }
         ))
         .toggleStyle(.switch)

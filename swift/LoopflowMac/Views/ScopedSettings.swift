@@ -41,7 +41,7 @@ struct ScopedSettings: View {
                     definition.panes.contains(pane) && model.work.scope(for: definition) == model.work
                 }
                 ForEach(SettingsSection.allCases) { group in
-                    let rows = group.keys.compactMap { key in definitions.first { $0.key == key } }
+                    let rows = group.rows.compactMap { row in definitions.first { $0.key == row.key } }
                     if !rows.isEmpty {
                         Section(group.rawValue) {
                             ForEach(rows, id: \.key) { row($0, in: scope) }
@@ -104,13 +104,13 @@ struct ScopedSettings: View {
     private func row(_ definition: ConfigurationDefinition, in scope: ConfigurationScope) -> some View {
         let key = definition.key
         if let effective = scope.settings[key] {
-            if let file = model.editableFile(for: definition) {
+            if let declaration = model.file?.declaration(key) {
                 // Search addresses the outer row by catalog key. The editor's draft
                 // belongs to the selected file and its Skill or Graph step.
                 VStack(alignment: .leading) {
                     ScopedSettingRow(model: model, definition: definition, effective: effective,
-                        file: file, source: scope.source(key), notices: notices, manager: undoManager)
-                        .id(ScopedSettingsModel.RowAddress(file, key))
+                        declaration: declaration, source: scope.source(key), notices: notices, manager: undoManager)
+                        .id(declaration.id)
                 }
                 .settingsRow(key, highlighted: highlightedKey)
             } else {
@@ -202,26 +202,52 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         }
     }
 
-    var keys: [String] {
+    var rows: KeyValuePairs<String, String> {
         switch self {
-        case .profile: ["user", "repo_root"]
-        case .updates: ["stream", "logs"]
-        case .policy: ["agent", "default_agent", "agents"]
-        case .execution: ["yolo", "wave.graph", "auto", "automation"]
-        case .harnesses: ["claude.model", "codex.service_tier", "chrome"]
-        case .diff: ["context.diff", "context.diff_files", "context.paste"]
-        case .files: ["context.docs", "context.exclude"]
-        case .pullRequests: ["land", "merge_method", "pr"]
-        case .diffView: ["diff_hidden"]
-        case .release: ["repo.tracker"]
-        case .placement: ["machine"]
-        case .machine: ["hub"]
+        case .profile:
+            ["user": "Display name",
+             "repo_root": "Repositories folder"]
+        case .updates:
+            ["stream": "Release channel",
+             "logs": "Log Linear requests"]
+        case .policy:
+            ["agent": "Primary agent",
+             "default_agent": "Starting preference",
+             "agents": "Fallback order"]
+        case .execution:
+            ["yolo": "Run without asking",
+             "wave.graph": "Default Graph",
+             "auto": "Auto-ship new Tasks",
+             "automation": "Automatic retries"]
+        case .harnesses:
+            ["claude.model": "Claude model",
+             "codex.service_tier": "Codex service tier",
+             "chrome": "Claude Chrome integration"]
+        case .diff:
+            ["context.diff": "Include diff in agent context",
+             "context.diff_files": "Include full file contents",
+             "context.paste": "Include clipboard contents"]
+        case .files:
+            ["context.docs": "Additional documents",
+             "context.exclude": "Excluded documents"]
+        case .pullRequests:
+            ["land": "Landing method",
+             "merge_method": "Merge method",
+             "pr": "Create pull requests after pushing"]
+        case .diffView: ["diff_hidden": "Hide files from Task diffs"]
+        case .release: ["repo.tracker": "Repository tracker"]
+        case .placement: ["machine": "Preferred Machines"]
+        case .machine: ["hub": "Plan hub"]
         }
     }
+
+    static let byKey = Dictionary(uniqueKeysWithValues: allCases.flatMap { section in
+        section.rows.map { ($0.key, (section: section, title: $0.value)) }
+    })
 }
 
 extension ConfigurationDefinition {
-    var section: SettingsSection? { SettingsSection.allCases.first { $0.keys.contains(key) } }
+    var section: SettingsSection? { SettingsSection.byKey[key]?.section }
     var pane: SettingsPane {
         if key == "theme" { return .appearance }
         if let section { return section.pane }
@@ -233,35 +259,10 @@ extension ConfigurationDefinition {
     var opensFile: Bool { section == nil && (pane == .general || pane == .machines) }
     var isContainer: Bool { ["context", "claude", "codex", "forward"].contains(key) }
     var title: String {
-        switch key {
-        case "user": "Display name"
-        case "repo_root": "Repositories folder"
-        case "stream": "Release channel"
-        case "logs": "Log Linear requests"
-        case "agent": "Primary agent"
-        case "default_agent": "Starting preference"
-        case "agents": "Fallback order"
-        case "yolo": "Run without asking"
-        case "wave.graph": "Default Graph"
-        case "auto": "Auto-ship new Tasks"
-        case "automation": "Automatic retries"
-        case "claude.model": "Claude model"
-        case "codex.service_tier": "Codex service tier"
-        case "chrome": "Claude Chrome integration"
-        case "hub": "Plan hub"
-        case "machine": "Preferred Machines"
-        case "context.diff": "Include diff in agent context"
-        case "context.diff_files": "Include full file contents"
-        case "context.paste": "Include clipboard contents"
-        case "context.docs": "Additional documents"
-        case "context.exclude": "Excluded documents"
+        if let row = SettingsSection.byKey[key] { return row.title }
+        return switch key {
         case "context.budgets": "Context budgets"
-        case "land": "Landing method"
-        case "merge_method": "Merge method"
-        case "pr": "Create pull requests after pushing"
-        case "diff_hidden": "Hide files from Task diffs"
         case "diff_groups": "Diff groups"
-        case "repo.tracker": "Repository tracker"
         case "release": "Release targets"
         case "session": "Session lifetime"
         case "machines": "Registered Machines"

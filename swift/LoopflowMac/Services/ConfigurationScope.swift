@@ -77,19 +77,19 @@ struct ConfigurationDefinition: Decodable {
         return value
     }
 
-    func change(to value: JSONValue?, in file: ConfigurationScope.File) -> ConfigurationChange {
+    func change(to value: JSONValue?, in declaration: SettingDeclaration) -> ConfigurationChange {
         guard let editedField else { return value.map { .set($0.settingsYAML) } ?? .reset }
         var fields: [String: JSONValue] = [:]
-        if case .present(.object(let existing)) = file.slots[key]?.declared { fields = existing }
+        if case .present(.object(let existing)) = declaration.slot.declared { fields = existing }
         fields[editedField] = value
         return fields.isEmpty ? .reset : .set(JSONValue.object(fields).settingsYAML)
     }
 
-    func integerChange(_ text: String, in file: ConfigurationScope.File) -> ConfigurationChange {
+    func integerChange(_ text: String, in declaration: SettingDeclaration) -> ConfigurationChange {
         let input = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if input.isEmpty { return change(to: nil, in: file) }
+        if input.isEmpty { return change(to: nil, in: declaration) }
         guard editedField != nil else { return .set(input) }
-        return change(to: Int64(input).map(JSONValue.integer) ?? .string(input), in: file)
+        return change(to: Int64(input).map(JSONValue.integer) ?? .string(input), in: declaration)
     }
 
     func displayText(for value: JSONValue) -> String {
@@ -136,6 +136,22 @@ struct ConfigurationInspection: Decodable {
     let settings: [String: ConfigurationValue]
 }
 
+/// A checked edit carries the addressed slot as it was when editing began.
+struct SettingDeclaration: Identifiable {
+    struct ID: Hashable {
+        let destination: JSONValue
+        let key: String
+    }
+
+    let catalogKey: String
+    let destination: JSONValue
+    let path: String
+    let owner: ConfigurationDestination?
+    let slot: ConfigurationScope.Slot
+
+    var id: ID { ID(destination: destination, key: slot.key) }
+}
+
 struct ConfigurationScope: Codable {
     let settings: [String: ConfigurationValue]
     let files: [File]
@@ -145,6 +161,11 @@ struct ConfigurationScope: Codable {
         let path: String
         let slots: [String: Slot]
         var id: JSONValue { destination }
+
+        func declaration(_ key: String) -> SettingDeclaration? {
+            guard let slot = slots[key] else { return nil }
+            return SettingDeclaration(catalogKey: key, destination: destination, path: path, owner: owner, slot: slot)
+        }
 
         var hasOverrides: Bool {
             owner != .personalGlobal && slots.values.contains { !$0.entries.isEmpty }
@@ -206,6 +227,12 @@ struct ConfigurationScope: Codable {
             if case .present(let value) = self { return value }
             return nil
         }
+    }
+
+    func current(_ declaration: SettingDeclaration) -> SettingDeclaration? {
+        let file = files.first { $0.destination == declaration.destination }
+        guard let current = file?.declaration(declaration.catalogKey), current.id == declaration.id else { return nil }
+        return current
     }
 
     func source(_ key: String) -> String? {

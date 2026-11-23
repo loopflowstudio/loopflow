@@ -181,40 +181,42 @@ impl<'a> Move<'a> {
     fn change(
         &mut self,
         address: &ResolvedDestination,
+        expected: &[edit::Entry],
         change: &edit::Change,
     ) -> Result<edit::Applied> {
         let document = self
             .documents
             .get_mut(&address.path)
             .expect("loaded both files");
-        let setting = edit::Setting::catalogued(address, self.key);
-        let before = setting.entries(&document.value)?;
-        setting.prepare(&mut document.value, &before, change)
+        edit::Setting::catalogued(address, self.key).prepare(&mut document.value, expected, change)
     }
 
     fn forward(&mut self) -> Result<Receipt> {
-        let declared = |address: &ResolvedDestination| {
-            let raw = &self.documents[&address.path].value;
-            let mut document = raw.clone();
-            crate::config::normalize_preferences(&mut document);
-            let setting = edit::Setting::catalogued(address, self.key);
-            setting.declared(&document, &setting.entries(raw)?)
-        };
+        let receiving = edit::Setting::catalogued(self.receiving, self.key);
         ensure!(
-            declared(self.receiving)?.is_none(),
+            receiving
+                .entries(&self.documents[&self.receiving.path].value)?
+                .is_empty(),
             "{} already contains {}",
             self.receiving.path.display(),
             self.key
         );
-        let value =
-            declared(self.source)?.context("the source declaration is absent; refresh Settings")?;
+        let source = edit::Setting::catalogued(self.source, self.key);
+        let raw = &self.documents[&self.source.path].value;
+        let before = source.entries(raw)?;
+        let mut normalized = raw.clone();
+        crate::config::normalize_preferences(&mut normalized);
+        let value = source
+            .declared(&normalized, &before)?
+            .context("the source declaration is absent; refresh Settings")?;
         let receiving = self.change(
             self.receiving,
+            &[],
             &edit::Change::Set {
                 value: serde_yaml_ng::to_string(&value)?,
             },
         )?;
-        let source = self.change(self.source, &edit::Change::Reset)?;
+        let source = self.change(self.source, &before, &edit::Change::Reset)?;
         Ok(Receipt { source, receiving })
     }
 
@@ -253,6 +255,7 @@ impl<'a> Move<'a> {
             if !done {
                 self.change(
                     address,
+                    &edit.before,
                     &edit::Change::Restore {
                         entries: edit.after.clone(),
                     },

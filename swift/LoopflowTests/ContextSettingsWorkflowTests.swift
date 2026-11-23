@@ -38,7 +38,7 @@ struct ContextSettingsWorkflowTests {
         try original.write(to: shared, atomically: true, encoding: .utf8)
         try Data("Read the context.\n".utf8).write(to: repo.appending(path: ".lf/skills/probe.md"))
         try Data("Checkout documentation.\n".utf8).write(to: repo.appending(path: "README.md"))
-        try Data("pi-conversation.jsonl\n.lf/*.lock\n.lf/prompts/\n".utf8).write(to: repo.appending(path: ".gitignore"))
+        try Data("pi-conversation.jsonl\n.lf/prompts/\n".utf8).write(to: repo.appending(path: ".gitignore"))
         try await git("init", "-b", "main")
         try await git("add", ".")
         try await git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.org", "commit", "-m", "Checkout")
@@ -121,8 +121,8 @@ struct ContextSettingsWorkflowTests {
             // My Off wins, but the search switch edits Shared On.
             _ = try diffResult().find(text: "Shared repository settings · checkout")
             #expect(try diffResult().find(ViewType.Toggle.self).isOn())
-            let sharedFile = try #require(model.file)
-            #expect(try await model.preview(.reset, key: "context.diff", file: sharedFile) == "- diff: true")
+            let sharedFile = try #require(model.file?.declaration("context.diff"))
+            #expect(try await model.preview(.reset, for: sharedFile) == "- diff: true")
             try diffResult().find(ViewType.Toggle.self).tap()
             #expect(navigation.search == " Diff ")
             try await awaitReading { model.file?.slots["context.diff"]?.declared.value == .bool(false) }
@@ -153,7 +153,7 @@ struct ContextSettingsWorkflowTests {
             let empty = try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView()
             _ = try empty.find(text: "No matching settings")
             #expect(empty.findAll(SettingsSearchRow.self).isEmpty)
-            let privateOff = try #require(model.file)
+            let privateOff = try #require(model.file?.declaration("context.diff"))
             try view.inspect().find(viewWithId: "context.diff").find(button: "Reset").tap()
             try await awaitReading { model.file?.slots["context.diff"]?.entries.isEmpty == true }
             #expect(notices.current?.text == "Reset Include diff in agent context in My repository settings")
@@ -167,8 +167,8 @@ struct ContextSettingsWorkflowTests {
             // The old private Off reading cannot reset a later hand edit.
             let external = "# hand edit\ncontext: {diff: true}\n"
             try external.write(to: mine, atomically: true, encoding: .utf8)
-            await model.apply(.reset, key: "context.diff", to: privateOff, notices: notices, manager: nil)
-            #expect(model.errors[.init(privateOff, "context.diff")]?.recovery == .refresh)
+            await model.apply(.reset, to: privateOff, notices: notices, manager: nil)
+            #expect(model.errors[privateOff.id]?.recovery == .refresh)
             #expect(try String(contentsOf: mine, encoding: .utf8) == external)
             try picker.select(value: ConfigurationDestination.personalRepository)
             try await awaitReading { model.file?.slots["context.diff"]?.declared.value == .bool(true) }
@@ -179,7 +179,7 @@ struct ContextSettingsWorkflowTests {
             #expect(throws: (any Error).self) { try view.inspect().find(viewWithId: "context.paste").find(button: "Refresh") }
             try staleRow.find(button: "Refresh").tap()
             try await awaitReading { model.errors.isEmpty }
-            await model.apply(.reset, key: "context.diff", to: try #require(model.file), notices: notices, manager: nil)
+            await model.apply(.reset, to: try #require(model.file?.declaration("context.diff")), notices: notices, manager: nil)
             try await awaitReading { model.file?.slots["context.diff"]?.entries.isEmpty == true }
 
             // A malformed file keeps the last reading visible until Refresh can read it.
@@ -269,13 +269,13 @@ struct ContextSettingsWorkflowTests {
             let output = try await lf.run(arguments + ["config", "scope", "--json"] + target)
             return try JSONDecoder().decode(ConfigurationScope.self, from: Data(output.utf8))
         }
-        func file(_ owner: ConfigurationDestination, _ arguments: [String] = []) async throws -> ConfigurationScope.File {
+        func declaration(_ key: String, in owner: ConfigurationDestination, _ arguments: [String] = []) async throws -> SettingDeclaration {
             let reading = try await scope(arguments)
-            return try #require(reading.files.first { $0.owner == owner })
+            return try #require(reading.files.first { $0.owner == owner }?.declaration(key))
         }
         func set(_ key: String, _ value: String, _ owner: ConfigurationDestination) async throws {
-            let address = try await file(owner)
-            let saved = await model.apply(.set(value), key: key, to: address, notices: notices, manager: nil)
+            let address = try await declaration(key, in: owner)
+            let saved = await model.apply(.set(value), to: address, notices: notices, manager: nil)
             try #require(saved, "\(model.errors.values.first?.message ?? "Save failed")")
         }
         func cliValue(_ key: String, _ arguments: [String] = []) async throws -> JSONValue {
@@ -284,12 +284,12 @@ struct ContextSettingsWorkflowTests {
         }
         do {
             _ = try await server.status()
-            #expect(try await file(.personalRepository).slots["context.docs"]?.declared == .absent)
+            #expect(try await declaration("context.docs", in: .personalRepository).slot.declared == .absent)
             try await set("context.docs", "[]", .personalRepository)
             #expect(try await cliValue("context.docs") == .array([]))
             #expect(try await scope().settings["context.docs"]?.value == .array([]))
-            let mine = try await file(.personalRepository)
-            #expect(await model.apply(.reset, key: "context.docs", to: mine, notices: notices, manager: nil))
+            let mine = try await declaration("context.docs", in: .personalRepository)
+            #expect(await model.apply(.reset, to: mine, notices: notices, manager: nil))
             #expect(try await cliValue("context.docs") == .null)
             #expect(try await scope().settings["context.docs"]?.value == .array([.string("README.md")]))
 
@@ -310,18 +310,18 @@ struct ContextSettingsWorkflowTests {
             for (target, key) in [(["--skill", "probe"], "skill.probe.context.diff"),
                                   (["--graph", "review", "--step", "work"], "graphs.review.steps.work.context.diff")] {
                 let reading = try await scope(target: target)
-                let addressed = try #require(reading.files.first { $0.owner == .personalRepository })
-                #expect(addressed.slots["context.diff"]?.key == key)
-                #expect(await model.apply(.set("false"), key: "context.diff", to: addressed, notices: notices, manager: nil))
+                let addressed = try #require(reading.files.first { $0.owner == .personalRepository }?.declaration("context.diff"))
+                #expect(addressed.slot.key == key)
+                #expect(await model.apply(.set("false"), to: addressed, notices: notices, manager: nil))
                 #expect(try await scope(target: target).settings["context.diff"]?.value == .bool(false))
             }
             #expect(try await cliValue("context.diff") == .null)
 
-            let source = try await file(.personalRepository)
-            let review = try #require(await model.promote(.preview, key: "default_agent", file: source, notices: notices, manager: nil))
+            let source = try await declaration("default_agent", in: .personalRepository)
+            let review = try #require(await model.promote(.preview, for: source, notices: notices, manager: nil))
             #expect(review.changes.count == 2)
             #expect(try await cliValue("default_agent", ["--shared"]) == .null)
-            _ = await model.promote(.confirm(review), key: "default_agent", file: source, notices: notices, manager: nil)
+            _ = await model.promote(.confirm(review), for: source, notices: notices, manager: nil)
             #expect(try await cliValue("default_agent", ["--shared"]) == .string("codex"))
             #expect(try await cliValue("default_agent") == .null)
             model.select(checkout: repo.path, wave: waveID)
@@ -333,8 +333,8 @@ struct ContextSettingsWorkflowTests {
             }
             #expect(try await cliValue("default_agent", ["--shared"]) == .null)
 
-            let sharedWave = try await file(.sharedWave, ["--wave", waveID])
-            #expect(await model.apply(.set("true"), key: "chrome", to: sharedWave, notices: notices, manager: nil))
+            let sharedWave = try await declaration("chrome", in: .sharedWave, ["--wave", waveID])
+            #expect(await model.apply(.set("true"), to: sharedWave, notices: notices, manager: nil))
             let renamed = wave.deletingLastPathComponent().appending(path: "renamed")
             try fm.moveItem(at: wave, to: renamed)
             try fm.createDirectory(at: wave, withIntermediateDirectories: true)

@@ -114,20 +114,19 @@ struct SettingsSearchRow: View {
 
     private var booleanToggle: ScopedBooleanToggle? {
         guard case .setting(let definition, _) = result, case .toggle = definition.control,
-              let file = scope.editableFile(for: definition),
+              let declaration = scope.file?.declaration(definition.key),
               let effective = scope.reading.value?.settings[definition.key] else { return nil }
-        return ScopedBooleanToggle(model: scope, definition: definition, effective: effective, file: file,
+        return ScopedBooleanToggle(model: scope, definition: definition, effective: effective, declaration: declaration,
                                    notices: notices, manager: manager)
     }
 
-    private func destinationLabel(for toggle: ScopedBooleanToggle) -> String {
-        let file = toggle.file
-        var parts = [file.owner?.title ?? file.path]
-        if file.owner != .personalGlobal, let checkout = scope.work.checkout {
+    private func destinationLabel(for declaration: SettingDeclaration) -> String {
+        var parts = [declaration.owner?.title ?? declaration.path]
+        if declaration.owner != .personalGlobal, let checkout = scope.work.checkout {
             parts.append(URL(fileURLWithPath: checkout).lastPathComponent)
         }
-        if file.owner?.isWave == true, let wave = scope.work.wave { parts.append(wave) }
-        if let key = file.slots[toggle.definition.key]?.key, key != toggle.definition.key { parts.append(key) }
+        if declaration.owner?.isWave == true, let wave = scope.work.wave { parts.append(wave) }
+        if declaration.slot.key != declaration.catalogKey { parts.append(declaration.slot.key) }
         return parts.joined(separator: " · ")
     }
 
@@ -140,11 +139,11 @@ struct SettingsSearchRow: View {
                     if case .setting(let definition, _) = result, definition.lifecycle == "inactive" {
                         Text("Inactive").font(Typography.meta).foregroundStyle(.secondary)
                     }
-                    if let toggle {
-                        Text(destinationLabel(for: toggle))
+                    if let declaration = toggle?.declaration {
+                        Text(destinationLabel(for: declaration))
                             .font(Typography.meta).foregroundStyle(.secondary)
-                            .help(toggle.file.path)
-                        if let error = scope.errors[.init(toggle.file, toggle.definition.key)] {
+                            .help(declaration.path)
+                        if let error = scope.errors[declaration.id] {
                             Text(error.message).font(Typography.meta).foregroundStyle(.secondary)
                         }
                     } else if result.key != nil {
@@ -164,7 +163,7 @@ struct SettingsSearchRow: View {
                     .disabled(mobile.status == nil || mobile.error != nil)
             default:
                 if let toggle {
-                    toggle.labelsHidden().accessibilityHint(toggle.file.path)
+                    toggle.labelsHidden().accessibilityHint(toggle.declaration.path)
                 }
             }
         }

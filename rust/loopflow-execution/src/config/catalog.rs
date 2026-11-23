@@ -159,9 +159,12 @@ impl Definition {
     }
 
     pub fn accepts(&self, path: &[&str]) -> bool {
-        let schema = (self.schema)().to_value();
         let fields = &path[self.key.split('.').count()..];
-        if self.key == "planning" && !fields.is_empty() {
+        if fields.is_empty() {
+            return true;
+        }
+        let schema = (self.schema)().to_value();
+        if self.key == "planning" {
             // Validation here receives the released, internally tagged path.
             return fields == ["provider"]
                 || ["linear", "asana", "git"]

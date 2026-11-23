@@ -9,24 +9,25 @@ import Observation
 @MainActor @Observable
 final class CheckoutTree {
     /// What is known about one directory. The root is `""`.
-    struct Listing: Equatable {
+    struct Listing {
         var entries: [TaskFileEntry] = []
         var nextCursor: String?
         var pages = 0
-        var loading = false
+        fileprivate var read: Task<Void, Never>?
+        var loading: Bool { read != nil }
         /// The last read failed; earlier pages stay readable.
         var error: String?
     }
 
     enum Row: Equatable, Identifiable {
-        case entry(TaskFileEntry, depth: Int)
+        case entry(TaskFileEntry, label: String, depth: Int)
         case loading(directory: String, depth: Int)
         case more(directory: String, depth: Int)
         case failed(directory: String, reason: String, depth: Int)
 
         var id: String {
             switch self {
-            case .entry(let entry, _): "entry:\(entry.path)"
+            case .entry(let entry, _, _): "entry:\(entry.path)"
             case .loading(let directory, _): "loading:\(directory)"
             case .more(let directory, _): "more:\(directory)"
             case .failed(let directory, _, _): "failed:\(directory)"
@@ -35,12 +36,12 @@ final class CheckoutTree {
 
         var depth: Int {
             switch self {
-            case .entry(_, let depth), .loading(_, let depth), .more(_, let depth), .failed(_, _, let depth): depth
+            case .entry(_, _, let depth), .loading(_, let depth), .more(_, let depth), .failed(_, _, let depth): depth
             }
         }
 
         var entry: TaskFileEntry? {
-            if case .entry(let entry, _) = self { return entry }
+            if case .entry(let entry, _, _) = self { return entry }
             return nil
         }
     }
@@ -51,40 +52,6 @@ final class CheckoutTree {
     var selection: String?
 
     // MARK: Reading
-
-    /// One page to read: the directory, and the cursor after its loaded pages.
-    struct Read: Equatable {
-        let directory: String
-        let cursor: String?
-    }
-
-    /// Mark a read as started; nil when one is running or `more` has nothing left.
-    func begin(_ directory: String, more: Bool) -> Read? {
-        var listing = listings[directory] ?? Listing()
-        guard !listing.loading else { return nil }
-        if more, listing.nextCursor == nil { return nil }
-        listing.loading = true
-        listing.error = nil
-        listings[directory] = listing
-        return Read(directory: directory, cursor: more ? listing.nextCursor : nil)
-    }
-
-    func receive(_ page: TaskDirectory, for directory: String, more: Bool) {
-        var listing = listings[directory] ?? Listing()
-        listing.entries = more ? listing.entries + page.entries : page.entries
-        listing.pages = more ? listing.pages + 1 : 1
-        listing.nextCursor = page.nextCursor
-        listing.loading = false
-        listing.error = nil
-        listings[directory] = listing
-    }
-
-    func fail(_ directory: String, reason: String) {
-        var listing = listings[directory] ?? Listing()
-        listing.loading = false
-        listing.error = reason
-        listings[directory] = listing
-    }
 
     /// Whether opening `directory` needs a read.
     func needsRead(_ directory: String) -> Bool {
@@ -110,7 +77,6 @@ final class CheckoutTree {
         didSet { if showIgnored != oldValue { resetListings() } }
     }
     private var treeGeneration = 0
-    private var reads: [String: Task<Void, Never>] = [:]
     var offset = CGPoint.zero
     private let issue: String
     private let query: RegistryQuery
@@ -122,8 +88,7 @@ final class CheckoutTree {
 
     private func resetListings() {
         treeGeneration += 1
-        for read in reads.values { read.cancel() }
-        reads = [:]
+        for listing in listings.values { listing.read?.cancel() }
         listings = [:]
         expanded = []
         selection = nil
@@ -151,7 +116,7 @@ final class CheckoutTree {
 
     private func find(_ child: String, in parent: String) async -> Bool {
         let generation = treeGeneration
-        if needsRead(parent) || reads[parent] != nil { await readDirectory(parent, more: false) }
+        if needsRead(parent) || listings[parent]?.loading == true { await readDirectory(parent, more: false) }
         while !Task.isCancelled, generation == treeGeneration, let listing = listings[parent] {
             if listing.entries.contains(where: { $0.path == child }) { return true }
             guard listing.error == nil, listing.nextCursor != nil else { break }
@@ -168,22 +133,28 @@ final class CheckoutTree {
     /// One page of `directory` through `lf task files`; a remote Task reads
     /// through its Machine. A failure stays on that directory.
     func readDirectory(_ directory: String, more: Bool) async {
-        if let pending = reads[directory] { await pending.value; return }
-        let generation = treeGeneration
-        guard let read = begin(directory, more: more) else { return }
-        let pending = Task {
-            defer { if treeGeneration == generation { reads[directory] = nil } }
+        var listing = listings[directory] ?? Listing()
+        if let pending = listing.read { await pending.value; return }
+        let cursor = more ? listing.nextCursor : nil
+        if more && cursor == nil { return }
+        listing.error = nil
+        let read = Task { [showIgnored, listing] in
+            var result = listing
             do {
-                let page = try await query.taskFiles(issue: issue, directory: directory, cursor: read.cursor, showIgnored: showIgnored)
-                guard treeGeneration == generation else { return }
-                receive(page, for: directory, more: more)
+                let page = try await query.taskFiles(issue: issue, directory: directory, cursor: cursor, showIgnored: showIgnored)
+                result.entries = more ? listing.entries + page.entries : page.entries
+                result.nextCursor = page.nextCursor
+                result.pages = more ? listing.pages + 1 : 1
             } catch {
-                guard treeGeneration == generation else { return }
-                fail(directory, reason: error.localizedDescription)
+                result.error = error.localizedDescription
             }
+            // Toggling Show Ignored discards every page and its cursor.
+            guard !Task.isCancelled else { return }
+            listings[directory] = result
         }
-        reads[directory] = pending
-        await pending.value
+        listing.read = read
+        listings[directory] = listing
+        await read.value
     }
 
     /// Retry a failed read where it stopped: the first page, or the next one.
@@ -206,15 +177,20 @@ final class CheckoutTree {
     /// The navigator's keys: ↑/↓ move, → opens a directory or enters it, ←
     /// closes it or goes to its parent, Return opens a file or toggles a directory.
     func move(_ move: Move) async -> String? {
-        let rows = rows()
-        let current = selection.flatMap { path in rows.compactMap(\.entry).first { $0.path == path } }
+        let entries = rows().compactMap(\.entry)
+        let index = entries.firstIndex { $0.path == selection }
+        let current = index.map { entries[$0] }
+        func neighbor(_ offset: Int) -> String? {
+            guard let index else { return entries.first?.path }
+            return entries[min(max(index + offset, 0), entries.count - 1)].path
+        }
         switch move {
         case .up, .down:
-            selection = neighbor(move == .up ? -1 : 1, in: rows)
+            selection = neighbor(move == .up ? -1 : 1)
         case .expand:
             guard let current, current.kind == .directory else { return nil }
             if isExpanded(current.path) {
-                selection = neighbor(1, in: rows)
+                selection = neighbor(1)
             } else {
                 await setDirectory(current.path, expanded: true)
             }
@@ -223,7 +199,7 @@ final class CheckoutTree {
             if current.kind == .directory, isExpanded(current.path) {
                 await setDirectory(current.path, expanded: false)
             } else {
-                if let parent = rows.compactMap(\.entry).last(where: { current.path.hasPrefix($0.path + "/") }) { selection = parent.path }
+                if let parent = entries.last(where: { current.path.hasPrefix($0.path + "/") }) { selection = parent.path }
             }
         case .open:
             guard let current else { return nil }
@@ -259,16 +235,6 @@ final class CheckoutTree {
         return entry
     }
 
-    func label(for entry: TaskFileEntry) -> String {
-        var parent = (entry.path as NSString).deletingLastPathComponent
-        while !parent.isEmpty, let listing = listings[parent], listing.entries.count == 1,
-              listing.pages > 0, !listing.loading, listing.nextCursor == nil, listing.error == nil,
-              isExpanded(parent), listing.entries.first?.kind == .directory {
-            parent = (parent as NSString).deletingLastPathComponent
-        }
-        return parent.isEmpty ? entry.path : String(entry.path.dropFirst(parent.count + 1))
-    }
-
     // MARK: Rows
 
     func rows() -> [Row] {
@@ -281,7 +247,8 @@ final class CheckoutTree {
         let listing = listings[directory] ?? Listing()
         for start in listing.entries {
             let entry = compact(start)
-            rows.append(.entry(entry, depth: depth))
+            let label = directory.isEmpty ? entry.path : String(entry.path.dropFirst(directory.count + 1))
+            rows.append(.entry(entry, label: label, depth: depth))
             if entry.kind == .directory, expanded.contains(entry.path) {
                 append(entry.path, depth: depth + 1, to: &rows)
             }
@@ -295,13 +262,6 @@ final class CheckoutTree {
         }
     }
 
-    /// The entry above or below the selection; the first entry when none is selected.
-    func neighbor(_ offset: Int, in rows: [Row]) -> String? {
-        let paths = rows.compactMap { $0.entry?.path }
-        guard !paths.isEmpty else { return nil }
-        guard let selection, let index = paths.firstIndex(of: selection) else { return paths.first }
-        return paths[max(0, min(paths.count - 1, index + offset))]
-    }
 }
 
 /// How a path differs from the Task's base, as one letter beside its name.

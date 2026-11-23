@@ -114,7 +114,7 @@ struct MarkdownBlocks: View, Equatable {
         }
     }
 
-    static func blocks(_ source: String) -> [Block] {
+    nonisolated static func blocks(_ source: String) -> [Block] {
         guard let parsed = try? AttributedString(markdown: source) else {
             return [Block(kind: .paragraph, marker: nil, depth: 0, cells: [AttributedString(source)])]
         }
@@ -161,7 +161,7 @@ struct MarkdownBlocks: View, Equatable {
     /// parent re-renders for unrelated state.
     nonisolated static func == (lhs: MarkdownBlocks, rhs: MarkdownBlocks) -> Bool { lhs.source == rhs.source && lhs.find === rhs.find }
 
-    private static func kind(_ leaf: PresentationIntent.Kind, in components: [PresentationIntent.IntentType]) -> Block.Kind {
+    private nonisolated static func kind(_ leaf: PresentationIntent.Kind, in components: [PresentationIntent.IntentType]) -> Block.Kind {
         switch leaf {
         case .header(let level): return .heading(level)
         case .codeBlock: return .code

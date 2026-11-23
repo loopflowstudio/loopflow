@@ -119,7 +119,7 @@ struct TaskChangesView: View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 Group {
-                    if let reason = store.diffReview.changesError {
+                    if let reason = store.diffReview.reviewReading.error {
                         FailureLine("Comparison unavailable.", machine: reason)
                     } else {
                         Text(store.diffReview.changesTitle).font(Typography.textStrong).foregroundStyle(palette.text)
@@ -294,7 +294,7 @@ struct TaskChangesView: View {
         .background(palette.surfaceMuted.opacity(0.5))
     }
 
-    private var isReading: Bool { store.diffReview.isRefreshingChanges || store.diffReview.unreadShown > 0 }
+    private var isReading: Bool { store.diffReview.reviewReading.loading || store.diffReview.unreadShown > 0 }
 
     /// The title counts what has been read; this says how much has not.
     private var reading: String {
@@ -486,7 +486,7 @@ struct TaskChangesView: View {
                     .id("window-end-\(window.upperBound)")
                     .onAppear { store.diffReview.extendWindow() }
             }
-        } else if store.diffReview.changesError == nil {
+        } else if store.diffReview.reviewReading.error == nil {
             ProgressView().frame(maxWidth: .infinity).padding(Spacing.xxl)
         }
     }

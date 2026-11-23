@@ -5,52 +5,54 @@ import Observation
 
 @MainActor @Observable
 final class DiffReviewState {
-    let issue: String
+    private var issue: String { workingTree.issue }
     let cwd: String
-    let query: RegistryQuery
+    private var query: RegistryQuery { workingTree.query }
     let workingTree: ComparisonReading
     let browser: FilesBrowserState
     let pullRequest: PullRequestStore
 
     let comments: ReviewComments
 
-    init(issue: String, cwd: String, query: RegistryQuery, workingTree: ComparisonReading,
+    init(cwd: String, workingTree: ComparisonReading,
          browser: FilesBrowserState, pullRequest: PullRequestStore, comments: ReviewComments) {
         self.comments = comments
-        self.issue = issue
         self.cwd = cwd
-        self.query = query
+        self.taskReading = workingTree
         self.workingTree = workingTree
         self.browser = browser
         self.pullRequest = pullRequest
     }
 
-    private var otherComparison: ComparisonReading?
+    private var taskReading: ComparisonReading
+    private var stepReading: (step: ReviewStep, reading: ComparisonReading)?
+    var reviewReading: ComparisonReading { stepReading?.reading ?? taskReading }
     var comparison: ChangeComparison {
-        get { reviewState.comparison }
+        get { reviewReading.comparison }
         set {
             guard newValue != comparison else { return }
-            otherComparison = newValue == workingTree.comparison ? nil : ComparisonReading(comparison: newValue)
+            stepReading = nil
+            taskReading = newValue == workingTree.comparison ? workingTree : makeReading(newValue)
             reviewGeneration += 1
             review = nil
         }
     }
-    var reviewState: ComparisonReading { otherComparison ?? workingTree }
-    var workingChanges: TaskChangesSnapshot? { workingTree.changes }
-    var changes: TaskChangesSnapshot? { reviewState.changes }
-    var changesError: String? { reviewState.error }
-    var isRefreshingChanges: Bool { reviewState.loading }
+
+    private func makeReading(_ comparison: ChangeComparison) -> ComparisonReading {
+        ComparisonReading(issue: issue, query: query, comparison: comparison)
+    }
+
+    var changes: TaskChangesSnapshot? { reviewReading.changes }
     var fileDiffError: String?
 
     /// A file's changes: the count read with the file list, else its own lines'.
     func changeCount(_ file: ReviewFile, in reader: ReviewReader = .changes) -> Int {
         if rendering(of: file, in: reader) != nil { return 1 }
-        return reader == .changes ? reviewState.counts[file.path] ?? file.stops.count : file.stops.count
+        return reader == .changes ? reviewReading.counts[file.path] ?? file.stops.count : file.stops.count
     }
     /// Files' Diff mode: the selected file through the review stream.
     private(set) var fileReview: FileReview?
     private var diffGeneration = 0
-    func refreshChanges() async { await reviewState.refresh(issue: issue, query: query) }
 
     // MARK: Review
 
@@ -121,25 +123,18 @@ final class DiffReviewState {
 
     /// The Graph steps in the Task's commits, oldest first, from the last read
     /// of the whole Task's comparison.
-    var steps: [ReviewStep] { ReviewStep.steps((taskComparison == nil && step == nil ? changes : wholeTaskChanges)?.commits ?? []) }
-    private var wholeTaskChanges: TaskChangesSnapshot?
-    /// The step the Diff compares, its first commit's parent with its last;
-    /// nil for the whole Task.
-    private(set) var step: ReviewStep?
-    @ObservationIgnored private var taskComparison: ChangeComparison?
+    var steps: [ReviewStep] { ReviewStep.steps(taskReading.changes?.commits ?? []) }
+    var step: ReviewStep? { stepReading?.step }
 
-    /// Compare one step, or the whole Task again with nil. The stream is read
-    /// anew, since the same path holds different lines in another comparison;
-    /// the Diff reloads when its comparison changes.
     func showStep(_ next: ReviewStep?) {
         guard next != step else { return }
-        if step == nil { taskComparison = comparison; wholeTaskChanges = changes }
-        step = next
-        comparison = next.map { .branch(base: $0.base, head: $0.head) } ?? taskComparison ?? comparison
-        if next == nil { taskComparison = nil; wholeTaskChanges = nil }
+        // A branch ref may have moved while its step was open.
+        if next == nil, taskReading !== workingTree { taskReading = makeReading(taskReading.comparison) }
+        stepReading = next.map { ($0, makeReading(.branch(base: $0.base, head: $0.head))) }
+        reviewGeneration += 1
         review = nil
-        reviewState.openedGaps = [:]
-        reviewState.dropSides()
+        reviewReading.openedGaps = [:]
+        reviewReading.dropSides()
         self[place: .changes] = ReviewPlace()
         windowStart = nil
         windowRows = Self.windowBudget
@@ -151,7 +146,7 @@ final class DiffReviewState {
     func rendering(of file: ReviewFile, in reader: ReviewReader) -> ReviewRendering? {
         if showsDraft(reader) { return nil }
         // Before its patch reads, a file `lf task changes` counted no lines in may be a picture.
-        let awaitingPatch = reader == .changes && isReading(file) && reviewState.counts[file.path] == 0
+        let awaitingPatch = reader == .changes && isReading(file) && reviewReading.counts[file.path] == 0
         guard let rendering = ReviewRendering.of(file, awaitingPatch: awaitingPatch) else { return nil }
         return rendering.hasSource && sourceFiles.contains(file.path) ? nil : rendering
     }
@@ -175,7 +170,7 @@ final class DiffReviewState {
     /// reload keeps the lines it had until their replacement arrives, and
     /// rereads only the `changed` paths while the comparison's commits stand.
     func loadReview(changed: Set<String>? = nil) async {
-        if changes == nil { await refreshChanges() }
+        if changes == nil { await reviewReading.refresh() }
         reviewGeneration += 1
         let generation = reviewGeneration
         let target = comparison
@@ -196,12 +191,12 @@ final class DiffReviewState {
             unread = paths.filter { unread.contains($0) || known[$0] == nil || TaskFilesStore.touches(changed, $0) }
         } else {
             unread = paths
-            reviewState.dropSides()
+            reviewReading.dropSides()
         }
         readCommits = commits
         reading = []
         fileNotes = fileNotes.filter { paths.contains($0.key) }
-        for path in openedGaps.keys where !paths.contains(path) { reviewState.openedGaps[path] = nil }
+        for path in reviewReading.openedGaps.keys where !paths.contains(path) { reviewReading.openedGaps[path] = nil }
         for path in Set(comments.items.map(\.selection.path)).subtracting(paths) {
             comments.reconcile(path: path, revision: revision, file: nil)
         }
@@ -310,8 +305,8 @@ final class DiffReviewState {
         guard let review, let index = review.files.firstIndex(where: { $0.path == path }),
               let file = result.file else { return }
         if file != review.files[index] {
-            reviewState.openedGaps[path] = nil
-            reviewState.dropSides(path)
+            reviewReading.openedGaps[path] = nil
+            reviewReading.dropSides(path)
             var files = review.files
             files[index] = file
             self.review = ReviewDiff(files: files)
@@ -511,27 +506,7 @@ final class DiffReviewState {
         }
     }
 
-    // MARK: Both sides of a file
-
-    /// Both versions of a changed file, read once for the comparison's
-    /// commits: the old at its base (under its old name), the new at its head,
-    /// or in the working tree when the comparison has none. Syntax colors,
-    /// skipped lines and images all read them.
-    struct FileSides: Equatable, Sendable {
-        let commits: Commits
-        /// Nil for an added file.
-        let old: TaskFileSnapshot?
-        /// Nil for a deleted file.
-        let new: TaskFileSnapshot?
-
-        struct Commits: Equatable, Sendable {
-            let base: String
-            /// Nil when the new side is the working tree.
-            let head: String?
-        }
-    }
-
-    func state(for reader: ReviewReader) -> ComparisonReading { reader == .changes ? reviewState : workingTree }
+    func reading(for reader: ReviewReader) -> ComparisonReading { reader == .changes ? reviewReading : workingTree }
 
     // MARK: Syntax colors
 
@@ -553,7 +528,7 @@ final class DiffReviewState {
     /// arrive, the ones before, which keep their numbers when skipped lines open.
     func highlights(of file: ReviewFile, in reader: ReviewReader) -> FileHighlights? {
         guard let grammar = Grammar.named(file.path) else { return nil }
-        let sides = showsDraft(reader) ? nil : state(for: reader).sides(of: file, query: query, issue: issue)
+        let sides = showsDraft(reader) ? nil : self.reading(for: reader).sides(of: file)
         let source = HighlightSource(fingerprint: file.fingerprint, whole: sides != nil)
         let known = highlighted[file.path]
         if known?.source == source { return known?.highlights }
@@ -574,33 +549,22 @@ final class DiffReviewState {
 
     // MARK: Skipped lines
 
-    /// What opening a file's skipped lines has given so far.
-    struct OpenedGaps {
-        /// The unchanged lines you opened between hunks, by hunk header.
-        var lines: [String: [ReviewLine]] = [:]
-        /// The Machine's message from the last open that failed.
-        var failure: String?
-    }
-
-    /// By file. A file's record goes whenever its lines are read again.
-    var openedGaps: [String: OpenedGaps] { reviewState.openedGaps }
-
     func opened(_ file: ReviewFile, in reader: ReviewReader = .changes) -> ReviewFile {
-        state(for: reader).openedGaps[file.path].map { file.opening($0.lines) } ?? file
+        self.reading(for: reader).openedGaps[file.path].map { file.opening($0.lines) } ?? file
     }
 
     /// Show the lines a hunk header skips, from the comparison's newer side:
     /// its head commit, or the working tree. Files' Diff of an unsaved draft
     /// reads the draft.
     func openGap(_ header: String, gap: ReviewGap, file: ReviewFile, reader: ReviewReader) async {
-
+        let reading = self.reading(for: reader)
         let path = file.path
         do {
             let content: String
             if showsDraft(reader), let draft = browser.documents[path]?.text {
                 content = draft
             } else {
-                let new = try await state(for: reader).readSides(file, query: query, issue: issue).new
+                let new = try await reading.readSides(file).new
                 guard let new, new.state == .text, let text = new.content else {
                     throw RegistryQueryError("\((new?.state ?? .missing).title) cannot be shown as text.")
                 }
@@ -609,10 +573,12 @@ final class DiffReviewState {
             guard let lines = gap.lines(in: content) else {
                 throw RegistryQueryError("the file changed since this comparison was read.")
             }
-            state(for: reader).openedGaps[path, default: OpenedGaps()].lines[header] = lines
-            state(for: reader).openedGaps[path]?.failure = nil
+            reading.openedGaps[path, default: .init()].lines[header] = lines
+            reading.openedGaps[path]?.failure = nil
+        } catch is CancellationError {
+            return
         } catch {
-            state(for: reader).openedGaps[path, default: OpenedGaps()].failure = error.localizedDescription
+            reading.openedGaps[path, default: .init()].failure = error.localizedDescription
         }
     }
 
@@ -743,7 +709,6 @@ final class DiffReviewState {
     /// in one stream. Files stops at either end of its own changes.
     @discardableResult
     func step(_ offset: Int, in reader: ReviewReader) -> ReviewStop? {
-
         steppedAt = .now
         if let stop = stops(reader).stop(after: current(reader), offset: offset) {
             currents[reader] = stop.id
@@ -792,7 +757,7 @@ final class DiffReviewState {
 
     /// "4 changed files", or why there is nothing to count yet. Hidden files,
     /// yours and the tour's, stay in the total: "4 of 9 changed files". A
-    /// comparison that failed is `changesError`, which the pane draws in its place.
+    /// comparison that failed shows its error here.
     var changesTitle: String {
         guard let changes else { return "Reading changes…" }
         guard !changes.files.isEmpty else { return "No changed files" }
@@ -823,12 +788,12 @@ final class DiffReviewState {
 
     /// The selected file's diff. A dirty draft is compared as typed, debounced.
     func loadDiff() async {
-        if workingChanges == nil { await workingTree.refresh(issue: issue, query: query) }
+        if workingTree.changes == nil { await workingTree.refresh() }
         diffGeneration += 1
         let generation = diffGeneration
         // Keep the displayed diff for the same file while its replacement loads.
-        if fileReview?.path != browser.selection || fileReview?.baseCommit != workingChanges?.baseCommit { fileReview = nil }
-        guard let path = browser.selection, let base = workingChanges?.baseCommit else { return }
+        if fileReview?.path != browser.selection || fileReview?.baseCommit != workingTree.changes?.baseCommit { fileReview = nil }
+        guard let path = browser.selection, let base = workingTree.changes?.baseCommit else { return }
         let document = browser.documents[path]
         let version = document?.editVersion
         let draft = document?.dirty == true ? document?.text : nil
@@ -837,7 +802,7 @@ final class DiffReviewState {
             if document?.dirty == true { try await Task.sleep(for: .milliseconds(180)) }
             let next = try await query.taskDiff(issue: issue, path: path, base: base, head: nil, draft: draft)
             let parsed = await Task.detached(priority: .userInitiated) { ReviewDiff.parse(next.patch) }.value
-            guard !Task.isCancelled, generation == diffGeneration, browser.selection == path, workingChanges?.baseCommit == base,
+            guard !Task.isCancelled, generation == diffGeneration, browser.selection == path, workingTree.changes?.baseCommit == base,
                   browser.documents[path]?.editVersion == version else { return }
             if let shown = fileReview, shown.diff != parsed {
                 workingTree.openedGaps[path] = nil
@@ -850,7 +815,7 @@ final class DiffReviewState {
                                file: parsed.files.first.map { opened($0, in: .file(path)) })
             fileDiffError = nil
         } catch {
-            guard !Task.isCancelled, generation == diffGeneration, browser.selection == path, workingChanges?.baseCommit == base else { return }
+            guard !Task.isCancelled, generation == diffGeneration, browser.selection == path, workingTree.changes?.baseCommit == base else { return }
             fileDiffError = error.localizedDescription
         }
     }

@@ -57,7 +57,7 @@ struct ReviewStream: View {
                     .onDisappear { store.diffReview.setNear(file.path, false) }
             } else {
                 if let rendering = store.diffReview.rendering(of: file, in: reader) {
-                    if let error = store.diffReview.state(for: reader).sideErrors[file.path] {
+                    if let error = store.diffReview.reading(for: reader).sideErrors[file.path] {
                         ReviewSidesFailed(store: store, reader: reader, file: file, error: error).id(ReviewStop.rendered(file.path).id)
                         // A file with Source falls back to its line Diff.
                         if rendering.hasSource { lines(file, note: note) }
@@ -75,7 +75,7 @@ struct ReviewStream: View {
 
     /// The file's line Diff: its hunks, or what stands in when it has none.
     @ViewBuilder private func lines(_ file: ReviewFile, note: DiffReviewState.FileNote?) -> some View {
-        if let machine = store.diffReview.state(for: reader).openedGaps[file.path]?.failure {
+        if let machine = store.diffReview.reading(for: reader).openedGaps[file.path]?.failure {
             FailureLine("Skipped lines did not load.", machine: machine).reviewNoticeInset()
         }
         if file.status == .binary {

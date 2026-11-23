@@ -60,7 +60,7 @@ final class TaskFilePicker {
 
     func load() async {
         if mode == .changed, workingTree.changes == nil {
-            await workingTree.refresh(issue: issue, query: query)
+            await workingTree.refresh()
         }
         guard mode == .files else { filter(); return }
         do {
@@ -179,6 +179,7 @@ struct TaskFilePickerView: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let showsPreview = geometry.size.width >= TaskFileChrome.dockedWidth
             VStack(spacing: 0) {
                 HStack {
                     Image(systemName: "magnifyingglass")
@@ -193,8 +194,8 @@ struct TaskFilePickerView: View {
                 }.padding(Spacing.sm)
                 Divider()
                 HStack(spacing: 0) {
-                    results.frame(width: geometry.size.width >= 620 ? geometry.size.width * 0.42 : geometry.size.width)
-                    if geometry.size.width >= 620 {
+                    results.frame(width: showsPreview ? geometry.size.width * 0.42 : geometry.size.width)
+                    if showsPreview {
                         Divider()
                         preview.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }

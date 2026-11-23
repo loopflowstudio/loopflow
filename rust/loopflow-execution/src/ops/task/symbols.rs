@@ -58,22 +58,17 @@ pub fn task_symbols(
         .line_number(true)
         .bom_sniffing(false)
         .build();
-    let stopped = scan_checkout(&checkout.worktree, paths, cancelled, |path, bytes| {
+    let stopped = scan_checkout(&checkout.worktree, paths, cancelled, |path, source| {
         let mut candidate = false;
         searcher.search_slice(
             &matcher,
-            bytes,
+            source.as_bytes(),
             UTF8(|_, _| {
                 candidate = true;
                 Ok(false)
             }),
         )?;
-        if candidate {
-            let source =
-                std::str::from_utf8(bytes).expect("checkout search only visits UTF-8 text");
-            return Ok(declarations(path, source, name, &mut result.hits));
-        }
-        Ok(true)
+        Ok(!candidate || declarations(path, source, name, &mut result.hits))
     })?;
     result.truncated = stopped || inventory.truncated;
     Ok(result)

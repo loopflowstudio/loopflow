@@ -59,6 +59,11 @@ Keep `Brief`, `Diff` and `Files` in the pane strip. Cleanly separate **working-t
 
 ## Gate and demo
 
+**Compression checks on November 23**
+
+- `swift build --build-tests --package-path swift` and the focused headless Desktop run passed all 12 tests, including both browser journeys, directory retry and a whole-Task commit arriving during step review. Mounted focus, scroll and sidebar layout remain for display QA.
+- `cargo build -p loopflow --bin lf`, the five focused `ops::task::grep::` and `ops::task::symbols::` tests, and `cargo clippy --all-targets -- -D warnings` passed. CI runs the suites.
+
 **Coverage checks on November 23**
 
 - `cargo test -p loopflow-execution --lib ops::task::symbols::` passed all four scanner cases. They cover Swift, Rust, TypeScript, JavaScript arrows, Python, Go, Markdown and a keyword fallback for an unlisted extension (`.zig`), along with the 100-hit cutoff.

@@ -150,8 +150,8 @@ struct TaskFileBrowserJourneyTests {
         #expect(message.contains(call) && message.contains(files.diffReview.revision) && message.contains("Check this edit"))
 
         files.diffReview.showStep(ReviewStep(name: "Unavailable step", base: "missing-base", commits: [], head: "HEAD"))
-        await files.diffReview.refreshChanges()
-        #expect(files.diffReview.reviewState.error != nil)
+        await files.diffReview.reviewReading.refresh()
+        #expect(files.diffReview.reviewReading.error != nil)
         files.chooseFile(.changed)
         let changedPicker = try #require(files.filePicker)
         await changedPicker.load()

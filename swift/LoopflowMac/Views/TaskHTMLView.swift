@@ -14,6 +14,7 @@ struct TaskHTMLView: View {
     var ready: () -> Void = {}
 
     @State private var page: WebPage?
+    @State private var rulesUnavailable = false
     @State private var position = ScrollPosition()
     @State private var offset = CGPoint.zero
     /// Offsets during a load are the page settling, not the person scrolling.
@@ -29,6 +30,9 @@ struct TaskHTMLView: View {
                     .webViewOnScrollGeometryChange(for: CGPoint.self, of: \.contentOffset) { _, new in
                         if !loading { offset = new }
                     }
+            } else if rulesUnavailable {
+                Text("Page unavailable: network blocking could not be set up.")
+                    .task(id: find?.query) { find?.receive(page: pageIndex, count: 0, expected: pageCount) }
             } else {
                 Color.clear
             }
@@ -119,10 +123,7 @@ struct TaskHTMLView: View {
         }
         if page == nil {
             guard let rules = await TaskHTMLRules.offline() else {
-                let blank = WebPage()
-                page = blank
-                await Self.load(blank, html: "<p>Page unavailable: network blocking could not be set up.</p>", baseURL: nil)
-                loaded += 1
+                rulesUnavailable = true
                 return
             }
             guard !Task.isCancelled else { return }

@@ -22,3 +22,5 @@
 - In-file Find uses case-insensitive literal text. Promoting the query to Grep keeps Find open underneath so Escape returns to the same match. A pure deletion marks the surviving line above it, or line one at the start of the file.
 
 - The Swift journey simulates SSH by forwarding addressed commands to a private Machine. Its checkout path on the Desktop side is absent. The Rust Machine fixture covers SSH dispatch.
+
+- Keep the existing `lf task changes --json` scratch fields for CLI consumers. Desktop gets its scratch list independently through `task.files.find`.

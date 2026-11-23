@@ -863,7 +863,7 @@ struct TaskFilesTests {
         store.selection = "note.txt"
         store.observeFiles()
         await store.refresh()
-        #expect(store.diffReview.changesError == "Task has no active PR")
+        #expect(store.diffReview.reviewReading.error == "Task has no active PR")
         #expect(store.error == nil)
         await store.loadFile()
         let document = try #require(store.selectedDocument)
@@ -943,7 +943,7 @@ struct TaskFilesTests {
     private func paths(_ rows: [CheckoutTree.Row]) -> [String] {
         rows.map { row in
             switch row {
-            case .entry(let entry, let depth): String(repeating: "  ", count: depth) + entry.path
+            case .entry(let entry, _, let depth): String(repeating: "  ", count: depth) + entry.path
             case .loading(let directory, _): "loading \(directory)"
             case .more(let directory, _): "more \(directory)"
             case .failed(let directory, _, _): "failed \(directory)"
@@ -963,7 +963,8 @@ struct TaskFilesTests {
         await tree.reveal("src/lib/Parser.swift")
         #expect(tree.selection == "src/lib/Parser.swift")
         #expect(paths(tree.rows()) == ["src/lib", "  src/lib/Parser.swift"])
-        #expect(tree.rows().first?.entry.map(tree.label(for:)) == "src/lib")
+        guard case .entry(_, let label, _) = tree.rows().first else { Issue.record("Missing compacted row"); return }
+        #expect(label == "src/lib")
         tree.showIgnored = true
         await tree.openRoot()
         #expect(paths(tree.rows()) == ["src"])
@@ -1566,7 +1567,7 @@ struct TaskFilesTests {
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
         let sha: @Sendable (Int) -> String = { String(repeating: "\($0)", count: 40) }
         let base = String(repeating: "a", count: 40)
-        let subjects = ["lf implement: parse", "lf implement: render", "fix a typo", "lf compress: fold"]
+        let subjects = OSAllocatedUnfairLock(initialState: ["lf implement: parse", "lf implement: render", "fix a typo", "lf compress: fold"])
         let reads = OSAllocatedUnfairLock<[[String]]>(initialState: [])
         let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
             let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
@@ -1576,7 +1577,7 @@ struct TaskFilesTests {
                 let whole = !args.contains("--head")
                 if !whole { value["files"] = [] }
                 value["base_commit"] = base
-                value["commits"] = subjects.enumerated().filter { whole || $0.offset < 2 }
+                value["commits"] = subjects.withLock { $0 }.enumerated().filter { whole || $0.offset < 2 }
                     .map { ["sha": sha($0.offset + 1), "parent": $0.offset == 0 ? base : sha($0.offset), "subject": $0.element] }
             } else {
                 value["patch"] = ""
@@ -1601,6 +1602,11 @@ struct TaskFilesTests {
         await picker.load()
         #expect(!picker.results.isEmpty && picker.results.map(\.path) == whole.files.map(\.path))
         #expect(store.diffReview.steps.count == 3 && store.diffReview.comparisonDescription?.hasPrefix("Step implement · 2 commits") == true)
+
+        subjects.withLock { $0.append("lf qa: exercise the reader") }
+        await store.workingTree.refresh()
+        #expect(store.diffReview.steps.last?.title == "qa")
+        #expect(store.diffReview.comparison == .branch(base: base, head: sha(2)))
 
         store.diffReview.showStep(nil)
         await store.diffReview.loadReview()
@@ -1638,7 +1644,8 @@ struct TaskFilesTests {
         })
         store.autosave = false
         await store.diffReview.loadReview()
-        store.diffReview.showStep(try #require(store.diffReview.steps.first))
+        let step = try #require(store.diffReview.steps.first)
+        store.diffReview.showStep(step)
         await store.diffReview.loadReview()
         let file = try #require(store.diffReview.shownReview?.file("a.swift"))
         let (index, header) = try #require(file.blocks.enumerated().compactMap { index, block -> (Int, String)? in
@@ -1646,7 +1653,7 @@ struct TaskFilesTests {
             return nil
         }.first)
         await store.diffReview.openGap(header, gap: try #require(file.gaps[index]), file: file, reader: .changes)
-        #expect(store.diffReview.openedGaps[file.path]?.failure == nil)
+        #expect(store.diffReview.reviewReading.openedGaps[file.path]?.failure == nil)
         let opened = store.diffReview.opened(file)
         #expect(opened.lines.first { $0.new == 5 }?.text == "let five = 5")
         #expect(reads.withLock { $0 }.contains { $0.suffix(2) == ["--at", head] })
@@ -1751,7 +1758,7 @@ struct TaskFilesTests {
             return nil
         }.first)
         await store.diffReview.openGap(header, gap: try #require(file.gaps[index]), file: file, reader: .changes)
-        #expect(store.diffReview.openedGaps[file.path]?.failure == nil)
+        #expect(store.diffReview.reviewReading.openedGaps[file.path]?.failure == nil)
         #expect(store.diffReview.opened(file).lines.compactMap(\.new).contains(5))
         store.comments.selection = ReviewSelection(path: "a.swift", source: .diff(side: .new, revision: store.diffReview.revision), first: 5, last: 5)
         store.comments.draft = "what is five?"
@@ -1774,12 +1781,12 @@ struct TaskFilesTests {
             return nil
         }.first)
         await store.diffReview.openGap(header, gap: try #require(file.gaps[index]), file: file, reader: .changes)
-        #expect(store.diffReview.openedGaps["a.swift"]?.failure?.contains("the file changed since this comparison was read") == true)
-        #expect(store.diffReview.openedGaps["b.swift"] == nil)
+        #expect(store.diffReview.reviewReading.openedGaps["a.swift"]?.failure?.contains("the file changed since this comparison was read") == true)
+        #expect(store.diffReview.reviewReading.openedGaps["b.swift"] == nil)
         #expect(store.diffReview.opened(file) == file)
 
         store.diffReview.showStep(ReviewStep(name: "implement", base: "a", commits: [], head: "b"))
-        #expect(store.diffReview.openedGaps["a.swift"] == nil)
+        #expect(store.diffReview.reviewReading.openedGaps["a.swift"] == nil)
     }
 
     /// A store over `a.swift` and `z.swift` whose checkout holds `tour`.
@@ -1964,7 +1971,7 @@ struct TaskFilesTests {
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         })
         store.observeFiles()
-        await store.refreshWorkingChanges()
+        await store.workingTree.refresh()
         let before = readings.withLock { $0 }
         try Data("ref: refs/heads/next\n".utf8).write(to: metadata.appendingPathComponent("HEAD"), options: .atomic)
         try await eventually { readings.withLock { $0 } > before }
@@ -2011,7 +2018,7 @@ struct TaskFilesTests {
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         })
         store.observeFiles()
-        await store.refreshWorkingChanges()
+        await store.workingTree.refresh()
         try await Task.sleep(for: .seconds(2))
         #expect(readings.withLock { $0 } == 1)
         store.selection = "tracked.txt"

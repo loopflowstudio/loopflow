@@ -73,12 +73,12 @@ fn search(
         root,
         inventory.paths.iter().map(String::as_str),
         cancelled,
-        |path, bytes| {
+        |path, source| {
             let mut revision = None;
             let mut omitted = false;
             searcher.search_slice(
                 &matcher,
-                bytes,
+                source.as_bytes(),
                 UTF8(|line, text| {
                     let text = text.strip_suffix('\n').unwrap_or(text);
                     let text = text.strip_suffix('\r').unwrap_or(text);
@@ -93,8 +93,9 @@ fn search(
                             let excerpt_end = text.floor_char_boundary(
                                 (excerpt_start + EXCERPT_BYTES).min(text.len()),
                             );
-                            let revision =
-                                revision.get_or_insert_with(|| hex::encode(Sha256::digest(bytes)));
+                            let revision = revision.get_or_insert_with(|| {
+                                hex::encode(Sha256::digest(source.as_bytes()))
+                            });
                             result.hits.push(TaskGrepHit {
                                 path: path.into(),
                                 line,
@@ -120,7 +121,7 @@ pub(super) fn scan_checkout<'a>(
     root: &Path,
     paths: impl Iterator<Item = &'a str>,
     cancelled: &dyn Fn() -> bool,
-    mut visit: impl FnMut(&str, &[u8]) -> OpsResult<bool>,
+    mut visit: impl FnMut(&str, &str) -> OpsResult<bool>,
 ) -> OpsResult<bool> {
     let root = root.canonicalize()?;
     let checkout = File::open(&root)?;
@@ -131,42 +132,45 @@ pub(super) fn scan_checkout<'a>(
         if cancelled() {
             return Err(task_error("Search cancelled"));
         }
-        match read_search_file(&root, &checkout, path, &mut bytes) {
-            Ok(false) => continue,
+        let source = match read_search_file(&root, &checkout, path, &mut bytes) {
+            Ok(None) => continue,
             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
             Err(error) => return Err(task_error(format!("Cannot search {path:?}: {error}"))),
-            Ok(true) => {}
-        }
-        if !visit(path, &bytes)? {
+            Ok(Some(source)) => source,
+        };
+        if !visit(path, source)? {
             return Ok(true);
         }
     }
     Ok(false)
 }
 
-fn read_search_file(
+fn read_search_file<'a>(
     root: &Path,
     checkout: &File,
     path: &str,
-    bytes: &mut Vec<u8>,
-) -> io::Result<bool> {
+    bytes: &'a mut Vec<u8>,
+) -> io::Result<Option<&'a str>> {
     // Inventory entries can be deleted or retargeted between keystrokes.
     let target = root.join(path).canonicalize()?;
     let Ok(relative) = target.strip_prefix(root) else {
-        return Ok(false);
+        return Ok(None);
     };
     if relative.as_os_str().is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
     let (parent, name) = parent_directory(checkout, relative)?;
     let file = open_file(&parent, &name)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.len() > MAX_FILE_BYTES as u64 {
-        return Ok(false);
+        return Ok(None);
     }
     bytes.clear();
     file.take(MAX_FILE_BYTES as u64 + 1).read_to_end(bytes)?;
-    Ok(bytes.len() <= MAX_FILE_BYTES && !bytes.contains(&0) && std::str::from_utf8(bytes).is_ok())
+    if bytes.len() > MAX_FILE_BYTES || bytes.contains(&0) {
+        return Ok(None);
+    }
+    Ok(std::str::from_utf8(bytes).ok())
 }
 
 #[cfg(test)]

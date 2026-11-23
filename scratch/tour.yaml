@@ -1,4 +1,4 @@
-at: 2d896175cc4250aaaee947474ee0583c319a0fef
+at: 0754c253f36742ffd2ecac73d455dcff76a5fbe5
 first:
   - path: swift/README.md
     why: Files walkthrough, rail, shortcuts and presentation
@@ -8,22 +8,22 @@ first:
     why: Search a checkout from the command line
   - path: swift/LoopflowTests/TaskFileBrowserJourneyTests.swift
     why: Follow a call through review and presentation
+  - path: tests/fixtures/dto/task_files.json
+    why: Checkout inventory, matches, declarations and working-tree counts
+  - path: swift/LoopflowMac/TaskFilesStore.swift
+    why: One Task coordinates working changes, drafts and presentations
+  - path: swift/LoopflowMac/ComparisonReading.swift
+    why: One addressed comparison owns changes, sides and pending reads
+  - path: swift/LoopflowMac/DiffReviewState.swift
+    why: Whole Task and step readings share the review stream
+  - path: swift/LoopflowMac/FilesBrowserState.swift
+    why: Open files, drafts, history and pending presentations
+  - path: swift/LoopflowMac/CheckoutTree.swift
+    why: Paged listings own their reads and compacted rows
   - path: swift/LoopflowMac/ReviewDiff.swift
     why: Line references keep their source through edits
   - path: swift/LoopflowMac/FileFind.swift
     why: Match coordinates, stepping and promotion to Grep
-  - path: swift/LoopflowMac/TaskFilesStore.swift
-    why: Working tree, scratch inventory and file observation
-  - path: swift/LoopflowMac/FilesBrowserState.swift
-    why: Open files, drafts, history and pending presentations
-  - path: swift/LoopflowMac/ComparisonReading.swift
-    why: Snapshot and file sides for one comparison
-  - path: swift/LoopflowMac/DiffReviewState.swift
-    why: Review state for a Task, step or file
-  - path: swift/LoopflowMac/CheckoutTree.swift
-    why: Directory paging, compaction and keyboard navigation
-  - path: tests/fixtures/dto/task_files.json
-    why: File counts, declarations and search coordinates
   - path: rust/loopflow-execution/src/ops/task/workspace.rs
     why: Peer notifications distinguish scratch writes from comparison changes
   - path: rust/loopflow-execution/src/ops/task/snapshot.rs
@@ -31,7 +31,7 @@ first:
   - path: rust/loopflow-execution/src/ops/task/find.rs
     why: Git membership, scratch inventory and fuzzy ranking
   - path: rust/loopflow-execution/src/ops/task/grep.rs
-    why: Literal matches and bounded checkout scans
+    why: Bounded checkout text shared by Grep and Symbols
   - path: rust/loopflow-execution/src/ops/task/symbols.rs
     why: Checkout declarations and enclosing names
   - path: rust/loopflow/src/lf/commands/desktop.rs
@@ -61,7 +61,7 @@ first:
   - path: rust/loopflow/tests/machine_commands.rs
     why: Watch and search a peer-only checkout
   - path: scratch/plan.md
-    why: Journey results and remaining language and display checks
+    why: Journey results and remaining display checks
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Generated from the Rust protocol types

@@ -38,7 +38,7 @@ struct ReviewRendered: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        if let sides = store.diffReview.state(for: reader).sides(of: file, query: store.query, issue: store.issue) {
+        if let sides = store.diffReview.reading(for: reader).sides(of: file) {
             switch rendering {
             case .markdown:
                 ReviewMarkdown(old: sides.old?.content, new: sides.new?.content, split: split, find: reader == .changes ? nil : store.find).equatable()
@@ -56,13 +56,13 @@ struct ReviewRendered: View {
     }
 
     /// Old then new, as pictures or as pages.
-    @ViewBuilder private func both(_ sides: DiffReviewState.FileSides) -> some View {
+    @ViewBuilder private func both(_ sides: ComparisonReading.FileSides) -> some View {
         if rendering == .html {
             let count = [sides.old?.content, sides.new?.content].compactMap { $0 }.count
             page(sides.old, index: 0, count: count, absent: "Added")
             // Relative references resolve in the working tree only when the new
             // side is the working tree of a checkout on this Machine.
-            page(sides.new, index: 1, count: count, absent: "Deleted", baseURL: sides.commits.head == nil && store.query.remoteMachine == nil
+            page(sides.new, index: 1, count: count, absent: "Deleted", baseURL: store.diffReview.reading(for: reader).comparison.head == nil && store.query.remoteMachine == nil
                  ? URL(fileURLWithPath: store.cwd).appendingPathComponent(file.path) : nil)
         } else {
             // No ideal width: a picture's natural size must not decide whether the
@@ -96,7 +96,7 @@ struct ReviewSidesFailed: View {
     var body: some View {
         HStack(spacing: 0) {
             ReviewNotice(text: "Can't render this file: \(error)")
-            Button("Retry") { Task { await store.diffReview.state(for: reader).retrySides(file, query: store.query, issue: store.issue) } }
+            Button("Retry") { Task { await store.diffReview.reading(for: reader).retrySides(file) } }
                 .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
         }
     }

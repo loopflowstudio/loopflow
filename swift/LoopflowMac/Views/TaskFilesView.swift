@@ -61,7 +61,7 @@ struct TaskFilesView: View {
             store.observeFiles()
             if page == .files { await store.enterFiles() }
             else if store.workingChanges == nil, page == .brief || store.diffReview.comparison != .workingTree(base: "parent") {
-                await store.refreshWorkingChanges()
+                await store.workingTree.refresh()
             }
         }
         .task(id: "\(store.selection ?? "")|\(store.mode)") {
@@ -118,12 +118,12 @@ struct TaskFilesView: View {
                 }
             }
             Spacer(minLength: 0)
-            if paneWidth >= TaskFileChrome.dockedWidth { navigationBar }
+            if docked { navigationBar }
             Menu {
                 Button("Find File…") { store.chooseFile() }
                 Button("Search Checkout…") { store.chooseFile(.grep) }
                 Button("File Outline") { store.jumps.search(.outline, line: store.jumps.readingLine, in: store) }
-                if paneWidth < TaskFileChrome.dockedWidth {
+                if !docked {
                     Picker("View", selection: $store.mode) { modeChoices }
                     if let document = store.selectedDocument {
                         Button("Save") { Task { await document.save(issue: store.issue, query: store.query) } }
@@ -221,7 +221,7 @@ struct TaskFilesView: View {
                         }
                     } else if let error = store.workingTree.error {
                         FailureLine("Changes unavailable.", machine: error) {
-                            Button("Retry") { Task { await store.refreshWorkingChanges() } }
+                            Button("Retry") { Task { await store.workingTree.refresh() } }
                         }
                     } else { ProgressView().controlSize(.mini) }
                     HStack {
@@ -268,8 +268,7 @@ struct TaskFilesView: View {
     @ViewBuilder private func treeRow(_ row: CheckoutTree.Row, badges: [String: CheckoutChange]) -> some View {
         let indent = CGFloat(row.depth) * 12
         switch row {
-        case .entry(let entry, _):
-            let label = store.tree.label(for: entry)
+        case .entry(let entry, let label, _):
             Button {
                 if entry.kind == .directory {
                     Task { await store.tree.setDirectory(entry.path, expanded: !store.tree.isExpanded(entry.path)) }
@@ -333,7 +332,7 @@ struct TaskFilesView: View {
                 .keyboardShortcut("s", modifiers: .command)
                 .fixedSize()
             }
-            Picker("View", selection: Binding(get: { store.mode }, set: { store.mode = $0 })) {
+            Picker("View", selection: $store.mode) {
                 modeChoices
             }.pickerStyle(.segmented).labelsHidden()
                 .accessibilityLabel("View").fixedSize()
@@ -425,7 +424,7 @@ struct TaskFilesView: View {
                     .onChange(of: review.path, initial: true) { reportVisible(review.path) }
             } else if let reason = store.diffReview.fileDiffError ?? store.workingTree.error {
                 EmptyState(title: "Comparison unavailable", machine: reason) {
-                    Button("Retry") { Task { await store.refreshWorkingChanges(); await store.loadDiff() } }
+                    Button("Retry") { Task { await store.workingTree.refresh(); await store.loadDiff() } }
                         .accessibilityIdentifier("files-comparison-retry")
                 }
             } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
@@ -556,7 +555,7 @@ private struct TaskFileDiffView: View {
                              layout: state.layout(width: width), removals: state.openedRemovals,
                              moves: state.expandedMoves, longLines: state.openedLongLines,
                              rendered: file.flatMap { state.rendering(of: $0, in: reader) } != nil &&
-                                 state.state(for: reader).sideErrors[review.path] == nil)
+                                 state.reading(for: reader).sideErrors[review.path] == nil)
     }
 
     var body: some View {
@@ -598,7 +597,7 @@ private struct TaskFileDiffView: View {
                 guard let find = store.find, !find.query.isEmpty else { return }
                 guard let file = review.diff.file(review.path) else { await find.search([]); return }
                 let state = store.diffReview
-                if let rendering = state.rendering(of: file, in: reader), state.state(for: reader).sideErrors[file.path] == nil {
+                if let rendering = state.rendering(of: file, in: reader), state.reading(for: reader).sideErrors[file.path] == nil {
                     if rendering == .image || rendering == .svg { await find.search([]) }
                 } else { await find.search(stream.searchCells(in: state.opened(file, in: reader))) }
             }

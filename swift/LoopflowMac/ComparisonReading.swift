@@ -6,24 +6,36 @@ import Observation
 /// The change list and file sides belong to exactly one comparison.
 @MainActor @Observable
 final class ComparisonReading {
+    let issue: String
+    let query: RegistryQuery
     let comparison: ChangeComparison
-    private(set) var changes: TaskChangesSnapshot?
+    private(set) var changes: TaskChangesSnapshot? {
+        didSet {
+            if changes?.baseCommit != oldValue?.baseCommit || changes?.headCommit != oldValue?.headCommit {
+                openedGaps = [:]
+                dropSides()
+            }
+        }
+    }
     private(set) var counts: [String: Int] = [:]
     private(set) var error: String?
-    private(set) var loading = false
-    @ObservationIgnored private var pending: Task<Void, Never>?
+    var loading: Bool { pending != nil }
+    private var pending: Task<Void, Never>?
 
-    init(comparison: ChangeComparison) { self.comparison = comparison }
+    init(issue: String, query: RegistryQuery, comparison: ChangeComparison) {
+        self.issue = issue
+        self.query = query
+        self.comparison = comparison
+    }
 
-    func refresh(issue: String, query: RegistryQuery, afterWrite: Bool = false) async {
+    func refresh(afterWrite: Bool = false) async {
         if let pending {
             await pending.value
-            if afterWrite { await refresh(issue: issue, query: query) }
+            if afterWrite { await refresh() }
             return
         }
-        loading = true
         let read = Task {
-            defer { loading = false; pending = nil }
+            defer { pending = nil }
             do {
                 let next = try await query.taskChanges(issue: issue, base: comparison.base, head: comparison.head)
                 changes = next
@@ -39,57 +51,75 @@ final class ComparisonReading {
         await read.value
     }
 
-    var openedGaps: [String: DiffReviewState.OpenedGaps] = [:]
-
-    private(set) var fileSides: [String: DiffReviewState.FileSides] = [:]
-    private(set) var sideErrors: [String: String] = [:]
-    @ObservationIgnored private var sideReads: [String: Task<DiffReviewState.FileSides, any Error>] = [:]
-
-    private var sideCommits: DiffReviewState.FileSides.Commits? {
-        changes.map { .init(base: $0.baseCommit, head: comparison.head == nil ? nil : $0.headCommit) }
+    /// Both versions of a changed file, read once for the comparison's
+    /// commits: the old at its base (under its old name), the new at its head,
+    /// or in the working tree when the comparison has none. Syntax colors,
+    /// skipped lines and images all read them.
+    struct FileSides: Equatable, Sendable {
+        /// Nil for an added file.
+        let old: TaskFileSnapshot?
+        /// Nil for a deleted file.
+        let new: TaskFileSnapshot?
     }
 
+    /// What opening a file's skipped lines has given so far.
+    struct OpenedGaps {
+        /// The unchanged lines you opened between hunks, by hunk header.
+        var lines: [String: [ReviewLine]] = [:]
+        /// The Machine's message from the last open that failed.
+        var failure: String?
+    }
+
+    var openedGaps: [String: OpenedGaps] = [:]
+
+    private var fileSides: [String: FileSides] = [:]
+    private(set) var sideErrors: [String: String] = [:]
+    @ObservationIgnored private var sideReads: [String: Task<FileSides, any Error>] = [:]
+
     /// The file's two sides once read for this comparison; asking starts the read.
-    func sides(of file: ReviewFile, query: RegistryQuery, issue: String) -> DiffReviewState.FileSides? {
-        guard let commits = sideCommits else { return nil }
-        if let known = fileSides[file.path], known.commits == commits { return known }
+    func sides(of file: ReviewFile) -> FileSides? {
+        guard changes != nil else { return nil }
+        if let known = fileSides[file.path] { return known }
         if sideReads[file.path] == nil, sideErrors[file.path] == nil {
-            Task { _ = try? await readSides(file, query: query, issue: issue) }
+            Task { _ = try? await readSides(file) }
         }
         return nil
     }
 
     /// Read again after a failure.
-    func retrySides(_ file: ReviewFile, query: RegistryQuery, issue: String) async {
+    func retrySides(_ file: ReviewFile) async {
         sideErrors[file.path] = nil
-        _ = try? await readSides(file, query: query, issue: issue)
+        _ = try? await readSides(file)
     }
 
-    func readSides(_ file: ReviewFile, query: RegistryQuery, issue: String) async throws -> DiffReviewState.FileSides {
-        guard let commits = sideCommits else { throw RegistryQueryError("The comparison has not been read yet.") }
-        if let known = fileSides[file.path], known.commits == commits { return known }
-        let read = sideReads[file.path] ?? Task { [query, issue] in
+    func readSides(_ file: ReviewFile) async throws -> FileSides {
+        guard let changes else { throw RegistryQueryError("The comparison has not been read yet.") }
+        if let known = fileSides[file.path] { return known }
+        if let read = sideReads[file.path] { return try await read.value }
+        let head = comparison.head == nil ? nil : changes.headCommit
+        let read = Task { [query, issue] in
+            // dropSides removes cancelled reads. A late reply must leave its replacement alone.
+            defer { if !Task.isCancelled { sideReads[file.path] = nil } }
             func side(_ path: String?, at commit: String?) async throws -> TaskFileSnapshot? {
                 guard let path else { return nil }
                 return try await query.taskFile(issue: issue, path: path, at: commit)
             }
-            async let old = side(file.status == .added ? nil : file.oldPath ?? file.path, at: commits.base)
-            async let new = side(file.status == .deleted ? nil : file.path, at: commits.head)
-            return DiffReviewState.FileSides(commits: commits, old: try await old, new: try await new)
+            do {
+                async let old = side(file.status == .added ? nil : file.oldPath ?? file.path, at: changes.baseCommit)
+                async let new = side(file.status == .deleted ? nil : file.path, at: head)
+                let sides = try await FileSides(old: old, new: new)
+                try Task.checkCancellation()
+                fileSides[file.path] = sides
+                sideErrors[file.path] = nil
+                return sides
+            } catch {
+                try Task.checkCancellation()
+                sideErrors[file.path] = error.localizedDescription
+                throw error
+            }
         }
         sideReads[file.path] = read
-        defer { if sideReads[file.path] == read { sideReads[file.path] = nil } }
-        do {
-            let result = try await read.value
-            if !read.isCancelled, sideCommits == commits {
-                fileSides[file.path] = result
-                sideErrors[file.path] = nil
-            }
-            return result
-        } catch {
-            if !read.isCancelled, sideCommits == commits { sideErrors[file.path] = error.localizedDescription }
-            throw error
-        }
+        return try await read.value
     }
 
     /// Forget a file's sides, or every file's, once what they were read for has changed.
@@ -105,6 +135,5 @@ final class ComparisonReading {
             sideReads = [:]
         }
     }
-
 }
 #endif

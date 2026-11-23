@@ -125,7 +125,7 @@ final class TaskFilesStore {
 
     func enterFiles() async {
         async let scratch: Void = refreshScratch()
-        await refreshWorkingChanges()
+        await workingTree.refresh()
         await scratch
         guard !Task.isCancelled, page == .files, !browser.hasChosenInitialFile else { return }
         browser.hasChosenInitialFile = true
@@ -201,7 +201,7 @@ final class TaskFilesStore {
         set { browser.mode = newValue }
     }
 
-    let workingTree = ComparisonReading(comparison: .workingTree(base: "parent"))
+    let workingTree: ComparisonReading
     let diffReview: DiffReviewState
     var workingChanges: TaskChangesSnapshot? { workingTree.changes }
     let comments = ReviewComments()
@@ -336,8 +336,8 @@ final class TaskFilesStore {
             } catch { self.error = error.localizedDescription }
         }
         guard !Task.isCancelled, comparisonChanged else { return }
-        await workingTree.refresh(issue: issue, query: query, afterWrite: true)
-        if page == .changes, diffReview.comparison != workingTree.comparison { await diffReview.refreshChanges() }
+        await workingTree.refresh(afterWrite: true)
+        if page == .changes, diffReview.comparison != workingTree.comparison { await diffReview.reviewReading.refresh() }
         if !Task.isCancelled, mode == .diff { await loadDiff() }
         if !Task.isCancelled, page == .changes { await diffReview.loadReview(changed: committed ? nil : visible) }
     }
@@ -399,7 +399,8 @@ final class TaskFilesStore {
     }
 
     init(issue: String, cwd: String, query: RegistryQuery = RegistryQueryLocal.shared) {
-        diffReview = DiffReviewState(issue: issue, cwd: cwd, query: query, workingTree: workingTree, browser: browser, pullRequest: pullRequest, comments: comments)
+        workingTree = ComparisonReading(issue: issue, query: query, comparison: .workingTree(base: "parent"))
+        diffReview = DiffReviewState(cwd: cwd, workingTree: workingTree, browser: browser, pullRequest: pullRequest, comments: comments)
         tree = CheckoutTree(issue: issue, query: query)
         self.issue = issue
         self.cwd = cwd
@@ -440,12 +441,8 @@ final class TaskFilesStore {
     /// Refresh navigation only; selection and filesystem events own document reads.
     func refresh() async {
         if query.remoteMachine != nil { observeFiles() }
-        await refreshWorkingChanges()
-        if page == .changes, diffReview.comparison != workingTree.comparison { await diffReview.refreshChanges() }
-    }
-
-    func refreshWorkingChanges() async {
-        await workingTree.refresh(issue: issue, query: query)
+        await workingTree.refresh()
+        if page == .changes, diffReview.comparison != workingTree.comparison { await diffReview.reviewReading.refresh() }
     }
 
     private var appliedDiffVisit: UUID?

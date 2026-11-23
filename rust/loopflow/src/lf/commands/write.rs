@@ -430,7 +430,7 @@ writes! {
         name: String,
     } => loopflow_execution::ops::wave_lifecycle::WaveRenamed;
     { wave, name, .. } => tokio::runtime::Runtime::new()?.block_on(
-        loopflow_execution::ops::wave_lifecycle::rename(directory, wave, Some(name), None, None),
+        loopflow_execution::ops::wave_lifecycle::rename(directory, wave, Some(name), None),
     )?,
 
     #[serde(rename = "wave.remove")]
@@ -498,18 +498,20 @@ writes! {
         super::waves::desktop_status(directory, refreshed.wave().unwrap_or(wave))?
     },
 
-    /// `lf wave plan connect [<wave>|--all] [--team-key <key>]
+    /// `lf wave plan connect [<wave> [<project>]|--all] [--team-key <key>]
     /// [--team-name <name>] --json`: one receipt per Wave connected.
     #[serde(rename = "wave.plan.connect")]
     WavePlanConnect {
         directory: PathBuf,
         wave: Option<String>,
+        project: Option<String>,
         all: bool,
         team_key: Option<String>,
         team_name: Option<String>,
     } => Vec<loopflow_execution::ops::linear::LinearInitResult>;
     {
         wave,
+        project,
         all,
         team_key,
         team_name,
@@ -517,6 +519,7 @@ writes! {
     } => loopflow_execution::engine::wave::planning_connect(
         directory,
         wave.as_deref(),
+        project.as_deref(),
         *all,
         team_key.as_deref(),
         team_name.as_deref(),

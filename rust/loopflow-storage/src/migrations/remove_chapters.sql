@@ -73,3 +73,15 @@ DROP INDEX idx_projects_wave;
 CREATE UNIQUE INDEX projects_wave ON projects(wave_id);
 -- Nothing orders a Wave's Projects.
 -- leaving: tracker_wave_projects.position LOO-995
+-- A Wave's tracker Project is the one its Project links; no Initiative
+-- decides it. A link to any other Project goes, and so does a queued
+-- attachment of a Project to an Initiative.
+DELETE FROM tracker_wave_projects WHERE project_id NOT IN (
+    SELECT p.external_project_id FROM projects p
+    WHERE p.wave_id=tracker_wave_projects.wave_id AND p.external_project_id IS NOT NULL);
+UPDATE tracker_actions SET phase='retired',error='Projects no longer join an Initiative'
+WHERE project_id IS NOT NULL AND kind='link' AND phase IN ('queued','sent','conflicted');
+-- leaving: tracker_wave_sync.initiative LOO-995
+-- leaving: tracker_projects.initiative_ids LOO-995
+-- leaving: tracker_projects.membership_unresolved LOO-995
+-- leaving: projects.planning_initiatives LOO-995

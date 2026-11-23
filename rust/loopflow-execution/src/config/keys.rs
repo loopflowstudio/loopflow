@@ -232,7 +232,7 @@ pub fn fold(document: &mut Value) {
     if let Some(plan) = repo_plan {
         merge(map, "planning".into(), plan);
     }
-    // The released `linear: {team}` block; a Wave file's `linear: {initiative}` stays.
+    // The released `linear: {team}` block.
     if let Some(team) = map
         .get_mut("linear")
         .and_then(Value::as_mapping_mut)

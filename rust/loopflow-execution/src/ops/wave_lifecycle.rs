@@ -8,7 +8,7 @@ pub mod recovery;
 
 use std::path::{Path, PathBuf};
 
-use crate::work::wave::lifecycle::{Identity, Operation, ProviderChange};
+use crate::work::wave::lifecycle::{Identity, Operation};
 
 use serde::{Deserialize, Serialize};
 
@@ -236,14 +236,6 @@ pub struct RemovalTask {
     pub started: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct InitiativeArchive {
-    pub wave: String,
-    pub initiative: String,
-    /// Why Linear still has it live; `None` once archived.
-    pub error: Option<String>,
-}
-
 /// The preview Desktop and the CLI render before removal, and the receipt after.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WaveRemoval {
@@ -260,7 +252,6 @@ pub struct WaveRemoval {
     pub completed_tasks: usize,
     pub projects: usize,
     pub sessions: usize,
-    pub initiatives: Vec<InitiativeArchive>,
     pub has_files: bool,
     /// Files under `.lf/wave/<name>` with edits nobody committed on the main
     /// checkout; removal deletes them with the directory, and Git keeps no copy.
@@ -397,29 +388,6 @@ pub fn remove(
     );
     let directory = main.join(authored_path(wave.slug()));
     let has_files = owns_address && directory.exists();
-    let initiatives = if let Some(operation) = saved {
-        operation
-            .providers
-            .iter()
-            .map(|provider| InitiativeArchive {
-                wave: provider.wave.clone(),
-                initiative: provider.initiative.clone(),
-                error: None,
-            })
-            .collect()
-    } else {
-        slugs
-            .iter()
-            .filter(|_| owns_address)
-            .filter_map(|slug| {
-                super::linear::read_initiative(&main, slug).map(|initiative| InitiativeArchive {
-                    wave: slug.clone(),
-                    initiative,
-                    error: None,
-                })
-            })
-            .collect()
-    };
     let mut receipt = WaveRemoval {
         id: wave.id().clone(),
         name: saved.map_or_else(
@@ -435,7 +403,6 @@ pub fn remove(
         completed_tasks,
         projects,
         sessions,
-        initiatives,
         has_files,
         uncommitted: if has_files {
             uncommitted_edits(&main, &authored_path(wave.slug()))
@@ -478,16 +445,6 @@ pub fn remove(
             waves: subtree.iter().map(Identity::from).collect(),
             destination: parent_id,
             delete_backlog,
-            providers: receipt
-                .initiatives
-                .iter()
-                .map(|archive| ProviderChange {
-                    wave: archive.wave.clone(),
-                    initiative: archive.initiative.clone(),
-                    title: None,
-                    done: false,
-                })
-                .collect(),
             changes,
             planning_done: false,
             applied: false,
@@ -525,30 +482,7 @@ pub fn remove(
     operation.planning_done = true;
     recovery::save(&operation, &store)?;
 
-    for (index, archive) in receipt.initiatives.iter_mut().enumerate() {
-        if operation.providers[index].done {
-            continue;
-        }
-        match runtime.block_on(super::linear::archive_initiative(
-            &main,
-            &archive.initiative,
-        )) {
-            Ok(()) => {
-                operation.providers[index].done = true;
-                recovery::save(&operation, &store)?;
-            }
-            Err(error) => archive.error = Some(error.to_string()),
-        }
-    }
-    receipt.files = Some(
-        if operation.providers.iter().any(|provider| !provider.done) {
-            AuthoredFiles::Uncommitted {
-                reason: "kept until the Linear Initiative is archived".into(),
-            }
-        } else {
-            recovery::finish_files(&mut operation, &store, &main)
-        },
-    );
+    receipt.files = Some(recovery::finish_files(&mut operation, &store, &main));
     receipt.summary = removal_summary(&receipt);
     Ok(receipt)
 }
@@ -728,7 +662,9 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
     let name = &removal.name;
     if removal.already_removed {
         let mut lines = vec![format!("{name} was already removed.")];
-        lines.extend(leftovers(removal));
+        if let Some(files) = &removal.files {
+            lines.extend(uncommitted_summary(name, files));
+        }
         return lines;
     }
     let mut lines = Vec::new();
@@ -837,15 +773,9 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
             ));
         }
     }
-    if removal.preview {
-        for archive in &removal.initiatives {
-            lines.push(format!(
-                "Linear Initiative {} for {} will be archived.",
-                archive.initiative, archive.wave
-            ));
-        }
+    if let Some(files) = &removal.files {
+        lines.extend(uncommitted_summary(&removal.name, files));
     }
-    lines.extend(leftovers(removal));
     lines
 }
 
@@ -857,22 +787,6 @@ pub fn render_removed(removal: &WaveRemoval) -> String {
         .chain(removal.summary.iter().cloned())
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn leftovers(removal: &WaveRemoval) -> Vec<String> {
-    let mut lines = Vec::new();
-    for archive in &removal.initiatives {
-        if let Some(error) = &archive.error {
-            lines.push(format!(
-                "Linear Initiative {} is still live: {error}. Run `lf wave remove {}` again to retry.",
-                archive.initiative, removal.name
-            ));
-        }
-    }
-    if let Some(files) = &removal.files {
-        lines.extend(uncommitted_summary(&removal.name, files));
-    }
-    lines
 }
 
 // ── Rename ─────────────────────────────────────────────────────────────
@@ -887,16 +801,7 @@ pub struct WaveRenamed {
     pub to: String,
     pub renamed: bool,
     pub files: AuthoredFiles,
-    /// The connected Initiative's new title, or why Linear kept the old one.
-    pub initiative: Option<InitiativeRename>,
     pub summary: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct InitiativeRename {
-    pub initiative: String,
-    pub title: String,
-    pub error: Option<String>,
 }
 
 /// Give a Wave a new address (and optionally another repository). Identity,
@@ -907,7 +812,6 @@ pub async fn rename(
     wave: &str,
     new_name: Option<&str>,
     target_repo: Option<&Path>,
-    title: Option<&str>,
 ) -> OpsResult<WaveRenamed> {
     let store = super::planning_sync::planning_store().await?;
     let main = crate::repository::discover(repo)
@@ -1007,16 +911,6 @@ pub async fn rename(
         } else {
             Vec::new()
         };
-        let providers = super::linear::read_initiative(Path::new(&source_repo), &from)
-            .filter(|_| moves || title.is_some())
-            .map(|initiative| ProviderChange {
-                wave: from.clone(),
-                initiative,
-                title: Some(title.map_or_else(|| super::linear::title_case(&to), str::to_string)),
-                done: false,
-            })
-            .into_iter()
-            .collect();
         let operation = Operation {
             id: uuid::Uuid::new_v4().to_string(),
             repo: repo_key.clone(),
@@ -1028,7 +922,6 @@ pub async fn rename(
             waves: subtree.iter().map(Identity::from).collect(),
             destination: None,
             delete_backlog: false,
-            providers,
             changes,
             planning_done: false,
             applied: false,
@@ -1073,38 +966,12 @@ pub async fn rename(
         .await;
     }
     let files = recovery::finish_files(&mut operation, &store, &main);
-    let initiative = if let Some(provider) = operation.providers.first() {
-        let mut result = InitiativeRename {
-            initiative: provider.initiative.clone(),
-            title: provider.title.clone().expect("rename retains its title"),
-            error: None,
-        };
-        if !provider.done {
-            match super::linear::rename_initiative(
-                Path::new(&operation.target_repo),
-                &result.initiative,
-                &result.title,
-            )
-            .await
-            {
-                Ok(()) => {
-                    operation.providers[0].done = true;
-                    recovery::save(&operation, &store)?;
-                }
-                Err(error) => result.error = Some(error.to_string()),
-            }
-        }
-        Some(result)
-    } else {
-        None
-    };
     let mut renamed = WaveRenamed {
         id: operation.waves[0].id.clone(),
         from: operation.from,
         to: operation.to,
         renamed: renamed_now,
         files,
-        initiative,
         summary: Vec::new(),
     };
     renamed.summary = rename_summary(&renamed);
@@ -1113,18 +980,7 @@ pub async fn rename(
 
 /// What the rename left for a person or agent to finish.
 fn rename_summary(renamed: &WaveRenamed) -> Vec<String> {
-    let mut lines = uncommitted_summary(&renamed.to, &renamed.files);
-    if let Some(InitiativeRename {
-        initiative,
-        error: Some(error),
-        ..
-    }) = &renamed.initiative
-    {
-        lines.push(format!(
-            "Linear Initiative {initiative} kept its title: {error}. Repeat the original `lf wave rename` command to retry."
-        ));
-    }
-    lines
+    uncommitted_summary(&renamed.to, &renamed.files)
 }
 
 pub fn render_renamed(renamed: &WaveRenamed) -> String {

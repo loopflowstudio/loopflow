@@ -164,22 +164,6 @@ impl Tracker {
         }
     }
 
-    /// Why `action` cannot be sent yet, decided with no request: a Linear
-    /// Project whose Wave has no Initiative. The action stays queued.
-    pub async fn blocked(
-        &self,
-        store: &Store,
-        repo: &Path,
-        action: &TrackerAction,
-    ) -> Option<String> {
-        match self {
-            Self::Linear(client) => client.blocked_action(store, repo, action).await,
-            Self::Asana(_) => None,
-            #[cfg(test)]
-            Self::Fake(fake) => (fake.blocked)(action),
-        }
-    }
-
     pub async fn send(&self, store: &Store, repo: &Path, action: &TrackerAction) -> Sent {
         match self {
             Self::Linear(client) => client.send_action(store, repo, action).await,
@@ -419,7 +403,6 @@ pub(crate) fn observed_project(project: &TrackerProject) -> Observed {
             WorkValue::ProjectDescription(project.description.clone()),
             WorkValue::ProjectStatus(project.status),
         ],
-        initiatives: project.initiative_ids.clone(),
         ..Observed::default()
     }
 }
@@ -441,55 +424,12 @@ pub(crate) async fn ingest_task(
             issue.identifier
         )));
     }
-    let mut confirmed = None;
-    if let Some(project) = project {
-        if let Some(local) = store
-            .get_project_by_project(&project.id)
-            .await
-            .map_err(message)?
-            .filter(|p| {
-                p.tracker_id
-                    .as_ref()
-                    .is_some_and(|id| id.as_str() == project.id)
-            })
-        {
-            let wave = store
-                .get_wave(&local.wave_id)
-                .await
-                .map_err(message)?
-                .ok_or_else(|| message("Project Wave is missing"))?;
-            if let Some(initiative) = super::linear::read_initiative(repo, wave.slug()) {
-                confirmed = Some((local.wave_id, initiative));
-            }
-        }
-    }
-    if confirmed.is_none() {
-        if let Some(project) = project {
-            for wave in store
-                .list_waves(Some(&repo.to_string_lossy()))
-                .await
-                .map_err(message)?
-            {
-                if let Some(initiative) = super::linear::read_initiative(repo, wave.slug()) {
-                    if project.initiative_ids.contains(&initiative) {
-                        if confirmed.is_some() {
-                            return Err(message("Project matches multiple Wave Initiatives"));
-                        }
-                        confirmed = Some((wave.id().clone(), initiative));
-                    }
-                }
-            }
-        }
-    }
     loopflow_storage::sqlite::linear_events::accept_linear_issue_in(
         &store.sqlite,
         &repo.to_string_lossy(),
         issue,
         project,
         observed_at,
-        confirmed
-            .as_ref()
-            .map(|(wave, initiative)| (wave, initiative.as_str())),
         queued_tracker(repo).unwrap_or(TrackerKind::Linear),
     )
     .map_err(message)
@@ -515,8 +455,6 @@ pub(crate) mod fake {
         pub idempotent: Vec<ActionKind>,
         pub held: Mutex<Option<Observed>>,
         pub requests: AtomicUsize,
-        /// Blocks these actions before any request, with the reason.
-        pub blocked: fn(&TrackerAction) -> Option<String>,
     }
 
     impl Fake {
@@ -525,7 +463,6 @@ pub(crate) mod fake {
                 idempotent: Vec::new(),
                 held: Mutex::new(None),
                 requests: AtomicUsize::new(0),
-                blocked: |_| None,
             }
         }
 

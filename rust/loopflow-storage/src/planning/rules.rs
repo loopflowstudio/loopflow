@@ -19,7 +19,6 @@ pub struct Observed {
     pub order: Option<Vec<String>>,
     /// Comment ids, or visible text where the provider keeps no id of ours.
     pub comments: Vec<String>,
-    pub initiatives: Vec<String>,
     pub deleted: bool,
     /// Whether the state moved since a state action's base, when the provider
     /// keeps that history. `None`: compare values only.
@@ -76,7 +75,7 @@ pub fn decide(
         ActionKind::Order => order(action, observed),
         ActionKind::Comment => comment(action, observed),
         ActionKind::Delete => delete(action, observed),
-        ActionKind::Link => link(action, observed),
+        ActionKind::Link => link(observed),
     }
 }
 
@@ -257,15 +256,8 @@ fn delete(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
     }
 }
 
-fn link(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
-    let wanted: Vec<String> =
-        serde_json::from_value(action.value["value"].clone()).unwrap_or_default();
-    match observed {
-        Some(observed) if wanted.iter().all(|id| observed.initiatives.contains(id)) => {
-            confirmed(observed)
-        }
-        _ => Decision::Send,
-    }
+fn link(observed: Option<&Observed>) -> Decision {
+    observed.map_or(Decision::Send, confirmed)
 }
 
 #[cfg(test)]

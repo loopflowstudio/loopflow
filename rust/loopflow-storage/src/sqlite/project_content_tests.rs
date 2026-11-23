@@ -26,12 +26,11 @@ fn project_name_receipt_does_not_reconstruct_unrelated_order_evidence() {
     let linear = wave.id().to_string();
     let observed = serde_json::from_value(serde_json::json!({
         "id":linear, "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
-        "workflow":"", "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
+        "workflow":"", "status":"started", "team_ids":["team"]
     })).unwrap();
     crate::sqlite::linear_events::accept_linear_project_in(
         &store,
         wave.id(),
-        "initiative",
         &observed,
         17,
         crate::planning_sync::TrackerKind::Linear,
@@ -82,12 +81,11 @@ fn project_prose_unobserved_baseline_stays_unknown_at_the_same_revision() {
     let linear = wave.id().to_string();
     let mut observed: crate::planning::TrackerProject = serde_json::from_value(serde_json::json!({
         "id":linear, "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
-        "workflow":"", "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
+        "workflow":"", "status":"started", "team_ids":["team"]
     })).unwrap();
     crate::sqlite::linear_events::accept_linear_project_in(
         &store,
         wave.id(),
-        "initiative",
         &observed,
         1,
         crate::planning_sync::TrackerKind::Linear,
@@ -109,7 +107,6 @@ fn project_prose_unobserved_baseline_stays_unknown_at_the_same_revision() {
     crate::sqlite::linear_events::accept_linear_project_in(
         &store,
         wave.id(),
-        "initiative",
         &observed,
         2,
         crate::planning_sync::TrackerKind::Linear,
@@ -145,12 +142,11 @@ fn project_prose_partial_observation_retains_its_original_baseline_and_age() {
     let linear = wave.id().to_string();
     let mut observed: crate::planning::TrackerProject = serde_json::from_value(serde_json::json!({
         "id":linear, "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"", "description":"Baseline",
-        "workflow":"", "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
+        "workflow":"", "status":"started", "team_ids":["team"]
     })).unwrap();
     crate::sqlite::linear_events::accept_linear_project_in(
         &store,
         wave.id(),
-        "initiative",
         &observed,
         17,
         crate::planning_sync::TrackerKind::Linear,
@@ -163,7 +159,6 @@ fn project_prose_partial_observation_retains_its_original_baseline_and_age() {
     crate::sqlite::linear_events::accept_linear_project_in(
         &store,
         wave.id(),
-        "initiative",
         &observed,
         29,
         crate::planning_sync::TrackerKind::Linear,
@@ -201,7 +196,6 @@ fn project_prose_partial_observation_retains_its_original_baseline_and_age() {
     crate::sqlite::linear_events::accept_linear_project_in(
         &store,
         wave.id(),
-        "initiative",
         &observed,
         30,
         crate::planning_sync::TrackerKind::Linear,

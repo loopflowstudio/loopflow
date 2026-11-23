@@ -475,10 +475,6 @@ impl Drain<'_> {
     }
 
     async fn send(&self, action: &TrackerAction) -> OpsResult<Step> {
-        if let Some(reason) = self.tracker.blocked(self.store, self.repo, action).await {
-            self.error(action, &reason)?;
-            return Ok(Step::Wait);
-        }
         if !self.take() {
             return Ok(Step::Spent);
         }
@@ -704,55 +700,6 @@ mod tests {
                 .len(),
             80
         );
-    }
-
-    #[tokio::test]
-    async fn a_blocked_creation_costs_the_pass_nothing() {
-        const NO_INITIATIVE: &str = "Wave has no Linear Initiative; its Projects stay local";
-        let mut fake = Fake::new();
-        fake.blocked =
-            |action| matches!(action.owner, ActionOwner::Project(_)).then(|| NO_INITIATIVE.into());
-        let mut f = fixture();
-        f.fake = Arc::new(fake);
-        f.tracker = Tracker::Fake(f.fake.clone());
-        for at in 0..21 {
-            loopflow_storage::test_fixture::project(
-                &f.store.sqlite,
-                "/repo",
-                &format!("project-{at}"),
-            );
-        }
-        // The creations queue ahead of the edit, so a charged block would
-        // spend the pass before the edit's turn.
-        f.store
-            .sqlite
-            .enqueue_tracker_creations("/repo", TrackerKind::Linear)
-            .unwrap();
-        let task = f.bound_task();
-        f.title(&task, "Renamed", "queued", None);
-        let pass = f.pass().await;
-        assert_eq!(f.fake.requests(), 1);
-        assert_eq!(pass.requests, 1);
-        assert_eq!(f.phases(&task), [ActionPhase::Confirmed]);
-        let blocked: Vec<_> = f.store.sqlite.unconfirmed_tracker_actions("/repo").unwrap();
-        assert_eq!(blocked.len(), 21);
-        assert!(blocked
-            .iter()
-            .all(|action| action.phase == ActionPhase::Queued
-                && action.error.as_deref() == Some(NO_INITIATIVE)
-                && action.sent_at.is_none()));
-        // A later pass decides the same block without writing the rows again.
-        let revision = f.store.sqlite.revisions().unwrap().planning;
-        let pass = f.pass().await;
-        assert_eq!(pass.requests, 0);
-        assert_eq!(f.store.sqlite.revisions().unwrap().planning, revision);
-        assert!(f
-            .store
-            .sqlite
-            .unconfirmed_tracker_actions("/repo")
-            .unwrap()
-            .iter()
-            .all(|action| action.phase == ActionPhase::Queued && action.sent_at.is_none()));
     }
 
     #[tokio::test]

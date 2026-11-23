@@ -26,24 +26,6 @@ use loopflow_storage::sqlite::tracker_actions::{
 use loopflow_storage::work::edit::WorkValue;
 
 impl LinearClient {
-    /// A Project created under a Wave with no Initiative stays local until the
-    /// Wave has one. A missing Project or Wave is not a block: the send reports it.
-    pub(crate) async fn blocked_action(
-        &self,
-        store: &Store,
-        repo: &Path,
-        action: &TrackerAction,
-    ) -> Option<String> {
-        let (ActionOwner::Project(project), ActionKind::Create) = (&action.owner, action.kind)
-        else {
-            return None;
-        };
-        let (_, slug) = project_wave(store, project).await.ok()?;
-        crate::ops::linear::read_initiative(repo, &slug)
-            .is_none()
-            .then(|| NO_INITIATIVE.to_string())
-    }
-
     pub(crate) async fn send_action(
         &self,
         store: &Store,
@@ -61,7 +43,7 @@ impl LinearClient {
                 self.task_field(store, repo, task, action).await
             }
             (ActionOwner::Project(project), ActionKind::Field) => {
-                self.project_field(store, repo, project, action).await
+                self.project_field(store, project, action).await
             }
             (ActionOwner::Task(task), ActionKind::State) => self.state(store, task, action).await,
             (ActionOwner::Task(task), ActionKind::Comment) => {
@@ -70,9 +52,6 @@ impl LinearClient {
             (ActionOwner::Task(task), ActionKind::Delete) => self.delete(store, task).await,
             (ActionOwner::Project(project), ActionKind::Order) => {
                 self.order(store, project, action).await
-            }
-            (ActionOwner::Project(project), ActionKind::Link) => {
-                self.link(store, repo, project).await
             }
             (ActionOwner::Task(task), ActionKind::Link) => {
                 self.task_link(store, task, action).await
@@ -97,7 +76,7 @@ impl LinearClient {
                 self.look_created_task(store, repo, task).await
             }
             (ActionOwner::Project(project), ActionKind::Create) => {
-                self.look_created_project(store, repo, project).await
+                self.look_created_project(store, project).await
             }
             (ActionOwner::Task(task), ActionKind::Delete) => {
                 self.look_deletion(store, repo, task, action).await
@@ -107,8 +86,8 @@ impl LinearClient {
             (ActionOwner::Project(project), ActionKind::Order) => {
                 self.look_order(store, repo, project).await
             }
-            (ActionOwner::Project(project), _) => self.look_project(store, repo, project).await,
-            (ActionOwner::Wave(_), _) => Err(message("Linear Initiatives are not queued")),
+            (ActionOwner::Project(project), _) => self.look_project(store, project).await,
+            (ActionOwner::Wave(_), _) => Err(message("Linear carries no Wave actions")),
         };
         observed.map_err(|error| error.to_string())
     }
@@ -155,7 +134,7 @@ impl LinearClient {
         project: &ProjectId,
         action: &TrackerAction,
     ) -> OpsResult<Sent> {
-        let (wave, initiative) = project_scope(store, repo, project).await?;
+        let wave = project_wave(store, project).await?;
         let team = repository_scope(repo)?;
         let id = creation_id(project.as_str())?;
         let mut input =
@@ -183,35 +162,11 @@ impl LinearClient {
             }
             Err(error) => return Ok(Sent::failed(error)),
         };
-        let project = match self.attached(&initiative, project).await {
-            Ok(project) => project,
-            Err(error) => return Ok(Sent::Unknown(error.to_string())),
-        };
-        accept_project(store, &wave, &initiative, &project)?;
+        accept_project(store, &wave, &project)?;
         Ok(Sent::Acknowledged {
             revision: project.revision,
             remote_id: Some(id),
         })
-    }
-
-    /// A created Project joins its Wave's Initiative. The attachment carries an
-    /// id derived from both, so repeating it after a lost reply is safe.
-    async fn attached(
-        &self,
-        initiative: &str,
-        project: TrackerProject,
-    ) -> OpsResult<TrackerProject> {
-        if !project.initiative_ids.is_empty() {
-            return Ok(project);
-        }
-        let link = uuid::Uuid::new_v5(
-            &uuid::Uuid::NAMESPACE_URL,
-            format!("loopflow/project/{}/initiative/{initiative}", project.id).as_bytes(),
-        )
-        .to_string();
-        self.deliver_project_attachment(&link, &project.id, initiative)
-            .await
-            .map_err(message)
     }
 
     async fn task_field(
@@ -246,7 +201,6 @@ impl LinearClient {
     async fn project_field(
         &self,
         store: &Store,
-        repo: &Path,
         project: &ProjectId,
         action: &TrackerAction,
     ) -> OpsResult<Sent> {
@@ -262,8 +216,7 @@ impl LinearClient {
             }
             Err(error) => return Ok(Sent::failed(error)),
         };
-        let (wave, initiative) = project_scope(store, repo, project).await?;
-        accept_project(store, &wave, &initiative, &observed)?;
+        accept_project(store, &project_wave(store, project).await?, &observed)?;
         Ok(Sent::Acknowledged {
             revision: observed.revision,
             remote_id: Some(external),
@@ -404,21 +357,6 @@ impl LinearClient {
                     .then(a.sort_order.total_cmp(&b.sort_order))
             });
         }
-    }
-
-    async fn link(&self, store: &Store, repo: &Path, project: &ProjectId) -> OpsResult<Sent> {
-        let (wave, initiative) = project_scope(store, repo, project).await?;
-        let external = remote_project(store, project).await?;
-        let observed = self.project_ownership(&external).await.map_err(message)?;
-        let observed = match self.attached(&initiative, observed).await {
-            Ok(observed) => observed,
-            Err(error) => return Ok(Sent::Unknown(error.to_string())),
-        };
-        accept_project(store, &wave, &initiative, &observed)?;
-        Ok(Sent::Acknowledged {
-            revision: observed.revision,
-            remote_id: Some(external),
-        })
     }
 
     async fn task_link(
@@ -604,7 +542,6 @@ impl LinearClient {
     async fn look_created_project(
         &self,
         store: &Store,
-        repo: &Path,
         project: &ProjectId,
     ) -> OpsResult<Option<Observed>> {
         let Some(found) = self
@@ -614,9 +551,7 @@ impl LinearClient {
         else {
             return Ok(None);
         };
-        let (wave, initiative) = project_scope(store, repo, project).await?;
-        let found = self.attached(&initiative, found).await?;
-        accept_project(store, &wave, &initiative, &found)?;
+        accept_project(store, &project_wave(store, project).await?, &found)?;
         Ok(Some(observed_project(&found)))
     }
 
@@ -703,13 +638,11 @@ impl LinearClient {
     async fn look_project(
         &self,
         store: &Store,
-        repo: &Path,
         project: &ProjectId,
     ) -> OpsResult<Option<Observed>> {
         let external = remote_project(store, project).await?;
         let observed = self.project_ownership(&external).await.map_err(message)?;
-        let (wave, initiative) = project_scope(store, repo, project).await?;
-        accept_project(store, &wave, &initiative, &observed)?;
+        accept_project(store, &project_wave(store, project).await?, &observed)?;
         Ok(Some(observed_project(&observed)))
     }
 
@@ -771,45 +704,20 @@ async fn project_id(store: &Store, project: Option<&str>) -> OpsResult<Option<St
     Ok(Some(remote_project(store, &project).await?))
 }
 
-const NO_INITIATIVE: &str = "Wave has no Linear Initiative; its Projects stay local";
-
-/// The Wave a Project belongs to and that Wave's Initiative.
-async fn project_scope(
-    store: &Store,
-    repo: &Path,
-    project: &ProjectId,
-) -> OpsResult<(WaveId, String)> {
-    let (wave, slug) = project_wave(store, project).await?;
-    let initiative =
-        crate::ops::linear::read_initiative(repo, &slug).ok_or_else(|| message(NO_INITIATIVE))?;
-    Ok((wave, initiative))
-}
-
-/// The Wave a Project belongs to, with its slug.
-async fn project_wave(store: &Store, project: &ProjectId) -> OpsResult<(WaveId, String)> {
-    let project = store
+/// The Wave a Project belongs to.
+async fn project_wave(store: &Store, project: &ProjectId) -> OpsResult<WaveId> {
+    Ok(store
         .get_project(project)
         .await
         .map_err(message)?
-        .ok_or_else(|| message("Project is missing"))?;
-    let wave = store
-        .get_wave(&project.wave_id)
-        .await
-        .map_err(message)?
-        .ok_or_else(|| message("Project Wave is missing"))?;
-    Ok((project.wave_id, wave.slug().to_owned()))
+        .ok_or_else(|| message("Project is missing"))?
+        .wave_id)
 }
 
-fn accept_project(
-    store: &Store,
-    wave: &WaveId,
-    initiative: &str,
-    project: &TrackerProject,
-) -> OpsResult<()> {
+fn accept_project(store: &Store, wave: &WaveId, project: &TrackerProject) -> OpsResult<()> {
     loopflow_storage::sqlite::linear_events::accept_linear_project_in(
         &store.sqlite,
         wave,
-        initiative,
         project,
         now(),
         loopflow_storage::planning_sync::TrackerKind::Linear,

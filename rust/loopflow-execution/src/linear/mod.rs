@@ -38,18 +38,9 @@ pub struct TeamBinding {
 
 pub(crate) fn validate_project_ownership(
     wave: &str,
-    initiative_id: &str,
     expected_team_id: Option<&str>,
     project: &TrackerProject,
 ) -> LinearResult<()> {
-    if project.initiative_ids.as_slice() != [initiative_id] {
-        return Err(LinearError::Message(format!(
-            "Linear Project `{}` ({}) in wave/{wave} belongs to Initiatives [{}]; expected exactly {initiative_id}",
-            project.name,
-            project.id,
-            project.initiative_ids.join(", ")
-        )));
-    }
     let [team_id] = project.team_ids.as_slice() else {
         return Err(LinearError::Message(format!(
             "Linear Project `{}` ({}) in wave/{wave} belongs to {} Teams [{}]; expected exactly one repository Team",
@@ -263,73 +254,6 @@ const UPDATE_TEAM_DESCRIPTION_MUTATION: &str = r#"mutation UpdateTeamDescription
   }
 }"#;
 
-const CREATE_INITIATIVE_MUTATION: &str = r#"mutation CreateInitiative($name: String!, $description: String!) {
-  initiativeCreate(input: { name: $name, description: $description }) {
-    initiative {
-      id
-    }
-  }
-}"#;
-
-const UPDATE_INITIATIVE_MUTATION: &str = r#"mutation UpdateInitiative($id: String!, $input: InitiativeUpdateInput!) {
-  initiativeUpdate(id: $id, input: $input) {
-    success
-    initiative {
-      id
-    }
-  }
-}"#;
-
-const ARCHIVE_INITIATIVE_MUTATION: &str = r#"mutation ArchiveInitiative($id: String!) {
-  initiativeArchive(id: $id) {
-    success
-  }
-}"#;
-
-const LIST_INITIATIVES_QUERY: &str = r#"query ListInitiatives($after: String, $first: Int!) {
-  initiatives(after: $after, first: $first) {
-    nodes {
-      id
-      name
-      description
-    }
-    pageInfo {
-      hasNextPage
-      endCursor
-    }
-  }
-}"#;
-
-const LIST_INITIATIVE_PROJECTS_QUERY: &str = r#"query ListInitiativeProjects($initiativeId: String!, $after: String, $first: Int!, $includeArchived: Boolean!) {
-  initiative(id: $initiativeId) {
-    projects(after: $after, first: $first, includeSubInitiatives: false, includeArchived: $includeArchived) {
-      nodes {
-        id
-        name
-        updatedAt
-        description
-        content
-        archivedAt
-        status { type }
-        initiatives(first: 50) {
-          nodes {
-            id
-          }
-        }
-        teams(first: 50) {
-          nodes {
-            id
-          }
-        }
-      }
-      pageInfo {
-        hasNextPage
-        endCursor
-      }
-    }
-  }
-}"#;
-
 const SET_PROJECT_TEAMS_MUTATION: &str = r#"mutation SetProjectTeams($id: String!, $teamIds: [String!]!) {
   projectUpdate(id: $id, input: { teamIds: $teamIds }) {
     project {
@@ -409,7 +333,6 @@ macro_rules! project_fields {
     description
     content
     status { type }
-    initiatives(first: 50) { nodes { id } }
     teams(first: 50) { nodes { id } }"#
     };
 }
@@ -890,85 +813,6 @@ impl LinearClient {
             })
     }
 
-    pub async fn create_wave(&self, name: &str, summary: &str) -> LinearResult<String> {
-        let response: InitiativeCreateData = self
-            .graphql(
-                CREATE_INITIATIVE_MUTATION,
-                json!({
-                    "name": name,
-                    "description": linear_description(summary),
-                }),
-            )
-            .await?;
-        Ok(response.initiative_create.initiative.id)
-    }
-
-    pub async fn rename_wave(&self, initiative_id: &str, name: &str) -> LinearResult<()> {
-        self.update_wave(initiative_id, Some(name), None).await
-    }
-
-    /// Archive a removed Wave's Initiative; Linear keeps it readable.
-    pub async fn archive_wave(&self, initiative_id: &str) -> LinearResult<()> {
-        let response: Value = self
-            .graphql(ARCHIVE_INITIATIVE_MUTATION, json!({"id": initiative_id}))
-            .await?;
-        if response["initiativeArchive"]["success"] != true {
-            return Err(LinearError::Message(format!(
-                "Linear did not confirm archive of Initiative {initiative_id}"
-            )));
-        }
-        Ok(())
-    }
-
-    pub async fn update_wave(
-        &self,
-        initiative_id: &str,
-        name: Option<&str>,
-        summary: Option<&str>,
-    ) -> LinearResult<()> {
-        let mut input = serde_json::Map::new();
-        if let Some(name) = name {
-            input.insert("name".into(), json!(name));
-        }
-        if let Some(summary) = summary {
-            input.insert("description".into(), json!(linear_description(summary)));
-        }
-        let response: Value = self
-            .graphql(
-                UPDATE_INITIATIVE_MUTATION,
-                json!({"id": initiative_id, "input": input}),
-            )
-            .await?;
-        if response["initiativeUpdate"]["success"] != true {
-            return Err(LinearError::Message(format!(
-                "Linear did not confirm update of Initiative {initiative_id}"
-            )));
-        }
-        Ok(())
-    }
-
-    pub async fn initiatives(&self) -> LinearResult<Vec<InitiativeNode>> {
-        let mut after = None;
-        let mut initiatives = Vec::new();
-        loop {
-            let response: InitiativesData = self
-                .graphql(
-                    LIST_INITIATIVES_QUERY,
-                    json!({
-                        "after": after,
-                        "first": LIST_PROJECTS_PAGE_SIZE,
-                    }),
-                )
-                .await?;
-            let page = response.initiatives;
-            initiatives.extend(page.nodes);
-            if !page.page_info.has_next_page {
-                return Ok(initiatives);
-            }
-            after = page.page_info.end_cursor;
-        }
-    }
-
     async fn project_status_id(
         &self,
         status: loopflow_storage::work::project::ProjectStatus,
@@ -1021,35 +865,6 @@ impl LinearClient {
                 ));
             }
             after = Some(cursor);
-        }
-    }
-
-    pub async fn list_projects(&self, initiative_id: &str) -> LinearResult<Vec<TrackerProject>> {
-        let mut after = None;
-        let mut projects = Vec::new();
-        loop {
-            let response: InitiativeProjectsData = self
-                .graphql(
-                    LIST_INITIATIVE_PROJECTS_QUERY,
-                    json!({
-                        "initiativeId": initiative_id,
-                        "after": after,
-                        "first": LIST_PROJECTS_PAGE_SIZE,
-                        "includeArchived": false,
-                    }),
-                )
-                .await?;
-            let page = response.initiative.projects;
-            projects.extend(
-                page.nodes
-                    .into_iter()
-                    .map(ProjectNode::into_tracker_project)
-                    .collect::<LinearResult<Vec<_>>>()?,
-            );
-            if !page.page_info.has_next_page {
-                return Ok(projects);
-            }
-            after = page.page_info.end_cursor;
         }
     }
 
@@ -1373,7 +1188,6 @@ impl LinearClient {
                 r#"query FindProject($id: ID!) {
                 projects(filter: { id: { eq: $id } }, first: 2, includeArchived: true) {
                     nodes { id name updatedAt archivedAt description content status { type }
-                        initiatives(first: 50) { nodes { id } }
                         teams(first: 50) { nodes { id } }
                     }
                     pageInfo { hasNextPage endCursor }
@@ -1396,6 +1210,46 @@ impl LinearClient {
                 project.into_tracker_project()
             })
             .transpose()
+    }
+
+/// The Linear Project a person names: its id, its URL, its slug id or its
+    /// name. A name two live Projects share is an error naming both.
+    pub(crate) async fn named_project(&self, key: &str) -> LinearResult<Option<TrackerProject>> {
+        let key = key.trim();
+        // `https://linear.app/<workspace>/project/<name-slug>-<slugId>/overview`
+        let key = key
+            .split_once("/project/")
+            .map_or(key, |(_, path)| path.split('/').next().unwrap_or(path));
+        if uuid::Uuid::parse_str(key).is_ok() {
+            return self.find_project(key).await;
+        }
+        let slug_id = key.rsplit('-').next().unwrap_or(key);
+        let response: ProjectsData = self
+            .graphql(
+                r#"query NamedProject($slugId: String!, $name: String!) {
+                projects(filter: { or: [{ slugId: { eq: $slugId } }, { name: { eqIgnoreCase: $name } }] }, first: 3) {
+                    nodes { id name updatedAt archivedAt description content status { type }
+                        teams(first: 50) { nodes { id } }
+                    }
+                    pageInfo { hasNextPage endCursor }
+                }
+            }"#,
+                json!({ "slugId": slug_id, "name": key }),
+            )
+            .await?;
+        match <[ProjectNode; 1]>::try_from(response.projects.nodes) {
+            Ok([project]) => project.into_tracker_project().map(Some),
+            Err(nodes) if nodes.is_empty() => Ok(None),
+            Err(nodes) => Err(LinearError::Message(format!(
+                "{} Linear Projects match `{key}`: {}; name one by its URL",
+                nodes.len(),
+                nodes
+                    .iter()
+                    .map(|node| format!("`{}` ({})", node.name, node.id))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))),
+        }
     }
 
     pub(crate) async fn project_ownership(&self, project_id: &str) -> LinearResult<TrackerProject> {
@@ -1459,37 +1313,6 @@ impl LinearClient {
                 .as_str()
                 .ok_or_else(|| LinearError::Message("creation identity is missing".into()))?,
         )
-    }
-
-    pub(crate) async fn deliver_project_attachment(
-        &self,
-        id: &str,
-        project: &str,
-        initiative: &str,
-    ) -> LinearResult<TrackerProject> {
-        let query = format!("mutation DeliverProjectAttachment($input: InitiativeToProjectCreateInput!) {{ initiativeToProjectCreate(input: $input) {{ success initiativeToProject {{ project {{ {PROJECT_RESPONSE_FIELDS} }} }} }} }}");
-        let response: Value = self
-            .graphql(
-                &query,
-                json!({"input":{"id":id,"projectId":project,"initiativeId":initiative}}),
-            )
-            .await?;
-        let payload = &response["initiativeToProjectCreate"];
-        if payload["success"] != true {
-            return Err(LinearError::Message(
-                "Project attachment was not confirmed; receipt retained".into(),
-            ));
-        }
-        let node: ProjectNode = serde_json::from_value(
-            payload["initiativeToProject"]["project"].clone(),
-        )
-        .map_err(|error| LinearError::Message(format!("invalid attached Project: {error}")))?;
-        if node.id != project {
-            return Err(LinearError::Message(
-                "Project attachment returned a different identity".into(),
-            ));
-        }
-        node.into_tracker_project()
     }
 
     /// The mutation's own response supplies confirmation; no follow-up read.
@@ -1880,12 +1703,6 @@ struct GraphqlErrorExtensions {
 }
 
 #[derive(Deserialize)]
-struct InitiativeCreateData {
-    #[serde(rename = "initiativeCreate")]
-    initiative_create: InitiativePayload,
-}
-
-#[derive(Deserialize)]
 struct IssueUpdateIdentifierData {
     #[serde(rename = "issueUpdate")]
     issue_update: IssueIdentifierPayload,
@@ -1900,11 +1717,6 @@ struct IssueIdentifierPayload {
 struct IssueIdentifierNode {
     #[serde(deserialize_with = "loopflow_model::id::deserialize_task_identifier")]
     identifier: String,
-}
-
-#[derive(Deserialize)]
-struct InitiativePayload {
-    initiative: IdNode,
 }
 
 #[derive(Deserialize)]
@@ -2274,7 +2086,6 @@ struct ProjectNode {
     description: Option<String>,
     #[serde(deserialize_with = "Option::deserialize")]
     content: Option<String>,
-    initiatives: IdConnection,
     teams: IdConnection,
 }
 
@@ -2289,12 +2100,6 @@ impl ProjectNode {
             name: self.name,
             summary: self.description.unwrap_or_default(),
             status: self.status.type_,
-            initiative_ids: self
-                .initiatives
-                .nodes
-                .into_iter()
-                .map(|initiative| initiative.id)
-                .collect(),
             team_ids: self.teams.nodes.into_iter().map(|team| team.id).collect(),
         })
     }
@@ -2312,30 +2117,7 @@ struct IdConnection {
 }
 
 #[derive(Deserialize)]
-struct InitiativesData {
-    initiatives: Connection<InitiativeNode>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct InitiativeNode {
-    #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid")]
-    pub id: String,
-    pub name: String,
-    pub description: Option<String>,
-}
-
-#[derive(Deserialize)]
 struct ProjectsData {
-    projects: Connection<ProjectNode>,
-}
-
-#[derive(Deserialize)]
-struct InitiativeProjectsData {
-    initiative: InitiativeWithProjects,
-}
-
-#[derive(Deserialize)]
-struct InitiativeWithProjects {
     projects: Connection<ProjectNode>,
 }
 
@@ -2413,44 +2195,6 @@ fn description_with_repository_claim(description: &str, repository: &str) -> Str
     } else {
         format!("{human}\n\n{marker}")
     }
-}
-
-pub(crate) fn linear_description(description: &str) -> String {
-    let summary = first_meaningful_paragraph(description);
-    if summary.is_empty() {
-        return String::new();
-    }
-
-    const MAX_DESCRIPTION_LEN: usize = 255;
-    summary.chars().take(MAX_DESCRIPTION_LEN).collect()
-}
-
-fn first_meaningful_paragraph(description: &str) -> String {
-    let mut lines = description.lines().peekable();
-    while let Some(line) = lines.next() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        let mut paragraph = vec![trimmed];
-        while let Some(next_line) = lines.peek() {
-            let trimmed = next_line.trim();
-            if trimmed.is_empty() {
-                break;
-            }
-            if trimmed.starts_with('#') {
-                lines.next();
-                break;
-            }
-            paragraph.push(trimmed);
-            lines.next();
-        }
-
-        return paragraph.join(" ");
-    }
-
-    String::new()
 }
 
 #[cfg(test)]
@@ -3299,18 +3043,6 @@ mod tests {
                 json!({"id":"ENG-7", "stateId":"state-default"})
             );
         }
-    }
-
-    #[test]
-    fn linear_description_skips_headings_and_truncates() {
-        let summary = linear_description(
-            "## Vision\n\nThis is the first paragraph.\n\n## Strategy\n\nSecond paragraph.",
-        );
-        assert_eq!(summary, "This is the first paragraph.");
-
-        let long = "a".repeat(300);
-        assert_eq!(linear_description(&long).len(), 255);
-        assert_eq!(linear_description(""), "");
     }
 }
 

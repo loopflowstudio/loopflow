@@ -1,6 +1,6 @@
 //! Asana's half of the tracker queue. A Task is an Asana task addressed by its
 //! Loopflow uuid (`external:<uuid>`); a Wave Project is mirrored once, when it
-//! is created. Project edits, order and Initiative links have no Asana form
+//! is created. Project edits and order have no Asana form
 //! and retire with a reason.
 
 use std::path::Path;
@@ -385,7 +385,6 @@ fn mirrored_project(
         summary: String::new(),
         description: None,
         status: loopflow_storage::work::project::ProjectStatus::Backlog,
-        initiative_ids: vec![team.to_owned()],
         team_ids: vec![team.to_owned()],
     };
     for value in values(action)? {
@@ -403,7 +402,7 @@ fn mirrored_project(
     Ok(project)
 }
 
-/// Asana has no Initiative: a Wave's Projects belong to the repository's team.
+/// The created Asana project becomes the one its Wave links.
 async fn accept_mirror(
     store: &Store,
     project: &ProjectId,
@@ -418,7 +417,6 @@ async fn accept_mirror(
     loopflow_storage::sqlite::linear_events::accept_linear_project_in(
         &store.sqlite,
         &wave,
-        &mirrored.initiative_ids[0],
         mirrored,
         now(),
         loopflow_storage::planning_sync::TrackerKind::Asana,

@@ -1957,7 +1957,7 @@ pub enum WaveCommand {
         cmd: Option<WavePlanCommand>,
     },
     /// Refresh one Wave's planning from its tracker, then show its status;
-    /// a Wave with no Linear Initiative shows its local planning
+    /// a Wave whose Project links no Linear Project shows its local planning
     Sync {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,
@@ -1992,14 +1992,11 @@ pub enum WaveCommand {
     /// Projects and Sessions keep their identity
     Rename {
         wave: String,
-        /// The new name; omit to keep it while changing --repo or --title
+        /// The new name; omit to keep it while changing --repo
         new_name: Option<String>,
         /// Move the Wave to another repository
         #[arg(long)]
         repo: Option<PathBuf>,
-        /// Change the linked Initiative display title
-        #[arg(long)]
-        title: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -2007,11 +2004,16 @@ pub enum WaveCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WavePlanCommand {
-    /// Connect a Wave to its Initiative and the repository's Team (Task prefix); a new name is added first
+    /// Link a Wave's Project to a Linear Project in the repository's Team
+    /// (Task prefix), or make one; a new Wave name is added first
     Connect {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
-        /// Recursively initialize every Wave under .lf/wave/
+        /// An existing Linear Project to link: its URL, id or name.
+        /// Without one, the Wave's Project is made in Linear.
+        #[arg(conflicts_with = "all")]
+        project: Option<String>,
+        /// Connect every Wave under .lf/wave/
         #[arg(long, conflicts_with = "wave")]
         all: bool,
         /// Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name.

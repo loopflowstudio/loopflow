@@ -205,20 +205,20 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
                     .to_string(),
             )
         } else {
-            // Ingestion resolves the returned Project against authored Wave mappings.
-            waves
-                .iter()
-                .find(|wave| {
-                    super::linear::read_initiative(std::path::Path::new(wave.repo()), wave.slug())
-                        .is_some_and(|initiative| {
-                            project
-                                .as_ref()
-                                .is_some_and(|project| project.initiative_ids.contains(&initiative))
-                        })
-                })
-                .map(|wave| wave.repo().to_owned())
-                // An item in no Wave Project is a standalone Task of this repository.
-                .or_else(|| Some(repository.to_owned()))
+            // An issue in the Project a Wave links is that Wave's; any other
+            // issue is this repository's, and ingestion imports it only when
+            // it is in no Project at all.
+            let linked = match &project {
+                Some(project) => super::linear::linking_project(store, &project.id).await?,
+                None => None,
+            };
+            match linked {
+                Some(linked) => waves
+                    .iter()
+                    .find(|wave| wave.id() == &linked.wave_id)
+                    .map(|wave| wave.repo().to_owned()),
+                None => Some(repository.to_owned()),
+            }
         };
         let Some(owner) = owner else { continue };
         super::tracker::ingest_task(

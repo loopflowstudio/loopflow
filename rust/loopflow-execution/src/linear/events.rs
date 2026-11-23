@@ -11,14 +11,13 @@ use loopflow_storage::sqlite::linear_events::{
 pub(crate) async fn accept_linear_inventory(
     store: &Store,
     wave: WaveId,
-    initiative: String,
     projects: Vec<loopflow_storage::planning::TrackerProject>,
     issues: Vec<loopflow_storage::planning::TrackerItem>,
     observed_at: i64,
     locks: Option<Arc<PlanningLocks>>,
 ) -> StoreResult<()> {
     run_planning_write(&store.sqlite, locks, move |store| {
-        accept_linear_inventory_in(&store, &wave, &initiative, &projects, &issues, observed_at)
+        accept_linear_inventory_in(&store, &wave, &projects, &issues, observed_at)
     })
     .await
 }
@@ -26,15 +25,13 @@ pub(crate) async fn accept_linear_inventory(
 pub(crate) async fn reconcile_linear_project_teams(
     store: &Store,
     wave: &WaveId,
-    initiative: &str,
     project: loopflow_storage::planning::TrackerProject,
     observed_at: i64,
     locks: Arc<PlanningLocks>,
 ) -> StoreResult<()> {
     let wave = wave.clone();
-    let initiative = initiative.to_string();
     run_planning_write(&store.sqlite, Some(locks), move |store| {
-        reconcile_linear_project_teams_in(&store, &wave, &initiative, &project, observed_at)
+        reconcile_linear_project_teams_in(&store, &wave, &project, observed_at)
     })
     .await
 }
@@ -45,7 +42,6 @@ pub(crate) async fn accept_linear_issue(
     issue: loopflow_storage::planning::TrackerItem,
     project: Option<loopflow_storage::planning::TrackerProject>,
     observed_at: i64,
-    confirmed_wave: Option<(WaveId, String)>,
     locks: Option<Arc<PlanningLocks>>,
 ) -> StoreResult<()> {
     let repo = repo.to_string();
@@ -59,9 +55,6 @@ pub(crate) async fn accept_linear_issue(
             &issue,
             project.as_ref(),
             observed_at,
-            confirmed_wave
-                .as_ref()
-                .map(|(wave, initiative)| (wave, initiative.as_str())),
             loopflow_storage::planning_sync::TrackerKind::Linear,
         )
     })

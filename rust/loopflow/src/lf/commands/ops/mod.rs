@@ -419,6 +419,7 @@ pub fn run_step_commit(step: &str, agent_override: Option<&str>) -> Result<()> {
 pub fn connect_wave(
     repo_root: &std::path::Path,
     wave: Option<&str>,
+    project: Option<&str>,
     all: bool,
     team_key: Option<&str>,
     team_name: Option<&str>,
@@ -427,6 +428,7 @@ pub fn connect_wave(
     let results = loopflow_execution::engine::wave::planning_connect(
         repo_root,
         wave,
+        project,
         all,
         team_key,
         team_name,
@@ -437,7 +439,14 @@ pub fn connect_wave(
         return Ok(());
     }
     for result in &results {
-        let initiative_state = if result.created { "created" } else { "linked" };
+        let project = match (&result.project_id, result.created) {
+            (Some(id), false) => format!("Linear Project `{}` ({id}) linked", result.project_name),
+            (Some(id), true) => format!("Linear Project `{}` ({id}) made", result.project_name),
+            (None, _) => format!(
+                "Linear Project `{}` is being made; `lf wave sync` retries it",
+                result.project_name
+            ),
+        };
         let team_state = if result.team_created {
             format!(
                 ", repository Team {} created ({}-*)",
@@ -449,17 +458,11 @@ pub fn connect_wave(
                 result.team_id, result.team_key
             )
         };
-        println!(
-            "{}: Linear Initiative {} ({initiative_state}){team_state}",
-            result.wave, result.initiative_id
-        );
+        println!("{}: {project}{team_state}", result.wave);
         if let loopflow_execution::ops::wave_lifecycle::AuthoredFiles::Uncommitted { reason } =
             &result.files
         {
-            println!(
-                ".lf/wave/{} is not committed on the main checkout: {reason}",
-                result.wave
-            );
+            println!(".lf/config.yaml is not committed on the main checkout: {reason}");
         }
     }
     Ok(())
@@ -499,9 +502,10 @@ pub fn sync_planning(
 pub enum PlanningRefresh {
     /// No tracker: the repository's whole plan, from the hub.
     Repository,
-    /// One Wave, from its Linear Initiative.
+    /// One Wave, from the Linear Project it links.
     Wave(String),
-    /// A Wave with no Initiative has nothing to exchange; its local planning stands.
+    /// A Wave whose Project links no Linear Project has nothing to read; its
+    /// local planning stands.
     Unconnected(String),
 }
 
@@ -524,17 +528,18 @@ pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result
     }
     let wave =
         planning_wave(&repo, wave)?.ok_or_else(|| anyhow::anyhow!("Select a Wave to refresh"))?;
-    if loopflow_execution::ops::linear::read_initiative(&repo, &wave).is_none() {
-        return Ok(PlanningRefresh::Unconnected(wave));
-    }
     // The Team delta brings changes and comments in and pending saves go out,
     // so a save left by an outage is delivered on the next refresh.
     if let Err(error) = loopflow_execution::ops::planning_sync::refresh_directory(&repo) {
         tracing::debug!(%error, "planning delivery pending before refresh");
     }
-    tokio::runtime::Runtime::new()?
+    let linked = tokio::runtime::Runtime::new()?
         .block_on(loopflow_execution::ops::linear::refresh_wave(&repo, &wave))?;
-    Ok(PlanningRefresh::Wave(wave))
+    Ok(if linked {
+        PlanningRefresh::Wave(wave)
+    } else {
+        PlanningRefresh::Unconnected(wave)
+    })
 }
 
 pub fn reteam(repo: &std::path::Path, apply: bool, json: bool) -> Result<()> {

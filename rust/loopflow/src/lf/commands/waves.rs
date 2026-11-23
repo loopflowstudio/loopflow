@@ -397,10 +397,14 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
         Evidence::Unavailable { reason } => println!("  projects unavailable: {reason}"),
         Evidence::Ok { items, .. } => {
             for project in items {
+                let link = if project.tracker_id.is_some() {
+                    "linked"
+                } else {
+                    "local"
+                };
                 println!(
-                    "  Project   {} ({}) · {}",
+                    "  Project   {} ({link}) · {}",
                     project.name,
-                    project.id,
                     project.status.as_str()
                 );
                 for line in project.sync.lines() {

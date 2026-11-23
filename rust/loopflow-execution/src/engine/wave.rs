@@ -9,12 +9,14 @@ use super::{Error, ErrorCode, Result};
 use crate::ops::linear::{LinearInitResult, LinearReteamResult};
 use crate::ops::Progress;
 
-/// `wave.plan.connect`: connect `wave` (the ambient Wave with none, every
-/// authored Wave with `all`) to its tracker Initiative and the repository's
-/// Team, as `lf wave plan connect` does; one receipt per Wave connected.
+/// `wave.plan.connect`: link the Project of `wave` (the ambient Wave with
+/// none, every authored Wave with `all`) to `project` in the repository's
+/// tracker Team, or make one there, as `lf wave plan connect` does; one
+/// receipt per Wave connected.
 pub fn planning_connect(
     directory: &Path,
     wave: Option<&str>,
+    project: Option<&str>,
     all: bool,
     team_key: Option<&str>,
     team_name: Option<&str>,
@@ -59,6 +61,7 @@ pub fn planning_connect(
                 &repo,
                 &crate::ops::linear::LinearInitOptions {
                     wave: Some(wave),
+                    project: project.map(str::to_owned),
                     team_key: team_key.map(str::to_owned),
                     team_name: team_name.map(str::to_owned),
                 },

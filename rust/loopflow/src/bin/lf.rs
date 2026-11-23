@@ -868,6 +868,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             match cmd {
                 WavePlanCommand::Connect {
                     wave,
+                    project,
                     all,
                     team_key,
                     team_name,
@@ -875,6 +876,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                 } => loopflow::lf::commands::ops::connect_wave(
                     repo,
                     wave.as_deref(),
+                    project.as_deref(),
                     *all,
                     team_key.as_deref(),
                     team_name.as_deref(),
@@ -920,7 +922,6 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             wave,
             new_name,
             repo: target,
-            title,
             json,
         } => {
             let renamed = tokio::runtime::Runtime::new()?.block_on(
@@ -929,7 +930,6 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                     wave,
                     new_name.as_deref(),
                     target.as_deref(),
-                    title.as_deref(),
                 ),
             )?;
             if *json {
@@ -3154,7 +3154,7 @@ fn execute_command(
             if let loopflow::lf::commands::ops::PlanningRefresh::Unconnected(wave) = &refreshed {
                 if !*json {
                     println!(
-                        "{wave}: no Linear Initiative; showing local planning (lf wave plan connect {wave})"
+                        "{wave}: links no Linear Project; showing local planning (lf wave plan connect {wave})"
                     );
                 }
             }

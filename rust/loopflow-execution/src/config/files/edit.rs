@@ -357,8 +357,7 @@ mod tests {
         let raw: serde_yaml_ng::Value =
             serde_yaml_ng::from_str("graph: auto\ncontext: {}\n").unwrap();
         let mut normalized = raw.clone();
-        crate::config::keys::fold(&mut normalized);
-        crate::config::normalize_context(&mut normalized);
+        crate::config::normalize_preferences(&mut normalized);
         let auto = Setting::catalogued(&address, "auto");
         assert!(auto
             .declared(&normalized, &auto.entries(&raw).unwrap())

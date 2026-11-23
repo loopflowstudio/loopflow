@@ -179,8 +179,8 @@ struct TaskChangesView: View {
     }
 
     private func explain(_ key: String) async throws -> ConfigurationValue? {
-        let data = try await ServerClient.configuration(.configExplain(destination: personalFile, key: key))
-        return try JSONDecoder().decode(ConfigurationExplanation.self, from: data).inspections.first?.settings[key]
+        try await ServerClient.configuration(.configExplain(destination: personalFile, key: key),
+                                             as: ConfigurationExplanation.self).inspections.first?.settings[key]
     }
 
     private func readSettings() async {

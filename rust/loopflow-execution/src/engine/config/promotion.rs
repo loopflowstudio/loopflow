@@ -1,7 +1,7 @@
 //! Move one declaration to its immediate broader destination. Both files are
 //! prepared under ordered locks before the receiving file is installed.
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use anyhow::{ensure, Context, Result};
 use schemars::JsonSchema;
@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use crate::config::files::{self, edit, Destination, ResolvedDestination};
 use crate::config::settings::EffectiveSetting;
 
-pub fn broader(source: &Destination) -> Option<Destination> {
+fn broader(source: &Destination) -> Option<Destination> {
     match source {
         Destination::PersonalRepository { repository }
         | Destination::SharedWave { repository, .. } => Some(Destination::SharedRepository {
@@ -35,7 +35,7 @@ pub enum Availability {
 
 pub(super) fn offer_moves(files: &mut [super::ScopeFile]) -> Result<()> {
     let directory = crate::store::lf_home_dir().join("settings-moves");
-    let pending_moves: std::collections::BTreeSet<_> = match crate::observe::read_dir(&directory) {
+    let pending_moves: BTreeSet<_> = match crate::observe::read_dir(&directory) {
         Ok(paths) => paths.into_iter().collect(),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Default::default(),
         Err(error) => return Err(error.into()),
@@ -50,21 +50,23 @@ pub(super) fn offer_moves(files: &mut [super::ScopeFile]) -> Result<()> {
         else {
             continue;
         };
-        let keys = files[other].slots.keys().cloned().collect::<Vec<_>>();
-        for key in keys {
-            let pending = !pending_moves.is_empty()
-                && files[index].slots.get(&key).is_some_and(|slot| {
-                    pending_moves.contains(&journal(&files[index].destination, &slot.key))
-                });
-            let empty = matches!(files[other].slots[&key].declared, super::Authored::Absent);
-            if let Some(slot) = files[index].slots.get_mut(&key) {
-                if pending {
-                    slot.promotion = Availability::Resume;
-                } else if empty && matches!(slot.declared, super::Authored::Present { .. }) {
-                    slot.promotion = Availability::Move {
-                        destination: destination.clone(),
-                    };
-                }
+        let [source, receiving] = files
+            .get_disjoint_mut([index, other])
+            .expect("a broader destination is distinct");
+        for (key, slot) in &mut source.slots {
+            let Some(broader_slot) = receiving.slots.get(key) else {
+                continue;
+            };
+            if !pending_moves.is_empty()
+                && pending_moves.contains(&journal(&source.destination, &slot.key))
+            {
+                slot.promotion = Availability::Resume;
+            } else if matches!(broader_slot.declared, super::Authored::Absent)
+                && matches!(slot.declared, super::Authored::Present { .. })
+            {
+                slot.promotion = Availability::Move {
+                    destination: destination.clone(),
+                };
             }
         }
     }
@@ -129,7 +131,7 @@ struct Pending {
     undo: bool,
 }
 
-pub(super) fn journal(source: &Destination, key: &str) -> PathBuf {
+fn journal(source: &Destination, key: &str) -> PathBuf {
     let id = Sha256::digest(
         serde_json::to_vec(&(source, key)).expect("configuration address serializes"),
     );
@@ -191,8 +193,7 @@ impl<'a> Move<'a> {
         let declared = |address: &ResolvedDestination| {
             let raw = &self.documents[&address.path].value;
             let mut document = raw.clone();
-            crate::config::keys::fold(&mut document);
-            crate::config::normalize_context(&mut document);
+            crate::config::normalize_preferences(&mut document);
             let setting = edit::Setting::catalogued(address, self.key);
             setting.declared(&document, &setting.entries(raw)?)
         };
@@ -261,6 +262,30 @@ impl<'a> Move<'a> {
             .collect()
     }
 
+    fn review(
+        &self,
+        repository: &Path,
+        wave: Option<&str>,
+        patches: &[(PathBuf, String)],
+        receipt: Receipt,
+    ) -> Result<Review> {
+        let effective = crate::observe::preview_files(patches, || {
+            super::scope::projected_setting(repository, wave, self.key)
+        })?;
+        let changes = patches
+            .iter()
+            .map(|(path, after)| FilePreview {
+                path: path.clone(),
+                patch: edit::preview(&self.documents[path].original, after),
+            })
+            .collect();
+        Ok(Review {
+            changes,
+            effective,
+            receipt,
+        })
+    }
+
     fn install(&self, patches: &[(PathBuf, String)], undo: bool) -> Result<()> {
         let mut addresses = vec![self.receiving, self.source];
         if undo {
@@ -310,7 +335,7 @@ pub fn run(
     }
     let paths = [&source.path, &receiving.path]
         .into_iter()
-        .collect::<std::collections::BTreeSet<_>>();
+        .collect::<BTreeSet<_>>();
     for path in &paths {
         if path.ends_with(files::PRIVATE_FILE) && !matches!(action, Action::Preview) {
             files::protect_private_file(path)?;
@@ -336,83 +361,44 @@ pub fn run(
         std::fs::remove_file(&id)?;
         return Ok(Outcome::Recovered);
     }
-    ensure!(
-        !matches!(action, Action::Resume),
-        "move already finished; refresh Settings"
-    );
-    let (receipt, patches, undo) = if let Action::Undo { receipt } = action {
-        let inverse = receipt.inverse();
-        operation.restore(
-            &Pending {
-                receipt: inverse.clone(),
+    let (pending, patches) = match action {
+        Action::Resume => anyhow::bail!("move already finished; refresh Settings"),
+        Action::Undo { receipt } => {
+            let pending = Pending {
+                receipt: receipt.inverse(),
                 undo: true,
-            },
-            false,
-        )?;
-        (inverse, operation.patches()?, true)
-    } else {
-        let receipt = operation.forward()?;
-        let patches = operation.patches()?;
-        let effective = crate::observe::preview_files(&patches, || -> Result<_> {
-            let resolved = crate::config::resolved(Some(repository), wave)?;
-            let typed = crate::config::keys::typed_key(key);
-            let parts = typed.split('.').collect::<Vec<_>>();
-            let preference = crate::config::settings::preference_parts(&parts)?;
-            let target = match &parts[..parts.len() - preference.len()] {
-                ["skills", name] => super::ScopeTarget::Skill {
-                    name: (*name).into(),
-                },
-                ["graphs", graph, "steps", step] => super::ScopeTarget::Step {
-                    graph: (*graph).into(),
-                    step: (*step).into(),
-                },
-                _ => super::ScopeTarget::General,
             };
-            let skill = target.skill(Some(repository))?;
-            let settings = match skill {
-                Some(skill) => super::effective_settings(&crate::config::settings::resolve(
-                    &resolved.config,
-                    Some(&skill),
-                )?)?,
-                None => super::effective_settings(&resolved)?,
-            };
-            let canonical =
-                crate::config::keys::canonical(preference, crate::config::keys::Root::General)
-                    .join(".");
-            settings.get(&canonical).cloned().context("unknown setting")
-        })?;
-        let changes = patches
-            .iter()
-            .map(|(path, after)| FilePreview {
-                path: path.clone(),
-                patch: edit::preview(&operation.documents[path].original, after),
-            })
-            .collect();
-        let review = Review {
-            changes,
-            effective,
-            receipt: receipt.clone(),
-        };
-        if !matches!(action, Action::Confirm {review: expected} if expected == &review) {
-            return Ok(Outcome::Preview { review });
+            operation.restore(&pending, false)?;
+            (pending, operation.patches()?)
         }
-        (receipt, patches, false)
+        Action::Preview | Action::Confirm { .. } => {
+            let receipt = operation.forward()?;
+            let patches = operation.patches()?;
+            let review = operation.review(repository, wave, &patches, receipt)?;
+            if !matches!(action, Action::Confirm {review: expected} if expected == &review) {
+                return Ok(Outcome::Preview { review });
+            }
+            (
+                Pending {
+                    receipt: review.receipt,
+                    undo: false,
+                },
+                patches,
+            )
+        }
     };
-    if source.path != receiving.path {
+    let across_files = source.path != receiving.path;
+    if across_files {
         std::fs::create_dir_all(id.parent().expect("journal has a parent"))?;
-        files::atomic_write(
-            &id,
-            &serde_json::to_string(&Pending {
-                receipt: receipt.clone(),
-                undo,
-            })?,
-        )?;
+        files::atomic_write(&id, &serde_json::to_string(&pending)?)?;
     }
-    operation.install(&patches, undo)?;
-    if source.path != receiving.path {
+    operation.install(&patches, pending.undo)?;
+    if across_files {
         std::fs::remove_file(id)?;
     }
-    Ok(Outcome::Applied { receipt })
+    Ok(Outcome::Applied {
+        receipt: pending.receipt,
+    })
 }
 
 #[cfg(test)]

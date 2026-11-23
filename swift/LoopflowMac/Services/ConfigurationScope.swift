@@ -55,21 +55,6 @@ struct ConfigurationInspection: Decodable {
     let settings: [String: ConfigurationValue]
 }
 
-struct ConfigurationValue: Codable {
-    let value: JSONValue
-    let candidates: [ConfigurationCandidate]
-}
-
-struct ConfigurationCandidate: Codable {
-    let key: String
-    let source: String
-    let reason: String
-    let locator: String
-    let scope: String
-    let target: JSONValue
-    let value: JSONValue
-}
-
 struct ConfigurationScope: Codable {
     let settings: [String: ConfigurationValue]
     let files: [File]
@@ -81,7 +66,7 @@ struct ConfigurationScope: Codable {
         var id: JSONValue { destination }
 
         var owner: ConfigurationDestination? {
-            guard case .object(let fields) = destination, case .string(let kind) = fields["kind"] else { return nil }
+            guard case .string(let kind) = destination["kind"] else { return nil }
             return ConfigurationDestination(rawValue: kind)
         }
     }
@@ -108,11 +93,6 @@ struct ConfigurationScope: Codable {
     }
 }
 
-struct ConfigurationEditReceipt: Codable {
-    let before: [ConfigurationEntry]
-    let after: [ConfigurationEntry]
-}
-
 extension JSONValue {
     var settingsText: String {
         switch self {
@@ -128,42 +108,5 @@ extension JSONValue {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return String(decoding: (try? encoder.encode(self)) ?? Data(), as: UTF8.self)
-    }
-}
-
-struct MoveReview: Codable {
-    struct Patch: Codable { let path: String; let patch: String }
-    let changes: [Patch]
-    let effective: ConfigurationValue
-    let receipt: MoveReceipt
-}
-
-struct MoveReceipt: Codable {
-    let source: ConfigurationEditReceipt
-    let receiving: ConfigurationEditReceipt
-}
-
-enum MoveResult: Decodable {
-    case preview(MoveReview)
-    case applied(MoveReceipt)
-    case pending
-    case recovered
-
-    private enum Keys: String, CodingKey { case kind, review, receipt }
-    private enum Kind: String, Decodable { case preview, applied, pending, recovered }
-    init(from decoder: Decoder) throws {
-        let fields = try decoder.container(keyedBy: Keys.self)
-        switch try fields.decode(Kind.self, forKey: .kind) {
-        case .preview: self = .preview(try fields.decode(MoveReview.self, forKey: .review))
-        case .applied: self = .applied(try fields.decode(MoveReceipt.self, forKey: .receipt))
-        case .pending: self = .pending
-        case .recovered: self = .recovered
-        }
-    }
-}
-
-extension JSONValue {
-    init(settingsValue: some Encodable) throws {
-        self = try JSONDecoder().decode(Self.self, from: JSONEncoder().encode(settingsValue))
     }
 }

@@ -309,22 +309,9 @@ Work selection uses the theme’s selection fill and contrasting text.
 File selection keeps a neutral fill and edge; keyboard focus has a separate outline.
 Ordinary controls and links use text roles; the theme’s accent emphasizes deliberate actions.
 Status labels and shapes retain their meaning across palettes.
-Press **⌘,** for **Settings**: a native macOS split sidebar with search and
-grouped forms across **App** (General, Appearance, Shortcuts, Mobile),
-**Workflow** (Agents, Context, Git & Release), and **Infrastructure** (Machines).
-Workflow and Machines separate **Applies to** (Global, a checkout, a Wave, or an
-Advanced Skill/Graph step) from **Save in** (My or Shared), show effective
-values alongside the edited declaration, and expand each row's provenance badge
-into an ordered precedence ladder with YAML previews for **Reset Layer** and
-**Move** plus **Undo** ([Settings](../docs/surfaces.md#settings)).
-
-In **Settings → Context**, choose a checkout and switch **Save in** between
-**My settings** and **Shared settings**. Expand **In effect** to see which file
-sets Diff for the next launch. **Reset layer…** shows the change to the selected
-file. Undo restores the declaration even after switching destinations.
-For **Additional documents**, **Save empty list** clears inherited entries.
-**Reset layer…** lets them apply again. **Move to Shared Repository…** shows
-both patches and the result for the selected work before saving.
+Press **⌘,** to open [Settings](../docs/surfaces.md#settings). Search for a
+control or choose a pane in the sidebar. In Workflow and Machines, **Applies
+to** selects the work and **Save in** selects the file to edit.
 
 Choose **Settings → Appearance** (**⌘,**) to pick a theme for every window,
 Ghostty, and iPhone. Pick **System**, **Light**, or **Dark**; System follows

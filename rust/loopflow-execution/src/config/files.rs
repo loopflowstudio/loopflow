@@ -379,12 +379,13 @@ pub(crate) fn update_settings<T>(
     LockedFile::open(path)?.update_text(|original| {
         let starting = settings_text(path, root)?;
         let mut document = parse_document(&starting, path)?;
-        let before = document.clone();
         let result = change(&mut document)?;
-        let text = if document == before {
+        let edited = edited_text(&starting, &document)?;
+        // A no-op must leave a legacy Wave in GOAL.md.
+        let text = if edited == starting {
             original.to_owned()
         } else {
-            edited_text(&starting, &document)?
+            edited
         };
         ensure!(
             settings_text(path, root)? == starting,
@@ -517,14 +518,8 @@ impl LockedFile {
     pub fn update<T>(&self, change: impl FnOnce(&mut Value) -> Result<T>) -> Result<T> {
         self.update_text(|original| {
             let mut after = parse_document(original, &self.path)?;
-            let before = after.clone();
             let result = change(&mut after)?;
-            let text = if after == before {
-                original.to_owned()
-            } else {
-                edited_text(original, &after)?
-            };
-            Ok((text, result))
+            Ok((edited_text(original, &after)?, result))
         })
     }
 

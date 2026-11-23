@@ -298,7 +298,7 @@ public enum ConfigOperation: Encodable, Sendable {
     case configSet(destination: JSONValue, key: String, value: String)
     case preview(destination: JSONValue, key: String, expected: [ConfigurationEntry], change: ConfigurationChange)
     case edit(destination: JSONValue, key: String, expected: [ConfigurationEntry], change: ConfigurationChange)
-    case promote(destination: JSONValue, key: String, wave: String?, action: JSONValue)
+    case promote(destination: JSONValue, key: String, wave: String?, action: MoveAction)
     case configUnset(destination: JSONValue, key: String)
     /// The serving Machine's `theme:`: set to `value` (YAML), or read when nil.
     case configTheme(value: String?)
@@ -327,26 +327,6 @@ public enum ConfigOperation: Encodable, Sendable {
         case .configTheme(let value):
             TaggedFields("config.theme", ["value": value])
         }
-    }
-}
-
-public struct ConfigurationEntry: Codable, Sendable, Equatable {
-    public let path: [String]
-    public let value: JSONValue
-}
-
-public enum ConfigurationChange: Encodable, Sendable {
-    case set(String)
-    case reset
-    case restore([ConfigurationEntry])
-
-    public func encode(to encoder: Encoder) throws {
-        let fields: TaggedFields = switch self {
-        case .set(let value): TaggedFields("set", ["value": value])
-        case .reset: TaggedFields("reset")
-        case .restore(let entries): TaggedFields("restore", ["entries": entries])
-        }
-        try fields.encode(to: encoder, tag: "kind")
     }
 }
 

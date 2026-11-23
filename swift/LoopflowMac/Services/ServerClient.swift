@@ -40,6 +40,17 @@ enum ServerClient {
         Data(try await request(.config(operation), location: location).bytes)
     }
 
+    static func configuration<T: Decodable>(_ operation: ConfigOperation, as type: T.Type,
+                                            location: ServerLocation = .shared) async throws -> T {
+        try JSONDecoder().decode(type, from: await configuration(operation, location: location))
+    }
+
+    static func edit(_ change: ConfigurationChange, destination: JSONValue, key: String,
+                     expected: [ConfigurationEntry], location: ServerLocation) async throws -> ConfigurationEditReceipt {
+        try await configuration(.edit(destination: destination, key: key, expected: expected, change: change),
+                                as: ConfigurationEditReceipt.self, location: location)
+    }
+
     private static func request(_ operation: ServerOperation, location: ServerLocation) async throws -> RawJSON {
         try Task.checkCancellation()
         let link = try await links.link(for: location)

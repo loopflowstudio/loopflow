@@ -22,8 +22,7 @@ struct ConfigurationSettingsTests {
         #expect(try json(ConfigOperation.preview(destination: mine.destination, key: "context.diff", expected: try #require(mine.slots["context.diff"]).entries, change: .reset)) == fixture["preview"])
         let result = try JSONDecoder().decode(MoveResult.self, from: JSONEncoder().encode(fixture["move_result"]))
         guard case .preview(let preview) = result else { Issue.record("Expected a move preview"); return }
-        let action: JSONValue = .object(["kind": .string("confirm"), "review": try json(preview)])
-        #expect(try json(ConfigOperation.promote(destination: mine.destination, key: "context.diff", wave: nil, action: action)) == fixture["promote"])
+        #expect(try json(ConfigOperation.promote(destination: mine.destination, key: "context.diff", wave: nil, action: .confirm(preview))) == fixture["promote"])
         let receipt = try JSONDecoder().decode(ConfigurationEditReceipt.self, from: JSONEncoder().encode(fixture["receipt"]))
         #expect(try json(receipt) == fixture["receipt"])
     }

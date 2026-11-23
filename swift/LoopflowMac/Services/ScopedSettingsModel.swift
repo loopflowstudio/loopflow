@@ -43,8 +43,7 @@ final class ScopedSettingsModel {
         let id = observation
         if catalogue.isEmpty {
             do {
-                catalogue = try JSONDecoder().decode([ConfigurationDefinition].self, from:
-                    await ServerClient.configuration(.configCatalog, location: location))
+                catalogue = try await ServerClient.configuration(.configCatalog, as: [ConfigurationDefinition].self, location: location)
             } catch {
                 if observation == id { reading = reading.failed(error.localizedDescription) }
                 return
@@ -80,25 +79,24 @@ final class ScopedSettingsModel {
         defer { saving = false }
         let id = observation
         do {
-            let receipt = try await write(change, key: slot.key, file: file, expected: slot.entries)
+            let destination = file.destination
+            let address = slot.key
+            let receipt = try await ServerClient.edit(change, destination: destination, key: address,
+                                                      expected: slot.entries, location: location)
             guard receipt.before != receipt.after else { return true }
             let name = "\(key) in \(file.owner?.title ?? file.path)"
-            let restore: @MainActor (ScopedSettingsModel) -> Void = { model in
+            let undo = Notice.Action.undo(name, manager: manager, target: self) { [weak notices] model in
                 Task {
                     do {
-                        _ = try await model.write(.restore(receipt.before), key: slot.key, file: file, expected: receipt.after)
-                        notices.clear(key: key)
+                        _ = try await ServerClient.edit(.restore(receipt.before), destination: destination, key: address,
+                                                        expected: receipt.after, location: model.location)
+                        notices?.clear(key: key)
                     } catch {
                         model.report(error, id: id, key: key, notices: notices)
                     }
                 }
             }
-            manager?.registerUndo(withTarget: self, handler: restore)
-            manager?.setActionName(name)
-            notices.post(Notice("Saved \(name)", key: key, action: .init("Undo") { [weak manager, weak self] in
-                if let manager, manager.undoActionName == name { manager.undo() }
-                else if let self { restore(self) }
-            }))
+            notices.post(Notice("Saved \(name)", key: key, action: undo))
             return true
         } catch {
             report(error, id: id, key: key, notices: notices)
@@ -106,9 +104,12 @@ final class ScopedSettingsModel {
         }
     }
 
-    func promote(key: String, file: ConfigurationScope.File, review: MoveReview?, resume: Bool,
+    func promote(_ action: MoveAction, key: String, file: ConfigurationScope.File,
                  notices: NoticeCenter, manager: UndoManager?) async -> MoveReview? {
-        guard !saving else { return review }
+        guard !saving else {
+            if case .confirm(let review) = action { return review }
+            return nil
+        }
         saving = true
         defer { saving = false }
         let id = observation
@@ -116,58 +117,41 @@ final class ScopedSettingsModel {
         let destination = file.destination
         let wave = self.wave
         do {
-            var action: [String: JSONValue] = ["kind": .string(resume ? "resume" : "preview")]
-            if let review { action = ["kind": .string("confirm"), "review": try JSONValue(settingsValue: review)] }
             switch try await move(address, destination: destination, wave: wave, action: action) {
             case .preview(let review): return review
             case .pending: refresh()
             case .recovered: notices.post(Notice("Finished moving \(key)", key: key))
             case .applied(let receipt):
                 let name = "Move \(key)"
-                let restore: @MainActor (ScopedSettingsModel) -> Void = { model in
+                let undo = Notice.Action.undo(name, manager: manager, target: self) { [weak notices] model in
                     Task {
                         do {
-                            let action: [String: JSONValue] = ["kind": .string("undo"), "receipt": try JSONValue(settingsValue: receipt)]
-                            switch try await model.move(address, destination: destination, wave: wave, action: action) {
-                            case .applied: notices.clear(key: key)
-                            default: notices.post(Notice("Refresh to inspect the move in progress", key: key))
+                            switch try await model.move(address, destination: destination, wave: wave, action: .undo(receipt)) {
+                            case .applied: notices?.clear(key: key)
+                            default: notices?.post(Notice("Refresh to inspect the move in progress", key: key))
                             }
                         } catch { model.report(error, id: id, key: key, notices: notices) }
                     }
                 }
-                manager?.registerUndo(withTarget: self, handler: restore)
-                manager?.setActionName(name)
-                notices.post(Notice("Moved \(key)", key: key, action: .init("Undo") { [weak self, weak manager] in
-                    if let manager, manager.undoActionName == name { manager.undo() }
-                    else if let self { restore(self) }
-                }))
+                notices.post(Notice("Moved \(key)", key: key, action: undo))
             }
         } catch { report(error, id: id, key: key, notices: notices) }
         return nil
     }
 
-    private func move(_ key: String, destination: JSONValue, wave: String?, action: [String: JSONValue]) async throws -> MoveResult {
-        let data = try await ServerClient.configuration(.promote(destination: destination, key: key, wave: wave,
-            action: .object(action)), location: location)
-        return try JSONDecoder().decode(MoveResult.self, from: data)
+    private func move(_ key: String, destination: JSONValue, wave: String?, action: MoveAction) async throws -> MoveResult {
+        try await ServerClient.configuration(.promote(destination: destination, key: key, wave: wave, action: action),
+                                             as: MoveResult.self, location: location)
     }
 
     func preview(_ change: ConfigurationChange, key: String, file: ConfigurationScope.File) async throws -> String {
         guard let slot = file.slots[key] else { throw RegistryQueryError("Choose a destination for this setting") }
-        let data = try await ServerClient.configuration(.preview(destination: file.destination, key: slot.key,
-            expected: slot.entries, change: change), location: location)
-        return try JSONDecoder().decode(String.self, from: data)
+        return try await ServerClient.configuration(.preview(destination: file.destination, key: slot.key,
+            expected: slot.entries, change: change), as: String.self, location: location)
     }
 
-    private func write(_ change: ConfigurationChange, key: String, file: ConfigurationScope.File,
-                       expected: [ConfigurationEntry]) async throws -> ConfigurationEditReceipt {
-        let data = try await ServerClient.configuration(.edit(destination: file.destination, key: key,
-            expected: expected, change: change), location: location)
-        return try JSONDecoder().decode(ConfigurationEditReceipt.self, from: data)
-    }
-
-    private func report(_ error: Error, id: UUID, key: String, notices: NoticeCenter) {
+    private func report(_ error: Error, id: UUID, key: String, notices: NoticeCenter?) {
         if observation == id { editError = error.localizedDescription }
-        notices.post(Notice(error.localizedDescription, key: key))
+        notices?.post(Notice(error.localizedDescription, key: key))
     }
 }

@@ -302,86 +302,39 @@ one line: its title and its button.
 
 ### Settings
 
-Press **⌘,** (or choose **Loopflow → Settings…**) to open the Settings window.
-The sidebar groups panes into **App** (General, Appearance, Shortcuts, Mobile),
-**Workflow** (Agents, Context, Git & Release), and **Infrastructure** (Machines),
-with a search box at the top.
+Press **⌘,** to open Settings. Search for a pane, label, configuration key,
+alias or description. Select a result with ↑/↓ and Return to reveal the
+control. A switch in the results edits the destination shown beside it.
 
-In **Workflow** and **Machines**, two selectors at the top separate what you are
-inspecting from which file an edit writes:
+**Applies to** selects Global, a checkout or a Wave. Expand **Advanced** to
+inspect a Skill or Graph step. **Save in** selects the file to edit. A checkout
+or Wave starts on your personal settings. Global writes to `~/.lf/config.yaml`.
 
-```text
-Applies to: [loopflow ▾]                     Save in: [My repository settings ▾]
+For example, open **Context** on a checkout where the shared file sets
+`context.diff: true` and your file sets it to `false`. Choose **Shared
+repository settings**. The switch shows **On**. **In effect** still shows
+**Off · My repository settings**. Expand it to see the candidates and paths.
 
-Include diff in agent context                                             [Off]
-Saved here · Off   ·   In effect: Off · My repository settings
+- **Reset layer…** previews removal of the selected declaration. For additional
+  documents, **Save empty list** clears inherited entries. Reset lets them
+  apply again.
+- **Move to Shared Repository…** appears when the shared slot is empty. From
+  a private Wave you can move to your repository settings. Review the YAML
+  changes and the projected result before confirming.
+- Switches and pickers save immediately. Text fields save on Return or focus
+  loss. Escape discards the text. YAML editors have **Apply** and **Cancel**.
+  **Undo** or **⌘Z** restores a saved edit even after switching destinations.
+  If the declaration changed on disk, use **Refresh** to review it before
+  retrying. Settings and the CLI share the same [configuration files](config.md).
 
-▾ Why this applies
-  Built-in            Off
-  Shared repository   On    .lf/config.yaml
-  My global settings  —     ~/.lf/config.yaml
-  My repository       Off   .lf/config.local.yaml  · applies
+| Sidebar group | Panes |
+| --- | --- |
+| App | **General** includes Task file autosave and global preferences. **Appearance** selects themes or opens the color editor. **Shortcuts** shows the keyboard reference. **Mobile** shows a green dot and pairing code when [phone access](server.md#phone-access) is ready. |
+| Workflow | **Agents** shows the pin, starting preference and fallback order. **Context** controls launch inputs. **Git & Release** includes the repository tracker. |
+| Infrastructure | **Machines** shows placement, connections and forwarding. While open, it checks up to four registered identities at once and distinguishes connection errors from ended rentals. |
 
-  [Reset Layer]   [Move to Shared Repository…]
-```
-
-1. Choose **Applies to** (`Global`, a repository checkout, a Wave, or a specific
-   Skill or Graph step under **Advanced**) to inspect what takes effect for that
-   work. On `Global`, edits always write `~/.lf/config.yaml`, so **Save in** is
-   hidden.
-2. For a checkout or Wave, **Save in** defaults to your private file (`My`) and
-   switches between `My` and `Shared` without changing **Applies to**. If
-   `.lf/config.yaml` sets `context.diff: true` and `.lf/config.local.yaml` sets
-   it to `false`, switching **Save in** to **Shared repository settings** shows
-   **On** in the switch while the row still reports **In effect: Off · My
-   repository settings**.
-3. Click a row's source badge to open its precedence ladder: every layer in
-   order, its file path, and any empty slots.
-   - **Reset Layer** previews the YAML removal before deleting that file's
-     declaration and exposing the next layer.
-   - **Move to Shared Repository…** (or **Move to My Repository Settings…** from
-     a private Wave) appears when the next layer up has no declaration for that
-     key. It previews both YAML changes and the projected result for the
-     selected work before moving the declaration.
-
-Controls write the same YAML files as `lf set` and keep unrelated keys and
-comments intact ([Configuration](config.md)).
-
-- **Save and Undo.** Toggles, pickers, and theme cards commit right away and
-  show an **Undo** notice (**⌘Z** works even after switching panes). Text
-  fields commit on Return or focus loss; Escape restores the saved value.
-  Inline YAML editors for complex keys (`diff_groups`, `release`,
-  `context.budgets`, `pools`, `ondemands`) and **Customize** in Appearance keep
-  **Apply** and **Cancel** buttons. If a file changed on disk since you opened
-  a preview or edited a row, Settings keeps both the file and your draft and
-  offers **Refresh** before retrying.
-- **Additive lists and agents.** For additive lists (`context.docs`,
-  `context.exclude`), the row edits only the entries declared in **Save in** and
-  shows the combined list separately; an empty list (`[]`) clears inherited
-  entries, while **Reset Layer** removes your declaration. In **Agents**,
-  **Pin** (`agent`), **Starting preference** (`default_agent`), and **Fallback
-  order** (`agents`) show their resolved order together.
-- **Search.** Typing in the sidebar searches pane names, setting labels, config
-  keys, aliases, and descriptions. Search for **Diff**, then click **Include diff
-  in agent context** or use ↑/↓ and Return to reveal the highlighted row. The
-  switch beside the result edits the file named below its label. **Undo** works
-  after opening the pane or switching destinations.
-- **Status dots.** **Mobile** shows a green dot in the sidebar when Tailscale
-  remote access is ready. Scoped panes show a dot when the selected non-global
-  **Save in** file holds declarations there, including ones overridden by a
-  higher layer.
-- **App panes.** **General** holds **Autosave Task Files** and global Loopflow
-  preferences (`user`, `repo_root`, `stream`, `logs`). **Appearance** picks
-  **System**, **Light**, or **Dark** and switches themes immediately with Undo
-  (syncing Desktop, Ghostty, and iPhone); **Customize** opens the color editor
-  with Apply and Cancel. **Shortcuts** shows the grouped keyboard reference
-  shared with the standalone **Keyboard Shortcuts** window. **Mobile** toggles
-  Tailscale phone access, displays live readiness, and shows the pairing QR
-  code ([Phone access](server.md#phone-access)).
-- **Machines.** Separates live connection checks (checking, reachable, error,
-  ended rental) from Machine placement, connections, and forwarding preferences.
-  While the pane is open, each round checks up to four connections at once.
-  A host has 20 seconds to answer with its registered Machine identity.
+A dot beside a scoped pane means the selected non-global file declares a
+setting there, even when another file overrides it.
 
 ## Script Desktop
 

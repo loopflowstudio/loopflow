@@ -24,8 +24,15 @@ struct AppearanceSelection: Equatable {
 }
 
 struct ThemeDeclaration: Decodable {
+    let file: ConfigurationFileValue
     let entries: [ConfigurationEntry]
-    let value: JSONValue
+
+    private enum CodingKeys: String, CodingKey { case entries }
+
+    init(from decoder: Decoder) throws {
+        file = try ConfigurationFileValue(from: decoder)
+        entries = try decoder.container(keyedBy: CodingKeys.self).decode([ConfigurationEntry].self, forKey: .entries)
+    }
 }
 
 /// One personal theme file being edited. A nil theme stages removal of that file.
@@ -33,7 +40,7 @@ private struct ThemeDraft {
     let name: String
     var theme: ThemeDefinition?
     var selection: AppearanceSelection
-    var original: JSONValue
+    var original: [ConfigurationEntry]?
 }
 
 /// All windows share one theme choice from `theme:` in `~/.lf/config.yaml`, your theme files and
@@ -45,7 +52,7 @@ final class AppearanceStore {
     let paths: ThemePaths
     private(set) var selection = AppearanceSelection()
     private(set) var library = ThemeLibrary()
-    private var declaration = JSONValue.null
+    private var declaration: [ConfigurationEntry]? = []
     private var draft: ThemeDraft?
     private(set) var previewSide: AppearanceMode = .light
     private(set) var effectiveTheme = ThemeDefinition.light
@@ -133,16 +140,27 @@ final class AppearanceStore {
         library = ThemeLibrary.load(paths)
         var problems = library.problems
         let answer: ConfigurationFileValue
+        let entries: [ConfigurationEntry]?
         do {
-            answer = try JSONDecoder().decode(ConfigurationFileValue.self, from:
-                await ServerClient.configuration(.configTheme(value: nil), location: location))
+            let data = try await ServerClient.configuration(.configTheme(value: nil), location: location)
+            do {
+                let theme = try JSONDecoder().decode(ThemeDeclaration.self, from: data)
+                answer = theme.file
+                entries = theme.entries
+            } catch DecodingError.keyNotFound(let key, _) where key.stringValue == "entries" {
+                // Older servers can still supply the window theme without supporting checked edits.
+                answer = try JSONDecoder().decode(ConfigurationFileValue.self, from: data)
+                entries = nil
+            }
+        } catch {
+            if reading == generation { readFailure = error.localizedDescription }
+            return
         }
-        catch { if reading == generation { readFailure = error.localizedDescription }; return }
         guard reading == generation else { return }
         readFailure = nil
         configPath = answer.path
-        let changed = declaration != answer.value
-        declaration = answer.value
+        let previous = selection
+        declaration = entries
         fingerprint = observedFiles
         switch selection(from: answer.text) {
         case let .success(choice): selection = choice
@@ -150,7 +168,7 @@ final class AppearanceStore {
         }
         notice = problems.isEmpty ? nil : problems.joined(separator: "\n")
         if draft == nil {
-            if changed { previewSide = selection.isDark(systemDark: systemDark) ? .dark : .light }
+            if selection != previous { previewSide = selection.isDark(systemDark: systemDark) ? .dark : .light }
             update(resolved(selection, in: library), keepingNotice: true)
         }
     }
@@ -283,7 +301,7 @@ final class AppearanceStore {
             readFailure = nil
             update(resolved(choice, in: library))
             guard receipt.before != receipt.after else { return }
-            let restore: @MainActor (AppearanceStore) -> Void = { [weak notices] store in
+            let undo = Notice.Action.undo("Change Theme", manager: manager, target: self) { [weak notices] store in
                 Task {
                     do {
                         _ = try await store.edit(.restore(receipt.before), expected: receipt.after)
@@ -298,13 +316,7 @@ final class AppearanceStore {
                     await store.reload()
                 }
             }
-            let name = "Change Theme"
-            manager?.registerUndo(withTarget: self, handler: restore)
-            manager?.setActionName(name)
-            notices?.post(Notice("Theme saved", key: "theme", action: .init("Undo") { [weak self, weak manager] in
-                if let manager, manager.undoActionName == name { manager.undo() }
-                else if let self { restore(self) }
-            }))
+            notices?.post(Notice("Theme saved", key: "theme", action: undo))
         } catch {
             await reload()
             readFailure = error.localizedDescription
@@ -312,20 +324,16 @@ final class AppearanceStore {
     }
 
     private func edit(_ change: ConfigurationChange, expected: [ConfigurationEntry]) async throws -> ConfigurationEditReceipt {
-        let data = try await ServerClient.configuration(.edit(destination: .object(["kind": .string("personal_global")]),
-            key: "theme", expected: expected, change: change), location: location)
-        return try JSONDecoder().decode(ConfigurationEditReceipt.self, from: data)
+        try await ServerClient.edit(change, destination: .object(["kind": .string("personal_global")]),
+                                    key: "theme", expected: expected, location: location)
     }
 
-    private func save(_ choice: AppearanceSelection, original: JSONValue) async throws -> ConfigurationEditReceipt {
-        // This file read bypasses the observation cache used by pane subscriptions.
-        let data = try await ServerClient.configuration(.configTheme(value: nil), location: location)
-        let authored = try JSONDecoder().decode(ThemeDeclaration.self, from: data)
-        guard authored.value == original else {
-            throw RegistryQueryError("The theme declaration changed. Review the current choice and try again.")
+    private func save(_ choice: AppearanceSelection, original: [ConfigurationEntry]?) async throws -> ConfigurationEditReceipt {
+        guard let original else {
+            throw RegistryQueryError("Update the Machine’s server to edit themes from Settings.")
         }
-        let receipt = try await edit(.set(JSONValue.string(choice.configValue).settingsYAML), expected: authored.entries)
-        declaration = .string(choice.configValue)
+        let receipt = try await edit(.set(JSONValue.string(choice.configValue).settingsYAML), expected: original)
+        declaration = receipt.after
         return receipt
     }
 

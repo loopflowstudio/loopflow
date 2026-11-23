@@ -1,41 +1,39 @@
-at: 3f35147ebd9cb4b58a4f1712685385ce0efc2e4d
+at: a3f40f5bb687cd1fad99f8d7f55cad01c85e8462
 first:
   - path: docs/surfaces.md
-    why: What the Settings window offers
+    why: Follow a setting from search through Undo
   - path: swift/README.md
-    why: Theme selection, Undo and pairing on macOS
-  - path: docs/config.md
-    why: Read effective settings and their declarations
+    why: Theme selection and staged asset edits
   - path: scratch/plan.md
-    why: Implemented panes, measured reads and remaining work
-  - path: rust/loopflow-execution/src/engine/config.rs
-    why: Resolve a scope and identify editable declarations
+    why: Design choices, measurements and remaining visual checks
+  - path: rust/loopflow-execution/src/engine/config/scope.rs
+    why: Effective values, editable slots and move projections
   - path: rust/loopflow-execution/src/config/files/edit.rs
-    why: Checked edits and Undo preserve unrelated declarations
+    why: Check and restore the affected YAML entries
   - path: rust/loopflow-execution/src/engine/config/promotion.rs
-    why: Preview, apply and recover moves across files
-  - path: rust/loopflow/src/lf/commands/machine.rs
-    why: Machine identity and rental status behind both surfaces
+    why: Review, install and recover a declaration move
+  - path: swift/Loopflow/Models/ConfigurationEdit.swift
+    why: Checked edits and moves on the wire
   - path: swift/LoopflowMac/Views/SettingsWindow.swift
-    why: Navigate by keyboard and reveal the matching control
-  - path: swift/LoopflowMac/Views/SettingsSearch.swift
-    why: Match catalog and App rows with their switches
-  - path: swift/LoopflowMac/Design/AppearanceStore.swift
-    why: Immediate theme selection, exact Undo and editor drafts
-  - path: swift/LoopflowMac/Views/MobileSettings.swift
-    why: One status drives the sidebar and pairing code
-  - path: swift/LoopflowMac/Views/MachineConnections.swift
-    why: Check four connections and show each result
+    why: Navigate panes and reveal search results
   - path: swift/LoopflowMac/Services/ScopedSettingsModel.swift
-    why: Follow selection, write to the file and undo
-  - path: swift/LoopflowMac/Views/ScopedSettings.swift
-    why: Select work, a save destination and an editor
+    why: Observe the selected work and edit its declarations
   - path: swift/LoopflowMac/Views/ScopedSettingRow.swift
-    why: Edit, inspect and move a declaration
+    why: Edit the saved value and inspect its source
+  - path: swift/LoopflowMac/Views/SettingsSearch.swift
+    why: Reuse pane switches in search results
+  - path: swift/LoopflowMac/Design/AppearanceStore.swift
+    why: Choose themes and keep color edits staged
+  - path: swift/LoopflowMac/Services/SettingsUndo.swift
+    why: Route notice and keyboard Undo to one edit
+  - path: swift/LoopflowMac/Views/MobileSettings.swift
+    why: Pairing and sidebar readiness share a status
+  - path: swift/LoopflowMac/Views/MachineConnections.swift
+    why: Display each registered Machine’s connection health
   - path: swift/LoopflowTests/ContextSettingsWorkflowTests.swift
-    why: Trace a search edit through Undo and launch
+    why: Follow an edit through launch, Reset and Undo
   - path: swift/LoopflowTests/ThemeWorkflowTests.swift
-    why: Follow theme picks and Undo through the branch server
+    why: Exercise theme writes, hand edits and Undo
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Regenerated from the typed server operations

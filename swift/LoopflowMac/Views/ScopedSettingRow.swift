@@ -10,9 +10,13 @@ struct ScopedSettingRow: View {
     let notices: NoticeCenter
     let manager: UndoManager?
     var highlightedKey: String?
-    @State private var draft: String?
-    @State private var draftObservation: UUID?
-    @State private var editingFile: ConfigurationScope.File?
+    private struct Draft {
+        var text: String
+        let file: ConfigurationScope.File
+        let observation: UUID
+    }
+
+    @State private var draft: Draft?
     @State private var reset: ConfigurationScope.File?
     @State private var patch: String?
     @State private var previewError: String?
@@ -23,9 +27,11 @@ struct ScopedSettingRow: View {
     private var slot: ConfigurationScope.Slot? { file.slots[key] }
     private var authored: JSONValue? { slot?.value }
     private var input: Binding<String> {
-        Binding(get: { draft ?? initialText }, set: {
-            if editingFile == nil { editingFile = file; draftObservation = model.observation }
-            draft = $0
+        Binding(get: { draft?.text ?? initialText }, set: { text in
+            reset = nil
+            patch = nil
+            if draft == nil { draft = Draft(text: text, file: file, observation: model.observation) }
+            else { draft?.text = text }
         })
     }
     private var initialText: String {
@@ -58,7 +64,7 @@ struct ScopedSettingRow: View {
                         Button("Reset in this file") { save(.reset, to: reset) }.disabled(patch == nil)
                     }
                 } else if authored != nil {
-                    Button("Reset layer…") { discard(); patch = nil; reset = file }
+                    Button("Reset layer…") { draft = nil; patch = nil; reset = file }
                 }
                 if let moveReview {
                     ForEach(moveReview.changes, id: \.path) { change in
@@ -68,14 +74,14 @@ struct ScopedSettingRow: View {
                     LabeledContent("In effect after move", value: moveReview.effective.value.settingsText)
                     HStack {
                         Button("Cancel") { self.moveReview = nil }
-                        Button("Confirm move") { promote(review: moveReview) }
+                        Button("Confirm move") { promote(.confirm(moveReview)) }
                     }
                 } else if case .object(let promotion) = slot?.promotion {
                     if promotion["kind"] == .string("resume") {
-                        Button("Finish interrupted move…") { promote(resume: true) }
+                        Button("Finish interrupted move…") { promote(.resume) }
                     } else if case .object(let address) = promotion["destination"] {
                         let title = address["kind"] == .string("shared_repo") ? "Move to Shared Repository…" : "Move to My Repository Settings…"
-                        Button(title) { promote() }
+                        Button(title) { promote(.preview) }
                     }
                 }
             } label: {
@@ -87,17 +93,16 @@ struct ScopedSettingRow: View {
         } footer: {
             Text(definition.description)
         }
-        .task(id: PreviewInput(draft: draft, resetting: reset != nil, observation: model.observation, entries: slot?.entries ?? [])) {
+        .task(id: PreviewInput(draft: draft?.text, resetting: reset != nil, observation: model.observation, entries: slot?.entries ?? [])) {
             patch = nil
             previewError = nil
             do {
                 let result: String
                 if let reset {
                     result = try await model.preview(.reset, key: key, file: reset)
-                } else if let draft, let editingFile, usesYAML {
+                } else if let draft, usesYAML {
                     try await Task.sleep(for: .milliseconds(150))
-                    result = try await model.preview(.set(draft), key: key,
-                        file: draftObservation == model.observation ? editingFile : file)
+                    result = try await model.preview(.set(draft.text), key: key, file: destination(for: draft))
                 } else { return }
                 if !Task.isCancelled { patch = result }
             } catch { if !Task.isCancelled { previewError = error.localizedDescription } }
@@ -135,12 +140,12 @@ struct ScopedSettingRow: View {
                 .focused($focused)
                 .onSubmit { commitText() }
                 .onChange(of: focused) { _, focused in if !focused { commitText() } }
-                .onExitCommand { discard() }
+                .onExitCommand { draft = nil }
         } else {
             DisclosureGroup(definition.title) {
                 TextEditor(text: input).font(Typography.mono).frame(minHeight: 65)
                 HStack {
-                    Button("Cancel") { discard() }
+                    Button("Cancel") { draft = nil }
                     Button("Apply") { commitText() }.disabled(patch == nil || previewError != nil)
                 }.disabled(draft == nil)
                 if let previewError {
@@ -151,30 +156,34 @@ struct ScopedSettingRow: View {
         }
     }
 
-    private func promote(review: MoveReview? = nil, resume: Bool = false) {
+    private func promote(_ action: MoveAction) {
         Task {
-            moveReview = await model.promote(key: key, file: file, review: review, resume: resume,
+            moveReview = await model.promote(action, key: key, file: file,
                 notices: notices, manager: manager)
         }
     }
 
-    private func discard() { draft = nil; editingFile = nil; draftObservation = nil }
+    // Hand edits retain the draft’s expectation. Refresh explicitly takes a new reading.
+    private func destination(for draft: Draft) -> ConfigurationScope.File {
+        draft.observation == model.observation ? draft.file : file
+    }
+
     private func commitText() {
-        guard let draft, let editingFile, !model.saving else { return }
+        guard let draft, !model.saving else { return }
         let text: String
         if key == "automation" {
             // The file declares the automation mapping as one setting.
-            let retries = Int64(draft).map(JSONValue.integer) ?? .string(draft)
+            let retries = Int64(draft.text).map(JSONValue.integer) ?? .string(draft.text)
             text = JSONValue.object(["retries": retries]).settingsYAML
         } else {
-            text = definition.controlType == "string" ? JSONValue.string(draft).settingsYAML : draft
+            text = definition.controlType == "string" ? JSONValue.string(draft.text).settingsYAML : draft.text
         }
-        save(.set(text), to: draftObservation == model.observation ? editingFile : file)
+        save(.set(text), to: destination(for: draft))
     }
     private func save(_ change: ConfigurationChange, to file: ConfigurationScope.File) {
         Task {
             if await model.apply(change, key: key, to: file, notices: notices, manager: manager) {
-                discard()
+                draft = nil
                 reset = nil
             }
         }

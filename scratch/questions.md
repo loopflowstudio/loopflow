@@ -11,3 +11,4 @@
 - Edit the tagged tracker and Machine placement as whole YAML declarations. Their Rust codecs interpret the tag and the mutually exclusive placement fields together.
 - Refresh Mobile while Settings is open and remote connections while Machines is visible, 30 seconds after the last check finishes. Each SSH probe keeps its existing 20-second deadline.
 - Return opens the first search result until ↑/↓ selects another. A switch keeps the results open so Undo or a second edit stays within reach.
+- Keep older servers’ theme declarations readable. Desktop uses the checked entries supplied by newer servers for edits and Undo.

@@ -22,8 +22,8 @@ struct ThemeWorkflowTests {
         let result = try JSONDecoder().decode(ThemeDeclaration.self, from: Data(contentsOf:
             root.appending(path: "tests/fixtures/dto/theme_declaration.json")))
         #expect(result.entries.map(\.path) == [["theme"]])
-        #expect(result.entries.map(\.value) == [result.value])
-        #expect(result.value == .string("dark"))
+        #expect(result.entries.map(\.value) == [result.file.value])
+        #expect(result.file.value == .string("dark"))
     }
 
     @Test(arguments: [false, true])
@@ -74,6 +74,22 @@ struct ThemeWorkflowTests {
             #expect(appearance.effectiveTheme.name == "Loopflow Light")
             appearance.setSystemDark(true)
             #expect(appearance.effectiveTheme.name == "Fig")
+        }
+    }
+
+    @Test func anExplicitNullAddedAfterReadingAnAbsentThemeSurvivesAStalePick() async throws {
+        try await withThemeServer { location, paths in
+            let store = try await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
+            try paths.writeConfig("theme: null\n")
+            await store.applyMode(.dark)
+            #expect(store.readFailure?.contains("changed") == true)
+            #expect(paths.configText() == "theme: null\n")
+            let notices = NoticeCenter()
+            await store.applyMode(.dark, notices: notices)
+            try #require(notices.current?.action).perform()
+            try await waitFor { store.selection.mode == .system }
+            let restored = try await ServerClient.configuration(.configTheme(value: nil), as: ThemeDeclaration.self, location: location)
+            #expect(restored.entries.map(\.value) == [.null])
         }
     }
 

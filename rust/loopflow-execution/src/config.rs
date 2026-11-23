@@ -552,9 +552,14 @@ fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError
         return Ok(None);
     }
     let mut value = serde_yaml_ng::Value::Mapping(reader::parse(&content, path));
-    keys::fold(&mut value);
-    normalize_context(&mut value);
+    normalize_preferences(&mut value);
     Ok(Some(value))
+}
+
+/// Fold scope and target aliases before expanding their legacy context fields.
+pub(crate) fn normalize_preferences(value: &mut serde_yaml_ng::Value) {
+    keys::fold(value);
+    normalize_context(value);
 }
 
 /// Temporary reader for preferences shared with the released flat format.
@@ -660,8 +665,7 @@ pub(crate) fn resolved_with(
     wave: Option<&str>,
     outside: &settings::Outside,
 ) -> Result<Arc<settings::ResolvedSettings>, LoadError> {
-    // A Wave named by ID is found by walking the checkout, which no reading
-    // observes: the shared value is kept under the name.
+    // Resolving the ID observes Wave directories so a rename invalidates the reading.
     let wave = selected_wave(repo_root, wave)?;
     let key = crate::observe::Derived::Settings {
         checkout: repo_root.map(Path::to_owned),

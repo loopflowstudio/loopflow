@@ -473,13 +473,8 @@ pub(super) fn filter_file_preferences(
         super::reader::warn(file, None, "skipping settings that are not a mapping");
         *value = Value::Mapping(Default::default());
     }
-    _normalize_preferences(value);
+    super::normalize_preferences(value);
     _filter_file_settings(value, &mut Vec::new(), file, source, scope);
-}
-
-fn _normalize_preferences(value: &mut Value) {
-    super::normalize_context(value);
-    super::keys::fold(value);
 }
 
 /// Account routing preferences the released lf still reads from personal
@@ -707,7 +702,7 @@ pub(crate) fn resolve_with(
         ) {
             filter_file_preferences(&mut layer.value, &layer.path, layer.source, layer.scope);
         } else {
-            _normalize_preferences(&mut layer.value);
+            super::normalize_preferences(&mut layer.value);
         }
         if layer.value.is_null() {
             continue;

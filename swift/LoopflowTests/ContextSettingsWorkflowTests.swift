@@ -283,12 +283,10 @@ struct ContextSettingsWorkflowTests {
             #expect(try await cliValue("context.diff") == .null)
 
             let source = try await file(.personalRepository)
-            let review = try #require(await model.promote(key: "default_agent", file: source, review: nil,
-                resume: false, notices: notices, manager: nil))
+            let review = try #require(await model.promote(.preview, key: "default_agent", file: source, notices: notices, manager: nil))
             #expect(review.changes.count == 2)
             #expect(try await cliValue("default_agent", ["--shared"]) == .null)
-            _ = await model.promote(key: "default_agent", file: source, review: review,
-                resume: false, notices: notices, manager: nil)
+            _ = await model.promote(.confirm(review), key: "default_agent", file: source, notices: notices, manager: nil)
             #expect(try await cliValue("default_agent", ["--shared"]) == .string("codex"))
             #expect(try await cliValue("default_agent") == .null)
             model.select(checkout: repo.path, wave: waveID)
@@ -310,9 +308,9 @@ struct ContextSettingsWorkflowTests {
             #expect(selected.settings["agent"]?.value == .string("codex"))
             let selectedPath = try #require(selected.files.first { $0.owner == .sharedWave }?.path)
             let expectedURL = renamed.appending(path: "config.yaml")
-            let selectedID = try FileManager.default.attributesOfItem(atPath: selectedPath)[.systemFileNumber] as? NSNumber
-            let expectedID = try FileManager.default.attributesOfItem(atPath: expectedURL.path)[.systemFileNumber] as? NSNumber
-            #expect(try #require(selectedID) == expectedID)
+            let selectedID = try #require(fm.attributesOfItem(atPath: selectedPath)[.systemFileNumber] as? NSNumber)
+            let expectedID = try #require(fm.attributesOfItem(atPath: expectedURL.path)[.systemFileNumber] as? NSNumber)
+            #expect(selectedID == expectedID)
         } catch {
             await server.stop()
             throw error

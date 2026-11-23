@@ -448,6 +448,9 @@ Headless Swift view tests inspect production leaf views directly when a parent
 needs `@Environment` Observation objects, which ViewInspector can't inject.
 Keep those views internal for `@testable` access. Mounted terminal frame checks
 stay in `.requiresDisplay` suites.
+For a headless check that depends on a SwiftUI `.task(id:)` running, mount
+the view with `ImageRenderer` and await its effect. With Xcode 26.2 on macOS
+26.7, ViewInspector looks for a newer task modifier than the SDK emits.
 
 # Review Ritual
 

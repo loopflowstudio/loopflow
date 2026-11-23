@@ -162,34 +162,49 @@ What do you want?
 
   Let people rebind chords per repository
 
-In Product ▾, running feature ▾, Product's default
+In Product ▾
 
+Workflow for Start   feature ▾   Product's default
 ☺ explore   plan   build   ☺ ship-review   deliver   ☺ verify
 You take part at explore, ship-review and verify.
 
-                                        Cancel   File   Start ⌘↩
+File to backlog   Choose a workflow when you start.
+                                      Cancel   Start with feature ⌘↩
 ```
 
-The sheet opens on the Wave you were looking at. The first menu moves the Task
-to another Wave or to the repository; the second picks its workflow, from
-[the same list Start offers](#start-picks-a-workflow). After the comma is whose
-choice the workflow is: the default of the Wave or repository named before it,
-your own default, or "for this Task only" once you pick another. Pick the default again to go back.
+**In** starts on the Wave you were looking at. Choose another Wave or the
+repository to change where the Task lands. A rename keeps the selection. If the
+selected Wave disappears, even if another takes its name before the Machine answers,
+**In** shows **Wave unavailable**. Choose a destination to enable File and Start.
 
-Under the sentence is the workflow as the Task will show it later: its steps,
-a person before each one where you take part, then the same thing in words. A
-workflow with no such step reads "Runs on its own." Change the menu and both
-lines change with it.
+**Workflow for Start** follows that scope's default. Pick a named workflow
+to keep it when you change scope, even if its name matches the default.
+**Use default** follows the scope again. The preview shows the workflow's
+steps and marks each one where you take part.
 
-- **Start** (⌘↩) files the Task and runs it.
-- **File** runs `lf task create` without `--run`: the Task lands in that
-  Wave's backlog, selected, and nothing starts.
+- **Start with `<workflow>`** (⌘↩) shows **Starting…** until the Machine
+  admits the Task and its primary conversation. The sheet closes and the
+  conversation opens, makes the checkout and starts the workflow. The
+  Machine resolves an inherited default at Start.
+- **File to backlog** opens the new Task’s brief in its backlog as soon as
+  `lf task create` answers, even while the backlog is refreshing.
+  When you start the filed Task, it offers the current default and
+  [the same workflow list](#start-picks-a-workflow).
 - **Cancel** (Esc) closes the sheet.
 
-If the Task can't be filed, the sheet stays open with what you typed, "Not
-filed." and the Machine's reason. If it is filed and its run doesn't start, the
-request stays on screen with "Not started.", the error, **Try again** and
-**Discard**.
+A confirmed refusal shows “Not filed.” or “Not started.” and the reason in
+the sheet. Your words, destination and workflow choice stay editable.
+After admission, setup errors appear in the Task's workspace. If the reply
+is lost or unreadable, the sheet closes and Desktop checks the saved
+submission on its original Machine. If a receipt exists, it leads back to
+the original work. If the Machine refuses the replay and confirms it has
+no receipt, the notice offers **Edit draft** with the Machine’s reason.
+
+**Edit draft** reopens New Task in the original repository with your words,
+destination and workflow choice. Choose another destination if the Wave is
+unavailable. The draft stays saved across restarts. **Cancel** leaves it in
+the notice, **Discard draft** removes it, and File or Start saves your
+correction as a new submission before sending it.
 
 #### A Task that has not started
 
@@ -240,8 +255,8 @@ you. **More ›** holds the pieces other
 Graphs include, such as `build` and `deliver`, and Graphs with no
 `description:` ([describe a Graph](orchestration.md#describe-a-graph)). A
 Graph that runs for a Wave is not offered for a Task. The
-[New Task](#new-task) sheet's workflow menu and an unstarted Task's
-**Start with…** are this list.
+[New Task](#new-task) sheet's **Workflow for Start** menu and an unstarted Task's
+**Start with…** use this list.
 
 Start reaches unstarted Tasks only. Select a started Task and the button reads
 `Open`, with no ▾: it goes to the Task, where its step, its PR and what running

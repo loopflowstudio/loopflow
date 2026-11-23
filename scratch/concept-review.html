@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>LOO-1065 · New Task concept review</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f6f4ee;
+      --panel: #fffdf8;
+      --ink: #222721;
+      --muted: #50594e;
+      --line: #aeb4a8;
+      --green: #155b42;
+      --green-wash: #e7f1e6;
+      --red: #8b382a;
+      --red-wash: #f9ece4;
+      --amber: #7a4b12;
+      --amber-wash: #f7efe2;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #1b201c;
+        --panel: #232b25;
+        --ink: #f1f1e8;
+        --muted: #c3cabc;
+        --line: #677265;
+        --green: #a1ddb7;
+        --green-wash: #293e32;
+        --red: #ffb39f;
+        --red-wash: #47312a;
+        --amber: #f1c583;
+        --amber-wash: #3d3221;
+      }
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font: 1rem/1.55 system-ui, sans-serif;
+    }
+    main { width: min(70rem, 100% - 2rem); margin: 0 auto; padding: 3rem 0; }
+    header { max-width: 54rem; }
+    h1, h2, h3, p { margin: 0; }
+    h1, h2 { font-family: Georgia, serif; font-weight: 500; line-height: 1.13; }
+    h1 { font-size: clamp(2.4rem, 7vw, 4.4rem); letter-spacing: -.035em; }
+    h2 { font-size: clamp(1.65rem, 3.8vw, 2.3rem); letter-spacing: -.025em; margin-bottom: .85rem; }
+    h3 { font-size: 1rem; }
+    p + p { margin-top: .65rem; }
+    header p { margin-top: 1rem; max-width: 66ch; }
+    .kicker { color: var(--muted); font-size: .9rem; margin: 0 0 .75rem; }
+    .lead { font-size: 1.15rem; }
+    .verdict {
+      display: inline-block;
+      margin-top: 1rem;
+      padding: .35rem .7rem;
+      border: 1px solid var(--green);
+      border-radius: .4rem;
+      background: var(--green-wash);
+      color: var(--green);
+      font-weight: 650;
+      font-size: .95rem;
+    }
+    section { margin-top: 2.5rem; }
+    a { color: var(--green); text-underline-offset: .18em; }
+    a:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+    code { font-family: ui-monospace, monospace; font-size: .9em; overflow-wrap: anywhere; }
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: .85rem; }
+    figure { display: flex; flex-direction: column; margin: 0; min-width: 0; border: 1px solid var(--line); border-radius: .65rem; overflow: hidden; background: var(--panel); }
+    figcaption, .result { padding: .7rem 1rem; }
+    figcaption { font-weight: 650; border-bottom: 1px solid var(--line); }
+    .before figcaption, .before .result { background: var(--red-wash); }
+    .built figcaption, .built .result { background: var(--green-wash); }
+    .sheet { display: flex; flex: 1; flex-direction: column; gap: .6rem; min-height: 17rem; padding: 1rem; }
+    .sheet > p { margin: 0; }
+    .request { border: 1px solid var(--line); border-radius: .25rem; padding: .6rem .75rem; }
+    .row { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem; }
+    .pill { display: inline-block; padding: .15rem .5rem; border: 1px solid var(--line); border-radius: .3rem; font-weight: 600; font-size: .9rem; }
+    .accent { background: var(--green); color: var(--panel); border-color: var(--green); }
+    .outline { color: var(--muted); font-size: .9rem; }
+    .notice { border-inline-start: .25rem solid var(--amber); padding: .55rem .75rem; background: var(--amber-wash); font-size: .92rem; }
+    .result { border-top: 1px solid var(--line); font-size: .93rem; }
+    .evidence { color: var(--muted); font-size: .9rem; margin-top: .75rem; }
+    .mapping { margin: 0; }
+    .mapping > div { display: grid; grid-template-columns: minmax(12rem, 1fr) 3fr; gap: .85rem; padding: .8rem .15rem; border-block-start: 1px solid var(--line); }
+    .mapping dt { font-weight: 650; }
+    .mapping dd { margin: 0; min-width: 0; }
+    .yes, .no { display: inline-block; font-weight: 700; min-width: 2.7rem; }
+    .yes { color: var(--green); }
+    .no { color: var(--red); }
+    .scenarios { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    .scenarios article { padding: .9rem 1rem; border-block-start: 2px solid var(--green); background: var(--panel); }
+    .scenarios h3 { margin-bottom: .4rem; }
+    .outside { padding: 1rem 1.15rem; border: 1px solid var(--line); border-inline-start: .25rem solid var(--amber); border-radius: .5rem; background: var(--panel); }
+    .outside h3 { margin-bottom: .4rem; }
+    .outside p + h3 { margin-top: 1rem; }
+    .questions { padding-left: 1.5rem; }
+    .questions > li { margin: .65rem 0; }
+    .questions p { margin-top: .25rem; }
+    @media (max-width: 45rem) {
+      main { padding-top: 1.75rem; }
+      .compare, .scenarios, .mapping > div { grid-template-columns: 1fr; }
+      .mapping > div { gap: .25rem; }
+      .sheet { min-height: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="kicker">LOO-1065 · Built branch 03a73aeeab against base 42d8b45944</p>
+      <h1>New Task carries your choices all the way through admission and recovery</h1>
+      <p class="lead">Area reviewed: Mac New Task creation, admission, handoff, refusal and recovery — from ⌘N through File and Start into the backlog brief, primary conversation, creation journal and Machine write. The Task brief is “ui polish dumping ground”; reviewing the whole New Task lifecycle catches the mismatches between what the sheet promises and what the Machine and recovery journal actually record.</p>
+      <p class="verdict">Outcome: concepts and code line up across all nine pairings · nothing to change in the plan</p>
+    </header>
+
+    <section aria-labelledby="compare">
+      <h2 id="compare">Before on base vs. built on this branch</h2>
+      <p>Every pass addressed one conceptual split: File owning no workflow, one sheet owning the draft through admission, the Wave ID surviving into SQLite commit, and refused replays returning as editable drafts.</p>
+      <div class="compare">
+        <figure class="before">
+          <figcaption>Base (42d8b45944) · Split lifecycle &amp; name-based scope</figcaption>
+          <div class="sheet">
+            <h3>What do you want?</h3>
+            <p class="request">Make the Task brief easier to scan</p>
+            <p>In <strong>Ops ▾</strong>, running <strong>code ▾</strong>, Ops's default</p>
+            <p class="outline"><code>File</code> still sends <code>wave: "ops"</code> and closes into a backlog that hasn't refreshed yet.</p>
+            <p class="outline"><code>Start</code> closes immediately into a second screen (<code>StartingTaskView</code>) with Try again / Discard.</p>
+            <p class="outline">Missing named Graph returns <code>outcome_unknown</code>; refused replay traps the journal in an error notice.</p>
+          </div>
+          <p class="result">Four mismatches: workflow looked shared with File; Wave names could recreate a removed Wave; Start refusal lost the form; recovery had no way back to editing.</p>
+        </figure>
+        <figure class="built">
+          <figcaption>Built (03a73aeeab) · One draft, Wave IDs &amp; Edit draft</figcaption>
+          <div class="sheet">
+            <h3>What do you want?</h3>
+            <p class="request">Make the Task brief easier to scan</p>
+            <p>In <strong>Ops ▾</strong> <span class="outline">(sends <code>wave: {"id":"…"}</code>; refuses if removed)</span></p>
+            <p>Workflow for Start <strong>code ▾</strong> <span class="outline">Ops's default · Use default / pinned</span></p>
+            <div class="row">
+              <span class="pill">File to backlog</span>
+              <span class="outline">Choose a workflow when you start.</span>
+            </div>
+            <div class="row">
+              <span class="outline">Cancel</span>
+              <span class="pill accent">Start with code ⌘↩</span>
+            </div>
+            <div class="notice"><strong>Lost reply refused on replay:</strong> “Not filed. The selected Wave is no longer available.” → <strong>Edit draft</strong> reopens the sheet with <strong>Wave unavailable</strong>, Cancel and <strong>Discard draft</strong>.</div>
+          </div>
+          <p class="result">One draft holds editing, sending and confirmed refusal. File opens its committed brief immediately; Start commits Task, Graph, claim and conversation together.</p>
+        </figure>
+      </div>
+      <p class="evidence">Verified in live isolated Dev-bundle QA (<a href="qa.html">QA round 3</a>) and Rust + Swift integration suites (<a href="plan.md">plan checks</a>).</p>
+    </section>
+
+    <section aria-labelledby="mapping">
+      <h2 id="mapping">Do the product and code concepts line up?</h2>
+      <dl class="mapping">
+        <div>
+          <dt>The request you are editing</dt>
+          <dd><span class="yes">Yes</span> <code>NewTaskDraft</code> holds the words, destination, Start workflow, replaced draft ID, unavailable Wave IDs and single <code>Submission</code> state (<code>editing</code>, <code>sending</code>, <code>refused</code>). <code>StartingTaskView</code> and <code>navigation.startingTask</code> are deleted. <a href="../swift/LoopflowMac/Views/NewTaskSheet.swift#L6-L44">NewTaskDraft</a></dd>
+        </div>
+        <div>
+          <dt>The existing place you chose in <strong>In</strong></dt>
+          <dd><span class="yes">Yes</span> Desktop selects <code>CreationWave.existing(id:)</code> or <code>nil</code> (repository), previews <code>wave.graph</code> by ID, and sends <code>wave: {"id":"…"}</code>. The Machine holds a shared wave-lifecycle lock, resolves <code>existing_creation_wave</code>, and rechecks live membership inside SQLite commit. Removal (even with a same-name replacement) returns typed <code>not_found</code> with <code>data.wave_id</code>; CLI string names stay a separate <code>CreationWave::Name</code> variant. <a href="../rust/loopflow/src/lf/commands/write.rs#L18-L32">CreationWave</a> · <a href="../rust/loopflow-execution/src/ops/task.rs#L2142-L2155">existing_creation_wave</a> · <a href="../rust/loopflow-storage/src/sqlite/children.rs#L399-L413">SQLite check</a></dd>
+        </div>
+        <div>
+          <dt>File a brief for later</dt>
+          <dd><span class="yes">Yes</span> <code>NewTaskAction.file</code> sends <code>run: false</code> and <code>graph: null</code>. The Task saves its brief and Wave membership with no Graph; first Start offers the current default or any chosen workflow. The sheet's named Start workflow is kept only in Desktop's local journal (<code>fileWorkflow</code>) so <strong>Edit draft</strong> can restore the menu without sending it on File. <a href="../swift/LoopflowMac/WorkModel.swift#L86-L91">NewTaskAction</a> · <a href="../swift/Loopflow/Services/RegistryQuery.swift#L1213-L1218">createTask</a></dd>
+        </div>
+        <div>
+          <dt>See the brief as soon as File answers</dt>
+          <dd><span class="yes">Yes</span> <code>openFiledTask</code> prefers current planning if it beat the reply (following moves; leaving already-started Tasks in Working), otherwise borrows <code>created.row</code> into <code>BacklogState.filedRow</code>, reveals a hidden backlog and unzooms other panes. <code>BacklogBrief</code> attaches <code>CreationPresentation</code> to retire the submission on mount, and current planning or a complete Task lookup clears the borrowed row. <a href="../swift/LoopflowMac/WorkModel.swift#L2669-L2699">openFiledTask &amp; refreshFiledRow</a> · <a href="../swift/LoopflowMac/Views/BacklogView.swift#L1405-L1409">BacklogBrief</a></dd>
+        </div>
+        <div>
+          <dt>Follow the default or pick a workflow for Start</dt>
+          <dd><span class="yes">Yes</span> <code>draft.graph == nil</code> means <strong>Use default</strong> and follows scope changes until admission; a named choice sticks across scope changes, even when its name matches the default. The Machine resolves an inherited default inside admission. <a href="../swift/LoopflowMac/Views/NewTaskSheet.swift#L172-L193">workflowPicker</a> · <a href="../docs/surfaces.md#new-task">Surfaces doc</a></dd>
+        </div>
+        <div>
+          <dt>Start and open the conversation</dt>
+          <dd><span class="yes">Yes</span> Admission commits the Task, captured Graph, claim, primary Session and <code>admitted</code> receipt in one transaction. <code>openCreatedTask</code> installs the returned conversation; checkout and launch failures belong to that Task's workspace, never a second creation. <a href="../rust/loopflow-execution/src/engine/creation.rs#L152-L232">creation::create</a> · <a href="../swift/LoopflowMac/WorkModel.swift#L2706-L2739">openCreatedTask</a></dd>
+        </div>
+        <div>
+          <dt>Correct a refused File or Start</dt>
+          <dd><span class="yes">Yes</span> Pre-commit refusals carry typed <code>ServerError</code> codes (<code>not_found</code> for removed Waves, <code>invalid</code> with <code>data.graph</code> for missing workflows) with <code>revisions == nil</code>. <code>confirmRefusal</code> verifies no receipt exists on the original Machine before returning the error to <code>NewTaskDraft.refuse</code>, keeping the same sheet editable and disabling the missing Wave ID even against stale planning. <a href="../rust/loopflow-execution/src/ops/task.rs#L805-L815">creation_graph</a> · <a href="../swift/Loopflow/Services/CreationJournal.swift#L175-L195">confirmRefusal</a></dd>
+        </div>
+        <div>
+          <dt>Find the same Task after a lost answer</dt>
+          <dd><span class="yes">Yes</span> <code>SubmittedCreation</code> records exact payload, request ID, original Machine and protocol revision before send. Receipt checks run before Wave or Graph validation, so an admitted Task replays cleanly even after its Wave or Graph disappears, across both Desktop and CLI UUID calls. <a href="../swift/Loopflow/Services/CreationJournal.swift#L4-L23">SubmittedCreation</a> · <a href="../rust/loopflow/tests/task_create_tests.rs#L761-L872">Served admission test</a></dd>
+        </div>
+        <div>
+          <dt>Correct a draft after an uncertain send settles as a refusal</dt>
+          <dd><span class="yes">Yes</span> When <code>reconcile</code> gets a typed refusal on replay and confirms receipt absence on the original Machine, it parks <code>refusal</code> on the journal file and surfaces <strong>Edit draft</strong> in every window's notice. Reopening routes to the original repository, survives restarts, keeps the draft on Cancel, deletes it on <strong>Discard draft</strong>, and atomically replaces the same journal slot under a fresh request ID on resubmit (re-parking if the replacement itself is refused). <a href="../swift/Loopflow/Services/CreationJournal.swift#L145-L238">record &amp; reconcile</a> · <a href="../swift/LoopflowMac/CreationSubmissions.swift#L140-L168">CreationRecovery</a></dd>
+        </div>
+      </dl>
+    </section>
+
+    <section aria-labelledby="paths">
+      <h2 id="paths">Normal, failure and recovery walkthroughs</h2>
+      <div class="scenarios">
+        <article>
+          <h3>Normal</h3>
+          <p>Rename Later to Someday while the sheet is open: <strong>In</strong> updates to Someday, File lands in the same Wave ID, and the Someday backlog opens with the brief selected even while planning is behind. Start with <strong>Use default</strong> resolves Someday's default at admission and opens the conversation.</p>
+        </article>
+        <article>
+          <h3>Refusal</h3>
+          <p>Remove Ops and add a new Ops while the sheet is open: Desktop's ID is refused with <code>not_found</code> and leaves zero rows in SQLite. <strong>In</strong> shows <strong>Wave unavailable</strong> and disables File and Start until a new destination is chosen. A missing named workflow returns <code>invalid</code> in place so <strong>Use default</strong> is one edit away.</p>
+        </article>
+        <article>
+          <h3>Recovery</h3>
+          <p>Lose the reply after commit: receipt lookup recovers the exact Task even if the Wave was later removed. Lose the reply before commit, then remove the Wave: replay confirms refusal and absence, parks the draft, and persists <strong>Edit draft</strong> across app restarts. Editing and resubmitting replaces the journal slot atomically under a new request ID.</p>
+        </article>
+      </div>
+      <p class="evidence">Counterexamples verified: same-name replacement Wave has a new ID; Wave retirement mid-transaction rolls back cleanly; CLI provisioning after wave creation converts later errors to <code>outcome_unknown</code> because an effect already occurred; legacy name-only Wave drafts force a new destination in Edit draft; late replies never overwrite newer navigation.</p>
+    </section>
+
+    <section aria-labelledby="outside">
+      <h2 id="outside">Outside this work &amp; remaining checks</h2>
+      <div class="outside">
+        <h3>Removed Wave's page draws as an empty repository (pre-existing on main)</h3>
+        <p>Observed in <a href="qa.html">QA round 3, section 5</a>: after removing a Wave whose conversation exists in Session history, <code>clearSelectionIfOutsideScope</code> keeps the Wave selected and <code>BacklogView</code> falls back to the repository's name over an empty list. New Task recovery often returns here because a refused replay commonly follows Wave removal. Fixing this is a separate Wave-lifecycle product decision across sidebar, sessions and backlog: either redirect the window to the repository when a Wave is removed, or label the page explicitly as a removed Wave while keeping its conversation history.</p>
+        <h3>Minor non-conceptual notes</h3>
+        <p><strong>Replacement notice lag:</strong> after submitting a replacement from <strong>Edit draft</strong>, the superseded <strong>Edit draft</strong> notice clears on the next 5-second <code>CreationRecovery.refresh()</code> tick rather than immediately on replacement. Safe (<code>CreationSubmissions.record</code> rejects reusing the replaced ID), worth tightening only if convenient.</p>
+        <p><strong>Unlocked-display verification:</strong> SwiftUI <code>Menu</code> interaction (picking a named workflow, resetting to <strong>Use default</strong>, choosing the repository after <strong>Wave unavailable</strong>) and a real click on destructive-role <strong>Discard draft</strong> could not be driven through the background QA hook and remain in <a href="plan.md">scratch/plan.md</a> for demo/QA on an unlocked display.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="decisions">
+      <h2 id="decisions">Choices made for review</h2>
+      <ol class="questions">
+        <li><strong>Does a workflow picked in New Task belong only to Start?</strong>
+          <p><strong>1a (built)</strong> Yes — File saves no workflow choice; first Start offers the current default or lets you choose. <strong>1b</strong> Persist a pre-start workflow preference on filed Tasks.</p>
+        </li>
+        <li><strong>What does picking a Wave in <em>In</em> mean?</strong>
+          <p><strong>2a (built)</strong> The existing Wave by ID: follows renames and asks again after removal, even if another Wave takes the same name. <strong>2b</strong> The name: file into whichever Wave answers to it.</p>
+        </li>
+        <li><strong>How should recovery surface a refused replay?</strong>
+          <p><strong>3a (built)</strong> Keep the draft parked and offer <strong>Edit draft</strong> in the notice so it never interrupts another window. <strong>3b</strong> Reopen the New Task sheet automatically when recovery settles the refusal.</p>
+        </li>
+      </ol>
+    </section>
+  </main>
+</body>
+</html>

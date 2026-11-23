@@ -21,7 +21,7 @@ struct WavesView: View {
     /// launch, and a model decodes the saved workspace.
     @State private var window = WindowModel()
     private var model: WorkModel { window.model }
-    let openTask: (String, String) -> Void
+    let openRepository: (String, LinkedWork?) -> Void
 
     @Environment(\.palette) private var palette
 
@@ -97,7 +97,9 @@ struct WavesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
         .overlay(alignment: .bottom) { NoticeView(center: model.navigation.notices).zIndex(ZIndex.toast) }
-        .modifier(CreationNotices(notices: model.navigation.notices))
+        .modifier(CreationNotices(notices: model.navigation.notices) { [openRepository] draft in
+            openRepository(draft.directory, .editDraft(draft))
+        })
         .answeringLostLines(model)
         .task { await model.keepWorkCurrent() }
         .task { await model.keepPlanningCurrent() }
@@ -393,6 +395,10 @@ struct WavesView: View {
         } else {
             RoadmapView(model: model, onOpenWave: openRoadmapWave, onOpenTask: openTask)
         }
+    }
+
+    private func openTask(_ repo: String, _ id: String) {
+        openRepository(repo, .task(TaskLink(issue: id, repo: repo)))
     }
 
     private var roadmapRepoPath: String? {
@@ -719,5 +725,5 @@ struct CreateWaveSheet: View {
 }
 
 #Preview {
-    WavesView(portfolioService: PortfolioService(), openTask: { _, _ in })
+    WavesView(portfolioService: PortfolioService(), openRepository: { _, _ in })
 }

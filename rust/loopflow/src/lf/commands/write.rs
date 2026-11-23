@@ -12,6 +12,24 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use loopflow_execution::engine::task;
 use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
 
+/// A saved name may provision a Wave. An ID selects only the existing Wave.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum CreationWave {
+    Existing { id: loopflow_model::id::WaveId },
+    Name(String),
+}
+
+impl CreationWave {
+    /// Both transports fingerprint the same Wave argument for receipt replay.
+    pub fn argument(&self) -> &str {
+        match self {
+            Self::Existing { id } => id.as_str(),
+            Self::Name(name) => name,
+        }
+    }
+}
+
 /// Moving a Task changes its Wave membership or its Machine ownership.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
@@ -94,7 +112,8 @@ writes! {
         request_id: String,
         title: Option<String>,
         request: Option<String>,
-        wave: Option<String>,
+        #[serde(deserialize_with = "Option::deserialize")]
+        wave: Option<CreationWave>,
         graph: Option<String>,
         session: Option<String>,
         run: bool,
@@ -107,7 +126,7 @@ writes! {
             directory: directory.to_path_buf(),
             title: title.clone(),
             request: request.clone(),
-            wave: wave.clone(),
+            wave: wave.as_ref().map(|wave| wave.argument().to_owned()),
             graph: graph.clone(),
             session: session.clone(),
             worktree: None,

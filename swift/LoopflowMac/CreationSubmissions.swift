@@ -1,8 +1,12 @@
-// Only immutable submitted creations live here. Outcomes are read from the server.
+// Receipts open the recovered work. A confirmed refusal can reopen its saved draft.
 import Foundation
 import Observation
 import SwiftUI
 import Loopflow
+
+extension RefusedTaskDraft {
+    var action: NewTaskAction { run ? .start : .file }
+}
 
 extension CreationSubmissions {
     static let shared = CreationSubmissions(
@@ -22,10 +26,15 @@ final class CreationRecovery {
     struct Item: Identifiable {
         let id: String
         let text: String
-        let complete: Bool
-        let resource: Resource?
+        enum Action {
+            case inspect(Resource)
+            case edit(RefusedTaskDraft)
+        }
+        var action: Action?
     }
-    struct Resource {
+    struct Resource: Identifiable {
+        let id: String
+        let complete: Bool
         let destination: String
         let directory: String
         let task: String?
@@ -44,32 +53,39 @@ final class CreationRecovery {
         didSet { postNotices(replacing: oldValue) }
     }
     /// The recovered creation whose inspector is open.
-    var inspecting: Item?
+    var inspecting: Resource?
     @ObservationIgnored private var centers: [WeakCenter] = []
 
-    private struct WeakCenter { weak var center: NoticeCenter? }
+    private struct WeakCenter {
+        weak var center: NoticeCenter?
+        let editDraft: (RefusedTaskDraft) -> Void
+    }
 
     init(submissions: CreationSubmissions = .shared) { self.submissions = submissions }
 
     /// `notices` shows each recovered creation until it is presented.
-    func report(to notices: NoticeCenter) {
+    func report(to notices: NoticeCenter, editDraft: @escaping (RefusedTaskDraft) -> Void) {
         centers.removeAll { $0.center == nil || $0.center === notices }
-        centers.append(WeakCenter(center: notices))
-        for item in items { notices.post(notice(item)) }
+        centers.append(WeakCenter(center: notices, editDraft: editDraft))
+        for item in items { notices.post(notice(item, editDraft: editDraft)) }
     }
 
-    private func notice(_ item: Item) -> Notice {
-        let action = item.resource.map { _ in
-            Notice.Action(item.complete ? "Show result" : "Inspect") { [weak self] in self?.inspecting = item }
+    private func notice(_ item: Item, editDraft: @escaping (RefusedTaskDraft) -> Void) -> Notice {
+        let action: Notice.Action? = switch item.action {
+        case .edit(let draft): Notice.Action("Edit draft") { editDraft(draft) }
+        case .inspect(let resource):
+            Notice.Action(resource.complete ? "Show result" : "Inspect") { [weak self] in self?.inspecting = resource }
+        case nil: nil
         }
         return Notice(item.text, key: "creation-\(item.id)", action: action, kind: .condition)
     }
 
     private func postNotices(replacing old: [Item]) {
         let current = Set(items.map(\.id))
-        for center in centers.compactMap(\.center) {
+        for window in centers {
+            guard let center = window.center else { continue }
             for gone in old where !current.contains(gone.id) { center.clear(key: "creation-\(gone.id)") }
-            for item in items { center.post(notice(item)) }
+            for item in items { center.post(notice(item, editDraft: window.editDraft)) }
         }
     }
 
@@ -93,10 +109,16 @@ final class CreationRecovery {
             catch {
                 presentations.removeValue(forKey: id)
                 items.removeAll { $0.id == id }
-                items.append(Item(id: id, text: error.localizedDescription, complete: false, resource: nil))
+                items.append(Item(id: id, text: error.localizedDescription))
             }
         }
     }
+
+    func discardDraft(_ id: String) async throws {
+        try await submissions.discardDraft(id)
+        items.removeAll { $0.id == id }
+    }
+
     private var refreshing = false
     private var observation: Task<Void, Never>?
 
@@ -119,43 +141,47 @@ final class CreationRecovery {
             var current: [Item] = []
             for record in records {
                 do {
-                    guard let receipt = try await submissions.reconcile(record) else { continue }
+                    guard let receipt = try await submissions.reconcile(record, keepingRefusedDraft: true) else { continue }
                     let payload = try JSONSerialization.jsonObject(with: record.payload) as? [String: Any]
                     guard let directory = payload?["directory"] as? String else {
                         throw RegistryQueryError("The saved creation has no repository; its original request is retained.")
                     }
                     let encoder = JSONEncoder()
                     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                    let resource = Resource(destination: record.destination, directory: directory,
+                    let resource = Resource(id: record.id, complete: receipt.disposition == .complete,
+                        destination: record.destination, directory: directory,
                         task: receipt.taskId, session: receipt.sessionId,
                         receipt: String(decoding: try encoder.encode(receipt), as: UTF8.self))
-                    current.append(Item(id: record.id, text: receipt.explanation,
-                        complete: receipt.disposition == .complete, resource: resource))
+                    current.append(Item(id: record.id, text: receipt.explanation, action: .inspect(resource)))
+                } catch let draft as RefusedTaskDraft {
+                    current.append(Item(id: draft.id, text: "\(draft.action.refusalTitle) \(draft.localizedDescription)",
+                                        action: .edit(draft)))
                 } catch {
-                    current.append(Item(id: record.id, text: "Creation \(record.id): \(error.localizedDescription)", complete: false, resource: nil))
+                    current.append(Item(id: record.id, text: "Creation \(record.id): \(error.localizedDescription)"))
                 }
             }
             // A mounted view may have retired a request while lookup awaited I/O.
             let pending = Set(try await submissions.pending().map(\.id))
             items = current.filter { pending.contains($0.id) }
-        } catch { items = [Item(id: "storage", text: error.localizedDescription, complete: false, resource: nil)] }
+        } catch { items = [Item(id: "storage", text: error.localizedDescription)] }
     }
 }
 
 /// A window's Notice reports recovered creations; their action opens the inspector.
 struct CreationNotices: ViewModifier {
     let notices: NoticeCenter
+    let editDraft: (RefusedTaskDraft) -> Void
     @Bindable private var recovery = CreationRecovery.shared
 
     func body(content: Content) -> some View {
         content
-            .sheet(item: $recovery.inspecting) { item in
-                if let resource = item.resource { RecoveredCreationInspector(resource: resource, presented: {
-                    if item.complete { await recovery.presented([item.id]) }
-                }) }
+            .sheet(item: $recovery.inspecting) { resource in
+                RecoveredCreationInspector(resource: resource) {
+                    if resource.complete { await recovery.presented([resource.id]) }
+                }
             }
             .task(id: ObjectIdentifier(notices)) {
-                recovery.report(to: notices)
+                recovery.report(to: notices, editDraft: editDraft)
                 recovery.start()
             }
     }

@@ -72,6 +72,7 @@ struct TaskLink: Equatable, Sendable {
 /// an exact conversation instead of its primary.
 enum LinkedWork: Equatable, Sendable {
     case task(TaskLink)
+    case editDraft(RefusedTaskDraft)
     case session(id: String, address: String)
     /// `address` is the public Work address when the Wave arrived as one.
     case wave(id: String, address: String?)
@@ -93,6 +94,7 @@ enum LinkedWork: Equatable, Sendable {
 
     var address: String? {
         switch self {
+        case .editDraft: nil
         case .task(let link): link.address
         case .session(_, let address): address
         case .wave(_, let address): address
@@ -103,7 +105,7 @@ enum LinkedWork: Equatable, Sendable {
     func with(repo: String) -> LinkedWork {
         switch self {
         case .task(let link): .task(link.with(repo: repo))
-        case .wave, .view, .session: self
+        case .editDraft, .wave, .view, .session: self
         }
     }
 }

@@ -70,7 +70,8 @@ enum QAHook {
                 }
             }
             return "not found"
-        case "click":
+        case "click", "dclick":
+            let direct = parts.first == "dclick"
             let n = arg.split(separator: " ").compactMap { Double($0) }
             guard n.count == 3, windows.indices.contains(Int(n[0])) else { return "usage: click window x y" }
             let window = windows[Int(n[0])]
@@ -81,8 +82,13 @@ enum QAHook {
                                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
             }
             // The up waits in the queue so an AppKit control's tracking loop finds it.
-            if let up = event(.leftMouseUp) { NSApp.postEvent(up, atStart: false) }
-            if let down = event(.leftMouseDown) { window.sendEvent(down) }
+            if direct {
+                if let down = event(.leftMouseDown) { window.sendEvent(down) }
+                if let up = event(.leftMouseUp) { window.sendEvent(up) }
+            } else {
+                if let up = event(.leftMouseUp) { NSApp.postEvent(up, atStart: false) }
+                if let down = event(.leftMouseDown) { window.sendEvent(down) }
+            }
             return "clicked \(window.title) \(point)"
         case "size":
             let n = arg.split(separator: " ").compactMap { Double($0) }
@@ -129,6 +135,22 @@ enum QAHook {
                 }
             }
             return "typed"
+        case "insert":
+            // Types into the focused field of the frontmost sheet (New Task opens focused); `type` needs a key window.
+            guard let sheet = windows.compactMap(\.attachedSheet).first ?? windows.first,
+                  let field = sheet.firstResponder as? NSTextView else { return "no text field focused" }
+            field.insertText(arg, replacementRange: field.selectedRange())
+            return "inserted"
+        case "key":
+            // `key return` sends ⌘↩, `key escape` sends Esc, to the frontmost sheet.
+            guard let sheet = windows.compactMap(\.attachedSheet).first ?? windows.first else { return "no window" }
+            let (characters, code, flags): (String, UInt16, NSEvent.ModifierFlags) =
+                arg == "escape" ? ("\u{1b}", 53, []) : ("\r", 36, .command)
+            guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
+                                               timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: sheet.windowNumber,
+                                               context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                                               isARepeat: false, keyCode: code) else { return "no event" }
+            return sheet.performKeyEquivalent(with: event) ? "handled" : "unhandled"
         default:
             return "unknown: \(line)"
         }

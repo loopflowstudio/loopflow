@@ -1,0 +1,39 @@
+at: 5bc0806fc51da2eba96f54ba876fcd735bc5d45b
+first:
+  - path: docs/surfaces.md
+    why: File, Start and correcting a refused draft
+  - path: rust/loopflow/src/server/README.md
+    why: Wave selection and the creation receipt contract
+  - path: swift/LoopflowMac/Views/NewTaskSheet.swift
+    why: The editable request, destination and workflow choice
+  - path: swift/Loopflow/Services/RegistryQuery.swift
+    why: Only Start sends the chosen workflow
+  - path: rust/loopflow/src/lf/commands/write.rs
+    why: Existing Wave IDs and legacy names
+  - path: rust/loopflow-execution/src/engine/creation.rs
+    why: Replay before resolving new work
+  - path: rust/loopflow-execution/src/ops/task.rs
+    why: Select the Wave and prepare File or Start
+  - path: rust/loopflow-storage/src/sqlite/children.rs
+    why: Commit the Task, membership and receipt together
+  - path: swift/Loopflow/Services/CreationJournal.swift
+    why: Save, replay and replace a refused submission
+  - path: swift/LoopflowMac/CreationSubmissions.swift
+    why: Recovery offers the receipt inspector or editable draft
+  - path: swift/LoopflowMac/WorkModel.swift
+    why: Open the filed brief or admitted conversation
+  - path: swift/LoopflowMac/Views/BacklogView.swift
+    why: Show the committed brief while planning catches up
+  - path: swift/LoopflowMac/WorkProjection.swift
+    why: Release the filed row on navigation
+  - path: rust/loopflow/tests/task_create_tests.rs
+    why: Wave retirement, rename, replay and named provisioning
+  - path: swift/LoopflowTests/NewTaskTests.swift
+    why: Follow both buttons through refusal and recovery
+  - path: swift/LoopflowTests/CreationSubmissionTests.swift
+    why: Storage failures, competing windows and late receipts
+  - path: swift/LoopflowTests/WorkDestinationTests.swift
+    why: Session installation and replies after navigation
+hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: Generated from the protocol and its fixtures

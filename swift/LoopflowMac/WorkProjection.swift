@@ -250,6 +250,7 @@ final class WorkNavigation {
         case graph(String)
         case workflow(String)
         case newTask
+        case editDraft(RefusedTaskDraft)
     }
     @MainActor @Observable
     final class WorkspacePresentation {
@@ -295,10 +296,6 @@ final class WorkNavigation {
     /// The window's one Notice: refusals, requested changes and failed reads.
     let notices = NoticeCenter()
     var startingTaskSessions: Set<String> = []
-    /// The New Task request this window submitted and has not opened yet. Its
-    /// words stand in for the Task's conversation from the click until the
-    /// answer installs it.
-    var startingTask: StartingTask?
     /// Successful `task prepare` receipts, available before the next roadmap read.
     var preparedTaskWorktrees: [String: WorkspaceIdentity] = [:]
     /// Tasks whose Comments are expanded; a presentation fact, not a reading.
@@ -325,7 +322,17 @@ final class WorkNavigation {
         case repository
     }
     static let workingTasksTitle = "Working Tasks"
-    var destination: Destination = .work(nil)
+    var destination: Destination = .work(nil) {
+        willSet {
+            if newValue != destination { releaseFiledRow() }
+        }
+    }
+
+    func releaseFiledRow() {
+        if let view = waveView, backlogs[view]?.filedRow != nil {
+            backlogs[view]?.filedRow = nil
+        }
+    }
     var selection: WorkReference? {
         get {
             switch destination {

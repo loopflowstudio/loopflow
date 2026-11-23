@@ -43,6 +43,8 @@ pub struct CreationIdentity {
 #[derive(Debug, Clone)]
 pub struct TaskCreationRecord {
     pub identity: CreationIdentity,
+    /// Recheck the selected Wave when committing its Task.
+    pub wave: Option<crate::work::wave::Wave>,
     /// A started creation's Graph and conversation commit with the Task, so
     /// no reading shows it unstarted; its receipt is `admitted`, never `filed`.
     pub admission: Option<TaskAdmission>,

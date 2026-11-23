@@ -30,7 +30,13 @@ enum BacklogNotice: Equatable {
 
 /// What a person has done to one view's backlog; it outlives entering a Task.
 struct BacklogState: Equatable {
-    var selection: Set<String> = []
+    var selection: Set<String> = [] {
+        didSet {
+            if let filedRow, selection != [filedRow.id] { self.filedRow = nil }
+        }
+    }
+    /// The selected brief while its File reply is ahead of planning.
+    var filedRow: RoadmapTask?
     /// Where ⇧-click and ⇧↑↓ extend from.
     var anchor: String?
     /// The row the keyboard last moved to; arrows step from here.
@@ -49,6 +55,15 @@ struct BacklogState: Equatable {
     mutating func select(_ id: String) {
         selection = selection == [id] ? [] : [id]
         mark(id)
+    }
+
+    mutating func showFiled(_ task: RoadmapTask, inPlanning: Bool) {
+        filter = .all
+        query = ""
+        selection = [task.id]
+        filedRow = inPlanning ? nil : task
+        mark(task.id)
+        notice = .did("Filed \(task.task.identifier)")
     }
 
     mutating func toggle(_ id: String) {
@@ -183,6 +198,8 @@ struct BacklogList {
     let state: BacklogState
     /// The selected rows the list shows; a row the filter or search hides is not selected.
     let selection: Set<String>
+    /// The selected Tasks in list order, shared by the brief, toolbar and row actions.
+    let selected: [RoadmapTask]
 
     init(tasks: [RoadmapTask], truncated: Bool, wave: String?, waveNames: [String: String], state: BacklogState) {
         all = tasks.filter { $0.section == .backlog }.sorted { $0.task.rank < $1.task.rank }
@@ -195,7 +212,8 @@ struct BacklogList {
             Self.passes(task, state.filter) && (needle.isEmpty
                 || "\(task.task.identifier) \(task.task.name) \(task.task.description)".localizedCaseInsensitiveContains(needle))
         }
-        selection = state.selection.intersection(rows.map(\.id))
+        selected = rows.filter { state.selection.contains($0.id) }
+        selection = Set(selected.map(\.id))
     }
 
     static func passes(_ task: RoadmapTask, _ filter: BacklogFilter) -> Bool {
@@ -213,15 +231,12 @@ struct BacklogList {
 
     var ids: [String] { rows.map(\.id) }
 
-    /// The selected Tasks in list order: what every action reads.
-    var selected: [RoadmapTask] { rows.filter { selection.contains($0.id) } }
-
     /// The one selected Task, whose brief opens under its row.
     var opened: RoadmapTask? { selection.count == 1 ? selected.first : nil }
 
-    /// The Tasks an action on `id` applies to: the selection when the row is in it, else the row alone.
-    func targets(_ id: String) -> [RoadmapTask] {
-        selection.contains(id) ? selected : rows.filter { $0.id == id }
+    /// The Tasks an action on `task` applies to: the selection when the row is in it, else the row alone.
+    func targets(_ task: RoadmapTask) -> [RoadmapTask] {
+        selection.contains(task.id) ? selected : [task]
     }
 
     /// The Wave a row names when it isn't the one being looked at.
@@ -534,7 +549,7 @@ extension WorkModel {
 
     /// Go to a Task's own view, where its position, PR and run action live.
     func openBacklog(_ task: RoadmapTask) {
-        openTaskDestination(wave: self.task(id: task.id)?.wave, task: task)
+        openTaskDestination(wave: task.task.waveId.flatMap { wave(id: $0) }, task: task)
     }
 
     func moveBacklog(_ tasks: [RoadmapTask], toWave wave: String?, in view: WorkNavigation.Board) {
@@ -615,7 +630,7 @@ struct BacklogView: View {
             Divider()
             BacklogToolbar(model: model, view: view, list: list, perform: perform)
             Divider()
-            notices
+            if let notice = list.state.notice { noticeLine(notice) }
             content(list)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -624,7 +639,9 @@ struct BacklogView: View {
         .background(palette.background, ignoresSafeAreaEdges: [])
         .accessibilityIdentifier("wave-backlog")
         .task(id: model.repoPath) { await model.loadGraphCatalog() }
-        .onChange(of: [list.state.filter.rawValue, list.state.query]) { state.wrappedValue.keep(model.backlog(view).ids) }
+        .onChange(of: [list.state.filter.rawValue, list.state.query]) {
+            state.wrappedValue.keep(list.ids)
+        }
         .confirmationDialog(abandonTitle, isPresented: Binding(get: { abandoning != nil }, set: { if !$0 { abandoning = nil } })) {
             Button("Abandon", role: .destructive) {
                 if let tasks = abandoning { model.abandonBacklog(tasks, in: view) }
@@ -758,22 +775,19 @@ struct BacklogView: View {
 
     /// What the last backlog action did. Read failures, refusals and Tasks
     /// outside the plan go to the window's Notice.
-    @ViewBuilder
-    private var notices: some View {
-        if let notice = list.state.notice {
-            Group {
-                switch notice {
-                case .did(let did):
-                    Text(did).font(Typography.text).foregroundStyle(palette.textSecondary).lineLimit(2)
-                        .textSelection(.enabled)
-                case .failed(let failure):
-                    FailureLine(failure)
-                }
+    private func noticeLine(_ notice: BacklogNotice) -> some View {
+        Group {
+            switch notice {
+            case .did(let did):
+                Text(did).font(Typography.text).foregroundStyle(palette.textSecondary).lineLimit(2)
+                    .textSelection(.enabled)
+            case .failed(let failure):
+                FailureLine(failure)
             }
-            .accessibilityIdentifier("backlog-notice")
-            .padding(.horizontal, Spacing.xl)
-            .padding(.vertical, Spacing.sm)
         }
+        .accessibilityIdentifier("backlog-notice")
+        .padding(.horizontal, Spacing.xl)
+        .padding(.vertical, Spacing.sm)
     }
 
     // MARK: Rows
@@ -796,7 +810,10 @@ struct BacklogView: View {
                             }
                             if isOpen {
                                 BacklogUnderTitle(identifier: task.task.identifier) {
-                                    BacklogBrief(model: model, view: view, task: task, state: state, perform: perform)
+                                    BacklogBrief(task: task, state: state, perform: perform)
+                                        .task(id: list.state.filedRow == nil ? nil : model.planningSequence) {
+                                            await model.refreshFiledRow(in: view)
+                                        }
                                 }
                             }
                         }
@@ -819,13 +836,16 @@ struct BacklogView: View {
             .focused($focused)
             .focusEffectDisabled()
             .onKeyPress(phases: .down) { press in key(press, list) }
-            .onChange(of: list.state.cursor) { _, row in if let row { proxy.scrollTo(row) } }
+            .onChange(of: list.state.cursor.flatMap { list.selection.contains($0) ? $0 : nil }, initial: true) { _, row in
+                if let row { proxy.scrollTo(row) }
+            }
         }
         .accessibilityIdentifier("backlog-list")
     }
 
     private func row(_ task: RoadmapTask, _ list: BacklogList) -> some View {
         let selected = list.selection.contains(task.id)
+        let targets = list.targets(task)
         let isOpen = list.opened?.id == task.id
         return HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
             Toggle("Select \(task.task.identifier)", isOn: Binding(get: { selected }, set: { _ in state.wrappedValue.toggle(task.id) }))
@@ -861,7 +881,7 @@ struct BacklogView: View {
             }
             .contentShape(Rectangle())
             .onTapGesture { click(task, list) }
-            Menu { actions(task, list) } label: {
+            Menu { actions(targets, list) } label: {
                 Image(systemName: "ellipsis")
             }
             .menuStyle(.borderlessButton).menuIndicator(.hidden)
@@ -873,26 +893,25 @@ struct BacklogView: View {
         .padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.xs)
         .frame(maxWidth: .infinity, minHeight: HitTarget.comfortable, alignment: .leading)
         .background(selected && !isOpen ? palette.selectionFill : .clear)
-        .modifier(BacklogDrag(enabled: list.canReorder, id: task.id, title: list.targets(task.id).count > 1
-                              ? "\(list.targets(task.id).count) Tasks" : task.task.name,
+        .modifier(BacklogDrag(enabled: list.canReorder, id: task.id, title: targets.count > 1
+                              ? "\(targets.count) Tasks" : task.task.name,
                               targeted: Binding(get: { dropTarget == task.id },
                                                 set: { if $0 { dropTarget = task.id } else if dropTarget == task.id { dropTarget = nil } }),
                               drop: { drop($0, before: task.id, list) }))
         .overlay(alignment: .top) {
             if dropTarget == task.id { Rectangle().fill(palette.accent).frame(height: Spacing.xxs).allowsHitTesting(false) }
         }
-        .contextMenu { actions(task, list) }
+        .contextMenu { actions(targets, list) }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityAction(named: Text("Move up")) { perform(.nudge(-1), on: list.targets(task.id)) }
-        .accessibilityAction(named: Text("Move down")) { perform(.nudge(1), on: list.targets(task.id)) }
+        .accessibilityAction(named: Text("Move up")) { perform(.nudge(-1), on: targets) }
+        .accessibilityAction(named: Text("Move down")) { perform(.nudge(1), on: targets) }
         .accessibilityIdentifier("wave-row-\(task.id)")
     }
 
     /// A row's "···" and right-click menu.
-    private func actions(_ task: RoadmapTask, _ list: BacklogList) -> BacklogActions {
-        let tasks = list.targets(task.id)
-        return BacklogActions(model: model, list: list, tasks: tasks) { perform($0, on: tasks) }
+    private func actions(_ tasks: [RoadmapTask], _ list: BacklogList) -> BacklogActions {
+        BacklogActions(model: model, list: list, tasks: tasks) { perform($0, on: tasks) }
     }
 
     private func click(_ task: RoadmapTask, _ list: BacklogList) {
@@ -905,9 +924,13 @@ struct BacklogView: View {
 
     private func drop(_ items: [String], before target: String?, _ list: BacklogList) -> Bool {
         dropTarget = nil
-        guard let source = items.first, list.all.contains(where: { $0.id == source }) else { return false }
-        perform(.reorder(list.moves(list.targets(source).map(\.id), before: target)))
-        return true
+        guard let id = items.first else { return false }
+        if let source = list.rows.first(where: { $0.id == id }) {
+            perform(.reorder(list.moves(list.targets(source).map(\.id), before: target)))
+            return true
+        }
+        // A row filtered out during the drag still belongs to this backlog.
+        return list.all.contains { $0.id == id }
     }
 
     @ViewBuilder
@@ -1340,8 +1363,6 @@ struct BacklogActions: View {
 
 /// The opened Task's brief, cut at nine lines past 900 characters; Edit turns it into a field.
 struct BacklogBrief: View {
-    let model: WorkModel
-    let view: WorkNavigation.Board
     let task: RoadmapTask
     let state: Binding<BacklogState>
     let perform: (BacklogView.Action) -> Void
@@ -1384,6 +1405,7 @@ struct BacklogBrief: View {
         .frame(maxWidth: 720, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, Spacing.sm)
+        .modifier(CreationPresentation(recovery: .shared, resource: .task(task.id)))
     }
 
     static func words(_ text: String) -> Int { text.split(whereSeparator: \.isWhitespace).count }

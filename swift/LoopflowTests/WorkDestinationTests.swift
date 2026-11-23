@@ -171,7 +171,7 @@ struct WorkDestinationTests {
         return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
-    @Test("New Task closes the sheet in the click and opens its conversation from the answer alone")
+    @Test("New Task keeps the draft until admission and installs the returned conversation")
     func newTaskSelectsTheTaskAndOpensItsConversation() async throws {
         let planning = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
@@ -196,15 +196,16 @@ struct WorkDestinationTests {
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
         model.navigation.palette = .newTask
         let deadline = ContinuousClock.now + .seconds(3)
-        StartingTaskView.start(model: model, request: "fix the flaky retry test", wave: nil, graph: nil)
-        // The click closes the sheet; the words stand in until the answer.
-        #expect(model.navigation.palette == nil)
+        let sheet = NewTaskSheet(model: model)
+        try sheet.inspect().find(ViewType.TextField.self).setInput("fix the flaky retry test")
+        try sheet.inspect().find(button: "Start ⌘↩").tap()
         while !(await barrier.contains("creation")), ContinuousClock.now < deadline { await Task.yield() }
         try #require(await barrier.contains("creation"))
-        #expect(model.navigation.startingTask?.request == "fix the flaky retry test")
+        #expect(model.navigation.palette == .newTask)
+        #expect(try sheet.inspect().find(button: "Starting…").isDisabled())
         await barrier.release("creation")
-        while model.navigation.startingTask != nil, ContinuousClock.now < deadline { await Task.yield() }
-        #expect(model.navigation.startingTask == nil)
+        try await eventually { self.installedSession(model, registry)?.id == record.id }
+        #expect(model.navigation.palette == nil)
         let log = requests.withLock { $0 }
         let unexpected = log.filter { !$0.starts(with: ["task", "create"]) && !$0.starts(with: ["machine", "self"]) }
         #expect(unexpected.isEmpty, "\(unexpected)")
@@ -240,8 +241,7 @@ struct WorkDestinationTests {
         let registry = SessionsWorkspaceRegistry(localMachineId: nil)
         model.bindWorkspaces(registry, repository: "repo")
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
-        try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil, requestID: UUID().uuidString)
-        #expect(model.navigation.startingTask == nil)
+        try await model.submitTask(.start, request: "fix the flaky retry test", wave: nil)
         #expect(model.selection == .task(id: task.id))
         let workspace = try #require(registry.retained(model.workspaceKey(for: model.selection, repository: "repo")))
         #expect(workspace.conversationError != nil)
@@ -272,8 +272,7 @@ struct WorkDestinationTests {
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
         registry.canPrepare = { false } // Warm primaries are not this Task's reads.
         model.applyFixture(roadmap: .available(without), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
-        try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil, requestID: UUID().uuidString)
-        #expect(model.navigation.startingTask == nil)
+        try await model.submitTask(.start, request: "fix the flaky retry test", wave: nil)
         #expect(model.selection == .task(id: task.id))
         #expect(model.task(id: task.id)?.task.id == task.id)
         #expect(installedSession(model, registry)?.id == record.id)
@@ -314,8 +313,9 @@ struct WorkDestinationTests {
         }
         let (model, _) = destinationModel(query: query, repoPath: task.task.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.navigation.palette = .newTask
         let originalNavigation = model.navigation
-        let creating = Task { try await model.createTask(request: "earlier request", wave: nil, graph: nil, requestID: UUID().uuidString) }
+        let creating = Task { try await model.submitTask(.start, request: "earlier request", wave: nil) }
         let deadline = ContinuousClock.now + .seconds(3)
         while !(await barrier.contains("creation")), ContinuousClock.now < deadline { await Task.yield() }
         try #require(await barrier.contains("creation"))
@@ -350,29 +350,6 @@ struct WorkDestinationTests {
             #expect(CreationRecovery.shared.requests(for: .task(task.task.id)).contains(submitted.withLock { $0 }))
             await CreationRecovery.shared.presented([submitted.withLock { $0 }])
         }
-    }
-
-    @Test("A submitted creation with an uncertain answer leaves the sheet for recovery")
-    func submittedCreationHasNoSecondSubmitButton() async throws {
-        let query = RegistryQuery { _, _ in
-            throw SubmittedCreationError(requestID: "original", cause: RegistryQueryError("Outcome unknown"))
-        }
-        let (model, _) = destinationModel(query: query, repoPath: "/repo")
-        try await model.createTask(request: "fix it", wave: nil, graph: nil, requestID: UUID().uuidString)
-        #expect(model.navigation.startingTask == nil)
-    }
-
-    @Test("New Task keeps the words and the failure when nothing was filed")
-    func newTaskFailureBeforeFilingKeepsTheWords() async throws {
-        let query = RegistryQuery { args, _ in
-            throw RegistryQueryError("not a repository")
-        }
-        let (model, _) = destinationModel(query: query, repoPath: "/repo")
-        await #expect(throws: RegistryQueryError.self) {
-            try await model.createTask(request: "fix it", wave: nil, graph: nil, requestID: UUID().uuidString)
-        }
-        #expect(model.navigation.startingTask?.request == "fix it")
-        #expect(model.navigation.startingTask?.error == "not a repository")
     }
 
     /// A Dashboard whose one tile is `task`, retained at `location`, with the

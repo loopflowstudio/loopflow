@@ -83,13 +83,11 @@ struct TaskReadings<Value> {
     }
 }
 
-/// A New Task submission from the click until its conversation is installed.
-struct StartingTask: Equatable {
-    let id: String
-    let request: String
-    let wave: WaveSnapshot?
-    let graph: String?
-    var error: String?
+enum NewTaskAction: Equatable {
+    case file
+    case start
+
+    var refusalTitle: String { self == .file ? "Not filed." : "Not started." }
 }
 
 /// One resolved opening: its companion must never outlive or drift from the Session.
@@ -860,13 +858,20 @@ final class WorkModel {
         } else { select(.wave(id: id)) }
     }
 
+    func editDraft(_ draft: RefusedTaskDraft) {
+        if draft.directory == repoPath { navigation.palette = .editDraft(draft) }
+        else { openRepository?(draft.directory, .editDraft(draft)) }
+    }
+
     func receiveWorkLink(_ link: LinkedWork) async {
         switch link {
+        case .editDraft(let draft): navigation.palette = .editDraft(draft)
         case .task(let link): await openTaskLink(link)
         case .session(let id, let address): await openSessionLink(id, address: address)
-        case .wave(let id, _):
-            if wave(id: id) == nil { await refresh() }
-            select(.wave(id: id))
+        case .wave(let name, _):
+            // A Wave link names the Wave (`loopflow://demo/wave/ops`); selection uses its ID.
+            if linkedWave(name) == nil { await refresh() }
+            select(.wave(id: linkedWave(name)?.wave.id ?? name))
         case .view(let expression, let address): await openView(expression: expression, url: URL(string: address))
         }
     }
@@ -1036,15 +1041,18 @@ final class WorkModel {
 
     /// A Wave view's backlog as `lf desktop capture -p backlog` reads it.
     private func backlogText(_ view: WorkNavigation.Board) -> String? {
-        let scope = view == .repository ? "Repository" : "Wave"
-        switch viewTasks(view) {
-        case .available:
-            let heading = if case .wave(let id) = view, let roadmap = wave(id: id) { BacklogList.heading(roadmap) }
-                else { [repositoryName] }
-            return backlog(view).text(heading: heading)
-        case .unavailable(let reason): return "\(scope) planning unavailable · \(reason)"
-        case nil: return nil
+        if navigation.backlogs[view]?.filedRow == nil {
+            switch viewTasks(view) {
+            case .available: break
+            case .unavailable(let reason):
+                let scope = view == .repository ? "Repository" : "Wave"
+                return "\(scope) planning unavailable · \(reason)"
+            case nil: return nil
+            }
         }
+        let heading = if case .wave(let id) = view, let roadmap = wave(id: id) { BacklogList.heading(roadmap) }
+            else { [repositoryName] }
+        return backlog(view).text(heading: heading)
     }
 
     /// A Wave view's backlog: its open Tasks nobody is running, in rank order, filtered and selected as the view left them.
@@ -1052,9 +1060,14 @@ final class WorkModel {
         let waveNames = Dictionary(visibleRoadmaps.map { ($0.wave.id, $0.wave.displayName) }, uniquingKeysWith: { first, _ in first })
         let scope: String? = if case .wave(let id) = view { id } else { nil }
         let tasks = viewTasks(view)
-        return BacklogList(tasks: tasks?.items ?? [], truncated: tasks?.truncated ?? false,
-                           wave: scope, waveNames: waveNames,
-                           state: navigation.backlogs[view] ?? BacklogState())
+        let state = navigation.backlogs[view] ?? BacklogState()
+        var rows = tasks?.items ?? []
+        if let filed = state.filedRow {
+            rows.removeAll { $0.id == filed.id }
+            rows += pendingChanges.apply(to: [filed], readAt: roadmap.readAt, wave: scope)
+        }
+        return BacklogList(tasks: rows, truncated: tasks?.truncated ?? false,
+                           wave: scope, waveNames: waveNames, state: state)
     }
 
     /// A Wave view's Tasks: the Wave's, or every Task in the repository.
@@ -1151,7 +1164,11 @@ final class WorkModel {
     var historyWave: WaveSnapshot?
     var historyReference: String?
     @ObservationIgnored private(set) var historyLookup: Task<Void, Never>?
-    var repoPath: String?
+    var repoPath: String? {
+        willSet {
+            if newValue != repoPath { navigationByRepo[repoPath ?? ""]?.releaseFiledRow() }
+        }
+    }
     var selection: WorkReference? { navigation.selection }
     @ObservationIgnored private var navigationByRepo: [String: WorkNavigation] = [:]
 
@@ -1219,6 +1236,10 @@ final class WorkModel {
         didSet {
             reported(WorkPart.planning.rawValue, "The plan", from: oldValue, to: roadmap)
             taskIndexCache = nil
+            if let owner = navigationByRepo[repoPath ?? ""], let view = owner.waveView,
+               let filed = owner.backlogs[view]?.filedRow, roadmap.current != nil, currentTask(id: filed.id) != nil {
+                owner.releaseFiledRow()
+            }
             // Retain the latest observed Task across temporary project membership
             // gaps, including selections saved in another repository.
             for navigation in navigationByRepo.values {
@@ -1466,6 +1487,10 @@ final class WorkModel {
     /// unless this launch has already replaced it.
     func confirmMachine(_ id: String) {
         let changed = workMachine != id
+        if observingMachineId != id {
+            navigation.releaseFiledRow()
+            if observingMachineId != nil { dismissTaskLink() }
+        }
         if changed, workMachine != nil { dropMachineContent() }
         workMachine = id
         // Readings are keyed by Machine: one taken before this confirmation is
@@ -2307,11 +2332,7 @@ final class WorkModel {
 
     private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true) {
         if navigation.palette == .search || navigation.palette == .sidebarSearch { navigation.palette = nil }
-        if !preservingOpening {
-            dismissTaskLink()
-            // Going elsewhere leaves a submitted New Task to its row and recovery.
-            if navigation.startingTask != nil { navigation.startingTask = nil }
-        }
+        if !preservingOpening { dismissTaskLink() }
         historyLookup?.cancel()
         historyLookup = nil
         if let requested, requested.kind == .task {
@@ -2587,79 +2608,94 @@ final class WorkModel {
 
     /// The graph a new Task in each scope would take up, keyed by repository and
     /// Wave. Rust resolves it; the New Task sheet only shows it.
-    private(set) var graphDefaults: [String: Reading<WaveGraph>] = [:] {
+    private var graphDefaults: [String: Reading<WaveGraph>] = [:] {
         didSet { reported("graph-defaults", "Graph defaults", from: oldValue, to: graphDefaults) }
     }
 
-    func graphDefaultKey(wave: WaveSnapshot?) -> String { "\(repoPath ?? ""):\(wave?.id ?? "")" }
+    func defaultWorkflow(in wave: WaveSnapshot?) -> WaveGraph.Default? {
+        graphDefaults[graphDefaultKey(wave: wave)]?.value?.default
+    }
+
+    private func graphDefaultKey(wave: WaveSnapshot?) -> String { "\(repoPath ?? ""):\(wave?.id ?? "")" }
 
     func loadGraphDefault(wave: WaveSnapshot?) async {
         let key = graphDefaultKey(wave: wave)
         let previous = graphDefaults[key]?.value
         let result: Result<WaveGraph, Error>
-        do { result = .success(try await query.waveGraph(wave: wave?.name, cwd: repoPath)) }
+        do { result = .success(try await query.waveGraph(wave: wave?.id, cwd: repoPath)) }
         catch { result = .failure(error) }
         graphDefaults[key] = reading(from: result, lastGood: previous)
     }
 
-    /// New Task: one `lf task create REQUEST --run` files it in `wave` (nil: the
-    /// repository) with its conversation admitted. The click has closed the
-    /// sheet; the words stand in until the answer's Session is installed, and
-    /// nothing else is read or prepared for it. A failure before filing keeps the
-    /// words and Try again; after the answer, the Task exists, so a failure
-    /// opening it belongs to its workspace. A submitted request whose answer is
-    /// lost hands uncertainty to recovery.
-    func createTask(request: String, wave: WaveSnapshot?, graph: String?, requestID: String) async throws {
+    /// Only a confirmed refusal returns to the draft. A saved submission whose
+    /// answer is unknown stays with recovery on its original Machine.
+    func submitTask(_ action: NewTaskAction, request: String, wave: CreationWave?,
+                    graph: String? = nil, requestID: String = UUID().uuidString, replacing: String? = nil) async throws {
         let owner = navigation
-        let starting = StartingTask(id: requestID, request: request, wave: wave, graph: graph)
-        owner.startingTask = starting
         let presentation = owner.paletteGeneration
         let destination = destinationGeneration
-        let created: TaskCreated
+        let machine = observingMachineId
+        let created: TaskCreated?
         do {
-            created = try await query.createTask(request: request, wave: wave?.name, graph: graph, run: true, cwd: repoPath, requestID: requestID)
-        } catch is SubmittedCreationError {
-            Perf.finish(.startTask, id: requestID, owner: owner.performanceOwner, outcome: .unmeasured)
-            // The saved submission owns recovery. Keeping a submit button here
-            // would turn a lost answer into another creation identity.
-            if owner.startingTask?.id == requestID { owner.startingTask = nil }
-            return
+            let answer = try await query.createTask(request: request, wave: wave, graph: graph,
+                                                    run: action == .start, cwd: repoPath, requestID: requestID, replacing: replacing)
+            created = answer
+            if case .start = action {
+                let receipt = answer.receipt
+                Perf.retarget(.startTask, from: requestID, to: receipt.sessionId ?? receipt.task.id, owner: owner.performanceOwner)
+                CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
+            }
         } catch {
-            if owner.startingTask?.id == requestID { owner.startingTask?.error = error.localizedDescription }
-            throw error
+            let uncertain = error is SubmittedCreationError
+            if case .start = action {
+                Perf.finish(.startTask, id: requestID, owner: owner.performanceOwner, outcome: uncertain ? .unmeasured : .failed)
+            }
+            guard uncertain else { throw error }
+            created = nil
         }
-        let receipt = created.receipt
-        Perf.retarget(.startTask, from: requestID, to: receipt.sessionId ?? receipt.task.id,
-                      owner: owner.performanceOwner)
-        CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
-        if owner.startingTask?.id == requestID, owner.paletteGeneration == presentation,
-           navigation === owner, destinationGeneration == destination {
-            await openCreatedTask(created)
+        guard owner.paletteGeneration == presentation else { return }
+        switch owner.palette {
+        case .newTask, .editDraft: owner.palette = nil
+        default: break
         }
-        if owner.startingTask?.id == requestID { owner.startingTask = nil }
+        guard let created, navigation === owner, destinationGeneration == destination,
+              observingMachineId == machine else { return }
+        switch action {
+        case .start: await openCreatedTask(created)
+        case .file: openFiledTask(created.row, requestID: requestID)
+        }
     }
 
-    /// New Task, filed only: `lf task create REQUEST` puts it in `wave`'s backlog
-    /// (nil: the repository's) and starts nothing. Its row is selected there,
-    /// with the filter and search out of its way. Throws while nothing is filed;
-    /// a request whose answer is lost belongs to recovery, as in `createTask`.
-    func fileTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
-        let requestID = UUID().uuidString
-        let created: TaskCreated
-        do {
-            created = try await query.createTask(request: request, wave: wave?.name, graph: graph, run: false,
-                                                 cwd: repoPath, requestID: requestID)
-        } catch is SubmittedCreationError { return }
-        let view: WorkNavigation.Board = wave.map { .wave($0.id) } ?? .repository
-        var state = navigation.backlogs[view] ?? BacklogState()
-        state.filter = .all
-        state.query = ""
-        state.selection = []
-        state.select(created.receipt.task.id)
-        state.notice = .did("Filed \(created.receipt.task.identifier)")
-        navigation.backlogs[view] = state
-        // Its backlog row is the Task's presentation; nothing opens.
-        await CreationRecovery.shared.presented([requestID])
+    private func openFiledTask(_ filed: RoadmapTask, requestID: String) {
+        if let repoPath, repoIdentity(filed.task.repo) != repoIdentity(repoPath) { return }
+        let planned = roadmap.current != nil && !showsSavedPlanning ? currentTask(id: filed.id)?.task : nil
+        let observed = subscribedTaskRow.current.flatMap { $0.id == filed.id ? $0 : nil }
+        let row = planned ?? observed ?? filed
+        guard row.section == .backlog else { return }
+        let view = row.task.waveId.map(WorkNavigation.Board.wave) ?? .repository
+        if navigation.waveView != view { select(row.task.waveId.map { .wave(id: $0) }) }
+        if isHidden(.backlog, in: view) { setHidden(.backlog, false, in: view) }
+        if let zoom = zoomedPart(in: view), zoom != .backlog { setZoomed(nil, in: view) }
+        navigation.backlogs[view, default: BacklogState()].showFiled(row, inPlanning: planned != nil)
+        CreationRecovery.shared.awaitingPresentation(requestID, of: .task(row.id))
+    }
+
+    /// Only an exact lookup can settle a filed Task's absence from planning.
+    func refreshFiledRow(in view: WorkNavigation.Board) async {
+        let owner = navigation
+        guard let row = owner.backlogs[view]?.filedRow,
+              let exact = try? await query.taskDestination(issue: row.id, repo: row.task.repo),
+              !Task.isCancelled, owner.backlogs[view]?.filedRow?.id == row.id,
+              case .available(let matches, let truncated) = exact.tasks else { return }
+        if let current = matches.first(where: { $0.id == row.id }) {
+            if current.section == .backlog, current.task.waveId == row.task.waveId {
+                owner.backlogs[view]?.filedRow = current
+            } else {
+                owner.backlogs[view]?.clear()
+            }
+        } else if matches.isEmpty && !truncated {
+            owner.backlogs[view]?.clear()
+        }
     }
 
     /// Install a created Task's conversation from the answer: its row selects the
@@ -3076,6 +3112,10 @@ final class WorkModel {
 
     func wave(id: String) -> WaveRoadmap? {
         roadmap.value?.waves.first { $0.wave.id == id }
+    }
+
+    private func linkedWave(_ name: String) -> WaveRoadmap? {
+        roadmap.value?.waves.first { $0.wave.name == name || $0.wave.id == name }
     }
 
     func rosterWave(id: String) -> WaveViewModel? {

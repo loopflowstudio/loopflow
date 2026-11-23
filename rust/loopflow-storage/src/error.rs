@@ -12,6 +12,8 @@ pub enum StoreError {
     Sqlite(#[from] rusqlite::Error),
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("Wave {0} is no longer available in this repository")]
+    WaveUnavailable(loopflow_model::id::WaveId),
     #[error("not found")]
     NotFound,
     /// A compare-and-swap named a revision that is no longer current.

@@ -207,10 +207,9 @@ them. Nothing here needs WindowServer focus.
   answer appears in `<name>.cmd.out`.
 - Give `snap` and `frame` an absolute prefix: a relative one is resolved
   against the app's cwd (`/`), and the `.out` lists a file that was never written.
-- Skew without relaunching: start the private server through a symlink
-  `bin/lf` and swap the binary it serves (`kill` the server PID, relink,
-  start again on the same `LF_HOME`); the running app reconnects to the new
-  one, which is how "update the older one" is checked.
+- To check “update the older one,” launch the private server through a
+  `bin/lf` symlink and keep its PID (`$!` when backgrounded). Stop that PID,
+  relink the binary and start it with the same `LF_HOME`. The app reconnects.
 - `snap <prefix>` writes every window with `cacheDisplay` (no title bar) and
   lists index, title and size. Indices change as windows open: read the list
   before each click.
@@ -257,8 +256,7 @@ them. Nothing here needs WindowServer focus.
 - Navigate with `lf desktop goto <n>`, `working-tasks`, `back` and `forward`;
   `lf --task <id> desktop do details page=brief` switches the Task pane. A tile
   shows its workflow sentence only after its Task was visited in that window.
-  `lf desktop do new-task` opens the New Task sheet, and `snap` lists a sheet
-  as its own untitled window. Card clicks in the chooser preview reliably;
+  Card clicks in the chooser preview reliably;
   Apply and Cancel answered one hook click in round 7 (Apply wrote
   `config.yaml`) after missing in earlier runs. If they miss, set the theme with
   `lf set --global theme`. Send Customize once: Done Editing takes its place,
@@ -324,9 +322,19 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
   `config.theme`).
 - With a sheet open, `osascript … quit` fails with "User canceled"; stop that
   one PID. `open -n` beside a live instance leaves two; check `pgrep` first.
-- New Task: `lf desktop do new-task` opens the sheet. Type with
-  `(sheet.firstResponder as? NSTextView)?.insertText(…)`; ⌘↩ and Esc work as
-  `sheet.performKeyEquivalent(with:)` on a synthesized key event.
+- `lf desktop do new-task` opens the sheet and prints its scope. The QA hook's
+  `snap` lists the sheet as an untitled window. Use `insert <words>` for its
+  focused field, `key return` for ⌘↩ and `key escape` for Esc. To file, send
+  `dclick <sheet> x y` (mouse-down and mouse-up both through `sendEvent`) at
+  **File to backlog**'s position in the snapshot; the sheet answered no
+  `click`. The button sits at (74, 308) with the workflow outline, (74, 258)
+  while the server is away and the outline is unread, 33 pt lower after a
+  refusal. Read the sheet's height from `snap` first.
+- Open a Wave with `loopflow://<repo>/wave/<name>`, the link `lf open --wave`
+  prints; the sheet then opens "In <Wave>".
+- Set `graph: <name>` in the Wave's committed `.lf/wave/<name>/config.yaml` to
+  exercise its default. Remove the chosen Wave with the sheet open to see
+  **Wave unavailable**. Choosing the repository enables File and Start again.
 - A synthesized click presses SwiftUI buttons, sidebar rows and backlog rows.
   Post the mouse-up with `NSApp.postEvent` before sending the mouse-down
   through `window.sendEvent`: a text field or other control that tracks the
@@ -349,12 +357,27 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
   in this repository." beside **New**. Filing a Task brings the page too.
 - "Not filed." and "Not started.": stop the private server (`kill` its PID),
   wait five seconds, then `lf desktop do new-task`, type, and press File or ⌘↩.
-  The sheet then shows "running …" with no step line. Start the server again
-  and **Try again** starts the Task. An unwritable `.git` or a repository
-  default naming a missing Graph ends in creation recovery (a notice, and the
-  Task is filed), not in "Not started.".
+  After a confirmed refusal, check that the sheet still has the request, Wave
+  and workflow. Restart the server and submit from the same sheet. SIGSTOP on
+  the server is the same refusal, after 60 s: File and Start read the Machine ID
+  before saving, so nothing is sent.
+- A lost reply after the journal write: put a `git` wrapper first on the
+  server's `PATH` that loops while a flag file exists. Touch the flag, submit,
+  wait for a file in `$LF_HOME/desktop-cache/submissions`, then `kill -9` the
+  server. Admission rolls back and the sheet closes into recovery. Remove the
+  Wave (`lf wave remove`) before restarting the server, and the replay is
+  refused: the notice offers **Edit draft**.
+- The hook takes one `.cmd` per tick and deletes it; its `.cmd.out` stays.
+  Reusing a name reads the old answer, so name each command uniquely
+  (`t$(date +%s)$RANDOM`). A `snap` can take over 20 s.
+- **Discard draft** (`role: .destructive`) answered no hook click while Cancel
+  in the same row did; without the role the same click worked. Check it on a
+  display or through `NewTaskTests`.
+- After its Wave is removed, the window stays on that Wave, even across a
+  relaunch, drawn as an empty page with the repository's name. Click the
+  repository's sidebar row (`click 0 115 64`) to see its backlog.
 - A SwiftUI `ScrollView` that meets the title bar comes back white from
-  `cacheDisplay`, background included ("Not started." with no Task selected).
+  `cacheDisplay`, background included.
   To see it, build once with the scroll view padded 60 pt from the top; do not
   commit that.
 - A stand-in `claude` must answer `--version` (exit 0) and then stay alive
@@ -429,8 +452,7 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
 - A real screen capture of that window, title bar included, needs no focus:
   take the window number from `CGWindowListCopyWindowInfo` (owner name is
   the bundle's name, `kCGWindowIsOnscreen` 1) and run `screencapture -x -o
-  -l <number> out.png`. This is the way to see a `ScrollView` that meets the
-  title bar ("Not started." with no Task selected).
+  -l <number> out.png`. This captures a `ScrollView` that meets the title bar.
 - `lf desktop do files path=<file>` follows a file: with another file being
   read it opens a tab and leaves the selection. The Read/Diff control is a
   menu, so a file's own Diff in Files needs a local-only line setting

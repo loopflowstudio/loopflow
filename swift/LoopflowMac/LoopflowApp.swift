@@ -186,9 +186,7 @@ struct LoopflowApp: App {
         .defaultSize(width: 760, height: 600)
 
         Window("Portfolio", id: "portfolio") {
-            WavesView(portfolioService: portfolioService, openTask: { path, id in
-                requestRepository(path, .task(TaskLink(issue: id, repo: path)))
-            })
+            WavesView(portfolioService: portfolioService, openRepository: requestRepository)
                 .modifier(AppAppearance(appearance: appearance))
                 .onOpenURL { handleDeepLink($0) }
         }

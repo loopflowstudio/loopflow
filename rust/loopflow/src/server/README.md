@@ -536,7 +536,11 @@ the phone's `view.select` Task list and its creation destinations all read it.
   standard output. `task.create {directory,request_id,title,request,wave,graph,session,run}`
   files a Task or adopts the named Session; `run` admits its conversation,
   which makes the checkout and starts the Graph after the answer.
-  A null `wave` selects the repository. Both paths return the same creation
+  A null `wave` selects the repository. A name may provision a Wave.
+  `{"id":"…"}` selects an existing Wave in this repository. If that selection
+  disappears, the Machine answers `not_found` with `data.wave_id`. An unavailable
+  named Graph answers `invalid` with `data.graph` before filing.
+  Both File and Start return the same creation
   receipt, described below. A write whose Work
   lives on another Machine (`task.run`, `task.auto.on`, `task.auto.off`,
   `task.claim`, `task.unassign`, `session.resume`) goes to that Machine's

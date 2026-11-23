@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1063 · Working Task order</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --paper: #f6f4ed;
+  --surface: #fffef9;
+  --ink: #1c2824;
+  --muted: #51625b;
+  --line: #cad3c9;
+  --accent: #12624c;
+  --tint: #e3f3ea;
+  --warn: #8b3b26;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #121a17;
+    --surface: #1a2420;
+    --ink: #f1f5ee;
+    --muted: #b2c0b5;
+    --line: #485a50;
+    --accent: #9fe5c6;
+    --tint: #213b31;
+    --warn: #ffb9a1;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 1rem/1.55 system-ui, sans-serif;
+}
+main { width: min(68rem, calc(100% - 2.5rem)); margin: 3rem auto 4.5rem; }
+header { max-width: 48rem; }
+h1, h2 { font-family: ui-serif, Georgia, serif; line-height: 1.12; }
+h1 { font-size: clamp(2.3rem, 6vw, 4.3rem); margin: .3rem 0 1rem; letter-spacing: -.045em; }
+h2 { font-size: clamp(1.65rem, 3vw, 2.1rem); margin: 0 0 .85rem; letter-spacing: -.025em; }
+h3 { margin: 0; font-size: 1rem; }
+p { margin: .5rem 0; }
+section { margin-top: 2.7rem; }
+.reference, .status, small { color: var(--muted); }
+.reference { font-size: .83rem; }
+a { color: var(--accent); text-underline-offset: .18em; }
+code { overflow-wrap: anywhere; font-size: .88em; }
+.trace, .callout { background: var(--surface); border: 1px solid var(--line); border-radius: .9rem; padding: clamp(.85rem, 3vw, 1.5rem); }
+.steps { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1.15rem 0; }
+button {
+  border: 1px solid var(--line);
+  border-radius: .45rem;
+  padding: .5rem .7rem;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: .89rem;
+  cursor: pointer;
+}
+button[aria-pressed="true"] { background: var(--tint); border-color: var(--accent); color: var(--accent); font-weight: 650; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; }
+.sidebar { border: 1px solid var(--line); border-radius: .65rem; overflow: hidden; min-width: 0; }
+.sidebar header { padding: .55rem .75rem; border-bottom: 1px solid var(--line); background: var(--paper); }
+.sidebar.proposed header { color: var(--accent); background: var(--tint); }
+.rows { padding: .4rem; margin: 0; list-style: none; }
+.rows li {
+  display: grid;
+  grid-template-columns: 2.3rem 1fr auto;
+  gap: .4rem;
+  align-items: center;
+  padding: .55rem .4rem;
+  border: 1px solid transparent;
+  border-radius: .45rem;
+}
+.rows .selected { border-color: var(--line); background: var(--paper); }
+kbd { color: var(--muted); font-size: .84rem; }
+.status { font-size: .82rem; }
+.status[data-active] { color: var(--accent); }
+#observation { margin-top: .9rem; font-size: .92rem; }
+.callout { border-inline-start: .3rem solid var(--warn); }
+.fit { font-weight: 700; white-space: nowrap; }
+.yes { color: var(--accent); }
+.no { color: var(--warn); }
+.mapping { width: 100%; border-collapse: collapse; }
+.mapping th, .mapping td { padding: .7rem .5rem; text-align: left; vertical-align: top; border-top: 1px solid var(--line); }
+.mapping thead th { color: var(--muted); font-size: .82rem; }
+.mapping tbody th { width: 23%; font-weight: 650; }
+.mapping small { display: block; margin-top: .17rem; }
+.scenarios { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem 1.35rem; margin: 0; }
+.scenarios dt { font-weight: 650; }
+.scenarios dd { margin: .15rem 0 0; }
+.choices > li { margin: .75rem 0; }
+.choices ol { padding-left: 1.6rem; }
+.choices strong { color: var(--accent); }
+@media (max-width: 46rem) {
+  .mapping, .mapping tbody, .mapping tr, .mapping td, .mapping tbody th { display: block; width: auto; }
+  .mapping thead { position: absolute; overflow: hidden; width: 1px; height: 1px; clip-path: inset(50%); }
+  .mapping td { border-top: 0; padding-top: 0; }
+  .mapping td:last-child { padding-bottom: .95rem; }
+}
+@media (max-width: 34rem) {
+  main { margin-top: 1.8rem; }
+  .comparison, .scenarios { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <p class="reference">LOO-1063 · Concept review</p>
+  <h1>Keep Working Tasks in place</h1>
+  <p>Open a Task, send a prompt, and return to the same row. Drag a row to give it
+  a new place. Do the product’s concepts and the code’s concepts line up?</p>
+</header>
+
+<section class="trace" aria-labelledby="trace-title">
+  <h2 id="trace-title">Follow one row</h2>
+  <p>Both Tasks are Working. A has rank 1 and B has rank 2. B is open in the conversation pane.
+  Try sending a prompt and handing back. During a second turn, try a drag the
+  Machine refuses while reads are down.</p>
+  <div class="steps" role="group" aria-label="Interaction step">
+    <button type="button" data-step="ready" aria-pressed="true">Open B</button>
+    <button type="button" data-step="busy" aria-pressed="false">Send prompt</button>
+    <button type="button" data-step="back" aria-pressed="false">Hand back</button>
+    <button type="button" data-step="drop" aria-pressed="false">Drag B up</button>
+    <button type="button" data-step="refused" aria-pressed="false">Reject drag and read</button>
+    <button type="button" data-step="recovered" aria-pressed="false">Recover read</button>
+    <button type="button" data-step="saved" aria-pressed="false">Retry and save drag</button>
+  </div>
+  <div class="comparison">
+    <article class="sidebar">
+      <header><h3>Existing</h3></header>
+      <ol class="rows" id="existing" aria-label="Existing Working Tasks">
+        <li class="selected" aria-current="true"><kbd>⌘1</kbd><span>B · Fix release notes</span><span class="status" data-active>Available</span></li>
+        <li><kbd>⌘2</kbd><span>A · Review invoice</span><span class="status">Idle</span></li>
+      </ol>
+    </article>
+    <article class="sidebar proposed">
+      <header><h3>Proposed</h3></header>
+      <ol class="rows" id="proposed" aria-label="Proposed Working Tasks">
+        <li><kbd>⌘1</kbd><span>A · Review invoice</span><span class="status">Idle</span></li>
+        <li class="selected" aria-current="true"><kbd>⌘2</kbd><span>B · Fix release notes</span><span class="status" data-active>Available</span></li>
+      </ol>
+    </article>
+  </div>
+  <p id="observation" role="status">Existing order promotes B as soon as it is Available. Proposed order starts with the Tasks’ planning ranks.</p>
+  <noscript><p>Sending the prompt reverses the existing list to A, B. Handing back restores B, A.
+  The proposed list stays A, B through both.</p></noscript>
+</section>
+
+<section class="callout" aria-labelledby="mismatch">
+  <h2 id="mismatch">A conversation can move a Task</h2>
+  <p><strong>Existing.</strong> The Machine sorts unsaved rows by whether a Session is
+  Available or Blocked, then by rank. Typing can move B and change its keyboard slot without
+  any change to its Task record. Saved drag positions happen to mask the problem.</p>
+  <p><strong>Proposed.</strong> One shared order uses saved positions, then rank and canonical
+  Task ID. Session reports update status, attention and activity filter membership. A user can
+  choose the Available filter for a queue that changes with who needs attention.</p>
+  <p class="reference"><a href="../rust/loopflow-storage/src/sqlite/selections.rs#L169">TaskOrder and TaskActivity</a>
+  · <a href="../rust/loopflow-storage/src/sqlite/sessions.rs#L337">Live availability</a></p>
+</section>
+
+<section aria-labelledby="pairs">
+  <h2 id="pairs">What each action means</h2>
+  <table class="mapping">
+    <thead>
+      <tr><th scope="col">Product</th><th scope="col">Code</th><th scope="col">Existing fit</th><th scope="col">Proposed fit</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th scope="row">A Task belongs in Working</th>
+        <td><code>TaskSection</code> derives membership from lifecycle and ownership.</td>
+        <td><span class="fit yes">Yes</span><small>An unassigned Task can leave Working while its Session is Busy.</small></td>
+        <td><span class="fit yes">Yes</span></td>
+      </tr>
+      <tr>
+        <th scope="row">The conversation is available or busy</th>
+        <td><code>TaskActivity</code> projects live Session reports into selection states and attention.</td>
+        <td><span class="fit yes">Yes</span><small>Several Sessions can match both filters.</small></td>
+        <td><span class="fit yes">Yes</span></td>
+      </tr>
+      <tr>
+        <th scope="row">A row has a place in Working</th>
+        <td><code>TaskOrder::key</code> combines saved position, waiting status, rank and ID.</td>
+        <td><span class="fit no">No</span><small>Starting a turn acts like an order edit.</small></td>
+        <td><span class="fit yes">Yes</span><small>Delete waiting status from the key.</small></td>
+      </tr>
+      <tr>
+        <th scope="row">The selected Task stays open</th>
+        <td><code>WorkReference</code> and the workspace registry select by ID.
+        <code>sidebarTaskIDs</code> drives the keyboard slots.</td>
+        <td><span class="fit yes">Yes</span><small>The open Task survives even when its shortcut changes.</small></td>
+        <td><span class="fit yes">Yes</span><small>Shortcuts change when the visible list does.</small></td>
+      </tr>
+      <tr>
+        <th scope="row">A drop saves an order</th>
+        <td><code>desktop move</code> commits to <code>task_orders</code>.
+        <code>WorkModel</code> writes the preview into its two readings.</td>
+        <td><span class="fit no">No</span><small>A refused drop can appear saved while reads fail.</small></td>
+        <td><span class="fit yes">Yes</span><small>The preview lives for the pending write. A refusal reveals the Machine’s last confirmed order.</small></td>
+      </tr>
+      <tr>
+        <th scope="row">Rank the Wave’s backlog</th>
+        <td><code>BacklogList</code> sorts by planning rank and its actions write rank.</td>
+        <td><span class="fit yes">Yes</span><small>It orders a planning list.</small></td>
+        <td><span class="fit yes">Yes</span><small>Rank also seeds Working before a drag position exists.</small></td>
+      </tr>
+      <tr>
+        <th scope="row">Arrange a saved Dashboard</th>
+        <td><code>Arrangement</code> follows query order in Auto and saves tile order in Touched.</td>
+        <td><span class="fit yes">Yes</span><small>The arrangement belongs to the Dashboard.</small></td>
+        <td><span class="fit yes">Yes</span></td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="reference"><a href="../rust/loopflow-storage/src/execution.rs#L131">Working membership</a>
+  · <a href="../rust/loopflow-execution/src/store/selections.rs#L305">Drop write</a>
+  · <a href="../swift/LoopflowMac/WorkModel.swift#L3565">Drag preview</a>
+  · <a href="../swift/LoopflowMac/Views/BacklogView.swift#L170">Backlog</a></p>
+</section>
+
+<section aria-labelledby="survives">
+  <h2 id="survives">What survives a refresh</h2>
+  <dl class="scenarios">
+    <div>
+      <dt>Busy, then Available again</dt>
+      <dd>B stays second in Working and keeps its conversation. It disappears from
+      Available during the turn and appears in Busy. If a second Session is
+      waiting, B can appear in both.</dd>
+    </div>
+    <div>
+      <dt>The read fails</dt>
+      <dd>Keep the last confirmed rows where a reading exists. A successful empty read
+      clears them. Unknown activity can make an activity filter incomplete.</dd>
+    </div>
+    <div>
+      <dt>A dragged target leaves Working</dt>
+      <dd>The Machine can refuse the drop. Clear the preview even if the refresh
+      fails. When the read returns, reflect current membership and order. A later
+      drag against a current target can succeed.</dd>
+    </div>
+    <div>
+      <dt>The saved order arrives before the write answer</dt>
+      <dd>Keep the preview on the chosen side of its target. Moving into the
+      target’s index again could flip the pair back. Retire the preview when a
+      read covers the write.</dd>
+    </div>
+    <div>
+      <dt>A Task joins after the first drag</dt>
+      <dd>It joins the rows after the saved positions unless it has a saved place.
+      Rank and Task ID order that tail.</dd>
+    </div>
+    <div>
+      <dt>A query or dashboard has its own arrangement</dt>
+      <dd>Built-in scopes and simple filters take their sequence from the Machine.
+      Authored query clauses keep their composition order. Touched Dashboards
+      use their saved arrangement.</dd>
+    </div>
+  </dl>
+  <p>The first build slice tests one live interactive Session across the repository and Wave
+  plans, the phone projection and the roadmap. Then the Mac test applies the same activity
+  frames to an open Task and exercises a refused drop against a failed read.</p>
+  <p class="reference"><a href="plan.md">Build plan</a>
+  · <a href="../rust/loopflow/src/lf/commands/waves.rs#L1808">Roadmap projection</a>
+  · <a href="../swift/Loopflow/Services/PendingChanges.swift#L32">Pending writes</a></p>
+</section>
+
+<section aria-labelledby="questions">
+  <h2 id="questions">Questions for review</h2>
+  <ol class="choices">
+    <li>What starts the Working order before a drag?
+      <ol type="a">
+        <li><strong>Planning rank, with Task ID for ties.</strong> A saved drag takes precedence. This is the build choice.</li>
+        <li>Oldest Task first. Planning rank edits would leave the unsaved Working rows in place.</li>
+      </ol>
+    </li>
+    <li>What should a drop mean for planning?
+      <ol type="a">
+        <li><strong>Save the Working order on the Machine.</strong> This is the build choice and keeps existing arrangements.</li>
+        <li>Change Project rank. LOO-937 takes this path and needs its own decision about cross-Project moves and existing saved positions.</li>
+      </ol>
+    </li>
+  </ol>
+</section>
+</main>
+<script>
+const tasks = {
+  A: "A · Review invoice",
+  B: "B · Fix release notes"
+};
+const replay = {
+  ready: ["BA", "AB", "Available", "Existing order promotes B as soon as it is Available. Proposed order starts with the Tasks’ planning ranks."],
+  busy: ["AB", "AB", "Busy", "B leaves Available and enters Busy. In the existing sidebar, B jumps from ⌘1 to ⌘2. In the proposed sidebar it keeps ⌘2."],
+  back: ["BA", "AB", "Available", "The conversation hands back. Existing order promotes B again. The proposed list keeps both keyboard slots."],
+  drop: ["BA", "BA", "Busy", "During another turn, both lists start with A first. B appears above A immediately after the drop, while the Machine answers."],
+  refused: ["BA", "AB", "Busy", "The Machine refuses the move and the reread fails. A Notice reports the refusal. The proposed list shows its last confirmed order immediately."],
+  recovered: ["AB", "AB", "Busy", "A successful reread resolves the default order again. B’s conversation is still selected."],
+  saved: ["BA", "BA", "Busy", "The Machine saves B above A. A fresh read keeps that order in both designs."]
+};
+const steps = document.querySelectorAll("[data-step]");
+function showRows(id, order, state) {
+  const list = document.getElementById(id);
+  list.replaceChildren(...Array.from(order, (task, index) => {
+    const row = document.createElement("li");
+    const slot = document.createElement("kbd");
+    const name = document.createElement("span");
+    const status = document.createElement("span");
+    slot.textContent = "⌘" + (index + 1);
+    name.textContent = tasks[task];
+    status.className = "status";
+    status.textContent = task === "B" ? state : "Idle";
+    if (task === "B") {
+      row.className = "selected";
+      row.setAttribute("aria-current", "true");
+      status.dataset.active = "";
+    }
+    row.append(slot, name, status);
+    return row;
+  }));
+}
+for (const step of steps) {
+  step.addEventListener("click", () => {
+    const [existing, proposed, state, observation] = replay[step.dataset.step];
+    for (const other of steps) other.setAttribute("aria-pressed", String(other === step));
+    showRows("existing", existing, state);
+    showRows("proposed", proposed, state);
+    document.getElementById("observation").textContent = observation;
+  });
+}
+</script>
+</body>
+</html>

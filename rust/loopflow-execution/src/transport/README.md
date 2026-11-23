@@ -30,7 +30,7 @@ caller's process.
 | Command | Launch | Lifetime |
 |---|---|---|
 | Direct `lf`, skill or Graph launch in the caller's terminal or pipe, with or without `--task`, `--wave` or `LF_AS` | chat or batch | its caller or terminal |
-| `lf -b resume <ID> --message TEXT` | batch; a Graph's correction turn inside a Task run is a worker | one turn, then exits |
+| `lf -b steer <ID> TEXT` | batch; a Graph's correction turn inside a Task run is a worker | one turn, then exits |
 | Resume a chat with no message | chat | its terminal |
 | Resume a bound or primary Session, or open a Task, Wave or repository conversation | work session | held interactive terminal, independent of its viewer |
 | Open a conversation in a held terminal through a Desktop pane or framed `lf --machine` view | work session | held interactive terminal, independent of its viewer |

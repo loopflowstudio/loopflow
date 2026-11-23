@@ -205,7 +205,7 @@ async fn read_resume(
         report.unavailable.push(format!("Session {selector} is not recorded; provider-conversation admission is not performed by explanation"));
         return Ok(());
     };
-    // Opening refuses a Run whatever the flags, so nothing would happen.
+    // Opening refuses a worker or a batch whatever the flags.
     let refusal = super::run_refusal(&store.sqlite, &session)?;
     // Explanation and opening use the same recorded Process evidence; a
     // metadata read does not acquire viewer control or probe the endpoint.

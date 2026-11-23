@@ -1,7 +1,8 @@
 """Steer an idle OpenCode or Pi work session through lf and watch it start a turn.
 
 Real TUIs under a PTY, a private Machine and a scripted local model. Nothing
-is typed after the first turn: `lf steer` is the only input.
+is typed to start a turn on a steer: `lf steer` is the only input, first to the
+open conversation, then to the same conversation quit and reopened.
 """
 
 import argparse
@@ -18,6 +19,7 @@ from pathlib import Path
 from tui import _Tui
 
 STEER = "WAKE_MARKER use the other table"
+REOPEN_STEER = "REOPEN_MARKER rename the column"
 
 
 class _Model(BaseHTTPRequestHandler):
@@ -60,11 +62,26 @@ def _heard(marker: str, since: int = 0) -> bool:
     return any(marker in json.dumps(body) for body in _Model.requests[since:])
 
 
+def _quit(tui: _Tui) -> None:
+    """End the provider the way a person does; its holder exits with it."""
+    for key in (b"\x03", b"\x03", b"\x04"):
+        os.write(tui.master, key)
+        try:
+            tui.wait(lambda: tui.child.poll() is not None, "", 3)
+            return
+        except AssertionError:
+            pass
+    raise AssertionError("the TUI did not quit\n" + "\n".join(tui.screen.display))
+
+
 def _owned(root: Path) -> list[int]:
     """Processes whose environment names this run's private root."""
     listing = subprocess.run(
         # -ax: the holder has no terminal, and plain `ps` lists only those that do.
-        ["ps", "-axeww", "-o", "pid=,command="], capture_output=True, text=True, check=True
+        ["ps", "-axeww", "-o", "pid=,command="],
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
     return [
         int(line.split(None, 1)[0])
@@ -91,20 +108,23 @@ def _probe(lf: Path, harness: str, native: Path, output: Path) -> None:
         "LANG": "en_US.UTF-8",
     }
     if harness == "opencode":
-        agent = "opencode:opencode/glm-5.2"
+        # Its own provider id: OpenCode 2 asks for a Console login before any
+        # request on its built-in `opencode` provider, whatever its baseURL.
+        # lf accepts only `opencode/*` models, so the settings pick the model.
+        agent = "opencode"
         settings = {
-            "model": "opencode/glm-5.2",
-            "small_model": "opencode/glm-5.2",
+            "model": "fixture/proof",
+            "small_model": "fixture/proof",
             "autoupdate": False,
             "share": "disabled",
-            "enabled_providers": ["opencode"],
+            "enabled_providers": ["fixture"],
             "permission": {"*": "allow"},
             "provider": {
-                "opencode": {
+                "fixture": {
                     "npm": "@ai-sdk/openai-compatible",
                     "options": {"baseURL": endpoint, "apiKey": "local-fixture-not-a-credential"},
                     "models": {
-                        "glm-5.2": {
+                        "proof": {
                             "name": "fixture",
                             "tool_call": True,
                             "limit": {"context": 128000, "output": 4096},
@@ -119,7 +139,6 @@ def _probe(lf: Path, harness: str, native: Path, output: Path) -> None:
         env |= {
             "OPENCODE_DISABLE_DEFAULT_PLUGINS": "true",
             "OPENCODE_DISABLE_MODELS_FETCH": "true",
-            "OPENCODE_API_KEY": "local-fixture-not-a-credential",
         }
     else:
         agent = "pi:fixture/proof"
@@ -186,6 +205,8 @@ def _probe(lf: Path, harness: str, native: Path, output: Path) -> None:
         start_new_session=True,
     )
     tui = None
+    # Where the open terminal's bytes land if the run stops while it is open.
+    raw = output / "terminal.raw"
     try:
         created = run("task", "create", "Idle wake fixture", "--json")
         (output / "task.json").write_text(created)
@@ -204,10 +225,38 @@ def _probe(lf: Path, harness: str, native: Path, output: Path) -> None:
         typed = len(_Model.requests)
         tui.enter("typed after wake")
         tui.wait(lambda: _heard("typed after wake", typed), "typing after a wake ran no turn", 45)
+        tui.drain(6.0)
+
+        # Quit, steer while nothing runs, reopen and type nothing.
+        _quit(tui)
+        raw.write_bytes(tui.raw)
+        tui.close()
+        tui = None
+        raw = output / "reopen-terminal.raw"
+        run("steer", task, REOPEN_STEER)
+        reopened = len(_Model.requests)
+        tui = _Tui([str(lf), "resume", "--task", task], work, env)
+        tui.wait(
+            lambda: _heard("REOPEN_MARKER", reopened),
+            "the reopened work session ran no turn on its waiting steer",
+            45,
+        )
+        tui.drain(6.0)
+        (output / "reopen-screen.txt").write_text("\n".join(tui.screen.display))
+        status = run("task", "status", task, "--json")
+        (output / "status.json").write_text(status)
+        session = json.loads(status)["conversation"]
+        steers = json.loads(run("session", "steers", session, "--json"))
+        (output / "steers.json").write_text(json.dumps(steers, indent=2))
+        rows = [row for row in steers["items"] if "REOPEN_MARKER" in json.dumps(row["steer"])]
+        assert len(rows) == 1 and rows[0]["delivered_at"] is not None, steers
+        # Each request carries the whole conversation: the steer appears in it once.
+        last = json.dumps(_Model.requests[-1])
+        assert last.count("REOPEN_MARKER") == 1, "the reopen steer reached the model twice"
     finally:
         (output / "requests.json").write_text(json.dumps(_Model.requests, indent=2))
         if tui is not None:
-            (output / "terminal.raw").write_bytes(tui.raw)
+            raw.write_bytes(tui.raw)
             tui.close()
         if server.poll() is None:
             os.killpg(server.pid, signal.SIGTERM)

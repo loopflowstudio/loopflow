@@ -112,7 +112,7 @@ lf task status LOO-12
   again as `lf task run` from the step they reached. Interactive stops stay
   stops, and recovery never turns auto on.
 - **Work sessions you quit** (`/exit`, `Ctrl+D`, `Ctrl+C` at the prompt) stay
-  quit until you run `lf resume --task <ID>`.
+  quit until you resume them or steer the Session or its Task.
 - **Backoff.** After a reboot, the server brings Tasks back one at a time, most
   recently active first. Repeated deaths back off from 1 minute up to 30
   minutes and stop after 5 attempts without a finished turn or step, printing
@@ -215,12 +215,21 @@ lf session steers <session>                          # pending vs. delivered
   steer for a child stays with the child.
 - **Chats** are never woken while idle; in a Task checkout they receive updates
   on their next turn.
+- **Stopped interactive Sessions** start in a held terminal when steered by
+  name. A Task steer starts its stopped primary conversation and reaches each
+  running Session on the Task; the next Graph step reads it too. Wave and repository steers wait for the next
+  boundary. Several steers saved while the server is down arrive together
+  when it returns. Attach with `lf resume <session>` to see the reply.
 
-Run one more headless turn on any Session from any directory:
+Run one more turn on a stopped interactive Session in its saved workspace,
+and print the reply in the calling terminal:
 
 ```bash
-lf -b resume <session> --message "now add the migration test"
+lf -b steer <session> "now add the migration test"
 ```
+
+On a running Session this saves the steer and returns immediately. Only a
+worker’s own Graph can continue its finished step this way.
 
 ## Name, bind, and Desktop reconnect
 

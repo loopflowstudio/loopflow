@@ -418,14 +418,7 @@ fn task_checkout_prepares_the_conversation_and_manual_launch_reuses_it() {
         // Allocating the checkout is the work reservation that claims the Task.
         assert_eq!(claims(), ["claim"]);
         let opened = if headless {
-            fixture.run(&[
-                "-b",
-                "session",
-                "resume",
-                &session,
-                "--message",
-                "Start the Task conversation",
-            ])
+            fixture.run(&["-b", "steer", &session, "Start the Task conversation"])
         } else {
             fixture.run(&["session", "resume", &session])
         };
@@ -1145,33 +1138,6 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
         assert!(fixture.json(&filtered).as_array().unwrap().is_empty());
     }
     assert_eq!(fixture.count("agent_sessions"), captures);
-}
-
-#[test]
-fn preparation_rejects_messages_without_admitting_or_launching_a_conversation() {
-    let fixture = Fixture::new(false);
-    let primary = fixture.json(&["resume", "--prepare", "--json"]);
-    let before = fixture.count("agent_sessions");
-    let output = fixture.run(&[
-        "-b",
-        "resume",
-        "--prepare",
-        "--message",
-        "Do not submit",
-        "--json",
-    ]);
-    assert!(!output.status.success(), "{output:?}");
-    let error = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        error.contains("--prepare") && error.contains("--message"),
-        "{error}"
-    );
-    assert_eq!(fixture.count("agent_sessions"), before);
-    assert!(fixture.launches().is_empty());
-    assert_eq!(
-        fixture.json(&["resume", "--prepare", "--json"])["id"],
-        primary["id"]
-    );
 }
 
 #[test]

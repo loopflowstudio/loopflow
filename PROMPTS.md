@@ -159,7 +159,7 @@ implementation?" is a goal; a numbered checklist belongs in a Graph. Loopflow
 concepts (`.lf/wave/`, `scratch/`, Graphs) are fine in goals; product details
 ("44pt tap targets") are not.
 
-Projects are groups of Tasks inside one Wave that start and end. Start from
+A Wave’s Project groups its Tasks and has its own status. Start from
 who benefits and what changes for them.
 
 ## Opening lines

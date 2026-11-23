@@ -1,4 +1,4 @@
-at: 98f96b8342e59148cfea2088b7e0497363060a5c
+at: bcab934dfd13d84a7bc7329297664d877ca417ae
 first:
   - path: docs/work.md
     why: How a Wave and its Tasks reach the tracker
@@ -6,12 +6,14 @@ first:
     why: Which Project survives and where existing Tasks go
   - path: rust/loopflow-storage/src/sqlite/children.rs
     why: Task membership and lookup by tracker Project ID
+  - path: rust/loopflow-storage/src/planning.rs
+    why: The Project and issues in one tracker inventory
   - path: rust/loopflow-execution/src/ops/wave_lifecycle.rs
     why: Register, rename and remove a Wave
   - path: rust/loopflow-execution/src/ops/linear.rs
     why: Connect and refresh the linked Project
   - path: rust/loopflow-storage/src/sqlite/linear_events.rs
-    why: Reclaim a retired link and admit tracker issues
+    why: Reclaim links and apply Project and issue observations
   - path: rust/loopflow-execution/src/ops/tracker.rs
     why: Verify observed membership after Wave removal
   - path: rust/loopflow-storage/src/sqlite/tracker_actions.rs

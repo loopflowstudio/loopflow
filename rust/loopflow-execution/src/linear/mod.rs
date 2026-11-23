@@ -2239,10 +2239,7 @@ mod tests {
 
     #[test]
     fn task_history_tracker_facts_require_valid_observed_completion_dates() {
-        let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/task_history_planning.json"
-        ))
-        .unwrap();
+        let planning = crate::test_linear_input::task_history_inventory();
         for item in planning.items {
             let mut wire = json!({
                 "id":item.id, "identifier":item.identifier, "updatedAt":item.revision,

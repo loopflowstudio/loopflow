@@ -210,7 +210,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         store.create_wave(&legacy).await.unwrap();
         let sibling = Wave::new(WaveId::new(), "sibling".into(), alias.display().to_string());
         store.create_wave(&sibling).await.unwrap();
-        let snapshot: crate::test_linear_input::Inventory =
+        let snapshot: loopflow_storage::planning::ProjectInventory =
             serde_json::from_str(include_str!("../fixtures/linear_snapshot.json")).unwrap();
         store
             .seed_inventory(
@@ -266,7 +266,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         let detail: crate::test_linear_input::IssueFixture =
             loopflow_test_support::retained_task_input(&database, resolved.repo(), "LOO-2");
         assert_eq!(detail.item, snapshot.items[0]);
-        assert_eq!(detail.project.as_ref(), Some(&snapshot.projects[0]));
+        assert_eq!(detail.project.as_ref(), Some(&snapshot.project));
     }
 
     let alpha_resolved =
@@ -343,20 +343,10 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .lines()
         .any(|line| { line.contains("infrastructure") && line.contains("beta") }));
 
-    store
-        .seed_inventory(
-            InventoryFixture {
-                wave_id: alpha.id().clone(),
-                synced_at: 1,
-                snapshot: crate::test_linear_input::Inventory {
-                    projects: vec![],
-                    items: vec![],
-                },
-            },
-            None,
-        )
-        .await
-        .unwrap();
+    rusqlite::Connection::open(&database).unwrap().execute(
+        "INSERT INTO tracker_wave_sync(wave_id,tracker,initiative,synced_at) VALUES(?1,'linear','',1)",
+        [alpha.id()],
+    ).unwrap();
     let project = project(&alpha);
     store.create_project(&project).await.unwrap();
     let (task, task_pr) = task(&store, &alpha, &project, &repo_a);
@@ -409,20 +399,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
 
     let occupied = registered_wave(&repo_a, "occupied");
     store.create_wave(&occupied).await.unwrap();
-    store
-        .seed_inventory(
-            InventoryFixture {
-                wave_id: occupied.id().clone(),
-                synced_at: 1,
-                snapshot: crate::test_linear_input::Inventory {
-                    projects: vec![],
-                    items: vec![],
-                },
-            },
-            None,
-        )
-        .await
-        .unwrap();
     let collision = relocate_wave(&store, alpha.id(), &repo_a, None, Some("occupied"))
         .await
         .unwrap_err();

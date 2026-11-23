@@ -99,10 +99,10 @@ impl Machine {
             })
             .collect();
         let payload = serde_json::json!({
-            "projects": [{
+            "project": {
                 "id": PROJECT, "slug": "reactive", "name": "Reactive", "summary": "",
                 "status": "started", "team_ids": ["team-product"]
-            }],
+            },
             "items": items
         });
         self.store

@@ -1077,23 +1077,17 @@ fn project_reads_keep_canonical_identity_after_edits() {
         );
         loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
         // The Wave's one Project, bound to the tracker's.
-        let projects = ["first"]
-            .into_iter()
-            .map(|name| {
-                serde_json::from_value(serde_json::json!({
-                    "id": format!("linear-{name}"), "slug": name, "name": name,
-                    "summary": "", "revision": null, "status": "started",
-                    "team_ids": ["team"]
-                }))
-                .unwrap()
-            })
-            .collect();
+        let observed = serde_json::from_value(serde_json::json!({
+            "id": "linear-first", "slug": "first", "name": "first",
+            "summary": "", "status": "started", "team_ids": ["team"]
+        }))
+        .unwrap();
         store
             .seed_inventory(&crate::test_linear_input::InventoryFixture {
                 wave_id: wave.id().clone(),
                 synced_at: 17,
-                snapshot: crate::test_linear_input::Inventory {
-                    projects,
+                snapshot: loopflow_storage::planning::ProjectInventory {
+                    project: observed,
                     items: vec![serde_json::from_value(serde_json::json!({
                     "id": "linear-task", "identifier": "FIX-1", "name": "Shared title",
                     "description": "Saved prose", "rank": 4, "project_id": "linear-first",
@@ -1284,8 +1278,8 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         let second = TaskId::parse(create()["id"].as_str().unwrap()).unwrap();
         assert_ne!(first, second);
         assert_eq!(store.list_tasks(None).unwrap().len(), 2);
-        let mut snapshot = crate::test_linear_input::Inventory {
-            projects: vec![project.clone()],
+        let mut snapshot = loopflow_storage::planning::ProjectInventory {
+            project: project.clone(),
             items: vec![],
         };
         if mapped {

@@ -49,3 +49,4 @@
 - Slice 7 treats simultaneous named connects in one checkout as competing
   for the same link. They share the existing repository lifecycle lock through
   local registration and binding, then release it before inventory refresh.
+- Compress after slice 7 uses a missing inventory for a skipped refresh. A successful refresh always supplies the linked Project, including when it has zero issues.

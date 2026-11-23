@@ -1,5 +1,3 @@
-#[cfg(any(test, feature = "test-support"))]
-use crate::test_linear_input::{Inventory, InventoryFixture, SeedLinear};
 use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
@@ -40,17 +38,11 @@ impl Fixture {
         );
     }
 
-    async fn seed_snapshot(&self, wave: &Wave) -> InventoryFixture {
-        let row = InventoryFixture {
-            wave_id: wave.id().clone(),
-            synced_at: 1,
-            snapshot: Inventory {
-                projects: vec![],
-                items: vec![],
-            },
-        };
-        self.store.seed_inventory(row.clone(), None).await.unwrap();
-        row
+    fn seed_snapshot(&self, wave: &Wave) {
+        rusqlite::Connection::open(&self.database).unwrap().execute(
+            "INSERT INTO tracker_wave_sync(wave_id,tracker,initiative,synced_at) VALUES(?1,'linear','',1)",
+            [wave.id()],
+        ).unwrap();
     }
 }
 
@@ -120,7 +112,7 @@ async fn pm_read_linear_oauth_recovers() {
         updated_at: timestamp,
     };
     fixture.store.create_project(&project).await.unwrap();
-    fixture.seed_snapshot(&wave).await;
+    fixture.seed_snapshot(&wave);
     fixture.seed(now() - 1).await;
     let (oauth, exchanges) = test_server::spawn(vec![
         json_response(StatusCode::SERVICE_UNAVAILABLE, json!({})),
@@ -200,7 +192,7 @@ async fn pm_read_linear_oauth_invalid_grant() {
         std::env::set_var("LF_HOME", fixture.directory.path());
         let (repo, wave) = fixture.planning_repo().await;
         if cached {
-            fixture.seed_snapshot(&wave).await;
+            fixture.seed_snapshot(&wave);
         }
         let previous = fixture.wave_refresh_at(&wave);
         let original = fixture.seed(now() - 1).await;
@@ -533,7 +525,7 @@ async fn pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers
     let fixture = Fixture::new().await;
     std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, wave) = fixture.planning_repo().await;
-    fixture.seed_snapshot(&wave).await;
+    fixture.seed_snapshot(&wave);
     let previous = fixture.wave_refresh_at(&wave);
     let original = fixture.seed(now() - 1).await;
     let conn = rusqlite::Connection::open(&fixture.database).unwrap();

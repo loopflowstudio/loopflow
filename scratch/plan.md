@@ -372,6 +372,18 @@ issue under it. An offline rename followed by connect and drain issued
 zero Project creates or field updates. Private CLI rename help shows one
 Project. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
 
+Compress after slice 7: Linear refresh and its fixtures pass one
+`ProjectInventory` from acquisition through SQLite. The released-store
+fixture checks the fate of both historical Tasks after its two Projects
+collapse. The cross-Wave move fixture delivers an older inventory after the
+move and checks the Task, graph and PR. On a synthetic SQLite store with
+1,000 Projects and 10,000 Tasks, the Project projection looks up the tracker
+row by repository, tracker and ID and the link by external ID.
+
+Checks on 2026-11-23: 35 focused Rust tests passed across storage, execution
+and CLI, including the released schema upgrades. Formatting, Clippy with
+warnings denied, and the rendered architecture page check passed.
+
 ## Remains
 
 1. Gate: Swift DTO and desktop suites (`scripts/test_desktop.sh`), full matrix

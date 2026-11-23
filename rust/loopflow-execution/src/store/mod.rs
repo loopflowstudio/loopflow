@@ -861,17 +861,13 @@ mod tests {
     }
 
     fn task_planning_snapshot(wave: &Wave, project: &Project, task: &Task) -> InventoryFixture {
-        let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/task_history_planning.json"
-        ))
-        .unwrap();
-        snapshot.projects.truncate(1);
+        let mut snapshot = crate::test_linear_input::task_history_inventory();
         snapshot.items.truncate(1);
-        snapshot.projects[0].id = project.tracker_id.as_ref().unwrap().as_str().to_string();
-        snapshot.projects[0].revision = Some("2026-10-05T12:00:00Z".into());
+        snapshot.project.id = project.tracker_id.as_ref().unwrap().as_str().to_string();
+        snapshot.project.revision = Some("2026-10-05T12:00:00Z".into());
         snapshot.items[0].id = task.tracker_id.as_ref().unwrap().as_str().to_string();
         snapshot.items[0].identifier = task.identifier.clone();
-        snapshot.items[0].project_id = Some(snapshot.projects[0].id.clone());
+        snapshot.items[0].project_id = Some(snapshot.project.id.clone());
         snapshot.items[0].revision = Some("2026-10-05T12:00:00Z".into());
         InventoryFixture {
             wave_id: wave.id().clone(),
@@ -989,10 +985,6 @@ mod tests {
             item.branch_name = Some("suggested-branch".into());
             item.assignee = Some("owner".into());
             snapshot.synced_at = 17;
-            let mut first_project = snapshot.snapshot.projects[0].clone();
-            first_project.id = "00000000-0000-4000-8000-000000000002".into();
-            first_project.slug = "ordered-first".into();
-            snapshot.snapshot.projects.insert(0, first_project);
             store.seed_inventory(snapshot.clone(), None).await.unwrap();
             let task = store
                 .get_task_by_issue(&task.identifier)
@@ -1438,7 +1430,7 @@ mod tests {
                 "linear",
                 crate::test_linear_input::IssueFixture {
                     item: confirmed,
-                    project: Some(snapshot.snapshot.projects[0].clone()),
+                    project: Some(snapshot.snapshot.project.clone()),
                     observed_at: 2,
                 },
                 None,
@@ -1455,7 +1447,7 @@ mod tests {
                 "linear",
                 crate::test_linear_input::IssueFixture {
                     item: snapshot.snapshot.items[0].clone(),
-                    project: Some(snapshot.snapshot.projects[0].clone()),
+                    project: Some(snapshot.snapshot.project.clone()),
                     observed_at: snapshot.synced_at,
                 },
                 None,
@@ -1493,7 +1485,7 @@ mod tests {
         let mut item = snapshot.snapshot.items[0].clone();
         item.name = "New issue title".into();
         item.revision = Some("2026-10-05T12:00:01Z".into());
-        let mut older_project = snapshot.snapshot.projects[0].clone();
+        let mut older_project = snapshot.snapshot.project.clone();
         older_project.name = "Old Project title".into();
         older_project.revision = Some("2026-10-05T11:59:59Z".into());
         store
@@ -1511,7 +1503,7 @@ mod tests {
             .unwrap();
         let retained = store.get_project(&project.id).await.unwrap().unwrap();
         let refreshed = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(retained.name, snapshot.snapshot.projects[0].name);
+        assert_eq!(retained.name, snapshot.snapshot.project.name);
         assert_eq!(retained.tracker_synced_at, Some(10));
         assert_eq!(refreshed.title, "New issue title");
         assert_eq!(refreshed.tracker_synced_at, Some(20));
@@ -1552,13 +1544,11 @@ mod tests {
         store.create_project(&foreign).await.unwrap();
         let mut response = snapshot.clone();
         response.synced_at = 2;
-        response.snapshot.projects[0].name = "Rejected Project name".into();
-        response.snapshot.projects[0].revision = Some("2026-10-05T12:00:01Z".into());
+        response.snapshot.project.name = "Rejected Project name".into();
+        response.snapshot.project.revision = Some("2026-10-05T12:00:01Z".into());
         response.snapshot.items[0].name = "Rejected issue title".into();
         response.snapshot.items[0].revision = Some("2026-10-05T12:00:01Z".into());
-        let mut conflict = response.snapshot.projects[0].clone();
-        conflict.id = foreign.tracker_id.as_ref().unwrap().as_str().to_string();
-        response.snapshot.projects.push(conflict);
+        response.snapshot.project.id = foreign.tracker_id.unwrap().as_str().to_string();
         assert!(store.seed_inventory(response, None).await.is_err());
         let retained_observation = store
             .linear_issue_state(wave.repo(), &task.identifier)
@@ -1594,10 +1584,10 @@ mod tests {
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.synced_at = 10;
         store.seed_inventory(snapshot.clone(), None).await.unwrap();
-        let original = snapshot.snapshot.projects[0].clone();
+        let original = snapshot.snapshot.project.clone();
         snapshot.synced_at = 20;
-        snapshot.snapshot.projects[0].revision = Some("2026-10-05T11:59:59Z".into());
-        snapshot.snapshot.projects[0].name = "Older provider title".into();
+        snapshot.snapshot.project.revision = Some("2026-10-05T11:59:59Z".into());
+        snapshot.snapshot.project.name = "Older provider title".into();
         store.seed_inventory(snapshot, None).await.unwrap();
         let projected = store.get_project(&project.id).await.unwrap().unwrap();
         assert_eq!(projected.name, original.name);
@@ -1613,7 +1603,7 @@ mod tests {
         let pr = make_task_pr(&task);
         let task = store.seed_task(&task, &pr).await.unwrap();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
-        let mut observed = snapshot.snapshot.projects.remove(0);
+        let mut observed = snapshot.snapshot.project;
         observed.name = "Refreshed plan".into();
         let mut item = snapshot.snapshot.items.remove(0);
         item.name = "Refreshed work".into();
@@ -1659,7 +1649,7 @@ mod tests {
         let task = make_task(&store, &wave, &project);
         let snapshot = task_planning_snapshot(&wave, &project, &task);
         store.seed_inventory(snapshot.clone(), None).await.unwrap();
-        let mut confirmed = snapshot.snapshot.projects[0].clone();
+        let mut confirmed = snapshot.snapshot.project.clone();
         confirmed.name = "Ordinary work".into();
         confirmed.slug = "ordinary-work".into();
         confirmed.revision = Some("2026-10-05T12:00:01Z".into());
@@ -1728,52 +1718,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn interrupted_rotation_transfer_survives_a_late_planning_response() {
-        let (_directory, store, wave) = planning_store().await;
-        let predecessor = make_project(&wave);
-        store.create_project(&predecessor).await.unwrap();
-        let mut successor = make_project(&wave);
-        successor.tracker_id =
-            Some(loopflow_storage::planning::LinearProjectId::new("successor-project").unwrap());
-        let task = make_task(&store, &wave, &predecessor);
-        let pr = make_task_pr(&task);
-        store.seed_task(&task, &pr).await.unwrap();
-        store.create_project(&successor).await.unwrap();
-        let mut response = task_planning_snapshot(&wave, &predecessor, &task);
-        let mut next = response.snapshot.projects[0].clone();
-        next.id = successor.tracker_id.as_ref().unwrap().as_str().to_string();
-        response.snapshot.projects.push(next);
-        store.seed_inventory(response.clone(), None).await.unwrap();
-        // Confirmed transfer is accepted before rotation's final full refresh.
-        let mut confirmed = response.snapshot.items[0].clone();
-        confirmed.project_id = Some(successor.tracker_id.as_ref().unwrap().as_str().into());
-        confirmed.revision = Some("2026-10-05T12:00:01Z".into());
-        store
-            .seed_issue(
-                wave.repo(),
-                "linear",
-                crate::test_linear_input::IssueFixture {
-                    item: confirmed,
-                    project: Some(response.snapshot.projects[1].clone()),
-                    observed_at: 2,
-                },
-                None,
-            )
-            .await
-            .unwrap();
-        let transferred = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(transferred.project_id, Some(successor.id));
-        // A delayed response cannot reverse the confirmed revision.
-        store.seed_inventory(response, None).await.unwrap();
-        assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-        assert_eq!(
-            store.get_task(&task.id).await.unwrap().unwrap(),
-            transferred
-        );
-    }
-
-    #[tokio::test]
-    async fn project_transfer_preserves_graph_pr_and_rejects_stale_parent_updates() {
+    async fn moving_between_waves_preserves_graph_and_pr_after_a_late_refresh() {
         let directory = tempfile::tempdir().unwrap();
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
             directory.path().join("registry.db"),
@@ -1782,9 +1727,9 @@ mod tests {
         .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
-        let predecessor = make_project(&wave);
-        store.create_project(&predecessor).await.unwrap();
-        let task = make_task(&store, &wave, &predecessor);
+        let source_project = make_project(&wave);
+        store.create_project(&source_project).await.unwrap();
+        let task = make_task(&store, &wave, &source_project);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
         // An operation step run in the checkout is started work.
@@ -1798,13 +1743,21 @@ mod tests {
         let graphs = store.sqlite.task_graphs(&task.id).unwrap();
         assert_eq!(graphs.len(), 1);
 
-        let mut successor = make_project(&wave);
-        successor.tracker_id = Some(LinearProjectId::new("next-project").unwrap());
-        store.create_project(&successor).await.unwrap();
-        let response = task_planning_snapshot(&wave, &successor, &task);
+        let previous = task_planning_snapshot(&wave, &source_project, &task);
+        store.seed_inventory(previous.clone(), None).await.unwrap();
+        let destination = make_wave(wave.repo());
+        store.create_wave(&destination).await.unwrap();
+        let mut destination_project = make_project(&destination);
+        destination_project.tracker_id = Some(LinearProjectId::new("next-project").unwrap());
+        store.create_project(&destination_project).await.unwrap();
+        let mut response = task_planning_snapshot(&destination, &destination_project, &task);
+        response.snapshot.items[0].revision = Some("2026-10-05T12:00:01Z".into());
         store.seed_inventory(response, None).await.unwrap();
         let moved = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(moved.project_id, Some(successor.id));
+        assert_eq!(moved.project_id.as_ref(), Some(&destination_project.id));
+        assert_eq!(moved.wave_id.as_ref(), Some(destination.id()));
+        store.seed_inventory(previous, None).await.unwrap();
+        assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), moved);
         assert_eq!(moved.worktree, task.worktree);
         assert_eq!(moved.tracker_id, task.tracker_id);
         assert_eq!(store.sqlite.task_graphs(&task.id).unwrap(), graphs);
@@ -2242,8 +2195,9 @@ mod tests {
         let task = make_task(&store, &wave, &project);
         let task = store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
 
-        let mut snapshot = task_planning_snapshot(&wave, &project, &task);
-        let mut observed = snapshot.snapshot.projects.remove(0);
+        let mut observed = task_planning_snapshot(&wave, &project, &task)
+            .snapshot
+            .project;
         observed.status = loopflow_storage::work::project::ProjectStatus::Completed;
         loopflow_storage::sqlite::linear_events::accept_linear_project_in(
             &store.sqlite,

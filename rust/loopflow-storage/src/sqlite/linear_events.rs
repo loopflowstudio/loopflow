@@ -2,7 +2,7 @@
 
 use super::tracker_actions::{self, ActionKind, Resolution, TrackerAction};
 use super::{self as sqlite, planning_write, SqliteStore};
-use crate::planning::{revision_nanos, TrackerItem, TrackerProject};
+use crate::planning::{revision_nanos, ProjectInventory, TrackerItem, TrackerProject};
 use crate::planning_sync::TrackerKind;
 use crate::work::edit::{Disposition, WorkValue as Edit};
 use crate::{StoreError, StoreResult};
@@ -24,38 +24,29 @@ pub fn accept_linear_project_in(
     let repo: String = tx.query_row("SELECT repo FROM waves WHERE id=?1", [wave], |row| {
         row.get(0)
     })?;
-    put_project(&tx, &repo, observed_at, project, tracker)?;
-    project_accepted_planning(&tx, &repo, &[project.id.as_str()], &[], Some(wave), tracker)?;
+    accept_project(&tx, &repo, project, observed_at, Some(wave), tracker)?;
     tx.commit()?;
     Ok(())
 }
 
 /// Check the named Project before registering a Wave. Linking repeats this check
 /// inside the transaction that claims the Project.
-pub fn check_project_link(
-    store: &SqliteStore,
-    project: &str,
-    wave: Option<&WaveId>,
-) -> StoreResult<()> {
+pub fn check_project_link(store: &SqliteStore, project: &str) -> StoreResult<()> {
     let conn = store.conn.lock().expect("store mutex poisoned");
-    check_project_link_in(&conn, project, wave)
+    check_project_link_in(&conn, project)
 }
 
-fn check_project_link_in(
-    conn: &Connection,
-    project: &str,
-    wave: Option<&WaveId>,
-) -> StoreResult<()> {
+fn check_project_link_in(conn: &Connection, project: &str) -> StoreResult<()> {
     let owner: Option<String> = conn
         .query_row(
             "WITH RECURSIVE owner(slug,parent) AS (
                  SELECT w.name,w.parent_wave_id FROM projects p JOIN waves w ON w.id=p.wave_id
-                 WHERE p.external_project_id=?1 AND w.id IS NOT ?2 AND w.retired_at IS NULL
+                 WHERE p.external_project_id=?1 AND w.retired_at IS NULL
                  UNION ALL
                  SELECT w.name || '/' || owner.slug,w.parent_wave_id
                  FROM owner JOIN waves w ON w.id=owner.parent
              ) SELECT slug FROM owner WHERE parent IS NULL",
-            params![project, wave],
+            [project],
             |row| row.get(0),
         )
         .optional()?;
@@ -90,7 +81,7 @@ pub fn link_wave_project_in(
         |row| row.get(0),
     )?;
     if linked.as_deref() != Some(project.id.as_str()) {
-        check_project_link_in(&tx, &project.id, Some(wave))?;
+        check_project_link_in(&tx, &project.id)?;
         let unresolved: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM tracker_actions WHERE project_id=?1
              AND (phase='sent' OR (kind='create' AND phase='conflicted')))",
@@ -130,8 +121,7 @@ pub fn link_wave_project_in(
             [own.as_str()],
         )?;
     }
-    put_project(&tx, &repo, observed_at, project, tracker)?;
-    project_accepted_planning(&tx, &repo, &[project.id.as_str()], &[], Some(wave), tracker)?;
+    accept_project(&tx, &repo, project, observed_at, Some(wave), tracker)?;
     tx.commit()?;
     Ok(())
 }
@@ -159,8 +149,7 @@ pub fn reconcile_linear_project_teams_in(
             serde_json::to_string(&project.team_ids)?
         ],
     )?;
-    put_project(&tx, &repo, observed_at, project, tracker)?;
-    project_accepted_planning(&tx, &repo, &[project.id.as_str()], &[], Some(wave), tracker)?;
+    accept_project(&tx, &repo, project, observed_at, Some(wave), tracker)?;
     tx.commit()?;
     Ok(())
 }
@@ -186,7 +175,7 @@ pub fn accept_linear_issue_in(
     }
     // Project revisions are independent of the issue revision and request age.
     if let Some(project) = project {
-        put_project(&tx, repo, observed_at, project, tracker)?;
+        accept_project(&tx, repo, project, observed_at, None, tracker)?;
     }
     if put_item(&tx, repo, observed_at, &item, tracker)? {
         tx.execute(
@@ -194,14 +183,7 @@ pub fn accept_linear_issue_in(
             params![repo, tracker, issue.id],
         )?;
     }
-    project_accepted_planning(
-        &tx,
-        repo,
-        project.map(|project| project.id.as_str()).as_slice(),
-        &[issue.id.as_str()],
-        None,
-        tracker,
-    )?;
+    apply_items(&tx, repo, std::slice::from_ref(issue), None, tracker)?;
     tx.commit()?;
     Ok(())
 }
@@ -211,8 +193,7 @@ pub fn accept_linear_issue_in(
 pub fn accept_linear_inventory_in(
     store: &SqliteStore,
     wave: &WaveId,
-    projects: &[TrackerProject],
-    issues: &[TrackerItem],
+    inventory: &ProjectInventory,
     observed_at: i64,
 ) -> StoreResult<()> {
     // Linear-only: Teams and ordered issues.
@@ -222,10 +203,8 @@ pub fn accept_linear_inventory_in(
     let repo: String = tx.query_row("SELECT repo FROM waves WHERE id=?1", [wave], |row| {
         row.get(0)
     })?;
-    for project in projects {
-        put_project(&tx, &repo, observed_at, project, tracker)?;
-    }
-    for item in issues {
+    let ProjectInventory { project, items } = inventory;
+    for item in items {
         put_item(&tx, &repo, observed_at, item, tracker)?;
     }
     tx.execute(
@@ -234,27 +213,13 @@ pub fn accept_linear_inventory_in(
          synced_at=MAX(tracker_wave_sync.synced_at,excluded.synced_at)",
         params![wave, tracker, observed_at],
     )?;
-    project_accepted_planning(
-        &tx,
-        &repo,
-        &projects.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
-        &issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
-        Some(wave),
-        tracker,
-    )?;
-    for project in projects {
-        observe_order(
-            &tx,
-            &repo,
-            &project.id,
-            &issues
-                .iter()
-                .filter(|i| i.project_id.as_deref() == Some(&project.id))
-                .cloned()
-                .collect::<Vec<_>>(),
-            tracker,
-        )?;
-    }
+    accept_project(&tx, &repo, project, observed_at, Some(wave), tracker)?;
+    apply_items(&tx, &repo, items, Some(wave), tracker)?;
+    // A list can include an issue that just moved. Only members set this Project's order.
+    let members = items
+        .iter()
+        .filter(|item| item.project_id.as_deref() == Some(&project.id));
+    observe_order(&tx, &repo, &project.id, members, tracker)?;
     tx.commit()?;
     Ok(())
 }
@@ -273,15 +238,8 @@ pub fn accept_linear_project_order_in(
     for item in items {
         put_item(&tx, repo, now, item, tracker)?;
     }
-    project_accepted_planning(
-        &tx,
-        repo,
-        &[],
-        &items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
-        None,
-        tracker,
-    )?;
-    let accepted = observe_order(&tx, repo, project, items, tracker)?;
+    apply_items(&tx, repo, items, None, tracker)?;
+    let accepted = observe_order(&tx, repo, project, items.iter(), tracker)?;
     tx.commit()?;
     Ok(accepted)
 }
@@ -435,11 +393,11 @@ fn put_item(
     Ok(true)
 }
 
-fn observe_order(
+fn observe_order<'a>(
     conn: &Connection,
     repo: &str,
     external: &str,
-    items: &[TrackerItem],
+    items: impl Iterator<Item = &'a TrackerItem>,
     tracker: &str,
 ) -> StoreResult<bool> {
     let project: Option<String> = conn
@@ -453,7 +411,7 @@ fn observe_order(
     let Some(project) = project.map(ProjectId::from_raw) else {
         return Ok(false);
     };
-    let mut items = items.iter().collect::<Vec<_>>();
+    let mut items = items.collect::<Vec<_>>();
     items.sort_by_key(|i| i.rank);
     let mut observed = Vec::new();
     for item in items {
@@ -477,114 +435,118 @@ fn observe_order(
     sqlite::planning_order::observe_in(conn, repo, external, &project, observed)
 }
 
-// Both durable projections read the tracker Projects a Wave's Project links,
-// or the one being linked to Wave ?4.
+// A detail read follows the stored link. A Wave refresh supplies its Wave ID in ?4.
 const ACCEPTED_WAVE_PROJECTS: &str = "
     SELECT p.*, w.id AS wave_id FROM tracker_projects p
     LEFT JOIN projects l ON l.external_project_id=p.id
     JOIN waves w ON w.id=COALESCE(?4,l.wave_id) AND w.repo=p.repo AND w.retired_at IS NULL
     WHERE p.repo=?1 AND p.tracker=?2 AND p.archived=0";
 
-/// Inputs select IDs only; project their accepted rows inside the ingestion transaction.
-fn project_accepted_planning(
+/// Apply the retained revision, which can be newer than this observation.
+fn accept_project(
     tx: &Transaction<'_>,
     repo: &str,
-    projects: &[&str],
-    items: &[&str],
+    project: &TrackerProject,
+    observed_at: i64,
     linking: Option<&WaveId>,
     tracker: &str,
 ) -> StoreResult<()> {
-    let project_ids = serde_json::to_string(projects)?;
-    let item_ids = serde_json::to_string(items)?;
-    let mut query = tx.prepare(&format!(
-        "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
-         SELECT id,observed_at,wave_id,revision,
-             slug,name,
-             summary,json_quote(status),
-             team_ids,
-             CASE WHEN description_revision IS revision THEN description END
-         FROM accepted WHERE id IN (SELECT value FROM json_each(?3))"
-    ))?;
-    let observations = query
-        .query_and_then(
-            params![repo, tracker, project_ids, linking],
-            |row| -> StoreResult<_> {
-                let external: String = row.get(0)?;
-                let wave: WaveId = row.get(2)?;
-                let mut edits = vec![
-                    Edit::ProjectWave(wave.to_string()),
-                    Edit::ProjectLinearId(Some(external.clone())),
-                    Edit::ProjectSlug(Some(row.get(4)?)),
-                    Edit::ProjectName(Some(row.get(5)?)),
-                    Edit::ProjectSummary(row.get(6)?),
-                    Edit::ProjectStatus(serde_json::from_str(&row.get::<_, String>(7)?)?),
-                    Edit::ProjectTeams(serde_json::from_str(&row.get::<_, String>(8)?)?),
-                ];
-                if let Some(description) = row.get::<_, Option<String>>(9)? {
-                    edits.push(Edit::ProjectDescription(Some(description)));
-                }
-                Ok((
-                    external,
-                    row.get::<_, i64>(1)?,
-                    wave,
-                    row.get::<_, Option<String>>(3)?,
-                    edits,
-                ))
-            },
-        )?
-        .collect::<StoreResult<Vec<_>>>()?;
-    drop(query);
-    for (external, observed_at, wave_id, revision, mut edits) in observations {
-        tracker_actions::attach_in(tx, repo, true, &external, revision.as_deref(), &edits)?;
-        let existing: Option<(String, WaveId)> = tx
-            .query_row(
-                "SELECT id,wave_id FROM projects WHERE external_project_id=?1",
-                [&external],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        let id = match existing {
-            Some((_, owner)) if owner != wave_id => {
-                return Err(StoreError::InvalidData(format!(
-                    "Project {external} changed Wave ownership"
-                )));
-            }
-            Some((id, _)) => {
-                ProjectId::parse(&id).map_err(|error| StoreError::InvalidData(error.to_string()))
-            }?,
-            // A Wave is exactly one Project. A tracker Project no Wave links
-            // becomes the Wave's when its Project links none yet, unless that
-            // Project's own `create` is out and this is not it.
-            None => {
-                let own = sqlite::children::held_wave_project_in(tx, &wave_id)?
-                    .unwrap_or_else(|| ProjectId::for_wave(&wave_id));
-                let (linked, creating): (bool, bool) = tx
-                    .query_row(
-                        "SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND external_project_id IS NOT NULL),
-                            EXISTS(SELECT 1 FROM tracker_actions WHERE project_id=?1 AND kind='create' AND phase IN ('queued','sent','conflicted'))",
-                        [own.as_str()],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )?;
-                if linked || (creating && !own.made_as(&external)) {
-                    continue;
-                }
-                own
-            }
+    put_project(tx, repo, observed_at, project, tracker)?;
+    let external = &project.id;
+    let (wave_id, observed_at, revision, mut edits) = {
+        let mut query = tx.prepare(&format!(
+            "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
+             SELECT wave_id, observed_at, revision, slug, name, summary, json_quote(status),
+                    team_ids, CASE WHEN description_revision IS revision THEN description END
+             FROM accepted WHERE id=?3"
+        ))?;
+        let mut rows = query.query(params![repo, tracker, external, linking])?;
+        let Some(row) = rows.next()? else {
+            return Ok(());
         };
-        tracker_actions::reconcile_in(
-            tx,
-            &tracker_actions::ActionOwner::Project(id.clone()),
-            revision.as_deref(),
-            &mut edits,
-        )?;
-        planning_write::create(
-            tx,
-            repo,
-            &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
-            crate::sqlite::planning_write::WriteOrigin::Tracker,
-        )?;
-        tx.execute("UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",params![id.as_str(),observed_at,revision])?;
-    }
+        let wave: WaveId = row.get(0)?;
+        let mut edits = vec![
+            Edit::ProjectWave(wave.to_string()),
+            Edit::ProjectLinearId(Some(external.clone())),
+            Edit::ProjectSlug(Some(row.get(3)?)),
+            Edit::ProjectName(Some(row.get(4)?)),
+            Edit::ProjectSummary(row.get(5)?),
+            Edit::ProjectStatus(serde_json::from_str(&row.get::<_, String>(6)?)?),
+            Edit::ProjectTeams(serde_json::from_str(&row.get::<_, String>(7)?)?),
+        ];
+        if let Some(description) = row.get::<_, Option<String>>(8)? {
+            edits.push(Edit::ProjectDescription(Some(description)));
+        }
+        (
+            wave,
+            row.get::<_, i64>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            edits,
+        )
+    };
+    tracker_actions::attach_in(tx, repo, true, external, revision.as_deref(), &edits)?;
+    let existing: Option<(String, WaveId)> = tx
+        .query_row(
+            "SELECT id,wave_id FROM projects WHERE external_project_id=?1",
+            [external],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let id = match existing {
+        Some((_, owner)) if owner != wave_id => {
+            return Err(StoreError::InvalidData(format!(
+                "Project {external} changed Wave ownership"
+            )));
+        }
+        Some((id, _)) => {
+            ProjectId::parse(&id).map_err(|error| StoreError::InvalidData(error.to_string()))?
+        }
+        // A Wave is exactly one Project. A tracker Project no Wave links
+        // becomes the Wave's when its Project links none yet, unless that
+        // Project's own `create` is out and this is not it.
+        None => {
+            let own = sqlite::children::held_wave_project_in(tx, &wave_id)?
+                .unwrap_or_else(|| ProjectId::for_wave(&wave_id));
+            let (linked, creating): (bool, bool) = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND external_project_id IS NOT NULL),
+                        EXISTS(SELECT 1 FROM tracker_actions WHERE project_id=?1 AND kind='create' AND phase IN ('queued','sent','conflicted'))",
+                    [own.as_str()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+            if linked || (creating && !own.made_as(external)) {
+                return Ok(());
+            }
+            own
+        }
+    };
+    tracker_actions::reconcile_in(
+        tx,
+        &tracker_actions::ActionOwner::Project(id.clone()),
+        revision.as_deref(),
+        &mut edits,
+    )?;
+    planning_write::create(
+        tx,
+        repo,
+        &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
+        crate::sqlite::planning_write::WriteOrigin::Tracker,
+    )?;
+    tx.execute(
+        "UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",
+        params![id.as_str(), observed_at, revision],
+    )?;
+    Ok(())
+}
+
+fn apply_items(
+    tx: &Transaction<'_>,
+    repo: &str,
+    items: &[TrackerItem],
+    linking: Option<&WaveId>,
+    tracker: &str,
+) -> StoreResult<()> {
+    let item_ids = serde_json::to_string(&items.iter().map(|item| &item.id).collect::<Vec<_>>())?;
     let mut query = tx.prepare(
         "SELECT i.id,i.revision,i.name,i.description,i.assignee,p.id,i.assignee_observed,i.project_id_observed,i.claimed_project_id
          FROM tracker_items i LEFT JOIN projects p ON p.external_project_id=i.project_id
@@ -796,16 +758,10 @@ fn record_adoptions(
 
 #[cfg(test)]
 mod tests {
-    use crate::planning::{TrackerItem, TrackerProject};
+    use crate::planning::{ProjectInventory, TrackerItem, TrackerProject};
     use rusqlite::{params, Connection};
 
-    #[derive(Debug, serde::Deserialize)]
-    struct Inventory {
-        projects: Vec<TrackerProject>,
-        items: Vec<TrackerItem>,
-    }
-
-    fn inventory() -> Inventory {
+    fn inventory() -> ProjectInventory {
         serde_json::from_str(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../tests/fixtures/dto/task_history_planning.json"
@@ -822,7 +778,7 @@ mod tests {
         let old = crate::test_fixture::project(&store, "/repo", "billing");
         let next = crate::test_fixture::project(&store, "/repo", "payments");
         let snapshot = inventory();
-        let project = &snapshot.projects[0];
+        let project = &snapshot.project;
         let mut done = snapshot.items[0].clone();
         done.completed = true;
         done.state = Some("completed".into());
@@ -874,7 +830,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
         let local = crate::test_fixture::project(&store, "/repo", "billing");
-        let first = inventory().projects.remove(0);
+        let first = inventory().project;
         let second = TrackerProject {
             id: "second".into(),
             name: "Second".into(),
@@ -929,8 +885,7 @@ mod tests {
                 &conn,
                 "planning_peers",
             );
-            let snapshot = inventory();
-            let mut project = snapshot.projects[0].clone();
+            let mut project = inventory().project;
             project.revision = Some("2026-10-05T12:00:00Z".into());
             project.name = historical_name.into();
             project.slug = crate::planning::project_slug(historical_name);
@@ -1078,11 +1033,7 @@ mod tests {
             &conn,
             "planning_peers",
         );
-        let snapshot: Inventory = serde_json::from_str(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/fixtures/dto/task_history_planning.json"
-        )))
-        .unwrap();
+        let snapshot = inventory();
         let item = &snapshot.items[0];
         conn.execute(
             "INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body)
@@ -1144,11 +1095,7 @@ mod tests {
             &conn,
             "planning_peers",
         );
-        let planning: Inventory = serde_json::from_str(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/fixtures/dto/task_history_planning.json"
-        )))
-        .unwrap();
+        let planning = inventory();
         let mut item = planning
             .items
             .iter()
@@ -1200,11 +1147,7 @@ mod tests {
             &conn,
             "planning_peers",
         );
-        let planning: Inventory = serde_json::from_str(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/fixtures/dto/task_history_planning.json"
-        )))
-        .unwrap();
+        let planning = inventory();
         let mut item = planning.items[0].clone();
         let mut old = serde_json::to_value(&item).unwrap();
         old.as_object_mut().unwrap().remove("due_date");
@@ -1240,11 +1183,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
         let conn = store.conn.lock().unwrap();
-        let planning: Inventory = serde_json::from_str(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/fixtures/dto/task_history_planning.json"
-        )))
-        .unwrap();
+        let planning = inventory();
         let mut item = planning.items[0].clone();
         let long = "jack/loo-403-make-the-mac-apps-shortcuts-findable-and-put-commands-in-the";
         item.branch_name = Some(long.into());

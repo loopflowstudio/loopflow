@@ -11,13 +11,12 @@ use loopflow_storage::sqlite::linear_events::{
 pub(crate) async fn accept_linear_inventory(
     store: &Store,
     wave: WaveId,
-    projects: Vec<loopflow_storage::planning::TrackerProject>,
-    issues: Vec<loopflow_storage::planning::TrackerItem>,
+    inventory: loopflow_storage::planning::ProjectInventory,
     observed_at: i64,
     locks: Option<Arc<PlanningLocks>>,
 ) -> StoreResult<()> {
     run_planning_write(&store.sqlite, locks, move |store| {
-        accept_linear_inventory_in(&store, &wave, &projects, &issues, observed_at)
+        accept_linear_inventory_in(&store, &wave, &inventory, observed_at)
     })
     .await
 }
@@ -70,21 +69,19 @@ mod tests {
     use loopflow_model::id::WaveId;
     use loopflow_storage::sqlite::SqliteStore;
 
+    fn one_issue_inventory() -> loopflow_storage::planning::ProjectInventory {
+        let mut snapshot = crate::test_linear_input::task_history_inventory();
+        snapshot.items.truncate(1);
+        snapshot
+    }
+
     #[test]
     fn explicit_null_detaches_but_unknown_linear_membership_retains_task() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
-        let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/task_history_planning.json"
-        ))
-        .unwrap();
-        snapshot.projects.truncate(1);
-        snapshot
-            .items
-            .retain(|item| item.project_id.as_deref() == Some(&snapshot.projects[0].id));
-        snapshot.items.truncate(1);
+        let snapshot = one_issue_inventory();
         let mut issue = snapshot.items[0].clone();
         store
             .seed_inventory(&crate::test_linear_input::InventoryFixture {
@@ -256,16 +253,8 @@ mod tests {
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
-        let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/task_history_planning.json"
-        ))
-        .unwrap();
-        snapshot.projects.truncate(1);
-        snapshot
-            .items
-            .retain(|item| item.project_id.as_deref() == Some(&snapshot.projects[0].id));
-        snapshot.items.truncate(1);
-        let project = snapshot.projects[0].clone();
+        let snapshot = one_issue_inventory();
+        let project = snapshot.project.clone();
         let item = snapshot.items[0].clone();
         store
             .seed_inventory(&crate::test_linear_input::InventoryFixture {
@@ -326,15 +315,7 @@ mod tests {
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
-        let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/task_history_planning.json"
-        ))
-        .unwrap();
-        snapshot.projects.truncate(1);
-        snapshot
-            .items
-            .retain(|item| item.project_id.as_deref() == Some(&snapshot.projects[0].id));
-        snapshot.items.truncate(1);
+        let snapshot = one_issue_inventory();
         let mut row = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
             synced_at: 42,
@@ -368,7 +349,7 @@ mod tests {
                 "linear",
                 &crate::test_linear_input::IssueFixture {
                     item: detail.clone(),
-                    project: Some(row.snapshot.projects[0].clone()),
+                    project: Some(row.snapshot.project.clone()),
                     observed_at: 44,
                 },
             )
@@ -430,16 +411,8 @@ mod tests {
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::work::wave::bootstrap::upsert_wave(&store, &wave).unwrap();
-        let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/task_history_planning.json"
-        ))
-        .unwrap();
-        snapshot.projects.truncate(1);
-        snapshot
-            .items
-            .retain(|item| item.project_id.as_deref() == Some(&snapshot.projects[0].id));
-        snapshot.items.truncate(1);
-        let mut project = snapshot.projects[0].clone();
+        let snapshot = one_issue_inventory();
+        let mut project = snapshot.project.clone();
         let issue = snapshot.items[0].clone();
         store
             .seed_inventory(&crate::test_linear_input::InventoryFixture {

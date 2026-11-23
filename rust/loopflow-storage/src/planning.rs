@@ -216,6 +216,14 @@ pub struct TrackerProject {
     #[serde(deserialize_with = "loopflow_model::id::deserialize_uuid_vec")]
     pub team_ids: Vec<String>,
 }
+
+/// The Project and issues returned by a Wave inventory refresh.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProjectInventory {
+    pub project: TrackerProject,
+    pub items: Vec<TrackerItem>,
+}
+
 pub fn revision_nanos(revision: Option<&str>) -> StoreResult<Option<i64>> {
     revision
         .map(|revision| {

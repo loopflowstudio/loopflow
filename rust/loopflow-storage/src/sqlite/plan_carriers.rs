@@ -500,8 +500,7 @@ fn why_not_taken(
 /// Write `records` together; when one cannot be written here (a Wave whose
 /// name another Wave already holds, a comment whose Task is missing), take
 /// them a record at a time, parents first, skip and log what fails, so the
-/// rest of the plan still arrives. A Wave goes with its Projects: each names
-/// the other. Returns what was written and what was skipped.
+/// rest of the plan still arrives. Apply a Wave with its incoming Project records.
 fn apply_each(
     tx: &mut rusqlite::Transaction<'_>,
     repo: &str,

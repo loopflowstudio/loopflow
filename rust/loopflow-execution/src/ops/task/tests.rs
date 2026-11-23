@@ -297,14 +297,10 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
             "Recover work.",
         )
         .unwrap();
-        let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-            "../../../../../tests/fixtures/dto/task_history_planning.json"
-        ))
-        .unwrap();
-        snapshot.projects.truncate(1);
+        let mut snapshot = crate::test_linear_input::task_history_inventory();
         snapshot.items.truncate(1);
-        snapshot.projects[0].id = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3".into();
-        snapshot.projects[0].status = loopflow_storage::work::project::ProjectStatus::Started;
+        snapshot.project.id = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3".into();
+        snapshot.project.status = loopflow_storage::work::project::ProjectStatus::Started;
         snapshot.items[0].id = "new-issue".into();
         snapshot.items[0].completed = false;
         snapshot.items[0].completed_at = None;

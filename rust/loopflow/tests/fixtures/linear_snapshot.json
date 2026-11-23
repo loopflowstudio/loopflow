@@ -1,19 +1,14 @@
 {
-  "projects": [
-    {
-      "id": "project-gmail",
-      "slug": "gmail",
-      "name": "Gmail",
-      "summary": "Keep mail flowing.",
-      "initiative_ids": [
-        "initiative-infrastructure"
-      ],
-      "team_ids": [
-        "team-loo"
-      ],
-      "status": "started"
-    }
-  ],
+  "project": {
+    "id": "project-gmail",
+    "slug": "gmail",
+    "name": "Gmail",
+    "summary": "Keep mail flowing.",
+    "team_ids": [
+      "team-loo"
+    ],
+    "status": "started"
+  },
   "items": [
     {
       "id": "issue-gmail",

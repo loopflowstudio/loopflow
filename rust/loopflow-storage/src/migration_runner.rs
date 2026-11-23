@@ -6054,8 +6054,9 @@ mod tests {
             "/../../tests/fixtures/dto/task_history_planning.json"
         )))
         .unwrap();
-        let mut project = snapshot["projects"][0].take();
-        // The released Project body carried KRs and targets; current DTOs do not.
+        let mut project = snapshot["project"].take();
+        // The released Project body included Initiative membership, KRs and targets.
+        project["initiative_ids"] = serde_json::json!(["initiative"]);
         project["krs"] = serde_json::json!([{"text":"Saved planning survives","holds":true}]);
         project["metric_targets"] = serde_json::json!([]);
         let item = &mut snapshot["items"][0];

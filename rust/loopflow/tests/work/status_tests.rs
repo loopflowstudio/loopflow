@@ -68,7 +68,7 @@ fn start_only(home: &Path, wave: &Wave, project_id: &str) {
 
 fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
     let payload = serde_json::json!({
-        "projects": [{
+        "project": {
             "id": project.tracker_id.as_ref().unwrap().as_str(),
             "slug": project.slug,
             "name": project.name,
@@ -76,7 +76,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
             "status": "started",
             "sync": {"actions": []},
             "team_ids": ["team-infrastructure"]
-        }],
+        },
         "items": []
     });
     let store = loopflow_execution::store::open_sqlite(&home.join("loopflow.db"))
@@ -274,16 +274,14 @@ fn seed_stale_project_work(home: &Path, current_task: bool) -> InventoryFixture 
         .expect("make fake tmux executable");
 
     let payload = serde_json::json!({
-        "projects": [
-            {
-                "id": "95159066-9098-4d0b-8903-01459dc7ec14",
-                "slug": "auditability",
-                "name": "Auditability",
-                "summary": "Every claim points to its receipt.",
-                "status": "started",
-                "team_ids": ["team-product"]
-            }
-        ],
+        "project": {
+            "id": "95159066-9098-4d0b-8903-01459dc7ec14",
+            "slug": "auditability",
+            "name": "Auditability",
+            "summary": "Every claim points to its receipt.",
+            "status": "started",
+            "team_ids": ["team-product"]
+        },
         "items": [
             {
                 "id": "task-prd-52",
@@ -812,7 +810,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
         other_repo.canonicalize().unwrap().display().to_string(),
     );
     loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &other).unwrap();
-    snapshot.snapshot.projects[0].id = "other-project".into();
+    snapshot.snapshot.project.id = "other-project".into();
     snapshot.snapshot.items[0].id = "other-task".into();
     snapshot.snapshot.items[0].project_id = Some("other-project".into());
     snapshot.snapshot.items[0].completed = true;

@@ -321,10 +321,10 @@ mod tests {
     use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::store::SharedStore;
     use crate::store::StorageConfig;
-    use crate::test_linear_input::Inventory;
     use crate::work::wave::Wave;
     use loopflow_model::durable::{ProjectId, TaskId, WorkRef};
     use loopflow_model::id::WaveId;
+    use loopflow_storage::planning::ProjectInventory;
     use loopflow_storage::planning::TrackerProject;
     use loopflow_storage::work::project::Project;
     use loopflow_storage::work::task::{LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
@@ -1266,8 +1266,8 @@ mod tests {
             .create_project(&project(&wave, "loopflow-api", "project-api"))
             .await
             .unwrap();
-        let snapshot = Inventory {
-            projects: vec![TrackerProject {
+        let snapshot = ProjectInventory {
+            project: TrackerProject {
                 description: None,
                 revision: None,
                 id: "project-api".to_string(),
@@ -1277,7 +1277,7 @@ mod tests {
                 status: loopflow_storage::work::project::ProjectStatus::Started,
                 url: None,
                 team_ids: vec!["team-1".to_string()],
-            }],
+            },
             items: Vec::new(),
         };
         store

@@ -1,7 +1,7 @@
 #![allow(clippy::await_holding_lock)] // Serialize process-wide Machine selection for each async fixture.
 
-#[cfg(any(test, feature = "test-support"))]
-use crate::test_linear_input::{Inventory, InventoryFixture, IssueFixture, SeedLinear};
+use crate::test_linear_input::{InventoryFixture, IssueFixture, SeedLinear};
+use loopflow_storage::planning::ProjectInventory;
 use std::sync::Arc;
 
 use axum::http::StatusCode;
@@ -42,8 +42,8 @@ fn snapshot(wave: &WaveId, record: &IssueFixture) -> InventoryFixture {
     InventoryFixture {
         wave_id: wave.clone(),
         synced_at: record.observed_at,
-        snapshot: Inventory {
-            projects: record.project.clone().into_iter().collect(),
+        snapshot: ProjectInventory {
+            project: record.project.clone().unwrap(),
             items: vec![record.item.clone()],
         },
     }
@@ -215,21 +215,17 @@ async fn refresh_returns_saved_task_fields_without_replacing_pending_edits() {
 }
 
 #[tokio::test]
-async fn an_inventory_without_the_project_keeps_its_facts() {
+async fn a_later_inventory_can_rename_a_project_at_the_same_revision() {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
     std::env::set_var("LF_HOME", fixture.directory.path());
     let (_repo, wave) = fixture.planning_repo().await;
-    let mut snapshot: Inventory = serde_json::from_str(include_str!(
-        "../../../../../tests/fixtures/dto/task_history_planning.json"
-    ))
-    .unwrap();
+    let mut snapshot = crate::test_linear_input::task_history_inventory();
     snapshot.items.clear();
-    snapshot.projects.truncate(1);
     // The Project the fixture Wave links.
-    snapshot.projects[0].id = "project-1".into();
-    snapshot.projects[0].revision = Some("2026-10-05T12:00:00Z".into());
+    snapshot.project.id = "project-1".into();
+    snapshot.project.revision = Some("2026-10-05T12:00:00Z".into());
     let mut snapshot = InventoryFixture {
         wave_id: wave.id().clone(),
         synced_at: 1,
@@ -241,7 +237,7 @@ async fn an_inventory_without_the_project_keeps_its_facts() {
         .await
         .unwrap();
     // Linear can rename at the same `updatedAt`; the later read wins.
-    snapshot.snapshot.projects[0].name = "Renamed in Linear".into();
+    snapshot.snapshot.project.name = "Renamed in Linear".into();
     snapshot.synced_at = 2;
     fixture
         .store
@@ -255,13 +251,6 @@ async fn an_inventory_without_the_project_keeps_its_facts() {
         .unwrap()
         .unwrap();
     assert_eq!(retained.name, "Renamed in Linear");
-    snapshot.snapshot.projects.clear();
-    snapshot.synced_at = 3;
-    fixture.store.seed_inventory(snapshot, None).await.unwrap();
-    assert_eq!(
-        fixture.store.project_of_wave(wave.id()).await.unwrap(),
-        Some(retained)
-    );
 }
 
 #[tokio::test]
@@ -995,27 +984,6 @@ async fn project_revisions_order_shared_facts() {
                 .unwrap()
                 .unwrap();
             assert_eq!(saved_project.name, "Renamed project");
-            // A read that misses the Project leaves its Tasks as they were.
-            let mut omitted = list.clone();
-            omitted.snapshot.projects.clear();
-            omitted.snapshot.items.clear();
-            fixture.store.seed_inventory(omitted, None).await.unwrap();
-            assert_eq!(
-                fixture
-                    .store
-                    .get_task_by_issue("FIX-1")
-                    .await
-                    .unwrap()
-                    .unwrap(),
-                saved
-            );
-            fixture.store.sqlite.conn.lock().unwrap().execute(
-                "UPDATE tracker_projects SET archived=1 WHERE repo=?1 AND tracker='linear' AND id=?2",
-                rusqlite::params![repo.to_string_lossy(), newer.project.unwrap().id],
-            ).unwrap();
-            list.snapshot.projects.clear();
-            list.snapshot.items.clear();
-            fixture.store.seed_inventory(list, None).await.unwrap();
             for task in fixture.store.list_tasks(None).await.unwrap() {
                 assert!(task.worktree.is_none());
                 assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());

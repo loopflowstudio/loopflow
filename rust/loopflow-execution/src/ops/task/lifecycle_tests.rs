@@ -180,7 +180,7 @@ fi
         store.sqlite.seed_inventory(&crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
             synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-            snapshot: serde_json::from_value(json!({"projects": [planning.project], "items": [planning.item]})).unwrap(),
+            snapshot: loopflow_storage::planning::ProjectInventory { project: planning.project.unwrap(), items: vec![planning.item] },
         }).unwrap();
         let log_path = home.path().join("graph.log");
         let log = fs::File::create(&log_path).unwrap();

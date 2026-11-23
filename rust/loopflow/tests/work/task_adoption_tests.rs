@@ -107,9 +107,9 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
             created_at: now,
             updated_at: now,
         };
-        let snapshot: crate::test_linear_input::Inventory = serde_json::from_value(json!({
-            "projects": [{"id":"project-1", "slug":"project", "name":"Project",
-                "summary":"", "status":"started", "team_ids":["team-1"]}],
+        let snapshot: loopflow_storage::planning::ProjectInventory = serde_json::from_value(json!({
+            "project": {"id":"project-1", "slug":"project", "name":"Project",
+                "summary":"", "status":"started", "team_ids":["team-1"]},
             "items": [{"id":"issue-1", "identifier":"FIX-1", "branch_name":branch, "revision":"2026-09-29T12:00:00Z",
                 "url":null, "name":"A different title", "description":"Existing implementation",
                 "rank":0, "completed":false, "state":"started", "project_id":"project-1",

@@ -51,13 +51,16 @@ async fn migration_preserves_planning_identity_and_removes_snapshot_storage() {
     let list = crate::test_linear_input::InventoryFixture {
         wave_id: wave.clone(),
         synced_at: 42,
-        snapshot: serde_json::from_value(snapshot).unwrap(),
+        snapshot: loopflow_storage::planning::ProjectInventory {
+            project: serde_json::from_value(snapshot["projects"][0].clone()).unwrap(),
+            items: serde_json::from_value(snapshot["items"].clone()).unwrap(),
+        },
     };
     assert_eq!(detail.observed_at, 42);
     assert_eq!(detail.item, list.snapshot.items[0]);
     assert_eq!(detail.item.name, "Retained title");
     assert_eq!(detail.item.description, "Retained notes");
-    assert_eq!(detail.project.as_ref(), Some(&list.snapshot.projects[0]));
+    assert_eq!(detail.project.as_ref(), Some(&list.snapshot.project));
     assert_eq!(store.get_wave(&wave).await.unwrap().unwrap().id(), &wave);
     assert!(store.list_tasks(None).await.unwrap().is_empty());
     assert!(!Connection::open(&database)

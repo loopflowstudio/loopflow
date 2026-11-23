@@ -132,14 +132,13 @@ both remotes away, make the Wave on both, bring only the hub back and
 clears it and the mini's list holds both. `lf task sync` still exits 1 on
 Git's error while the remotes are away.
 
-No `lf` command adds, renames or ends a Project without a tracker. To give a
-Wave a second Project, or end one, push a Project record as another Machine:
-copy `projects/<id>.json` from this home's ref, give it a new `proj_<32 hex>`
-id, the Wave's id in `project_wave`, a `home_<32 hex>` machine and a later
-`at`, commit it with the `repository` file in a fresh `git init` and
-`git push <bare> HEAD:refs/loopflow/plan/<that machine>`; `lf task sync <id>`
-takes it. Change `project_status` to `completed` with a later `at` and
-force-push to end it. Fields this build doesn't know (`project_krs`,
+To exercise a Project ending through Git exchange, copy the Wave's
+`projects/<id>.json` record and the `repository` file into a fresh Git
+repository. Keep the Project ID and set `project_status` to `completed`
+with a later `at` and the sending Machine's ID. Push the commit to
+`refs/loopflow/plan/<that machine>` on the bare remote. After
+`lf task sync <id>`, `lf wave status` shows the same Project as completed.
+Fields this build doesn't know (`project_krs`,
 `wave_project`) are `WARN loopflow_storage::work::edit: skipped an unknown
 plan field` lines.
 

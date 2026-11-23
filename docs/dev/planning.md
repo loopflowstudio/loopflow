@@ -9,9 +9,8 @@ lf task run INF-124
 ```
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
-cadence and budget across Projects. A Project groups Tasks, has a name, a
-summary and a status, and ends; connected to Linear, it is a Linear Project.
-A Wave holds any number of them and selects none.
+cadence and budget. Its Project groups all its Tasks and can link to a Linear
+Project.
 [Cutover status](reference-cutover.md#cutover-status) records
 other implementation and proof gaps.
 
@@ -20,7 +19,7 @@ other implementation and proof gaps.
 | Word | Means | Not |
 |---|---|---|
 | plan | the shared Waves, Projects and Tasks | |
-| Project | a group of a Wave's Tasks with a name, summary and status; a Wave holds several | a Wave's current or selected Project: there is none |
+| Project | the group containing all of a Wave's Tasks, with a name, summary and status | |
 | tracker | where the plan is mirrored: Linear or Asana; `tracker:` in `.lf/config.yaml`, shown by `lf repo tracker` | bridge, planning provider; provider means the agent's provider |
 | stamp | `(at, machine id)` on one planning field; the newest stamp is the plan | a revision, a clock comparison with a tracker |
 | carrier | what moves stamped records between Machines: Git plan refs, a hub | a tracker; a carrier decides nothing |
@@ -244,7 +243,7 @@ and runs outside any SQLite transaction. A file that does not parse, or a
 field this build does not know, is skipped and logged; the rest applies. A
 record, from either carrier, that cannot be written here, such as a Wave
 whose name another active Wave of the repository already holds, is not
-taken, with its Projects and Tasks, and the rest applies. The import returns
+taken, with its Project and Tasks, and the rest applies. The import returns
 those records. Git then leaves that ref's tip out of `plan_refs`, the hub
 carrier keeps its `seen_seq`, and a hub answers `plan.apply` with their count
 so the sender keeps its `sent_seq`: each carrier brings them again at every

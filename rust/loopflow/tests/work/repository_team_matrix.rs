@@ -1,6 +1,7 @@
 //! Repository Team bindings preserve independent Wave and Project ownership.
 
-use crate::test_linear_input::{Inventory, InventoryFixture, SeedLinearSqlite};
+use crate::test_linear_input::{InventoryFixture, SeedLinearSqlite};
+use loopflow_storage::planning::ProjectInventory;
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -40,16 +41,16 @@ fn snapshot(
     issue_id: &str,
     identifier: &str,
     completed: bool,
-) -> Inventory {
+) -> ProjectInventory {
     serde_json::from_value(serde_json::json!({
-        "projects": [{
+        "project": {
             "id": project_id,
             "slug": project_slug,
             "name": project_name,
             "summary": "Fixture project",
             "status": "started",
             "team_ids": ["team-loo"]
-        }],
+        },
         "items": [{
             "id": issue_id,
             "identifier": identifier,
@@ -67,7 +68,7 @@ fn snapshot(
     .unwrap()
 }
 
-fn put_snapshot(store: &SqliteStore, repo: &Path, wave: &str, snapshot: Inventory) {
+fn put_snapshot(store: &SqliteStore, repo: &Path, wave: &str, snapshot: ProjectInventory) {
     let registered = store
         .get_wave_at(&loopflow_execution::work::wave::discover(repo, wave).unwrap())
         .unwrap()

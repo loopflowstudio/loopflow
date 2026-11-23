@@ -3505,10 +3505,7 @@ mod tests {
                 crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
                     synced_at: 1,
-                    snapshot: serde_json::from_str(include_str!(
-                        "../../../../../tests/fixtures/dto/task_history_planning.json"
-                    ))
-                    .unwrap(),
+                    snapshot: crate::test_linear_input::task_history_inventory(),
                 },
                 None,
             )
@@ -3566,10 +3563,7 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
-        let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
-            "../../../../../tests/fixtures/dto/task_history_planning.json"
-        ))
-        .unwrap();
+        let planning = crate::test_linear_input::task_history_inventory();
         store
             .seed_inventory(
                 crate::test_linear_input::InventoryFixture {
@@ -3680,10 +3674,10 @@ mod tests {
                     crate::test_linear_input::InventoryFixture {
                         wave_id: wave.id().clone(),
                         synced_at: 2,
-                        snapshot: serde_json::from_value(serde_json::json!({"projects":[{
+                        snapshot: serde_json::from_value(serde_json::json!({"project":{
                     "id":format!("{repository}-{name}"), "slug":name, "name":name,
                     "summary":"", "workflow":"feature", "status":"started", "team_ids":["team"]
-                }], "items":[]}))
+                }, "items":[]}))
                         .unwrap(),
                     },
                     None,
@@ -3758,10 +3752,10 @@ mod tests {
         let snapshot = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
             synced_at: 1,
-            snapshot: serde_json::from_value(serde_json::json!({"projects":[{
+            snapshot: serde_json::from_value(serde_json::json!({"project":{
                 "id":"current", "slug":"current", "name":"Current project", "summary":"",
                 "workflow":"feature", "status":"started", "team_ids":["team"]
-            }], "items":items}))
+            }, "items":items}))
             .unwrap(),
         };
         store.seed_inventory(snapshot.clone(), None).await.unwrap();
@@ -3816,10 +3810,10 @@ mod tests {
         ));
         store.seed_inventory(crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(), synced_at: 2,
-            snapshot: serde_json::from_value(serde_json::json!({"projects":[{
+            snapshot: serde_json::from_value(serde_json::json!({"project":{
                 "id":"999bdbdd-c045-41a6-8ffc-a97c4a40b0b3", "slug":"first", "name":"First project", "summary":"",
                 "workflow":"feature", "status":"started", "team_ids":["team"]
-            }], "items":[]})).unwrap(),
+            }, "items":[]})).unwrap(),
         }, None).await.unwrap();
         let super::Reading::Ok {
             value: Some(project),
@@ -3832,20 +3826,6 @@ mod tests {
             project.status,
             loopflow_storage::work::project::ProjectStatus::Started
         );
-        let unreadable = crate::test_linear_input::InventoryFixture {
-            wave_id: wave.id().clone(),
-            synced_at: 3,
-            snapshot: crate::test_linear_input::Inventory {
-                projects: vec![],
-                items: vec![],
-            },
-        };
-        // A read that misses the Project keeps it.
-        store.seed_inventory(unreadable, None).await.unwrap();
-        assert!(matches!(
-            super::project_planning(&store, &wave).await,
-            super::Reading::Ok { value: Some(_) }
-        ));
         // Invalid provider evidence cannot erase the owned plan.
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()

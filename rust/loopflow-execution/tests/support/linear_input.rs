@@ -3,14 +3,14 @@
 use loopflow::id::WaveId;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{PlanningLocks, Store, StoreResult};
-use loopflow_storage::planning::TrackerItem;
-use loopflow_storage::planning::TrackerProject;
-use serde::{Deserialize, Serialize};
+use loopflow_storage::planning::ProjectInventory;
 use std::sync::Arc;
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Inventory {
-    pub projects: Vec<TrackerProject>,
-    pub items: Vec<TrackerItem>,
+
+pub fn task_history_inventory() -> ProjectInventory {
+    serde_json::from_str(include_str!(
+        "../../../../tests/fixtures/dto/task_history_planning.json"
+    ))
+    .unwrap()
 }
 
 /// One acquired Linear inventory. Input to ingestion, never a local Work reading.
@@ -18,7 +18,7 @@ pub struct Inventory {
 pub struct InventoryFixture {
     pub wave_id: WaveId,
     pub synced_at: i64,
-    pub snapshot: Inventory,
+    pub snapshot: ProjectInventory,
 }
 
 /// A planning observation; neither Project ownership nor execution is required.
@@ -53,8 +53,7 @@ impl SeedLinear for Store {
         loopflow::linear::events::accept_linear_inventory(
             self,
             input.wave_id,
-            input.snapshot.projects,
-            input.snapshot.items,
+            input.snapshot,
             input.synced_at,
             locks,
         )
@@ -88,8 +87,7 @@ impl SeedLinearSqlite for SqliteStore {
         loopflow::store::sqlite::linear_events::accept_linear_inventory_in(
             self,
             &input.wave_id,
-            &input.snapshot.projects,
-            &input.snapshot.items,
+            &input.snapshot,
             input.synced_at,
         )
     }

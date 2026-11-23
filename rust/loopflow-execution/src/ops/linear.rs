@@ -24,7 +24,7 @@ use crate::store::{
 };
 use crate::work::wave::Wave;
 use loopflow_model::id::WaveId;
-use loopflow_storage::planning::{TrackerItem, TrackerProject};
+use loopflow_storage::planning::{ProjectInventory, TrackerProject};
 use loopflow_storage::sqlite::tracker_actions::ActionOwner;
 use loopflow_storage::work::task::Task;
 use loopflow_storage::work::wave::normalize_wave_name;
@@ -551,14 +551,13 @@ pub(crate) async fn refresh_inventory_locked(
     locks: Arc<crate::store::PlanningLocks>,
 ) -> OpsResult<bool> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    let Some((project, items)) = read_wave_inventory(ctx, wave, store).await? else {
+    let Some(inventory) = read_wave_inventory(ctx, wave, store).await? else {
         return Ok(false);
     };
     crate::linear::events::accept_linear_inventory(
         store,
         wave.id().clone(),
-        vec![project],
-        items,
+        inventory,
         observed_at,
         Some(locks),
     )
@@ -655,35 +654,35 @@ async fn connect_async(
         .get_wave_at(&locator)
         .await
         .map_err(super::tracker::message)?;
-    if let Some(project) = &named {
-        let id = project.id.clone();
-        let wave_id = registered.as_ref().map(|wave| wave.id().clone());
-        crate::store::run_sqlite(&store.sqlite, move |sqlite| {
-            loopflow_storage::sqlite::linear_events::check_project_link(
-                &sqlite,
-                &id,
-                wave_id.as_ref(),
-            )
-        })
-        .await
-        .map_err(super::tracker::message)?;
-    }
     let wave_id = match registered {
         Some(registered) => registered.id().clone(),
         None => {
+            if let Some(project) = &named {
+                let id = project.id.clone();
+                crate::store::run_sqlite(&store.sqlite, move |sqlite| {
+                    loopflow_storage::sqlite::linear_events::check_project_link(&sqlite, &id)
+                })
+                .await
+                .map_err(super::tracker::message)?;
+            }
             progress.status(&format!("adding Wave {wave}"));
             super::wave_lifecycle::add_local(&store, repo, &wave, None)
                 .await?
                 .id
         }
     };
-    let own = store
-        .sqlite
-        .wave_project(&wave_id)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let linked = linked_project(&store, &wave_id).await?;
+    let (own, linked) = match store
+        .project_of_wave(&wave_id)
+        .await
+        .map_err(super::tracker::message)?
+    {
+        Some(project) => (project.id, project.tracker_id),
+        None => (loopflow_model::durable::ProjectId::for_wave(&wave_id), None),
+    };
     let create = named.is_none() && linked.is_none();
-    if let Some(project) = named.filter(|project| linked.as_deref() != Some(project.id.as_str())) {
+    if let Some(project) =
+        named.filter(|project| linked.as_ref().map(|id| id.as_str()) != Some(project.id.as_str()))
+    {
         progress.status(&format!(
             "linking wave/{wave} to Linear Project `{}`",
             project.name
@@ -1525,7 +1524,7 @@ async fn read_wave_inventory(
     ctx: &LinearRepository,
     wave: &Wave,
     store: &Store,
-) -> OpsResult<Option<(TrackerProject, Vec<TrackerItem>)>> {
+) -> OpsResult<Option<ProjectInventory>> {
     let Some(linked) = linked_project(store, wave.id()).await? else {
         return Ok(None);
     };
@@ -1543,7 +1542,7 @@ async fn read_wave_inventory(
         .list_items(&project.id)
         .await
         .map_err(linear_error)?;
-    Ok(Some((project, items)))
+    Ok(Some(ProjectInventory { project, items }))
 }
 
 fn validate_project_ownership(
@@ -1601,7 +1600,7 @@ mod tests {
     use super::*;
     use crate::linear::test_server::{self, json_response, QueuedResponse};
     use crate::ops::NullProgress;
-    use crate::test_linear_input::{Inventory, InventoryFixture, SeedLinear};
+    use crate::test_linear_input::{InventoryFixture, SeedLinear};
     use axum::http::StatusCode;
     use serde_json::{json, Value};
 
@@ -2510,12 +2509,12 @@ mod tests {
                 };
 
                 if cache_planning {
-                    let projects = vec![resolved
+                    let project = resolved
                         .repository
                         .client
                         .project_ownership("project-survival")
                         .await
-                        .unwrap()];
+                        .unwrap();
                     let items = resolved
                         .repository
                         .client
@@ -2528,7 +2527,7 @@ mod tests {
                             InventoryFixture {
                                 wave_id: wave.id().clone(),
                                 synced_at: 1,
-                                snapshot: Inventory { projects, items },
+                                snapshot: ProjectInventory { project, items },
                             },
                             None,
                         )
@@ -2596,7 +2595,7 @@ mod tests {
         let store = isolated_pm_store(repo.path()).await;
         let wave = scan_linked_to(&store, repo.path()).await;
 
-        let (project, items) = read_wave_inventory(&ctx, &wave, &store)
+        let ProjectInventory { project, items } = read_wave_inventory(&ctx, &wave, &store)
             .await
             .unwrap()
             .unwrap();
@@ -2635,7 +2634,7 @@ mod tests {
         let store = isolated_pm_store(repo.path()).await;
         let wave = scan_linked_to(&store, repo.path()).await;
 
-        let (_, items) = read_wave_inventory(&ctx, &wave, &store)
+        let ProjectInventory { items, .. } = read_wave_inventory(&ctx, &wave, &store)
             .await
             .unwrap()
             .unwrap();

@@ -735,7 +735,7 @@ fn local_planning_migration_preserves_released_links() {
     let project = ProjectId::new();
     let task = TaskId::new();
     conn.execute("INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'shared','/repo',1),(?2,'recovery','/repo',1)", params![wave,orphan_wave]).unwrap();
-    conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at,project_slug,project_name,project_prompt_context,pm_snapshot_synced_at,updated_at) VALUES(?1,?2,'linear-project',1,'shared','Shared','Retain KRs',7,7)",params![project.as_str(),wave]).unwrap();
+    conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at,project_slug,project_name,project_prompt_context,pm_snapshot_synced_at,updated_at) VALUES(?1,?2,'linear-project',2,'shared','Shared','Retain KRs',7,7)",params![project.as_str(),wave]).unwrap();
     conn.execute(
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -750,7 +750,8 @@ fn local_planning_migration_preserves_released_links() {
         "/../../tests/fixtures/dto/task_history_planning.json"
     )))
     .unwrap();
-    let mut historical_project = payload["projects"][0].clone();
+    let mut historical_project = payload["project"].clone();
+    historical_project["initiative_ids"] = serde_json::json!(["initiative"]);
     historical_project["workflow"] = serde_json::json!("");
     let project_body = historical_project.to_string();
     let item_body = payload["items"][0].to_string();
@@ -769,13 +770,8 @@ fn local_planning_migration_preserves_released_links() {
     let imported_project = ProjectId::new();
     conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at,project_slug,project_name,project_prompt_context,pm_snapshot_synced_at,updated_at) VALUES(?1,?2,'current',1,'current','Current','',7,7)",params![imported_project.as_str(),wave]).unwrap();
     conn.execute(
-        "INSERT INTO pm_wave_sync(wave_id,provider,initiative,synced_at) VALUES(?1,'linear',?2,7)",
-        params![
-            wave,
-            payload["projects"][0]["initiative_ids"][0]
-                .as_str()
-                .unwrap()
-        ],
+        "INSERT INTO pm_wave_sync(wave_id,provider,initiative,synced_at) VALUES(?1,'linear','initiative',7)",
+        [&wave],
     )
     .unwrap();
     conn.execute(
@@ -859,7 +855,7 @@ fn local_planning_migration_preserves_released_links() {
     assert_eq!(serde_json::to_value(observation.item).unwrap(), expected);
     assert_eq!(
         serde_json::to_value(observation.project.unwrap()).unwrap(),
-        payload["projects"][0]
+        payload["project"]
     );
     assert_eq!(observation.observed_at, 7);
     let imported = store.task_by_issue("LOO-318").unwrap().unwrap();
@@ -867,7 +863,9 @@ fn local_planning_migration_preserves_released_links() {
         serde_json::from_str::<serde_json::Value>(&order).unwrap(),
         serde_json::json!([imported.id.as_str()])
     );
-    assert_eq!(imported.project_id, Some(imported_project));
+    // Both released Projects were open. Both Tasks join the more recent one.
+    assert!(store.project(&imported_project).unwrap().is_none());
+    assert_eq!(imported.project_id.as_ref(), Some(&project));
     assert!(imported.worktree.is_none());
     assert!(store.task_prs(&imported.id).unwrap().is_empty());
     assert_eq!(imported.tracker_synced_at, Some(7));

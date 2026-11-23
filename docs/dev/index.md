@@ -296,7 +296,7 @@ Graph                          one lf process; cursor in its memory, graph in Gr
 | LfSession | An interactive or headless conversation across attachments and native reconnection | `agent_sessions`, subordinate history and provider-native conversation |
 | Running Graph | One Graph process and the steps it starts, including taskless execution | The Graph process and its child step processes in `processes` |
 | Wave | Enduring objective, memory, cadence and budget | Wave files, local Wave identity and its one Project, linked to a Linear Project when connected |
-| Project | A group of a Wave’s Tasks with name, summary and status | `projects` row, shared through the tracker |
+| Project | All of a Wave’s Tasks, grouped under one name, summary and status | `projects` row, shared through the tracker |
 | Task | A concrete change, investigation or document | `tasks`, the tracker, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
 | Machine | A machine's store, credentials and exact process authority | Machine identity and observed route |

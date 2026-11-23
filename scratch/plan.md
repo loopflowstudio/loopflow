@@ -443,8 +443,8 @@ Main is merged through #1988 (`8892ba5671`, origin/main's head). The review is
    overlapping one already in the checkout and adds nothing to history
    (questions.md). Tests: the four `admission_lifecycle_tests` expect the
    Session to stay taskless; `task_work::` 8 passed.
-4. **Built** (`1605ad1d72`). `SqliteStore::task_holding(dir)` is the one
-   answer: deepest checkout, lower id on a shared root, `dir` matched as
+4. **Built** (`1605ad1d72`, since replaced by the Git-root rule above).
+   One store answer for a directory's Task: deepest checkout, lower id on a shared root, `dir` matched as
    named and as it resolves. `counted_task` and bare `lf resume`'s
    `worktree_task` call it; the scan and the prefix match are gone, and so is
    `counted_task`'s Git subprocess. Counterexample found: fixtures recorded
@@ -493,35 +493,6 @@ task status` shows no rank (QA 2026-11-22). Desktop's Working board after
 merge and install. Auto stays a Machine fact
 (2a), unchanged.
 
-## Built: ownership vs membership (concept review on `a49184a28b`, 2026-11-22)
-
-Two store answers, one per question. `SqliteStore::task_checkout_owner(root)`
-(exact `task_checkouts_root` match, as named and resolved, lower id) answers
-"whose checkout is this Git worktree"; `task_holding(dir)` (deepest
-containing checkout) answers "whose work is this directory". Execution's
-`task_for_checkout` split into `checkout_owner` (`checkout_scope`, so resume,
-adoption and bind; `pr_landing` on the Git root) and `task_holding`
-(`run.rs` select, `handoff.rs --design`, `task_status`); `counted_task` and
-`starting_task_in` stay membership. Bare `lf resume` routing
-(`work_route.rs` `worktree_task`) resolves the Git root and asks the owner.
-The `adoption.rs` special case is gone. Tests:
-`a_directory_is_held_by_its_deepest_checkout_and_owned_by_its_exact_one`
-(storage `task_work::` 9 passed); the nested adoption row now also checks
-bare resume there says "no associated work conversation" (execution
-`ops::task::adoption:: ops::task::tests:: ops::human_session:: ops::run::`
-107 passed); `work_route` 6 passed; clippy clean. Not run: `lf land` in a
-nested worktree end to end (gate/CI: `land_tests`). Compress inlined
-`counted_task`: provider conversations ask `SqliteStore::task_holding`.
-
-## Concept review on `a8627a309e` (2026-11-23)
-
-Nothing to change in the design. Every caller of `task_holding`,
-`task_checkout_owner`, `select_work` and `select_execution_work` is on the
-right side of the split; delivery was the last one and is fixed
-(`scratch/concept-review.html`). One gate fix: the `implicit_binding`
-comment (`rust/loopflow/src/lf/commands/run.rs:285`) says "checkout
-ownership" for what is membership (`task_holding`).
-
 ## Then: gate
 
 QA on `71feca7db5` (2026-11-23, `scratch/qa.html`) found one more regression
@@ -537,9 +508,8 @@ used the launch selection, now containment. Delivery asks the Git root's
 QA on `86fe72ab65` (2026-11-22, `scratch/qa.html`) found one regression and
 fixed it: `lf task create --worktree` refused a worktree nested inside another
 Task's checkout ("<outer> already has a different checkout"), because
-`task_holding` answers by containment where the old `counted_task` compared
-Git roots. The inline adoption patch for it is gone: adoption asks
-`checkout_owner` (section above), and
+containment answered where the old `counted_task` compared Git roots; the
+Git-root rule settles it, and
 `a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout` covers it.
 Also repaired: `creation_adopts_only_the_selected_work` still expected
 adoption to give the open conversation the Task (change 3 removed that).
@@ -579,5 +549,5 @@ Concept review of the first build (2026-11-18) and its four answers are in
 questions.md; all four are applied or handed on (LOO-877, LOO-934).
 
 For the PR body, larger than this Task: launch and store each define "the
-checkout holding this directory" (Mismatch A; store side is `task_holding`
+checkout holding this directory" (Mismatch A; store side is `task_checkout_owner`
 now, `WorkspaceResolver` remains, fits LOO-934).

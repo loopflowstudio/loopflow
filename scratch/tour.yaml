@@ -1,27 +1,27 @@
-at: dd1040680344cbca15f8ab5d9494c93e7fe8ac17
+at: f18d8b0ba5af46e7479bd8002a2df60affa87b3b
 first:
   - path: docs/surfaces.md
-    why: Settings navigation and the selected checkout
+    why: What the Settings window offers
   - path: docs/config.md
-    why: What My and Shared settings control
+    why: Read effective settings and their declarations
   - path: scratch/plan.md
-    why: Built panes, measured reads and remaining work
+    why: Implemented panes, measured reads and remaining work
   - path: rust/loopflow-execution/src/engine/config.rs
-    why: Effective value and both editable files in one reading
-  - path: rust/loopflow-execution/src/config/files/context_diff.rs
-    why: Lossless edits, stale previews and Undo
-  - path: rust/loopflow/src/lf/commands/read.rs
-    why: The checkout reading exposed to Desktop and CLI
+    why: Resolve a scope and identify editable declarations
+  - path: rust/loopflow-execution/src/config/files/edit.rs
+    why: Checked edits and Undo preserve unrelated declarations
+  - path: rust/loopflow-execution/src/engine/config/promotion.rs
+    why: Preview, apply and recover moves across files
   - path: swift/LoopflowMac/Views/SettingsWindow.swift
-    why: Navigation, search and the checkout observation
-  - path: swift/LoopflowMac/Views/ContextSettings.swift
-    why: Save destination, effective source and reset confirmation
-  - path: swift/LoopflowMac/Views/GeneralSettings.swift
-    why: The autosave preference and window Undo
-  - path: swift/LoopflowMac/Views/KeyboardShortcutsView.swift
-    why: One grouped reference shared between windows
+    why: Settings navigation and the shared observation
+  - path: swift/LoopflowMac/Services/ScopedSettingsModel.swift
+    why: Follow selection, write to the file and undo
+  - path: swift/LoopflowMac/Views/ScopedSettings.swift
+    why: Select work, a save destination and an editor
+  - path: swift/LoopflowMac/Views/ScopedSettingRow.swift
+    why: Edit, inspect and move a declaration
   - path: swift/LoopflowTests/ContextSettingsWorkflowTests.swift
-    why: From the toggle to a provider launch
+    why: Trace settings through the CLI and provider launch
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Regenerated from the typed server operations

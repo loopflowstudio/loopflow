@@ -7,6 +7,5 @@
 - Keep Applies to and Save in independent. Use Global when the window first opens and My settings by default for the selected checkout or Wave. A single combined picker obscures a successful Shared edit when a private declaration still applies.
 - Bind edits to the selected file’s declaration. Show the combined or winning value separately where it differs. A copied effective list can duplicate inherited documents, and a losing toggle must still show what was saved.
 - Confirm Promote with a named move and YAML preview. A move changes ownership or audience and can change the result for the selected work.
-- Show the existing Configuration editor under Workflow until its scoped panes are ready. Pane search lists only destinations that can be opened.
-
-- Start the first Context row on the open checkout and offer Choose Checkout when opening Settings from the portfolio. Save in starts at My for each checkout. The Global and Wave destinations follow with the other scoped rows.
+- Open the full scoped panes on Global. Keep the current checkout in the Applies to menu alongside portfolio checkouts.
+- Edit the tagged tracker and Machine placement as whole YAML declarations. Their Rust codecs interpret the tag and the mutually exclusive placement fields together.

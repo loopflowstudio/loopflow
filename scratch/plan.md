@@ -42,8 +42,7 @@ A toggle or picker commits immediately. Text commits on Return or focus loss and
 
 The split window opens on General, with pane-name search, the autosave switch and
 Undo, a grouped Shortcuts reference shared with the separate window, and a direct
-route from Choose Theme to Appearance. Configuration remains under Workflow until
-the other scoped panes replace it.
+route from Choose Theme to Appearance.
 
 Context follows one checkout. My and Shared show their own Diff declarations,
 the scope reading names the effective source, and the disclosure shows the
@@ -57,11 +56,23 @@ in its start-context manifest when Diff is On. With My Off the reference
 disappeared and the same explicit README still reached the provider. The
 fixture checks this delivery during an ordinary batch skill run.
 
+Agents, Context, Git & Release and Machines now share one observation of the
+selected Global, checkout or Wave settings. Advanced selects a Skill or Graph
+occurrence. The bulk reading includes 47 catalog entries. An empty list, a
+missing declaration and a value contributed by another file have separate
+representations. General reads the personal global slots.
+
+The checked writer captures component paths before normalization. Reset and
+Undo cover every spelling the edit touches. Promote previews the receiving
+and source declarations and resolves the proposed files together. Private Wave
+and repository settings can share a single file. Across two files, an
+interrupted move leaves the receiving declaration in place until recovery
+checks both slots. The old Configuration pane and Diff-only writer are gone.
+
 ## Remaining slices
 
-1. **All scoped rows and actions.** Fill native controls and YAML disclosures, connect checkout/Wave and Advanced selectors, add the Promote preview/recovery/Undo path, and remove the old Configuration view. Exercise explicit empty versus absent docs, pin versus fallback, tagged tracker, coupled Machine keys, Wave rename and reuse, and Task Diff from the existing Rust owners. Today `lf config scope` reads only Context and `config/files/context_diff.rs` hand-codes the two `diff` spellings; generalize both to every catalog key through the canonical key codecs and delete the Diff-only `Spelling`/`Declarations` path in the same change.
-2. **App panes and health.** Add the global catalog rows to General, apply theme selection instantly with Undo, retain the staged ThemeEditor, and wire the shared Mobile observation and Machine statuses. Remove the old chooser transaction.
-3. **Search across panes.** Wire keyboard selection, row highlighting and in-place edits to the same address and edit state. Verify no-results, a stale reading, error recovery, accessibility, window resizing and light/dark.
+1. **App panes and health.** Apply theme selection instantly with Undo, retain the staged ThemeEditor, and wire the shared Mobile observation and Machine statuses. Remove the old chooser transaction.
+2. **Search across panes.** Wire keyboard selection, row highlighting and in-place edits to the same address and edit state. Verify no-results, a stale reading, error recovery, accessibility, window resizing and light/dark.
 
 ## Sidebar checks
 
@@ -76,6 +87,12 @@ fixture checks this delivery during an ordinary batch skill run.
 - `scripts/test_desktop.sh --skip-build --filter ContextSettingsWorkflowTests` passed in 37.6 seconds with the built CLI, a private server and the Pi fixture. The toggle, Save in, Reset, Undo, stale preview and linked checkout all reached the expected CLI or launch result. The configuration DTO, sidebar and design suites also passed.
 - `cargo clippy --all-targets -- -D warnings` passed. Gate runs the documented command checks and the shared Swift protocol checks.
 
+## Scoped settings checks
+
+- Six focused nextest cases passed for authored presence, legacy spellings, stale and interrupted moves, the Desktop wire fixture and the checked-in server schema. `cargo clippy --all-targets -- -D warnings` passed.
+- `scripts/test_desktop.sh --filter 'ContextSettingsWorkflowTests|ConfigurationSettingsTests|SettingsWorkflowTests|DesignDisciplineTests'` passed 12 tests in 40.1 seconds against the branch CLI. The fixture observed the provider launch, absent and empty docs, a pin and fallback, Task Diff exclusions, tracker and placement changes, Skill and Graph-step addresses, Promote and Undo, and the same Wave file after renaming it and reusing the old name.
+- A private server returned all 47 settings in 31 warm checkout readings over one Unix socket. Median 16.4 ms, p95 125.6 ms against the 150 ms target. Gate retains the documented-command and served-read checks.
+
 ## Gate and demo
 
 Run `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ContextSettingsWorkflowTests|ConfigurationSettingsTests|ThemeWorkflowTests|MobilePairingTests|DesignDisciplineTests'`. Build `SettingsWorkflowTests` around the branch’s `lf`, a local server and temporary checkouts using the ThemeWorkflow fixture pattern. The focused Rust checks cover preview/write parity, interrupted promotion and DTOs. Swift coverage checks the real controls, selected destination versus effective value, context changes during reads, Undo across navigation, theme selection and a staged editor, and shared Mobile detail/sidebar status. Run the iOS protocol and pairing gate when shared wire code changes.
@@ -83,3 +100,12 @@ Run `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ContextSettingsWork
 For the visual demo, `uv run python scripts/loopflow-dev.py run` against the branch server on a private Machine. Open Settings with ⌘,, search Diff, and switch Save in between My and Shared while Applies to stays on the demo checkout. Change, inspect, Reset and Undo. Preview a Promote to an empty slot and apply it. Pick and undo a theme, then compare the Mobile panel with its sidebar dot. Check Light and Dark with the window resized. The required gate uses headless fixtures and view inspection.
 
 Kickoff probes on November 22 showed Builtin → Shared repository → Shared Wave → Personal global → Personal repository for the test Wave. A personal empty `context.docs` cleared earlier contributions. Tracker read as `{git: {}}` in `config get` and `{provider: git}` in `config explain`. The native Settings shell passed the headless SDK typecheck.
+
+### Legacy Wave files
+
+A private CLI fixture with an ID and `agent: codex` in GOAL.md returned
+`"codex"` before `config set chrome true --shared` and `null` afterwards.
+The next private edit reported “Wave legacy needs its authored id before
+private settings can follow it through renames”. The shared writer now seeds the file from the
+same frontmatter as the Wave reader under the file lock. The ID and pin
+survived the first shared edit and the private edit addressed the original ID.

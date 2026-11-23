@@ -1,0 +1,47 @@
+<!doctype html><meta charset=utf-8><title>LOO-1002 QA: waking idle agy</title>
+<style>body{font:15px/1.5 -apple-system,system-ui;max-width:920px;margin:2em auto;padding:0 1em;color:#222}pre{background:#111;color:#ddd;padding:1em;overflow:auto;font-size:12px}h2 span{font-size:13px;padding:2px 8px;border-radius:4px;margin-left:.5em}.works{background:#d8f5d8}.fixed{background:#fde9b8}code{background:#eee;padding:0 3px}</style>
+<h1>Waking an idle Antigravity work session</h1>
+<p>Branch <code>lf</code> (f0273550b + QA fix), private <code>LF_HOME=/tmp/lfq-agy/home</code>, real <code>agy</code> 1.5.14 on Gemini 4 Neon, repository under <code>~/lfq-agy</code>, Graph <code>help task → demo</code>. The view is <code>tests/e2e/hold_tui.py</code> on <code>lf resume --task</code>.</p>
+<section><h2>Idle work session takes a steer <span class='works'>works</span></h2><p><b>Did:</b> <code>lf task run 1f77ae -a agy</code>; the Task conversation ran its task-session turn and sat idle (yielded=1). <code>lf steer 1f77ae 'Reply with only the word WOKEN.'</code> from another shell.</p><p><b>Saw:</b> Transcript: USER_INPUT with &lt;lf:steers&gt; 1.5 s after the steer, model answered WOKEN 2 s later. <code>lf session steers</code>: delivered, 0 pending.</p><pre>────────────────────────────────────────────────────────────
+&gt; &lt;lf:steers&gt;
+  Steer 38fd421c-e903-4478-9eab-c47f55b9f2b3. Source &quot;comment:7cbe8166-2c60-4faf-bcc2-c2d739aa6075&quot; revision &quot;local&quot;; author &quot;QA&quot;. Complete source:
+  &quot;.lf/prompts/20261122-225752-Iz4w3m-steer.md&quot;
+  Comment 7cbe8166-2c60-4faf-bcc2-c2d739aa6075 by QA:
+  Reply with only the word WOKEN.
+  &lt;!-- loopflow-requester:&quot;QA&quot; --&gt;
+  &lt;!-- loopflow-steer:7cbe8166-2c60-4faf-bcc2-c2d739aa6075 --&gt;
+  0 pending. Inspect: lf session steers d7264c0e28d14c6e9136555081ffd2ea --json
+  &lt;/lf:steers&gt;
+  WOKEN
+ How&#x27;s the CLI experience so far? Help us improve:
+ [1] Good  [2] Fine  [3] Bad  [0] Skip
+? for shortcuts                                                                                                                      auto · Gemini 4 Neon · high</pre></section><section><h2>Steer while a turn runs <span class='works'>works</span></h2><p><b>Did:</b> Typed prompt: run <code>sleep 20</code> then say SLEPT; steered BUSYSTEER 10 s in.</p><p><b>Saw:</b> Delivered by the PreInvocation hook (SYSTEM_SDK row), answer “SLEPT / BUSYSTEER”. No second woken turn after it ended.</p></section><section><h2>Quit, steer, reopen <span class='fixed'>fixed</span></h2><p><b>Did:</b> Esc, ctrl+c twice in the view; two steers saved while closed; <code>lf resume --task 1f77ae</code>.</p><p><b>Saw:</b> <b>Before the fix:</b> nothing arrived, and a later steer did not wake it either: session_activity still named the quit AgentProcess, and agy runs no hook until someone types. <b>After:</b> both waiting steers arrived ~20 s after the reopen with nothing typed; a new steer then woke it in ~2 s (THIRD).</p><pre>  &quot;.lf/prompts/20261122-231536-SEQ8II-steer.md&quot;
+  Comment 2e665547-a038-451f-8fd5-dab6e03f9dbe by QA:
+  Reply with only the word REOPENED.
+  &lt;!-- loopflow-requester:&quot;QA&quot; --&gt;
+  &lt;!-- loopflow-steer:2e665547-a038-451f-8fd5-dab6e03f9dbe --&gt;
+  Steer 743b5897-152e-4f56-8a85-7330b370efca. Source &quot;comment:8585a329-4f47-49ef-85fc-9f0f7708f353&quot; revision &quot;local&quot;; author &quot;QA&quot;. Complete source:
+  &quot;.lf/prompts/20261122-231536-4zJx54-steer.md&quot;
+  Comment 8585a329-4f47-49ef-85fc-9f0f7708f353 by QA:
+  Reply with only the word SECOND.
+  &lt;!-- loopflow-requester:&quot;QA&quot; --&gt;
+  &lt;!-- loopflow-steer:8585a329-4f47-49ef-85fc-9f0f7708f353 --&gt;
+  0 pending. Inspect: lf session steers d7264c0e28d14c6e9136555081ffd2ea --json
+  &lt;/lf:steers&gt;
+▸ Thought for 4s, 205 tokens
+  REOPENED
+  SECOND
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+&gt; Auto mode: edits &amp; safe commands auto-approved (shift+tab to cycle)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                                                                                      auto · Gemini 4 Neon · high</pre></section><section><h2>Failed wake <span class='fixed'>fixed</span></h2><p><b>Did:</b> Moved the <code>.agy.log</code> aside, steered, restored it.</p><p><b>Saw:</b> lf.log: “idle conversation not woken … error=agy log &lt;path&gt;: No such file or directory”; pending stayed 1; the next minute sweep delivered it. Before the fix the error named no file and nothing retried until the next steer.</p></section>
+<section><h2>What QA changed</h2><ul>
+<li><code>record_launch_inbox</code> takes <code>starts_turn</code>; a launch with no first prompt records its AgentProcess idle through <code>record_opened_idle</code>, the statement <code>record_agent_inbox</code> already used for OpenCode and Pi.</li>
+<li>The wake watcher sweeps at least once a minute (<code>Watcher::swept</code>), so steers waiting at a reopen arrive and a failed wake is retried.</li>
+<li><code>LanguageServer::find</code> errors name the wake file or log.</li>
+<li>Test <code>a_reopened_antigravity_conversation_hears_what_arrived_while_it_was_closed</code> (fails without the fix); wake tests 10 passed, antigravity tests 8 passed, clippy clean on the three crates.</li></ul></section>
+<section><h2>Still open, worst first</h2><ol>
+<li>Steers waiting at a reopen take up to a minute (the sweep), not a second: <code>agy</code> reports nothing when it opens.</li>
+<li>A wake racing a typed prompt on <code>agy</code> is untested.</li>
+<li>The reopened TUI renders lf's steer block as a prompt the person sees in full (source paths, HTML comments): the same text Claude and Codex get, noisier here.</li>
+<li>Not reached: the released-<code>lf</code> Machine upgrade (sessions launched by released lf have no wake file and stay next-turn-only, as planned); MTG-415 itself on the live Machine.</li></ol></section>

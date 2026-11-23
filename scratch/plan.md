@@ -48,18 +48,23 @@ hooks never see the token. The RPC is undocumented: a release that breaks it lea
 failure in `logs/lf.log` and the steer arrives at the next boundary. Sessions launched by the
 released `lf` have no wake file and stay next-turn-only.
 
-Checks: `cargo test -p loopflow --lib server::wake::tests::` 9 passed;
+Checks: `cargo test -p loopflow --lib server::wake::tests::` 10 passed;
 `cargo test -p loopflow-execution --lib harness::antigravity::tests::` 8 passed, 1 ignored
-(both 2026-11-22, after merging #1988).
+(both 2026-11-22, after the QA fix).
+
+## QA (2026-11-22, branch `lf` on a private Machine, real `agy` 1.5.14)
+
+`scratch/qa.html` holds the run. Idle wake, a steer mid-turn (hook, no second turn), quit and
+reopen, and a failed wake all work. QA found and fixed: a reopened `agy` was never woken, by
+waiting steers or later ones, because no hook reports it and its activity still named the quit
+process. `record_launch_inbox` now records a launch that starts no turn as idle
+(`record_opened_idle`, shared with `record_agent_inbox`), and the wake watcher sweeps at least once
+a minute (`Watcher::swept`), which also retries a failed wake. Test:
+`a_reopened_antigravity_conversation_hears_what_arrived_while_it_was_closed`.
 
 ## Remaining
 
-1. **Live wake** (demo/qa, needs the branch installed and an `agy` login): the demo above. Risk
-   still open: a wake racing a typed prompt on `agy` is untested; the server sends only when the
-   store says yielded.
-2. **Shape, settled:** the candidate query selects the wake file as its own column
-   (`CASE WHEN provider='agy' THEN agent_inbox END`), beside Codex's endpoint. Not `Inbox`: that is
-   the wire type hooks report, and `agy`'s file comes from the launch. Not `agent_endpoint`:
-   `session_connection` reads it as a Codex app-server on resume.
-3. Main's `tests/e2e/idle_wake.py` drives OpenCode and Pi live against a stand-in model; `agy` has
+1. A wake racing a typed prompt on `agy` is untested; the server sends only when the store says
+   yielded.
+2. Main's `tests/e2e/idle_wake.py` drives OpenCode and Pi live against a stand-in model; `agy` has
    no stand-in model route, so Antigravity is not added there.

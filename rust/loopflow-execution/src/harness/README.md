@@ -159,7 +159,10 @@ An OpenCode work session reports each turn's first request and its end, so the
 server knows when it is idle; Pi reports every event. Both name their socket
 as they start, so a work session reopened idle takes the steers saved while it
 was closed.
-Antigravity starts a turn through the language server in its running `agy` process.
+Antigravity starts a turn through the language server in its running `agy`
+process. `agy` reopened on its conversation runs no hook until someone types,
+so its launch records it as idle; steers saved while it was closed arrive
+within the server's one-minute sweep.
 
 Each harness's decoder reports a provider failure as an error event, and
 `drive::run` asks that harness what it means (`classify_failure`), once, at the

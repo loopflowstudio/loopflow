@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -476,7 +476,9 @@ impl super::Launcher for loopflow_harness::Antigravity {
         if let Some(trust) = cwd.and_then(trust) {
             args.extend(["--settings".into(), trust]);
         }
-        if let Some(input) = input.filter(|input| !input.is_empty()) {
+        let input = input.filter(|input| !input.is_empty());
+        let starts_turn = input.is_some();
+        if let Some(input) = input {
             crate::agent::validate_terminal_turn(&input)?;
             args.extend(["-i".into(), input]);
         }
@@ -490,6 +492,7 @@ impl super::Launcher for loopflow_harness::Antigravity {
                     launch.recording,
                     &delivery,
                     &mut client.process,
+                    starts_turn,
                 )?);
             }
         }
@@ -517,6 +520,7 @@ fn prepare_wake(
     recording: &Recording,
     delivery: &Path,
     process: &mut std::process::Command,
+    starts_turn: bool,
 ) -> Result<[String; 2]> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
@@ -533,9 +537,12 @@ fn prepare_wake(
         .open(&wake)?
         .write_all(&serde_json::to_vec(&file)?)?;
     process.env("ANTIGRAVITY_SERVER_CSRF_TOKEN", token);
-    recording
-        .store
-        .record_launch_inbox(&recording.session, &recording.attachment, &wake)?;
+    recording.store.record_launch_inbox(
+        &recording.session,
+        &recording.attachment,
+        &wake,
+        starts_turn,
+    )?;
     Ok(["--log-file".into(), file.log.display().to_string()])
 }
 
@@ -561,9 +568,12 @@ impl LanguageServer {
     /// # Errors
     /// The wake file or log is unreadable, or the log names no port yet.
     pub fn find(wake: &Path) -> Result<Self> {
-        let file: WakeFile = serde_json::from_slice(&std::fs::read(wake)?)
-            .map_err(|error| anyhow::anyhow!("wake file {}: {error}", wake.display()))?;
-        let log = std::fs::read_to_string(&file.log)?;
+        let file: WakeFile = std::fs::read(wake)
+            .map_err(anyhow::Error::from)
+            .and_then(|bytes| Ok(serde_json::from_slice(&bytes)?))
+            .with_context(|| format!("wake file {}", wake.display()))?;
+        let log = std::fs::read_to_string(&file.log)
+            .with_context(|| format!("agy log {}", file.log.display()))?;
         let port = log
             .lines()
             .rev()

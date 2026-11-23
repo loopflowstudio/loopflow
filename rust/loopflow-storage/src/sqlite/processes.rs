@@ -995,12 +995,15 @@ impl SqliteStore {
 
     /// Where the AgentProcess its launch started takes a wake once idle, for
     /// an address lf made itself (Antigravity's wake file); a provider that
-    /// makes its own reports it on a boundary (`record_agent_inbox`).
+    /// makes its own reports it on a boundary (`record_agent_inbox`). A launch
+    /// that starts no turn, a reopened conversation, is idle from the start:
+    /// no hook reports it until someone types.
     pub fn record_launch_inbox(
         &self,
         session: &str,
         expected: &SessionAttachment,
         inbox: &Path,
+        starts_turn: bool,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1009,6 +1012,9 @@ impl SqliteStore {
             "UPDATE agent_sessions SET agent_inbox=?2 WHERE agent_process_id=?1",
             params![expected.agent_process_id, inbox.to_string_lossy()],
         )?;
+        if !starts_turn {
+            super::steers::record_opened_idle(&tx, session, &expected.agent_process_id)?;
+        }
         tx.commit()?;
         Ok(())
     }

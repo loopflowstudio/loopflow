@@ -1,0 +1,13 @@
+at: 879ca3584ae9291a9063dae841a0d5bde39d4dc3
+first:
+  - path: swift/README.md
+    why: Option chords in a focused terminal
+  - path: swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift
+    why: How AppKit text and physical modifiers reach Ghostty
+  - path: swift/LoopflowTests/GhosttyModifierInputTests.swift
+    why: Bytes written by each Option key
+  - path: swift/LoopflowTests/GhosttyTerminalInputTests.swift
+    why: Typing into a mounted terminal after scrolling
+  - path: scratch/plan.md
+    why: Remaining shortcuts, composition, and held Session checks
+hide: []

@@ -306,6 +306,35 @@ them. Nothing here needs WindowServer focus.
 - Stand-in providers exit at once here, so a Session pane shows "Process
   exited" under its opening overlay. That is the stand-in, not the pane.
 
+# Settings window with the screen locked
+
+The ⌘, window (`menu Settings…`) is a `NavigationSplitView` of grouped
+Forms. Locked, `snap`, `frame` and a `CALayer.render` of the frame all come
+back white below the title: the rows draw through RenderBox layers. Read it
+as text instead.
+
+- `views <window>` prints each view's window-space center, every text
+  field's value (row values are `SelectionTextField`s) and the form's clip
+  origin. A row whose y exceeds the window height is scrolled off; `click`
+  there lands outside the window.
+- Sidebar rows ignore hook clicks. Navigate with search:
+  `field Search settings|context.paste`, then `return <window title>` opens
+  the first match. Search an exact catalog key; a word can match an earlier
+  row's description first.
+- Switches answer a hook click Off→On only; On→Off never calls the setter,
+  on this branch's rows and the old autosave switch alike. Drive Off with
+  `scripts/test_desktop.sh` suites, which use the bindings.
+- The Undo notice and the Refresh button are missing from `tree`, and the
+  window's `undoManager` is not the one SwiftUI registers with. Click Refresh
+  by position (the first click after a change is often swallowed).
+- Each written value is in `$LF_HOME/config.yaml`; hand edits and a broken
+  file reach the open pane within a few seconds. Kill the private server to
+  see the stale reading; restarting it needs Refresh.
+- Menus (Applies to, Save in) don't open, so a checkout or Wave scope is not
+  reachable here; `ContextSettingsWorkflowTests` drives those.
+- The hook's `tree` and `views` block the main thread for seconds; the
+  matching "main thread stalled" lines in `lf.log` are the hook's.
+
 # Driving sheets and captures with the screen locked
 
 One capture per launch is slow. For a run with many states, add a loop to

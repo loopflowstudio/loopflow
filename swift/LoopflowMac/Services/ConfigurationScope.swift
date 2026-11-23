@@ -86,6 +86,7 @@ struct ConfigurationScope: Codable {
     func source(_ key: String) -> String? {
         let locators = Set(settings[key]?.candidates.filter { $0.reason == "selected" }.map(\.locator) ?? [])
         guard locators.count == 1, let path = locators.first else { return nil }
+        if path == "builtin" { return "Default" }
         return files.first { file in
             if file.owner == .personalWave { return path.hasPrefix(file.path + "#waves.") }
             return file.path == path
@@ -99,7 +100,24 @@ extension JSONValue {
         case .null: return "None"
         case .string(let text): return text
         case .bool(let enabled): return enabled ? "On" : "Off"
-        default: return settingsYAML
+        case .integer, .number: return settingsYAML
+        case .array(let items):
+            if items.isEmpty { return "Empty list" }
+            return items.allSatisfy(\.isScalar) ? items.map(\.settingsText).joined(separator: ", ") : settingsYAML
+        case .object(let fields):
+            if fields.isEmpty { return "Empty" }
+            let declared = fields.filter { $0.value != .null }.sorted { $0.key < $1.key }
+            if declared.isEmpty { return "None" }
+            guard declared.allSatisfy({ $0.value.isScalar }) else { return settingsYAML }
+            return declared.map { "\($0.key.replacingOccurrences(of: "_", with: " ").capitalized): \($0.value.settingsText)" }
+                .joined(separator: ", ")
+        }
+    }
+
+    private var isScalar: Bool {
+        switch self {
+        case .array, .object: false
+        default: true
         }
     }
 

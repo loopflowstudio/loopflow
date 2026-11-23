@@ -89,6 +89,14 @@ the sidebar keeps the last reading visible and offers Refresh.
 Gate and demo cover the rendered scroll position, resizing, keyboard focus, and
 light and dark appearance on the Mac.
 
+The locked-screen QA run never saw search scroll the form. Opening
+`context.paste`, `context.diff_files` or `context.budgets` from search left the
+Context form's clip origin at −88 (document 899 pt, window 648 pt), on the
+same pane and from General. The scroll task fired with the key each time.
+A standalone grouped `Form` in a `NavigationSplitView` with the same row
+shape scrolled to its target in the same conditions. The demo checks this
+on an unlocked display before anything changes.
+
 ## Sidebar checks
 
 - `swift build --package-path swift --build-tests` and `scripts/test_desktop.sh --skip-build --filter 'SettingsWorkflowTests|DesignDisciplineTests'` passed locally. Seven tests covered both suites. Gate runs the Desktop checks again.

@@ -56,6 +56,43 @@ enum QAHook {
                 lines.append("\(index) \(window.title) \(file)")
             }
             return lines.joined(separator: "\n")
+        case "views":
+            // The NSView tree with window-space centers, text field values and each clip view's scroll origin.
+            guard let index = Int(arg), windows.indices.contains(index), let root = windows[index].contentView?.superview else { return "usage: views window" }
+            var lines: [String] = []
+            func dump(_ view: NSView, _ depth: Int) {
+                guard depth < 40 else { return }
+                let box = view.convert(view.bounds, to: nil)
+                let height = view.window?.contentView?.frame.height ?? 0
+                let clip = (view as? NSClipView).map { " origin=\(Int($0.bounds.origin.y)) document=\(Int($0.documentView?.frame.height ?? 0))" } ?? ""
+                let text = (view as? NSTextField).map { " text=\($0.stringValue.prefix(80)) placeholder=\($0.placeholderString ?? "")" } ?? ""
+                lines.append(String(repeating: " ", count: depth) + "\(type(of: view)) @\(Int(box.midX)),\(Int(height - box.midY)) \(Int(view.frame.width))x\(Int(view.frame.height))" + clip + text)
+                view.subviews.forEach { dump($0, depth + 1) }
+            }
+            dump(root, 0)
+            return lines.joined(separator: "\n")
+        case "field":
+            // field <placeholder>|<text>: replaces the text of the field with that placeholder.
+            let pieces = arg.split(separator: "|", maxSplits: 1).map(String.init)
+            guard pieces.count == 2 else { return "usage: field placeholder|text" }
+            func search(_ view: NSView) -> NSTextField? {
+                if let field = view as? NSTextField, field.placeholderString == pieces[0] { return field }
+                for child in view.subviews { if let found = search(child) { return found } }
+                return nil
+            }
+            for window in windows {
+                guard let root = window.contentView?.superview, let field = search(root) else { continue }
+                window.makeFirstResponder(field)
+                (window.firstResponder as? NSTextView)?.selectAll(nil)
+                (window.firstResponder as? NSTextView)?.insertText(pieces[1], replacementRange: NSRange(location: NSNotFound, length: 0))
+                return "typed into \(window.title)"
+            }
+            return "not found"
+        case "return":
+            // Return in the field `field` focused; `arg` is the window title.
+            guard let window = windows.first(where: { $0.title == arg }) ?? windows.last else { return "no window" }
+            (window.firstResponder as? NSTextView)?.insertNewline(nil)
+            return "return in \(window.title)"
         case "tree":
             var lines: [String] = []
             for (index, window) in windows.enumerated() {

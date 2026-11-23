@@ -27,6 +27,16 @@ struct ConfigurationSettingsTests {
         #expect(try json(receipt) == fixture["receipt"])
     }
 
+    @Test func rowsSummarizeMapsAndListsInWords() {
+        #expect(JSONValue.object(["name": .null]).settingsText == "None")
+        #expect(JSONValue.object(["linear_requests": .bool(false)]).settingsText == "Linear Requests: Off")
+        #expect(JSONValue.object([:]).settingsText == "Empty")
+        #expect(JSONValue.array([]).settingsText == "Empty list")
+        #expect(JSONValue.null.settingsText == "None")
+        #expect(JSONValue.array([.string("README.md"), .string("docs/")]).settingsText == "README.md, docs/")
+        #expect(JSONValue.object(["groups": .array([.string("a")])]).settingsText == #"{"groups":["a"]}"#)
+    }
+
     @Test func catalogueIncludesFeatureCategory() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

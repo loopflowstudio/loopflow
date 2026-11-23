@@ -13,6 +13,12 @@ struct ScopedSettings: View {
 
     var body: some View {
         Form {
+            if let error = model.editError ?? model.reading.failure {
+                Section {
+                    Text(error).textSelection(.enabled)
+                    Button("Refresh") { model.refresh() }
+                }
+            }
             if pane == .general {
                 Section("Task Files") {
                     AutosaveToggle(notices: notices, undoManager: undoManager)
@@ -86,12 +92,6 @@ struct ScopedSettings: View {
                 }
             } else if model.reading.isLoading {
                 ProgressView("Loading settings")
-            }
-            if let error = model.editError ?? model.reading.failure {
-                Section {
-                    Text(error).textSelection(.enabled)
-                    Button("Refresh") { model.refresh() }
-                }
             }
         }
         .formStyle(.grouped)

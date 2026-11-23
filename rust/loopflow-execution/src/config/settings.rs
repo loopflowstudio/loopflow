@@ -182,9 +182,15 @@ fn _list_agents(value: &mut Value) {
 
 pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadError> {
     if value.is_null() {
-        return Err(invalid(
-            "omit a file value or use unset to remove a preference",
-        ));
+        // YAML deserializes null into an empty mapping too. Use JSON's strict
+        // null here so only a nullable field can retain the declaration.
+        let mut check = Value::Mapping(Default::default());
+        insert(&mut check, path, Value::Null);
+        return serde_json::from_value::<Config>(
+            serde_json::to_value(check).expect("string keys and null"),
+        )
+        .map(|_| ())
+        .map_err(|error| invalid(format!("{}: {error}", path.join("."))));
     }
     if ["agent", "default_agent"].contains(&path[0]) {
         let agent = value
@@ -1330,6 +1336,16 @@ mod tests {
     }
 
     #[test]
+    fn explicit_null_requires_a_nullable_declaration() {
+        for key in ["chrome", "codex.service_tier", "merge_method", "agent"] {
+            assert_eq!(super::parse_value(key, "null").unwrap(), Value::Null);
+        }
+        for key in ["yolo", "land", "context.diff", "agents", "machines", "logs"] {
+            assert!(super::parse_value(key, "null").is_err(), "{key}");
+        }
+    }
+
+    #[test]
     fn claude_model_uses_normal_precedence_without_selecting_a_harness() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let layers = [
@@ -1361,7 +1377,8 @@ mod tests {
                 .unwrap(),
             "claude:fable"
         );
-        for invalid in ["''", "' '", "null", "{}"] {
+        assert!(super::parse_value("claude.model", "null").is_ok());
+        for invalid in ["''", "' '", "{}"] {
             assert!(
                 super::parse_value("claude.model", invalid).is_err(),
                 "{invalid}"
@@ -1394,7 +1411,8 @@ mod tests {
             .unwrap();
             assert_eq!(resolved.config.codex.service_tier, Some(expected));
         }
-        for value in ["slow", "true", "null", "42"] {
+        assert!(super::parse_value("codex.service_tier", "null").is_ok());
+        for value in ["slow", "true", "42"] {
             assert!(super::parse_value("codex.service_tier", value).is_err());
         }
     }

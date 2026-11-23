@@ -153,7 +153,10 @@ lf context --json                              # context budgets and current usa
 `lf set` validates keys and types strictly and preserves comments in YAML
 files. Desktop's [Settings](surfaces.md#settings) window (`⌘,`) reads and
 writes the same files, with **Applies to** / **Save in** selectors, a
-precedence ladder, YAML previews for Reset and Move, and Undo.
+precedence ladder, YAML previews for Reset and Move, and Undo. For nullable
+choices such as `chrome`, **Inherited** removes the declaration. Selecting
+**Explicit null** keeps the key in YAML. The resolver skips null declarations
+when choosing the effective value.
 
 ## Where settings live
 

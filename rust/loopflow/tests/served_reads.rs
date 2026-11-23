@@ -13,6 +13,95 @@ use loopflow_test_support::TestRepo;
 use serde_json::Value;
 use support::{register_task_with_pr, EnvGuard};
 
+#[cfg(target_os = "linux")]
+#[test]
+fn container_connects_share_one_server_and_restart_it_after_exit() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::{Command, Stdio};
+
+    let home = tempfile::tempdir().unwrap();
+    let machine = home.path().join("machine");
+    let write_tool = |name: &str, script: &str| {
+        let path = home.path().join(name);
+        fs::write(&path, script).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    };
+    write_tool(
+        "systemctl",
+        "#!/bin/sh\necho 'Failed to connect to user scope bus: No medium found' >&2\nexit 1\n",
+    );
+    let binary = env!("CARGO_BIN_EXE_lf");
+    let launcher = write_tool("launch", &format!(
+        "#!/bin/sh\n[ \"$*\" != \"server run\" ] || echo $$ >> \"$LF_HOME/starts\"\nexec '{binary}' \"$@\"\n"
+    ));
+    let connect = || {
+        let mut child = Command::new(binary)
+            .env_clear()
+            .env("HOME", home.path())
+            .env("LF_HOME", &machine)
+            .env("LF_BIN", &launcher)
+            .env("PATH", format!("{}:/usr/bin:/bin", home.path().display()))
+            .current_dir(home.path())
+            .args(["server", "connect"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"{\"type\":\"status\"}\n")
+            .unwrap();
+        child
+    };
+    let instance = |child: std::process::Child| {
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let status: Value = serde_json::from_slice(&output.stdout).unwrap();
+        status["instance"].as_str().unwrap().to_owned()
+    };
+    // Each PID comes from this home's own launcher. Clean up on assertion failure too.
+    struct Starts(std::path::PathBuf);
+    impl Starts {
+        fn stop(&self) -> usize {
+            let Ok(recorded) = fs::read_to_string(&self.0) else {
+                return 0;
+            };
+            fs::remove_file(&self.0).unwrap();
+            for pid in recorded.lines() {
+                let _ = Command::new("/bin/kill").args(["-TERM", pid]).status();
+            }
+            recorded.lines().count()
+        }
+    }
+    impl Drop for Starts {
+        fn drop(&mut self) {
+            self.stop();
+        }
+    }
+    let starts = Starts(machine.join("starts"));
+    let first = connect();
+    let second = connect();
+    let initial = instance(first);
+    assert_eq!(instance(second), initial);
+    assert_eq!(starts.stop(), 1);
+    let directory = loopflow_execution::transport::directory(&machine).unwrap();
+    let lock = fs::File::open(directory.join("machine.lock")).unwrap();
+    fs2::FileExt::lock_exclusive(&lock).unwrap();
+    drop(lock);
+    assert_ne!(instance(connect()), initial);
+    assert_eq!(starts.stop(), 1);
+    assert!(machine.join("logs/server.log").is_file());
+}
+
 #[test]
 fn configuration_readiness_recognizes_an_older_server_for_replacement() {
     use std::io::Read;

@@ -9,16 +9,17 @@ Installation prepares client access automatically. Desktop's first connection
 requests readiness through the selected installation; subsequent connections and
 terminal recovery never re-register a server. `lf server status` only observes.
 
-The foreground `lf server run` belongs to the OS supervisor. Desktop
-uses the service for all shared Work reads, writes and subscriptions, plus
-existing terminal attachment. It links no embedded Loopflow library. Desktop's UI automation socket remains app-owned.
+Desktop uses the service for all shared Work reads, writes and subscriptions,
+plus existing terminal attachment. It links no embedded Loopflow library. Desktop's UI automation socket remains app-owned.
 
 `installation/server.rs` owns registration and replacement. Its hidden
 `install server` bridge is for local clients, not a separate setup workflow.
 
 On macOS the signed selected app bundles `com.loopflow.server.plist` and
 registers it with SMAppService. Explicit development Machines use separately
-named launchd jobs. Linux uses a user systemd service. Closing Desktop does not
+named launchd jobs. Linux uses a systemd user service when its manager is available.
+Without a user manager, the first connection starts a detached `lf server run`
+and writes its output to `logs/server.log`. Closing Desktop does not
 stop the service. Work sessions and Desktop shells run in a holder the service starts with
 `setsid` and controls ([Held terminals](../../../loopflow-execution/src/transport/README.md#held-terminals));
 stopping or replacing the service leaves holders and their agents running.

@@ -157,8 +157,9 @@ Claude's inbox, Codex's app-server, and for OpenCode and Pi a socket their
 plugin or extension listens on, which asks the provider to start the turn.
 An OpenCode work session reports each turn's first request and its end, so the
 server knows when it is idle; Pi reports every event. Both name their socket
-as they start, so a work session reopened idle takes the steers saved while it
-was closed.
+as they start. A work session reopened on any of the four takes the steers
+saved while it was closed as a turn; Codex's launch reports the start its
+app-server's hook would only report inside a turn.
 Antigravity takes queued steers on its next turn.
 
 Each harness's decoder reports a provider failure as an error event, and

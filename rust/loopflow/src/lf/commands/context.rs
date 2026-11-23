@@ -438,6 +438,19 @@ fn read_news(
     {
         tracing::warn!(session = adapter.session, %error, "Task updates unwritten at this boundary");
     }
+    // A start the server recorded on a conversation it can wake leaves the
+    // waiting steers to that wake, which runs them as a turn. A chat or a
+    // worker reads them here; the next boundary claims what the wake could
+    // not deliver.
+    if !unrecorded && matches!(boundary, NativeBoundary::Select { .. }) {
+        let wakes = store
+            .idle_conversation_candidates(Some(&adapter.session))?
+            .iter()
+            .any(|idle| idle.conversation.adapter.agent_process_id == adapter.agent_process_id);
+        if wakes {
+            return Ok(News::default());
+        }
+    }
     let steers =
         loopflow_execution::steer::claim(&store, &delivery.repo, adapter, thread, boundary)?;
     Ok(News {
@@ -480,7 +493,7 @@ fn ask_server(
         loopflow_execution::machine::client::hook_request(
             &socket,
             operation,
-            crate::server::boundary::HOOK_DEADLINE,
+            loopflow_execution::machine::client::HOOK_DEADLINE,
         )
     });
     match answered {
@@ -650,7 +663,7 @@ fn write_output(mut bytes: &[u8]) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::load_delivery;
+    use super::{load_delivery, read_news};
     use loopflow_execution::context_block::{ContextDelivery, ContextMoment};
 
     #[test]
@@ -745,5 +758,64 @@ mod tests {
             .1;
             assert_eq!(restored, contexts[index]);
         }
+    }
+
+    /// A reopened work session's start leaves its waiting steer to the wake,
+    /// which runs it as a turn; a start no server recorded, a chat's, reads it.
+    #[test]
+    fn a_wakeable_start_leaves_waiting_steers_to_the_wake() {
+        use loopflow_execution::process::attachment;
+        let _lock = loopflow_execution::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let store = loopflow_execution::store::opening::open_ephemeral(
+            &loopflow_execution::store::default_db_path(),
+        )
+        .unwrap();
+        store.test_session(
+            "session",
+            &loopflow_execution::session_record::new_artifact_key(),
+        );
+        let process = store.test_lf_process();
+        let claim =
+            attachment::claim_session_attachment(&store, "session", None, &process).unwrap();
+        store
+            .record_agent_process_identity("session", &claim, std::process::id(), 1)
+            .unwrap();
+        let adapter = store.reserve_steer_adapter("session", &claim).unwrap();
+        store
+            .with_provider_context(
+                &adapter,
+                "native",
+                loopflow_execution::steer::NativeBoundary::Activate { source: "startup" },
+                || Ok(()),
+            )
+            .unwrap();
+        store
+            .record_agent_inbox(
+                &adapter,
+                &loopflow_execution::steer::Inbox::Socket("/tmp/lf-wake-fixture/s".into()),
+            )
+            .unwrap();
+        assert!(store.record_first_boundary(&adapter).unwrap());
+        store
+            .save_session_steer("session", "Fixture author", "WAITING")
+            .unwrap();
+        let delivery = ContextDelivery {
+            identity: None,
+            repository: None,
+            repo: home.path().to_owned(),
+            home: home.path().to_owned(),
+            wave: None,
+            skill_file: None,
+            submitted_docs: None,
+            references: Vec::new(),
+        };
+        let start = serde_json::json!({"session_id":"native","hook_event_name":"SessionStart","source":"resume"});
+        let recorded = read_news(&delivery, &adapter, "native", &start, false).unwrap();
+        assert!(recorded.steers.is_none());
+        let chat = read_news(&delivery, &adapter, "native", &start, true).unwrap();
+        assert!(chat.steers.unwrap().1.text.contains("WAITING"));
     }
 }

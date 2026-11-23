@@ -1,4 +1,4 @@
-at: d9ae29f9645798c0085f27f9381162a1f0cadace
+at: 98f96b8342e59148cfea2088b7e0497363060a5c
 first:
   - path: docs/work.md
     why: How a Wave and its Tasks reach the tracker
@@ -11,7 +11,9 @@ first:
   - path: rust/loopflow-execution/src/ops/linear.rs
     why: Connect and refresh the linked Project
   - path: rust/loopflow-storage/src/sqlite/linear_events.rs
-    why: Bind the tracker Project and import its issues
+    why: Reclaim a retired link and admit tracker issues
+  - path: rust/loopflow-execution/src/ops/tracker.rs
+    why: Verify observed membership after Wave removal
   - path: rust/loopflow-storage/src/sqlite/tracker_actions.rs
     why: Keep queued Task creates deliverable after Wave removal
   - path: rust/loopflow/src/lf/commands/waves.rs
@@ -19,7 +21,7 @@ first:
   - path: swift/LoopflowMac/Views/BacklogView.swift
     why: Project and objective in the Wave backlog
   - path: rust/loopflow-execution/src/ops/linear/task_planning_tests.rs
-    why: Exercise Project linking and delivery against simulated Linear
+    why: Remove, race two reconnects, and drain an offline rename
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Generated from the protocol types

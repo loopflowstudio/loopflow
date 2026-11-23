@@ -76,7 +76,8 @@ one headless in this checkout on any model (`-a codex`), and your harness's
 own subagent is fine too, working in this checkout. A separate checkout
 comes from `lf wt create <name>` beside this one (`--stack` when its piece
 builds on this branch), never from the harness's own worktree tools, which
-nest one inside this checkout where it belongs to no Task. You answer for what it returns; check it before you use it.
+nest one inside this checkout where it belongs to no Task. You answer for
+what it returns; check it before you use it.
 
 ## Notes
 

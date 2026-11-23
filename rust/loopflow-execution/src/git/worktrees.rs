@@ -237,8 +237,6 @@ pub struct WorktreePruneReport {
 pub struct CreateWorktreeResult {
     pub path: PathBuf,
     pub branch: String,
-    pub base_branch: Option<String>,
-    pub base_commit: Option<String>,
 }
 
 /// One main agent's isolated execution checkout.
@@ -1866,8 +1864,6 @@ pub fn create_named_worktree(
         return Ok(CreateWorktreeResult {
             path: worktree_path,
             branch,
-            base_branch: None,
-            base_commit: None,
         });
     }
 
@@ -1880,13 +1876,6 @@ pub fn create_named_worktree(
 
     let default_branch = get_default_branch(repo)?;
     let base_ref = base.unwrap_or(default_branch.as_str());
-    let base_branch = base.and_then(|value| (value != default_branch).then(|| value.to_string()));
-    let base_commit = if base_branch.is_some() {
-        rev_parse(repo, base_ref).ok()
-    } else {
-        None
-    };
-
     worktree_add_inheriting(
         repo,
         &worktree_path,
@@ -1899,8 +1888,6 @@ pub fn create_named_worktree(
     Ok(CreateWorktreeResult {
         path: worktree_path,
         branch,
-        base_branch,
-        base_commit,
     })
 }
 
@@ -1999,8 +1986,6 @@ fn apply_placement_plan(
     Ok(CreateWorktreeResult {
         path: plan.worktree_path.clone(),
         branch: plan.branch.clone(),
-        base_branch: None,
-        base_commit: None,
     })
 }
 
@@ -2031,81 +2016,54 @@ pub fn ensure_agent_worktree(
         plan.base_ref = agent_base_ref(&main_repo)?;
     }
     let worktree = create_agent_worktree(&main_repo, &plan)?;
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(&main_repo)
-        .args([
-            "config",
-            &format!("branch.{}.loopflow-persistent", worktree.branch),
-            "true",
-        ])
-        .output()?;
-    if !output.status.success() {
-        return Err(GitError::CommandFailed {
-            command: "mark persistent worktree".into(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        });
-    }
+    set_branch_config(&main_repo, &worktree.branch, "loopflow-persistent", "true")?;
     Ok(worktree)
 }
 
 /// Persistent branches keep their checkout and local plans after delivery.
 pub fn is_persistent_worktree(repo: &Path) -> Result<bool, GitError> {
-    let Some(branch) = current_branch(repo)? else {
-        return Ok(false);
-    };
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args([
-            "config",
-            "--bool",
-            "--get",
-            &format!("branch.{branch}.loopflow-persistent"),
-        ])
-        .output()?;
-    match output.status.code() {
-        Some(0) => Ok(output.stdout == b"true\n"),
-        Some(1) => Ok(false),
-        _ => Err(GitError::CommandFailed {
-            command: "read persistent worktree configuration".into(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        }),
-    }
+    Ok(current_branch_config(repo, "loopflow-persistent")?.as_deref() == Some("true"))
 }
 
 /// The branch this checkout was stacked on by `lf wt create --stack`, while
 /// that branch still exists locally. A deleted base leaves the checkout
 /// following the default branch again.
 pub fn stacked_base(repo: &Path) -> Result<Option<String>, GitError> {
+    match current_branch_config(repo, "loopflow-base")? {
+        Some(base) if branch_exists(repo, &base)? => Ok(Some(base)),
+        _ => Ok(None),
+    }
+}
+
+/// Record that `branch` builds on `base`, so [`stacked_base`] finds it.
+pub fn record_stacked_base(repo: &Path, branch: &str, base: &str) -> Result<(), GitError> {
+    set_branch_config(repo, branch, "loopflow-base", base)
+}
+
+/// `branch.<current>.<key>` from Git config; `None` when detached or unset.
+fn current_branch_config(repo: &Path, key: &str) -> Result<Option<String>, GitError> {
     let Some(branch) = current_branch(repo)? else {
         return Ok(None);
     };
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
-        .args(["config", "--get", &format!("branch.{branch}.loopflow-base")])
+        .args(["config", "--get", &format!("branch.{branch}.{key}")])
         .output()?;
-    let base = match output.status.code() {
-        Some(0) => String::from_utf8_lossy(&output.stdout).trim().to_string(),
-        Some(1) => return Ok(None),
-        _ => {
-            return Err(GitError::CommandFailed {
-                command: "read stacked base configuration".into(),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            })
-        }
-    };
-    Ok(branch_exists(repo, &base)?.then_some(base))
+    match output.status.code() {
+        Some(0) => Ok(Some(
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        )),
+        Some(1) => Ok(None),
+        _ => Err(GitError::CommandFailed {
+            command: format!("read branch.{branch}.{key}"),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }),
+    }
 }
 
-/// Record that `branch` builds on `base`, so [`stacked_base`] finds it.
-pub fn record_stacked_base(repo: &Path, branch: &str, base: &str) -> Result<(), GitError> {
-    git_stdout(
-        repo,
-        &["config", &format!("branch.{branch}.loopflow-base"), base],
-    )
-    .map(|_| ())
+fn set_branch_config(repo: &Path, branch: &str, key: &str, value: &str) -> Result<(), GitError> {
+    git_stdout(repo, &["config", &format!("branch.{branch}.{key}"), value]).map(|_| ())
 }
 
 /// Move a bare/default `lf` session off canonical main while preserving both

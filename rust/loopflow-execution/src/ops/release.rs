@@ -1354,12 +1354,7 @@ fn materialize_exact_source_worktree(
                 &format!("worktree is dirty: {status}"),
             ));
         }
-        return Ok(CreateWorktreeResult {
-            path,
-            branch,
-            base_branch: None,
-            base_commit: Some(expected_commit),
-        });
+        return Ok(CreateWorktreeResult { path, branch });
     }
 
     if registered_at_path.is_none() && path.exists() && !publisher_path_is_empty(&path)? {

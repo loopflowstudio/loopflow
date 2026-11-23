@@ -539,7 +539,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: DesktopCommand,
     },
-    /// Plans across Waves: what Desktop shows of each Wave's Projects and Tasks
+    /// Plans across Waves: what Desktop shows of each Wave's Project and Tasks
     Plan {
         #[command(subcommand)]
         cmd: PlanCommand,
@@ -1900,7 +1900,7 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
-    /// Read Projects and Tasks without starting work; an explicit Wave includes history
+    /// Read a Wave's Project and Tasks without starting work; an explicit Wave includes history
     Show {
         wave: Option<String>,
         /// Find an exact Task, including historical planning
@@ -1946,7 +1946,7 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Print one Wave's Projects and Tasks as Desktop shows them; `connect`
+    /// Print one Wave's Project and Tasks as Desktop shows them; `connect`
     /// and `reteam` change where its planning lives
     #[command(args_conflicts_with_subcommands = true)]
     Plan {
@@ -1975,7 +1975,7 @@ pub enum WaveCommand {
         #[arg(long)]
         all: bool,
     },
-    /// Show one Wave's Projects, Tasks and execution evidence.
+    /// Show one Wave's Project, Tasks and execution evidence.
     Status {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,

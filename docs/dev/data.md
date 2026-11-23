@@ -328,7 +328,7 @@ those lines by binary.
 
 ## Planning and external transitions
 
-A Wave's Projects group its Tasks; none is selected. Project rows own saved
+A Wave's one Project groups its Tasks. Project rows own saved
 planning, with optional tracker bindings and separate tracker events. Local
 changes save before their tracker actions send; conflicts a tracker reports follow
 the planning writer's rules. Replanning preserves started Tasks and their worktree, PR and execution.

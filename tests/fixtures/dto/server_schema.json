@@ -6625,7 +6625,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> wave plan <wave>`: one Wave's Projects and\nTasks, after syncing its repository with the tracker.",
+          "description": "`lf --cwd <directory> wave plan <wave>`: one Wave's Project and\nTasks, after syncing its repository with the tracker.",
           "properties": {
             "directory": {
               "type": "string"

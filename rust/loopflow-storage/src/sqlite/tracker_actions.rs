@@ -964,12 +964,13 @@ pub(crate) fn attach_in(
     Ok(())
 }
 
-/// Unbound Projects, then Tasks, made on this Machine in `repo` with no live
-/// `create`. A Project is made here unless another Machine stamped its Wave.
+/// Unbound Projects of live Waves, then Tasks, made on this Machine in `repo`
+/// with no live `create`. A Project is made here unless another Machine
+/// stamped its Wave.
 fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<ActionOwner>> {
     let mut query = conn.prepare_cached(
         "SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id
-         WHERE w.repo=?1 AND p.external_project_id IS NULL
+         WHERE w.repo=?1 AND w.retired_at IS NULL AND p.external_project_id IS NULL
          AND NOT EXISTS(SELECT 1 FROM plan_stamps s WHERE s.owner_id=p.id AND s.field='project_wave'
              AND s.machine_id!=(SELECT id FROM machines WHERE is_local=1))
          AND NOT EXISTS(SELECT 1 FROM tracker_actions e WHERE e.project_id=p.id AND e.kind='create' AND e.phase!='retired')
@@ -1420,19 +1421,22 @@ mod tests {
         let here = store.seed_project(wave.id()).unwrap().id;
         // The released lf made Projects before fields were stamped, and
         // another Machine's Project arrives with its own stamps.
-        let (older, theirs) = (
+        let (older, theirs, removed) = (
+            loopflow_model::id::WaveId::new(),
             loopflow_model::id::WaveId::new(),
             loopflow_model::id::WaveId::new(),
         );
         let unstamped = loopflow_model::durable::ProjectId::new();
+        // A removed Wave's Project is never made in a tracker connected later.
+        let retired = loopflow_model::durable::ProjectId::new();
         store
             .conn
             .lock()
             .unwrap()
             .execute_batch(&format!(
-                "INSERT INTO waves(id,name,repo,created_at) VALUES('{older}','older','/repo',1),('{theirs}','theirs','/repo',1);
+                "INSERT INTO waves(id,name,repo,created_at,retired_at) VALUES('{older}','older','/repo',1,NULL),('{theirs}','theirs','/repo',1,NULL),('{removed}','removed','/repo',1,2);
                  INSERT INTO projects(id,wave_id,created_at,updated_at,description,project_name,project_slug)
-                 VALUES('{unstamped}','{older}',1,1,'','Earlier','earlier')"
+                 VALUES('{unstamped}','{older}',1,1,'','Earlier','earlier'),('{retired}','{removed}',1,1,'','Removed','removed')"
             ))
             .unwrap();
         let elsewhere = loopflow_model::durable::ProjectId::new();

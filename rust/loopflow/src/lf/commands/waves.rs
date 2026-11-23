@@ -507,7 +507,7 @@ pub(crate) async fn wave_snapshots(store: &SharedStore, all: bool) -> Result<Vec
     Ok(snapshots)
 }
 
-/// `lf wave status [wave]` — one Wave's Projects, Tasks and Session evidence.
+/// `lf wave status [wave]` — one Wave's Project, Tasks and Session evidence.
 /// `lf wave status [<wave>]` observes the tracker first; `lf wave plan
 /// <wave>` reads what the store records and `lf wave sync` exchanges planning.
 pub fn status(wave: Option<&str>, json: bool, observe: bool) -> Result<()> {

@@ -203,8 +203,8 @@ open only a Task's conversation and never read Desktop's layouts.
 Repository and Wave
 entry shows their conversation, opened on load or on selection.
 Waves pair that conversation with their objective, status, planning and
-full Task inventory. **Projects** lists the Wave's Projects in order with
-name, status and tracker sync, ended ones included; **Workflow** opens the
+full Task inventory. **Projects** shows the Wave's Project with its
+name, status and tracker sync; **Workflow** opens the
 Wave's default Graph in the catalogue inspector. The sidebar starts at 240 points wide;
 drag its edge to resize or use the title-bar button or **⌘\** to toggle it.
 Its scroll position survives Wave and Task navigation. Working order survives
@@ -877,7 +877,7 @@ Add `session` to open an existing Task conversation in its terminal pane. A
 missing or unrelated Session leaves the current workspace intact and offers Retry.
 Opening a conversation does not complete a review or start a Task Graph.
 
-Wave details show the objective, the Wave's Projects and their status, its Workflow,
+Wave details show the objective, the Wave's Project and its status, its Workflow,
 current Tasks and plan history. Completed Tasks start hidden.
 **Completed** adds the last 7 days. Click **7 Days** to edit the number inline;
 Enter or clicking away applies it, Escape cancels. Enter **0** for **All Tasks**

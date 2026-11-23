@@ -154,20 +154,25 @@ its PID), type nothing on the laptop and poll `lf task list` there after a
 save on the mini: 40 to 60 s. The minute's exchange is silent; a split Wave
 is one `skipped a plan record` WARN per exchange in `logs/lf.log`.
 
-A Task's Wave is `tasks.wave_id`, carried as `task_wave`. To check a Task in
-an ancestor's Project, build the home with an `lf` older than LOO-995
-(`lf wave create` there makes the Wave's Project), then open it with the
-branch, `lf wave create <parent>/<child>` and `lf task create --wave
-<parent>/<child>`: it joins the parent's Project and must list as a Task
-under the child in `lf wave status`, `lf wave show` and `lf wave list`. A
-fresh clone on a second home must show every Task under the same Wave
-(`tasks.wave_id` in its store). Read a record from the right Machine's ref:
-once a second home has synced, `for-each-ref refs/loopflow/plan | head -1`
-may be that home's ref, which republishes what it took in. Records written
-before `task_wave` existed carry no such field, and every later home
-republishes the value it derived at stamp 0, so a home that took a record in
-wrongly passes the mistake on: delete that home's ref
-(`git update-ref -d`) before repeating the run.
+A Wave has exactly one Project, made with it (`ProjectId::for_wave`, the
+Wave's UUID); a Task's Wave is its Project's. Read both in `loopflow.db`:
+`projects(id, wave_id, project_name, status, external_project_id)` and
+`tasks.project_id`; `tasks` has no `wave_id`. The plan's demo runs offline:
+`lf wave create billing`, `lf wave create billing/refunds`, `lf task create
+--wave billing/refunds 'x'`, `lf task move <id> --wave billing`, and
+`lf wave status <wave>` prints `Project   <name> (local|linked) · <status>`.
+For a returning user, write the home with the installed `lf` (it names a child
+Wave's Project `billing/refunds`; the branch names it `refunds`), then open it
+with the branch. Every recorded Task keeps its Wave. A second clone on another
+home lists each Task under the same Wave after `lf task list`; a move on one
+home reaches the other on `lf task sync <id>`.
+
+To see which Projects a newly connected tracker makes, remove a Wave first
+(`lf wave remove`), then set `repo.tracker.linear.team` and an `origin`: `lf
+repo tracker` lists one `create` per live Wave and every Task, none for the
+removed Wave. With no Linear login every create and `lf wave plan connect`
+stop at "No Linear credential found"; without `origin`, connect stops at the
+origin error first.
 
 A repository with a Linear or Asana tracker has no Git plan exchange: after
 `git push`, `git -C <bare> for-each-ref refs/loopflow` is empty and a fresh

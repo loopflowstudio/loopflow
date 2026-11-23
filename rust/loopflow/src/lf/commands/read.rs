@@ -265,7 +265,7 @@ pub enum Read {
     #[serde(rename = "task.context")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::context_usage::ContextReport>()))]
     TaskContext { task: String },
-    /// `lf --cwd <directory> wave plan <wave>`: one Wave's Projects and
+    /// `lf --cwd <directory> wave plan <wave>`: one Wave's Project and
     /// Tasks, after syncing its repository with the tracker.
     #[serde(rename = "wave.plan")]
     #[schemars(extend("x-result" = generator.subschema_for::<Option<crate::lf::commands::waves::WaveDetailSnapshot>>()))]

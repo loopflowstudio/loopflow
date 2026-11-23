@@ -113,13 +113,39 @@ touch that path, unverified on the base) and
 timed out under the parallel run and passes alone (15 s). clippy
 `--all-targets -D warnings` clean.
 
-## Remaining
+## Remaining (slice 3, from the 2026-11-23 concept review)
 
-Nothing to implement. Gate: Swift DTO suite for `WaveRemoval`/`WaveRenamed`,
-the full matrix in CI, and the `oauth_tests` contention failure checked on the
-base. Initiative names left in `rust/` are released-schema readers
+`scratch/concept-review.html` reviewed the built branch. Two defects come
+from every Wave now making its own Project:
+
+1. A local Project's name is a copy of the Wave's, taken once in
+   `wave_project_in` (`rust/loopflow-storage/src/sqlite/children.rs`).
+   `lf wave rename` (`ops/wave_lifecycle.rs` `rename`) leaves it stale
+   (QA: `Project scratchpad (local)` on Wave `sandbox`), and a queued Linear
+   `create` sends the old name. Build: rename also writes the Wave's Project
+   `ProjectName`/`ProjectSlug` while `external_project_id IS NULL`, as plan
+   edits so they cross Machines with the Wave's rename. A linked Project keeps
+   the tracker's name; no new tracker action. Chosen for review; passed over:
+   pushing renames to a linked Linear Project.
+2. `lf wave remove` (`ops/wave_lifecycle.rs` `remove`) leaves the retiring
+   Waves' Projects' unsent tracker actions queued, so Linear can get a Project
+   for a removed Wave. Build: removal retires them in the same write
+   (`tracker_actions` phase `retired`).
+
+Shows it worked: `lf wave create scratchpad; lf wave rename scratchpad
+sandbox; lf wave status sandbox` prints `Project   sandbox (local)`; in a
+connected repository, `lf wave add gone; lf wave remove gone; lf repo tracker`
+lists no `create` for `gone`. One focused test each.
+
+Then gate: Swift DTO suite for `WaveRemoval`/`WaveRenamed`, the full matrix
+in CI, and the `oauth_tests` contention failure checked on the base.
+Initiative names left in `rust/` are released-schema readers
 (`ProjectInitiatives`, `planning_initiatives`, `tracker_wave_sync.initiative`
 written empty, the ignored Wave `linear:` key) and fixtures that test them.
+
+Not here (on the page as questions): the removal line "N Projects stay
+readable in history" and `WaveRemoval.projects`; Desktop's **Projects**
+button; upgraded child Waves' Projects named by full path.
 
 ## Tracker decisions (built in slice 2)
 

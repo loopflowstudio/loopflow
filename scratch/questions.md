@@ -30,10 +30,9 @@
   history", since every Wave has its Project; `WaveRemoval.projects` equals
   the number of retiring Waves. Kept as is; dropping the line and field is a
   wire change for another pass.
-- QA 2026-11-23: renaming a Wave leaves its local Project's name as it was
-  (`lf wave rename scratchpad sandbox` → `Project scratchpad (local)`). No
-  Project rename path exists; following the rename (and a tracker `update`
-  for a made Linear Project) is a product change, not made here.
+- QA 2026-11-23: renaming a Wave left its local Project's name as it was.
+  Concept review chose: an unlinked Project's name follows the rename (plan
+  slice 3); a linked one keeps the tracker's name, nothing is sent.
 - QA 2026-11-23: Desktop's Wave pane still has a **Projects** button listing
   the Wave's Projects; with one per Wave it lists one. Left as is.
 - QA 2026-11-23: a `create` queued for a Wave's Project before `lf wave

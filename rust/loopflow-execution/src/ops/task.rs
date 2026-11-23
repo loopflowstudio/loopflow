@@ -2588,30 +2588,14 @@ pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsRe
     }
 }
 
-/// The Task a conversation run in `cwd` belongs to: the one whose checkout
-/// on this Machine holds it. A launch counts toward it, with usage rows; a
-/// raw conversation only lists under it. Both ask here, so whether a calling
-/// Session's Task should outrank its checkout's is decided by changing this
-/// function alone.
+/// The Task a conversation run in `cwd` belongs to: the one holding it on
+/// this Machine. A launch counts toward it, with usage rows; a raw
+/// conversation only lists under it.
 pub(crate) fn counted_task(
     store: &SqliteStore,
     cwd: &Path,
 ) -> OpsResult<Option<loopflow_model::durable::TaskId>> {
-    // Branch names are not checkout identity: another clone can use the same
-    // branch.
-    let Ok(root) = crate::git::worktree_root(cwd) else {
-        return Ok(None);
-    };
-    let mut id = None;
-    for checkout in store.task_checkouts().map_err(task_error)? {
-        if crate::git::worktree_root(&checkout.worktree).ok().as_ref() == Some(&root) {
-            if id.is_some() {
-                return Err(task_error("Multiple Tasks claim this checkout"));
-            }
-            id = Some(checkout.task_id);
-        }
-    }
-    Ok(id)
+    store.task_holding(cwd).map_err(task_error)
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]

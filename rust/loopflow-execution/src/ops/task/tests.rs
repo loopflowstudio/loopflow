@@ -178,7 +178,7 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
                 time::OffsetDateTime::now_utc().unix_timestamp(),
             ),
             None,
-            Some(&repo.path().to_string_lossy()),
+            Some(&fixture.task.worktree.as_ref().unwrap().to_string_lossy()),
             None,
         )
         .unwrap();
@@ -188,7 +188,7 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
     );
     let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
     conn.execute("UPDATE agent_sessions SET cwd=?1,task_id=?2,wave_id=?3,input_published=0,interactive=0 WHERE id=?4",
-            rusqlite::params![repo.path().to_str().unwrap(), fixture.task.id.as_str(), fixture.task.wave_id.as_ref().unwrap().as_str(), session.id]).unwrap();
+            rusqlite::params![fixture.task.worktree.as_ref().unwrap().to_str().unwrap(), fixture.task.id.as_str(), fixture.task.wave_id.as_ref().unwrap().as_str(), session.id]).unwrap();
     conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,'captured',?2,1,'{}')",
             rusqlite::params![session.id, crate::session_record::new_artifact_key()]).unwrap();
     conn.execute(
@@ -265,7 +265,11 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
             .unwrap(),
         WorkStatus::Done
     );
-    assert!(fixture.store.sqlite.graphs_at(repo.path()).unwrap()[0]
+    assert!(fixture
+        .store
+        .sqlite
+        .graphs_at(fixture.task.worktree.as_ref().unwrap())
+        .unwrap()[0]
         .run
         .ended_at
         .is_none());
@@ -716,6 +720,9 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
 }
 
 async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> TaskFixture {
+    // lf records a checkout as Git names it, resolved through symlinks such
+    // as macOS's /var -> /private/var.
+    let repository = repository.canonicalize().unwrap_or(repository);
     let database = tempfile::tempdir().unwrap();
     let database_path = database.path().join("loopflow.db");
     let store = std::sync::Arc::new(

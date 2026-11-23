@@ -584,6 +584,30 @@ fn member_graphs(tx: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec<Me
 }
 
 impl SqliteStore {
+    /// The Task holding `dir` on this Machine: the one whose checkout is the
+    /// deepest holding it, so a checkout nested inside another is its own
+    /// Task's; two Tasks recorded on one root resolve to the lower id. `dir`
+    /// matches as named and as it resolves through symlinks. Every "which Task
+    /// is this directory" question asks here.
+    pub fn task_holding(&self, dir: &std::path::Path) -> StoreResult<Option<TaskId>> {
+        let resolved = dir.canonicalize().ok().filter(|resolved| resolved != dir);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                &format!(
+                    "SELECT coalesce({},{})",
+                    deepest_checkout("?1"),
+                    deepest_checkout("?2")
+                ),
+                rusqlite::params![
+                    dir.to_string_lossy(),
+                    resolved.as_deref().map(std::path::Path::to_string_lossy)
+                ],
+                |row| row.get::<_, Option<String>>(0),
+            )?
+            .map(TaskId::from_raw))
+    }
+
     /// Held terminals of unfinished member Sessions, without loading
     /// retained history.
     pub fn task_session_terminals(
@@ -1116,6 +1140,58 @@ mod tests {
             .map(OpenWork::label)
             .collect();
         assert_eq!(open, [format!("Graph run {second_run}")]);
+    }
+
+    #[test]
+    fn the_task_holding_a_directory_is_its_deepest_checkout() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
+        let repository = crate::test_fixture::repository(&store, "/repo");
+        let task = |worktree: &str| {
+            let id = store
+                .create_task(&crate::work::task::NewTask {
+                    id: TaskId::new(),
+                    repository_id: repository.clone(),
+                    project_id: None,
+                    title: worktree.into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap()
+                .id;
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+                    [id.as_str(), worktree],
+                )
+                .unwrap();
+            id
+        };
+        let (outer, nested) = (task("/repo/outer"), task("/repo/outer/nested"));
+        let (one, two) = (task("/repo/shared"), task("/repo/shared/"));
+        let holding = |path: &str| store.task_holding(std::path::Path::new(path)).unwrap();
+        assert_eq!(holding("/repo/outer/src"), Some(outer.clone()));
+        assert_eq!(holding("/repo/outer/nested/src"), Some(nested));
+        // A sibling sharing a name prefix is not inside the checkout.
+        assert_eq!(holding("/repo/outer/nestedness"), Some(outer));
+        let lower = if one.as_str() < two.as_str() {
+            one
+        } else {
+            two
+        };
+        assert_eq!(holding("/repo/shared"), Some(lower));
+        assert_eq!(holding("/repo"), None);
+        assert_eq!(holding("/elsewhere"), None);
+        // A directory named through a symlink is in the checkout it resolves to.
+        let real = dir.path().canonicalize().unwrap().join("real");
+        std::fs::create_dir_all(real.join("src")).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let resolved = task(real.to_str().unwrap());
+        assert_eq!(holding(link.join("src").to_str().unwrap()), Some(resolved));
     }
 
     #[test]

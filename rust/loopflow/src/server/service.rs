@@ -1578,7 +1578,7 @@ async fn session_boundary(
     .map_err(unavailable)?;
     if let Some(after) = after {
         tokio::task::spawn_blocking(move || {
-            loopflow_execution::journal::request::isolate(|| super::boundary::after_stop(after))
+            loopflow_execution::journal::request::isolate(|| super::boundary::after(after))
         });
     }
     serde_json::to_value(answer).map_err(unavailable)

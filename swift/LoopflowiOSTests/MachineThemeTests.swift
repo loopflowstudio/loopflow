@@ -12,8 +12,8 @@ final class MachineThemeTests: XCTestCase {
     }
 
     func testEveryBuiltinThemeDecodesOnThePhone() {
-        XCTAssertEqual(ThemeDefinition.builtins.count, 26)
-        XCTAssertEqual(ThemeDefinition.builtins.filter(\.isDark).count, 13)
+        XCTAssertEqual(ThemeDefinition.builtins.count, 24)
+        XCTAssertEqual(ThemeDefinition.builtins.filter(\.isDark).count, 12)
     }
 
     func testTheMachinesPairDrawsEachSideAndIsRememberedForTheNextLaunch() throws {

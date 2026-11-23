@@ -1,27 +1,37 @@
-at: 33d075aaffe6f8ff2122a935633884c817e4f24d
+at: ad1ea05a0098be9a45021bdb69dd2c47fcd3e505
 first:
   - path: docs/surfaces.md
-    why: Follow a Working row through a turn and drag.
-  - path: rust/loopflow-storage/src/sqlite/selections.rs
-    why: Read the shared order independent of activity.
+    why: Follow a Working Task through arrivals, sorts and drags.
   - path: rust/loopflow-storage/src/work/selection.rs
-    why: Place a member before or after its target.
-  - path: rust/loopflow/src/lf/commands/desktop.rs
-    why: CLI and served writes resolve the same tile edit.
+    why: Read Task content and drop placement on the wire.
+  - path: rust/loopflow-storage/src/sqlite/selections.rs
+    why: Order Working Tasks and read their Graph positions.
   - path: rust/loopflow-execution/src/store/selections.rs
-    why: Retry the drop against the latest Working order.
-  - path: swift/Loopflow/Models/WorkSelection.swift
-    why: Read Task tiles from one plan.
+    why: Commit a drag or status sort against current order.
+  - path: rust/loopflow-storage/src/sqlite/sessions.rs
+    why: Recognize a finished interactive turn as available.
+  - path: rust/loopflow-execution/src/transport/hosted.rs
+    why: Typing acknowledges finished reports for every viewer.
+  - path: rust/loopflow/src/lf/commands/desktop.rs
+    why: Reach the same order from the CLI.
+  - path: swift/LoopflowMac/Views/WorkNavigator.swift
+    why: Find the sort button and Graph step.
   - path: swift/LoopflowMac/WorkModel.swift
-    why: Share the drop between the sidebar and grid.
+    why: Keep the sidebar and grid in agreement.
   - path: swift/Loopflow/Services/PendingChanges.swift
-    why: Show the drop until each reading confirms it.
+    why: Follow a drag through confirmation or refusal.
+  - path: rust/loopflow/src/lf/commands/waves.rs
+    why: Trace one conversation across roadmap, Wave and phone.
+  - path: scripts/app_bundle.py
+    why: Package the fonts with every SwiftPM app.
+  - path: swift/Loopflow/AppBootstrap.swift
+    why: Resolve bundled faces for the New Task sheet.
   - path: rust/loopflow/tests/served_reads.rs
-    why: Check competing moves through the server and CLI.
-  - path: swift/LoopflowTests/WorkNavigationTests.swift
-    why: Follow both lists through confirmation and refusal.
+    why: Reorder from competing clients on a private Machine.
+  - path: swift/LoopflowTests/DashboardWorkspaceTests.swift
+    why: Check sorting from the command palette.
 hide:
   - path: tests/fixtures/dto/server_schema.json
-    why: Generated from the Rust protocol types.
+    why: Generated from the Rust protocol.
   - path: tests/fixtures/dto/task_concepts.json
     why: Rust snapshots replayed by Desktop tests.

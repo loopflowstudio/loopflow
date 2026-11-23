@@ -1,0 +1,1390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1063 · Explore Round 2: Start-Time Stack + Sort &amp; Quiet Tasks</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --paper: #f6f4ed;
+  --surface: #fffef9;
+  --sidebar-bg: #f1efe7;
+  --row-selected: #e2efe8;
+  --row-hover: #ebe8de;
+  --ink: #1c2824;
+  --muted: #55665e;
+  --faint: #75857d;
+  --line: #cfd6ce;
+  --line-strong: #adb8ae;
+  --accent: #12624c;
+  --accent-soft: #e3f3ea;
+  --warn: #9a451f;
+  --warn-soft: #f9ebe2;
+  --busy: #2b5a8a;
+  --busy-soft: #e6eff8;
+  --step-bg: #eae6da;
+  --step-ink: #44524b;
+  --step-int-bg: #f9ebe2;
+  --step-int-ink: #9a451f;
+  --step-end-bg: #e3f3ea;
+  --step-end-ink: #12624c;
+  --badge-prop: #ece8dc;
+  --badge-prop-ink: #47534d;
+  --badge-rad: #efe5f6;
+  --badge-rad-ink: #5d2f7e;
+  --flash: rgba(18, 98, 76, 0.14);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #121916;
+    --surface: #18211e;
+    --sidebar-bg: #141d1a;
+    --row-selected: #1f362d;
+    --row-hover: #1d2824;
+    --ink: #edf2eb;
+    --muted: #a9b8ae;
+    --faint: #7e9085;
+    --line: #324039;
+    --line-strong: #4d6056;
+    --accent: #8ee0be;
+    --accent-soft: #1c342b;
+    --warn: #f5b08f;
+    --warn-soft: #362218;
+    --busy: #96c2f0;
+    --busy-soft: #1a2a3b;
+    --step-bg: #232f2a;
+    --step-ink: #bfcdc3;
+    --step-int-bg: #362218;
+    --step-int-ink: #f5b08f;
+    --step-end-bg: #1c342b;
+    --step-end-ink: #8ee0be;
+    --badge-prop: #24302b;
+    --badge-prop-ink: #c6d3ca;
+    --badge-rad: #2f203b;
+    --badge-rad-ink: #dbb7f5;
+    --flash: rgba(142, 224, 190, 0.16);
+  }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 15.5px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+main {
+  width: min(50rem, calc(100% - 2rem));
+  margin: 2.25rem auto 4.5rem;
+}
+
+header.doc-head {
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--line);
+}
+.eyebrow {
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.45rem;
+}
+h1, h2 {
+  font-family: ui-serif, Georgia, "Iowan Old Style", serif;
+  font-weight: 600;
+  line-height: 1.18;
+  margin: 0;
+}
+h1 { font-size: clamp(1.85rem, 5vw, 2.65rem); letter-spacing: -0.03em; }
+h2 { font-size: clamp(1.3rem, 3.2vw, 1.65rem); letter-spacing: -0.02em; }
+h3 { font-size: 0.82rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 0.35rem; }
+p { margin: 0.6rem 0; }
+.quote {
+  margin: 0.75rem 0;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--line-strong);
+  color: var(--muted);
+  font-size: 0.94rem;
+}
+.sub { color: var(--muted); font-size: 0.9rem; }
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  background: var(--sidebar-bg);
+  padding: 0.08em 0.34em;
+  border-radius: 0.28rem;
+}
+kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.73rem;
+  color: var(--faint);
+  padding: 0.04rem 0.26rem;
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  background: var(--surface);
+  white-space: nowrap;
+}
+
+.decision-box {
+  margin-top: 1rem;
+  padding: 0.9rem 1.05rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: 0.6rem;
+  font-size: 0.95rem;
+}
+
+.rule-card {
+  margin-top: 1.4rem;
+  padding: 0.95rem 1.1rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  font-size: 0.91rem;
+}
+.rule-card ul { margin: 0.45rem 0 0; padding-left: 1.15rem; }
+.rule-card li { margin: 0.25rem 0; }
+
+.badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 0.16rem 0.5rem;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+.badge.proposed { background: var(--badge-prop); color: var(--badge-prop-ink); }
+.badge.radical { background: var(--badge-rad); color: var(--badge-rad-ink); }
+
+section.panel {
+  margin-top: 2.2rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+}
+section.panel.radical-panel { border-color: var(--accent); }
+.panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.45rem 0.8rem;
+  margin-bottom: 0.3rem;
+}
+.truth {
+  font-size: 0.97rem;
+  color: var(--muted);
+  margin: 0.2rem 0 0.95rem;
+}
+
+/* Simulator */
+.sim {
+  margin: 0.95rem 0 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  background: var(--sidebar-bg);
+  overflow: hidden;
+}
+.sim-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.38rem;
+  padding: 0.58rem 0.68rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.sim-controls button {
+  appearance: none;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.81rem;
+  font-weight: 550;
+  padding: 0.3rem 0.58rem;
+  border-radius: 0.4rem;
+  cursor: pointer;
+  line-height: 1.25;
+}
+.sim-controls button:hover:not(:disabled) {
+  background: var(--row-hover);
+  border-color: var(--accent);
+}
+.sim-controls button.primary {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sim-controls button.active-toggle {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--surface);
+}
+.sim-controls button:disabled { opacity: 0.42; cursor: not-allowed; }
+.sim-controls .spacer { flex: 1 1 auto; }
+.sim-controls .ghost {
+  border-color: transparent;
+  color: var(--muted);
+  background: transparent;
+  padding-inline: 0.4rem;
+}
+.sim-controls .ghost:hover { color: var(--ink); background: var(--row-hover); border-color: transparent; }
+
+.sim-subbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  padding: 0.42rem 0.7rem;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.4rem;
+  overflow: hidden;
+  background: var(--surface);
+}
+.seg button {
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.77rem;
+  font-weight: 550;
+  padding: 0.22rem 0.55rem;
+  cursor: pointer;
+}
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.sim-body { padding: 0.58rem 0.65rem 0.65rem; }
+.sidebar-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.2rem 0.4rem 0.5rem;
+}
+.sidebar-header .repo-name {
+  font-size: 0.83rem;
+  font-weight: 650;
+  color: var(--muted);
+}
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.32rem;
+}
+.sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.77rem;
+  font-weight: 620;
+  padding: 0.22rem 0.54rem;
+  border-radius: 0.38rem;
+  cursor: pointer;
+}
+.sort-btn:hover { filter: brightness(0.96); }
+.sort-btn.secondary {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+}
+.sort-btn.secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+.zone-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 0.42rem 0.5rem 0.22rem;
+}
+.zone-label.with-rule {
+  margin-top: 0.45rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.55rem;
+}
+
+ul.task-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+}
+li.task-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.2rem 0.55rem;
+  padding: 0.46rem 0.56rem;
+  border-radius: 0.48rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+li.task-row:hover { background: var(--row-hover); }
+li.task-row.selected {
+  background: var(--row-selected);
+  border-color: var(--accent);
+}
+li.task-row.sunk { opacity: 0.86; }
+li.task-row.sunk.selected { opacity: 1; }
+li.task-row.drag-over-before { box-shadow: inset 0 2px 0 0 var(--accent); }
+li.task-row.drag-over-after { box-shadow: inset 0 -2px 0 0 var(--accent); }
+li.task-row.just-moved { animation: rowflash 650ms ease; }
+@keyframes rowflash {
+  0% { background: var(--flash); }
+  100% { background: transparent; }
+}
+li.task-row.selected.just-moved { animation: none; }
+
+.row-main { min-width: 0; }
+.row-title {
+  font-size: 0.89rem;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+li.task-row.selected .row-title { font-weight: 650; }
+.row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.48rem;
+  font-size: 0.76rem;
+  color: var(--muted);
+  margin-top: 0.12rem;
+}
+.st-available { color: var(--accent); font-weight: 620; }
+.st-blocked { color: var(--warn); font-weight: 620; }
+.st-busy { color: var(--busy); font-weight: 560; }
+.st-idle { color: var(--muted); }
+
+.step-pill {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  padding: 0.04rem 0.36rem;
+  border-radius: 0.26rem;
+  background: var(--step-bg);
+  color: var(--step-ink);
+}
+.step-pill.interactive {
+  background: var(--step-int-bg);
+  color: var(--step-int-ink);
+  font-weight: 600;
+}
+.step-pill.ending {
+  background: var(--step-end-bg);
+  color: var(--step-end-ink);
+  font-weight: 600;
+}
+.pill-mini {
+  font-size: 0.69rem;
+  padding: 0.03rem 0.34rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  background: var(--surface);
+}
+.pill-mini.auto { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.pill-mini.reason { border-style: dashed; }
+
+.row-right {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+.row-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.76rem;
+  padding: 0.12rem 0.3rem;
+  border-radius: 0.3rem;
+  cursor: pointer;
+  line-height: 1.1;
+}
+.row-btn:hover {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+}
+.row-btn.close-btn:hover {
+  border-color: var(--warn);
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.row-btn:disabled { opacity: 0.25; cursor: default; }
+
+.drawer {
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.35rem;
+}
+.drawer-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 560;
+  padding: 0.32rem 0.5rem;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+.drawer-toggle:hover { background: var(--row-hover); color: var(--ink); }
+.empty-note {
+  padding: 0.5rem;
+  font-size: 0.83rem;
+  color: var(--faint);
+  font-style: italic;
+}
+
+.sim-log {
+  padding: 0.5rem 0.72rem;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 0.82rem;
+  color: var(--muted);
+  min-height: 2.25rem;
+}
+.sim-log strong { color: var(--ink); }
+
+.demo-block {
+  margin: 0.85rem 0;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.55rem;
+  background: var(--sidebar-bg);
+  font-size: 0.9rem;
+}
+.demo-block p { margin: 0.2rem 0 0; }
+
+.tradeoffs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+  margin-top: 0.85rem;
+}
+.tradeoffs > div {
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  background: var(--paper);
+  font-size: 0.89rem;
+}
+.tradeoffs ul { margin: 0; padding-left: 1.1rem; }
+.tradeoffs li { margin: 0.25rem 0; }
+
+.table-wrap {
+  margin-top: 1.15rem;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+table.compare {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+table.compare th, table.compare td {
+  padding: 0.6rem 0.68rem;
+  text-align: left;
+  vertical-align: top;
+  border-top: 1px solid var(--line);
+}
+table.compare thead th {
+  border-top: 0;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  background: var(--sidebar-bg);
+}
+table.compare tbody th { font-weight: 620; white-space: nowrap; }
+
+section.questions {
+  margin-top: 2.4rem;
+  padding: clamp(1.05rem, 3vw, 1.5rem);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 0.85rem;
+}
+ol.q-list { margin: 0.9rem 0 0; padding-left: 1.25rem; }
+ol.q-list > li { margin: 1rem 0; }
+ol.q-list > li > strong { display: block; margin-bottom: 0.35rem; }
+ul.choices { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.28rem; }
+ul.choices li { font-size: 0.92rem; }
+ul.choices code {
+  font-weight: 650;
+  color: var(--accent);
+  background: var(--accent-soft);
+  margin-right: 0.3rem;
+}
+
+@media (max-width: 640px) {
+  .tradeoffs { grid-template-columns: 1fr; }
+  .row-title { white-space: normal; }
+}
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<main>
+
+<header class="doc-head">
+  <p class="eyebrow">LOO-1063 · Explore · Round 2</p>
+  <h1>Start-Time Stack + On-Demand Sort &amp; Quiet Tasks</h1>
+  <div class="quote">
+    “ok i think i like b. i think we could do something liek what rex does with a button that sorts by terminal status, or alternatively we could sort by what step theyre at<br><br>
+    i think we need something like moving auto to the bottom, or being able to 'close' certain tasks, but auto has to be smart enough to know like if its moving towards the end, that coutn even if its not explicitly auto”
+  </div>
+  <div class="decision-box">
+    <strong>Held fixed from Round 1:</strong> Base order is <strong>B · Start-Time Stack</strong> — newest-started Tasks land at the top (<code>⌘1</code>), manual drags hold in <code>task_orders</code>, and entering a Task or sending a prompt never jumps it.<br>
+    <strong>Open in Round 2:</strong> (1) What does the sort button sort by — <em>terminal status</em> (like Rex) or <em>Graph step</em>? (2) How do we get hands-off Tasks out of the way — <em>smart “heading to end” sink</em>, <em>explicit Close/Park</em>, or both?
+  </div>
+
+  <div class="rule-card">
+    <h3>What counts as “moving towards the end” (even without <code>Auto</code>)?</h3>
+    <p>Loopflow already knows each Task's Graph step, live Graph process, PR merge state, and <code>auto</code> flag. Two clean definitions to feel below:</p>
+    <ul>
+      <li><strong>Heading to done (narrow):</strong> <code>auto</code> is on (and not blocked), <em>or</em> a live Graph is in <code>deliver</code> (past <code>ship-review</code>), <em>or</em> its PR has auto-merge armed / CI settling on GitHub. Tasks in <code>plan</code> or <code>build</code> stay in your active stack.</li>
+      <li><strong>Autonomous run (broad):</strong> Any Task with a live Graph moving on its own (<code>plan</code>, <code>build</code>, or <code>deliver</code>) or PR settling — it sinks while churning and pops back when it reaches <code>ship-review</code>, <code>verify</code>, or blocks.</li>
+    </ul>
+  </div>
+</header>
+
+<!-- VISION B1 -->
+<section class="panel" id="panel-b1">
+  <div class="panel-head">
+    <h2>B1 · Rex-Style Sort Button (by Terminal Status)</h2>
+    <span class="badge proposed">Proposed</span>
+  </div>
+  <p class="truth">Start-Time Stack stays dead calm on its own; clicking one button (<strong>⇅ Status</strong>) snapshots <code>Blocked → Available → Idle → Busy</code> into <code>task_orders</code> once, then freezes again.</p>
+
+  <div class="sim" data-sim="b1"></div>
+
+  <div class="demo-block">
+    <h3>Demo</h3>
+    <p>Work across 6 Tasks: sending prompts and receiving replies never moves a single row. When you finish a stretch and want to sweep waiting agents, click <strong>⇅ Status</strong> in the sidebar header (or shortcut). Blocked and Available Tasks snap to the top once; when you click <code>⌘1</code> and hit Enter, it stays right at <code>⌘1</code>.</p>
+  </div>
+
+  <div class="tradeoffs">
+    <div>
+      <h3>Appeal</h3>
+      <ul>
+        <li>Zero surprise motion — sorting only happens at the exact moment you press the button.</li>
+        <li>Familiar mental model from Rex: calm list between sweeps, one-click triage when you want it.</li>
+        <li>Works identically for Graph Tasks and ad-hoc chat Tasks (every Task has session status).</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Cost &amp; risk</h3>
+      <ul>
+        <li><strong>Cost:</strong> Small (~1 day past PR #2025). Add <code>started_at</code> default in <code>work_in</code>, plus a one-shot sort command/button that writes the sorted IDs to <code>task_orders</code>. Zero migration.</li>
+        <li><strong>Overwrites drags:</strong> pressing Sort replaces any manual drag arrangement you made earlier.</li>
+        <li>Doesn't move quiet <code>Auto</code> / finishing Tasks out of the way on its own unless paired with B3 or B4.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- VISION B2 -->
+<section class="panel" id="panel-b2">
+  <div class="panel-head">
+    <h2>B2 · Sort by Graph Step</h2>
+    <span class="badge proposed">Proposed</span>
+  </div>
+  <p class="truth">Each row shows its Graph step; one click on <strong>⇅ Step</strong> orders your stack by pipeline progress — either finish-line first (<code>verify → ship-review → deliver → build → plan</code>) or interactive stops first.</p>
+
+  <div class="sim" data-sim="b2"></div>
+
+  <div class="demo-block">
+    <h3>Demo</h3>
+    <p>Advance a Task from <code>build</code> to <code>ship-review</code> (or <code>deliver</code> to <code>verify</code>) using the simulator controls, then click <strong>⇅ Step</strong>. Compare <em>Closest to done</em> (finish nearly-done work first) against <em>Needs review first</em> (<code>verify</code> &amp; <code>ship-review</code> on top, <code>build</code>/<code>plan</code> middle, <code>deliver</code> at bottom). Between clicks, nothing moves.</p>
+  </div>
+
+  <div class="tradeoffs">
+    <div>
+      <h3>Appeal</h3>
+      <ul>
+        <li>Matches Loopflow's core work model: clearing <code>verify</code> and <code>ship-review</code> unblocks merges faster than starting new <code>plan</code>s.</li>
+        <li>Shows where every Task actually is in its Graph without clicking into each one.</li>
+        <li>One-shot button means advancing a step never yanks a row while you're in it.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Cost &amp; risk</h3>
+      <ul>
+        <li><strong>Cost:</strong> Small–Medium (1–1.5 days). Batch-read <code>task_graphs</code> + live <code>graph_processes</code> in <code>work_in</code> (no migration) and carry the step label on sidebar rows.</li>
+        <li><strong>Non-<code>code</code> Tasks:</strong> ad-hoc chat Tasks (no Graph) and custom Graphs need a fallback rule (progress fraction + interactive flag, with chat Tasks grouped at top or bottom).</li>
+        <li>A Task can be <code>Blocked</code> on a question during <code>build</code> — step order alone won't float it above an unblocked <code>ship-review</code>.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- VISION B3 -->
+<section class="panel" id="panel-b3">
+  <div class="panel-head">
+    <h2>B3 · Start-Time Stack + Smart “Heading to End” Sink</h2>
+    <span class="badge proposed">Proposed</span>
+  </div>
+  <p class="truth">Tasks advancing toward the finish line without you — explicit <code>Auto</code>, or running <code>deliver</code>, or PR settling — automatically tuck below a hairline and pop back up if they block or reach review.</p>
+
+  <div class="sim" data-sim="b3"></div>
+
+  <div class="demo-block">
+    <h3>Demo</h3>
+    <p>Select <code>LOO-1042</code> at <code>ship-review</code> (with <code>Auto</code> <strong>off</strong>) and click <strong>Advance step →</strong> into <code>deliver</code>. Even though <code>Auto</code> isn't set, Loopflow sees it is heading to the end and glides it under <strong>Heading to done</strong> at the bottom. Advance once more to <code>verify</code> (or click <strong>Block / fail CI</strong>): it pops right back into your active stack. Toggle <em>Narrow</em> vs. <em>Broad</em> above the list to feel whether <code>plan</code>/<code>build</code> runs should sink too.</p>
+  </div>
+
+  <div class="tradeoffs">
+    <div>
+      <h3>Appeal</h3>
+      <ul>
+        <li>Solves the “finished my part, now it's just landing” clutter with zero manual bookkeeping.</li>
+        <li>Smart predicate catches non-<code>Auto</code> Tasks in <code>deliver</code> or waiting on GitHub auto-merge — not just the literal <code>Auto</code> flag.</li>
+        <li>Typing in a normal Task (<code>Available → Busy</code>) still never moves it; only Graph-level autonomous progress sinks.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Cost &amp; risk</h3>
+      <ul>
+        <li><strong>Cost:</strong> Medium (1.5–2 days). Zero schema migration: <code>work_in</code> joins existing <code>task_graphs</code>, <code>task_prs</code> (merge mode / CI), and <code>auto</code> to compute one boolean predicate (<code>heading_to_end</code>) carried on the wire for Desktop &amp; iOS.</li>
+        <li><strong>Broad vs. narrow edge:</strong> if <code>plan</code>/<code>build</code> sink too, kicking off a brand-new Task immediately sends it to the bottom — can feel like the old jump unless limited to post-review / <code>Auto</code>.</li>
+        <li>Doesn't let you manually hide an idle Task you're deliberately ignoring for a few hours.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- VISION B4 (RADICAL) -->
+<section class="panel radical-panel" id="panel-b4">
+  <div class="panel-head">
+    <h2>B4 · Clean Desk: Tidy Button + Smart Sink + Close (Park)</h2>
+    <span class="badge radical">Proposed · Radical</span>
+  </div>
+  <p class="truth">Start-Time Stack at rest, a one-shot <strong>Tidy</strong> control (<strong>Status</strong> or <strong>Step</strong>), smart auto-sink for Tasks heading to the end, and a tab-like <strong>× Close</strong> to park any Task into the bottom drawer without abandoning it.</p>
+
+  <div class="sim" data-sim="b4"></div>
+
+  <div class="demo-block">
+    <h3>Demo</h3>
+    <p>Start with 6 Tasks: two heading to done (<code>Auto</code> in <code>build</code> and a non-<code>Auto</code> Task in <code>deliver</code>) already sit quietly in the bottom drawer. Click <strong>×</strong> on an idle Task you won't touch until tomorrow — it tucks into the drawer (still Working, still running, never abandoned). Click <strong>⇅ Status</strong> or <strong>⇅ Step</strong> to tidy your remaining active stack. If a parked or heading-to-done Task hits <code>verify</code> or blocks, it pops right back into your active stack automatically.</p>
+  </div>
+
+  <div class="tradeoffs">
+    <div>
+      <h3>Appeal</h3>
+      <ul>
+        <li>Combines machine judgment (heading to done) with human judgment (“hide this for now”) in one place.</li>
+        <li>Gives you both Rex's one-shot Status sort and Graph-step sort without ever reordering behind your back.</li>
+        <li>Keeps your visible sidebar at the 3–5 Tasks you're actually steering even when 15 are open.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Cost &amp; risk</h3>
+      <ul>
+        <li><strong>Cost:</strong> Medium–Large (2.5–3.5 days). Needs a Machine-local <code>parked_tasks</code> table (additive migration) beside <code>task_orders</code>, the shared <code>heading_to_end</code> predicate in Rust, one-shot Tidy actions, and the bottom drawer in Desktop &amp; iOS.</li>
+        <li><strong>Naming hazard:</strong> “Close” can be misread as <em>Complete</em> or <em>Abandon</em> — needs unmistakable verb/copy (e.g. <strong>Park</strong> or <strong>Hide</strong>, tooltip “Keep running, tuck below”).</li>
+        <li><strong>Auto-reopen tuning:</strong> a manually parked Task should pop back on <code>Blocked</code> / interactive review, or stay parked until you click it? (See Q4.)</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARISON -->
+<section style="margin-top: 2.2rem;">
+  <h2>Side by side (all built on Start-Time Stack)</h2>
+  <div class="table-wrap">
+    <table class="compare">
+      <thead>
+        <tr>
+          <th></th>
+          <th>B1 · Status Button</th>
+          <th>B2 · Step Sort</th>
+          <th>B3 · Smart Sink</th>
+          <th>B4 · Clean Desk</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th>Default order</th>
+          <td>Newest started + drags</td>
+          <td>Newest started + drags</td>
+          <td>Newest started + drags, hands-off sunk</td>
+          <td>Newest started + drags, tray at bottom</td>
+        </tr>
+        <tr>
+          <th>One-shot sort</th>
+          <td>By terminal status (Rex)</td>
+          <td>By Graph step</td>
+          <td>None (optional add-on)</td>
+          <td>Both: Status or Step</td>
+        </tr>
+        <tr>
+          <th>Handles “heading to end”?</th>
+          <td>No</td>
+          <td>Sorts <code>deliver</code> together</td>
+          <td>Yes — auto-sinks below hairline</td>
+          <td>Yes — auto-sinks into tray</td>
+        </tr>
+        <tr>
+          <th>Manual “Close / Park”?</th>
+          <td>No</td>
+          <td>No</td>
+          <td>No</td>
+          <td>Yes — <code>×</code> tucks without abandoning</td>
+        </tr>
+        <tr>
+          <th>Schema migration?</th>
+          <td>No</td>
+          <td>No</td>
+          <td>No</td>
+          <td>Yes (small local <code>parked_tasks</code>)</td>
+        </tr>
+        <tr>
+          <th>Effort past PR #2025</th>
+          <td>~1 day</td>
+          <td>1–1.5 days</td>
+          <td>1.5–2 days</td>
+          <td>2.5–3.5 days</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- QUESTIONS -->
+<section class="questions" id="questions">
+  <h2>Questions for Round 3 (or to lock in &amp; build)</h2>
+  <p class="sub">Reply with shorthand like <code>1c, 2a, 3b</code> or tweak any piece.</p>
+  <ol class="q-list">
+    <li>
+      <strong>Which sort button do you want in the sidebar header?</strong>
+      <ul class="choices">
+        <li><code>1a</code> <strong>Terminal status only</strong> (Rex-style: <code>Blocked → Available → Idle → Busy</code>)</li>
+        <li><code>1b</code> <strong>Graph step only</strong> (say whether you prefer <em>closest to done</em> or <em>interactive stops first</em>)</li>
+        <li><code>1c</code> <strong>Tiny menu with both</strong> (<code>Status</code> · <code>Graph step</code> · <code>Newest first</code>)</li>
+        <li><code>1d</code> <strong>No sort button</strong> — just Start-Time Stack + drag</li>
+      </ul>
+    </li>
+    <li>
+      <strong>What should count as “heading to the end” (sinking to the bottom)?</strong>
+      <ul class="choices">
+        <li><code>2a</code> <strong>Narrow:</strong> <code>Auto</code> on (unblocked), OR live Graph in <code>deliver</code>, OR PR auto-merge settling on GitHub (keeps <code>plan</code> &amp; <code>build</code> in main stack)</li>
+        <li><code>2b</code> <strong>Broad:</strong> Any live Graph churning autonomously (<code>plan</code>, <code>build</code>, or <code>deliver</code>) sinks until it hits <code>ship-review</code>, <code>verify</code>, or blocks</li>
+        <li><code>2c</code> <strong>Only explicit <code>Auto</code></strong> (don't auto-sink non-Auto runs)</li>
+      </ul>
+    </li>
+    <li>
+      <strong>Do you want manual “Close / Park” on individual Tasks, or is smart auto-sink enough?</strong>
+      <ul class="choices">
+        <li><code>3a</code> <strong>Smart auto-sink only</strong> (B3 — zero extra concepts or verbs)</li>
+        <li><code>3b</code> <strong>Manual Close/Park only</strong> (you choose what tucks away; nothing moves by itself)</li>
+        <li><code>3c</code> <strong>Both</strong> (B4 — hands-off Tasks sink automatically, and <code>×</code> parks anything else you want out of sight)</li>
+      </ul>
+    </li>
+    <li>
+      <strong>If a parked / sunk Task blocks or hits <code>ship-review</code> / <code>verify</code>, what happens?</strong>
+      <ul class="choices">
+        <li><code>4a</code> <strong>Pop back up automatically</strong> into the main stack (at the top)</li>
+        <li><code>4b</code> <strong>Stay in the bottom section</strong>, but highlight its status / badge count on the drawer</li>
+      </ul>
+    </li>
+  </ol>
+</section>
+
+</main>
+
+<script>
+(() => {
+  const STEPS = ['plan', 'build', 'ship-review', 'deliver', 'verify'];
+  const INTERACTIVE_STEPS = new Set(['ship-review', 'verify']);
+
+  const SEED = () => [
+    { id: 'task_9c12', ident: 'LOO-1042', title: 'Keep sidebar Task order steady across turns', step: 'ship-review', graphRunning: false, prAutoMerge: false, status: 'available', auto: false, parked: false, startedAt: 40 },
+    { id: 'task_4b19', ident: 'LOO-1058', title: 'Export Linear sync queue metrics', step: 'build', graphRunning: false, prAutoMerge: false, status: 'blocked', auto: false, parked: false, startedAt: 50 },
+    { id: 'task_7f04', ident: 'LOO-1051', title: 'Add keyboard focus ring to theme chooser', step: 'verify', graphRunning: false, prAutoMerge: false, status: 'available', auto: false, parked: false, startedAt: 30 },
+    { id: 'task_2a80', ident: 'LOO-1039', title: 'Fix SQLite lock contention under 200 agents', step: 'deliver', graphRunning: true, prAutoMerge: true, status: 'busy', auto: false, parked: false, startedAt: 15 },
+    { id: 'task_c311', ident: 'LOO-1027', title: 'Backfill session replay fixtures for Codex', step: 'build', graphRunning: true, prAutoMerge: false, status: 'busy', auto: true, parked: false, startedAt: 20 },
+    { id: 'task_1e77', ident: 'LOO-1019', title: 'Investigate Ghostty paste newline quirk', step: null, graphRunning: false, prAutoMerge: false, status: 'idle', auto: false, parked: false, startedAt: 10 },
+  ];
+
+  const NEW_POOL = [
+    { id: 'task_0d44', ident: 'LOO-1064', title: 'Show branch ahead/behind count in header', step: 'plan', graphRunning: true, status: 'busy', auto: false },
+    { id: 'task_e910', ident: 'LOO-1065', title: 'Trim idle Ghostty buffers on sleep', step: null, graphRunning: false, status: 'available', auto: false },
+    { id: 'task_5a22', ident: 'LOO-1066', title: 'Retry GitHub PR checks on transient 502', step: 'plan', graphRunning: true, status: 'busy', auto: true },
+    { id: 'task_a801', ident: 'LOO-1067', title: 'Expose wave cadence in lf wave show --json', step: 'build', graphRunning: true, status: 'busy', auto: false },
+  ];
+
+  const statusLabel = s => s === 'available' ? 'Available' : s === 'blocked' ? 'Blocked' : s === 'busy' ? 'Busy' : 'Idle';
+  const statusWeight = s => s === 'blocked' ? 0 : s === 'available' ? 1 : s === 'idle' ? 2 : 3;
+
+  function stepWeight(t, stepMode) {
+    if (stepMode === 'interactive') {
+      // Interactive stops waiting first (verify, ship-review), then active dev (build, plan), chat, then deliver (heading out)
+      const map = { 'verify': 0, 'ship-review': 1, 'build': 2, 'plan': 3, 'deliver': 5 };
+      return t.step == null ? 4 : (map[t.step] ?? 4);
+    }
+    // Closest to done first: verify -> deliver -> ship-review -> build -> plan -> chat
+    const map = { 'verify': 0, 'deliver': 1, 'ship-review': 2, 'build': 3, 'plan': 4 };
+    return t.step == null ? 5 : (map[t.step] ?? 5);
+  }
+
+  function headingToEndReason(t, sinkScope) {
+    if (t.status === 'blocked') return null;
+    if (t.auto) return 'Auto';
+    if (t.step === 'deliver' && t.graphRunning) return 'delivering';
+    if (t.prAutoMerge && t.step !== 'verify') return 'PR settling';
+    if (sinkScope === 'broad' && t.graphRunning && !INTERACTIVE_STEPS.has(t.step)) {
+      return `running ${t.step}`;
+    }
+    return null;
+  }
+
+  function createSim(el, mode) {
+    let state;
+    function reset() {
+      state = {
+        tasks: SEED(),
+        savedOrder: [],
+        selectedId: 'task_9c12',
+        stepSortMode: 'closest',  // 'closest' | 'interactive' (for B2 & B4)
+        sinkScope: 'narrow',      // 'narrow' | 'broad' (for B3 & B4)
+        drawerOpen: mode === 'b3', // B3 shows bottom section open; B4 collapses tray by default
+        nextNewIdx: 0,
+        nextClock: 60,
+        lastMovedIds: new Set(),
+        log: initialLog(mode),
+      };
+      render();
+    }
+
+    function initialLog(m) {
+      if (m === 'b1') return 'Newest-started first. Send a prompt on <code>LOO-1042</code> (stays put), then click <strong>⇅ Status</strong> to pull Blocked &amp; Available to the top once.';
+      if (m === 'b2') return 'Click <strong>⇅ Step</strong> to sort by Graph step. Switch between <em>Closest to done</em> and <em>Interactive stops first</em>, or advance a Task\'s step.';
+      if (m === 'b3') return '<code>LOO-1039</code> (non-Auto, in <code>deliver</code>) and <code>LOO-1027</code> (<code>Auto</code>) sit in <strong>Heading to done</strong>. Advance <code>LOO-1042</code> into <code>deliver</code> to watch it sink, then to <code>verify</code> to watch it pop back.';
+      return 'Try <strong>×</strong> on any row to park it, <strong>⇅ Status</strong> or <strong>⇅ Step</strong> to tidy active rows, or advance <code>LOO-1042</code> into <code>deliver</code>.';
+    }
+
+    function taskById(id) { return state.tasks.find(t => t.id === id); }
+
+    function baseOrderSort(arr) {
+      return arr.sort((a, b) => {
+        const inA = state.savedOrder.includes(a.id), inB = state.savedOrder.includes(b.id);
+        if (!inA && !inB) return b.startedAt - a.startedAt || a.id.localeCompare(b.id);
+        if (!inA) return -1;
+        if (!inB) return 1;
+        return state.savedOrder.indexOf(a.id) - state.savedOrder.indexOf(b.id);
+      });
+    }
+
+    function computeLayout() {
+      const list = [...state.tasks];
+      if (mode === 'b1' || mode === 'b2') {
+        return { kind: 'flat', rows: baseOrderSort(list) };
+      }
+      const active = [];
+      const quiet = [];
+      for (const t of list) {
+        const reason = headingToEndReason(t, state.sinkScope);
+        if (mode === 'b4' && t.parked) {
+          quiet.push({ task: t, reason: 'parked' });
+        } else if (reason) {
+          quiet.push({ task: t, reason });
+        } else {
+          active.push(t);
+        }
+      }
+      baseOrderSort(active);
+      quiet.sort((a, b) => b.task.startedAt - a.task.startedAt);
+      return { kind: 'split', active, quiet };
+    }
+
+    function visibleIdsFrom(layout) {
+      if (layout.kind === 'flat') return layout.rows.map(t => t.id);
+      const q = (mode === 'b3' || state.drawerOpen) ? layout.quiet.map(x => x.task.id) : [];
+      return [...layout.active.map(t => t.id), ...q];
+    }
+
+    function trackMovement(beforeIds, afterIds) {
+      const moved = new Set();
+      afterIds.forEach((id, idx) => {
+        const oldIdx = beforeIds.indexOf(id);
+        if (oldIdx !== -1 && oldIdx !== idx) moved.add(id);
+      });
+      state.lastMovedIds = moved;
+    }
+
+    function selectTask(id) {
+      state.selectedId = id;
+      state.lastMovedIds = new Set();
+      const t = taskById(id);
+      state.log = `Opened <strong>${t.ident}</strong> (${statusLabel(t.status)}${t.step ? `, at <code>${t.step}</code>` : ', no graph'}).`;
+      render();
+    }
+
+    function sendPrompt() {
+      const t = taskById(state.selectedId);
+      if (!t) return;
+      const before = visibleIdsFrom(computeLayout());
+      t.status = 'busy';
+      const after = visibleIdsFrom(computeLayout());
+      trackMovement(before, after);
+      const pos = after.indexOf(t.id) + 1;
+      state.log = `Sent prompt to <strong>${t.ident}</strong>: flipped to <code>Busy</code> and stayed put${pos > 0 ? ` at <code>⌘${pos}</code>` : ''}.`;
+      render();
+    }
+
+    function agentReplies() {
+      const before = visibleIdsFrom(computeLayout());
+      const target = state.tasks.find(t => t.status === 'busy' && t.id !== state.selectedId)
+        || state.tasks.find(t => t.status === 'busy');
+      if (!target) {
+        state.log = 'No Busy Tasks right now — send a prompt first.';
+        render();
+        return;
+      }
+      target.status = 'available';
+      target.graphRunning = false;
+      const after = visibleIdsFrom(computeLayout());
+      trackMovement(before, after);
+      state.log = `<strong>${target.ident}</strong> handed back (<code>Available</code>).`;
+      render();
+    }
+
+    function advanceStep() {
+      const t = taskById(state.selectedId);
+      if (!t) return;
+      const before = visibleIdsFrom(computeLayout());
+      const prevStep = t.step;
+      const idx = prevStep ? STEPS.indexOf(prevStep) : -1;
+      const nextStep = STEPS[(idx + 1) % STEPS.length];
+      t.step = nextStep;
+      const isInt = INTERACTIVE_STEPS.has(nextStep);
+      t.graphRunning = !isInt;
+      t.prAutoMerge = nextStep === 'deliver';
+      t.status = isInt ? 'available' : 'busy';
+      if (isInt && t.parked) t.parked = false;
+      const after = visibleIdsFrom(computeLayout());
+      trackMovement(before, after);
+      const sunkNow = (mode === 'b3' || mode === 'b4') && headingToEndReason(t, state.sinkScope);
+      if (sunkNow) {
+        state.log = `<strong>${t.ident}</strong> moved <code>${prevStep ?? 'chat'} → ${nextStep}</code> (${sunkNow}) — tucked to the bottom automatically even with Auto ${t.auto ? 'on' : 'off'}.`;
+      } else if (isInt && (mode === 'b3' || mode === 'b4')) {
+        state.log = `<strong>${t.ident}</strong> reached interactive step <code>${nextStep}</code> — surfaced into your active stack.`;
+      } else {
+        state.log = `<strong>${t.ident}</strong> moved <code>${prevStep ?? 'chat'} → ${nextStep}</code> (${statusLabel(t.status)}).`;
+      }
+      render();
+    }
+
+    function triggerBlock() {
+      const t = taskById(state.selectedId);
+      if (!t) return;
+      const before = visibleIdsFrom(computeLayout());
+      const wasQuiet = (mode === 'b3' || mode === 'b4') && (t.parked || headingToEndReason(t, state.sinkScope));
+      t.status = 'blocked';
+      t.graphRunning = false;
+      t.parked = false;
+      const after = visibleIdsFrom(computeLayout());
+      trackMovement(before, after);
+      state.log = wasQuiet
+        ? `<strong>${t.ident}</strong> hit a blocker / failed CI — popped right back up into your active stack!`
+        : `<strong>${t.ident}</strong> is now <code>Blocked</code> (stayed in place until you press Sort).`;
+      render();
+    }
+
+    function toggleAuto() {
+      const t = taskById(state.selectedId);
+      if (!t) return;
+      const before = visibleIdsFrom(computeLayout());
+      t.auto = !t.auto;
+      const after = visibleIdsFrom(computeLayout());
+      trackMovement(before, after);
+      state.log = `Turned <code>Auto</code> <strong>${t.auto ? 'on' : 'off'}</strong> for <strong>${t.ident}</strong>.`;
+      render();
+    }
+
+    function togglePark(id) {
+      const t = taskById(id);
+      if (!t) return;
+      const before = visibleIdsFrom(computeLayout());
+      t.parked = !t.parked;
+      const after = visibleIdsFrom(computeLayout());
+      trackMovement(before, after);
+      state.log = t.parked
+        ? `Closed (parked) <strong>${t.ident}</strong> from the active list — still Working and running in the bottom tray.`
+        : `Reopened <strong>${t.ident}</strong> back into your active stack.`;
+      render();
+    }
+
+    function sortByStatus() {
+      const before = visibleIdsFrom(computeLayout());
+      const sorted = [...state.tasks].sort((a, b) =>
+        statusWeight(a.status) - statusWeight(b.status) || b.startedAt - a.startedAt || a.id.localeCompare(b.id)
+      );
+      state.savedOrder = sorted.map(t => t.id);
+      const after = visibleIdsFrom(computeLayout());
+      trackMovement(before, after);
+      state.log = `One-shot <strong>Sort by status</strong> saved to <code>task_orders</code> (<code>Blocked → Available → Idle → Busy</code>). Frozen again until your next drag or sort.`;
+      render();
+    }
+
+    function sortByStep() {
+      const before = visibleIdsFrom(computeLayout());
+      const sorted = [...state.tasks].sort((a, b) =>
+        stepWeight(a, state.stepSortMode) - stepWeight(b, state.stepSortMode) || b.startedAt - a.startedAt || a.id.localeCompare(b.id)
+      );
+      state.savedOrder = sorted.map(t => t.id);
+      const after = visibleIdsFrom(computeLayout());
+      trackMovement(before, after);
+      const desc = state.stepSortMode === 'closest'
+        ? '<code>verify → deliver → ship-review → build → plan → chat</code>'
+        : '<code>verify → ship-review → build → plan → chat → deliver</code>';
+      state.log = `One-shot <strong>Sort by step</strong> saved to <code>task_orders</code> (${desc}).`;
+      render();
+    }
+
+    function sortNewest() {
+      const before = visibleIdsFrom(computeLayout());
+      state.savedOrder = [];
+      const after = visibleIdsFrom(computeLayout());
+      trackMovement(before, after);
+      state.log = `Reset order to <strong>Newest started first</strong>.`;
+      render();
+    }
+
+    function startNewTask() {
+      const before = visibleIdsFrom(computeLayout());
+      const tpl = NEW_POOL[state.nextNewIdx % NEW_POOL.length];
+      state.nextNewIdx += 1;
+      const suffix = state.nextNewIdx > NEW_POOL.length ? `-${state.nextNewIdx}` : '';
+      const task = {
+        id: `${tpl.id}${suffix}`,
+        ident: suffix ? `LOO-${1063 + state.nextNewIdx}` : tpl.ident,
+        title: tpl.title,
+        step: tpl.step,
+        graphRunning: tpl.graphRunning,
+        prAutoMerge: false,
+        status: tpl.status,
+        auto: tpl.auto,
+        parked: false,
+        startedAt: state.nextClock++,
+      };
+      state.tasks.push(task);
+      const after = visibleIdsFrom(computeLayout());
+      trackMovement(before, after);
+      const sunk = (mode === 'b3' || mode === 'b4') && headingToEndReason(task, state.sinkScope);
+      state.log = sunk
+        ? `Started <strong>${task.ident}</strong> (${sunk}): tucked straight into the bottom quiet group.`
+        : `Started <strong>${task.ident}</strong>: landed at the top of your active stack (<code>⌘1</code>).`;
+      render();
+    }
+
+    function reorderRow(fromId, targetId, side) {
+      if (fromId === targetId) return;
+      const before = visibleIdsFrom(computeLayout());
+      const current = [...before];
+      for (const t of state.tasks) if (!current.includes(t.id)) current.push(t.id);
+      const fromIdx = current.indexOf(fromId);
+      if (fromIdx === -1) return;
+      current.splice(fromIdx, 1);
+      const targetIdx = current.indexOf(targetId);
+      if (targetIdx === -1) return;
+      current.splice(side === 'after' ? targetIdx + 1 : targetIdx, 0, fromId);
+      state.savedOrder = current;
+      const after = visibleIdsFrom(computeLayout());
+      trackMovement(before, after);
+      state.log = `Dragged <strong>${taskById(fromId).ident}</strong> ${side} <strong>${taskById(targetId).ident}</strong> (saved to <code>task_orders</code>).`;
+      render();
+    }
+
+    function nudgeRow(id, delta, scopeIds) {
+      const idx = scopeIds.indexOf(id);
+      const next = idx + delta;
+      if (idx === -1 || next < 0 || next >= scopeIds.length) return;
+      reorderRow(id, scopeIds[next], delta > 0 ? 'after' : 'before');
+    }
+
+    let dragSrcId = null;
+
+    function buildRow(t, slotNum, scopeIds, opts = {}) {
+      const posInScope = scopeIds.indexOf(t.id);
+      const li = document.createElement('li');
+      li.className = 'task-row'
+        + (t.id === state.selectedId ? ' selected' : '')
+        + (opts.sunk ? ' sunk' : '')
+        + (state.lastMovedIds.has(t.id) ? ' just-moved' : '');
+      li.draggable = !opts.sunk;
+
+      const stepClass = t.step == null ? '' : INTERACTIVE_STEPS.has(t.step) ? ' interactive' : t.step === 'deliver' ? ' ending' : '';
+      const stepLabel = t.step ? `${t.step}${t.graphRunning ? ' ▸' : ''}` : 'chat';
+
+      const metaBits = [
+        `<span>${t.ident}</span>`,
+        `<span class="st-${t.status}">${statusLabel(t.status)}</span>`,
+        `<span class="step-pill${stepClass}">${stepLabel}</span>`,
+      ];
+      if (t.auto) metaBits.push(`<span class="pill-mini auto">Auto</span>`);
+      if (opts.reason && opts.reason !== 'Auto') metaBits.push(`<span class="pill-mini reason">${opts.reason}</span>`);
+
+      li.innerHTML = `
+        <div class="row-main">
+          <div class="row-title">${t.title}</div>
+          <div class="row-meta">${metaBits.join('')}</div>
+        </div>
+        <div class="row-right">
+          ${!opts.sunk ? `<button type="button" class="row-btn up-btn" title="Move up" ${posInScope > 0 ? '' : 'disabled'}>↑</button><button type="button" class="row-btn down-btn" title="Move down" ${posInScope < scopeIds.length - 1 ? '' : 'disabled'}>↓</button>` : ''}
+          ${mode === 'b4' && !opts.sunk ? `<button type="button" class="row-btn close-btn" title="Close (park below without abandoning)">×</button>` : ''}
+          ${mode === 'b4' && t.parked ? `<button type="button" class="row-btn reopen-btn" title="Reopen into active list">Reopen</button>` : ''}
+          ${slotNum && slotNum <= 9 ? `<kbd>⌘${slotNum}</kbd>` : ''}
+        </div>
+      `;
+
+      li.addEventListener('click', e => {
+        if (e.target.closest('button')) return;
+        selectTask(t.id);
+      });
+
+      const up = li.querySelector('.up-btn');
+      const down = li.querySelector('.down-btn');
+      const closeBtn = li.querySelector('.close-btn');
+      const reopenBtn = li.querySelector('.reopen-btn');
+      if (up) up.addEventListener('click', e => { e.stopPropagation(); nudgeRow(t.id, -1, scopeIds); });
+      if (down) down.addEventListener('click', e => { e.stopPropagation(); nudgeRow(t.id, 1, scopeIds); });
+      if (closeBtn) closeBtn.addEventListener('click', e => { e.stopPropagation(); togglePark(t.id); });
+      if (reopenBtn) reopenBtn.addEventListener('click', e => { e.stopPropagation(); togglePark(t.id); });
+
+      if (!opts.sunk) {
+        li.addEventListener('dragstart', e => {
+          dragSrcId = t.id;
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', t.id);
+        });
+        li.addEventListener('dragover', e => {
+          if (!dragSrcId || dragSrcId === t.id) return;
+          e.preventDefault();
+          const rect = li.getBoundingClientRect();
+          const side = (e.clientY - rect.top) < rect.height / 2 ? 'before' : 'after';
+          li.classList.toggle('drag-over-before', side === 'before');
+          li.classList.toggle('drag-over-after', side === 'after');
+        });
+        li.addEventListener('dragleave', () => li.classList.remove('drag-over-before', 'drag-over-after'));
+        li.addEventListener('drop', e => {
+          e.preventDefault();
+          const rect = li.getBoundingClientRect();
+          const side = (e.clientY - rect.top) < rect.height / 2 ? 'before' : 'after';
+          li.classList.remove('drag-over-before', 'drag-over-after');
+          if (dragSrcId) reorderRow(dragSrcId, t.id, side);
+          dragSrcId = null;
+        });
+      }
+      return li;
+    }
+
+    function render() {
+      const layout = computeLayout();
+      const selected = taskById(state.selectedId);
+      el.innerHTML = '';
+
+      // Top action controls
+      const controls = document.createElement('div');
+      controls.className = 'sim-controls';
+      controls.innerHTML = `
+        <button type="button" class="primary act-send">Send prompt → ${selected ? selected.ident : ''}</button>
+        <button type="button" class="act-step">Advance step →</button>
+        <button type="button" class="act-block">Block / fail CI</button>
+        <button type="button" class="act-auto">Auto: ${selected && selected.auto ? 'On' : 'Off'}</button>
+        <button type="button" class="act-new">+ New Task</button>
+        <span class="spacer"></span>
+        <button type="button" class="ghost act-reset">Reset</button>
+      `;
+      controls.querySelector('.act-send').addEventListener('click', sendPrompt);
+      controls.querySelector('.act-step').addEventListener('click', advanceStep);
+      controls.querySelector('.act-block').addEventListener('click', triggerBlock);
+      controls.querySelector('.act-auto').addEventListener('click', toggleAuto);
+      controls.querySelector('.act-new').addEventListener('click', startNewTask);
+      controls.querySelector('.act-reset').addEventListener('click', reset);
+      el.appendChild(controls);
+
+      // Mode-specific sub-bar (step order direction or smart-sink scope)
+      if (mode === 'b2') {
+        const sub = document.createElement('div');
+        sub.className = 'sim-subbar';
+        sub.innerHTML = `
+          <span>Step sort rule:</span>
+          <span class="seg">
+            <button type="button" data-step="closest" aria-pressed="${state.stepSortMode === 'closest'}">Closest to done first</button>
+            <button type="button" data-step="interactive" aria-pressed="${state.stepSortMode === 'interactive'}">Interactive stops first</button>
+          </span>
+        `;
+        sub.querySelectorAll('button[data-step]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            state.stepSortMode = btn.dataset.step;
+            sortByStep();
+          });
+        });
+        el.appendChild(sub);
+      } else if (mode === 'b3' || mode === 'b4') {
+        const sub = document.createElement('div');
+        sub.className = 'sim-subbar';
+        sub.innerHTML = `
+          <span>“Heading to end” rule:</span>
+          <span class="seg">
+            <button type="button" data-sink="narrow" aria-pressed="${state.sinkScope === 'narrow'}">Narrow (Auto · deliver · PR settling)</button>
+            <button type="button" data-sink="broad" aria-pressed="${state.sinkScope === 'broad'}">Broad (+ any live plan/build)</button>
+          </span>
+        `;
+        sub.querySelectorAll('button[data-sink]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const before = visibleIdsFrom(computeLayout());
+            state.sinkScope = btn.dataset.sink;
+            const after = visibleIdsFrom(computeLayout());
+            trackMovement(before, after);
+            state.log = state.sinkScope === 'broad'
+              ? 'Switched to <strong>Broad</strong>: any live Graph (<code>plan</code>, <code>build</code>, <code>deliver</code>) sinks while churning and pops up at interactive steps.'
+              : 'Switched to <strong>Narrow</strong>: only <code>Auto</code>, <code>deliver</code>, and PR auto-merge sink; <code>plan</code> &amp; <code>build</code> stay in your active stack.';
+            render();
+          });
+        });
+        el.appendChild(sub);
+      }
+
+      const body = document.createElement('div');
+      body.className = 'sim-body';
+
+      // Sidebar header with Rex-style / Tidy sort buttons
+      const head = document.createElement('div');
+      head.className = 'sidebar-header';
+      let sortButtons = '';
+      if (mode === 'b1') {
+        sortButtons = `<button type="button" class="sort-btn act-sort-status">⇅ Status</button><button type="button" class="sort-btn secondary act-sort-newest">Newest</button>`;
+      } else if (mode === 'b2') {
+        sortButtons = `<button type="button" class="sort-btn act-sort-step">⇅ Step</button><button type="button" class="sort-btn secondary act-sort-newest">Newest</button>`;
+      } else if (mode === 'b4') {
+        sortButtons = `<button type="button" class="sort-btn act-sort-status">⇅ Status</button><button type="button" class="sort-btn secondary act-sort-step">⇅ Step</button><button type="button" class="sort-btn secondary act-sort-newest">Newest</button>`;
+      }
+      head.innerHTML = `
+        <span class="repo-name">loopflow · ${state.tasks.length} working</span>
+        <span class="header-actions">${sortButtons}</span>
+      `;
+      const sStatus = head.querySelector('.act-sort-status');
+      const sStep = head.querySelector('.act-sort-step');
+      const sNewest = head.querySelector('.act-sort-newest');
+      if (sStatus) sStatus.addEventListener('click', sortByStatus);
+      if (sStep) sStep.addEventListener('click', sortByStep);
+      if (sNewest) sNewest.addEventListener('click', sortNewest);
+      body.appendChild(head);
+
+      let slot = 1;
+      if (layout.kind === 'flat') {
+        const ids = layout.rows.map(t => t.id);
+        const ul = document.createElement('ul');
+        ul.className = 'task-list';
+        layout.rows.forEach(t => ul.appendChild(buildRow(t, slot++, ids)));
+        body.appendChild(ul);
+      } else {
+        const activeIds = layout.active.map(t => t.id);
+        const ul = document.createElement('ul');
+        ul.className = 'task-list';
+        if (layout.active.length === 0) {
+          ul.innerHTML = `<li class="empty-note">All caught up — everything is heading to done or parked below.</li>`;
+        } else {
+          layout.active.forEach(t => ul.appendChild(buildRow(t, slot++, activeIds)));
+        }
+        body.appendChild(ul);
+
+        if (layout.quiet.length > 0) {
+          if (mode === 'b3') {
+            const lbl = document.createElement('div');
+            lbl.className = 'zone-label with-rule';
+            lbl.innerHTML = `<span>Heading to done · ${layout.quiet.length}</span><span>surfaces if blocked or at review</span>`;
+            body.appendChild(lbl);
+            const ulQ = document.createElement('ul');
+            ulQ.className = 'task-list';
+            const qIds = layout.quiet.map(x => x.task.id);
+            layout.quiet.forEach(({ task, reason }) => ulQ.appendChild(buildRow(task, slot++, qIds, { sunk: true, reason })));
+            body.appendChild(ulQ);
+          } else {
+            const drawer = document.createElement('div');
+            drawer.className = 'drawer';
+            const parkedCount = layout.quiet.filter(x => x.task.parked).length;
+            const autoCount = layout.quiet.length - parkedCount;
+            const parts = [];
+            if (autoCount) parts.push(`${autoCount} heading to done`);
+            if (parkedCount) parts.push(`${parkedCount} closed`);
+            const toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'drawer-toggle';
+            toggle.innerHTML = `<span>${state.drawerOpen ? '▾' : '▸'} ${parts.join(' · ')}</span><span>surfaces if blocked</span>`;
+            toggle.addEventListener('click', () => { state.drawerOpen = !state.drawerOpen; render(); });
+            drawer.appendChild(toggle);
+            if (state.drawerOpen) {
+              const ulQ = document.createElement('ul');
+              ulQ.className = 'task-list';
+              const qIds = layout.quiet.map(x => x.task.id);
+              layout.quiet.forEach(({ task, reason }) => ulQ.appendChild(buildRow(task, null, qIds, { sunk: true, reason })));
+              drawer.appendChild(ulQ);
+            }
+            body.appendChild(drawer);
+          }
+        }
+      }
+
+      body.appendChild(document.createTextNode(''));
+      el.appendChild(body);
+
+      const log = document.createElement('div');
+      log.className = 'sim-log';
+      log.innerHTML = state.log;
+      el.appendChild(log);
+    }
+
+    reset();
+  }
+
+  document.querySelectorAll('.sim[data-sim]').forEach(el => createSim(el, el.dataset.sim));
+})();
+</script>
+</body>
+</html>

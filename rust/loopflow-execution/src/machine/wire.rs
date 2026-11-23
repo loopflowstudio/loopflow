@@ -282,14 +282,11 @@ pub struct SessionBoundary {
     /// started before then still send it. TODO(LOO-838): delete it with
     /// `ContextMoment::TaskUpdates`, once none of them is live.
     pub printed: Vec<String>,
-    /// Where an idle conversation takes steers and Task updates. From Claude,
-    /// the key file it publishes for the conversation's cross-session inbox,
-    /// `sessions/<pid>.<sha256 of socket>.key` in its configuration
-    /// directory; the server reads the key when it sends. From an OpenCode
-    /// or Pi work session, the Unix socket its plugin or extension listens
-    /// on. Null from Codex, a worker and a Claude with no inbox.
+    /// Where an idle conversation takes steers and Task updates: Claude's
+    /// inbox key, or an OpenCode or Pi work session's socket. Null from
+    /// Codex, a worker and a Claude with no inbox.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub inbox: Option<std::path::PathBuf>,
+    pub inbox: Option<crate::steer::Inbox>,
 }
 
 /// Where in a native conversation a hook fired.

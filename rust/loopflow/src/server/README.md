@@ -691,7 +691,7 @@ provider ([below](#opencode-and-pi-report-from-inside-the-provider)):
 ```text
 → {"type":"hello","revision":7,"min_revision":7,"client":{"kind":"hook","platform":"macos","name":"lf __context-block","version":"0.15.1"}}
 ← {"type":"welcome",…}
-→ {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null,"printed":[],"inbox":"/Users/me/.claude/sessions/4242.9c1d….key"},"select":null,"request_id":null}
+→ {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null,"printed":[],"inbox":{"claude":"/Users/me/.claude/sessions/4242.9c1d….key"}},"select":null,"request_id":null}
 ← {"type":"response","id":"stop","trace_id":"…","result":{"steers":null,"update":null,"waiting":false}}
 ```
 
@@ -703,12 +703,13 @@ such as a thread a Codex app-server opened, has no provider context: its hook
 sends only `stop`, with a null `adapter`, and the server only refreshes
 planning. `gap` is the hook's open recording
 gap, `{first, last}`, or null. `inbox` is where the conversation
-takes messages while idle. From Claude it is the key file the conversation
-publishes for peers of its cross-session inbox,
-`sessions/<pid>.<sha256 of socket>.key` in its configuration directory, found
-from the `CLAUDE_CODE_MESSAGING_SOCKET` Claude gives its children. From an
-OpenCode or Pi work session it is the Unix socket its plugin or extension
-listens on. It is null from Codex and from workers.
+takes messages while idle, and names which kind it is. From Claude it is
+`{"claude": key}`, the key file the conversation publishes for peers of its
+cross-session inbox, `sessions/<pid>.<sha256 of socket>.key` in its
+configuration directory, found from the `CLAUDE_CODE_MESSAGING_SOCKET` Claude
+gives its children. From an OpenCode or Pi work session it is
+`{"socket": path}`, the Unix socket its plugin or extension listens on. It is
+null from Codex and from workers.
 
 Before answering, the server records what the boundary says: the native turn
 (started at a prompt, yielded at a turn end, with the open background tools and
@@ -772,10 +773,10 @@ The server keeps no list of conversations (`wake.rs`); it reads them from the
 store. A work session is idle when its last recorded native turn yielded
 (`session_activity`) and its AgentProcess is live, and reachable through its
 Codex app-server (`agent_sessions.agent_endpoint`) or what its boundaries
-saved in `agent_sessions.agent_inbox`: a Claude inbox key, where
+saved: a Claude inbox key in `agent_sessions.agent_inbox`, where
 `sessions/<pid>.json` beside the key names the socket and must still name the
-conversation, or the socket an OpenCode plugin or Pi extension listens on. The
-Session's provider says which. One
+conversation, or the socket an OpenCode plugin or Pi extension listens on in
+`agent_sessions.agent_socket`. One
 server thread waits on the store's change signal (`store::changes`) and reads
 the `task_updates` revision and the newest steer at start and whenever either
 moves; every idle conversation with news gets its unread steers, Task updates

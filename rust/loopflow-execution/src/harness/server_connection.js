@@ -33,9 +33,9 @@ function ownNews(callback, log, args = [], options = {}) {
 // hook sends, one session.boundary, close. The server's connection slot is
 // back as soon as the answer arrives. Nothing here throws: an unanswered
 // boundary is a recording gap, one `recording gap` line per changed failure
-// through `log`, and the next boundary sends the open gap. `inbox` is where
-// the server wakes this conversation once it is idle (`wakeSocket`).
-function machineServer(delivery, log, inbox = null) {
+// through `log`, and the next boundary sends the open gap. `wake` is the
+// socket where the server wakes this conversation once it is idle (`wakeSocket`).
+function machineServer(delivery, log, wake = null) {
   const adapter = process.env.LF_PROVIDER_CONTEXT ? JSON.parse(process.env.LF_PROVIDER_CONTEXT) : null;
   let queue = Promise.resolve();
   let gap;
@@ -85,7 +85,8 @@ function machineServer(delivery, log, inbox = null) {
     if (skippable && gap) return undefined;
     try {
       const answer = await ask({ kind: "session.boundary", moment, delivery, adapter, callback,
-        gap: gap ? { first: gap.first, last: gap.last } : null, printed: [], inbox });
+        gap: gap ? { first: gap.first, last: gap.last } : null, printed: [],
+        inbox: wake ? { socket: wake } : null });
       if (gap) log(`recording gap closed (${gap.message}); lf records from here`);
       gap = undefined;
       return answer;

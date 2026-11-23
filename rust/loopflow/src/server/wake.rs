@@ -16,7 +16,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use serde_json::json;
 
-use loopflow_execution::steer::{IdleConversation, IdleReach};
+use loopflow_execution::steer::{IdleConversation, IdleReach, Inbox};
 use loopflow_storage::sqlite::SqliteStore;
 
 /// How long the watcher waits for a store change before reading the revision
@@ -124,12 +124,12 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
         // Connect before claiming, so an unreachable conversation keeps its
         // news for its next boundary.
         let reach = match reach {
-            IdleReach::Claude(key) => match open_inbox(key, thread)? {
-                Some((socket, token)) => Reach::Inbox(socket, token),
+            IdleReach::Inbox(Inbox::Claude(key)) => match open_inbox(key, thread)? {
+                Some((socket, token)) => Reach::Claude(socket, token),
                 None => return Ok(()),
             },
             IdleReach::Codex(endpoint) => Reach::Codex(endpoint),
-            IdleReach::Extension(socket) => Reach::Extension(open_extension(socket)?),
+            IdleReach::Inbox(Inbox::Socket(socket)) => Reach::Socket(open_socket(socket)?),
         };
         let steers = loopflow_execution::steer::claim(
             store,
@@ -142,13 +142,11 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
             return Ok(());
         };
         match reach {
-            Reach::Inbox(mut socket, token) => {
+            Reach::Claude(mut socket, token) => {
                 send_inbox(&mut socket, &token, thread, &steers.text)?
             }
             Reach::Codex(endpoint) => start_codex_turn(endpoint, thread, &steers.text)?,
-            Reach::Extension(mut socket) => {
-                start_extension_turn(&mut socket, thread, &steers.text)?
-            }
+            Reach::Socket(mut socket) => start_extension_turn(&mut socket, thread, &steers.text)?,
         }
         store.record_woken(adapter)?;
         loopflow_execution::steer::delivered(store, session, &steers);
@@ -160,14 +158,14 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
 }
 
 enum Reach<'a> {
-    Inbox(UnixStream, String),
+    Claude(UnixStream, String),
     Codex(&'a Path),
-    Extension(UnixStream),
+    Socket(UnixStream),
 }
 
 /// The socket an OpenCode plugin or Pi extension listens on while its work
 /// session runs.
-fn open_extension(socket: &Path) -> Result<UnixStream> {
+fn open_socket(socket: &Path) -> Result<UnixStream> {
     let stream = UnixStream::connect(socket)
         .with_context(|| format!("wake socket {} unreachable", socket.display()))?;
     stream.set_write_timeout(Some(SEND_DEADLINE))?;
@@ -269,7 +267,7 @@ mod tests {
     use super::{after_turn, wake_idle, Watcher};
     use crate::server::wire::{BoundaryMoment, SessionBoundary};
     use loopflow_execution::context_block::ContextDelivery;
-    use loopflow_execution::steer::{NativeBoundary, SteerAdapter};
+    use loopflow_execution::steer::{Inbox, NativeBoundary, SteerAdapter};
     use loopflow_storage::sqlite::SqliteStore;
     use std::io::Read;
     use std::os::unix::net::UnixListener;
@@ -421,7 +419,7 @@ mod tests {
                     callback: serde_json::json!({"hook_event_name":"Stop","session_id":"native"}),
                     gap: None,
                     printed: Vec::new(),
-                    inbox: Some(inbox.to_owned()),
+                    inbox: Some(Inbox::Claude(inbox.to_owned())),
                 },
             )
             .unwrap();
@@ -453,7 +451,7 @@ mod tests {
                         callback,
                         gap: None,
                         printed: Vec::new(),
-                        inbox: Some(socket.to_owned()),
+                        inbox: Some(Inbox::Socket(socket.to_owned())),
                     },
                 )
                 .unwrap();

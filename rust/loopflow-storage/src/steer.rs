@@ -40,12 +40,23 @@ pub struct IdleConversation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IdleReach {
-    /// The inbox key file Claude publishes beside its session record.
-    Claude(std::path::PathBuf),
     /// The Session's private app-server.
     Codex(std::path::PathBuf),
+    /// What the provider's own code listens on.
+    Inbox(Inbox),
+}
+
+/// Where code the provider loads takes a message for an idle conversation,
+/// as its hook, plugin or extension names it at a boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum Inbox {
+    /// The key file Claude publishes for peers of its cross-session inbox,
+    /// `sessions/<pid>.<sha256 of socket>.key` in its configuration
+    /// directory; the server reads the key when it sends.
+    Claude(std::path::PathBuf),
     /// The Unix socket an OpenCode plugin or Pi extension listens on.
-    Extension(std::path::PathBuf),
+    Socket(std::path::PathBuf),
 }
 
 impl std::fmt::Debug for SteerAdapter {

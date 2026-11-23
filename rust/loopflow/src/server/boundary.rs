@@ -500,7 +500,9 @@ mod tests {
             &delivery,
             serde_json::json!({"session_id":"native","hook_event_name":"OpenCodeMessagesTransform"}),
         );
-        listening.inbox = Some("/tmp/lf-wake-fixture/s".into());
+        listening.inbox = Some(loopflow_execution::steer::Inbox::Socket(
+            "/tmp/lf-wake-fixture/s".into(),
+        ));
         let (_, after) = answer(&store, &listening).unwrap();
         assert!(
             matches!(&after, Some(After::Reachable(session)) if session == "session"),

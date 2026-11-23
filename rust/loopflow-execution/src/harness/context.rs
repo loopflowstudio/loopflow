@@ -559,7 +559,7 @@ end();
 await new Promise((resolve) => setTimeout(resolve, 200));
 // Only a work session listens for the server while it is idle. A message
 // for its conversation starts a turn; one for another is not taken.
-const inbox = seen.requests.at(-1)?.inbox ?? null;
+const inbox = seen.requests.at(-1)?.inbox?.socket ?? null;
 assert.equal(inbox !== null, {wakes});
 if (inbox) {{
   assert.equal(await wake(inbox, 'native', 'use the other table'), 'started\n');
@@ -593,7 +593,7 @@ await close();
         );
         let requests = managed.server["requests"].as_array().unwrap();
         assert_eq!(requests[0]["callback"]["session_id"], "native");
-        assert!(requests[0]["inbox"].is_string(), "{}", requests[0]);
+        assert!(requests[0]["inbox"]["socket"].is_string(), "{}", requests[0]);
         assert_eq!(
             requests[2]["callback"],
             serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit"})
@@ -711,7 +711,7 @@ await fire('agent_settled', {{ type: 'agent_settled' }});
 assert.deepEqual(steers, [["STEER ", {{ deliverAs: "steer" }}]]);
 // Only a work session listens for the server while it is idle. A message
 // for its conversation starts a turn; one for another is not taken.
-const inbox = seen.requests.at(-1)?.inbox ?? null;
+const inbox = seen.requests.at(-1)?.inbox?.socket ?? null;
 assert.equal(inbox !== null, {wakes});
 if (inbox) {{
   assert.equal(await wake(inbox, '/pi/session.jsonl', 'use the other table'), 'started\n');

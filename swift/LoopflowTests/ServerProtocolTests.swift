@@ -198,7 +198,7 @@ struct ServerProtocolTests {
                                "prompt_id": .string("p-12")]),
             gap: .object(["first": .integer(1794358000), "last": .integer(1794358020)]),
             printed: ["54dc6432-26f1-43fe-ad9d-20b7e91bad69"],
-            inbox: .string("/Users/maya/.claude/sessions/4242.9c1d.key")), select: nil, requestID: nil)
+            inbox: .object(["claude": .string("/Users/maya/.claude/sessions/4242.9c1d.key")])), select: nil, requestID: nil)
         #expect(try encoded(boundary) == value("session_boundary"))
         guard case .response(_, _, .object(let answer)) = try answer("session_boundary_answer") else {
             Issue.record("Missing boundary answer"); return

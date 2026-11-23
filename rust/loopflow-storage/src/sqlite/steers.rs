@@ -230,21 +230,17 @@ impl SqliteStore {
     /// `agent_inbox`, an OpenCode or Pi socket in `agent_socket`. Written only
     /// when it changes, which is the answer.
     pub fn record_agent_inbox(&self, adapter: &SteerAdapter, inbox: &Inbox) -> StoreResult<bool> {
-        let (Inbox::Claude(path) | Inbox::Socket(path)) = inbox;
+        let (column, path) = match inbox {
+            Inbox::Claude(path) => ("agent_inbox", path),
+            Inbox::Socket(path) => ("agent_socket", path),
+        };
         let conn = self.conn.lock().expect("store mutex poisoned");
         let changed = conn.execute(
-            match inbox {
-                Inbox::Claude(_) => {
-                    "UPDATE agent_sessions SET agent_inbox=?3 WHERE id=?1
-                    AND agent_process_id=?2 AND agent_inbox IS NOT ?3 AND EXISTS(SELECT 1
+            &format!(
+                "UPDATE agent_sessions SET {column}=?3 WHERE id=?1
+                    AND agent_process_id=?2 AND {column} IS NOT ?3 AND EXISTS(SELECT 1
                     FROM steer_adapters a WHERE a.agent_process_id=?2 AND a.capability=?4)"
-                }
-                Inbox::Socket(_) => {
-                    "UPDATE agent_sessions SET agent_socket=?3 WHERE id=?1
-                    AND agent_process_id=?2 AND agent_socket IS NOT ?3 AND EXISTS(SELECT 1
-                    FROM steer_adapters a WHERE a.agent_process_id=?2 AND a.capability=?4)"
-                }
-            },
+            ),
             params![
                 adapter.session,
                 adapter.agent_process_id,
@@ -289,14 +285,13 @@ impl SqliteStore {
                AND (?1 IS NULL OR s.id=?1)",
         )?;
         let rows = statement.query_map([session], |row| {
+            // The query keeps only reachable conversations: with no endpoint
+            // or socket, the Claude key is there.
             let path = |column| row.get::<_, Option<String>>(column);
-            let reach = match (path(5)?, path(6)?, path(9)?) {
-                (Some(endpoint), _, _) => IdleReach::Codex(endpoint.into()),
-                (None, _, Some(socket)) => IdleReach::Inbox(Inbox::Socket(socket.into())),
-                (None, key, None) => IdleReach::Inbox(Inbox::Claude(
-                    key.expect("the query keeps a reachable conversation")
-                        .into(),
-                )),
+            let reach = match (path(5)?, path(9)?) {
+                (Some(endpoint), _) => IdleReach::Codex(endpoint.into()),
+                (None, Some(socket)) => IdleReach::Inbox(Inbox::Socket(socket.into())),
+                (None, None) => IdleReach::Inbox(Inbox::Claude(row.get::<_, String>(6)?.into())),
             };
             let identity = row
                 .get::<_, Option<u32>>(7)?

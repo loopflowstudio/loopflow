@@ -1,0 +1,23 @@
+at: 8cff0d3e963c14f695cf6e9b0ba12b129b089211
+first:
+  - path: docs/work.md
+    why: How a Wave, its Project and Tasks travel
+  - path: rust/loopflow-storage/src/migrations/remove_chapters.sql
+    why: Which Project survives and where existing Tasks go
+  - path: rust/loopflow-storage/src/sqlite/children.rs
+    why: Task membership through the Wave's Project
+  - path: rust/loopflow-execution/src/ops/wave_lifecycle.rs
+    why: Register, rename and remove a Wave
+  - path: rust/loopflow-execution/src/ops/linear.rs
+    why: Connect the Wave to a new or existing Project
+  - path: rust/loopflow-storage/src/sqlite/linear_events.rs
+    why: Bind the tracker Project and import its issues
+  - path: rust/loopflow/src/lf/commands/waves.rs
+    why: One Project shared by CLI and Desktop
+  - path: swift/LoopflowMac/Views/BacklogView.swift
+    why: Project and objective in the Wave backlog
+  - path: rust/loopflow-execution/src/ops/linear/task_planning_tests.rs
+    why: Exercise Project linking and delivery against simulated Linear
+hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: Generated from the protocol types

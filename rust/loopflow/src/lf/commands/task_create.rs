@@ -11,8 +11,8 @@ use loopflow_execution::engine::creation::{self, TaskCreation};
 use loopflow_storage::graph_process::{Execution, ExecutionResult};
 use loopflow_storage::sqlite::SqliteStore;
 
-/// `task.create`'s answer: its receipt, the primary conversation's record and
-/// the Task's row in the Work projection's shape, read when answering, so a
+/// `task.create`'s answer: its receipt, the primary conversation's record, the
+/// Task's parent and its row in the Work projection's shape, read when answering, so a
 /// client selects the Task and opens the conversation before its planning
 /// subscription lists it. The stored receipt holds neither.
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
@@ -22,6 +22,9 @@ pub struct TaskCreated {
     #[serde(deserialize_with = "Option::deserialize")]
     pub session: Option<loopflow_execution::ops::human_session::SessionRecord>,
     pub row: super::waves::RoadmapTask,
+    /// The Task this one was filed from; `null` for top-level work.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub parent: Option<super::task_row::TaskRow>,
 }
 
 /// Read the created Task's row after its commit and join it to the answer, as
@@ -37,11 +40,12 @@ pub(crate) fn answer(
             let store = loopflow_execution::store::read_existing_registry()?
                 .map(std::sync::Arc::new)
                 .context("no Loopflow store exists on this Machine")?;
-            let row = super::waves::task_row(&store, &receipt.task).await?;
+            let (row, parent, _) = super::waves::task_with_family(&store, &receipt.task).await?;
             Ok(TaskCreated {
                 receipt,
                 session,
                 row,
+                parent,
             })
         })
     })
@@ -60,6 +64,7 @@ pub fn create(
         request,
         no_wave,
         wave,
+        parent,
         title,
         notes,
         run,
@@ -84,6 +89,7 @@ pub fn create(
             title: title.clone(),
             request: report,
             wave: if *no_wave { None } else { wave.clone() },
+            parent: parent.clone(),
             graph: graph.clone(),
             session: session.clone(),
             worktree: worktree.clone(),
@@ -128,6 +134,14 @@ pub fn create(
             "{} · {}",
             receipt.task.title, receipt.task.identifier
         )?;
+        // Filed from a Task's conversation, the link was never typed: say it.
+        if receipt.task.parent_task_id.is_some() {
+            let store = loopflow_execution::store::read_existing_registry()?
+                .context("no Loopflow store exists on this Machine")?;
+            if let Some(parent) = super::waves::parent_identifier(&store.sqlite, &receipt.task)? {
+                writeln!(io.output, "  parent: {parent}")?;
+            }
+        }
     }
     if *run && approve {
         // The first Graph attempt identifies this launch's carrier. Batch callers

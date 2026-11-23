@@ -274,7 +274,7 @@ one.
 A Task update is a steer lf writes (source `update:…`), owned by the Task. No
 writer sits at each fact: `task_updates::write` compares the Task with its
 last reading (`task_update_readings`) and saves what moved, one steer for its
-position and runs and one per comment. Whoever looks first writes it for
+position, runs, merge and close, and one per comment. Whoever looks first writes it for
 everyone: a conversation's hook before it claims its steers, or the Machine
 server before it wakes an idle conversation
 ([Waking an idle conversation](../../../loopflow/src/server/README.md#waking-an-idle-conversation)).
@@ -290,8 +290,19 @@ not direction. A run between steps keeps its last report until its next step
 or its end. The server caches the revision at which a Task had nothing new; a
 hook's process is too short-lived to.
 
-The revision's triggers follow Task membership, Graph and step facts, comments
-and delivery receipts. Transcript, usage, availability and ordinary tool-process
+A Task with a parent is conducted by its parent's interactive conversations.
+The same reading writes them one notice (source `notice:<Task>:<key>`, owned
+by the child) when the child's standing moved: it stopped at an interactive
+step, a run ended without succeeding, its PR merged, it was completed or
+abandoned. Steps passing inside a run write none. A child starts from nothing,
+so its first reading is compared with an empty one and a child nobody read
+before it stopped is still news. The audience is one definition,
+`task_work::conducted_tasks`: a notice reaches the Sessions whose Task is the
+child's parent and never the child's own, and steers saved for a child stay
+with the child. A closed child whose reading says so is not read again.
+
+The revision's triggers follow Task membership, Graph and step facts, comments,
+a PR merging, a Task closing or changing parent, and delivery receipts. Transcript, usage, availability and ordinary tool-process
 writes leave it unchanged, so idle conversations cost one revision read per
 store change.
 

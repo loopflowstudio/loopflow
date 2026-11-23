@@ -98,6 +98,7 @@
           ]
         },
         "tracker_id": "issue-1",
+        "parent_id": null,
         "tracker_state": {
           "state": "available",
           "synced_at": null

@@ -27,6 +27,7 @@ fn git(repo: &std::path::Path, args: &[&str]) {
 
 fn input(store: &SqliteStore, repo: &std::path::Path) -> NewTask {
     NewTask {
+        parent_task_id: None,
         id: TaskId::new(),
         repository_id: crate::repository::location::ensure_repository(
             store,

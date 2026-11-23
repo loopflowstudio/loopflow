@@ -222,6 +222,7 @@ esac
                 .find(|project| project.tracker_id.as_ref().unwrap().as_str() == "project-1")
                 .unwrap();
             let task = Task {
+                parent_task_id: None,
                 repository_id: crate::repository::location::ensure_repository(
                     &fixture.store.sqlite,
                     repo.to_str().unwrap(),
@@ -526,6 +527,7 @@ fn with_export_plan(
         .store
         .sqlite
         .create_task(&loopflow_storage::work::task::NewTask {
+            parent_task_id: None,
             repository_id: crate::repository::location::ensure_repository(
                 &fixture.store.sqlite,
                 repo.to_str().unwrap(),
@@ -563,12 +565,110 @@ fn task_create_in_linear_repository_returns_published_task_without_execution() {
             Some("New Linear Task".into()),
             Some("Retain this work".into()),
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
         assert!(saved.tracker_id.is_some());
         assert!(saved.identifier.starts_with("FIX-"));
         assert!(saved.worktree.is_none());
+    });
+}
+
+#[test]
+fn a_follow_up_is_created_in_linear_under_its_parents_issue() {
+    with_export_plan(|runtime, fixture, repo, task, state| {
+        let wave = runtime
+            .block_on(fixture.store.get_wave(task.wave_id.as_ref().unwrap()))
+            .unwrap()
+            .unwrap();
+        let file = |title: &str, parent: Option<&Task>| {
+            crate::ops::task::task_create(
+                repo,
+                Some(wave.slug()),
+                Some(title.into()),
+                Some("Retain this work".into()),
+                crate::ops::task::TaskAdoptionOptions::default(),
+                parent.map(|parent| parent.identifier.clone()),
+                None,
+            )
+            .unwrap()
+        };
+        let parent = file("Parent", None);
+        let child = file("Follow-up", Some(&parent));
+        let issue = runtime
+            .block_on(state.lock())
+            .issues
+            .iter()
+            .find(|issue| issue["id"] == child.tracker_id.as_ref().unwrap().as_str())
+            .cloned()
+            .expect("the follow-up reached Linear");
+        assert_eq!(
+            issue["parent"]["id"],
+            parent.tracker_id.as_ref().unwrap().as_str()
+        );
+        // What Linear answered names the same parent, so the link stands.
+        assert_eq!(child.parent_task_id, Some(parent.id.clone()));
+
+        // Reparenting via `task_edit` refuses cycles and syncs clear/set to Linear.
+        let cycle = crate::ops::task::task_edit(
+            repo,
+            &parent.identifier,
+            None,
+            loopflow_storage::work::task::TaskUpdate::default(),
+            Some(&child.identifier),
+        );
+        assert!(cycle
+            .unwrap_err()
+            .to_string()
+            .contains("cannot be its own ancestor"));
+
+        crate::ops::task::task_edit(
+            repo,
+            &child.identifier,
+            None,
+            loopflow_storage::work::task::TaskUpdate::default(),
+            Some("none"),
+        )
+        .unwrap();
+        let unparented = runtime
+            .block_on(fixture.store.get_task(&child.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(unparented.parent_task_id, None);
+        let remote = runtime
+            .block_on(state.lock())
+            .issues
+            .iter()
+            .find(|issue| issue["id"] == child.tracker_id.as_ref().unwrap().as_str())
+            .cloned()
+            .unwrap();
+        assert!(remote["parent"].is_null(), "{remote}");
+
+        crate::ops::task::task_edit(
+            repo,
+            &child.identifier,
+            None,
+            loopflow_storage::work::task::TaskUpdate::default(),
+            Some(&parent.identifier),
+        )
+        .unwrap();
+        let adopted = runtime
+            .block_on(fixture.store.get_task(&child.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(adopted.parent_task_id, Some(parent.id));
+        let remote = runtime
+            .block_on(state.lock())
+            .issues
+            .iter()
+            .find(|issue| issue["id"] == child.tracker_id.as_ref().unwrap().as_str())
+            .cloned()
+            .unwrap();
+        assert_eq!(
+            remote["parent"]["id"],
+            parent.tracker_id.as_ref().unwrap().as_str()
+        );
     });
 }
 

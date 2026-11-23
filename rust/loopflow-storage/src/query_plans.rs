@@ -521,6 +521,7 @@ mod tests {
         let task = TaskId::new();
         store
             .create_task(&crate::work::task::NewTask {
+                parent_task_id: None,
                 id: task.clone(),
                 repository_id: crate::test_fixture::repository(&store, "/repo"),
                 project_id: None,
@@ -593,6 +594,7 @@ mod tests {
         let traced = statements(&store, || {
             store
                 .create_task(&crate::work::task::NewTask {
+                    parent_task_id: None,
                     repository_id,
                     id: TaskId::from_raw("task_abcdef10000000000000000000000001"),
                     project_id: None,
@@ -606,6 +608,19 @@ mod tests {
             .into_iter()
             .filter(|scan| scan.contains("SCAN tasks"))
             .collect();
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    #[test]
+    fn a_tasks_children_are_read_by_index() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&home.path().join("loopflow.db")).unwrap();
+        let parent = loopflow_model::durable::TaskId::new();
+        let traced = statements(&store, || {
+            assert!(store.task_children(&parent).unwrap().is_empty());
+        });
+        assert!(traced.iter().any(|sql| sql.contains("parent_task_id")));
+        let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));
     }
 

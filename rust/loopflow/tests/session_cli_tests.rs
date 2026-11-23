@@ -572,20 +572,13 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
     }
 }
 
+/// A stand-in `claude` in `bin` that answers one resumed turn and writes its
+/// cwd, arguments, caller, hook context and input beside `LF_TEST_RESUME_PROOF`.
 #[cfg(unix)]
-#[test]
-fn headless_resume_reads_the_saved_workspace_and_names_its_caller() {
+fn claude_resume_probe(bin: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
 
-    let home = tempfile::tempdir().unwrap();
-    let saved = home.path().join("saved");
-    let caller = home.path().join("caller");
-    let bin = home.path().join("bin");
-    for (path, marker) in [(&saved, "SAVED_CONTEXT"), (&caller, "CALLER_CONTEXT")] {
-        std::fs::create_dir_all(path.join("scratch")).unwrap();
-        std::fs::write(path.join("scratch/context.md"), marker).unwrap();
-    }
-    std::fs::create_dir(&bin).unwrap();
+    std::fs::create_dir(bin).unwrap();
     let provider = bin.join("claude");
     std::fs::write(
         &provider,
@@ -619,6 +612,434 @@ for line in sys.stdin:
     )
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// What `lf` prints when run in `repo`, by the conversation `caller` when one is named.
+fn lf_in(
+    home: &std::path::Path,
+    repo: &std::path::Path,
+    args: &[&str],
+    caller: Option<&str>,
+) -> String {
+    let mut command = command(home, args);
+    command.current_dir(repo).env("HOME", home);
+    if let Some(caller) = caller {
+        command.env("LF_AGENT_CALLER", caller);
+    }
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn json(text: String) -> serde_json::Value {
+    serde_json::from_str(&text).unwrap()
+}
+
+#[test]
+fn explicit_parent_shows_under_parent_and_update_reparents_without_cycles() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let lf = |args: &[&str], caller: Option<&str>| lf_in(home.path(), repo.path(), args, caller);
+    let parent = json(lf(
+        &["task", "create", "--title", "Retry requests", "--json"],
+        None,
+    ));
+    let parent_id = parent["task"]["id"].as_str().unwrap().to_owned();
+    let parent_name = parent["task"]["identifier"].as_str().unwrap().to_owned();
+    assert!(parent["task"]["parent_task_id"].is_null());
+
+    // Even inside the parent Task's conversation, plain `lf task create` stays top-level.
+    let (session, _, _) = prepare_conversation(home.path(), repo.path(), "claude", "Parent");
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let launcher = loopflow_model::id::LfProcessId::new();
+    database
+        .execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            [&launcher],
+        )
+        .unwrap();
+    database
+        .execute(
+            "UPDATE agent_sessions SET task_id=?2 WHERE id=?1",
+            [&session, &parent_id],
+        )
+        .unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, &session, None, &launcher).unwrap();
+    let caller = serde_json::to_string(&attachment.caller(session.clone().into(), None)).unwrap();
+
+    let apart = json(lf(
+        &["task", "create", "--title", "Unrelated", "--json"],
+        Some(&caller),
+    ));
+    assert!(apart["task"]["parent_task_id"].is_null());
+    assert!(apart["parent"].is_null());
+    let apart_name = apart["task"]["identifier"].as_str().unwrap().to_owned();
+
+    // Explicit `--parent` links the new Task under the parent.
+    let child = json(lf(
+        &[
+            "task",
+            "create",
+            "--title",
+            "Retry budget per host",
+            "--parent",
+            &parent_name,
+            "--json",
+        ],
+        Some(&caller),
+    ));
+    assert_eq!(child["task"]["parent_task_id"], parent_id);
+    // The receipt names the parent Task as a list would show it.
+    assert_eq!(child["parent"]["identifier"], parent_name);
+    assert_eq!(child["parent"]["state"], "unstarted");
+    assert!(parent["parent"].is_null());
+    let child_name = child["task"]["identifier"].as_str().unwrap().to_owned();
+
+    // Without `--json` the receipt says where the child went.
+    let receipt = lf(
+        &[
+            "task",
+            "create",
+            "--title",
+            "Log each retry",
+            "--parent",
+            &parent_name,
+        ],
+        Some(&caller),
+    );
+    assert!(
+        receipt.ends_with(&format!("\n  parent: {parent_name}\n")),
+        "{receipt}"
+    );
+
+    // `lf task update --parent` adopts an existing Task, refuses cycles, and clears with `none`.
+    lf(
+        &["task", "update", &apart_name, "--parent", &parent_name],
+        None,
+    );
+    let adopted = json(lf(&["task", "status", &apart_name, "--json"], None));
+    assert_eq!(adopted["parent"]["identifier"], parent_name);
+
+    let mut cycle = command(
+        home.path(),
+        &["task", "update", &parent_name, "--parent", &apart_name],
+    );
+    cycle.current_dir(repo.path()).env("HOME", home.path());
+    let cycle = cycle.output().unwrap();
+    assert!(!cycle.status.success());
+    let stderr = String::from_utf8_lossy(&cycle.stderr);
+    assert!(stderr.contains("cannot be its own ancestor"), "{stderr}");
+
+    lf(&["task", "update", &apart_name, "--parent", "none"], None);
+    let cleared = json(lf(&["task", "status", &apart_name, "--json"], None));
+    assert!(cleared["parent"].is_null());
+
+    // `lf task show` carries the same two keys as `lf task status`.
+    let shown = json(lf(&["task", "show", &parent_name, "--json"], None));
+    assert!(shown["parent"].is_null());
+    assert_eq!(shown["children"][0]["identifier"], child_name);
+    let shown = json(lf(&["task", "show", &child_name, "--json"], None));
+    assert_eq!(shown["parent"]["identifier"], parent_name);
+    assert_eq!(shown["children"], serde_json::json!([]));
+
+    let status = json(lf(&["task", "status", &parent_name, "--json"], None));
+    assert!(status["parent"].is_null());
+    let children = status["children"].as_array().unwrap();
+    assert_eq!(children.len(), 2, "{children:?}");
+    assert_eq!(children[0]["identifier"], child_name);
+    assert_eq!(children[0]["state"], "unstarted");
+    let status = json(lf(&["task", "status", &child_name, "--json"], None));
+    // The same row the creation receipt carried, wherever a parent is read.
+    assert_eq!(status["parent"]["identifier"], parent_name);
+    assert_eq!(status["parent"]["id"], parent_id);
+    assert_eq!(status["task"]["parent_id"], parent_id);
+    assert_eq!(status["children"], serde_json::json!([]));
+
+    let shown = lf(&["task", "status", &parent_name], None);
+    assert!(
+        shown.contains(&format!(
+            "child: {child_name}  Retry budget per host  unstarted"
+        )),
+        "{shown}"
+    );
+    let shown = lf(&["task", "status", &child_name], None);
+    assert!(shown.contains(&format!("parent: {parent_name}")), "{shown}");
+}
+
+#[test]
+fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let lf = |args: &[&str]| lf_in(home.path(), repo.path(), args, None);
+    let file = |title: &str, parent: Option<&str>| {
+        let mut args = vec!["task", "create", "--title", title, "--json"];
+        args.extend(parent.into_iter().flat_map(|parent| ["--parent", parent]));
+        let task = json(lf(&args))["task"].clone();
+        (
+            task["id"].as_str().unwrap().to_owned(),
+            task["identifier"].as_str().unwrap().to_owned(),
+        )
+    };
+    let (parent_id, parent) = file("Retry requests", None);
+    let (landed_id, landed) = file("Retry budget per host", Some(&parent));
+    let (reviewing_id, reviewing) = file("Log each retry", Some(&parent));
+    let (_, unstarted) = file("Document the budget", Some(&parent));
+    let (_, unstarted_child) = file("Translate the budget docs", Some(&unstarted));
+    // The landed child has follow-ups of its own.
+    let (_, grandchild) = file("Tune the budget", Some(&landed));
+    let (kept_id, kept) = file("Budget dashboards", Some(&landed));
+
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let publish = |task: &str, number: u32, merged: bool| {
+        let branch = format!("pr-{number}");
+        database
+            .execute(
+                "INSERT INTO task_checkouts(task_id,worktree,branch,base_commit) VALUES(?1,?2,?3,'base')
+                 ON CONFLICT(task_id) DO UPDATE SET branch=excluded.branch,base_commit=excluded.base_commit",
+                rusqlite::params![task, home.path().join(&branch).to_str(), branch],
+            )
+            .unwrap();
+        database
+            .execute(
+                "UPDATE tasks SET workspace_slug=?2 WHERE id=?1",
+                [task, &branch],
+            )
+            .unwrap();
+        database
+            .execute(
+                "INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,created_at,updated_at,github_number,github_url,merge_commit)
+                 VALUES(?1,?2,1,?3,?3,'base',1,1,1,?4,'https://example.test/pr/'||?4,?5)",
+                rusqlite::params![
+                    uuid::Uuid::new_v4().to_string(),
+                    task,
+                    branch,
+                    number,
+                    merged.then_some("abc123")
+                ],
+            )
+            .unwrap();
+    };
+    publish(&parent_id, 1979, true);
+    publish(&landed_id, 1980, true);
+    publish(&reviewing_id, 1981, false);
+    publish(&kept_id, 1982, false);
+
+    // Merged with children open: it says so, and nothing asks to complete it.
+    let status = json(lf(&["task", "status", &parent, "--json"]));
+    assert_eq!(status["task"]["pr"]["phase"], "merged");
+    assert_eq!(status["task"]["reason"], "Merged · 3 children open");
+    assert!(status["task"]["next"].is_null(), "{}", status["task"]);
+    assert_ne!(status["task"]["state"], "done");
+    assert_eq!(status["children"][0]["parent_id"], parent_id);
+    let listed = lf(&["task", "list"]);
+    let line = |listed: &str, start: String| listed.lines().any(|line| line.starts_with(&start));
+    assert!(line(&listed, format!("  {reviewing} ·")), "{listed}");
+
+    // A child that becomes done settles its own children by the same rule.
+    let completed = json(lf(&["task", "complete", &parent, "--json"]));
+    assert_eq!(completed["identifier"], parent);
+    let outcomes = |children: &serde_json::Value| {
+        children
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|child| {
+                (
+                    child["task"]["identifier"].as_str().unwrap().to_owned(),
+                    child["outcome"].as_str().unwrap().to_owned(),
+                    child["task"]["state"].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let children = outcomes(&completed["children"]);
+    assert_eq!(children[0], (landed.clone(), "done".into(), "done".into()));
+    let abandoned: Vec<_> = children[1..]
+        .iter()
+        .map(|(id, outcome, state)| {
+            assert_eq!(outcome, "abandoned");
+            assert_eq!(state, "abandoned");
+            id.as_str()
+        })
+        .collect();
+    assert!(abandoned.contains(&unstarted.as_str()), "{children:?}");
+    assert!(abandoned.contains(&reviewing.as_str()), "{children:?}");
+
+    let grandchildren = outcomes(&completed["children"][0]["children"]);
+    assert_eq!(grandchildren.len(), 2, "{grandchildren:?}");
+    for (_, outcome, state) in &grandchildren {
+        assert_eq!(outcome, "abandoned");
+        assert_eq!(state, "abandoned");
+    }
+    let grandchild_ids: Vec<_> = grandchildren.iter().map(|(id, _, _)| id.as_str()).collect();
+    assert!(grandchild_ids.contains(&grandchild.as_str()));
+    assert!(grandchild_ids.contains(&kept.as_str()));
+
+    // An abandoned child also settles its own open descendants.
+    let unstarted_row = completed["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|child| child["task"]["identifier"] == unstarted)
+        .unwrap();
+    assert_eq!(
+        outcomes(&unstarted_row["children"]),
+        [(
+            unstarted_child.clone(),
+            "abandoned".into(),
+            "abandoned".into()
+        )]
+    );
+    let state = |task: &str| json(lf(&["task", "status", task, "--json"]))["task"]["state"].clone();
+    assert_eq!(state(&parent), "done");
+    assert_eq!(state(&landed), "done");
+    assert_eq!(state(&unstarted), "abandoned");
+    assert_eq!(state(&reviewing), "abandoned");
+    assert_eq!(state(&grandchild), "abandoned");
+    assert_eq!(state(&kept), "abandoned");
+    assert_eq!(state(&unstarted_child), "abandoned");
+
+    // Reopening a done parent with prior work restores `started` planning state;
+    // abandoned children cannot be reopened.
+    let reopened = json(lf(&["task", "reopen", &parent, "--json"]));
+    assert_eq!(reopened["state"], "started");
+    let mut reopen_abandoned = command(home.path(), &["task", "reopen", &reviewing]);
+    reopen_abandoned
+        .current_dir(repo.path())
+        .env("HOME", home.path());
+    assert!(!reopen_abandoned.output().unwrap().status.success());
+
+    // A Task with no PR whose Graph reached `end` stands the same way.
+    let (planned_id, planned) = file("Plan the cache", None);
+    let (_, follow_up) = file("Cache responses per host", Some(&planned));
+    database
+        .execute(
+            "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'end',1)",
+            rusqlite::params![
+                planned_id,
+                serde_json::json!({"name": "code", "steps": []}).to_string()
+            ],
+        )
+        .unwrap();
+    lf(&["task", "claim", &planned]);
+    let status = json(lf(&["task", "status", &planned, "--json"]));
+    assert_eq!(status["task"]["reason"], "Finished · 1 child open");
+    assert!(status["task"]["next"].is_null(), "{}", status["task"]);
+    lf(&["task", "abandon", &follow_up]);
+    let status = json(lf(&["task", "status", &planned, "--json"]));
+    assert_eq!(status["task"]["reason"], "Finished; complete the Task");
+    assert_eq!(
+        status["task"]["next"],
+        format!("lf task complete {planned}")
+    );
+    lf(&["task", "complete", &planned]);
+    assert_eq!(state(&planned), "done");
+
+    // In text, each child's own children are indented under it.
+    let (second_id, second) = file("Cache responses", None);
+    let (merged_id, merged) = file("Cache per host", Some(&second));
+    let (_, idle) = file("Document the cache", Some(&merged));
+    publish(&second_id, 1990, true);
+    publish(&merged_id, 1991, true);
+    assert_eq!(
+        lf(&["task", "complete", &second]),
+        format!(
+            "{second} done\n  {merged} done: #1991 merged\n    {idle} abandoned: no merged PR\n"
+        )
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_closed_tasks_conversation_resumes_in_the_main_checkout() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let bin = home.path().join("bin");
+    claude_resume_probe(&bin);
+    // The Task is done and its checkout was retired with the conversation's directory.
+    let retired = home.path().join("retired-checkout");
+    let (id, _, _) = prepare_conversation(home.path(), &retired, "claude", "Original input");
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let repository = loopflow_execution::repository::location::ensure_repository(
+        &store,
+        repo.path().to_str().unwrap(),
+    )
+    .unwrap();
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    database
+        .execute(
+            "INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug,planning_completed,planning_completed_at)
+             VALUES('task_00000000000000000000000000000001',?1,'INF-1','Closed work','',1,1,'closed-work',1,'2026-11-03T00:00:00Z')",
+            [repository.as_str()],
+        )
+        .unwrap();
+    database
+        .execute_batch(&format!(
+            "UPDATE agent_sessions SET provider_thread='fixture-native',task_id='task_00000000000000000000000000000001' WHERE id='{id}';
+             INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task_00000000000000000000000000000001','{id}');"
+        ))
+        .unwrap();
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let output = command(
+        home.path(),
+        &[
+            "-b",
+            "session",
+            "resume",
+            &id,
+            "--message",
+            "Where are you?",
+        ],
+    )
+    .current_dir(home.path())
+    .env("PATH", path)
+    .env("HOME", home.path())
+    .env("LF_TEST_RESUME_PROOF", home.path().join("proof"))
+    .output()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let main = repo.path().canonicalize().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("proof.cwd"))
+            .unwrap()
+            .trim(),
+        main.to_str().unwrap()
+    );
+    let args = std::fs::read_to_string(home.path().join("proof.args")).unwrap();
+    assert!(args.contains("--resume\nfixture-native\n"), "{args}");
+    let after = store.session(&id).unwrap().unwrap();
+    assert_eq!(after.cwd.canonicalize().unwrap(), main);
+    assert_eq!(
+        after.task_id.as_ref().map(ToString::to_string).as_deref(),
+        Some("task_00000000000000000000000000000001")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn headless_resume_reads_the_saved_workspace_and_names_its_caller() {
+    let home = tempfile::tempdir().unwrap();
+    let saved = home.path().join("saved");
+    let caller = home.path().join("caller");
+    let bin = home.path().join("bin");
+    for (path, marker) in [(&saved, "SAVED_CONTEXT"), (&caller, "CALLER_CONTEXT")] {
+        std::fs::create_dir_all(path.join("scratch")).unwrap();
+        std::fs::write(path.join("scratch/context.md"), marker).unwrap();
+    }
+    claude_resume_probe(&bin);
     let (id, input, dir) = prepare_conversation(home.path(), &saved, "claude", "Original input");
     let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     database

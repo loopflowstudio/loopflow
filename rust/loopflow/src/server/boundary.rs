@@ -373,6 +373,7 @@ mod tests {
 
         let task = store
             .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: loopflow_execution::repository::location::ensure_repository(
                     &store, "/repo",
                 )

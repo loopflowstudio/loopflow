@@ -45,6 +45,7 @@ impl TaskList {
         let task = self
             .store
             .create_task(&NewTask {
+                parent_task_id: None,
                 id: TaskId::from_raw(format!("task_{}", key.simple())),
                 repository_id: self.repository.clone(),
                 project_id: None,

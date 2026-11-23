@@ -238,3 +238,11 @@ Answers (Jack Heart): "1a 2a 3b 4b 5 not sure, explain"
 Jack Heart, on page question 1: "i think I prefer (c)". On nested worktrees:
 "We should make sure our loopflow instructions are clear about using lf wt
 create instead of this so that we avoid it." Run liveness filed as LOO-1075.
+
+## Git-root rule: a path no worktree holds (implement, 2026-11-23)
+
+Choice made: `task_checkout_owner(dir)` treats a directory with no `.git`
+ancestor as its own root (exact match), instead of answering nothing or
+falling back to the deepest checkout. Live starts always have a real
+directory; this only decides fixtures with missing paths and a checkout whose
+worktree is gone. Reversible in `checkout_owner_in` (`sqlite/task_work.rs`).

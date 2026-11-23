@@ -883,7 +883,7 @@ pub fn repository_root() -> Result<Option<PathBuf>, LoadError> {
     Ok(load_global_config()?.and_then(|config| config.repo_root))
 }
 
-fn global_config_path() -> PathBuf {
+pub(crate) fn global_config_path() -> PathBuf {
     crate::store::lf_home_dir().join("config.yaml")
 }
 

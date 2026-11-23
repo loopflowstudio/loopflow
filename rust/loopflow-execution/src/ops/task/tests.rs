@@ -892,7 +892,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
                 &fixture.task.id.as_str()[..9],
                 fixture.task.tracker_id.as_ref().unwrap().as_str(),
             ] {
-                let file = super::task_file(issue, "scratch/note.md", false).unwrap();
+                let file = super::task_file(issue, "scratch/note.md", None, false).unwrap();
                 assert_eq!(file.content.as_deref(), Some("local note\n"));
                 let changes = super::task_changes(issue, "parent", None).unwrap();
                 assert_eq!(changes.base_commit, pr.base_commit);
@@ -901,7 +901,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
                     super::task_diff(issue, Some("scratch/note.md"), "head", None, None).unwrap();
                 assert!(diff.patch.contains("+local note"));
             }
-            let file = super::task_file("FILES-1", "scratch/note.md", false).unwrap();
+            let file = super::task_file("FILES-1", "scratch/note.md", None, false).unwrap();
             let saved = super::file_save::task_save(
                 "FILES-1",
                 "scratch/note.md",
@@ -937,7 +937,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
             graphql_url: "http://127.0.0.1:1".into(),
         },
         || {
-            let file = super::task_file("FILES-1", "scratch/note.md", false).unwrap();
+            let file = super::task_file("FILES-1", "scratch/note.md", None, false).unwrap();
             let saved = super::task_save(
                 "FILES-1",
                 "scratch/note.md",
@@ -1003,7 +1003,7 @@ fn task_without_a_local_checkout_never_reads_a_local_path() {
         },
         || {
             let expected = "not checked out on this Machine";
-            assert!(super::task_file("LOCATION-1", "note.md", false)
+            assert!(super::task_file("LOCATION-1", "note.md", None, false)
                 .unwrap_err()
                 .to_string()
                 .contains(expected));
@@ -1350,6 +1350,78 @@ fn task_files_compare_net_parent_head_and_revisioned_drafts() {
         );
         assert!(super::file_snapshot(workspace.checkout, "scratch/link/private").is_err());
     }
+}
+
+#[test]
+fn task_files_read_committed_versions_and_carry_binary_bytes() {
+    use base64::Engine as _;
+    let repo = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        super::git_output(repo.path(), args)
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    git(&["init", "-q", "-b", "main"]);
+    let image = [b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".as_slice(), &[7; 1_500_000]].concat();
+    std::fs::write(repo.path().join("notes.md"), "first\n").unwrap();
+    std::fs::write(repo.path().join("image.png"), &image).unwrap();
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "fixture",
+    ]);
+    let parent = git(&["rev-parse", "HEAD"]);
+    std::fs::write(repo.path().join("notes.md"), "second\n").unwrap();
+    std::fs::remove_file(repo.path().join("image.png")).unwrap();
+    let id = TaskId::new();
+    let workspace = super::TaskWorkspace {
+        issue_identifier: "TEST-1",
+        task_id: &id,
+        worktree: repo.path(),
+    };
+
+    let old = super::snapshot::committed_file_snapshot(workspace, &parent, "notes.md").unwrap();
+    assert_eq!(old.content.as_deref(), Some("first\n"));
+    assert_eq!(old.state, super::TaskFileState::Text);
+    assert_eq!(
+        old.read_only_reason.as_deref(),
+        Some("A committed version is read-only.")
+    );
+    let current = super::file_snapshot(workspace, "notes.md").unwrap();
+    assert_eq!(current.content.as_deref(), Some("second\n"));
+    assert!(current.read_only_reason.is_none());
+
+    // A binary file past the 1 MB text limit still carries its bytes, at a commit and on disk.
+    let committed =
+        super::snapshot::committed_file_snapshot(workspace, &parent, "image.png").unwrap();
+    assert_eq!(committed.state, super::TaskFileState::Binary);
+    assert_eq!(committed.size_bytes, image.len() as u64);
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(committed.data.unwrap())
+        .unwrap();
+    assert_eq!(decoded, image);
+    assert_eq!(
+        super::file_snapshot(workspace, "image.png").unwrap().state,
+        super::TaskFileState::Missing
+    );
+    std::fs::write(repo.path().join("image.png"), &image).unwrap();
+    let on_disk = super::file_snapshot(workspace, "image.png").unwrap();
+    assert_eq!(on_disk.state, super::TaskFileState::Binary);
+    assert_eq!(
+        on_disk.data,
+        Some(base64::engine::general_purpose::STANDARD.encode(&image))
+    );
+
+    let absent = super::snapshot::committed_file_snapshot(workspace, &parent, "new.md").unwrap();
+    assert_eq!(absent.state, super::TaskFileState::Missing);
+    assert!(absent.data.is_none());
+    assert!(super::snapshot::committed_file_snapshot(workspace, &parent, "../outside").is_err());
 }
 
 #[tokio::test]

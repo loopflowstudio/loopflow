@@ -20,6 +20,16 @@ owner. The phone keeps the address and Machine identity in Keychain.
 A Simulator on the server's Mac shares its Tailscale identity and is refused
 until that Mac opts in with `touch ~/.lf/mobile-same-device`.
 
+## Theme
+
+The phone draws your Machine's theme: whatever Desktop's Choose Theme applied
+(`theme:` in the Machine's `~/.lf/config.yaml`). It reads it on connect and
+whenever the app comes back, and remembers the last answer so launch opens in
+it. `light:Fig Leaf,dark:Fig` follows the phone's appearance; one name is that
+theme in either. A name the phone doesn't ship, such as your own theme file or
+a Ghostty theme, draws Loopflow Light or Dark. Before you connect, Loopflow's
+own pair.
+
 ## Tasks
 
 The list shows one repository at a time: tap the title to switch, or pick

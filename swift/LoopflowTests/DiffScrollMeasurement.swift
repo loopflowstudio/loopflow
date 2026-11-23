@@ -27,9 +27,11 @@ struct DiffScrollMeasurement {
         await store.loadReview()
         let review = try #require(store.shownReview)
         let lines = review.files.reduce(0) { $0 + $1.blocks.count }
-        let parsed = review.stops.count, counted = review.files.reduce(0) { $0 + store.changeCount($1) }
-        for file in review.files where file.stops.count != store.changeCount(file) {
-            print("count differs: \(file.path) parsed \(file.stops.count) counted \(store.changeCount(file))")
+        let parsed = store.stops(.changes).count, counted = review.files.reduce(0) { $0 + store.changeCount($1) }
+        for file in review.files {
+            let stops = store.stops(of: [file], in: .changes).count
+            guard stops != store.changeCount(file) else { continue }
+            print("count differs: \(file.path) parsed \(stops) counted \(store.changeCount(file))")
         }
 
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 900),
@@ -55,12 +57,12 @@ struct DiffScrollMeasurement {
         let targets = stride(from: 0, to: review.files.count, by: max(1, review.files.count / 20)).map { review.files[$0] }
         for file in targets.reversed() {
             jumps.append(measure(window) {
-                store[place: .changes] = .init(anchor: file.topID, current: file.stops.first)
+                store[place: .changes] = .init(anchor: store.topID(of: file, in: .changes), current: store.stops(of: [file], in: .changes).first?.id)
             })
             slowest.append((jumps.last ?? 0, "\(file.path) (\(file.blocks.count) blocks)"))
         }
         let last = try #require(review.files.last)
-        _ = measure(window) { store[place: .changes] = .init(anchor: last.topID, current: last.stops.first) }
+        _ = measure(window) { store[place: .changes] = .init(anchor: store.topID(of: last, in: .changes), current: store.stops(of: [last], in: .changes).first?.id) }
         let before = store[place: .changes].anchor
         let earlier = measure(window) { store.showEarlierFiles() }
         let held = store[place: .changes].anchor == before

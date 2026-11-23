@@ -438,6 +438,8 @@ struct TaskFilesView: View {
                     interacted: store.noteInteraction)
             } else if snapshot.state == .text {
                 TaskDocumentView(document: document)
+            } else if let data = snapshot.data, NSImage(data: data) != nil {
+                ScrollView { TaskImage(file: snapshot).padding(Spacing.lg) }
             } else {
                 EmptyState(title: snapshot.state.title)
             }
@@ -471,7 +473,7 @@ struct TaskFileReadingView: View {
 
 /// Pages run their scripts but never reach the network; links open in the browser.
 /// A rewrite reloads in place at the same scroll position.
-private struct TaskHTMLView: View {
+struct TaskHTMLView: View {
     let html: String
     let baseURL: URL?
     let interacted: () -> Void
@@ -563,6 +565,7 @@ private enum TaskHTMLRules {
 private struct TaskDocumentView: NSViewRepresentable {
     let document: TaskFileDocument
     @Environment(\.palette) private var palette
+    @Environment(\.theme) private var theme
     func makeNSView(context: Context) -> NSView { NSView() }
     func updateNSView(_ host: NSView, context: Context) {
         if document.scroll.superview !== host {
@@ -572,7 +575,7 @@ private struct TaskDocumentView: NSViewRepresentable {
             document.scroll.autoresizingMask = [.width, .height]
             host.addSubview(document.scroll)
         }
-        document.applyPalette(palette)
+        document.applyTheme(theme)
         document.editor.recordReadiness()
         document.scroll.backgroundColor = NSColor(palette.background)
     }

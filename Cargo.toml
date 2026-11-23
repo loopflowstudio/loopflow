@@ -23,9 +23,10 @@ license = "MIT"
 debug = 1
 incremental = false
 
+# Keep compiler state between focused tests in the same worktree.
 [profile.test]
 debug = 1
-incremental = false
+incremental = true
 
 # Install selection authenticates copied binaries by digest. Keep that startup
 # check fast in local debug and test builds too.

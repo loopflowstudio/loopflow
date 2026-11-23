@@ -38,18 +38,7 @@ struct MarkdownBlocks: View, Equatable {
         let blocks = Perf.measure(Perf.markdownParse, "bytes=\(source.utf8.count)") { Self.blocks(source) }
         VStack(alignment: .leading, spacing: Spacing.sm) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                    if let marker = block.marker {
-                        Text(marker).foregroundStyle(palette.textSecondary)
-                    } else if block.depth > 0 {
-                        Text("•").hidden()
-                    }
-                    content(block)
-                }
-                .font(Typography.text)
-                .lineSpacing(block.kind == .code ? 0 : Self.lineSpacing)
-                .padding(.leading, Self.indent(block))
-                .id(Self.anchor(index))
+                Row(block: block).id(Self.anchor(index))
             }
         }
         .textSelection(.enabled)
@@ -57,36 +46,56 @@ struct MarkdownBlocks: View, Equatable {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder
-    private func content(_ block: Block) -> some View {
-        switch block.kind {
-        case .heading(let level):
-            Text(block.text)
-                .font(level <= 2 ? Typography.lede : Typography.textStrong)
-                .padding(.top, Spacing.xs)
-        case .paragraph:
-            Text(block.text)
-        case .quote:
-            Text(block.text)
-                .foregroundStyle(palette.textSecondary)
-                .padding(.leading, Spacing.sm)
-                .overlay(alignment: .leading) { Rectangle().fill(palette.border).frame(width: 2) }
-        case .code:
-            Text(String(block.text.characters))
-                .font(Typography.mono)
-                .padding(Spacing.sm)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(palette.surfaceMuted)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control))
-        case .rule:
-            Divider()
-        case .row(let header):
-            HStack(alignment: .top, spacing: Spacing.sm) {
-                ForEach(Array(block.cells.enumerated()), id: \.offset) { _, cell in
-                    Text(cell).frame(maxWidth: .infinity, alignment: .leading)
+    /// One block as it reads: its list marker, then its text in the block's style.
+    struct Row: View {
+        let block: Block
+        @Environment(\.palette) private var palette
+
+        var body: some View {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                if let marker = block.marker {
+                    Text(marker).foregroundStyle(palette.textSecondary)
+                } else if block.depth > 0 {
+                    Text("•").hidden()
                 }
+                content
             }
-            .fontWeight(header ? .semibold : .regular)
+            .font(Typography.text)
+            .lineSpacing(block.kind == .code ? 0 : MarkdownBlocks.lineSpacing)
+            .padding(.leading, MarkdownBlocks.indent(block))
+        }
+
+        @ViewBuilder
+        private var content: some View {
+            switch block.kind {
+            case .heading(let level):
+                Text(block.text)
+                    .font(level <= 2 ? Typography.lede : Typography.textStrong)
+                    .padding(.top, Spacing.xs)
+            case .paragraph:
+                Text(block.text)
+            case .quote:
+                Text(block.text)
+                    .foregroundStyle(palette.textSecondary)
+                    .padding(.leading, Spacing.sm)
+                    .overlay(alignment: .leading) { Rectangle().fill(palette.border).frame(width: 2) }
+            case .code:
+                Text(block.text)
+                    .font(Typography.mono)
+                    .padding(Spacing.sm)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(palette.surfaceMuted)
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control))
+            case .rule:
+                Divider()
+            case .row(let header):
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    ForEach(Array(block.cells.enumerated()), id: \.offset) { _, cell in
+                        Text(cell).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .fontWeight(header ? .semibold : .regular)
+            }
         }
     }
 

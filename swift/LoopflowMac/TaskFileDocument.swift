@@ -25,9 +25,12 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     private(set) var saveFailed = false
     private(set) var readOnlyReason: String?
     var onEdit: (() -> Void)?
-    /// The palette the editor shows, once it has been on screen.
-    @ObservationIgnored private var palette: LoopflowPalette?
+    /// The theme the editor shows, once it has been on screen.
+    @ObservationIgnored private var theme: ThemeDefinition?
     @ObservationIgnored private var coloringScheduled = false
+    /// The last highlights worked out, and the `editVersion` of the text they read.
+    @ObservationIgnored private var colored: (version: Int, highlights: [Grammar.Highlight])?
+    @ObservationIgnored private var highlighting = false
 
     var canSave: Bool {
         dirty && !saving && external == nil && deferredSnapshot == nil
@@ -150,21 +153,64 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     }
 
     /// The editor's colors, syntax included. Setting the text color clears
-    /// every syntax color, so they are applied again after it.
-    func applyPalette(_ palette: LoopflowPalette) {
-        self.palette = palette
-        editor.applyPalette(palette)
-        colorSyntax()
+    /// every syntax color, so they are painted again after it.
+    func applyTheme(_ theme: ThemeDefinition) {
+        if self.theme == theme { return }
+        self.theme = theme
+        editor.applyPalette(theme.palette)
+        paintSyntax()
+        if colored?.version != editVersion { colorSyntax() }
     }
 
+    /// Parse the buffer off the main thread, one parse at a time. Colors are
+    /// painted only for the text they were worked out from; typing meanwhile
+    /// keeps the colors already shown and parses again once this one ends.
     private func colorSyntax() {
-        guard let palette, !editor.hasMarkedText() else { return }
-        editor.textStorage?.colorSyntax(path: path, palette: palette)
+        guard theme != nil, !highlighting else { return }
+        highlighting = true
+        let version = editVersion, text = editor.string, path = path
+        Task { [weak self] in
+            let highlights = await Task.detached(priority: .userInitiated) {
+                Grammar.named(path)?.highlights(of: text) ?? []
+            }.value
+            guard let self else { return }
+            self.highlighting = false
+            if self.editVersion == version {
+                self.colored = (version, highlights)
+                self.paintSyntax()
+            } else {
+                self.colorSyntax()
+            }
+        }
     }
 
-    /// Storage cannot change inside its own editing callback; color after it.
+    private func paintSyntax() {
+        guard let theme, let colored, colored.version == editVersion, !editor.hasMarkedText(),
+              let storage = editor.textStorage, let font = editor.font else { return }
+        let inks = SyntaxInks.of(theme)
+        let whole = NSRange(location: 0, length: storage.length)
+        storage.beginEditing()
+        storage.addAttribute(.foregroundColor, value: NSColor(theme.palette.text), range: whole)
+        storage.addAttribute(.font, value: font, range: whole)
+        let bold = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+        let italic = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+        for highlight in colored.highlights where NSMaxRange(highlight.range) <= storage.length {
+            guard let ink = highlight.ink else { continue }
+            switch ink {
+            case .emphasis: storage.addAttribute(.font, value: italic, range: highlight.range)
+            case .strong: storage.addAttribute(.font, value: bold, range: highlight.range)
+            default:
+                if ink == .heading { storage.addAttribute(.font, value: bold, range: highlight.range) }
+                if let color = inks.color(ink) { storage.addAttribute(.foregroundColor, value: NSColor(color), range: highlight.range) }
+            }
+        }
+        storage.endEditing()
+    }
+
+    /// Storage cannot change inside its own editing callback, and `editVersion`
+    /// settles after it; color after it.
     private func scheduleSyntaxColors() {
-        guard palette != nil, !coloringScheduled else { return }
+        guard theme != nil, !coloringScheduled else { return }
         coloringScheduled = true
         Task { [weak self] in
             await Task.yield()
@@ -176,7 +222,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     func restore(_ draft: WorkFileDraft, task: String) {
         guard !dirty else { return }
         snapshot = TaskFileSnapshot(recoveries: [], issueIdentifier: task, taskId: task, path: draft.path,
-            content: draft.baseContent, state: .text, revision: draft.baseRevision,
+            content: draft.baseContent, data: nil, state: .text, revision: draft.baseRevision,
             readOnlyReason: "Recovered draft; checking the current file", sizeBytes: UInt64(draft.baseContent.utf8.count))
         applyIncoming(draft.text)
         editor.isEditable = false
@@ -590,7 +636,10 @@ final class TaskFilesStore {
     private var changeCounts: [String: Int] = [:]
 
     /// A file's changes: the count read with the file list, else its own lines'.
-    func changeCount(_ file: ReviewFile) -> Int { changeCounts[file.path] ?? file.stops.count }
+    func changeCount(_ file: ReviewFile, in reader: ReviewReader = .changes) -> Int {
+        if rendering(of: file, in: reader) != nil { return 1 }
+        return reader == .changes ? changeCounts[file.path] ?? file.stops.count : file.stops.count
+    }
     private(set) var isRefreshingChanges = false
     private(set) var changesError: String?
     private(set) var documents: [String: TaskFileDocument] = [:]
@@ -916,6 +965,8 @@ final class TaskFilesStore {
     private var viewed: [String: Int] = [:]
     /// Changes whose removed lines you opened while reading new code.
     var openedRemovals: Set<String> = []
+    /// Rendered files you switched to their line Diff, by path.
+    var sourceFiles: Set<String> = []
     /// One file at a time; next/previous still crosses into the next file.
     var focusedPath: String? { didSet { refreshTopPath() } }
     var expandedMoves: Set<String> = []
@@ -954,11 +1005,26 @@ final class TaskFilesStore {
         changes = nil
         review = nil
         openedGaps = [:]
+        dropSides()
         self[place: .changes] = ReviewPlace()
         windowStart = nil
         windowRows = Self.windowBudget
         noteInteraction()
     }
+
+    /// How the file reads in the Diff instead of its lines; nil once you chose
+    /// its Source, and for Files' Diff of an unsaved draft, which the sides
+    /// read from disk would not show.
+    func rendering(of file: ReviewFile, in reader: ReviewReader) -> ReviewRendering? {
+        if showsDraft(reader) { return nil }
+        // Before its patch reads, a file `lf task changes` counted no lines in may be a picture.
+        let awaitingPatch = reader == .changes && isReading(file) && changeCounts[file.path] == 0
+        guard let rendering = ReviewRendering.of(file, awaitingPatch: awaitingPatch) else { return nil }
+        return rendering.hasSource && sourceFiles.contains(file.path) ? nil : rendering
+    }
+
+    /// Files' Diff of an unsaved draft, whose lines are not the file on disk.
+    private func showsDraft(_ reader: ReviewReader) -> Bool { reader != .changes && fileReview?.draft == true }
 
     /// A file you marked viewed and whose lines have not changed since.
     func isViewed(_ file: ReviewFile) -> Bool { viewed[file.path] == file.fingerprint && !isReading(file) }
@@ -998,6 +1064,7 @@ final class TaskFilesStore {
             unread = paths.filter { unread.contains($0) || known[$0] == nil || Self.touches(changed, $0) }
         } else {
             unread = paths
+            dropSides()
         }
         readCommits = commits
         reading = []
@@ -1110,6 +1177,7 @@ final class TaskFilesStore {
               let file = result.file else { return }
         if file != review.files[index] {
             openedGaps[path] = nil
+            dropSides(path)
             var files = review.files
             files[index] = file
             self.review = ReviewDiff(files: files)
@@ -1309,6 +1377,130 @@ final class TaskFilesStore {
         }
     }
 
+    // MARK: Both sides of a file
+
+    /// Both versions of a changed file, read once for the comparison's
+    /// commits: the old at its base (under its old name), the new at its head,
+    /// or in the working tree when the comparison has none. Syntax colors,
+    /// skipped lines and images all read them.
+    struct FileSides: Equatable, Sendable {
+        let commits: Commits
+        /// Nil for an added file.
+        let old: TaskFileSnapshot?
+        /// Nil for a deleted file.
+        let new: TaskFileSnapshot?
+
+        struct Commits: Equatable, Sendable {
+            let base: String
+            /// Nil when the new side is the working tree.
+            let head: String?
+        }
+    }
+
+    private(set) var fileSides: [String: FileSides] = [:]
+    private(set) var sideErrors: [String: String] = [:]
+    @ObservationIgnored private var sideReads: [String: Task<FileSides, any Error>] = [:]
+
+    private var sideCommits: FileSides.Commits? {
+        changes.map { .init(base: $0.baseCommit, head: comparison.head == nil ? nil : $0.headCommit) }
+    }
+
+    /// The file's two sides once read for this comparison; asking starts the read.
+    func sides(of file: ReviewFile) -> FileSides? {
+        guard let commits = sideCommits else { return nil }
+        if let known = fileSides[file.path], known.commits == commits { return known }
+        if sideReads[file.path] == nil, sideErrors[file.path] == nil {
+            Task { _ = try? await readSides(file) }
+        }
+        return nil
+    }
+
+    /// Read again after a failure.
+    func retrySides(_ file: ReviewFile) async {
+        sideErrors[file.path] = nil
+        _ = try? await readSides(file)
+    }
+
+    func readSides(_ file: ReviewFile) async throws -> FileSides {
+        guard let commits = sideCommits else { throw RegistryQueryError("The comparison has not been read yet.") }
+        if let known = fileSides[file.path], known.commits == commits { return known }
+        let read = sideReads[file.path] ?? Task { [query, issue] in
+            func side(_ path: String?, at commit: String?) async throws -> TaskFileSnapshot? {
+                guard let path else { return nil }
+                return try await query.taskFile(issue: issue, path: path, at: commit)
+            }
+            async let old = side(file.status == .added ? nil : file.oldPath ?? file.path, at: commits.base)
+            async let new = side(file.status == .deleted ? nil : file.path, at: commits.head)
+            return FileSides(commits: commits, old: try await old, new: try await new)
+        }
+        sideReads[file.path] = read
+        defer { if sideReads[file.path] == read { sideReads[file.path] = nil } }
+        do {
+            let result = try await read.value
+            if sideCommits == commits {
+                fileSides[file.path] = result
+                sideErrors[file.path] = nil
+            }
+            return result
+        } catch {
+            if sideCommits == commits { sideErrors[file.path] = error.localizedDescription }
+            throw error
+        }
+    }
+
+    /// Forget a file's sides, or every file's, once what they were read for has changed.
+    private func dropSides(_ path: String? = nil) {
+        if let path {
+            fileSides[path] = nil
+            sideErrors[path] = nil
+            sideReads.removeValue(forKey: path)?.cancel()
+        } else {
+            fileSides = [:]
+            sideErrors = [:]
+            for read in sideReads.values { read.cancel() }
+            sideReads = [:]
+        }
+    }
+
+    // MARK: Syntax colors
+
+    struct HighlightSource: Equatable {
+        let fingerprint: Int
+        /// Read from both whole files, rather than each hunk's own lines.
+        let whole: Bool
+    }
+
+    /// Each file's syntax colors, with what they were worked out from.
+    /// Parsing runs off the main thread.
+    private var highlighted: [String: (source: HighlightSource, highlights: FileHighlights)] = [:]
+    @ObservationIgnored private var highlighting: [String: HighlightSource] = [:]
+
+    /// The file's syntax colors: from each hunk's own lines at first, then from
+    /// both whole files once they are read, so a hunk that opens inside a
+    /// docstring colors as one. Files' Diff of an unsaved draft keeps hunk
+    /// colors, since the file on disk is not what it shows. Until new colors
+    /// arrive, the ones before, which keep their numbers when skipped lines open.
+    func highlights(of file: ReviewFile, in reader: ReviewReader) -> FileHighlights? {
+        guard let grammar = Grammar.named(file.path) else { return nil }
+        let sides = showsDraft(reader) ? nil : sides(of: file)
+        let source = HighlightSource(fingerprint: file.fingerprint, whole: sides != nil)
+        let known = highlighted[file.path]
+        if known?.source == source { return known?.highlights }
+        if highlighting[file.path] != source {
+            highlighting[file.path] = source
+            let old = sides?.old?.content, new = sides?.new?.content
+            Task { [weak self] in
+                let result = await Task.detached(priority: .userInitiated) {
+                    FileHighlights.hunks(of: file, grammar: grammar).reading(old: old, new: new, grammar: grammar)
+                }.value
+                guard let self, self.highlighting[file.path] == source else { return }
+                self.highlighting[file.path] = nil
+                self.highlighted[file.path] = (source, result)
+            }
+        }
+        return known?.highlights
+    }
+
     // MARK: Skipped lines
 
     /// What opening a file's skipped lines has given so far.
@@ -1322,26 +1514,24 @@ final class TaskFilesStore {
     /// By file. A file's record goes whenever its lines are read again.
     private(set) var openedGaps: [String: OpenedGaps] = [:]
 
-    /// The skipped lines are read from the file as it stands, which is the
-    /// comparison's newer side only while it reads the working tree.
-    var canOpenGaps: Bool { comparison.head == nil }
-
     func opened(_ file: ReviewFile) -> ReviewFile {
         openedGaps[file.path].map { file.opening($0.lines) } ?? file
     }
 
-    /// Show the lines a hunk header skips. Files' Diff of an unsaved draft
-    /// reads the draft; everything else reads the checkout.
-    func openGap(_ header: String, gap: ReviewGap, path: String, reader: ReviewReader) async {
+    /// Show the lines a hunk header skips, from the comparison's newer side:
+    /// its head commit, or the working tree. Files' Diff of an unsaved draft
+    /// reads the draft.
+    func openGap(_ header: String, gap: ReviewGap, file: ReviewFile, reader: ReviewReader) async {
         noteInteraction()
+        let path = file.path
         do {
             let content: String
-            if case .file = reader, fileReview?.draft == true, let draft = documents[path]?.text {
+            if showsDraft(reader), let draft = documents[path]?.text {
                 content = draft
             } else {
-                let file = try await query.taskFile(issue: issue, path: path)
-                guard file.state == .text, let text = file.content else {
-                    throw RegistryQueryError("\(file.state.title) cannot be shown as text.")
+                let new = try await readSides(file).new
+                guard let new, new.state == .text, let text = new.content else {
+                    throw RegistryQueryError("\((new?.state ?? .missing).title) cannot be shown as text.")
                 }
                 content = text
             }
@@ -1430,7 +1620,7 @@ final class TaskFilesStore {
         let files = shownReview?.files ?? []
         var start = window.lowerBound, added = 0
         guard start > 0 else { return }
-        let top = anchors[.changes] ?? files[start].topID
+        let top = anchors[.changes] ?? topID(of: files[start], in: .changes)
         while start > 0, added < Self.windowBudget {
             start -= 1
             added += files[start].rows
@@ -1465,20 +1655,32 @@ final class TaskFilesStore {
         }
     }
 
-    /// "2 of 5" once a change is current; the count before. In the Diff, files
-    /// not read yet count what `lf task changes` counted, so neither number
-    /// grows; Files' Diff counts its one file's lines, draft included.
+    /// The changes a reader steps through, as it shows them: a file the Diff
+    /// renders is one change, read as a document; with Source on, its hunks.
+    func stops(of files: [ReviewFile], in reader: ReviewReader) -> [ReviewStop] {
+        files.flatMap { file in
+            rendering(of: file, in: reader) != nil
+                ? [.rendered(file.path)] : file.stops.map { ReviewStop(id: $0, path: file.path) }
+        }
+    }
+
+    func stops(_ reader: ReviewReader) -> [ReviewStop] { diff(reader).map { stops(of: $0.files, in: reader) } ?? [] }
+
+    /// The id of the first row the reader draws for a file under its header.
+    func topID(of file: ReviewFile, in reader: ReviewReader) -> String {
+        rendering(of: file, in: reader) != nil ? ReviewStop.rendered(file.path).id : file.topID
+    }
+
+    /// Source totals come with the file list, before the patch reads finish.
     func position(_ reader: ReviewReader) -> String {
         guard let diff = diff(reader) else { return "" }
-        let count = { (file: ReviewFile) in reader == .changes ? self.changeCount(file) : file.stops.count }
-        let total = diff.files.reduce(0) { $0 + count($1) }
+        let total = diff.files.reduce(0) { $0 + changeCount($1, in: reader) }
         guard total > 0 else { return "No changes" }
-        guard let current = current(reader),
-              let file = diff.files.firstIndex(where: { $0.stops.contains(current) }),
-              let index = diff.files[file].stops.firstIndex(of: current) else {
+        guard let current = current(reader), let file = diff.fileIndex(holding: current),
+              let index = stops(of: [diff.files[file]], in: reader).firstIndex(where: { $0.id == current }) else {
             return total == 1 ? "1 change" : "\(total) changes"
         }
-        let before = diff.files[..<file].reduce(0) { $0 + count($1) }
+        let before = diff.files[..<file].reduce(0) { $0 + changeCount($1, in: reader) }
         return "\(before + index + 1) of \(total)"
     }
 
@@ -1490,7 +1692,7 @@ final class TaskFilesStore {
     func step(_ offset: Int, in reader: ReviewReader) -> ReviewStop? {
         noteInteraction()
         steppedAt = .now
-        if let stop = diff(reader)?.stop(after: current(reader), offset: offset) {
+        if let stop = stops(reader).stop(after: current(reader), offset: offset) {
             currents[reader] = stop.id
             if reader == .changes, focusedPath != nil { focusedPath = stop.path }
             return stop
@@ -1587,12 +1789,16 @@ final class TaskFilesStore {
             let parsed = await Task.detached(priority: .userInitiated) { ReviewDiff.parse(next.patch) }.value
             guard !Task.isCancelled, generation == diffGeneration, selection == path, changes?.baseCommit == base, comparison == target,
                   selectedDocument?.editVersion == version else { return }
-            if let shown = fileReview, shown.diff != parsed { openedGaps[path] = nil }
+            if let shown = fileReview, shown.diff != parsed {
+                openedGaps[path] = nil
+                // A changed comparison of the file on disk means the disk changed.
+                if draft == nil { dropSides(path) }
+            }
             comments = comments.map { $0.selection.path == path ? $0.anchored(in: parsed.files.first.map(opened)) : $0 }
             fileReview = FileReview(path: path, baseCommit: base, diff: parsed, truncated: next.truncated, draft: draft != nil)
             if let entry = entering, entry.path == path {
                 entering = nil
-                let stop = parsed.stop(after: nil, offset: entry.offset)
+                let stop = stops(.file(path)).stop(after: nil, offset: entry.offset)
                 self[place: .file(path)] = ReviewPlace(anchor: stop?.id, current: stop?.id)
             }
             changesError = nil

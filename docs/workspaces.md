@@ -44,6 +44,7 @@ lf open --wave product --workspace  # open every started, unfinished Task in `pr
 lf open --workspace                 # open every started, unfinished Task in this repo
 lf open --available                 # open conversations ready for your next turn
 lf diff ENG-123 --base parent --difftool  # inspect one Task's changes in your diff tool
+lf task file ENG-123 README.md --at parent  # read a file as it was before the Task
 ```
 
 `--workspace` opens an overview of started, unfinished Tasks: Desktop opens its

@@ -16,6 +16,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/nalexn/ViewInspector.git", from: "0.10.5"),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.7.0"),
+        .package(url: "https://github.com/ChimeHQ/SwiftTreeSitter", from: "0.25.0"),
     ],
     targets: [
         .target(
@@ -33,12 +34,21 @@ let package = Package(
             url: "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf8.xcframework.zip",
             checksum: "306d53ebe8604121ca0e371f01d5f7eeabf788a78e615ff21572eb25bfaaaa99"
         ),
+        // Built by `scripts/loopflow-dev.py grammars-build` and named for its
+        // checksum; a new grammar set uploads under a new name, never over this one.
+        .binaryTarget(
+            name: "TreeSitterGrammars",
+            url: "https://bin.loopflow.studio/TreeSitterGrammars-f9a0593.xcframework.zip",
+            checksum: "f9a05932806a5288ce4e3f8cefbd4aa2b2a8a02f58564e6a928639d46890828e"
+        ),
         .executableTarget(
             name: "LoopflowMac",
             dependencies: [
                 "Loopflow",
                 .target(name: "GhosttyKit", condition: .when(platforms: [.macOS])),
                 .product(name: "Sparkle", package: "Sparkle", condition: .when(platforms: [.macOS])),
+                .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter", condition: .when(platforms: [.macOS])),
+                .target(name: "TreeSitterGrammars", condition: .when(platforms: [.macOS])),
             ],
             path: "LoopflowMac",
             exclude: [
@@ -50,6 +60,7 @@ let package = Package(
             ],
             resources: [
                 .copy("GhosttyResources"),
+                .copy("Grammars"),
                 .copy("ThirdPartyNotices")
             ],
             swiftSettings: [

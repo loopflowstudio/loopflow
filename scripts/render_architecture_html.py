@@ -34,7 +34,7 @@ def render_html() -> str:
     )
     css = "\n".join(
         (
-            (WEBSITE / "static" / "style.css").read_text(),
+            *((WEBSITE / "static" / name).read_text() for name in site.STYLESHEETS),
             (ROOT / "docs" / "dev" / "architecture.css").read_text(),
         )
     ).replace("url(/static/", f"url({site.BASE_URL}/static/")

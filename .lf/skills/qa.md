@@ -6,7 +6,9 @@ extends: builtin
 Use the [isolated Dev bundle](../qa/desktop.md#loopflow-dev-on-the-live-machine)
 and disposable Work. Check whether launch can attach to or resize personal
 terminals before opening the live Machine. For visual acceptance, capture the
-changed UI and a real update in the foreground. Report the check as open if
+changed UI and a real update in the foreground, and click through it watching
+the rest of the window: choosing or hovering an item never moves or resizes
+its neighbors. Report the check as open if
 it cannot run safely.
 
 For Session attachment, join an already-running disposable Session on its
@@ -48,3 +50,15 @@ running `sh -c 'tty; exec lf session resume <id>'`: the printed tty tells your
 view apart from a held terminal that takes it ("moved to ttysN"). Replacing a
 binary a live server runs: `rm` it and copy the new one, or macOS SIGKILLs the
 next exec (status exits 137); then restart the private server.
+
+## Shared build cache
+
+Drive `scripts/build_cache.py` in an isolated `HOME` and `CARGO_HOME`, keeping
+the real `RUSTUP_HOME`. Copy the installed pin's `bin/sccache` to the same
+revision path under that `HOME`; `install` then skips `cargo install`. Run the
+branch's `.venv/bin/python` directly, since `uv` under a new `HOME` refetches.
+A dependency-free two-crate workspace is enough. Give it `[profile.dev]
+incremental = false`, like the repository; never read `CARGO_MANIFEST_DIR`
+in a crate meant to hit, because that value stays verbatim in the hash. Touch a
+source before a build that must start a daemon: a fresh build compiles nothing.
+Stop that daemon by the PID `status --json` reports.

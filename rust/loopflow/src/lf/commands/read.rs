@@ -156,10 +156,15 @@ pub enum Read {
         draft: Option<String>,
         head: Option<String>,
     },
-    /// `lf task file <issue> <path>`: one file of a Task's checkout.
+    /// `lf task file <issue> <path> [--at <rev>]`: one file of a Task's
+    /// checkout, or its version at a commit.
     #[serde(rename = "task.file")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskFileSnapshot>()))]
-    TaskFile { issue: String, path: String },
+    TaskFile {
+        issue: String,
+        path: String,
+        at: Option<String>,
+    },
     /// `lf task files <issue> <path> [--cursor <cursor>] [--show-ignored]`:
     /// one page of a Task checkout directory's immediate entries.
     #[serde(rename = "task.files")]
@@ -455,7 +460,11 @@ impl Read {
                 }
                 argv
             }
-            Self::TaskFile { issue, path } => words(&["task", "file", issue, path, "--json"]),
+            Self::TaskFile { issue, path, at } => {
+                let mut argv = words(&["task", "file", issue, path, "--json"]);
+                argv.extend(optional("--at", at.as_ref()));
+                argv
+            }
             Self::TaskFiles {
                 issue,
                 path,
@@ -733,7 +742,9 @@ impl Read {
                 head.as_deref(),
                 draft.as_deref(),
             )?),
-            Self::TaskFile { issue, path } => value(&task_file(issue, path, false)?),
+            Self::TaskFile { issue, path, at } => {
+                value(&task_file(issue, path, at.as_deref(), false)?)
+            }
             Self::TaskFiles {
                 issue,
                 path,

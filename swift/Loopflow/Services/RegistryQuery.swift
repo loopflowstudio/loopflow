@@ -46,7 +46,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case planBoard(directory: String, wave: String?, task: String?, all: Bool)
     case taskChanges(issue: String, base: String, head: String?)
     case taskDiff(issue: String, path: String?, base: String, head: String?, draft: String?)
-    case taskFile(issue: String, path: String)
+    case taskFile(issue: String, path: String, at: String?)
     case taskFiles(issue: String, path: String, cursor: String?, showIgnored: Bool)
     case waveList
     case machineSelf
@@ -117,8 +117,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .taskDiff(let issue, let path, let base, let head, let draft):
             return ["task", "diff", issue] + (path.map { [$0] } ?? []) + ["--base", base, "--json"]
                 + (head.map { ["--head", $0] } ?? []) + (draft == nil ? [] : ["--draft"])
-        case .taskFile(let issue, let path):
-            return ["task", "file", issue, path, "--json"]
+        case .taskFile(let issue, let path, let at):
+            return ["task", "file", issue, path, "--json"] + argument("--at", at)
         case .taskFiles(let issue, let path, let cursor, let showIgnored):
             return ["task", "files", issue, path, "--json"] + argument("--cursor", cursor)
                 + (showIgnored ? ["--show-ignored"] : [])
@@ -221,8 +221,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("task.changes", ["issue": issue, "base": base, "head": head])
         case .taskDiff(let issue, let path, let base, let head, let draft):
             TaggedFields("task.diff", ["issue": issue, "path": path, "base": base, "head": head, "draft": draft])
-        case .taskFile(let issue, let path):
-            TaggedFields("task.file", ["issue": issue, "path": path])
+        case .taskFile(let issue, let path, let at):
+            TaggedFields("task.file", ["issue": issue, "path": path, "at": at])
         case .taskFiles(let issue, let path, let cursor, let showIgnored):
             TaggedFields("task.files", ["issue": issue, "path": path, "cursor": cursor, "show_ignored": showIgnored])
         case .waveList: TaggedFields("wave.list")
@@ -1227,12 +1227,14 @@ public struct RegistryQuery: Sendable {
                                    cursor: cursor, showIgnored: false)).decode(TaskDirectory.self)
     }
 
-    /// Current contents of one file, constrained to the Task worktree.
+    /// One file of the Task worktree, or its read-only version at commit `at`
+    /// (`parent`, `head` or a resolved SHA).
     public func taskFile(
         issue: String,
-        path: String
+        path: String,
+        at: String? = nil
     ) async throws -> TaskFileSnapshot {
-        try await serve(.taskFile(issue: issue, path: path)).decode(TaskFileSnapshot.self)
+        try await serve(.taskFile(issue: issue, path: path, at: at)).decode(TaskFileSnapshot.self)
     }
 
     public func saveTaskFile(issue: String, path: String, revision: String,

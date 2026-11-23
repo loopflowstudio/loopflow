@@ -19,6 +19,7 @@ struct ReviewStream: View {
     var headsFirstFile = true
     let addToConversation: ((String) -> Bool)?
     @Environment(\.palette) private var palette
+    @Environment(\.theme) private var theme
 
     var body: some View {
         if reader == .changes {
@@ -46,25 +47,41 @@ struct ReviewStream: View {
             if reader == .changes, store.isViewed(file) {
                 // Viewed: folded to its header until you clear it or its lines change.
             } else if reader == .changes, store.isReading(file) {
-                ReviewNotice(text: "Reading…").id(file.topID)
+                ReviewNotice(text: "Reading…").id(store.topID(of: file, in: reader))
                     .onAppear { store.setNear(file.path, true) }
                     .onDisappear { store.setNear(file.path, false) }
             } else {
-                if let machine = store.openedGaps[file.path]?.failure {
-                    FailureLine("Skipped lines did not load.", machine: machine).reviewNoticeInset()
-                }
-                if file.status == .binary {
-                    ReviewNotice(text: "Binary file. No text to compare.").id(file.topID)
-                } else if file.blocks.isEmpty, note == nil {
-                    ReviewNotice(text: file.status == .renamed ? "Renamed without changes." : "No textual changes.")
-                        .id(file.topID)
-                }
-                let gaps = file.gaps
-                ForEach(Array(file.blocks.enumerated()), id: \.offset) { index, block in
-                    blockView(block, gap: gaps[index], file: file)
+                if let rendering = store.rendering(of: file, in: reader) {
+                    if let error = store.sideErrors[file.path] {
+                        ReviewSidesFailed(store: store, file: file, error: error).id(ReviewStop.rendered(file.path).id)
+                        // A file with Source falls back to its line Diff.
+                        if rendering.hasSource { lines(file, note: note) }
+                    } else {
+                        ReviewRendered(store: store, file: file, rendering: rendering, split: split)
+                            .id(ReviewStop.rendered(file.path).id)
+                    }
+                } else {
+                    lines(file, note: note)
                 }
             }
             if let note { ReviewFileNote(note: note) { Task { await store.retryFile(file.path) } } }
+        }
+    }
+
+    /// The file's line Diff: its hunks, or what stands in when it has none.
+    @ViewBuilder private func lines(_ file: ReviewFile, note: TaskFilesStore.FileNote?) -> some View {
+        if let machine = store.openedGaps[file.path]?.failure {
+            FailureLine("Skipped lines did not load.", machine: machine).reviewNoticeInset()
+        }
+        if file.status == .binary {
+            ReviewNotice(text: "Binary file. No text to compare.").id(file.topID)
+        } else if file.blocks.isEmpty, note == nil {
+            ReviewNotice(text: file.status == .renamed ? "Renamed without changes." : "No textual changes.")
+                .id(file.topID)
+        }
+        let gaps = file.gaps
+        ForEach(Array(file.blocks.enumerated()), id: \.offset) { index, block in
+            blockView(block, gap: gaps[index], file: file)
         }
     }
 
@@ -105,7 +122,7 @@ struct ReviewStream: View {
     private func blockView(_ block: ReviewBlock, gap: ReviewGap?, file: ReviewFile) -> some View {
         switch block {
         case .hunk(let header):
-            gapRow(header, gap: gap, path: file.path).id(block.id(in: file.path))
+            gapRow(header, gap: gap, file: file).id(block.id(in: file.path))
         case .context(let line):
             pairRow(ReviewPair(removed: line, added: line, removedSegments: nil, addedSegments: nil),
                     file: file, context: true)
@@ -156,7 +173,7 @@ struct ReviewStream: View {
 
     /// The lines between two hunks: how many, and the declaration git names.
     /// A click reads them from the file and shows them in place.
-    @ViewBuilder private func gapRow(_ header: String, gap: ReviewGap?, path: String) -> some View {
+    @ViewBuilder private func gapRow(_ header: String, gap: ReviewGap?, file: ReviewFile) -> some View {
         let label = gap?.label ?? ""
         let row = HStack(spacing: Spacing.sm) {
             if !label.isEmpty {
@@ -166,9 +183,9 @@ struct ReviewStream: View {
             Rectangle().fill(palette.border).frame(height: 1)
         }
         .padding(.leading, Self.gutterWidth + 6).padding(.trailing, Spacing.md).padding(.vertical, Spacing.xs)
-        if let gap, !gap.new.isEmpty, store.canOpenGaps {
+        if let gap, !gap.new.isEmpty {
             Button {
-                Task { await store.openGap(header, gap: gap, path: path, reader: reader) }
+                Task { await store.openGap(header, gap: gap, file: file, reader: reader) }
             } label: {
                 row.overlay(alignment: .leading) {
                     Image(systemName: "arrow.up.and.down").font(Typography.meta).fontWeight(.semibold)
@@ -331,7 +348,9 @@ struct ReviewStream: View {
                 Text(tone == nil ? " " : line.kind == .added ? "+" : "−")
                     .foregroundStyle(tone?.ink ?? palette.textSecondary)
                     .textSelection(.disabled)
-                Text(Self.attributed(text, segments: cut == nil ? segments : nil, tone: tone, path: path, palette: palette))
+                Text(Self.attributed(text, segments: cut == nil ? segments : nil, tone: tone,
+                                     highlights: store.highlights(of: file, in: reader)?.spans(for: line) ?? [],
+                                     inks: SyntaxInks.of(theme)))
                     .lineLimit(store.wrapsLines ? nil : 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -371,9 +390,9 @@ struct ReviewStream: View {
     }
 
     /// The line in its syntax colors; the changed words of an edited line
-    /// carry a stronger fill.
+    /// carry a stronger fill. A cut line colors only what it shows.
     static func attributed(_ text: String, segments: [ReviewSegment]?, tone: ThemeTone?,
-                           path: String, palette: LoopflowPalette) -> AttributedString {
+                           highlights: [Grammar.Highlight], inks: SyntaxInks) -> AttributedString {
         var result = AttributedString()
         if let segments, let tone {
             for segment in segments {
@@ -386,7 +405,7 @@ struct ReviewStream: View {
         } else {
             result = AttributedString(text.isEmpty ? " " : text)
         }
-        result.colorSyntax(of: text, path: path, palette: palette)
+        result.paint(highlights, inks: inks)
         return result
     }
 
@@ -462,9 +481,19 @@ struct ReviewFileTitle: View {
     }
 
     @ViewBuilder private var actions: some View {
-        if !store.isReading(file) {
+        if !store.isReading(file), file.status != .binary {
             Text("+\(file.additions)").foregroundStyle(palette.successTone.ink).font(Typography.mono).fixedSize()
             Text("−\(file.deletions)").foregroundStyle(palette.failureTone.ink).font(Typography.mono).fixedSize()
+        }
+        if ReviewRendering.of(file)?.hasSource == true {
+            let source = store.sourceFiles.contains(file.path)
+            Button(source ? "Rendered" : "Source") {
+                if source { store.sourceFiles.remove(file.path) } else { store.sourceFiles.insert(file.path) }
+                store.noteInteraction()
+            }
+            .buttonStyle(.plain).font(Typography.meta).foregroundStyle(palette.textSecondary).fixedSize()
+            .help(source ? "Read \(file.path) rendered" : "Show the lines that changed in \(file.path)")
+            .accessibilityIdentifier("changes-source")
         }
         Button("Open") { store.selectFile(file.path, mode: .read) }
             .buttonStyle(.plain).font(Typography.meta).foregroundStyle(palette.textSecondary).fixedSize()

@@ -502,6 +502,45 @@ mod tests {
     }
 
     #[test]
+    fn promotion_reads_live_lfs_before_and_after_upgrading_v0_15_1() {
+        use loopflow_execution::store::{migrations, token_key};
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("lf.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        // native_terminal_input was the first migration after the v0.15.1 tag.
+        migrations::apply_before_migration(&conn, "native_terminal_input");
+        let me = loopflow_execution::process::OsProcess::read(std::process::id())
+            .unwrap()
+            .unwrap();
+        let id = LfProcessId::new();
+        conn.execute(
+            "INSERT INTO processes(id,trace_id,cwd,started_at,pid,os_started_at) VALUES(?1,?1,'/repo',?2,?3,?2)",
+            rusqlite::params![id, me.started_at, me.pid],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'code','{}')",
+            [&id],
+        )
+        .unwrap();
+        let inventory = || {
+            let store = SqliteStore::open_read_only(&path, token_key::encryption_key).unwrap();
+            super::live_lf_processes(&store, me.started_at)
+                .unwrap()
+                .into_iter()
+                .find(|(process, _)| process.id == id)
+                .unwrap()
+                .0
+        };
+        assert_eq!(inventory().pid, me.pid);
+        migrations::apply_sqlite(&conn).unwrap();
+        assert_eq!(inventory().label, "Graph run");
+        conn.execute("DROP INDEX agent_sessions_attached", [])
+            .unwrap();
+        let store = SqliteStore::open_read_only(&path, token_key::encryption_key).unwrap();
+        assert!(super::live_lf_processes(&store, me.started_at).is_err());
+    }
+
+    #[test]
     fn versions_come_from_the_binary_banner() {
         assert_eq!(
             parse_version("lf 0.14.16+e9b2c2eac\n").as_deref(),

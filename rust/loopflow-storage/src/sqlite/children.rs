@@ -2372,10 +2372,15 @@ pub(crate) fn wave_project_in(conn: &Connection, wave: &WaveId) -> StoreResult<P
     Ok(id)
 }
 
-pub(crate) fn held_wave_project_in(conn: &Connection, wave: &WaveId) -> StoreResult<Option<ProjectId>> {
+pub(crate) fn held_wave_project_in(
+    conn: &Connection,
+    wave: &WaveId,
+) -> StoreResult<Option<ProjectId>> {
     Ok(conn
         .prepare_cached("SELECT id FROM projects WHERE wave_id=?1")?
-        .query_row([wave], |row| Ok(ProjectId::from_raw(row.get::<_, String>(0)?)))
+        .query_row([wave], |row| {
+            Ok(ProjectId::from_raw(row.get::<_, String>(0)?))
+        })
         .optional()?)
 }
 
@@ -2624,7 +2629,10 @@ mod local_planning_tests {
                 [refunds_project.id.as_str()],
             )
             .unwrap();
-        assert_eq!(store.wave_project(refunds.id()).unwrap(), refunds_project.id);
+        assert_eq!(
+            store.wave_project(refunds.id()).unwrap(),
+            refunds_project.id
+        );
 
         // A move takes the Task to the new Wave's Project, and out of every
         // Wave with none.
@@ -2655,7 +2663,10 @@ mod local_planning_tests {
     fn the_migration_leaves_every_live_wave_one_project_with_its_tasks() {
         use crate::migration_runner::{apply_before_migration, upgrade_from_migration};
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        let (observers, build) = (crate::test_fixture::observers(), crate::test_fixture::build());
+        let (observers, build) = (
+            crate::test_fixture::observers(),
+            crate::test_fixture::build(),
+        );
         apply_before_migration(&observers, &build, &conn, "remove_chapters");
         let (coverage, empty, retired) = (WaveId::new(), WaveId::new(), WaveId::new());
         let repository = loopflow_model::durable::RepositoryId::new();
@@ -2677,7 +2688,11 @@ mod local_planning_tests {
         }
         // Newest is completed; the newest started one is kept.
         let (oldest, kept, newest) = (ProjectId::new(), ProjectId::new(), ProjectId::new());
-        for (project, status, at) in [(&oldest, "started", 1), (&kept, "started", 2), (&newest, "completed", 3)] {
+        for (project, status, at) in [
+            (&oldest, "started", 1),
+            (&kept, "started", 2),
+            (&newest, "completed", 3),
+        ] {
             conn.execute(
                 "INSERT INTO projects(id,wave_id,created_at,updated_at,description,status) VALUES(?1,?2,?3,?3,'',?4)",
                 params![project.as_str(), coverage, at, status],
@@ -2699,7 +2714,9 @@ mod local_planning_tests {
         upgrade_from_migration(&observers, &build, &conn, "remove_chapters");
 
         let projects = |wave: &WaveId| -> Vec<String> {
-            let mut query = conn.prepare("SELECT id FROM projects WHERE wave_id=?1").unwrap();
+            let mut query = conn
+                .prepare("SELECT id FROM projects WHERE wave_id=?1")
+                .unwrap();
             query
                 .query_map([wave], |row| row.get(0))
                 .unwrap()
@@ -2709,13 +2726,21 @@ mod local_planning_tests {
         assert_eq!(projects(&coverage), [kept.to_string()]);
         for task in &tasks {
             let project: String = conn
-                .query_row("SELECT project_id FROM tasks WHERE id=?1", [task.as_str()], |row| row.get(0))
+                .query_row(
+                    "SELECT project_id FROM tasks WHERE id=?1",
+                    [task.as_str()],
+                    |row| row.get(0),
+                )
                 .unwrap();
             assert_eq!(project, kept.to_string());
         }
         assert_eq!(projects(&empty), [ProjectId::for_wave(&empty).to_string()]);
         let name: String = conn
-            .query_row("SELECT project_name FROM projects WHERE wave_id=?1", [&empty], |row| row.get(0))
+            .query_row(
+                "SELECT project_name FROM projects WHERE wave_id=?1",
+                [&empty],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(name, "empty");
         assert!(projects(&retired).is_empty());

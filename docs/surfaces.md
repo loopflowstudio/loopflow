@@ -50,7 +50,12 @@ own settings.
 The native macOS app reads the same local store as `lf`; it keeps no copy of its own:
 
 - **Sidebar (⌘1–9):** your working Tasks in shared order (dragging reorders
-  them for CLI lists too).
+  them for CLI lists too), plus a **Paused** filter and Wave-board section
+  outside Working so paused Tasks stay out of active counts.
+- **Paused Tasks:** opening a paused Task (on Mac or iPhone) shows its history
+  and status sentence without launching a provider, and offers **Unpause** as
+  the primary action (keeping **Stop Auto-Ship** available when auto is on).
+  **Pause** is available on any open, started Task.
 - **Task workspace:** three resizable panes: `session` (conversation), `shell`
   (at the Task's worktree), and `browser` (Files, Graph log, local dev URLs).
 - **Dashboards:** saved side-by-side grids of Tasks selected by query. Each
@@ -76,12 +81,12 @@ lf desktop dashboard query attention 'state:available or state:blocked'
 ```
 
 Queries support `wave:`, `task:`, `kind:task|wave`, and
-`state:open|available|busy|blocked|unstarted|idle|active|moving|backlog|working|done|auto`
+`state:open|available|busy|blocked|unstarted|idle|active|moving|paused|backlog|working|done|auto`
 (`auto`: an open Task with auto on), combined with whitespace (AND), `or`, and parentheses.
 
 ### Changes show at once
 
-Actions in Desktop (Complete, Abandon, Reopen, Claim, Unassign, Move, Rename)
+Actions in Desktop (Complete, Abandon, Reopen, Claim, Unassign, Pause, Unpause, Move, Rename)
 update the UI on the click, including for remote Machines and the phone. If the
 Machine refuses, the row returns and a single bottom Notice explains why
 (auto-dismissing after 6 seconds; the **Auto** toggle's Notice carries **Undo**,

@@ -331,6 +331,7 @@ lf task auto off LOO-12             # LOO-12: auto off
 | `idle` | Checked out, nothing running, not at an interactive step |
 | `active` | Waiting at an interactive step in its Task conversation |
 | `moving` | Graph running, whatever the auto setting |
+| `paused` | Started Task held by [`lf task pause`](work.md#pause-a-task): work and conversation stopped, ownership and worktree kept |
 | `done` / `abandoned` | Completed / dropped |
 
 ## Run Tasks on pools or rented machines

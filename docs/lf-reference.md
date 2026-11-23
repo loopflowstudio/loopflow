@@ -34,6 +34,8 @@ walkthrough examples.
 lf task run EXP-12 pursue
 lf graph show RUN_ID --json
 lf task interrupt EXP-12
+lf task pause EXP-12
+lf task unpause EXP-12 --run
 ```
 
 Each launch starts a new Graph run recording its own PID, steps, exit codes,

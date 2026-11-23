@@ -11,7 +11,7 @@ A crash, a reboot or a closed terminal loses less than it looks like.
 |---|---|---|
 | Conversations (interactive & headless) | `~/.lf/loopflow.db`, `~/.lf/history.db`, and native provider transcripts | `lf resume --task <ID>` or `lf resume <SESSION>` |
 | Task worktree, branch, PR, and thread | Beside your repo and on GitHub/tracker | `lf task run <ID>` |
-| Task work sessions and runs | Auto-restarted by the server unless you quit or interrupted them | `lf task status <ID>` |
+| Task work sessions and runs | Auto-restarted by the server unless you quit, interrupted, or paused them | `lf task status <ID>` |
 | Stopped Graph runs | Recorded as history with per-step exit codes | `lf task runs <ID>` · `lf graph show <RUN_ID>` |
 | Uncommitted files | In the worktree (`lf wt prune` saves unpushed work to `refs/lf/pruned/…` first) | `lf wt list` |
 
@@ -33,6 +33,7 @@ lf graph list --runs --state current         # live Graph runs
 | Task is waiting for your input | `lf resume --task <ID>` |
 | Run is heading the wrong way | `lf steer <ID> "address the latest feedback"` |
 | Need to stop it right now | `lf task interrupt <ID>` |
+| Need to stop work and conversation, keeping ownership | `lf task pause <ID>` (`lf task unpause <ID> --run` to resume) |
 | Stopped at a failed step, ready to retry | `lf task run <ID>` |
 | Need to redo an earlier step | `lf task run <ID> --from <step>` |
 
@@ -51,16 +52,22 @@ Dirty files under a live Graph are ongoing progress. An idle Task Graph does not
 prove helper Sessions are idle, and a finished launcher does not prove its
 interactive Session closed: check Sessions separately.
 
-`lf task interrupt <ID>` stops a running Graph: an agent step ends at once, an
-operation finishes and nothing follows, and the run exits 130. With nothing
-live it records nothing and says so.
+`lf task interrupt <ID>` stops a running Graph: an agent step and its build
+jobs end at once, an operation finishes and nothing follows, and the run exits
+130. With nothing live it records nothing and says so.
+
+`lf task pause <ID>` stops the Graph, its build jobs, and the Task's primary
+conversation, and holds off runs, wakes, and recovery until
+[`lf task unpause <ID>`](work.md#pause-a-task). If status still reads `Pausing`
+after a cut-short stop, repeat `lf task pause <ID>` to finish stopping the
+remaining processes.
 
 If the Task's worktree never finished being created, status keeps the Task and
 names the exact path and branch to restore before launching.
 
 ## The Task is idle, but waiting on something
 
-Task state says what the Task is doing (`idle`, `active`, `moving`,
+Task state says what the Task is doing (`idle`, `active`, `moving`, `paused`,
 …); whether anyone owns it is separate (`lf task claim`, `lf task unassign`). What it is waiting on (a child Task, review, CI, merge) is its
 `reason`; Desktop's condition, with the evidence behind it, is in `lf task show`:
 

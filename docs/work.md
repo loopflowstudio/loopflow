@@ -54,7 +54,9 @@ context without changing its Graph position or completion state.
 ```bash
 lf steer LOO-12 "keep the retry budget at 3"   # delivered at the next step or turn
 lf task status LOO-12 --json                   # thread: your steers, teammates' comments, agent reports
-lf task interrupt LOO-12                       # stop its running Graph
+lf task interrupt LOO-12                       # stop its running Graph; stay in Working
+lf task pause LOO-12                           # stop work and conversation; keep ownership
+lf task unpause LOO-12 --run                   # lift pause and continue from the interrupted step
 lf task unassign LOO-12                        # release ownership; stops CI repair
 ```
 
@@ -66,6 +68,65 @@ arrive the same way.
 `lf task claim LOO-12` takes ownership without starting a run; `lf task run`
 claims and runs. To jump into the conversation directly, run
 `lf resume --task LOO-12` ([Sessions](sessions.md)).
+
+### Pause a Task
+
+Pause a started Task to stop its worker, build jobs, and conversation without
+giving up ownership or losing your place:
+
+```bash
+lf task pause LOO-12
+lf task list --state paused
+lf task unpause LOO-12 --run
+```
+
+```text
+$ lf task pause LOO-12
+LOO-12 paused (build · implement)
+  stopped: Graph run lf_81a, cargo (pid 41202), rustc (pid 41219)
+  session: session_a1 closed (thread retained)
+  kept:    owner Maya on macbook, worktree, PR #2041
+
+$ lf task status LOO-12
+LOO-12  paused
+  Graph code: Paused at build. `lf task unpause` resumes it.
+
+$ lf task unpause LOO-12 --run
+LOO-12 unpaused
+LOO-12 · code from implement running as Graph run lf_94c
+  follow: lf task status LOO-12
+```
+
+- **What stops.** The running Graph, its worker, and build processes that worker
+  started (such as `cargo` or `rustc`) exit. Other Tasks' builds, shared caches,
+  and your own shells stay untouched. If a mutating operation (such as `lf land`)
+  is already running, it finishes cleanly and nothing starts after it
+  (`Pausing at deliver (pr-land is finishing).`).
+- **What stays.** Your ownership on this Machine, uncommitted files, branch, PR,
+  Graph step, `auto` setting, and the primary conversation's thread ID, history,
+  and queued steers. The primary conversation process closes so it holds no CPU
+  or memory; open terminals display the unpause command.
+- **What stays quiet.** While paused, the Task moves out of Working into
+  **Paused** (`lf wave show`, Desktop, and iPhone). `lf task run`,
+  `lf task auto on`, `lf resume --task`, server recovery after a restart,
+  `wave-operate`, and incoming steers or Linear/Asana comments all leave it
+  quiet (steers and comments queue until you unpause).
+- **Resuming.** `lf task unpause LOO-12` returns the Task to Working and lets
+  the server bring back a pause-closed conversation (leaving a conversation quit
+  if you had already quit it before pausing) without replaying the stopped
+  Graph. Add `--run` to continue from the interrupted step in one command.
+  Unpause refuses while a stopping process or draining operation is still live
+  and names it; repeat `lf task pause LOO-12` to retry cleanup if an earlier
+  stop was cut short.
+- **Lifecycle.** Only open, started Tasks can be paused (`unstarted` backlog,
+  `done`, and `abandoned` Tasks are refused). `lf task unassign` refuses while
+  processes are still stopping, then clears the pause and returns the Task to
+  Backlog. `lf task complete`, `lf task abandon`, and `lf task reopen` also
+  clear the pause. `lf task move LOO-12 --machine mini` carries the pause to the
+  destination Machine so it arrives quiet.
+
+Use `lf task interrupt LOO-12` instead when you only want to stop the running
+Graph while staying in Working with the conversation open.
 
 ## See where everything stands
 
@@ -96,7 +157,8 @@ LOO-12  moving
 
 With auto on, the second clause names auto: "Auto stands in next at
 ship-review." A stopped Graph reads "Stopped at build. `lf task run` starts it
-again." `--json` carries the parts: `graph.steps` (each top-level step's
+again." A paused Task reads "Paused at build. `lf task unpause` resumes it."
+(or "Pausing at …" while processes finish stopping). `--json` carries the parts: `graph.steps` (each top-level step's
 `name` and `interactive`, true when a person takes part anywhere inside the
 step), `graph.current_step` (its index, null before the start and at the end)
 and `graph.sentence`. Before a Task starts, Desktop draws the same steps from
@@ -509,8 +571,8 @@ lf wave status billing                            # plan, Tasks, KRs, and runtim
 ```
 
 `wave-operate` reviews every started Task you own (leaving running Graphs alone
-and continuing stopped ones), lists unstarted backlog for you to pick, and
-leaves teammates' Tasks untouched. Run it on a schedule with your OS scheduler:
+and continuing stopped ones), skips paused Tasks, lists unstarted backlog for
+you to pick, and leaves teammates' Tasks untouched. Run it on a schedule with your OS scheduler:
 
 ```bash
 # Linux crontab (or a macOS LaunchAgent when Keychain access is needed):

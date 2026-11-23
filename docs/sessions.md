@@ -113,6 +113,10 @@ lf task status LOO-12
   stops, and recovery never turns auto on.
 - **Work sessions you quit** (`/exit`, `Ctrl+D`, `Ctrl+C` at the prompt) stay
   quit until you resume them or steer the Session or its Task.
+- **Paused Tasks** (`lf task pause`) close their primary conversation without
+  recording a crash or a quit; it stays closed across restarts and steers until
+  [`lf task unpause`](work.md#pause-a-task) lifts the pause, when the server
+  brings it back automatically (unless you had already quit it beforehand).
 - **Backoff.** After a reboot, the server brings Tasks back one at a time, most
   recently active first. Repeated deaths back off from 1 minute up to 30
   minutes and stop after 5 attempts without a finished turn or step, printing
@@ -216,8 +220,9 @@ lf session steers <session>                          # pending vs. delivered
 - **Chats** are never woken while idle; in a Task checkout they receive updates
   on their next turn.
 - **Stopped interactive Sessions** start in a held terminal when steered by
-  name. A Task steer starts its stopped primary conversation and reaches each
-  running Session on the Task; the next Graph step reads it too. Wave and repository steers wait for the next
+  name. A Task steer starts its stopped primary conversation (unless the Task is
+  [paused](work.md#pause-a-task), in which case steers queue until unpause) and
+  reaches each running Session on the Task; the next Graph step reads it too. Wave and repository steers wait for the next
   boundary. Several steers saved while the server is down arrive together
   when it returns. Attach with `lf resume <session>` to see the reply.
 

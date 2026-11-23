@@ -48,3 +48,14 @@ The demo runs two Tasks building side by side. Pause one: its build and nested b
 1. **Storage, admission, shared teardown, and CLI pause/unpause.** Add the `task_pauses` migration (with revision triggers and 10,000-Task query-plan check), `TaskState::Paused` / `TaskSection::Paused` / `SelectionState::Paused`, `Departure::Paused`, per-Task admission lock, shared descendant-aware teardown (wired into `pause`, `interrupt`, and `move`), immediate carrier/limit settlement, and `lf task pause` / `lf task unpause [--run]`. Prove with the first-slice gate test `cargo test -p loopflow --lib task_graph_launch_tests::pause_stops_owned_build_and_keeps_claim`: two Tasks building side by side with nested build groups; pause one from outside; confirm its worker and nested build exit while the neighbor keeps compiling, owner/dirty file/PR/cursor survive, repeated pause and recovery leave it quiet, unpause (`--run` and separate `run`) continues at the interrupted step, and Session ID/thread survive.
 2. **Session closure, recovery gates, steers, unassign, and move.** Wire `Left::Paused` into `ops/recovery.rs` and `session_ending`, gate `run_recovery`, `limit_recovery`, `due_task_conversations`, and steer/child-notification wakes on `task_pauses`, clear `task_pauses` on `unassign`/`complete`/`abandon`/`reopen`, and carry `paused` through `MovedTask`. Test crash/retry between writing `task_pauses` and stopping descendants, simultaneous `task run` race, draining `lf land` operation, queued steer while paused, already-quit Session staying quit after unpause, unassigning a paused Task, refusing `unstarted`, and move handoff to another Machine. Extend the five-harness worker matrix where providers differ.
 3. **Served writes, Rust projections, Mac/iPhone UI, and docs/skills.** Wire `task.pause` and `task.unpause` served writes and remote routing, update `TaskGraph.sentence`, `TaskRunControl`, and `TaskActionModel`, update shared Rust/Swift DTO fixtures, add `TaskList.paused`, Mac sidebar/Wave board Paused visibility, `PendingChanges`, and `TaskActions` Pause/Unpause on Mac and iPhone, and update operator skills and Task docs.
+
+## User docs
+
+Written ahead of implementation:
+- `docs/work.md`
+- `docs/surfaces.md`
+- `docs/orchestration.md`
+- `docs/sessions.md`
+- `docs/troubleshooting.md`
+- `docs/agent-api.md`
+- `docs/lf-reference.md`

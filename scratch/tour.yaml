@@ -1,11 +1,13 @@
-at: 551f922b36a651981c43d063c67c1b7f5678fc28
+at: 35cd3a22755294f34b3a8d5b7914527fdb915b1e
 first:
   - path: docs/workspaces.md
     why: Checkout search from the command line
   - path: swift/README.md
     why: Files walkthrough and keyboard controls
   - path: tests/fixtures/dto/task_files.json
-    why: Search hits, revisions and checkout paths on the wire
+    why: Declarations, enclosing names and search coordinates
+  - path: rust/loopflow-execution/src/ops/task/symbols.rs
+    why: Checkout declaration lookup and container tracking
   - path: rust/loopflow-execution/src/ops/task/grep.rs
     why: Literal matches, source coordinates and bounded checkout scans
   - path: rust/loopflow-execution/src/ops/task/checkout_file.rs
@@ -18,6 +20,12 @@ first:
     why: Typed checkout read and its command line
   - path: swift/Loopflow/Services/RegistryQuery.swift
     why: How Desktop searches the owning Machine
+  - path: swift/LoopflowMac/FileOutline.swift
+    why: Live declarations from the reader’s syntax tree
+  - path: swift/LoopflowMac/FileJumps.swift
+    why: Definition choices and return locations
+  - path: swift/LoopflowMac/DesktopActions.swift
+    why: File history yields to window navigation
   - path: swift/LoopflowMac/Views/TaskFilePicker.swift
     why: Files and Grep share selection and previews
   - path: swift/LoopflowMac/Views/TaskFilesView.swift
@@ -27,7 +35,7 @@ first:
   - path: swift/LoopflowMac/Views/TaskCodeReader.swift
     why: The numbered source reader shared with previews
   - path: swift/LoopflowTests/TaskFilesTests.swift
-    why: Previewing peer matches while keeping a draft
+    why: Peer jumps, live drafts and exact return lines
   - path: rust/loopflow/tests/machine_commands.rs
     why: Search on a peer-only checkout
   - path: rust/loopflow/tests/served_reads.rs

@@ -437,7 +437,10 @@ detach `sync_tests::`, `git::worktrees::`, `ops::pr::`, `ops::checkout::`,
 `task_handoff_tests::`, `task_initialization_tests::`, `worktree_tests::`,
 `task_pr_range_tests::`. Standalone binaries sharing the fixture
 (`task_pr_authority_tests` and others) are left to gate/CI.
-Next: gate.
+Compress (`f05b4f0dfe`): `branch_pr_merged` lives beside `checkout_base`;
+`CheckoutBase::Stacked` is boxed (clippy `large_enum_variant` had failed
+`loopflow-execution`). Clippy clean; `ops::pr:: ops::checkout::` 52 and
+`sync_tests::` 60 passed. Next: gate.
 
 ## Built: one Git-root rule (human review of the ownership split, 2026-11-23)
 

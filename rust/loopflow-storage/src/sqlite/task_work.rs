@@ -393,8 +393,8 @@ fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> Sto
 }
 
 /// Unended Graph runs paired with each selected Task they occupy: the Task a
-/// run recorded, or for a run that recorded none, the Task whose checkout
-/// holds it. A Task can take a checkout a run is already in; that run stays
+/// run recorded, or for a run that recorded none, a Task at the same
+/// worktree root. A Task can take a checkout a run is already in; that run stays
 /// out of the Task's history and still keeps a second run from starting
 /// beside it. The few unended runs seed it.
 pub(super) fn task_open_graph_pairs(selector: &str) -> String {
@@ -402,9 +402,9 @@ pub(super) fn task_open_graph_pairs(selector: &str) -> String {
         "SELECT tw.id AS task_id,g.lf_process_id AS graph
          FROM graph_processes g INDEXED BY graph_processes_unended
          JOIN tasks tw ON tw.id IN ({selector}) AND (g.task_id=tw.id OR (g.task_id IS NULL
-            AND EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id=tw.id AND {})))
-         WHERE g.ended_at IS NULL",
-        within("g.cwd", "c.worktree")
+            AND EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id=tw.id
+                       AND rtrim(g.cwd,'/')=rtrim(c.worktree,'/'))))
+         WHERE g.ended_at IS NULL"
     )
 }
 
@@ -1183,11 +1183,6 @@ mod tests {
         let link = dir.path().join("link");
         std::os::unix::fs::symlink(&outer_root, &link).unwrap();
         assert_eq!(owner(&link.join("src")), Some(outer.clone()));
-        // A directory that is gone is its own root.
-        assert_eq!(owner(&base.join("gone")), None);
-        std::fs::remove_dir_all(&outer_root).unwrap();
-        assert_eq!(owner(&outer_root), Some(outer.clone()));
-        assert_eq!(owner(&outer_root.join("src")), None);
 
         // A Session and a Graph run started in the nested worktree get no
         // Task; started in a subdirectory of a checkout, they get its Task.
@@ -1230,6 +1225,28 @@ mod tests {
         };
         assert_eq!(run(&claude), None);
         assert_eq!(run(&shared_src), Some(lower.clone()));
+
+        assert_eq!(
+            store.task_state(&outer).unwrap(),
+            crate::execution::TaskState::Idle
+        );
+        assert!(store
+            .graph_execution_facts([], &[&outer])
+            .unwrap()
+            .open_graphs
+            .is_empty());
+        assert!(store.task_open_work(&outer).unwrap().is_empty());
+        assert!(store
+            .checkout_open_work(&outer_root)
+            .unwrap()
+            .iter()
+            .any(|work| matches!(work, OpenWork::Graph { .. })));
+
+        // A directory that is gone is its own root.
+        assert_eq!(owner(&base.join("gone")), None);
+        std::fs::remove_dir_all(&outer_root).unwrap();
+        assert_eq!(owner(&outer_root), Some(outer));
+        assert_eq!(owner(&outer_root.join("src")), None);
     }
 
     #[test]

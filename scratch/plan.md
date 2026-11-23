@@ -229,3 +229,16 @@ Storage `sqlite::plan` and `local_planning` focused tests; a migration test
 from a store with a Wave of three Projects and a Wave with none; clippy.
 `documented_commands::`, golden prompts, Swift DTO suites and the full
 matrix for gate and CI.
+
+## Slice 4 (human-review answers, 2026-11-23)
+
+Jack Heart, on `scratch/concept-review.html`'s questions: "1b 2b 3b 4 - w e dont have child waves".
+
+1. Renaming a linked Wave also renames its Linear Project: queue a
+   `project_name` tracker action, as an unlinked rename already does.
+2. Drop the removal line "N Projects stay readable in history" and
+   `WaveRemoval.projects` (wire change: Rust, Swift, DTO fixtures, schema).
+3. Desktop: replace the Wave pane's **Projects** button with the Project's
+   name and its tracker link in the Wave header.
+4. Child Wave Project naming: no change ("we dont have child waves").
+5. Unanswered: the queued create's snapshot stays as built.

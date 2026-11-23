@@ -336,9 +336,9 @@ other repositories' roots. Git can finish the checkout if registration fails.
 
 The pinned daemon reads its roots at startup. When it is serving a client-side
 cache and lacks this root, registration asks it to stop. The next compile
-starts a daemon with the updated list. Existing client compilers run to
-completion. The daemon gives outstanding connections up to ten seconds to
-finish, so a late cache write can be lost. In the two-worktree check, a
+starts a daemon with the updated list. Rust compiles in the client process
+tree. The daemon gives outstanding connections up to ten seconds to finish,
+so a late cache write can be lost. In the two-worktree check, a
 `rustls` compile continued across the stop and its Cargo invocation passed the
 focused execution test. The [probe](benchmarks/crate-rebuild/README.md#registration-during-a-build)
 exercises this through the installed hook.

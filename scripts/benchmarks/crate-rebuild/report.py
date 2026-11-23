@@ -70,6 +70,7 @@ def _test_loop(source: Path, output: Path) -> None:
         < next(r["median"] for r in totals if r["owner"] == owner and r["mode"] == "cache")
         for owner in ("app", "execution")
     )
+    registration = source / "registration" / "stop.json"
     interruption = source / "host-interruption.json"
     disk_interruption = source / "disk-interruption.json"
     loads = [
@@ -83,6 +84,9 @@ def _test_loop(source: Path, output: Path) -> None:
     payload = {
         "configuration": config,
         "warm_cohorts": warm_cohorts,
+        "registration_during_compile": json.loads(registration.read_text())
+        if registration.exists()
+        else None,
         "background_load": background,
         "host_interruption": json.loads(interruption.read_text())
         if interruption.exists()
@@ -180,15 +184,21 @@ def _test_loop(source: Path, output: Path) -> None:
     calibration_note = config.get(
         "calibration_reason", "Both incremental settings were seeded before measurement."
     )
+    jobs = config.get("jobs")
+    jobs_note = (
+        f"Cargo used {html.escape(str(jobs))} jobs."
+        if jobs is not None
+        else "Cargo used the Machine's default job count."
+    )
     document = f"""<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width"><title>LOO-921 edit-to-test loop</title>
 <style>body{{font:16px/1.5 system-ui;max-width:1050px;margin:48px auto;padding:0
 24px;color:#20252b}}
-table{{width:100%;border-collapse:collapse;margin:24px 0}}th,td{{text-
-align:left;padding:10px;border-bottom:1px solid #ddd}}
+table{{width:100%;border-collapse:collapse;margin:24px 0}}
+th,td{{text-align:left;padding:10px;border-bottom:1px solid #ddd}}
 th{{background:#f4f5f6}}td{{font-variant-numeric:tabular-nums}}</style>
 <h1>A Rust edit through a passing test</h1>
-<p>{len(warm_cohorts)} warm alternating cohorts, Machine Cargo jobs unchanged.
+<p>{len(warm_cohorts)} warm alternating cohorts. {jobs_note}
 Median [minimum–maximum]. Each sample passes one focused test and includes its link.</p>
 <p>Revision <code>{html.escape(config["revision"])}</code>.<br>{html.escape(config["rustc"])}</p>
 <p>{html.escape(load_note)} {html.escape(interruption_note)}</p>
@@ -208,8 +218,8 @@ Incremental must win both three-edit totals to become the default.</p>
 <h2>Largest process RSS, GiB</h2>{table("rss_bytes", 1024**3)}
 <h2>Peak sampled process-tree RSS, GiB</h2>{table("tree_rss_bytes", 1024**3)}
 <p>{html.escape(payload["method"])} Concurrent-worktree capacity is unmeasured.
-Both incremental settings need their own third-party cache keys. Seed commands and
-calibration cohorts are excluded from medians; their raw receipts are retained.
+Both incremental settings need their own third-party cache keys. The medians include only
+complete measured cohorts. The raw file also includes the seed commands for this run.
 Each worktree owns its target; all samples use one private cache.
 New roots are registered before starting its daemon. Worktree creation is timed separately and added
 to the first build; setup overlaps no Cargo command. Registry build scripts and proc macros still

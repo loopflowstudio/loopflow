@@ -161,7 +161,7 @@ def install_hook(repo: Path) -> None:
     command = shlex.join([str(Path(sys.executable).resolve()), str(program.resolve()), "register"])
     block = (
         f'{begin}\nif [ "${{3:-}}" = 1 ]; then\n'
-        f"    {command} </dev/null >/dev/null || :\nfi\n{end}\n"
+        f"    {command} </dev/null >/dev/null 2>&1 || :\nfi\n{end}\n"
     )
     body = original
     if begin in original:

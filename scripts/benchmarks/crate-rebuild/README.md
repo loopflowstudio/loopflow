@@ -67,7 +67,7 @@ survival rate under shared-cache eviction. The cap stays unchanged.
 
 ```bash
 uv run python scripts/build_cache.py install
-uv run python scripts/benchmarks/crate-rebuild/stop_probe.py --output /tmp/lf-stop-proof
+uv run python scripts/benchmarks/crate-rebuild/stop_probe.py --output ~/.cache/loopflow/measurements/loo-921/registration
 ```
 
 The probe runs a focused application test in one linked Loopflow worktree.
@@ -78,7 +78,8 @@ Both worktrees use the installed hook and pin with a private inventory, socket
 and cache. Idle exit is disabled for this experiment. `stop.json` records the
 compiler PID observed across registration, the original and replacement daemon
 PIDs, whether the replacement loaded the second root, and the Cargo and test
-outcomes. `cargo.log` holds the build output.
+outcomes. `cargo.log` holds the build output. When the probe writes to
+`registration/` in the measurement directory, the report includes its receipt.
 
 ## Cache probes and the revision comparison
 

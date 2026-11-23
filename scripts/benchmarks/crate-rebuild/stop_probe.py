@@ -73,14 +73,17 @@ def main() -> None:
             settings,
             RUSTC_WRAPPER=str(wrapper),
             CARGO_TARGET_DIR=str(a / "target"),
+            CARGO_INCREMENTAL="0",
             SCCACHE_DIR=str(root / "cache"),
             SCCACHE_SERVER_UDS=str(root / "cache.sock"),
             SCCACHE_CONF=str(root / "roots.json"),
             SCCACHE_IDLE_TIMEOUT="0",
         )
 
+        revision = _run(["git", "rev-parse", "HEAD"], ROOT, env)
+
         def add(tree: Path) -> None:
-            _run(["git", "worktree", "add", "--detach", str(tree), "HEAD"], ROOT, env)
+            _run(["git", "worktree", "add", "--detach", str(tree), revision], ROOT, env)
             stack.callback(_run, ["git", "worktree", "remove", "--force", str(tree)], ROOT, env)
 
         add(a)
@@ -97,7 +100,12 @@ def main() -> None:
             raise RuntimeError("private daemon failed to start")
         package, selected = FILTERS["app"]
         command = ["cargo", "test", "--locked", "-p", package, "--lib", selected, "--", "--exact"]
-        observation = {"command": command, "wrapper": str(wrapper), "original_daemon": old_pid}
+        observation = {
+            "command": command,
+            "revision": revision,
+            "wrapper": str(wrapper),
+            "original_daemon": old_pid,
+        }
         with (output / "cargo.log").open("w") as log:
             build = subprocess.Popen(
                 command,

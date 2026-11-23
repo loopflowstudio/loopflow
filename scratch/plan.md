@@ -175,8 +175,12 @@ and build scripts" becomes the seeded behaviour plus what still compiles.
    `scripts/benchmarks/crate-rebuild/test_loop.py` (or a sibling driver), run
    three cohorts, and render results with `report.py` as
    `results/loo-922.html`.
-3. **Docs.** Update testing.md's Shared compilation cache section and the
-   crate-rebuild README row.
+3. **Docs.** Written ahead of the code: `scripts/testing.md` (Shared
+   compilation cache: `seed` status line, "New worktrees start warm", hook
+   paragraph, `lf wt prune --builds` overcount) and
+   `scripts/benchmarks/crate-rebuild/README.md` (`seed_probe.py` commands,
+   LOO-922 results link, "Seeded worktrees"). Make the code match them, or fix
+   them where the code shows they're wrong.
 
 After verify: check LOO-923 status/liveness, `lf task checkout LOO-923` if
 absent, then `lf ship LOO-923` with these measurements in its context.

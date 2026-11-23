@@ -332,15 +332,39 @@ uv run python scripts/build_cache.py status    # in any worktree
 wrapper  ~/.local/share/loopflow/sccache/ca81ec2a…/bin/sccache (pinned)
 daemon   pid 4242, /…/ca81ec2a…/bin/sccache, up 3m; configured idle timeout sccache default (600s) (next start)
 roots    61 of 61 loaded; this checkout loaded
+seed     from ../loopflow.loo-917-theme-cards at 42d8b45944
 Rust     258 hits, 1 miss
 cache    6.2 GiB of 10 GiB
 ```
 
 Plain `cargo build` shares eligible libraries across worktrees. Each worktree
 keeps its own target. `cargo test` shares registry dependencies and keeps
-incremental state for workspace crates. A fresh target still compiles and links
-test executables, binaries, proc-macros and build scripts. The application's
-`test-support` libraries embed checkout paths and also compile in each root.
+incremental state for workspace crates. The application's `test-support`
+libraries embed checkout paths and also compile in each root.
+
+**New worktrees start warm.** `git worktree add` clones `target/debug` from the
+newest sibling worktree whose Cargo isn't running, so registry crates, their
+build scripts and proc macros come back `Fresh` instead of compiling:
+
+```bash
+git worktree add ../loopflow.my-change main && cd ../loopflow.my-change
+cargo build -p loopflow --bin lf     # 7 Compiling lines (workspace crates), not 256
+```
+
+Cargo still decides what is fresh; the seed only gives it a target to look at.
+Every workspace crate rebuilds, because checkout gives its sources new mtimes,
+and the shared cache serves the eligible ones. The seed is a copy-on-write clone
+(APFS on macOS, reflink on Linux) of `.fingerprint`, `build` and `deps`; it never
+copies `incremental/`, lock files or a built `lf`. Clone blocks are shared until
+a build rewrites them: after the first `lf` build about 40% of the target had
+diverged. Where the filesystem can't clone, or every sibling is building, the
+worktree starts with no target and builds cold. A focused `cargo test` still
+compiles the workspace libraries in the incremental test profile, about 200
+CPU-seconds that neither the seed nor the cache serves.
+
+To build a new worktree cold, `rm -rf target` before the first build. A target
+that already exists is never replaced. `lf wt prune --builds` counts a seeded
+target at full size, so it reports more space freed than the disk gains back.
 
 The installer builds and checks the pin, then writes `build.rustc-wrapper` and
 `SCCACHE_*` entries in the personal Cargo configuration (`~/.cargo/config.toml`,
@@ -352,9 +376,11 @@ identifies the pin. Installing registers the checkout like the hook does, so
 a daemon already serving other repositories loads it. CI uses its own Cargo
 configuration.
 
-Git's `post-checkout` hook registers the worktree in
-`~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set). The hook
-carries a copy of the script so older revisions can register. It retains other
+Git's `post-checkout` hook seeds a new worktree's target, then registers the
+worktree in `~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set).
+The hook carries a copy of the script so older revisions can register; an
+existing installation seeds after one more `install`. Both steps are
+best-effort and silent. It retains other
 repositories' roots and lets Git finish checkout if registration fails.
 Installation keeps an existing shell hook in place when it can insert the
 registration command. Other hooks move beside it to `post-checkout.before-loopflow`.

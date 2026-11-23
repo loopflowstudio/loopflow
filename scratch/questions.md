@@ -12,3 +12,12 @@
   opt-in, and the probe showed −58% CPU on a fresh `lf` build. An env-var
   opt-out was dropped in concept review as a duplicate of deleting the
   directory.
+- The measured arm is documented as a sibling driver `seed_probe.py` (plus
+  `report.py --seed-probe`), not a mode of `test_loop.py`: its rows (an `lf`
+  build then one focused test, seeded vs cold) share nothing with test_loop's
+  edit cohorts. Slice 2 should confirm or rename in the README.
+- How to measure "bytes rewritten instead of shared": the probe reported
+  0.84 GiB rewritten / 1.17 GiB shared, but `measure.sh` doesn't show the
+  method. `df` deltas are noisy with other agents writing. Slice 2 picks one
+  (e.g. per-file `clonefile` identity via `getattrlist` ATTR_CMNEXT_PRIVATESIZE)
+  and the README sentence follows it.

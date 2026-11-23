@@ -457,7 +457,8 @@ struct TaskFilesTests {
         let store = TaskFilesStore(issue: "TEST-1", cwd: "/peer/checkout", query: query)
         store.selectFile("src/reader.swift", mode: .edit)
         let tabs = store.tabs
-        store.invalidate([], ignoredScratch: ["scratch/page.html", "scratch/page.html"])
+        // `sed -i` and other atomic saves write a temporary sibling, then rename it over the page.
+        store.invalidate([], ignoredScratch: ["scratch/.!4312!page.html", "scratch/page.html", "scratch/page.html"])
         try await eventually { store.browser.updated == ["scratch/page.html"] }
         #expect(store.mode == .edit && store.tabs == tabs && store.selection == "src/reader.swift")
         #expect(store.scratchPaths == ["scratch/page.html"] && store.documents.isEmpty)

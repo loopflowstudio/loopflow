@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LOO-1067 QA · File browser</title>
+<style>
+  body { font: 15px/1.5 -apple-system, system-ui, sans-serif; max-width: 1100px; margin: 32px auto; padding: 0 24px; color: #1d1d1f; }
+  h1 { font-size: 26px; margin-bottom: 4px; }
+  h2 { font-size: 19px; margin-top: 40px; border-top: 1px solid #ddd; padding-top: 16px; }
+  .meta { color: #666; }
+  figure { margin: 12px 0 20px; }
+  figure img { width: 100%; border: 1px solid #ccc; border-radius: 6px; }
+  figcaption { color: #555; font-size: 13px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  code, pre { font: 13px ui-monospace, Menlo, monospace; }
+  pre { background: #f4f4f6; padding: 10px 12px; border-radius: 6px; overflow-x: auto; }
+  .ok { color: #1a7f37; font-weight: 600; }
+  .fixed { color: #0b5cad; font-weight: 600; }
+  .bad { color: #b42318; font-weight: 600; }
+  .open { color: #8a5a00; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid #e5e5e5; }
+</style>
+</head>
+<body>
+<h1>File browser QA</h1>
+<p class="meta">November 23 · branch <code>lf</code> and an isolated Dev bundle (<code>com.loopflow.mac.qafiles.dev</code>) on a private Machine under <code>/tmp/lf-qa-files</code>.
+The screen was locked, so the app was driven through <code>lf desktop</code> and the file-driven QA hook (<code>.lf/qa/QAHook.swift</code>). It ran headless, with no physical keyboard or mouse.</p>
+
+<p>Setup: a disposable repository <code>shop</code> with a nested <code>src/billing/invoices/render/mod.rs</code> holding two <code>render_total</code> declarations (one inside <code>mod legacy</code>, one only mentioned in a comment), a 3,000-line <code>src/long.rs</code>, an ignored <code>scratch/</code> with <code>notes.md</code> and <code>explore.html</code>, and an ignored <code>target/</code> artifact containing <code>render_total</code>. The Task <code>a29f32</code> ran the <code>qa</code> Graph to its <code>demo</code> step. Its checkout carried uncommitted edits to <code>main.rs</code> (+2 −1) and <code>config.rs</code> (−1).</p>
+
+<h2>1 · Find a file in an unopened folder and preview it</h2>
+<p><code>desktop do files-find -p files</code>, then type <code>billrend</code>. The picker lists only <code>src/billing/invoices/render/mod.rs</code>, and with the pane zoomed past 620 pt it previews the file beside the list. <span class="ok">Works.</span></p>
+<p><span class="bad">Broken, then fixed:</span> the preview, and the reader generally, wrapped code lines at about 200 pt whatever the pane's width. A wrapped declaration read as two lines beside one number. Pinning each row's width to its content fixed the wrap. The first attempt pinned only the text, which pushed long lines over their numbers, so the fix pins the whole row (<code>TaskCodeReader.swift</code>).</p>
+<div class="pair">
+  <figure><img src="qa/s4.png"><figcaption>Before: line 4 wraps into three rows.</figcaption></figure>
+  <figure><img src="qa/s9.png"><figcaption>After: one row per line, numbers intact; the pane scrolls sideways.</figcaption></figure>
+</div>
+<p>Return opens the file in Read. The rail docks (620 pt+), the breadcrumb shows every folder, and the Checkout tree reveals the file through its unopened ancestors.</p>
+<figure><img src="qa/s10.png"><figcaption>Opened from the picker: Open &amp; Scratch, Changed in Task, revealed Checkout path.</figcaption></figure>
+
+<h2>2 · Presentation, change marks, outline and history</h2>
+<p><code>lf desktop files src/main.rs:5</code> opens Read with line 5 highlighted, green change marks on 7–8 and <code>› main</code> in the breadcrumb. <code>files-outline</code> lists <code>render_total</code>, <code>legacy</code>, <code>legacy.render_total</code> and skips the comment. <code>files-back</code> and <code>files-forward</code> move between <code>main.rs</code> and <code>render/mod.rs</code>. <span class="ok">Works.</span></p>
+<div class="pair">
+  <figure><img src="qa/s12.png"><figcaption>Presented line range and Task change marks.</figcaption></figure>
+  <figure><img src="qa/s20.png"><figcaption>⇧⌘O outline from the reader's own parse.</figcaption></figure>
+</div>
+
+<h2>3 · Find, promote to Grep, open a hit, return</h2>
+<p>⌘F with <code>total</code> counts “2 of 4” and Return steps. Only the current match is tinted, which is how <code>FileFind.highlight</code> is written. ⇧⌘F carries the query to checkout Grep. It finds the ignored scratch page and skips <code>target/</code>. Arrowing previews each hit with its exact bytes marked, Return opens <code>render/mod.rs:9</code>, and Back returns to <code>main.rs</code>. <span class="ok">Works.</span></p>
+<div class="pair">
+  <figure><img src="qa/s24.png"><figcaption>In-file Find.</figcaption></figure>
+  <figure><img src="qa/s28.png"><figcaption>Grep with preview on the third hit.</figcaption></figure>
+</div>
+<p>The CLI agrees:</p>
+<pre>$ lf task find a29f32 billrend
+src/billing/invoices/render/mod.rs
+$ lf task grep a29f32 render_total --whole-word
+src/billing/invoices/render/mod.rs:3:// render_total in a comment is not a declaration
+src/billing/invoices/render/mod.rs:4:pub fn render_total(settings: &amp;Settings, cents: u64) -&gt; String {
+src/billing/invoices/render/mod.rs:9:    pub fn render_total(cents: u64) -&gt; String {
+src/main.rs:6:    let total = billing::invoices::render::render_total(&amp;settings, 42);
+$ lf task symbols a29f32 render_total
+src/billing/invoices/render/mod.rs:4:fn render_total
+src/billing/invoices/render/mod.rs:9:fn render_total (legacy)
+$ lf task grep a29f32 café --json     # start 14, end 19: UTF-8 bytes around "café"</pre>
+
+<h2>4 · Per-file Read, Edit and Diff</h2>
+<p>Edit and Diff are reachable from the header buttons. Diff shows the file against the Task base with the step control, the “1 old line · Show” fold and the three layouts. <span class="ok">Works.</span></p>
+<figure><img src="qa/s31.png"><figcaption>Per-file Diff on <code>main.rs</code>.</figcaption></figure>
+
+<h2>5 · Scratch writes while editing, and presentation</h2>
+<p>With <code>main.rs</code> in Edit, two rewrites of <code>scratch/explore.html</code> left the editor in place and showed a quiet “Updated scratch/explore.html · Open”. <code>lf desktop files scratch/notes.md</code> during Edit showed “Presented scratch/notes.md · Open” and did not switch files. In Read, presenting <code>explore.html</code> opened the rendered page at once.</p>
+<p><span class="bad">Broken, then fixed:</span> the rewrites used <code>sed -i</code>, which saves atomically: it writes <code>scratch/.!43245!explore.html</code> and renames it over the page. Each temporary file became a badged entry in Open &amp; Scratch that stayed after the file was gone, and the update bar once offered “Updated scratch/.!43245!explore.html”. Updates now offer only pages the refreshed scratch inventory still holds (<code>TaskFilesStore.applyWrites</code>). The existing peer scratch-write test now sends the temporary sibling, and it fails without the fix.</p>
+<div class="pair">
+  <figure><img src="qa/s33.png"><figcaption>Before: two vanished temp files listed as updated pages.</figcaption></figure>
+  <figure><img src="qa/s47.png"><figcaption>After: the same <code>sed -i</code> burst badges only <code>notes.md</code> and <code>explore.html</code>.</figcaption></figure>
+</div>
+<div class="pair">
+  <figure><img src="qa/s34.png"><figcaption>Presented during Edit: offered, not taken.</figcaption></figure>
+  <figure><img src="qa/s38.png"><figcaption>Presented in Read: rendered immediately.</figcaption></figure>
+</div>
+<p>Settled reload: scrolled to 600, then two writes 0.3 s apart. Read through WebKit 0.4 s after the burst and again 3 s later:</p>
+<pre>Euro totals  Version 7 of the explore page.  Bottom of the page. | scrollY=600   (during the burst)
+Euro totals  Version 9 of the explore page.  Bottom of the page. | scrollY=600   (settled: one reload, scroll kept)</pre>
+
+<h2>6 · Narrow layouts and the drawer</h2>
+<p>At about 380 pt the rail becomes a drawer, and Read/Edit/Diff fold into the header menu. At about 240 pt the breadcrumb keeps only the filename. The sidebar button opens the drawer over the reader.</p>
+<div class="pair">
+  <figure><img src="qa/s48.png"><figcaption>Below 620 pt: rail hidden, modes in the menu.</figcaption></figure>
+  <figure><img src="qa/s51.png"><figcaption>Drawer open.</figcaption></figure>
+</div>
+<figure><img src="qa/s49.png" style="max-width:640px"><figcaption>Window at 900 pt: the pane strip has dropped its selected “Files” tab.</figcaption></figure>
+
+<h2>7 · Wrong input and returning</h2>
+<pre>$ lf desktop files ../../../../etc/hosts   → Error: Files needs a path inside the checkout. (2)
+$ lf desktop files src/main.rs:5-2        → Error: Expected LINE or LINE-END after the path (2)
+$ lf desktop files nosuch/path.rs         → files (0), reader shows "File no longer exists"
+$ lf desktop files src/main.rs:999        → files (0)</pre>
+<figure><img src="qa/s52.png" style="max-width:640px"><figcaption>A path that never existed reads “File no longer exists” (existing <code>TaskFileState.missing</code> text and <code>EmptyState</code> style).</figcaption></figure>
+<p>After quitting and relaunching, the Task reopened on <code>main.rs</code> in Read.</p>
+
+<h2>What works now</h2>
+<p>Finding a nested file and previewing it. Opening it in Read with change marks, enclosing symbol and outline. Presenting a line range from the CLI. Back and forward. Find promoted to Grep, with exact hit previews. Per-file Edit and Diff. Calm scratch updates and presentation offers during Edit. Settled HTML reloads that keep their scroll. The responsive rail and drawer. Matching <code>lf task find|grep|symbols</code> output.</p>
+
+<h2>Couldn't reach</h2>
+<table>
+<tr><td class="open">Jump to definition by click</td><td>Word taps (<code>gd</code>, ⌘-click) are SwiftUI tap gestures, and none fired from the hook in a window that isn't key. Neither a pre-queued mouse-up nor a down-then-up 80 ms later worked. The definition read itself works (<code>lf task symbols</code>, the outline), and headless tests cover the model. A mounted click needs an unlocked display.</td></tr>
+<tr><td class="open">Line comments into the conversation</td><td>Gutter clicks are tap gestures too, so the shared comment batch and ⌘↩ insertion went unexercised here.</td></tr>
+<tr><td class="open">Rail rows, outline rows, the update bar's Open</td><td>Same limit. Presentation and history were used instead.</td></tr>
+<tr><td class="open">Step Diff keeping whole-Task counts</td><td>The disposable Task had no committed steps. Headless tests cover it.</td></tr>
+<tr><td class="open">Peer Machine checkout</td><td>Not set up in this run. The plan's Swift and Rust journeys cover it.</td></tr>
+</table>
+
+<h2>Still wrong, worst first</h2>
+<table>
+<tr><td class="bad">Clicking a word may never reach <code>gd</code></td><td>The hook's click on a code line made the line's selectable text view first responder, and the following <code>g</code> <code>d</code> keys went to it, not to the reader's <code>onKeyPress</code>. The hook can't settle whether a real click behaves the same. Check on an unlocked display before relying on <code>gd</code> after a click.</td></tr>
+<tr><td class="bad">Session zoom hides presentations</td><td>After a relaunch the window restored with the session pane zoomed. <code>lf desktop files …</code> answered <code>files</code> (exit 0) while nothing visible changed.</td></tr>
+<tr><td class="open">Pane strip at narrow widths</td><td>At about 240 pt the “Files” tab is clipped away while Files is showing.</td></tr>
+<tr><td class="open">Nonexistent paths</td><td><code>lf desktop files nosuch/path.rs</code> succeeds, and the reader says the file “no longer exists” in the large serif empty-state title.</td></tr>
+<tr><td class="open">Grep rows for two hits on one line</td><td>The two <code>src/main.rs:6</code> rows look identical; the row excerpt doesn't mark the hit. Long single-line hits (the HTML page) sit off to the right of the preview now that code doesn't wrap.</td></tr>
+<tr><td class="open">Changed in Task omits open files</td><td>Once <code>main.rs</code> was open, it moved from Changed in Task to Open &amp; Scratch (with its counts), leaving Changed listing only <code>config.rs</code>.</td></tr>
+<tr><td class="open">Stale presentation bar</td><td>“Presented scratch/notes.md · Open” stayed after leaving Edit and opening another page.</td></tr>
+</table>
+
+<h2>Checks run</h2>
+<pre>scripts/test_desktop.sh --filter 'ignoredScratchWritesOfferThePageWithoutOpeningItOrReadingAComparison|codeOpensInReadAndKeepsItsDraftAndEditorAcrossFiles'
+  → 2 passed; with the store fix reverted, the scratch test fails.</pre>
+</body>
+</html>

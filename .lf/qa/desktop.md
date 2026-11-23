@@ -509,6 +509,23 @@ store reads again on file events. Twice a list stayed stale after a `git
 checkout` of one file plus an edit to another; the next write to any file
 cleared it.
 
+Files' pane actions need `-p files` (`lf --task <id> desktop do files-find -p files`);
+without it the command answers "Several panes are eligible". `lf desktop files
+<path>[:LINE[-END]]` presents a file and builds jump history for `files-back` and
+`files-forward`. A relaunch can restore with the session pane zoomed, which hides
+Files while `desktop files` still answers `files`: `desktop zoom --off -p session`.
+With the QA hook (see above): `fill Find file|<text>` (or `Find in file`, `Search
+checkout text`) types into the picker or Find bar, and `key 0 - down|return|escape`
+drives the focused field. `click` presses Buttons (Read, Edit, Diff, the sidebar
+toggle; it toggles, so send it once). SwiftUI tap gestures never fire from the
+hook in a window that isn't key: code-reader word taps (`gd`, ⌘-click), gutter
+comment taps, rail and outline rows and the update bar's Open. `snap` shows
+WebKit pages only right after a load and goes blank once the display sleeps;
+`web <png>` takes WebKit's own snapshot and writes body text and `scrollY` beside
+it, and `webscroll <y>` scrolls the page, which is how the settled HTML reload and
+its scroll restore are checked. BSD `sed -i` writes `scratch/.!<pid>!<page>` and
+renames it: a quick atomic-save check for the scratch rail.
+
 In-memory view state (the layout picker's `reviewLayout`, Source,
 `TaskFilesStore.sourceFiles`) and the change stepper (`]`) have no
 control command. Use the QA hook above to click Source, the layout picker

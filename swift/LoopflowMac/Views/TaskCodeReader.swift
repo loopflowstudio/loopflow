@@ -113,6 +113,8 @@ struct TaskCodeReader: View {
                 }
                 source(lines[index], number: index + 1)
             }
+            // Code scrolls sideways; a wrapped line would read as two lines beside one number.
+            .fixedSize(horizontal: true, vertical: false)
             if let store {
                 if let selection = store.comments.selection, selected(index + 1), selection.last == index + 1 {
                     ReviewCommentEditor(store: store, selection: selection, excerpt: {

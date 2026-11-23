@@ -318,7 +318,10 @@ final class TaskFilesStore {
         if !pages.isEmpty || changed.contains("") || visible.contains(where: { $0.hasPrefix("scratch/") || $0 == "scratch" }) {
             await refreshScratch()
             guard !Task.isCancelled else { return }
-            browser.noteWrites(pages)
+            // An atomic save writes a temporary sibling and renames it over the
+            // page; offer only pages the checkout still holds.
+            let present = Set(scratchPaths)
+            browser.noteWrites(scratchError == nil ? pages.filter(present.contains) : pages)
         }
         // Re-read retained documents even when another file or terminal is visible.
         for (path, document) in documents where Self.touches(changed, path) {

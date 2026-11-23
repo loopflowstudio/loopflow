@@ -1,5 +1,6 @@
 // Copy into swift/LoopflowMac/ for a local QA build; never commit it there. See desktop.md, "Driving the app with the screen locked".
 import AppKit
+import WebKit
 
 @MainActor
 enum QAHook {
@@ -84,6 +85,33 @@ enum QAHook {
             if let up = event(.leftMouseUp) { NSApp.postEvent(up, atStart: false) }
             if let down = event(.leftMouseDown) { window.sendEvent(down) }
             return "clicked \(window.title) \(point)"
+        case "web":
+            // `web <png path>`: WebKit's own snapshot of the first web view, plus its body text and scroll offset.
+            // `snap` reads WebKit content reliably only right after a load.
+            func webView(_ view: NSView?) -> WKWebView? {
+                guard let view else { return nil }
+                if let web = view as? WKWebView { return web }
+                return view.subviews.lazy.compactMap(webView).first
+            }
+            guard let web = windows.lazy.compactMap({ webView($0.contentView) }).first else { return "no web view" }
+            web.takeSnapshot(with: nil) { image, _ in
+                guard let tiff = image?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return }
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: arg))
+            }
+            web.evaluateJavaScript("document.body.innerText.slice(0, 120) + ' | scrollY=' + scrollY") { value, error in
+                try? String(describing: value ?? error ?? "nil").write(toFile: arg + ".txt", atomically: true, encoding: .utf8)
+            }
+            return "web \(arg)"
+        case "webscroll":
+            // `webscroll <y>`: scrolls the first web view as a wheel would, for scroll-restoration checks.
+            func webView(_ view: NSView?) -> WKWebView? {
+                guard let view else { return nil }
+                if let web = view as? WKWebView { return web }
+                return view.subviews.lazy.compactMap(webView).first
+            }
+            guard let web = windows.lazy.compactMap({ webView($0.contentView) }).first else { return "no web view" }
+            web.evaluateJavaScript("scrollTo(0, \(Int(arg) ?? 0))")
+            return "scrolled"
         case "size":
             let n = arg.split(separator: " ").compactMap { Double($0) }
             guard n.count == 3, windows.indices.contains(Int(n[0])) else { return "usage: size window w h" }
@@ -129,9 +157,50 @@ enum QAHook {
                 }
             }
             return "typed"
+        case "fill":
+            // `fill <placeholder>|<text>`: focuses the text field showing that placeholder and inserts text through its field editor.
+            let pieces = arg.split(separator: "|", maxSplits: 1).map(String.init)
+            guard pieces.count == 2 else { return "usage: fill placeholder|text" }
+            for window in windows {
+                guard let field = textField(in: window.contentView, placeholder: pieces[0]) else { continue }
+                window.makeFirstResponder(field)
+                (window.firstResponder as? NSTextView)?.insertText(pieces[1], replacementRange: NSRange(location: NSNotFound, length: 0))
+                return "filled \(window.title)"
+            }
+            return "no field"
+        case "key":
+            // `key <window> <mods> <chars|return|escape|up|down>`: a key event sent straight to that window's first responder.
+            let pieces = arg.split(separator: " ").map(String.init)
+            guard pieces.count == 3, let index = Int(pieces[0]), windows.indices.contains(index) else { return "usage: key window mods chars" }
+            let window = windows[index]
+            var flags: NSEvent.ModifierFlags = []
+            if pieces[1].contains("cmd") { flags.insert(.command) }
+            if pieces[1].contains("shift") { flags.insert(.shift) }
+            if pieces[1].contains("ctrl") { flags.insert(.control) }
+            if pieces[1].contains("opt") { flags.insert(.option) }
+            let named: [String: (String, UInt16)] = ["return": ("\r", 36), "escape": ("\u{1b}", 53), "up": (String(UnicodeScalar(NSUpArrowFunctionKey)!), 126),
+                                                    "down": (String(UnicodeScalar(NSDownArrowFunctionKey)!), 125), "space": (" ", 49)]
+            let (chars, code) = named[pieces[2]] ?? (pieces[2], 0)
+            for type in [NSEvent.EventType.keyDown, .keyUp] {
+                if let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+                                                windowNumber: window.windowNumber, context: nil, characters: chars,
+                                                charactersIgnoringModifiers: chars, isARepeat: false, keyCode: code) {
+                    if type == .keyDown, !window.performKeyEquivalent(with: event) { window.firstResponder?.keyDown(with: event) }
+                }
+            }
+            return "key \(String(describing: window.firstResponder.map { type(of: $0) }))"
+        case "responder":
+            return windows.map { "\($0.title): \(String(describing: $0.firstResponder.map { type(of: $0) }))" }.joined(separator: "\n")
         default:
             return "unknown: \(line)"
         }
+    }
+
+    private static func textField(in view: NSView?, placeholder: String) -> NSTextField? {
+        guard let view else { return nil }
+        if let field = view as? NSTextField, field.isEditable, field.placeholderString == placeholder { return field }
+        for child in view.subviews { if let found = textField(in: child, placeholder: placeholder) { return found } }
+        return nil
     }
 
     private static func children(_ element: Any) -> [Any] {

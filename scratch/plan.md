@@ -12,7 +12,7 @@ Latest concept review: [Built B1 concept review](concept-review.html).
 
 ## Remaining work (from B1 concept review at `1e3b4007ce`)
 
-Slice 1 is built. Slices 2 and 3 remain; Slice 2 (Sort write recovery) is next.
+All three slices are built. The unlocked Desktop walkthrough remains for gate.
 
 ### Slice 1 (built at `820bcdc384`) — Shared status for Task rows and Sort by status
 
@@ -33,43 +33,25 @@ and Available queries.
 - `scripts/test_desktop.sh --filter 'TaskStatusTests|TaskConceptTests/missingKeysFailAndSavedActivityCannotReturn|WorkSelectionTests/everyStateRustSendsDecodes'` passed all four tests.
 - `server::schema::tests::the_checked_in_schema_is_what_describe_prints` passed against the regenerated fixture.
 
-### Slice 2 — Route **Sort by status** through `PendingChanges`
+### Slice 2 (built at `ca02700fb8`) — Sort recovery on Desktop
 
-Rust unified drags and status sorts into one `TaskOrderEdit` write path, while
-Swift still runs `WorkModel.sortWorkingTasksByStatus()` outside `PendingChanges`.
-That causes three failure modes: a brief Machine blip fails Sort instead of
-retrying under one `requestID`, the sidebar button stays enabled when the Machine
-is away (`!pendingChanges.acceptsChanges`), and an in-flight `.reorder` preview
-can replay over a newer sort result.
+The sidebar and ⌘K submit Sort through `PendingChanges`. Each Working list
+sends its drags and sorts in click order across reconnects. Sort supersedes
+earlier drag previews in that list, and later drags preview immediately.
+Both controls disable while the Machine is away. A refusal clears the pending
+sort and its explanation survives a failed reread.
 
-What follows across layers:
-- **Swift shared (`swift/Loopflow/Services/PendingChanges.swift`):**
-  - Add `PendingCommand.sortWorkingTasks(machine: String?, repository: String)`.
-  - In `PendingChanges.workingOrder(_:machine:readAt:)`, find the last `.sortWorkingTasks` for `(machine, plan.repository)` in `patches(at: readAt)` and only replay `.reorder` commands that follow it (pre-sort drags are superseded; drags made after Sort still preview on top).
-  - On refusal of `.sortWorkingTasks`, follow the same atomic refusal handling as `.reorder` (clear the pending entry on definite refusal and reread while keeping the refusal Notice via `NoticeCenter.reread(keeping:)`).
-- **Swift Mac (`swift/LoopflowMac/WorkModel.swift`, `Views/WorkNavigator.swift`, `Views/SessionsView.swift`):**
-  - Route `WorkModel.sortWorkingTasksByStatus()` through `pendingChanges.make(.sortWorkingTasks(machine: scope.machineId, repository: repo), subject: "Working Tasks", verb: "sorted", write: .desktopSort(directory: repoPath), notices: navigation.notices, show: nil)` calling `refreshWorkingOrder(in: scope)` on answer.
-  - Disable the sidebar **Sort by status** button when `model.repoPath == nil || !model.pendingChanges.acceptsChanges` (and guard the ⌘K `.sortWorkingTasks` path when `!pendingChanges.acceptsChanges` with `PendingChanges.awayText` so it never fires while away).
-- **Verification:**
-  - `PendingChangesTests` covering a `.reorder` followed by `.sortWorkingTasks` (pre-sort drag no longer replays over the reading; post-sort drag still previews), blip retry under one `requestID`, and definite refusal keeping the Notice.
-  - `WorkNavigationTests` / `DashboardWorkspaceTests` covering Sort disabled when `link == .away` and Sort going through `PendingChanges`.
+- `scripts/test_desktop.sh --filter 'statusSortSupersedes|refusedStatusSort|sortRetriesAfter|sortIsDisabled|sortByStatusUpdates|refusedWorkingTaskDrop|workingTaskDropAcrossReceipt'` passed all seven tests.
 
-### Slice 3 — Filter internal Graph step sentinels and show `graph_step` on iOS
+### Slice 3 (built at `ecf3ac66eb`) — Current Graph step on Mac and phone
 
-`task_graphs.step` stores `task_work::START` (`"start"`) and `task_work::END`
-(`"end"`). `TaskGraph::read` maps both to `current_step = None`, but
-`fill_graph_steps_in` returns them verbatim so the sidebar prints literal `start`
-and `end` as step names. Meanwhile, iOS decodes `WorkViewPlan.Content.graphStep`
-and drops it in `TaskListView`.
+Selections use the running cursor when it names a step, then the parked step.
+The parked start and end positions have no step name. The phone draws the same
+step in its Task row as the sidebar.
 
-What follows across layers:
-- **Rust storage (`rust/loopflow-storage/src/sqlite/selections.rs`):**
-  - In `fill_graph_steps_in`, omit `task_work::START` and `task_work::END` when parked (`run_start` is `None`) — and if `running_step` falls back to `parked`, omit `START`/`END` there too — so `graph_step` is `None` when not at an actual step.
-- **Swift iOS (`swift/LoopflowiOS/TaskListView.swift`):**
-  - Pass `context: task.graphStep` to `TaskRow(...)` in `TaskListView.link(_:)`.
-- **Verification:**
-  - Extend the Rust `fill_graph_steps_in` / selection test to assert `graph_step == None` for `task_graphs.step = "start"` and `"end"`, and `Some("review")` / running cursor step for real steps.
-  - Assert `graphStep` renders in `TaskListView` / `TaskRow` on iOS (or unit test on the row inputs).
+- `cargo test -p loopflow-execution --lib sidebar_step_follows_the_captured_cursor`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` passed.
+- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/TaskFeedTests/testTaskRowShowsItsCurrentGraphStep` passed on the iOS 26.2 Simulator.
+- On a fresh private Machine, `lf desktop view show 'kind:task state:working' --json` reported `null`, `"review"`, and `null` for FIX-2 parked at start, review, and end.
 
 ### Choices made for review (headless Graph)
 

@@ -1,19 +1,27 @@
-at: 94d6766476d60b9a34a7131b992c19c9612be2f9
+at: dd1040680344cbca15f8ab5d9494c93e7fe8ac17
 first:
   - path: docs/surfaces.md
-    why: The Settings experience and its controls
+    why: Settings navigation and the selected checkout
+  - path: docs/config.md
+    why: What My and Shared settings control
   - path: scratch/plan.md
-    why: Sidebar scope and the legacy configuration counterexample
+    why: Built panes, measured reads and remaining work
+  - path: rust/loopflow-execution/src/engine/config.rs
+    why: Effective value and both editable files in one reading
+  - path: rust/loopflow-execution/src/config/files/context_diff.rs
+    why: Lossless edits, stale previews and Undo
+  - path: rust/loopflow/src/lf/commands/read.rs
+    why: The checkout reading exposed to Desktop and CLI
   - path: swift/LoopflowMac/Views/SettingsWindow.swift
-    why: Pane selection, sidebar search and native window layout
-  - path: swift/LoopflowMac/LoopflowApp.swift
-    why: Settings scene and Choose Theme routing
+    why: Navigation, search and the checkout observation
+  - path: swift/LoopflowMac/Views/ContextSettings.swift
+    why: Save destination, effective source and reset confirmation
   - path: swift/LoopflowMac/Views/GeneralSettings.swift
-    why: Autosave writes and window Undo
-  - path: swift/LoopflowMac/TaskFileDocument.swift
-    why: The editor consumes the same preference
+    why: The autosave preference and window Undo
   - path: swift/LoopflowMac/Views/KeyboardShortcutsView.swift
-    why: One grouped reference for both windows
-  - path: swift/LoopflowTests/SettingsWorkflowTests.swift
-    why: Navigation, persisted autosave and shortcut bindings
-hide: []
+    why: One grouped reference shared between windows
+  - path: swift/LoopflowTests/ContextSettingsWorkflowTests.swift
+    why: From the toggle to a provider launch
+hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: Regenerated from the typed server operations

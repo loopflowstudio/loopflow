@@ -714,3 +714,8 @@ now, `WorkspaceResolver` remains, fits LOO-934).
 - The native-resume fixture passed with its explicit bind. A failed sync push
   kept the Task's recorded base. `cargo clippy --all-targets -- -D warnings`
   passed.
+
+Concept review on `0be48216d8` (`scratch/concept-review.html`): both mismatches
+from `7d8cc0c94a` (root-exact `task_open_graph_pairs`, `lf sync main` clearing
+`loopflow-base`) and the `reference-code.md` omission are built and QA-verified;
+nothing left to change inside this Task. Next: gate.

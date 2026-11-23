@@ -8,8 +8,8 @@ extension Bundle {
     /// packaged apps, SwiftPM development, and xcodegen framework builds.
     static var loopflowResources: Bundle {
         #if SWIFT_PACKAGE
-        if let packaged = packagedLoopflowResources(at: Bundle.main.resourceURL) {
-            return packaged
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            return packagedLoopflowResources(at: Bundle.main.resourceURL) ?? .main
         }
         return .module
         #else
@@ -43,15 +43,34 @@ enum AppFontRegistration {
         "SplineSansMono-BoldItalic.ttf",
     ]
 
-    static func registerBundledFonts() {
+    private static let faces: [String: URL] = {
+        var faces: [String: URL] = [:]
         let bundle = Bundle.loopflowResources
         for file in fontFiles {
             let name = (file as NSString).deletingPathExtension
             let ext = (file as NSString).pathExtension
             guard let url = bundle.url(forResource: name, withExtension: ext, subdirectory: "Fonts")
-                ?? bundle.url(forResource: name, withExtension: ext) else { continue }
+                ?? bundle.url(forResource: name, withExtension: ext),
+                  let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
+                  let face = descriptors.first,
+                  let postScriptName = CTFontDescriptorCopyAttribute(face, kCTFontNameAttribute) as? String else { continue }
             CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+            faces[postScriptName] = url
         }
+        return faces
+    }()
+
+    /// Resolve the packaged face, including when an installed font shares its name.
+    static func font(_ name: String, size: CGFloat, descriptor: CTFontDescriptor? = nil) -> CTFont? {
+        guard let url = faces[name] else { return nil }
+        let base = descriptor ?? CTFontDescriptorCreateWithNameAndSize(name as CFString, size)
+        let source = CTFontDescriptorCreateCopyWithAttributes(base, [kCTFontURLAttribute: url] as CFDictionary)
+        let font = CTFontCreateWithFontDescriptor(source, size, nil)
+        return CTFontCopyPostScriptName(font) as String == name ? font : nil
+    }
+
+    static func registerBundledFonts() {
+        _ = faces
     }
 }
 

@@ -123,11 +123,12 @@ timed out under the parallel run and passes alone (15 s). clippy
   `project_name` field action behind it, so Linear ends on the new name.
 - `retire_waves` (under `lf wave remove`) retires the queued tracker actions
   of each retiring Wave's Project in the same write (`its Wave was removed`).
-  A `sent` action is left to resolve.
+  A `sent` action is left to resolve. A queued Task `create` naming that
+  Project names the Task's current one (QA found it stuck otherwise).
 - Tests: `tracker_actions::tests::a_removed_waves_project_is_not_created_in_the_tracker`,
   `…::renaming_a_wave_renames_its_unlinked_project_and_not_a_linked_one`
-  (pass); `cargo clippy -p loopflow-storage --all-targets` clean. The CLI
-  run (`lf wave rename` then `lf wave status`) was not done here; it goes to gate/QA.
+  (pass), `…::a_task_moved_out_of_a_removed_wave_is_created_in_its_new_project`;
+  clippy clean. QA ran rename and removal through the CLI (`scratch/qa.html`).
 
 Compress (2026-11-23): Task tracker state no longer reads the leaving
 `tracker_projects.membership_unresolved` (nothing writes it; a released `1`

@@ -48,9 +48,47 @@ Tracker: linear. 3 open · 0 lost.
 
 <h2>Still wrong, worst first</h2>
 <ol>
-<li>Renaming a Wave leaves its local Project's name stale (<code>Project scratchpad (local)</code> on Wave <code>sandbox</code>). No Project rename exists; making it follow is a product call (<code>scratch/questions.md</code>).</li>
-<li>A <code>create</code> already queued for a Wave's Project before removal likely still sends (read from code, not run).</li>
+<li>Renaming a Wave leaves its local Project's name stale (<code>Project scratchpad (local)</code> on Wave <code>sandbox</code>). No Project rename exists; making it follow is a product call (<code>scratch/questions.md</code>). <b>Fixed in slice 3; checked in the second run.</b></li>
+<li>A <code>create</code> already queued for a Wave's Project before removal likely still sends (read from code, not run). <b>Fixed in slice 3; checked in the second run.</b></li>
 <li>The installed lf names a child Wave's Project <code>billing/refunds</code>, the branch <code>refunds</code>; upgraded homes keep the old name.</li>
 <li>A fresh home makes <code>~/.lf/chapter-locks/</code>: kept on purpose so released callers share the lock files.</li>
 <li><code>lf config set --shared repo.tracker.linear.team</code> prints "saved; DomainAction" (installed lf too; not this change).</li>
 </ol>
+<h2>Second run, 2026-11-23: slice 3 (rename and removal)</h2>
+<p>Branch <code>lf</code> at 39b4b965b3 plus this run's fix, private Machine <code>/tmp/lf-qa-995/e</code>, fresh repository, then a bare <code>origin</code> and <code>repo.tracker.linear.team QA</code> with no Linear login so every tracker action stays queued and readable.</p>
+<table><tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>Rename an unlinked Wave with a Task (no tracker)</td><td class="ok">Project follows: <code>Project   payments (local) · started</code>; <code>projects.project_name</code> and slug both <code>payments</code>. The Task stays in it.</td></tr>
+<tr><td>Rename in a connected repository, create still queued</td><td class="ok">The create keeps its snapshot (<code>ledger</code>); one <code>name</code> action queues behind it. A second rename retires the first ("superseded by a later save").</td></tr>
+<tr><td>Remove a Wave with a Task, create and name queued</td><td class="ok">Both Project actions retire ("its Wave was removed"); the Task moves to the repository and gets a <code>project</code> action.</td></tr>
+<tr><td>The moved Task's own queued create</td><td class="bad">Before the fix it still named the removed Wave's Project, which Linear will never have: <code>remote_project</code> fails on it every pass, so the Task never reaches Linear. Fixed, below.</td></tr>
+<tr><td>Remove child Wave <code>pay/refunds</code> with a Task</td><td class="ok">After the fix: Task moves to <code>pay</code>; its create names <code>pay</code>'s Project, which the drain creates first.</td></tr>
+</table>
+<h3>Transcript</h3>
+<pre>$ lf wave rename ledger books ; lf repo tracker
+Tracker: linear. 4 open · 0 lost.
+  payments            create · queued · No Linear credential found. …
+  books               create · queued · …
+  d37111              create · queued · …
+  books               name · queued · …
+$ lf wave create pay/refunds ; lf task create --wave pay/refunds "Partial refund"
+$ lf wave remove pay/refunds
+Removed Wave pay/refunds.
+1 open Task moved to pay.
+1 Project stays readable in history.
+.lf/wave/pay/refunds removed on the main checkout.
+tracker_actions after (fixed build):
+  9  create   retired  refunds' Project   its Wave was removed
+  10 create   queued   task 2b9a48        task_project = pay's Project   (before the fix: refunds' Project)
+  11 field    queued   task 2b9a48        task_project = pay's Project</pre>
+<h3>Fixed</h3>
+<p><code>retire_wave_in</code> (storage, under <code>retire_waves</code>) retires the Project's queued actions and points any queued Task create naming that Project at the Task's current Project. Test: <code>tracker_actions::tests::a_task_moved_out_of_a_removed_wave_is_created_in_its_new_project</code>.</p>
+<h3>Checks</h3>
+<ul><li><code>cargo test -p loopflow-storage --lib tracker_actions::tests::</code>: 12 pass (me).</li>
+<li><code>cargo clippy -p loopflow-storage --all-targets -- -D warnings</code>: clean (me).</li>
+<li>Full matrix, Swift DTO suites: CI at gate.</li></ul>
+<h3>Not reached</h3>
+<p>Renaming a linked Wave through the CLI: linking needs a Linear login on a private home; the storage test covers it. Sending to Linear at all, same reason.</p>
+<h3>Still wrong, worst first</h3>
+<ol><li>A Task moved out of a removed Wave keeps a now-redundant queued <code>project</code> action behind its create (sends the same value). Harmless.</li>
+<li><code>lf wave rename</code> commits as <code>lf wave rename: billing</code>, without the new name (<code>wave_lifecycle/recovery.rs</code>, not this branch).</li>
+<li>"1 Project stays readable in history" on every removal (already in <code>scratch/questions.md</code>).</li></ol>

@@ -167,6 +167,15 @@ with the branch. Every recorded Task keeps its Wave. A second clone on another
 home lists each Task under the same Wave after `lf task list`; a move on one
 home reaches the other on `lf task sync <id>`.
 
+A Wave's queued tracker actions are rows in `tracker_actions` (`kind`,
+`phase`, `project_id`, `task_id`, `value_json`, `error`); with a Linear team
+set and no login they stay `queued`, so a rename or removal shows its effect
+there and in `lf repo tracker`. Renaming an unlinked Wave queues one `name`
+action behind its Project's `create` (a second rename retires the first,
+"superseded by a later save"); removing it retires both ("its Wave was
+removed") and repoints a moved Task's queued `create` at its new Project.
+The store has no WAL: copy `loopflow.db` and read the copy.
+
 To see which Projects a newly connected tracker makes, remove a Wave first
 (`lf wave remove`), then set `repo.tracker.linear.team` and an `origin`: `lf
 repo tracker` lists one `create` per live Wave and every Task, none for the

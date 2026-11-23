@@ -507,6 +507,47 @@ fn withdraw_unsent(conn: &Connection, owner: &ActionOwner) -> StoreResult<bool> 
     Ok(unsent)
 }
 
+/// Removing `wave`: its Project's unsent actions retire, and an unsent Task
+/// creation naming that Project names the Project its Task has now, which the
+/// tracker will have. Removal moves a Wave's Tasks out before it retires.
+pub(crate) fn retire_wave_in(conn: &Connection, wave: &WaveId) -> StoreResult<()> {
+    conn.execute(
+        "UPDATE tracker_actions SET phase='retired', error='its Wave was removed'
+         WHERE phase='queued' AND project_id IN (SELECT id FROM projects WHERE wave_id=?1)",
+        [wave],
+    )?;
+    let creations: Vec<(String, String, Option<String>, String)> = conn
+        .prepare(
+            "SELECT e.id,p.id,t.project_id,e.value_json FROM tracker_actions e
+             JOIN tasks t ON t.id=e.task_id JOIN projects p ON p.wave_id=?1
+             WHERE e.kind='create' AND e.phase='queued'
+               AND EXISTS(SELECT 1 FROM json_each(e.value_json) v
+                   WHERE json_extract(v.value,'$.field')='task_project'
+                     AND json_extract(v.value,'$.value')=p.id)",
+        )?
+        .query_map([wave], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?
+        .collect::<Result<_, _>>()?;
+    for (action, removed, current, values) in creations {
+        let values: Vec<WorkValue> =
+            crate::work::edit::known_values(serde_json::from_str(&values)?)?
+                .into_iter()
+                .map(|value| match value {
+                    WorkValue::TaskProject(Some(project)) if project == removed => {
+                        WorkValue::TaskProject(current.clone())
+                    }
+                    value => value,
+                })
+                .collect();
+        conn.execute(
+            "UPDATE tracker_actions SET value_json=?2 WHERE id=?1",
+            params![action, serde_json::to_string(&values)?],
+        )?;
+    }
+    Ok(())
+}
+
 /// The owner's tracker observation, joined from its binding.
 fn observation_source(owner: &ActionOwner) -> Option<&'static str> {
     match owner {
@@ -1500,6 +1541,51 @@ mod tests {
             .unwrap();
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].phase, ActionPhase::Retired);
+    }
+
+    #[test]
+    fn a_task_moved_out_of_a_removed_wave_is_created_in_its_new_project() {
+        let (_dir, store) = store();
+        let wave = |slug: &str| {
+            let wave = crate::work::wave::Wave::new(
+                loopflow_model::id::WaveId::new(),
+                slug.into(),
+                "/repo".into(),
+            );
+            crate::test_fixture::wave(&store, &wave);
+            wave
+        };
+        let (gone, kept) = (wave("gone"), wave("kept"));
+        let gone_project = store.seed_project(gone.id()).unwrap().id;
+        let kept_project = store.seed_project(kept.id()).unwrap().id;
+        let moved = task(&store, false);
+        store.move_task(&moved, None, Some(gone.id())).unwrap();
+        store
+            .enqueue_tracker_creations("/repo", TrackerKind::Linear)
+            .unwrap();
+        // `lf wave remove` moves the Wave's Tasks out, then retires it.
+        store
+            .move_task(&moved, Some(&gone_project), Some(kept.id()))
+            .unwrap();
+        store
+            .retire_waves(std::slice::from_ref(gone.id()), "removed")
+            .unwrap();
+        let creation = store
+            .tracker_actions_for(&ActionOwner::Task(moved))
+            .unwrap()
+            .into_iter()
+            .find(|action| action.kind == ActionKind::Create)
+            .unwrap();
+        assert_eq!(creation.phase, ActionPhase::Queued);
+        let project = creation
+            .value
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| value["field"] == "task_project")
+            .unwrap()["value"]
+            .clone();
+        assert_eq!(project, json!(kept_project.as_str()));
     }
 
     #[test]

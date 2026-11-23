@@ -143,12 +143,7 @@ impl SqliteStore {
                 params![wave, reason, at],
             )?;
             // A removed Wave's Project never reaches the tracker, nor do its unsent changes.
-            tx.execute(
-                "UPDATE tracker_actions SET phase='retired', error='its Wave was removed'
-                 WHERE phase='queued'
-                   AND project_id IN (SELECT id FROM projects WHERE wave_id=?1)",
-                [wave],
-            )?;
+            super::tracker_actions::retire_wave_in(&tx, wave)?;
         }
         tx.commit()?;
         Ok(())

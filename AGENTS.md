@@ -19,6 +19,7 @@ How we build Loopflow. Contributors and agents follow it.
 - Mock side effects; don't test mock wiring or reshape production code for tests
 - Design docs go under `scratch/`; `lf pr submit` and `lf pr land` run `lf scratch clear`, which removes added files and keeps existing ones
 - Stop only processes you started, by PID; never `pkill` or `killall` by pattern. Other agents and the person's own apps run on this Machine
+- Context too large for a prompt: give the agent the whole index (every file, with sizes) and the command that reads any piece, and let it choose what to read. lf never cuts, ranks or picks for an agent that can run commands
 
 **Secrets:**
 - Fetch every secret from Doppler. Never hardcode a key, read one from a dotfile, or paste one into code. Prefer `doppler run -- <cmd>`, which injects the value as an env var.
@@ -140,6 +141,15 @@ Refusing a context is usually what caused the failure: someone works around
 the refusal and corrupts state. Prefer dropping a precondition to adding one.
 If a fix reads as "extend the allowlist" or "verify identity", reframe it as a
 reduction. The best fix makes the system smaller.
+
+## Choosing between designs
+
+Rank candidate designs in this order: reliably functional, resilient and
+recoverable for the core uses (steering among them); then performant, without
+needless work or scattered processes on the Machine; then consistent across
+harnesses and surfaces; then open to functionality outside the core. When one
+harness drops a mechanism another keeps (an OpenCode server beside Codex's
+app-server), the plan says why at the top, before anything is deleted.
 
 ## Work model
 

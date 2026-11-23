@@ -17,6 +17,7 @@ use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::task::{StackParentPr, StackedSync};
 use crate::ops::util::{command_exists, stderr_from_output};
+use crate::prompt::change::{Change, ChangeRange};
 
 #[derive(Debug, Clone)]
 pub struct PrOptions {
@@ -531,15 +532,11 @@ pub fn generate_pr_copy(
         repo,
         &["log", &format!("origin/{base_branch}..HEAD"), "--oneline"],
     )?;
-    let stat = git_stdout(
-        repo,
-        &["diff", &format!("origin/{base_branch}...HEAD"), "--stat"],
-    )?;
-    let diff = git_stdout(repo, &["diff", &format!("origin/{base_branch}...HEAD")])?;
-    let diff = truncate_chars(&diff, 20_000);
+    let change =
+        Change::read(repo, ChangeRange::Since(format!("origin/{base_branch}")))?.prompt_section();
 
     let prompt = format!(
-        "{template}\n\n## Base branch\n{base_branch}\n\n## Commits\n```\n{log}\n```\n\n## Diff stat\n```\n{stat}\n```\n\n## Unified diff\n```diff\n{diff}\n```\n\nReturn exactly one JSON object with this schema:\n{{\"title\":\"...\",\"body\":\"...\"}}\nNo markdown fences. No explanation."
+        "{template}\n\n## Base branch\n{base_branch}\n\n## Commits\n```\n{log}\n```\n\n## Change\n{change}\nReturn exactly one JSON object with this schema:\n{{\"title\":\"...\",\"body\":\"...\"}}\nNo markdown fences. No explanation."
     );
 
     progress.status("Generating PR title/body...");
@@ -2566,19 +2563,6 @@ fn git_stdout(repo: &Path, args: &[&str]) -> OpsResult<String> {
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-fn truncate_chars(text: &str, max_chars: usize) -> String {
-    let mut iter = text.char_indices();
-    if iter.nth(max_chars).is_none() {
-        return text.to_string();
-    }
-    let end = text
-        .char_indices()
-        .nth(max_chars)
-        .map(|(idx, _)| idx)
-        .unwrap_or(text.len());
-    format!("{}\n\n[diff truncated]", &text[..end])
 }
 
 #[cfg(test)]

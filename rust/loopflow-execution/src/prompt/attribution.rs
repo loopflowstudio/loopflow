@@ -9,7 +9,7 @@ pub fn attributed_context(
     deduplication_decisions: &[crate::trace::ContextDecision],
     request: Option<&str>,
 ) -> crate::trace::PreparedTurnContext {
-    use crate::prompt::{DiffTier, DocumentSource};
+    use crate::prompt::DocumentSource;
     use crate::trace::{
         ContextAssetKind as Kind, ContextAssetSpec, ContextChannel, ContextDecision,
         ContextDecisionKind, ContextScope as Scope,
@@ -145,9 +145,9 @@ pub fn attributed_context(
             "diff_files",
         );
     }
-    if let Some(diff) = &components.diff {
+    if let Some(change) = &components.change {
         push(
-            diff,
+            &change.prompt_section(),
             Kind::Diff,
             Scope::Repo,
             "branch diff".to_string(),
@@ -230,7 +230,7 @@ pub fn attributed_context(
     }
 
     let mut decisions = deduplication_decisions.to_vec();
-    if components.diff_tier == DiffTier::StatOnly {
+    if matches!(&components.change, Some(change) if change.patch.is_none()) {
         decisions.push(ContextDecision {
             position: decisions.len() as u32,
             kind: Kind::Diff,
@@ -238,7 +238,7 @@ pub fn attributed_context(
             label: "branch diff".to_string(),
             source_path: None,
             decision: ContextDecisionKind::StatOnly,
-            reason: "unified diff exceeded the context tier limit".to_string(),
+            reason: "the patch is too large to inline".to_string(),
             original_bytes: None,
             original_tokens: None,
             asset_position: None,
@@ -304,6 +304,7 @@ fn tagged_block<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::attributed_context;
+    use crate::prompt::change::{Change, ChangeRange};
     use crate::prompt::{Document, DocumentSource, PromptComponents};
     use crate::trace::{ContextAssetKind, ContextScope};
     #[test]
@@ -384,5 +385,28 @@ mod tests {
             .assets
             .iter()
             .all(|asset| asset.kind != ContextAssetKind::Assembly));
+    }
+
+    #[test]
+    fn the_branch_change_in_the_first_turn_is_a_diff_asset() {
+        let components = PromptComponents {
+            message: Some("What does this branch change?".into()),
+            change: Some(Change {
+                range: ChangeRange::Uncommitted,
+                files: Vec::new(),
+                patch: Some("+let cost = \"$5\";\n".into()),
+                patch_bytes: 20,
+            }),
+            ..Default::default()
+        };
+        let turn = crate::prompt::format_first_turn(&components);
+        let prepared = attributed_context(&components, "", &turn, &[], None);
+        let diff = prepared
+            .task
+            .assets
+            .iter()
+            .find(|asset| asset.kind == ContextAssetKind::Diff)
+            .expect("the change section is attributed");
+        assert!(turn[diff.byte_start as usize..diff.byte_end as usize].contains("&#36;5"));
     }
 }

@@ -1711,7 +1711,10 @@ fn pr_copy_moves_to_the_next_agent_when_codex_is_out_of_quota() {
         .contains("written by claude"));
     // Claude starts on the same prompt Codex was refused, the whole diff in it.
     let prompt = fs::read_to_string(received).unwrap();
-    assert!(prompt.contains("## Unified diff"), "{prompt}");
+    assert!(
+        prompt.contains("## Change\nChanged since origin/main, 2 files."),
+        "{prompt}"
+    );
     assert!(!prompt.contains("Original task:"));
     assert!(prompt.contains("the end of the diff"));
     assert!(prompt.ends_with("No markdown fences. No explanation."));

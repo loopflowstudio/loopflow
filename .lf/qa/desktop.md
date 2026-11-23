@@ -303,6 +303,25 @@ them. Nothing here needs WindowServer focus.
 - Portfolio buttons answer hook clicks: Start on a Roadmap row runs the Graph.
   With the `LF_BIN` wrapper holding `help graph`, the row reads "Moving" until
   `touch <dir>/go`, then "Waiting".
+- The app prepends the person's own tool directories (`~/.local/bin` …) to
+  `PATH`, so a conversation it reopens runs the real `claude` in the private
+  `HOME`. Put the stand-in in `$LF_HOME/bin`, which stays first.
+- A Session's provider transition is written when the SessionStart hook
+  reports. To get `started`, then `resumed`, have the stand-in read
+  `--settings`, run `hooks.SessionStart[0].hooks[0].command`, and pipe
+  `{"session_id":…,"cwd":…,"hook_event_name":"SessionStart","source":"startup|resume"}`
+  into it. Then kill the provider: the pane reopens it with `--resume`. The
+  transition is the `transition` column on `agent_sessions` and a
+  `Provider transition:` line in `lf session history show <session>`.
+- Connection bar: stopping the private server shows "Reconnecting…", then the
+  relay's "Session unavailable…" with **Retry connection**. Killing the pane's
+  `lf session attach` shows nothing, because the app starts a new relay within
+  1.5 s. `tree 0` gives the bar's label and button frames. The hook's `press` is
+  refused once the button hides.
+- Composited pixels without Quartz in Python: a `swift` script calling
+  `CGWindowListCopyWindowInfo` prints the window number for `screencapture
+  -l`. A window behind others shows a stale Ghostty frame; read the terminal
+  with `lf --task <id> desktop capture -p session`.
 - Stand-in providers exit at once here, so a Session pane shows "Process
   exited" under its opening overlay. That is the stand-in, not the pane.
 
@@ -446,6 +465,28 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
   and open the Task by its link first.
 - Stop the run's processes by PID (`ps -axo pid,ppid,command | grep <private
   dir>`), never by pattern.
+
+# Terminal faces without focus
+
+Ghostty panes render in a window launched behind others, so a glyph check
+needs an unlocked display but no keyboard or focus.
+
+- Production mode (no `-ui-test-mode`), isolated bundle, private Machine:
+  `open -n -g --env HOME=… --env LF_HOME=… --env LF_BIN=… --env PATH=…
+  "<bundle>" --args -ApplePersistenceIgnoreState YES --repo <repo>`, then
+  `open -g -b <bundle id> 'loopflow://<repo>/task/<id>'`.
+- `lf --task <id> desktop run "sh <script>"` (from the checkout, with
+  `LF_DESKTOP` set) opens a Shell tab and runs the script in it. `desktop
+  capture -p shell` answers "not a terminal"; take pixels instead.
+- `screencapture -x -o -l <n> terminal.png` with `<n>` from `CGWindowListCopyWindowInfo`
+  (owner = bundle name, onscreen, titled with the repository). Once the
+  screen locks it fails with "could not create image from window".
+- Personal Ghostty settings come from `$HOME/.config/ghostty/config` of the
+  app's `HOME`; change it and relaunch the app (kill its PID) to compare.
+- Locked, Ghostty's glyph path can still be measured offscreen: draw with
+  CoreText into an alpha-only `linearGray` context with the flags
+  `src/font/face/coretext.zig` sets (`setShouldSmoothFonts` = thicken) and
+  sum the alpha.
 
 # Diff and Files without clicks
 

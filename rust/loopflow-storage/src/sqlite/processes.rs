@@ -576,7 +576,7 @@ pub(super) fn attach_in(
         "UPDATE agent_sessions SET agent_process_id=?2,agent_launcher_lf_process_id=?3,
             agent_started_at=?4,agent_pid=NULL,agent_os_started_at=NULL,agent_ended_at=NULL,
             agent_exit_code=NULL,agent_spawn_state='reserved',agent_command=NULL,
-            agent_interactive=interactive,agent_endpoint=NULL,agent_inbox=NULL,
+            agent_interactive=interactive,agent_endpoint=NULL,agent_inbox=NULL,agent_socket=NULL,
             attachment_token=?5,attached_lf_process_id=?3,attached_pid=?6,
             attached_os_started_at=?7,attached_terminal_id=?8,
             completed_at=CASE WHEN interactive=0 AND moved_to_machine_id IS NULL

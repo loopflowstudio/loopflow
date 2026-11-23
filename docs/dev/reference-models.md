@@ -134,7 +134,7 @@ Graph run --< step                 graph_process_steps; result is the step's exi
 | Task | Worktree, optional PR, captured graph and position, and every associated Session and Graph run; independent Graphs do not move that position |
 | Graph | Reusable authored graph of agent/mechanical/router nodes; a running one is a Graph run and its steps |
 | LfProcess | One lf invocation's opaque id (`LfProcessId`, `LF_PROCESS_ID`); no table holds it. The record that owns the work (Session attachment, Graph run, step, Task carrier, CI repair) carries its pid, OS start and result |
-| AgentProcess | The provider OS process Loopflow started: durable `id` (`AgentProcessId`) with its launching lf, pid, OS start, spawn state, exit, endpoint and inbox, recorded on its Session's row; the Session also holds the attached lf, that lf's pid, OS start and terminal, and the attachment token. A Session runs one agent at a time; a replaced one has exited |
+| AgentProcess | The provider OS process Loopflow started: durable `id` (`AgentProcessId`) with its launching lf, pid, OS start, spawn state, exit, endpoint, inbox and socket, recorded on its Session's row; the Session also holds the attached lf, that lf's pid, OS start and terminal, and the attachment token. A Session runs one agent at a time; a replaced one has exited |
 | LfSession | Loopflow conversation identity, title, feedback, current AgentSession and provider history |
 | AgentSession | Provider-owned conversation, identified by opaque AgentSessionId for resume, turn matching and account attribution; no separate table |
 | Machine | Store, payloads, credentials and exact local process authority |

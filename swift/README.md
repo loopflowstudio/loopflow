@@ -221,10 +221,11 @@ Selecting one shows its opening progress, the live conversation, or a failure
 with **Retry**. Desktop prepares two conversations at a time, starting with the
 selected Work, then visible tiles, the repository and Waves, and recent working
 Tasks. The window renders while they open.
-A prepared conversation starts its provider at once, before any pane shows it;
-selecting the Work shows the running terminal. One **Opening… Input paused**
-reading remains through preparation, attachment and native input readiness. The
-terminal owns that display once mounted; there is no second workspace overlay.
+While Desktop prepares a conversation, an empty pane delays briefly before
+showing a centered spinner; refreshing over a retained screen keeps the text
+clear and shows progress in the pane strip's Refresh slot. A prepared
+conversation starts its provider immediately. Selecting the Work shows the
+terminal directly below the provider and status strip.
 
 Recent unfinished Tasks stay warm for immediate return: Desktop retains sixteen, plus
 any additional panes on screen; a Task admitted from a Dashboard tile stays warm after
@@ -265,12 +266,14 @@ Finite CLI requests time out after 30 seconds. Canceling preparation ends only
 that request; running Sessions continue. If a change times out, refresh to learn
 its result before retrying.
 
-Session panes receive their relay's status and send Retry over one
-private Unix connection. Quiet streams schedule no reads, including in retained
-hidden panes. Status loss pauses input while the relay continues; a fresh status
-connection supplies the current reading without replaying actions. Closing a pane
-stops observation and removes its private socket directory. Input waits for a
-connected reading with native readiness; a saved screen cannot enable input.
+Session panes receive status and send **Retry connection** over one private Unix
+connection to the relay. Input waits for attachment and native readiness. Quiet
+streams schedule no reads, including in retained hidden panes. Losing the status
+connection pauses input while the relay continues. A fresh connection supplies
+the current reading. Closing the pane stops observation and removes the socket
+directory. See [Desktop reconnect](../docs/sessions.md#name-bind-and-desktop-reconnect)
+for recovery messages and actions.
+
 The terminal view tells Ghostty when it gains or loses focus (first responder in
 the key window); the relay turns Ghostty's focus reports into the holder's
 `focus` requests, so the pane being looked at sets the size.
@@ -332,6 +335,9 @@ the same column. Clicking a card previews it in every window; the chosen card is
 ringed in the window's focus color. A theme with unreadable roles shows why
 under the cards, before **Apply**.
 
+Check font weight in an open shell or Session pane. Previewing, applying or
+cancelling a theme changes only its colors.
+
 ```yaml
 # ~/.lf/config.yaml
 theme: "light:Folio,dark:Fig"   # System
@@ -367,10 +373,10 @@ loopflow-accent = #3d59a1
 loopflow-titlebar = #242f50
 ```
 
-Files read up to 256 KiB of UTF-8. Six-digit RGB background/foreground are
-required; cursor, selection, `palette = N=#RRGGBB` and `loopflow-` roles are
-optional. Preview explains defaults, repeats and omitted settings. Fonts,
-commands, keybindings, includes and theme references are never followed.
+Theme files can contain up to 256 KiB of UTF-8. Background and foreground
+require six-digit RGB values. Cursor, selection, `palette = N=#RRGGBB` and
+`loopflow-` roles are optional. Preview lists defaults, repeated colors and
+omitted settings such as fonts, commands, keybindings, includes and theme references.
 
 The title bar is its own role. A file that leaves it out gets a bar from its
 accent, darkened where needed (lightened under black text) so the bar's text
@@ -378,8 +384,9 @@ stays readable; a theme you made before the role existed may show a slightly
 darker bar. **Customize** lists **Title bar** under Actions and focus, and saving
 states it: after that, changing **Button** leaves the bar alone.
 
-Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
-their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
+Unreadable app, default, selection or cursor text prevents Apply. ANSI colors keep
+their source values. Loopflow reads personal non-color settings from your Ghostty
+configuration at launch, ignores its `theme =` setting and leaves the file untouched.
 Source and license notices ship offline with the catalogue.
 
 Under the jump bar, the workflow bar reads where the Task stands:
@@ -606,7 +613,7 @@ Open **•••** or press Command-/ for the selected Task’s actions. Row con
 menus use the same actions for the clicked Task. Command-T adds a shell tab. The main Session's menu switches between **Claude**,
 **Codex**, **OpenCode**, **Pi** and **Antigravity**, continuing the same Session with its history.
 **Refresh session** reconnects the pane to that conversation, including after a
-failed launch or stale connection. It keeps the provider's history and running
+failed launch or lost status connection. It keeps the provider's history and running
 process, and takes over a conversation a native client holds. The control
 stays visible when the Session is the only pane. The same action is available
 through `lf desktop do refresh-session -p session`.
@@ -801,25 +808,29 @@ current match for 160 ms; hiding a pane cancels the cue. Reduce Motion uses
 Find's persistent match styling. Programs that own selection may show their own
 copy confirmation; terminal feedback describes only a terminal-owned copy.
 
-Terminals draw in Spline Sans Mono 13 with its real bold and italic faces and
-ligatures off; Ghostty draws box drawing, blocks and braille itself, so Claude's
-frames stay continuous. Your Ghostty configuration still wins: a
-`font-family` you set comes first and Spline Sans Mono fills the glyphs it
-lacks, and your `font-size`, `adjust-cell-height` or `font-feature` replace
-Loopflow's.
+Task shells and Session panes use Spline Sans Mono at 13 points with its native
+stroke weight, bold and italic faces, and ligatures off. Ghostty draws box
+lines, blocks and braille so terminal frames stay continuous.
+
+For thicker strokes, add the `font-thicken` line below to your Ghostty
+configuration and reopen Loopflow. You can also set `font-size`,
+`adjust-cell-height` and `font-feature`. If you choose a `font-family`, Spline
+Sans Mono supplies missing glyphs. [Ghostty configuration locations](https://ghostty.org/docs/config#file-location)
 
 ```ini
-# In your Ghostty configuration; reopen Loopflow after editing.
+# ~/.config/ghostty/config
 font-family = Berkeley Mono
+font-thicken = true
 minimum-contrast = 1
 ```
 
-The default is `3`. Set `1` to preserve original colors. Correction moves only
-low-contrast text toward black or white while retaining its alpha and channel
-ordering. It preserves more color than replacing text with black or white, but
-cannot guarantee exact hue or separation of nearly identical colors. Faint text
-may not reach the requested ratio. Graphics, images, transparent backdrops and
-custom postprocessing are outside the opaque-text contrast guarantee.
+`minimum-contrast` defaults to `3`. Set it to `1` to keep original colors.
+Correction moves only low-contrast text toward black or white while retaining
+its alpha and channel ordering. It preserves more color than replacing text with
+black or white, but cannot guarantee exact hue or separation of nearly identical
+colors. Faint text may not reach the requested ratio. Graphics, images,
+transparent backdrops and custom postprocessing are outside the opaque-text
+contrast guarantee.
 
 Files and the Graph process log open beside retained Sessions and shells in the
 same multiplexer. Resize, zoom, close and Reopen preserve each pane’s content.
@@ -1411,7 +1422,6 @@ context changes. Native cancellation releases the client's wait; a lost reply
 remains unknown without replay.
 
 Terminal recovery must preserve the exact owner and draft.
-Opening shows **Opening… Input paused** through attachment and native readiness;
 **Reconnecting…** follows a previously acknowledged connection.
 Connection feedback overlays the terminal, so clearing it does not resize the
 provider or move its cursor. Both mount layout and pre-mount sizing keep the same

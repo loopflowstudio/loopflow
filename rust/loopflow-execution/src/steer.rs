@@ -136,6 +136,22 @@ fn render(
     Ok(text)
 }
 
+/// Steers a turn of its own reads as its prompt: each one's attribution and
+/// complete text, unlike the excerpts a hook prints between tool calls.
+pub fn render_complete(steers: &[Steer]) -> String {
+    let mut text = String::from("<lf:steers>\n");
+    for steer in steers {
+        text.push_str(&format!(
+            "Steer {}; author {}:\n{}\n",
+            steer.id,
+            steer.author,
+            steer.text.trim_end()
+        ));
+    }
+    text.push_str("</lf:steers>\n");
+    text
+}
+
 /// Only confirmed live, managed conversations can be woken.
 pub fn idle_conversations(
     store: &loopflow_storage::sqlite::SqliteStore,
@@ -152,6 +168,26 @@ pub fn idle_conversations(
                         == crate::store::ProcessIdentityEvidence::Live
                 })
                 .then_some(candidate.conversation)
+        })
+        .collect())
+}
+
+/// The stopped Sessions the steers saved since the server last read name,
+/// each once with the first steer naming it. Each steer is read once; a
+/// running Session hears its steers at its boundaries.
+pub fn sessions_to_start(
+    store: &loopflow_storage::sqlite::SqliteStore,
+) -> crate::store::StoreResult<Vec<SteerWake>> {
+    let mut named = std::collections::HashSet::new();
+    Ok(store
+        .read_steer_wakes()?
+        .into_iter()
+        .filter(|wake| {
+            let running = wake.identity.is_some_and(|(pid, start)| {
+                crate::process::os_process::process_identity_evidence(pid, start)
+                    == crate::store::ProcessIdentityEvidence::Live
+            });
+            !running && named.insert(wake.session.clone())
         })
         .collect())
 }

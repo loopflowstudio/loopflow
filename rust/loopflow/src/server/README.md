@@ -681,7 +681,7 @@ reported, never started by an attachment attempt.
 `Launch::kind` carries whether a launch is bare or managed and its mode.
 [Work sessions, workers, chats and batches are defined here](../../../../docs/glossary.md#loopflows-words).
 `transport::LaunchInput::kind` selects chats or batches for skill and Graph
-commands launched in the caller's terminal or pipe. `lf -b resume <ID> --message TEXT`
+commands launched in the caller's terminal or pipe. `lf -b steer <ID> TEXT`
 is a batch. A Graph's correction turn in a Task run remains a worker.
 Interactive Task, Wave, repository and bound conversations are work sessions,
 as are conversations opened in a held terminal through Desktop or a framed
@@ -766,9 +766,10 @@ line in `logs/lf.log`; the tool goes on and the next boundary asks again.
 
 The launch carries its capability as `LF_PROVIDER_CONTEXT` when the server
 records its boundaries and as `LF_BARE_STEER` when no one does. For chats and
-batches, tool and prompt hooks run only `--moment steer`, which reports nothing. Nothing wakes a chat or batch: a chat idle at its prompt reads a
-steer when its person next types. A work session's start claims none when the
-server can wake it; the wake runs them as a turn.
+batches, tool and prompt hooks run only `--moment steer`, which reports
+nothing. A chat idle at its prompt reads a steer when its person next types.
+When the server can wake a work session, its start hook leaves waiting steers
+for the server to deliver as a turn.
 
 Every tool hook first compares files and starts `lf` only when a steer may be
 waiting. Saving a steer touches one marker under `steers/` inside the write:
@@ -814,22 +815,35 @@ that lapses for the next boundary:
   A turn already running takes the message as a steer. OpenCode's TUI shows
   the answer but not the message that caused it.
 
-A conversation reopened after it was quit takes what was saved while it was
-closed as a turn, before anyone types. A new provider process's first boundary
-records it idle, whatever the process before it was doing
-(`record_first_boundary`), and that boundary or a later one naming a new inbox
-or socket wakes it. Claude reports its start; Codex runs its start hook only
-inside a turn, so lf's launch reports the start itself once the app-server
-holds the conversation, or the opening prompt before its turn. An OpenCode
-plugin names its socket as it loads, a Pi extension at `session_start`. A
-start the server recorded on a conversation it can wake claims no steers:
-they go to the wake, and the next boundary claims what it could not deliver.
+A reopened work session takes steers saved while it was closed as a turn
+before anyone types. Without a steer or an opening prompt, it waits for input.
+The new provider process's first boundary records it idle
+(`record_first_boundary`). That boundary, or a later one naming a new inbox
+or socket, lets the server deliver waiting steers. Claude reports its start.
+Codex runs its start hook inside a turn, so lf reports the start once the
+app-server holds the conversation. If Codex has an opening prompt, lf reports
+the prompt before starting its turn. OpenCode names its socket when the plugin
+loads, and Pi names its socket at `session_start`. The next boundary claims
+any steers the server could not deliver.
 
 A server that restarts reads the same conversations again. An unreachable
-Claude inbox or socket leaves its news unclaimed. After a failed send the steers arrive
-again. Chats and batches are never woken. No
-process or clock runs per Session: the watcher's only clock is the change
-signal's 60 s fallback for a missed checkpoint or a Machine's sleep.
+Claude inbox or extension socket leaves its news unclaimed. After a failed
+send the steers arrive again. One watcher serves every Session, with a 60 s
+fallback for a missed checkpoint or a Machine's sleep.
+
+### Starting a stopped conversation
+
+The watcher reads steers after the cursor in `steer_wake_reading`. A direct
+steer names one interactive Session. A Task steer names its primary
+conversation. If the Session has an unread steer naming it and its agent
+has stopped, the watcher starts it through `session.continue` in its saved
+directory, using the first steer's ID as the request ID. The cursor advances
+once per reading, so a restart does not repeat a start. Wave and repository
+steers, Task updates, workers and batches do not trigger these starts.
+
+A resumed conversation with a saved provider thread takes its unread steers
+as input. Held Codex threads retain their existing first-turn handling.
+Failed starts are logged in `logs/lf.log`.
 
 A managed launch's agent starts only once the server answers. The launch
 opens a connection to the server, as a hook does; when nothing answers it runs `lf install server`

@@ -1,4 +1,4 @@
-use crate::support;
+use crate::support::{self, prepare_conversation, record_native, CALLER};
 use loopflow_execution::process::attachment;
 
 use std::process::{Command, Output};
@@ -438,71 +438,9 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
     }
 }
 
-const CALLER: &str = "run_00000000000000000000000000000002";
-
-/// A prepared conversation, before a provider has started.
-fn prepare_conversation(
-    home: &std::path::Path,
-    cwd: &std::path::Path,
-    harness: &str,
-    title: &str,
-) -> (String, String, std::path::PathBuf) {
-    let store = loopflow_execution::store::open_sqlite(&home.join("loopflow.db")).unwrap();
-    let input = format!("run_{}", uuid::Uuid::new_v4().simple());
-    let session = loopflow_execution::store::sessions::create_session(
-        &store,
-        loopflow_execution::session::LfSession {
-            captured: None,
-            id: format!("session_{input}").into(),
-            artifact_key: Some(input.clone()),
-            caller_artifact_key: Some(CALLER.into()),
-            input_published: false,
-            cwd: cwd.into(),
-            skill: None,
-            provider: Some(harness.into()),
-            model: None,
-            node: None,
-            iterations: None,
-            task_id: None,
-            wave_id: None,
-            graph_lf_process_id: None,
-            work_source: None,
-            bound_at: None,
-            interactive: true,
-            repo: None,
-            title: title.into(),
-            title_source: loopflow_execution::session::TitleSource::Generated,
-            request: Some(title.into()),
-            completed_at: None,
-            created_at: 1,
-        },
-        None,
-    )
-    .unwrap();
-    let dir = home.join("runs").join(&input[4..6]).join(&input);
-    std::fs::create_dir_all(&dir).unwrap();
-    let manifest = serde_json::json!({
-        "schema_version": 1, "artifact_key": input, "caller_artifact_key": CALLER,
-        "created_at": "2026-01-01T00:00:00Z", "harness": harness, "model": null,
-        "surface": "tui", "cwd": cwd, "repo": null, "worktree": null,
-        "skill": null, "subjects": [], "flow": {"kind":"independent"}, "exec": null, "context": null,
-        "runtime_path": null, "runtime_digest": null, "host": "test", "boot_id": null
-    });
-    std::fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
-    std::fs::write(dir.join("prepared"), "").unwrap();
-    rusqlite::Connection::open(home.join("loopflow.db"))
-        .unwrap()
-        .execute(
-            "UPDATE agent_sessions SET input_published=1 WHERE id=?1",
-            [&session.id],
-        )
-        .unwrap();
-    (session.id.to_string(), input, dir)
-}
-
 #[cfg(unix)]
 #[test]
-fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
+fn a_headless_steer_preserves_a_held_owners_capture_on_both_harnesses() {
     use std::os::unix::fs::PermissionsExt;
 
     for harness in ["claude", "codex"] {
@@ -539,14 +477,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         ));
         let output = command(
             home.path(),
-            &[
-                "--batch",
-                "session",
-                "resume",
-                &id,
-                "--message",
-                "another instruction",
-            ],
+            &["--batch", "steer", &id, "another instruction"],
         )
         .current_dir(&cwd)
         .env("PATH", std::env::join_paths(paths).unwrap())
@@ -989,23 +920,13 @@ fn a_closed_tasks_conversation_resumes_in_the_main_checkout() {
         &std::env::var_os("PATH").unwrap_or_default(),
     )))
     .unwrap();
-    let output = command(
-        home.path(),
-        &[
-            "-b",
-            "session",
-            "resume",
-            &id,
-            "--message",
-            "Where are you?",
-        ],
-    )
-    .current_dir(home.path())
-    .env("PATH", path)
-    .env("HOME", home.path())
-    .env("LF_TEST_RESUME_PROOF", home.path().join("proof"))
-    .output()
-    .unwrap();
+    let output = command(home.path(), &["-b", "steer", &id, "Where are you?"])
+        .current_dir(home.path())
+        .env("PATH", path)
+        .env("HOME", home.path())
+        .env("LF_TEST_RESUME_PROOF", home.path().join("proof"))
+        .output()
+        .unwrap();
     assert!(
         output.status.success(),
         "{}",
@@ -1030,7 +951,7 @@ fn a_closed_tasks_conversation_resumes_in_the_main_checkout() {
 
 #[cfg(unix)]
 #[test]
-fn headless_resume_reads_the_saved_workspace_and_names_its_caller() {
+fn a_headless_steer_reads_the_saved_workspace_and_names_its_caller() {
     let home = tempfile::tempdir().unwrap();
     let saved = home.path().join("saved");
     let caller = home.path().join("caller");
@@ -1068,18 +989,22 @@ fn headless_resume_reads_the_saved_workspace_and_names_its_caller() {
         &std::env::var_os("PATH").unwrap_or_default(),
     )))
     .unwrap();
-    let output = command(
-        home.path(),
-        &["-b", "session", "resume", &id, "--message", "Continue here"],
-    )
-    .current_dir(&caller)
-    .env("PATH", path)
-    .env("HOME", home.path())
-    .env("LF_TEST_RESUME_PROOF", home.path().join("proof"))
-    // A calling agent's Wave must not supply a different conversation's context.
-    .env("LF_WAVE_ID", wave.id().as_str())
-    .output()
-    .unwrap();
+    // A steer saved while the Session was stopped is read in the next turn.
+    let earlier = command(home.path(), &["steer", &id, "Earlier direction"])
+        .current_dir(&caller)
+        .env("HOME", home.path())
+        .output()
+        .unwrap();
+    assert!(earlier.status.success(), "{earlier:?}");
+    let output = command(home.path(), &["-b", "steer", &id, "Continue here"])
+        .current_dir(&caller)
+        .env("PATH", path)
+        .env("HOME", home.path())
+        .env("LF_TEST_RESUME_PROOF", home.path().join("proof"))
+        // A calling agent's Wave must not supply a different conversation's context.
+        .env("LF_WAVE_ID", wave.id().as_str())
+        .output()
+        .unwrap();
     assert!(
         output.status.success(),
         "{}",
@@ -1089,6 +1014,12 @@ fn headless_resume_reads_the_saved_workspace_and_names_its_caller() {
     assert!(sent.contains("SAVED_CONTEXT"), "{sent}");
     let sent_input = std::fs::read_to_string(home.path().join("proof.input")).unwrap();
     assert!(sent_input.contains("Continue here"), "{sent_input}");
+    assert!(
+        sent_input.contains("Earlier direction")
+            && sent_input.find("Earlier direction") < sent_input.find("Continue here"),
+        "{sent_input}"
+    );
+    assert_eq!(store.session_steers(&id, 0, 32).unwrap().pending, 0);
     assert!(!sent.contains("CALLER_CONTEXT"), "{sent}");
     assert!(!sent.contains("CALLER_WAVE_CONTEXT"), "{sent}");
     assert!(!sent.contains("missing-original-skill"), "{sent}");
@@ -2063,22 +1994,6 @@ fn provider_switch_stops_startup_output_before_codex_opens() {
     )
     .unwrap()
     .contains("Keep the original request"));
-}
-
-fn record_native(home: &std::path::Path, id: &str, input: &str, native: &str) {
-    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
-    db.execute(
-        "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
-        [id, native],
-    )
-    .unwrap();
-    // The input resumes the native conversation its captured row names.
-    db.execute(
-        "UPDATE session_events SET provider_thread=?3,provider_account=NULL
-         WHERE session_id=?1 AND kind='captured' AND receipt_key=?2",
-        [id, input, native],
-    )
-    .unwrap();
 }
 
 #[cfg(unix)]

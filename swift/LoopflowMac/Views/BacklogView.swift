@@ -624,7 +624,12 @@ struct BacklogView: View {
         .background(palette.background, ignoresSafeAreaEdges: [])
         .accessibilityIdentifier("wave-backlog")
         .task(id: model.repoPath) { await model.loadGraphCatalog() }
-        .onChange(of: [list.state.filter.rawValue, list.state.query]) { state.wrappedValue.keep(model.backlog(view).ids) }
+        .onChange(of: [list.state.filter.rawValue, list.state.query]) {
+            // File clears both filters and selects its row before planning delivers it.
+            if list.state.filter != .all || !list.state.query.isEmpty {
+                state.wrappedValue.keep(model.backlog(view).ids)
+            }
+        }
         .confirmationDialog(abandonTitle, isPresented: Binding(get: { abandoning != nil }, set: { if !$0 { abandoning = nil } })) {
             Button("Abandon", role: .destructive) {
                 if let tasks = abandoning { model.abandonBacklog(tasks, in: view) }

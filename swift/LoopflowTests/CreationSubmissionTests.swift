@@ -103,6 +103,26 @@ struct CreationSubmissionTests {
         #expect(Set(fields.keys) == Set(["requestID", "destination", "payload", "version", "submittedAt"]))
     }
 
+    @Test func aRefusedCreationReturnsToTheDraftOnlyAfterConfirmedAbsence() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = Server()
+        let refusal = ServerError(code: "invalid", message: "Wave unavailable", data: .null)
+        let client = CreationSubmissions(directory: root, machine: { "original-machine" },
+            lookup: { await server.lookup($0) }, send: { _ in throw refusal })
+        let change = ServedWrite.taskCreate(directory: "/repo", requestID: "file", title: nil,
+            request: "an idea", wave: "product", graph: nil, session: nil, run: false)
+        await #expect(throws: refusal) { try await client.submit(change, requestID: "file") }
+        #expect(try await client.pending().isEmpty)
+        let stale = SubmittedCreation(requestID: "file", destination: "original-machine",
+            payload: try JSONEncoder().encode(change), version: ServerProtocol.revision, submittedAt: Date())
+        #expect(try await client.reconcile(stale) == nil)
+
+        await server.unknown("file")
+        await #expect(throws: SubmittedCreationError.self) { try await client.submit(change, requestID: "file") }
+        #expect(try await client.pending().first?.id == "file")
+    }
+
     @Test func simultaneousWindowsShareOneRecoveryAndUnavailableLookupNeverSends() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -189,10 +209,17 @@ struct CreationSubmissionTests {
         recovery.awaitingPresentation("same", of: resource)
         #expect(try await client.pending().count == 1) // reply and navigation aren't presentation
         let hidden = Text("Result").modifier(CreationPresentation(recovery: recovery, resource: resource, visible: false))
-        try await hidden.inspect().modifier(CreationPresentation.self).viewModifierContent().callTask(id: [String]())
+        let (mounts, mounted) = AsyncStream<Void>.makeStream()
+        let hiddenPane = ImageRenderer(content: hidden.task { mounted.yield(()) })
+        defer { withExtendedLifetime(hiddenPane) {} }
+        _ = try #require(hiddenPane.cgImage)
+        for await _ in mounts { break }
         #expect(try await client.pending().count == 1)
         let shown = Text("Result").modifier(CreationPresentation(recovery: recovery, resource: resource))
-        try await shown.inspect().modifier(CreationPresentation.self).viewModifierContent().callTask(id: ["same"])
+        let visiblePane = ImageRenderer(content: shown)
+        defer { withExtendedLifetime(visiblePane) {} }
+        _ = try #require(visiblePane.cgImage)
+        for await retired in Observations({ recovery.requests(for: resource).isEmpty }) where retired { break }
         #expect(try await client.pending().isEmpty)
         await recovery.refresh()
         #expect(recovery.items.isEmpty)

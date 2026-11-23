@@ -2643,14 +2643,20 @@ final class WorkModel {
     /// (nil: the repository's) and starts nothing. Its row is selected there,
     /// with the filter and search out of its way. Throws while nothing is filed;
     /// a request whose answer is lost belongs to recovery, as in `createTask`.
-    func fileTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
+    func fileTask(request: String, wave: WaveSnapshot?) async throws {
+        let owner = navigation
+        let presentation = owner.paletteGeneration
+        let destination = destinationGeneration
         let requestID = UUID().uuidString
         let created: TaskCreated
         do {
-            created = try await query.createTask(request: request, wave: wave?.name, graph: graph, run: false,
+            created = try await query.createTask(request: request, wave: wave?.name, graph: nil, run: false,
                                                  cwd: repoPath, requestID: requestID)
         } catch is SubmittedCreationError { return }
+        guard navigation === owner, owner.paletteGeneration == presentation,
+              destinationGeneration == destination else { return }
         let view: WorkNavigation.Board = wave.map { .wave($0.id) } ?? .repository
+        if navigation.waveView != view { select(wave.map { .wave(id: $0.id) }) }
         var state = navigation.backlogs[view] ?? BacklogState()
         state.filter = .all
         state.query = ""

@@ -94,11 +94,25 @@ public actor CreationSubmissions {
         defer { active.remove(requestID) }
         // Saving precedes the first send. A lost answer leaves this exact record.
         do { return try await send(record.payload) }
-        catch { throw SubmittedCreationError(requestID: requestID, cause: error) }
+        catch {
+            // New Task can offer a retry once the original Machine confirms
+            // the refusal left no Task. An answer can fail after the Task exists.
+            if case .taskCreate(_, _, _, _, _, _, nil, _) = change,
+               let refusal = error as? ServerError, refusal.code != nil, !refusal.mayHaveHappened,
+               (try? await discardIfAbsent(record)) == true { throw refusal }
+            throw SubmittedCreationError(requestID: requestID, cause: error)
+        }
+    }
+
+    private func discardIfAbsent(_ record: SubmittedCreation) async throws -> Bool {
+        guard try await currentMachine() == record.destination,
+              try await receipt(record.id) == nil else { return false }
+        try FileManager.default.removeItem(at: url(record.id))
+        return true
     }
 
     /// The Machine's receipt for `record`, sending it again only when the Machine
-    /// says to continue; nil while another call is already sending it.
+    /// says to continue; nil while another call owns it or after it was retired.
     public func reconcile(_ record: SubmittedCreation) async throws -> CreationLookup? {
         // Own recovery before the first await, including destination lookup.
         guard active.insert(record.id).inserted else { return nil }
@@ -113,6 +127,8 @@ public actor CreationSubmissions {
             guard record.version == ServerProtocol.revision else {
                 throw RegistryQueryError("This submitted creation requires protocol revision \(record.version); its request is retained")
             }
+            // Another window may have listed this request before its refusal retired it.
+            guard FileManager.default.fileExists(atPath: url(record.id).path) else { return nil }
             _ = try await send(record.payload)
             receipt = try await self.receipt(record.id)
             guard receipt != nil else { throw RegistryQueryError("The Machine has no receipt for creation \(record.id)") }

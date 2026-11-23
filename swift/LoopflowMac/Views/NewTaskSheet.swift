@@ -1,38 +1,48 @@
 import Loopflow
 import SwiftUI
 
-/// ⌘N: your words, where the Task lives and the workflow it takes up, drawn as
-/// the line the Task shows later. Start closes the sheet into the Task's
-/// conversation and runs `lf task create REQUEST --run`. File runs it without
-/// `--run`: the Task lands in that backlog, selected, and nothing starts.
+/// The request and Start choice stay together while the sheet is open.
+@MainActor @Observable
+private final class NewTaskDraft {
+    var request = ""
+    var waveID: String?
+    var graph: String?
+    var filing = false
+    var fileError: String?
+
+    init(waveID: String?) { self.waveID = waveID }
+}
+
 struct NewTaskSheet: View {
     let model: WorkModel
     @Environment(\.palette) private var palette
     @Environment(\.dismiss) private var dismiss
-    @State private var request = ""
-    /// The Wave it is filed in; nil files it in the repository.
-    @State private var waveID: String?
-    /// A graph other than the scope's default; nil takes up the default.
-    @State private var graph: String?
-    @State private var filing = false
-    /// Why File was refused; the sheet stays open with your words.
-    @State private var fileError: String?
+    @State private var draft: NewTaskDraft
     @FocusState private var focused: Bool
 
     init(model: WorkModel) {
         self.model = model
-        _waveID = State(initialValue: model.sidebarWave?.wave.id)
+        _draft = State(initialValue: NewTaskDraft(waveID: model.sidebarWave?.wave.id))
     }
 
-    private var wave: WaveSnapshot? { NewTaskWorkflow.wave(waveID, in: model) }
-    private var trimmed: String { request.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var wave: WaveSnapshot? { draft.waveID.flatMap { model.wave(id: $0)?.wave } }
+    private var trimmed: String { draft.request.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var reported: WaveGraph.Default? {
+        model.graphDefaults[model.graphDefaultKey(wave: wave)]?.value?.default
+    }
+    private var chosen: String? { draft.graph ?? reported?.name }
+    private var whose: String? {
+        if draft.graph != nil { return "chosen for this start" }
+        return reported.map { model.workflowChoice(source: $0.source, wave: wave) }
+    }
 
     var body: some View {
+        @Bindable var draft = self.draft
         VStack(alignment: .leading, spacing: Spacing.lg) {
             Text("What do you want?")
                 .serif(.display)
                 .foregroundStyle(palette.emphasisInk)
-            TextField("", text: $request, axis: .vertical)
+            TextField("", text: $draft.request, axis: .vertical)
                 .lineLimit(3...10)
                 .textFieldStyle(.plain)
                 .font(Typography.lede)
@@ -42,114 +52,86 @@ struct NewTaskSheet: View {
                     .strokeBorder(focused ? palette.accent : palette.borderStrong, lineWidth: 1))
                 .focused($focused)
                 .accessibilityIdentifier("new-task-request")
-            NewTaskWorkflow(model: model, waveID: $waveID, graph: $graph)
-            if let fileError {
+            HStack(spacing: Spacing.xs) {
+                Text("In")
+                Menu(model.scopeName(wave)) {
+                    Button(model.repositoryName) { draft.waveID = nil }
+                    ForEach(model.visibleRoadmaps, id: \.wave.id) { roadmap in
+                        Button(roadmap.wave.displayName) { draft.waveID = roadmap.wave.id }
+                    }
+                }
+                .menuStyle(.borderlessButton).font(Typography.textStrong).fixedSize()
+                .accessibilityIdentifier("new-task-wave")
+            }
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack(spacing: Spacing.sm) {
+                    Text("Workflow for Start")
+                    Menu(chosen ?? "…") {
+                        Toggle("Use default", isOn: Binding(get: { draft.graph == nil }, set: { _ in draft.graph = nil }))
+                        Divider()
+                        StartFlowItems(model: model, chosen: draft.graph) { draft.graph = $0 }
+                    }
+                    .menuStyle(.borderlessButton).font(Typography.textStrong).fixedSize()
+                    .accessibilityIdentifier("new-task-workflow")
+                    if let whose {
+                        Text(whose)
+                            .foregroundStyle(palette.textSecondary)
+                            .accessibilityIdentifier("new-task-default")
+                    }
+                }
+                if let outline = model.workflowOutline(chosen) {
+                    WorkflowLine(outline: outline).accessibilityIdentifier("new-task-steps")
+                }
+            }
+            if let fileError = draft.fileError {
                 FailureLine("Not filed.", machine: fileError)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("new-task-file-error")
+            }
+            HStack(spacing: Spacing.sm) {
+                Button(draft.filing ? "Filing…" : "File to backlog") { Task { await file() } }
+                    .buttonStyle(LoopflowButtonStyle())
+                    .disabled(trimmed.isEmpty)
+                    .accessibilityIdentifier("new-task-file")
+                Text("Choose a workflow when you start.")
+                    .foregroundStyle(palette.textSecondary)
             }
             HStack(spacing: Spacing.sm) {
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .buttonStyle(LoopflowButtonStyle())
                     .keyboardShortcut(.cancelAction)
-                Button(filing ? "Filing…" : "File") { file() }
-                    .buttonStyle(LoopflowButtonStyle())
-                    .disabled(trimmed.isEmpty || filing)
-                    .help("Put it in \(model.scopeName(wave))'s backlog without starting it")
-                    .accessibilityIdentifier("new-task-file")
-                Button("Start ⌘↩") { create() }
-                    .buttonStyle(LoopflowButtonStyle(.accent))
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(trimmed.isEmpty)
-                    .accessibilityIdentifier("new-task-create")
+                Button(chosen.map { "Start with \($0) ⌘↩" } ?? "Start ⌘↩") {
+                    StartingTaskView.start(model: model, request: trimmed, wave: wave, graph: draft.graph)
+                }
+                .buttonStyle(LoopflowButtonStyle(.accent))
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(trimmed.isEmpty)
+                .accessibilityIdentifier("new-task-create")
             }
-            .padding(.top, Spacing.sm)
         }
+        .font(Typography.text)
+        .foregroundStyle(palette.text)
+        .disabled(draft.filing)
         .padding(Spacing.xxl)
         .frame(width: 540)
         .background(palette.surface)
         .onAppear { focused = true }
         .task { await model.loadGraphCatalog() }
-        .task(id: waveID) { await model.loadGraphDefault(wave: wave) }
+        .task(id: draft.waveID) { await model.loadGraphDefault(wave: wave) }
     }
 
-    private func create() {
-        StartingTaskView.start(model: model, request: trimmed, wave: wave, graph: graph)
-    }
-
-    /// File it unstarted. The sheet waits for Rust's answer, so a refusal keeps your words.
-    private func file() {
-        filing = true
-        fileError = nil
-        Task {
-            do {
-                try await model.fileTask(request: trimmed, wave: wave, graph: graph)
-                if model.navigation.palette == .newTask { model.navigation.palette = nil }
-            } catch { fileError = error.localizedDescription }
-            filing = false
-        }
-    }
-}
-
-/// "In myapp, running code, myapp's default": where the Task lives and the
-/// workflow it takes up, which follows that scope unless you choose another,
-/// then that workflow as the Task shows it later.
-struct NewTaskWorkflow: View {
-    let model: WorkModel
-    @Binding var waveID: String?
-    /// A graph other than the scope's default; nil takes up the default.
-    @Binding var graph: String?
-    @Environment(\.palette) private var palette
-
-    static func wave(_ id: String?, in model: WorkModel) -> WaveSnapshot? {
-        id.flatMap { id in model.visibleRoadmaps.first { $0.wave.id == id }?.wave }
-    }
-
-    private var wave: WaveSnapshot? { Self.wave(waveID, in: model) }
-    private var scopeName: String { model.scopeName(wave) }
-    private var reported: WaveGraph.Default? {
-        model.graphDefaults[model.graphDefaultKey(wave: wave)]?.value?.default
-    }
-    private var chosen: String? { graph ?? reported?.name }
-    /// Whose choice the workflow is; nil until the scope's default is read.
-    private var whose: String? {
-        if graph == nil, reported == nil { return nil }
-        return model.workflowChoice(source: chosen == reported?.name ? reported?.source : nil, wave: wave)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                Text("In")
-                Menu(scopeName) {
-                    Button(model.repositoryName) { waveID = nil }
-                    ForEach(model.visibleRoadmaps, id: \.wave.id) { roadmap in
-                        Button(roadmap.wave.displayName) { waveID = roadmap.wave.id }
-                    }
-                }
-                .menuStyle(.borderlessButton).font(Typography.textStrong).fixedSize()
-                .accessibilityIdentifier("new-task-wave")
-                Text(", running").padding(.leading, -Spacing.xs)
-                Menu(chosen ?? "…") {
-                    StartFlowItems(model: model, chosen: chosen) { name in
-                        graph = name == reported?.name ? nil : name
-                    }
-                }
-                .menuStyle(.borderlessButton).font(Typography.textStrong).fixedSize()
-                .accessibilityIdentifier("new-task-workflow")
-                if let whose {
-                    Text(", \(whose)").padding(.leading, -Spacing.xs)
-                        .foregroundStyle(palette.textSecondary)
-                        .accessibilityIdentifier("new-task-default")
-                }
-            }
-            .font(Typography.text)
-            .foregroundStyle(palette.text)
-            if let outline = model.workflowOutline(chosen) {
-                WorkflowLine(outline: outline).accessibilityIdentifier("new-task-steps")
-            }
-        }
+    func file() async {
+        guard !draft.filing else { return }
+        let owner = model.navigation
+        let presentation = owner.paletteGeneration
+        draft.filing = true
+        defer { draft.filing = false }
+        draft.fileError = nil
+        do {
+            try await model.fileTask(request: trimmed, wave: wave)
+            if owner.paletteGeneration == presentation, owner.palette == .newTask { owner.palette = nil }
+        } catch { draft.fileError = error.localizedDescription }
     }
 }
 

@@ -198,8 +198,10 @@ and both lines update with it, along with the **Start** button label.
 
 If **File to backlog** is refused, the sheet stays open with what you typed,
 the selected scope and Start workflow, "Not filed." and the Machine's reason.
-If **Start** can't begin the run, the request stays on screen with "Not
-started.", the error, **Try again** and **Discard**.
+If the Machine refuses **Start** before creating the Task, the request stays
+on screen with "Not started.", the error, **Try again** and **Discard**.
+After admission, setup errors appear in the Task's workspace. If the reply
+is lost, Desktop checks the original submission on its Machine.
 
 #### A Task that has not started
 

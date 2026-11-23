@@ -1,11 +1,13 @@
-at: e3bd54bbbfcd1041fa87717ac790b3bacd841fd9
+at: 820bcdc3840f1b524f3051543b656faa645273d5
 first:
   - path: docs/surfaces.md
     why: Follow a sidebar Task through prompts, sorts and drops.
   - path: rust/loopflow-storage/src/work/selection.rs
-    why: Find drop placement and the nullable Graph step.
+    why: Read activity flags, attention membership and drop placement.
   - path: rust/loopflow-storage/src/sqlite/selections.rs
-    why: Read the default order and both order edits.
+    why: Follow Session reports into the saved Working order.
+  - path: swift/Loopflow/Design/TaskRow.swift
+    why: See which status a phone row displays.
   - path: rust/loopflow-execution/src/store/selections.rs
     why: Retry an edit against the latest saved order.
   - path: rust/loopflow/src/lf/commands/desktop.rs
@@ -24,6 +26,8 @@ first:
     why: Package SwiftPM fonts with every Desktop build.
   - path: swift/Loopflow/AppBootstrap.swift
     why: Register and resolve the packaged faces.
+  - path: rust/loopflow/src/lf/commands/waves.rs
+    why: Check mixed reports through filters and status sorts.
   - path: rust/loopflow/tests/served_reads.rs
     why: Drop from competing clients on a private Machine.
   - path: swift/LoopflowTests/DashboardWorkspaceTests.swift

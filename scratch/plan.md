@@ -544,6 +544,23 @@ merge and install. Auto stays a Machine fact
 
 ## Then: gate
 
+QA on `60fcf050b9` (2026-11-23, `scratch/qa.html`) walked `lf wt create
+--stack` against the fake GitHub and fixed three things: `lf pr open` in a
+stacked checkout whose base was never pushed failed with `git diff
+origin/<base>...HEAD` "bad revision" (it now pushes the base with an
+upstream, as `lf sync <Task>` does for an unpushed parent); `lf sync` kept
+merging a base whose PR had merged while its local branch remained (it now
+asks `gh pr view`, the check `lf pr` already made, and follows main);
+`--stack --persistent` dropped the stack. `served_reads` did not compile
+(`Write::CheckoutCreate` gained `stack`). Tests:
+`sync_tests::a_checkout_created_with_stack` (persistent case added) and
+`sync_tests::a_stacked_checkout_publishes_onto_its_unpushed_base_and_follows_main_once_it_merges`
+passed; clippy on `loopflow-execution` and `loopflow` clean.
+`served_reads::server_operations_match_their_lf_commands` fails at its
+`session bind` step (served `outlook` "starting", CLI "could_not_start": the
+CLI read follows a start attempt); not this change's write, not checked on
+main — gate.
+
 QA on `71feca7db5` (2026-11-23, `scratch/qa.html`) found one more regression
 of the same kind and fixed it: `lf commit`/`lf pr open` in a plain worktree
 nested inside a Task's checkout acted for the outer Task ("Task … expects

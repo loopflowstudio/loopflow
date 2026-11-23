@@ -2676,6 +2676,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             name,
             preview,
             persistent,
+            stack,
         } => {
             let mut spelled = words(&["wt", "create", name]);
             if *preview {
@@ -2683,6 +2684,9 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             }
             if *persistent {
                 spelled.push("--persistent".into());
+            }
+            if *stack {
+                spelled.push("--stack".into());
             }
             spelled.push("--json".into());
             (path(directory), spelled)

@@ -46,3 +46,16 @@ in a fresh private home with no `-wal`; with no lf process running, open it
 plainly. A merge lf read as open less than 60 s earlier stays open to it: the
 next sync fetches the deleted branch and fails with `couldn't find remote ref`.
 Wait out the cache before landing-then-syncing.
+
+# `lf wt create --stack` checkouts
+
+Same world. From a Task's checkout, `lf wt create <name> --stack` branches
+from that checkout's branch and records `branch.<new>.loopflow-base` in the
+repository's Git config (`--persistent` beside it adds `loopflow-persistent`).
+`lf sync` there merges the local base branch, not `origin/<base>`, so it works
+before the parent is pushed. `lf pr open` there pushes a base origin lacks
+(`git ls-remote <origin.git>` shows it) and targets it; the stand-in's state
+file shows `base`. To land the parent with its checkout still on disk, squash
+it into `main`, delete the remote branch and mark the PR `MERGED`: `lf sync`
+in the child then merges main, and `lf pr open` retargets its PR to main.
+`lf task status` in the stacked checkout says "this checkout has no Task".

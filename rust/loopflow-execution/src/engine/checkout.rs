@@ -180,23 +180,13 @@ pub fn create(
     progress: &impl Progress,
 ) -> Result<Checkout> {
     use crate::git::worktrees::{
-        create_from_placement_plan, ensure_agent_worktree, main_repo_root, plan_placement,
-        record_stacked_base, WorktreeSegment,
+        create_from_placement_plan, ensure_agent_worktree, main_repo_root, mark_persistent,
+        plan_placement, record_stacked_base, WorktreeSegment,
     };
     let repo = repo_root(directory)?;
     let main_repo = main_repo_root(&repo).map_err(outcome_unknown)?;
     let segment = WorktreeSegment::parse(name)
         .map_err(|error| Error::new(ErrorCode::Invalid, error.to_string()))?;
-    if persistent && !preview {
-        let workspace = ensure_agent_worktree(&main_repo, segment).map_err(outcome_unknown)?;
-        return Ok(Checkout {
-            path: workspace.path,
-            branch: workspace.branch,
-            base: None,
-            strategy: None,
-            created: true,
-        });
-    }
     // On the default branch or a detached HEAD there is nothing to stack on.
     let stacked_on = if stack {
         crate::git::current_branch(&repo)
@@ -207,6 +197,16 @@ pub fn create(
     } else {
         None
     };
+    if persistent && stacked_on.is_none() && !preview {
+        let workspace = ensure_agent_worktree(&main_repo, segment).map_err(outcome_unknown)?;
+        return Ok(Checkout {
+            path: workspace.path,
+            branch: workspace.branch,
+            base: None,
+            strategy: None,
+            created: true,
+        });
+    }
     let plan = |main_repo: &Path| {
         let mut placement = plan_placement(main_repo, segment.clone()).map_err(outcome_unknown)?;
         if let Some(base) = &stacked_on {
@@ -232,6 +232,9 @@ pub fn create(
     let stacked_on = stacked_on.filter(|_| placement.strategy == PlacementStrategy::Create);
     if let Some(base) = &stacked_on {
         record_stacked_base(&main_repo, &result.branch, base).map_err(outcome_unknown)?;
+    }
+    if persistent {
+        mark_persistent(&main_repo, &result.branch).map_err(outcome_unknown)?;
     }
     crate::ops::telemetry::record_ops_metric(
         &repo,

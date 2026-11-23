@@ -2257,29 +2257,44 @@ fn pr_target(repo: &Path, main_repo: &Path, default_branch: &str) -> OpsResult<S
 }
 
 fn resolve_pr_target(repo: &Path, base_branch: &str) -> OpsResult<String> {
-    if base_branch == "main" {
+    if base_branch == "main" || branch_pr_merged(repo, base_branch)? {
         return Ok("main".to_string());
     }
-
-    let output = Command::new("gh")
-        .arg("pr")
-        .arg("view")
-        .arg(base_branch)
-        .arg("--json")
-        .arg("state")
-        .arg("-q")
-        .arg(".state")
+    // A PR can only target a branch GitHub has, so a base never pushed is
+    // pushed now, as stacking a Task on an unpushed parent does. Without a
+    // branch on origin it has no PR, so no merge request moves.
+    let fetched = Command::new("git")
+        .args(["fetch", "--quiet", "origin", base_branch])
         .current_dir(repo)
         .output()?;
-    if output.status.success() {
-        let state = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .to_uppercase();
-        if state == "MERGED" {
-            return Ok("main".to_string());
+    if !fetched.status.success() {
+        let pushed = Command::new("git")
+            .args(["push", "--quiet", "--set-upstream", "origin", base_branch])
+            .current_dir(repo)
+            .output()?;
+        if !pushed.status.success() {
+            return Err(OpsError::Message(format!(
+                "this branch builds on {base_branch}, which origin doesn't have, and pushing it failed: {}",
+                stderr_from_output(&pushed)
+            )));
         }
     }
     Ok(base_branch.to_string())
+}
+
+/// Whether `branch`'s PR has merged; without `gh` nothing says so.
+pub(crate) fn branch_pr_merged(repo: &Path, branch: &str) -> OpsResult<bool> {
+    if !gh_available() {
+        return Ok(false);
+    }
+    let output = Command::new("gh")
+        .args(["pr", "view", branch, "--json", "state", "-q", ".state"])
+        .current_dir(repo)
+        .output()?;
+    Ok(output.status.success()
+        && String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .eq_ignore_ascii_case("MERGED"))
 }
 
 fn parse_generated_pr_copy(raw: &str) -> Option<PrCopy> {

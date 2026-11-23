@@ -273,3 +273,11 @@ worktree is gone. Reversible in `checkout_owner_in` (`sqlite/task_work.rs`).
   checkout merges main once and keeps the record, so the next bare `lf sync`
   follows the base again; a stacked Task's `lf sync main` detaches it. Clearing
   the record there would match Tasks; reversible in `run_sync_in`.
+
+## `--stack` base behind origin (QA 2026-11-23)
+
+`lf pr open` in a `--stack` checkout pushes its base only when origin lacks
+it. A base on origin but behind its local branch stays as it is, so the
+child's PR shows the parent's unpushed commits until the parent pushes.
+`lf sync <Task>` pushes in that case, handling the parent's merge request;
+matching it here would need the same care. Left as is.

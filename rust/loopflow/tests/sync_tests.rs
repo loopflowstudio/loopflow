@@ -1075,6 +1075,70 @@ fn a_checkout_created_with_stack_builds_on_this_branch_and_sync_follows_it() {
         std::fs::read_to_string(child_path.join("later.txt")).unwrap(),
         "later parent work\n"
     );
+
+    let kept = created(&["wt", "create", "kept", "--stack", "--persistent", "--json"]);
+    assert_eq!(kept["base"], "parent");
+    let kept_path = std::path::PathBuf::from(kept["path"].as_str().unwrap());
+    assert_eq!(
+        git(&kept_path, &["rev-parse", "HEAD"]),
+        git(&parent_path, &["rev-parse", "HEAD"])
+    );
+    assert_eq!(
+        git(
+            &kept_path,
+            &[
+                "config",
+                "--get",
+                &format!(
+                    "branch.{}.loopflow-persistent",
+                    kept["branch"].as_str().unwrap()
+                ),
+            ]
+        ),
+        "true"
+    );
+}
+
+#[test]
+fn a_stacked_checkout_publishes_onto_its_unpushed_base_and_follows_main_once_it_merges() {
+    let home = tempfile::TempDir::new().unwrap();
+    let state = home.path().join("parent-pr-state");
+    let log = home.path().join("gh.log");
+    let gh = format!(
+        "#!/bin/sh\necho \"$*\" >> '{log}'\ncase \"$1 $2\" in\n  'pr list') echo '[]';;\n  'pr create') echo 'https://example.com/pr/1';;\n  'pr view') cat '{state}' 2>/dev/null || echo OPEN;;\nesac\nexit 0\n",
+        log = log.display(),
+        state = state.display(),
+    );
+    let repo = TestRepo::new();
+    let _env = EnvGuard::with_lf_home(&[("gh", &gh)], home.path());
+    let parent_path = repo.create_named_worktree("parent");
+    commit_file(&parent_path, "parent.txt", "parent work\n");
+    let output = lf(
+        &parent_path,
+        &["wt", "create", "child", "--stack", "--json"],
+    );
+    let child: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let child_path = std::path::PathBuf::from(child["path"].as_str().unwrap());
+    commit_file(&child_path, "child.txt", "child work\n");
+
+    lf(
+        &child_path,
+        &["pr", "open", "--title", "Child", "--body", "On parent"],
+    );
+    assert_eq!(
+        git(repo.bare_path(), &["rev-parse", "refs/heads/parent"]),
+        git(&parent_path, &["rev-parse", "HEAD"])
+    );
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        calls.contains("pr create") && calls.contains("--base parent"),
+        "{calls}"
+    );
+
+    std::fs::write(&state, "MERGED\n").unwrap();
+    let output = lf(&child_path, &["sync", "--plan"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("base: parent\n"), "{stdout}");
 }
 
 #[test]

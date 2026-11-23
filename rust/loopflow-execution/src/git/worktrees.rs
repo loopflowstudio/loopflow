@@ -2016,13 +2016,18 @@ pub fn ensure_agent_worktree(
         plan.base_ref = agent_base_ref(&main_repo)?;
     }
     let worktree = create_agent_worktree(&main_repo, &plan)?;
-    set_branch_config(&main_repo, &worktree.branch, "loopflow-persistent", "true")?;
+    mark_persistent(&main_repo, &worktree.branch)?;
     Ok(worktree)
 }
 
 /// Persistent branches keep their checkout and local plans after delivery.
 pub fn is_persistent_worktree(repo: &Path) -> Result<bool, GitError> {
     Ok(current_branch_config(repo, "loopflow-persistent")?.as_deref() == Some("true"))
+}
+
+/// Keep `branch`'s checkout and local plans after delivery.
+pub fn mark_persistent(repo: &Path, branch: &str) -> Result<(), GitError> {
+    set_branch_config(repo, branch, "loopflow-persistent", "true")
 }
 
 /// The branch this checkout was stacked on by `lf wt create --stack`, while

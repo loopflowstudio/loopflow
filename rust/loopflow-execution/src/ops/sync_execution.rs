@@ -99,11 +99,15 @@ pub(crate) fn run_sync_in(
         }
     }
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
-    // A checkout made with `lf wt create --stack` follows the branch it was made from.
+    // A checkout made with `lf wt create --stack` follows the branch it was
+    // made from until that branch's PR merges.
     let stacked_base = if on_main || stacked.is_some() {
         None
     } else {
-        crate::git::worktrees::stacked_base(repo_root)?
+        match crate::git::worktrees::stacked_base(repo_root)? {
+            Some(base) if !crate::ops::pr::branch_pr_merged(repo_root, &base)? => Some(base),
+            _ => None,
+        }
     };
     let default_target = if on_main {
         &upstream

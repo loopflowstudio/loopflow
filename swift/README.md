@@ -605,6 +605,8 @@ files first. Matching paths favor scratch, changed and open files. Choose
 | ⌘[ / ⌘] | Return to the call line or jump forward. An empty history falls through to Desktop navigation. |
 | ⌃⌘E | Toggle Edit for this file. |
 
+In Read, click an identifier to underline the occurrence that `gd` or `gr` will use.
+
 Grep opens the numbered source, including for Markdown and HTML. It highlights
 the occurrence when the displayed revision matches. Escape from Grep returns
 to the current Find match. Definitions resolve in the live document first,

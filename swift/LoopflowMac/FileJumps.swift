@@ -31,19 +31,21 @@ final class FileJumps {
         }
     }
 
-    struct Chord {
-        private(set) var pending = false
+    final class Target {
+        let path: String
+        let line: Int
+        let word: String
+        let range: NSRange
 
-        mutating func press(_ key: String, identifier: String) -> Lookup? {
-            defer { pending = key == "g" }
-            guard pending else { return nil }
-            switch key {
-            case "d": return .definition(identifier)
-            case "r": return .references(identifier)
-            default: return nil
-            }
+        init(path: String, line: Int, word: String, range: NSRange) {
+            self.path = path
+            self.line = line
+            self.word = word
+            self.range = range
         }
     }
+
+    var target: Target?
 
     struct Candidate {
         let label: String

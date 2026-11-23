@@ -219,10 +219,7 @@ struct TaskFilesTests {
         store.selectFile("Call.swift")
         let doc = store.document("Call.swift")
         await doc.reconcile(snapshot("readMore()\n😀 read()\n", path: doc.path))
-        var chord = FileJumps.Chord()
-        #expect(chord.press("g", identifier: "read") == nil && chord.pending)
-        let lookup = chord.press("r", identifier: "read")
-        await store.jumps.search(try #require(lookup), line: 2, in: store)?.value
+        await store.jumps.search(.references("read"), line: 2, in: store)?.value
         let peek = try #require(store.jumps.peek)
         #expect(peek.lookup.title == "References to read" && peek.candidates.count == 1)
         #expect(store.visit == nil && store.jumps.back.isEmpty)
@@ -253,12 +250,56 @@ struct TaskFilesTests {
         }
     }
 
-    @Test func readerIdentifiesTheClickedWordAfterUnicode() {
+    @Test func readChordsUseTheUnderlinedOccurrenceBesideSelectableText() async throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let location = fixtureWorkspace("/fixture")
+        let workspace = fixtureWork(registry, location)
+        let pane = try #require(workspace.multiplexer.showBrowser(.files, location: location))
+        let query = RegistryQuery { _, _ in #"{"hits":[],"truncated":false}"# }
+        let store = try workspace.files(for: pane.content, task: nil, query: query)
+        let context = DesktopActionContext(model: WorkModel(query: query), workspaces: registry, workspace: workspace, pane: pane)
+        let monitor = DesktopActionMonitor(context: { context }, failed: { Issue.record($0) }).makeCoordinator()
+        let path = "Call.swift"
+        let text = "😀 read() + read()"
+        store.selectFile(path)
+        await store.document(path).reconcile(snapshot(text, path: path))
+        let reader = TaskCodeReader(path: path, text: text, store: store, ready: {})
         let font = NSFont(name: Typography.monoFace, size: Typography.monoSize)
             ?? .monospacedSystemFont(ofSize: Typography.monoSize, weight: .regular)
-        let prefix = NSAttributedString(string: "😀. ", attributes: [.font: font]).size().width
-        #expect(TaskCodeReader.word(in: "😀. read()", at: CGPoint(x: prefix + 1, y: 0)) == "read")
-        #expect(TaskCodeReader.word(in: "read()", at: CGPoint(x: 1000, y: 0)) == nil)
+        let prefix = NSAttributedString(string: "😀 read() + ", attributes: [.font: font]).size().width
+        store.jumps.target = reader.target(in: text, number: 1, at: CGPoint(x: prefix + 1, y: 0))
+        let target = try #require(store.jumps.target)
+        #expect(target.word == "read" && target.range == NSRange(location: 12, length: 4))
+        let line = try #require(CodeLine.read(text, grammar: nil).first)
+        let painted = reader.painted(line, number: 1)
+        let marked = painted.runs.filter { $0.underlineStyle != nil }.map { NSRange($0.range, in: painted) }
+        #expect(marked == [target.range])
+        #expect(reader.target(in: text, number: 1, at: CGPoint(x: 1000, y: 0)) == nil)
+
+        let responder = NSTextView()
+        responder.isEditable = false
+        responder.isSelectable = true
+        func press(_ key: String) -> Bool {
+            monitor.handleReadKey(key, modifiers: [], firstResponder: responder)
+        }
+        #expect(press("g") && press("d"))
+        #expect(store.jumps.peek?.lookup == .definition("read"))
+        #expect(press("g") && press("r"))
+        #expect(store.jumps.peek?.lookup == .references("read"))
+        store.jumps.dismiss()
+        #expect(press("g"))
+        responder.isEditable = true
+        #expect(!press("d") && !press("g") && !press("r"))
+        responder.isEditable = false
+        #expect(!press("r"))
+        store.find = FileFind()
+        #expect(!press("g"))
+        store.find = nil
+        store.chooseFile()
+        #expect(!press("g"))
+        store.filePicker = nil
+        store.mode = .edit
+        #expect(!press("g") && store.jumps.peek == nil)
     }
 
     @Test func outlineAndLocalDefinitionReadTheLiveSwiftBuffer() async throws {

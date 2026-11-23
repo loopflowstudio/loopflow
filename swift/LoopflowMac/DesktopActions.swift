@@ -751,6 +751,7 @@ struct DesktopActionMonitor: NSViewRepresentable {
         var context: () -> DesktopActionContext
         var failed: (Error) -> Void
         private var monitor: Any?
+        private weak var chordTarget: FileJumps.Target?
 
         init(context: @escaping () -> DesktopActionContext, failed: @escaping (Error) -> Void) {
             self.context = context
@@ -762,13 +763,35 @@ struct DesktopActionMonitor: NSViewRepresentable {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self, let window = self.view?.window,
                       event.window === window, window.isKeyWindow, window.attachedSheet == nil,
-                      (window.firstResponder as? NSTextView)?.hasMarkedText() != true else { return event }
+                      (window.firstResponder as? NSTextView)?.hasMarkedText() != true else {
+                    self?.chordTarget = nil
+                    return event
+                }
+                if self.handleReadKey(event.charactersIgnoringModifiers, modifiers: event.modifierFlags,
+                                      firstResponder: window.firstResponder) { return nil }
                 guard let (action, args) = DesktopAction.binding(characters: event.charactersIgnoringModifiers,
                           keyCode: event.keyCode, specialKey: event.specialKey, modifiers: event.modifierFlags, context: self.context())
                 else { return event }
                 do { try action.perform(self.context().with(args: args)) } catch { self.failed(error) }
                 return nil
             }
+        }
+
+        func handleReadKey(_ key: String?, modifiers: NSEvent.ModifierFlags, firstResponder: NSResponder?) -> Bool {
+            let pending = chordTarget
+            chordTarget = nil
+            guard modifiers.intersection([.command, .shift, .option, .control]).isEmpty,
+                  key == "g" || (pending != nil && (key == "d" || key == "r")),
+                  (firstResponder as? NSTextView)?.isEditable != true,
+                  let files = context().readingFiles, files.mode == .read, files.find == nil, files.filePicker == nil,
+                  let target = files.jumps.target, target.path == files.selection else { return false }
+            if key == "g" {
+                chordTarget = target
+                return true
+            }
+            guard pending === target else { return false }
+            files.jumps.search(key == "d" ? .definition(target.word) : .references(target.word), line: target.line, in: files)
+            return true
         }
 
         func uninstall() {

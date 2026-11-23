@@ -16,10 +16,6 @@ struct TaskCodeReader: View {
     @State private var parsedVersion = 0
     @State private var lines: [CodeLine]?
 
-    @FocusState private var focused: Bool
-    @State private var selectedWord: String?
-    @State private var selectedLine = 1
-    @State private var chord = FileJumps.Chord()
     @State private var scrolling = false
 
     var body: some View {
@@ -48,16 +44,6 @@ struct TaskCodeReader: View {
                     .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.1) { visible in
                         if scrolling, let store, let first = visible.min() { store.jumps.readingLine = first + 1 }
                     }
-                    .focusable(store != nil).focused($focused).focusEffectDisabled()
-                    .onChange(of: focused) { if !focused { chord = .init() } }
-                    .onKeyPress { key in
-                        guard let store, key.modifiers.isEmpty, let selectedWord else { chord = .init(); return .ignored }
-                        if let lookup = chord.press(key.characters, identifier: selectedWord) {
-                            store.jumps.search(lookup, line: selectedLine, in: store)
-                            return .handled
-                        }
-                        return chord.pending ? .handled : .ignored
-                    }
                     .task(id: FileFind.Scan(query: store?.find?.query, revision: parsedVersion)) {
                         if let find = store?.find, !find.query.isEmpty {
                             await find.search(lines: lines)
@@ -79,9 +65,9 @@ struct TaskCodeReader: View {
                 ProgressView()
             }
         }
+        .onDisappear { store?.jumps.target = nil }
         .task(id: text) {
-            selectedWord = nil
-            chord = .init()
+            store?.jumps.target = nil
             let document = store?.selectedDocument
             let version = document?.editVersion
             let result = await Task.detached(priority: .userInitiated) { [text, path, needsOutline = document != nil] in
@@ -150,19 +136,17 @@ struct TaskCodeReader: View {
         let label = Text(painted(line, number: number)).textSelection(.enabled)
         if let store {
             label.simultaneousGesture(SpatialTapGesture().onEnded { tap in
-                focused = true
                 store.jumps.readingLine = number
-                selectedLine = number
-                selectedWord = Self.word(in: line.text, at: tap.location)
-                chord = .init()
-                if NSApp.currentEvent?.modifierFlags.contains(.command) == true, let selectedWord {
-                    store.jumps.search(.definition(selectedWord), line: number, in: store)
+                let target = target(in: line.text, number: number, at: tap.location)
+                store.jumps.target = target
+                if NSApp.currentEvent?.modifierFlags.contains(.command) == true, let target {
+                    store.jumps.search(.definition(target.word), line: number, in: store)
                 }
             })
         } else { label }
     }
 
-    static func word(in text: String, at point: CGPoint) -> String? {
+    func target(in text: String, number: Int, at point: CGPoint) -> FileJumps.Target? {
         let font = NSFont(name: Typography.monoFace, size: Typography.monoSize)
             ?? .monospacedSystemFont(ofSize: Typography.monoSize, weight: .regular)
         let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
@@ -179,12 +163,18 @@ struct TaskCodeReader: View {
         let after = source.rangeOfCharacter(from: characters, options: [], range: NSRange(location: index, length: source.length - index))
         let start = before.location == NSNotFound ? 0 : NSMaxRange(before)
         let end = after.location == NSNotFound ? source.length : after.location
-        return index < end ? source.substring(with: NSRange(location: start, length: end - start)) : nil
+        guard index < end else { return nil }
+        let range = NSRange(location: start, length: end - start)
+        return FileJumps.Target(path: path, line: number, word: source.substring(with: range), range: range)
     }
 
-    private func painted(_ line: CodeLine, number: Int) -> AttributedString {
+    func painted(_ line: CodeLine, number: Int) -> AttributedString {
         var value = AttributedString(line.text)
         value.paint(line.highlights, inks: .of(theme))
+        if let target = store?.jumps.target, target.path == path, target.line == number,
+           let range = Range(target.range, in: value) {
+            value[range].underlineStyle = Text.LineStyle(pattern: .solid, color: palette.actionInk)
+        }
         if selected(number) || location?.lines?.contains(number) == true { value.backgroundColor = palette.keyboardFocus.opacity(0.3) }
         if let hit = location?.hit, hit.line == number, hit.revision == revision,
            let range = hit.range(in: line.text), let attributed = Range(range, in: value) {

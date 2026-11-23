@@ -50,6 +50,7 @@ final class TaskFilesStore {
         browser.open(location.path, automatically: true)
         page = .files
         mode = .read
+        jumps.target = nil
         jumps.readingLine = location.line
         browser.visit = FileVisit(line: location.line, hit: hit, visitID: UUID())
     }

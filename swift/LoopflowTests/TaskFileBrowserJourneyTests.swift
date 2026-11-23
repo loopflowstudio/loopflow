@@ -108,10 +108,19 @@ struct TaskFileBrowserJourneyTests {
         find.query = "read()"
         await find.search(lines: CodeLine.read(doc.text, grammar: nil))
         #expect(find.current?.cell == .line(3))
-        var chord = FileJumps.Chord()
-        #expect(chord.press("g", identifier: "read") == nil && chord.pending)
-        let lookup = chord.press("r", identifier: "read")
-        await files.jumps.search(try #require(lookup), line: 3, in: files)?.value
+        files.find = nil
+        let monitor = DesktopActionMonitor(context: { context }, failed: { Issue.record($0) }).makeCoordinator()
+        let readerText = NSTextView()
+        readerText.isEditable = false
+        readerText.isSelectable = true
+        func lookup(_ key: String) async throws {
+            let line = "    /* 😀 */ read()"
+            files.jumps.target = .init(path: call, line: 3, word: "read", range: (line as NSString).range(of: "read"))
+            try #require(monitor.handleReadKey("g", modifiers: [], firstResponder: readerText))
+            try #require(monitor.handleReadKey(key, modifiers: [], firstResponder: readerText))
+            for await loading in Observations({ files.jumps.peek?.loading }) where loading != true { break }
+        }
+        try await lookup("r")
         let references = try #require(files.jumps.peek)
         #expect(references.candidates.compactMap(\.hit) == refs.hits)
         #expect(files.selection == call && files.jumps.back.isEmpty)
@@ -121,7 +130,7 @@ struct TaskFileBrowserJourneyTests {
         #expect(files.selection == call && files.visit?.line == 3)
         #expect(try binding("[").name == "back")
 
-        await files.jumps.search(.definition("read"), line: 3, in: files)?.value
+        try await lookup("d")
         let choices = try #require(files.jumps.peek?.candidates)
         #expect(choices.map(\.label) == ["A.read", "B.read"])
         #expect(choices.map(\.position) == definitions.hits.map { FilePosition(path: $0.path, line: $0.line) })

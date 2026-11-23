@@ -73,7 +73,7 @@ and all four macOS clone checks passed locally.
 
 ## Shared skill discovery
 
-Run `lf sync-skills --yes`, then `/reload` in an open Pi session. Generated native
+Run `lf self sync-skills --yes`, then `/reload` in an open Pi session. Generated native
 names use lowercase letters, digits and hyphens within 64 characters. Long names
 and collisions retain distinct exports; original `lf` commands and resource paths
 remain available. Third-party bundles are preserved.

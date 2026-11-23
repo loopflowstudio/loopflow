@@ -25,6 +25,7 @@ impl SqliteStore {
                 attachment_token=CASE WHEN session_activity.agent_process_id IS ?2 THEN session_activity.attachment_token ELSE NULL END,
                 program_status=CASE WHEN session_activity.agent_process_id IS ?2 THEN session_activity.program_status END,
                 preview=CASE WHEN session_activity.agent_process_id IS ?2 THEN session_activity.preview END,
+                observed_at=CASE WHEN session_activity.agent_process_id IS ?2 THEN session_activity.observed_at ELSE 0 END,
                 agent_process_id=?2,status_stream=?3,status_sequence=0",
             params![session, agent_process, stream],
         )? == 1)

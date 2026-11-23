@@ -57,7 +57,11 @@ The CLI now records the hold and the worker-session members in the interrupt tra
 
 Mac’s sidebar requests only the selected section. Working and Paused have distinct readings and saved cache entries. The Wave board lists paused Tasks separately. iPhone reads `state:paused` under its Paused filter. Both clients offer plain Unpause, retain Stop Auto-Ship, and use the server’s `run_control.pausing` flag and refusal while cleanup runs. The Mac checks the hold when preparing recently visited workspaces. iPhone reads saved primary Session history while paused. Operator skills leave the hold in place. The CLI’s stop receipt identifies the Task and any finishing run. It does not enumerate stopped PIDs or retained files.
 
-Item 1 still needs a way to establish a launch-side source of the shell's OS session identity. Reproduce the separate-group orphan and a double-forked service with a real Codex tool call before wiring the receipt into worker capture and settlement. An app-server handle, a later process census, and the shared tool environment leave the two jobs ambiguous. Pause overlapping interrupt or move is still open. The five-harness matrix belongs to gate.
+Remaining:
+
+- **Pause overlapping an interrupt or a move.** Next slice. A `task_graph_launch_tests` fixture starts a build, issues `lf task interrupt` (and, separately, a move to a private second Machine) and pauses before it settles. Expected: one hold, the build stopped, the Graph stopped at its cursor, and the move either arrives held or the source keeps the hold.
+- **Codex tool sessions outside the worker's OS session.** The three probes below found no launch-side identity on Codex 0.171.0: the app-server reports `osPid: null`, a later census cannot tell the build from a double-forked service, and a zsh startup hook misses an explicit `/bin/sh`. Current choice (`scratch/questions.md`): such jobs stay outside signal authority and the PR names the gap. Open choice for review: accept that gap for this PR, or wrap Codex's tool command (a PreToolUse prefix, which can displace a configured rewrite) to register the session before the command runs.
+- **Five-harness worker matrix and Linux session enumeration:** gate and CI.
 
 ## Codex launch identity and pause races
 

@@ -49,7 +49,7 @@ struct ScopedSettingRow: View {
             }
             if file.owner != .personalGlobal && definition.section != .policy {
                 SettingProvenance(title: "In effect",
-                    value: [effective.value.settingsText, source].compactMap { $0 }.joined(separator: " · "),
+                    value: [effectiveText, source ?? "Default"].joined(separator: " · "),
                     effective: effective, files: model.reading.value?.files ?? [], key: key, path: file.path)
             }
             if let draft, draft.text == nil {
@@ -60,7 +60,7 @@ struct ScopedSettingRow: View {
                     if preview.failure != nil { Button("Refresh") { refreshRow() } }
                 }
             } else if declared != .absent {
-                Button("Reset layer…") {
+                Button("Reset…") {
                     preview = .loading
                     draft = Draft(text: nil, file: file)
                 }.controlSize(.small)
@@ -128,17 +128,23 @@ struct ScopedSettingRow: View {
             guard let candidate = effective.candidates.last(where: { $0.key == key }) else {
                 // The catalog's defaults for these keys are the JSON literals `null` and `[]`.
                 let builtin = try? JSONDecoder().decode(JSONValue.self, from: Data(definition.default.utf8))
-                return labeled(builtin ?? .null, origin: "Default")
+                return labeled((builtin ?? .null).settingsText, origin: "Default")
             }
             let origin = model.reading.value?.title(locator: candidate.locator) ?? candidate.locator
-            return labeled(candidate.value, origin: origin)
+            return labeled(candidate.value.settingsText, origin: origin)
         }
-        let value = definition.fieldValue(in: effective.value) ?? .null
-        return labeled(value, origin: source ?? "Default")
+        return labeled(effectiveText, origin: source ?? "Default")
     }
 
-    private func labeled(_ value: JSONValue, origin: String) -> String {
-        origin == "Default" ? "\(value.settingsText) (Default)" : "\(value.settingsText) (from \(origin))"
+    /// A null default reads as what decides instead (`~/src`, Git's user.name), never "None".
+    private var effectiveText: String {
+        let value = definition.fieldValue(in: effective.value) ?? .null
+        if value == .null, (source ?? "Default") == "Default", let unset = definition.unset { return unset }
+        return value.settingsText
+    }
+
+    private func labeled(_ text: String, origin: String) -> String {
+        origin == "Default" ? "\(text) (Default)" : "\(text) (from \(origin))"
     }
 
     @ViewBuilder private var control: some View {

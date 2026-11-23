@@ -1,54 +1,37 @@
-<!doctype html>
-<meta charset="utf-8">
-<title>LOO-1066 QA: Settings, round 2</title>
-<style>
-body{font:15px/1.5 -apple-system,system-ui;max-width:980px;margin:2rem auto;padding:0 1rem;color:#222}
-h1{font-size:1.6rem} h2{margin-top:2rem;font-size:1.2rem}
-pre{background:#f4f2ee;padding:.7rem;overflow:auto;font-size:13px}
-table{border-collapse:collapse;width:100%} td,th{border-bottom:1px solid #ddd;padding:.4rem;vertical-align:top;text-align:left}
-.ok{color:#2a7a2a} .fix{color:#8a5a00} .open{color:#a02020}
-</style>
-<h1>Settings redesign: QA round 2</h1>
-<p>Branch build <code>2f251db42</code> plus the fixes below. This round covers the concept-review slices: live writes, row errors, explicit null, interrupted moves, This Machine (Global) and search scroll.
-The setup was a private Machine at <code>/tmp/lfq67</code> with its own HOME, LF_HOME, a disposable repository and the branch <code>lf server run</code>. A Python client spoke the server's newline-JSON protocol the way Desktop does (<code>config.scope</code> subscription, <code>config.edit</code>, <code>config.promote</code>). The isolated Dev bundle <code>com.loopflow.mac.qa1066.dev</code> was driven through <code>.lf/qa/QAHook.swift</code>.
-The display was locked for the whole run, so Forms rendered white and the checks below read view-tree text, files and protocol answers.</p>
-
+<!doctype html><meta charset="utf-8"><title>LOO-1066 QA round 3: Settings</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em}img{max-width:100%;border:1px solid #ccc;border-radius:8px}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:6px 10px;vertical-align:top}figure{margin:1.5em 0}</style>
+<h1>Settings redesign: QA round 3 (Policy B, live pixels)</h1>
+<p>Branch build of 960172a56e plus the fixes below. Private Machine <code>/tmp/lfq66</code> (own HOME, LF_HOME, branch <code>lf server run</code>), disposable repository <code>qarepo</code> with a shared <code>merge_method: squash</code> and <code>agents: [codex, claude]</code>, and global <code>default_agent: claude</code>, <code>claude.model: sonnet</code>. Isolated bundle <code>com.loopflow.mac.qa1066r3.dev</code> with <code>.lf/qa/QAHook.swift</code>, opened behind other windows on an <b>unlocked</b> display; windows captured with <code>screencapture -l</code>. Rounds 1–2 (locked display, protocol checks) are in git history.</p>
 <h2>Scenarios</h2>
-<table>
-<tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
-<tr><td>Rapid edits with a live reader</td><td>Opened a <code>config.scope</code> subscription, then sent three <code>config.edit</code> calls back to back on <code>context.diff</code> (My checkout), each using the previous answer's <code>after</code> as <code>expected</code></td><td class="ok">All three were accepted within 117 ms, with no stale-slot conflict. A separate read straight afterwards showed <code>true</code>, and the subscription settled on <code>true</code> at 323 ms. The file read <code>context: {diff: true}</code>.</td></tr>
-<tr><td>Stale slot</td><td>Edited with an old <code>expected</code></td><td class="ok"><code>conflict</code>: “context.diff changed in …/config.local.yaml; refresh before editing”.</td></tr>
-<tr><td>Bad value</td><td><code>config.edit</code> with <code>maybe</code> and with <code>null</code> on a boolean, and <code>lf config set context.diff maybe</code></td><td class="fix">Code <code>invalid</code>, but the message read <b>“invalid graph: context.diff: invalid type…”</b>. Settings validation reused <code>LoadError::InvalidGraph</code>. <b>Fixed:</b> it now reads “context.diff: invalid type: string "maybe", expected a boolean” on the row and in the CLI.</td></tr>
-<tr><td>Explicit null</td><td>Global <code>claude.model: sonnet</code>, then <code>null</code> at My checkout</td><td class="ok">The slot holds <code>{kind: present, value: null}</code> and the YAML keeps <code>model: null</code>. The effective value stays <code>sonnet</code> from Global.</td></tr>
-<tr><td>Move, then a crash mid-move</td><td>Ran a Promote preview. With the server stopped, I wrote the journal a crash leaves behind and started the server again.</td><td class="ok">The preview patch removed the setting from <code>config.local.yaml</code> and added it to <code>config.yaml</code>. The slot then offered <code>resume</code> (a live server saw a fresh journal within 3 s too), Preview answered <code>pending</code>, and Resume answered <code>recovered</code> with the value moved to the shared file.</td></tr>
-<tr><td>Diverged move, Dismiss</td><td>Changed the shared file, then sent Resume, Dismiss and Dismiss again</td><td class="fix">Resume refused with a conflict (“review that file before continuing the move”), and Dismiss removed the journal and left both files byte-identical. A <b>second Dismiss</b> (a double click, or another window) failed with “No such file or directory (os error 2); inspect the affected work before retrying”. <b>Fixed:</b> a missing journal now counts as dismissed. The promotion unit test checks a repeated Dismiss.</td></tr>
-<tr><td>This Machine (Global)</td><td>Searched <code>hub</code>, pressed Return, typed <code>qa-hub</code> and pressed Return in the Machines pane</td><td class="ok">The Machines pane opened, scrolled to the row (clip origin 49 in a 907 pt form), and <code>hub: qa-hub</code> was written to <code>$LF_HOME/config.yaml</code>.</td></tr>
-<tr><td>Row error stays on its row</td><td>Agents → typed <code>bogus::x</code> into the agent row; then toggled <code>yolo</code>; then typed <code>codex</code> into the agent row</td><td class="ok">“unsupported agent harness 'bogus' …” appeared directly under the row, and the file did not change. While that error showed, the <code>yolo</code> switch wrote <code>false</code> and then <code>true</code>. Entering <code>codex</code> cleared the error and saved <code>agent: codex</code>, and the Agent Policy result row read “codex”.</td></tr>
-<tr><td>CLI write while open</td><td><code>lf config set --global claude.model null</code></td><td class="fix">The open row changed to the placeholder <b>“Cleared (null)”</b> within 3 s, while choice rows and the docs say “Explicit null”. <b>Fixed:</b> text rows now also say “Explicit null”.</td></tr>
-<tr><td>Search → row</td><td>Searched <code>codex.service_tier</code>, <code>default_agent</code>, <code>claude.model</code> and <code>agent</code>, pressing Return each time</td><td class="fix">The first three scrolled correctly (origin 393, −88, 393 in a 1041 pt form; last round's stuck-at-−88 is gone). The exact key <b><code>agent</code> opened the Agents pane instead of the agent row</b>, because pane matches rank first. <b>Fixed:</b> an exact key or title now ranks first. After a rebuild, <code>agent</code> scrolls to the top row.</td></tr>
-<tr><td>Returning user</td><td>Quit, rebuilt, relaunched and reopened Settings</td><td class="ok"><code>agent</code> read codex, <code>claude.model</code> read Explicit null, and <code>hub</code> read qa-hub.</td></tr>
-<tr><td>Headless suites</td><td><code>scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ContextSettingsWorkflowTests|ConfigurationSettingsTests|ThemeWorkflowTests|DesignDisciplineTests'</code></td><td class="ok">25 tests in 5 suites passed, including the new ranking check. <code>cargo test -p loopflow-execution --lib config::</code> passed 113 and <code>engine::config::promotion::</code> passed 2. Clippy reported no warnings with <code>-D warnings</code>.</td></tr>
+<table><tr><th>Scenario</th><th>What I saw</th><th>Result</th></tr>
+<tr><td>Open ⌘, Settings, General (Light)</td><td>Display name, Repositories folder and Release channel read <b>None (Default)</b>.</td><td>Fixed: they read <i>Git's user.name</i>, <i>~/src</i> and <i>stable</i> (Default).</td></tr>
+<tr><td>Agents pane</td><td>Auto-ship and Codex service tier read <b>None (Default)</b>.</td><td>Fixed: <i>Off (Default)</i>, <i>Codex's own setting (Default)</i>, Chrome reads <i>Claude's own setting (Default)</i>.</td></tr>
+<tr><td>Project &amp; Wave Config</td><td><b>Applies to</b> showed only a chevron, with no checkout name. Selecting the pane highlighted the divider above it.</td><td>Fixed: <i>Applies to · qarepo</i> is a right-aligned menu like Save in. Each divider is now its own unselectable row.</td></tr>
+<tr><td>Values in effect</td><td>Fallback order: <i>codex, claude (from Shared repository settings)</i>. Primary agent: <i>claude (from My global preferences)</i>. Run without asking: <i>On · Default</i>.</td><td>Works</td></tr>
+<tr><td>Dark mode via Appearance segment</td><td>Wrote <code>theme: Loopflow Dark</code>, the window turned dark at once and showed <i>Theme saved · Undo</i>.</td><td>Works</td></tr>
+<tr><td>Compact (min ≈760 pt) and wide (1400×900)</td><td>Compact long values fit without clipping. Wide caps the form width and centers it.</td><td>Works</td></tr>
+<tr><td>Edit Repositories folder from its new prompt</td><td>Typed <code>~/code</code> and pressed Return. <code>repo_root: ~/code</code> was written and the row showed a value plus Reset.</td><td>Works</td></tr>
+<tr><td>Checks</td><td><code>scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|ContextSettingsWorkflowTests|ThemeWorkflowTests|DesignDisciplineTests'</code>: 25 passed. <code>cargo test -p loopflow-execution --lib config::</code>: 113 passed. Clippy <code>-D warnings</code> was clean. The catalogue and server-schema fixture tests passed.</td><td>Pass</td></tr>
 </table>
-
-<h2>Fixed in this run</h2>
-<ul>
-<li><code>error.rs</code>, <code>settings.rs</code>: <code>LoadError::InvalidSetting</code>, so setting errors stop calling themselves “invalid graph”.</li>
-<li><code>promotion.rs</code>: Dismiss is idempotent, and the test covers a repeated Dismiss.</li>
-<li><code>ScopedSettingRow.swift</code>: one name for a saved null, “Explicit null”.</li>
-<li><code>SettingsSearch.swift</code>: an exact key or title leads the results. <code>ContextSettingsWorkflowTests</code> checks <code>agent</code>.</li>
-<li><code>.lf/qa/desktop.md</code>: Settings driving notes corrected (switches go both ways, scroll origins, row errors, crash journal).</li>
-</ul>
-
-<h2>Couldn't reach</h2>
-<ul>
-<li><b>Pixels.</b> The screen was locked (idle 2.6 h), and Forms draw through RenderBox, so captures come back white. Light/Dark at different sizes is still open for the demo: <code>uv run python scripts/loopflow-dev.py run</code> on an unlocked display.</li>
-<li><b>Applies to / Save in menus, Wave scope and the Git &amp; Release banner.</b> SwiftUI menus don't open from the hook. <code>sharedCheckoutKeepsItsDestinationThroughValidationAndGlobalMachineEdits</code> and <code>ContextSettingsWorkflowTests</code> drive them, and both pass.</li>
-<li><b>Finish/Dismiss buttons on a row.</b> I drove these through the server operations they call. No hook route reaches a checkout scope where a move is offered.</li>
-<li><b>Connection health.</b> The private Machine has no registered Machines.</li>
-</ul>
-
-<h2>Still wrong or unknown, worst first</h2>
-<ul>
-<li>A pane match (“Agents”) keeps the previous scroll position when the same pane was already open, so it doesn't return to the top. This is minor.</li>
-<li>Row titles derived from keys (“Repo Root”, “Linear Requests”) still read less like macOS Settings than the hand-named ones. Carried over from round 1.</li>
-</ul>
+<h2>Fixed in this run</h2><ul>
+<li><code>catalog.rs</code>: optional <code>unset</code> phrase per definition, carried on the wire (fixtures updated); Swift decodes it as a required nullable key and shows it for a null default.</li>
+<li><code>ScopedSettings.swift</code>: Applies to shows its checkout.</li>
+<li><code>SettingsWindow.swift</code>: sidebar dividers are separate, unselectable rows.</li>
+<li><code>ScopedSettingRow.swift</code>: “Reset layer…” → “Reset…”; In effect uses the same text as the row.</li></ul>
+<h2>Screens</h2>
+<figure><img src="qa-r3/gen-light.png"><figcaption>Before: General with None (Default)</figcaption></figure>
+<figure><img src="qa-r3/p-ProjectWaveConfig-light.png"><figcaption>Before: empty Applies to, divider inside the selection</figcaption></figure>
+<figure><img src="qa-r3/r-general.png"><figcaption>After: General</figcaption></figure>
+<figure><img src="qa-r3/r-project.png"><figcaption>After: Project &amp; Wave Config</figcaption></figure>
+<figure><img src="qa-r3/r-agents.png"><figcaption>After: Agents</figcaption></figure>
+<figure><img src="qa-r3/r-app-dark.png"><figcaption>Dark via Appearance, Undo notice</figcaption></figure>
+<figure><img src="qa-r3/d-project-compact.png"><figcaption>Dark, compact</figcaption></figure>
+<figure><img src="qa-r3/d-agents-wide.png"><figcaption>Dark, wide (built before the Reset… rename)</figcaption></figure>
+<figure><img src="qa-r3/d-general-edited.png"><figcaption>After an edit</figcaption></figure>
+<h2>Couldn't reach</h2><ul>
+<li>Menus (Applies to, Save in) and Promote: they don't open through the hook. The Swift suites drive them.</li>
+<li>Key-window styling: the window was never key, so sidebar labels draw in their inactive grey.</li></ul>
+<h2>Still wrong, worst first</h2><ul>
+<li>Starting preference unset still reads <i>None (Default)</i>. Its catalogue default is null, and unset means no starting preference, so this is accurate but bare.</li>
+<li>The Undo notice names the raw key (“Saved repo_root in My global preferences”), not the row title.</li>
+<li>The large empty band under the title bar on every pane comes from the system toolbar area of <code>NavigationSplitView</code>.</li></ul>

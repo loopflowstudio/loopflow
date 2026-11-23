@@ -41,6 +41,27 @@ struct ConfigurationDefinition: Decodable {
     let portability: String
     let lifecycle: String
     let description: String
+    /// What an unset value means when the default is null and something outside the files decides.
+    let unset: String?
+
+    private enum Keys: String, CodingKey {
+        case key, shorthands, category, schema, `default`, applicability, combination, portability, lifecycle, description, unset
+    }
+
+    init(from decoder: Decoder) throws {
+        let fields = try decoder.container(keyedBy: Keys.self)
+        key = try fields.decode(String.self, forKey: .key)
+        shorthands = try fields.decode([String].self, forKey: .shorthands)
+        category = try fields.decode(String.self, forKey: .category)
+        schema = try fields.decode(JSONValue.self, forKey: .schema)
+        `default` = try fields.decode(String.self, forKey: .default)
+        applicability = try fields.decode(String.self, forKey: .applicability)
+        combination = try fields.decode(String.self, forKey: .combination)
+        portability = try fields.decode(String.self, forKey: .portability)
+        lifecycle = try fields.decode(String.self, forKey: .lifecycle)
+        description = try fields.decode(String.self, forKey: .description)
+        unset = try fields.decode(String?.self, forKey: .unset)
+    }
 
     enum Control {
         case toggle, text, integer, stringList, yaml

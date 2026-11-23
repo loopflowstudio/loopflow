@@ -2140,6 +2140,12 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "unset": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -2152,7 +2158,8 @@
         "combination",
         "portability",
         "lifecycle",
-        "description"
+        "description",
+        "unset"
       ],
       "type": "object"
     },

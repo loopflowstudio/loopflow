@@ -359,6 +359,18 @@ desktop focus -p session`; `desktop capture -p session` reads the provider.
 - Stand-in providers exit at once here, so a Session pane shows "Process
   exited" under its opening overlay. That is the stand-in, not the pane.
 
+# Settings window on an unlocked display
+
+With the display unlocked, `open -n -g` and the hook still work behind the
+person's windows, and `screencapture -x -o -l <window number>` returns the
+composited Settings window (Forms included) even while it is not frontmost;
+`snap` still comes back white. Get the number from a `swift` script calling
+`CGWindowListCopyWindowInfo` filtered to the app's PID. A pane's window title
+changes a few seconds after `return`; wait about 4 s before capturing. Dark:
+`click 0 898 126` on Appearance at 960x648 is the Dark segment (`theme:` in
+`config.yaml` confirms). `size 0 1400 900` gives the wide layout; the window
+will not go narrower than about 760 pt.
+
 # Settings window with the screen locked
 
 The ⌘, window (`menu Settings…`) is a `NavigationSplitView` of grouped

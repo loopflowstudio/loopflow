@@ -127,29 +127,30 @@ struct ScopedSettings: View {
 
     private var scopeSelector: some View {
         Section {
-            Menu {
-                ForEach(checkouts, id: \.self) { path in
-                    Button(URL(fileURLWithPath: path).lastPathComponent) { model.select(checkout: path) }.help(path)
-                }
-                if let checkout = model.checkout {
-                    let origin = WaveOrigin.resolve(checkout).normalizedFilePath
-                    let choices = waves.filter { WaveOrigin.resolve($0.repo).normalizedFilePath == origin }
-                    if !choices.isEmpty {
-                        Section("Waves") {
-                            ForEach(choices) { wave in
-                                Button(wave.displayName) { model.select(checkout: checkout, wave: wave.id) }
+            LabeledContent("Applies to") {
+                Menu(scopeTitle) {
+                    ForEach(checkouts, id: \.self) { path in
+                        Button(URL(fileURLWithPath: path).lastPathComponent) { model.select(checkout: path) }.help(path)
+                    }
+                    if let checkout = model.checkout {
+                        let origin = WaveOrigin.resolve(checkout).normalizedFilePath
+                        let choices = waves.filter { WaveOrigin.resolve($0.repo).normalizedFilePath == origin }
+                        if !choices.isEmpty {
+                            Section("Waves") {
+                                ForEach(choices) { wave in
+                                    Button(wave.displayName) { model.select(checkout: checkout, wave: wave.id) }
+                                }
                             }
                         }
                     }
+                    Button("Choose Checkout…") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseDirectories = true
+                        panel.canChooseFiles = false
+                        if panel.runModal() == .OK { model.select(checkout: panel.url?.path) }
+                    }
                 }
-                Button("Choose Checkout…") {
-                    let panel = NSOpenPanel()
-                    panel.canChooseDirectories = true
-                    panel.canChooseFiles = false
-                    if panel.runModal() == .OK { model.select(checkout: panel.url?.path) }
-                }
-            } label: {
-                LabeledContent("Applies to", value: scopeTitle)
+                .fixedSize()
             }
             if model.target != .general {
                 Button("Inspect general work") { model.target = .general }

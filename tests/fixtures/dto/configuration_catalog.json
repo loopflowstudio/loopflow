@@ -16,6 +16,7 @@
     "portability": "referenced_assets",
     "lifecycle": "next_read",
     "description": "Appearance theme or light:name,dark:name pair",
-    "category": "Desktop"
+    "category": "Desktop",
+    "unset": null
   }
 ]

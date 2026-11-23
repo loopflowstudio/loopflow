@@ -99,12 +99,12 @@ struct SettingsWindow: View {
                         get: { navigation.pane },
                         set: { if let pane = $0 { navigation.open(pane) } }
                     )) {
-                        ForEach(SettingsPane.allCases) { pane in
-                            if pane == .agents || pane == .project {
-                                Divider().accessibilityHidden(true)
-                            }
-                            sidebarRow(pane)
-                        }
+                        // Separate rows, so selecting a pane never highlights the divider above it.
+                        ForEach([SettingsPane.general, .appearance, .shortcuts]) { sidebarRow($0) }
+                        Divider().selectionDisabled().accessibilityHidden(true)
+                        ForEach([SettingsPane.agents, .machines, .mobile]) { sidebarRow($0) }
+                        Divider().selectionDisabled().accessibilityHidden(true)
+                        sidebarRow(.project)
                     }
                     .listStyle(.sidebar)
                 }

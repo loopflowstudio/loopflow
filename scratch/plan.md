@@ -12,14 +12,14 @@ During the live demo of PR #2033, Jack chose **Policy B** (`1b`, `2a`) plus a vi
 
 **Built: no "Inherited" display values.** `ScopedSettingRow.unsetText` labels an unset control with the value in effect and its origin (`On (Default)`, `GitHub PR (from Shared repository settings)`); the choice Picker's absent option, the TextField prompt and the ordered-list label all use it, and the provenance disclosure is always titled "In effect". `agents` and `default_agent` read the highest other declaration of their own key from the candidates, else the catalog default, because their effective value is the combined agent order. Absent, `Explicit null` and authored values stay distinct tags. `sharedCheckoutKeepsItsDestinationThroughValidationAndGlobalMachineEdits` fails if "Inherited" returns to any Settings pane.
 
-**Next.** Live Light and Dark visual QA at compact and wide sizes (qa/gate).
+**Built: null defaults name what decides.** A catalogue row may carry `unset` (wire field, nullable): `~/src`, `stable`, `Git's user.name`, `Off`, `Claude's own setting`, `Codex's own setting`, `This Machine`, `Squash when GitHub allows it`. Rows show it instead of "None (Default)". Live Light and Dark QA at compact and wide sizes is done ([qa.html](qa.html), round 3).
 
 **Checks for this slice**
 
 - `scripts/test_desktop.sh --skip-build --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|ThemeWorkflowTests'` after building Desktop and `lf` — 20 passed, one compact-window scrolling check skipped headless.
 - `loopflow-execution` libtest with `config::files:: config::keys:: engine::config::promotion::` — 24 passed.
 - `cargo test -p loopflow --test integration documented_commands::` — 4 passed.
-- Live Light and Dark windows at compact and wide sizes remain for qa/gate.
+- Live Light and Dark windows at compact and wide sizes — checked in QA round 3 (screenshots in `scratch/qa-r3/`).
 
 ### 1. Clear policy for what belongs in `⌘,` Settings (Policy B · `2a`)
 

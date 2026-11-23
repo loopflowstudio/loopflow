@@ -330,7 +330,7 @@ For example, open **Project & Wave Config** on a checkout where the shared file 
 repository settings**. The switch shows **On**. **In effect** still shows
 **Off · My repository settings**. Expand it to see the candidates and paths.
 
-- **Reset layer…** previews removal of the selected declaration. For additional
+- **Reset…** previews removal of the selected declaration. For additional
   documents, **Save empty list** clears inherited entries. Reset lets them
   apply again.
 - **Move to Shared Repository…** appears when the shared slot is empty. From

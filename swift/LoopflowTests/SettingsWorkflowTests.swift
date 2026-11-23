@@ -188,7 +188,9 @@ struct SettingsWorkflowTests {
             #expect(model.file?.slots["chrome"]?.declared == .absent)
 
             // An unset control shows the value in effect and where it comes from.
-            _ = try pane(.project).inspect().find(viewWithId: "chrome").find(text: "None (Default)")
+            // A null default names what decides instead, from the catalogue.
+            _ = try pane(.project).inspect().find(viewWithId: "chrome").find(text: "Claude's own setting (Default)")
+            #expect(try pane(.general).inspect().find(viewWithId: "repo_root").find(ScopedSettingRow.self).actualView().unsetText == "~/src (Default)")
             let agentsPane = try pane(.agents)
             #expect(try agentsPane.inspect().find(viewWithId: "default_agent").find(ScopedSettingRow.self).actualView().unsetText == "None (Default)")
             #expect(try agentsPane.inspect().find(viewWithId: "yolo").find(ScopedSettingRow.self).actualView().unsetText == "On (Default)")

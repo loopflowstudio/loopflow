@@ -49,7 +49,7 @@ fn place_in_order(
                 base.as_ref(),
             )?;
         }
-        apply_order(conn, project, &order, WriteOrigin::Local)?;
+        apply_order(conn, &order, WriteOrigin::Local)?;
     }
     Ok(order)
 }
@@ -151,7 +151,12 @@ pub(crate) fn observe_in(
     }
     // The tracker's complete list answers an attempted order the way the
     // drain's look would; the newest unconfirmed order is local intent.
-    for action in unconfirmed_orders(conn, project)? {
+    let mut pending = None;
+    for action in tracker_actions::unconfirmed_for_in(conn, &ActionOwner::Project(project.clone()))?
+    {
+        if action.kind != ActionKind::Order {
+            continue;
+        }
         if action.phase == tracker_actions::ActionPhase::Sent {
             let seen = crate::planning::rules::Observed {
                 order: Some(observed.clone()),
@@ -161,77 +166,45 @@ pub(crate) fn observe_in(
                 crate::planning::rules::decide(&action, Some(&seen), false)
             {
                 tracker_actions::resolve_in(conn, &action.id, &resolution)?;
+                continue;
             }
         }
+        pending = Some(action);
     }
-    let pending = unconfirmed_orders(conn, project)?.pop();
     let order = match pending {
         Some(action) => include_members(
-            &current_members(
-                conn,
-                project,
-                &serde_json::from_value::<Vec<String>>(action.value)?,
-            )?,
+            &current_members(conn, project, serde_json::from_value(action.value)?)?,
             &observed,
         ),
         None => observed,
     };
-    apply_order(conn, Some(project), &order, WriteOrigin::Tracker)?;
+    apply_order(conn, &order, WriteOrigin::Tracker)?;
     Ok(true)
-}
-
-fn unconfirmed_orders(
-    conn: &Connection,
-    project: &ProjectId,
-) -> StoreResult<Vec<tracker_actions::TrackerAction>> {
-    Ok(
-        tracker_actions::unconfirmed_for_in(conn, &ActionOwner::Project(project.clone()))?
-            .into_iter()
-            .filter(|action| action.kind == ActionKind::Order)
-            .collect(),
-    )
-}
-
-fn project_members(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<String>> {
-    let mut query = conn.prepare(
-        "SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL
-         ORDER BY planning_rank,id",
-    )?;
-    let rows = query.query_map([project.as_str()], |row| row.get(0))?;
-    rows.collect::<Result<_, _>>().map_err(Into::into)
 }
 
 fn current_members(
     conn: &Connection,
     project: &ProjectId,
-    desired: &[String],
+    mut desired: Vec<String>,
 ) -> StoreResult<Vec<String>> {
-    let members = project_members(conn, project)?;
-    Ok(desired
-        .iter()
-        .filter(|id| members.contains(id))
-        .cloned()
-        .collect())
+    let mut query =
+        conn.prepare("SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL")?;
+    let members = query
+        .query_map([project.as_str()], |row| row.get(0))?
+        .collect::<rusqlite::Result<std::collections::HashSet<String>>>()?;
+    desired.retain(|id| members.contains(id));
+    Ok(desired)
 }
 
-fn apply_order(
-    conn: &Connection,
-    project: Option<&ProjectId>,
-    order: &[String],
-    origin: WriteOrigin,
-) -> StoreResult<()> {
+// Both the sibling list and the accepted tracker list select current members
+// inside the transaction that writes their ranks.
+fn apply_order(conn: &Connection, order: &[String], origin: WriteOrigin) -> StoreResult<()> {
     for (rank, id) in order.iter().enumerate() {
-        let member: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id IS ?2 AND planning_deleted_at IS NULL)",
-            params![id, project.map(ProjectId::as_str)], |row| row.get(0),
+        planning_write::write(
+            conn,
+            &crate::work::edit::WorkEdit::for_target(id, &[Edit::TaskRank(rank as u32)]),
+            origin,
         )?;
-        if member {
-            planning_write::write(
-                conn,
-                &crate::work::edit::WorkEdit::for_target(id, &[Edit::TaskRank(rank as u32)]),
-                origin,
-            )?;
-        }
     }
     Ok(())
 }

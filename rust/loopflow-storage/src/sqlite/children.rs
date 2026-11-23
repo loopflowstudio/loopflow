@@ -488,15 +488,16 @@ impl SqliteStore {
         task_checkout_in(&conn, task)
     }
 
-    pub fn task_checkouts(&self) -> StoreResult<Vec<TaskCheckout>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.savepoint()?;
-        let identifiers = TaskIdentifiers::read(&conn)?;
-        let mut statement = conn.prepare(TASK_CHECKOUT_COLUMNS)?;
+    pub fn task_checkout_paths(&self) -> StoreResult<Vec<(TaskId, PathBuf)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare("SELECT task_id, worktree FROM task_checkouts")?;
         let rows = statement.query_map([], |row| {
-            map_task_checkout(row, |id| Ok(identifiers.short(id)))
+            Ok((
+                TaskId::from_raw(row.get::<_, String>(0)?),
+                PathBuf::from(row.get::<_, String>(1)?),
+            ))
         })?;
-        rows.map(|row| row.map_err(StoreError::from)).collect()
+        rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
     }
 
     pub fn request_task_completion(
@@ -1733,30 +1734,21 @@ pub(super) fn task_checkout_in(
     conn: &Connection,
     task: &TaskId,
 ) -> StoreResult<Option<TaskCheckout>> {
-    conn.query_row(
-        &format!("{TASK_CHECKOUT_COLUMNS} WHERE task_id=?1"),
-        [task.as_str()],
-        |row| map_task_checkout(row, |id| short_task_id(conn, id)),
-    )
-    .optional()
-    .map_err(Into::into)
-}
-
-const TASK_CHECKOUT_COLUMNS: &str = "SELECT task_id, worktree FROM task_checkouts";
-
-fn map_task_checkout(
-    row: &rusqlite::Row<'_>,
-    short: impl FnOnce(&TaskId) -> StoreResult<Option<String>>,
-) -> rusqlite::Result<TaskCheckout> {
-    let task_id = TaskId::from_raw(row.get::<_, String>(0)?);
-    let issue_identifier = short(&task_id)
-        .map_err(|error| invalid_column(0, error))?
-        .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
-    Ok(TaskCheckout {
-        task_id,
-        issue_identifier,
-        worktree: PathBuf::from(row.get::<_, String>(1)?),
-    })
+    let path: Option<String> = conn
+        .query_row(
+            "SELECT worktree FROM task_checkouts WHERE task_id=?1",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    Ok(Some(TaskCheckout {
+        task_id: task.clone(),
+        issue_identifier: short_task_id(conn, task)?.ok_or(StoreError::NotFound)?,
+        worktree: path.into(),
+    }))
 }
 
 pub(super) const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL";

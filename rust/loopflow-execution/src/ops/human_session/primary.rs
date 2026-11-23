@@ -237,7 +237,7 @@ pub(super) fn scope_worktree(
 pub fn ensure_scope_worktree(
     repo: &Path,
     scope: &PrimaryScope,
-) -> Result<crate::git::worktrees::AgentWorktree> {
+) -> Result<crate::git::worktrees::Worktree> {
     Ok(crate::git::worktrees::ensure_agent_worktree(
         repo,
         scope_segment(scope)?,

@@ -617,7 +617,7 @@ pub(super) fn local_upstream_base(
 
 fn upstream_base(repo: &Path, default_branch: &str) -> OpsResult<String> {
     Ok(if default_branch == get_default_branch(repo)? {
-        crate::git::integration_base(repo)?
+        crate::git::default_branch_upstream(repo, default_branch)?
     } else if has_remote(repo)? {
         format!("origin/{default_branch}")
     } else {

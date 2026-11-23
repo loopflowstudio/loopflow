@@ -58,11 +58,11 @@ pub(crate) fn run_sync_in(
     }
     let started = Instant::now();
     let default = get_default_branch(repo_root)?;
-    let upstream = crate::git::integration_base(repo_root)?;
+    let upstream = crate::git::default_branch_upstream(repo_root, &default)?;
     let on_main = current_branch(repo_root)?.as_deref() == Some(&default);
     if !plan_only && (onto.is_none() || (on_main && onto == Some(upstream.as_str()))) {
         crate::ops::checkout::refresh_main(repo_root, progress)?;
-        if on_main && onto.is_none_or(|target| target == upstream) {
+        if on_main {
             return Ok(Sync::Finished {
                 message: "Main is current; unpublished commits and edits remain local.".into(),
             });

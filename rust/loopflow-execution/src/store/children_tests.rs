@@ -255,7 +255,11 @@ fn task_labels_and_generated_names_follow_local_identity_and_linear_mapping() {
     assert_eq!(mapped.identifier, "ENG-123");
     assert_eq!(mapped.branch, "old/branch");
     assert_eq!(
-        store.task_checkouts().unwrap()[0].issue_identifier,
+        store
+            .task_checkout(&task.id)
+            .unwrap()
+            .unwrap()
+            .issue_identifier,
         "ENG-123"
     );
     assert_eq!(
@@ -507,7 +511,7 @@ fn local_planning_creation_retry_keeps_identity_after_edit_and_restart() {
     assert!(task.worktree.is_none());
     assert!(task.tracker_id.is_none());
     assert!(store.task_prs(&task.id).unwrap().is_empty());
-    assert!(store.task_checkouts().unwrap().is_empty());
+    assert!(store.task_checkout_paths().unwrap().is_empty());
     let edited = store
         .edit_task(
             &task.id,

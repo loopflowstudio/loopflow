@@ -699,3 +699,18 @@ questions.md; all four are applied or handed on (LOO-877, LOO-934).
 For the PR body, larger than this Task: launch and store each define "the
 checkout holding this directory" (Mismatch A; store side is `task_checkout_owner`
 now, `WorkspaceResolver` remains, fits LOO-934).
+
+## Compress checks for checkout reads and Task ranking
+
+- SQLite with 10,000 Tasks, 10,000 tracker items and 1,000 checkouts:
+  `EXPLAIN QUERY PLAN` scans only `task_checkouts` for Session placement.
+  A retained item uses the tracker item primary key and the Task's
+  external-issue index. Current Project membership uses `idx_tasks_project`.
+- Focused Rust tests passed for Git worktree placement, checkout identity,
+  Session and Graph membership after path reuse, Working-board moves, and
+  Linear order delivery, including a lost reply and a newly observed member.
+- CLI sync tests passed for a fork's upstream, explicit detach, publication
+  after detach, and conflict continuation.
+- The native-resume fixture passed with its explicit bind. A failed sync push
+  kept the Task's recorded base. `cargo clippy --all-targets -- -D warnings`
+  passed.

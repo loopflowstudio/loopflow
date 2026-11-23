@@ -462,8 +462,12 @@ impl SqliteStore {
         held_terminal: Option<&loopflow_model::id::TerminalId>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let task =
-            super::task_work::starting_task_in(&conn, task, cwd, start.caller_session.as_ref())?;
+        let task = super::task_work::starting_task_in(
+            &conn,
+            task,
+            cwd.map(std::path::Path::new),
+            start.caller_session.as_ref(),
+        )?;
         conn.execute(
             "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id,started_at,pid,os_started_at,repo,cwd,held_terminal_id,caller_session_id)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",

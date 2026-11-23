@@ -2039,12 +2039,7 @@ fn resolve_ancestry_in(conn: &Connection, session: &mut LfSession) -> StoreResul
         && session.wave_id.is_none()
         && matches!(session.work_source, None | Some(WorkSource::Checkout))
     {
-        session.task_id = super::task_work::starting_task_in(
-            conn,
-            None,
-            Some(&session.cwd.to_string_lossy()),
-            None,
-        )?;
+        session.task_id = super::task_work::starting_task_in(conn, None, Some(&session.cwd), None)?;
         if session.task_id.is_some() {
             session.work_source = Some(WorkSource::Checkout);
         }

@@ -2164,6 +2164,9 @@ fn refresh_and_sync_follow_the_default_branch_upstream_in_a_fork() {
     loopflow_execution::ops::checkout::refresh_main(repo.path(), &NullProgress).unwrap();
     assert_eq!(git(repo.path(), &["rev-parse", "main"]), upstream_head);
     assert_eq!(git(repo.path(), &["rev-parse", "origin/main"]), origin_head);
+    git(repo.path(), &["branch", "parent"]);
+    loopflow_execution::git::worktrees::record_stacked_base(repo.path(), "feature", "parent")
+        .unwrap();
     let plan = plan_sync(repo.path(), None, None).unwrap();
     assert_eq!(plan.base_ref, "upstream/main");
     sync_with_recovery(
@@ -2176,6 +2179,10 @@ fn refresh_and_sync_follow_the_default_branch_upstream_in_a_fork() {
         &NullProgress,
     )
     .unwrap();
+    assert_eq!(
+        loopflow_execution::git::worktrees::stacked_base(repo.path()).unwrap(),
+        None
+    );
     assert_eq!(
         std::fs::read_to_string(repo.path().join("upstream.txt")).unwrap(),
         "upstream work"

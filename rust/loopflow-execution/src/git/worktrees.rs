@@ -232,15 +232,9 @@ pub struct WorktreePruneReport {
     pub failed: Vec<WorktreePruneFailure>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct CreateWorktreeResult {
-    pub path: PathBuf,
-    pub branch: String,
-}
-
-/// One main agent's isolated execution checkout.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgentWorktree {
+/// A named Git worktree and its checked-out branch.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct Worktree {
     pub path: PathBuf,
     pub branch: String,
 }
@@ -1790,7 +1784,7 @@ pub fn create_named_worktree(
     name: &str,
     base: Option<&str>,
     inherit_creation: &impl Fn(&mut Command),
-) -> Result<CreateWorktreeResult, GitError> {
+) -> Result<Worktree, GitError> {
     let user = git_user(repo)?;
     let segment = WorktreeSegment::parse(name).map_err(|error| GitError::CommandFailed {
         command: "git worktree add".to_string(),
@@ -1830,7 +1824,7 @@ pub fn create_named_worktree(
             }
         };
         worktree_add_inheriting(repo, &worktree_path, &branch, mode, inherit_creation)?;
-        return Ok(CreateWorktreeResult {
+        return Ok(Worktree {
             path: worktree_path,
             branch,
         });
@@ -1854,7 +1848,7 @@ pub fn create_named_worktree(
         },
         inherit_creation,
     )?;
-    Ok(CreateWorktreeResult {
+    Ok(Worktree {
         path: worktree_path,
         branch,
     })
@@ -1901,10 +1895,7 @@ pub(crate) fn plan_branch_placement(
     })
 }
 
-pub fn create_from_placement_plan(
-    repo: &Path,
-    plan: &PlacementPlan,
-) -> Result<CreateWorktreeResult, GitError> {
+pub fn create_from_placement_plan(repo: &Path, plan: &PlacementPlan) -> Result<Worktree, GitError> {
     apply_placement_plan(repo, plan, true)
 }
 
@@ -1912,7 +1903,7 @@ fn apply_placement_plan(
     repo: &Path,
     plan: &PlacementPlan,
     publish_upstream: bool,
-) -> Result<CreateWorktreeResult, GitError> {
+) -> Result<Worktree, GitError> {
     if plan.strategy != PlacementStrategy::UseExistingWorktree && plan.worktree_path.exists() {
         return Err(GitError::CommandFailed {
             command: "git worktree add".to_string(),
@@ -1952,7 +1943,7 @@ fn apply_placement_plan(
             }
         }
     }
-    Ok(CreateWorktreeResult {
+    Ok(Worktree {
         path: plan.worktree_path.clone(),
         branch: plan.branch.clone(),
     })
@@ -1965,7 +1956,7 @@ fn apply_placement_plan(
 pub fn ensure_agent_worktree(
     main_repo: &Path,
     segment: WorktreeSegment,
-) -> Result<AgentWorktree, GitError> {
+) -> Result<Worktree, GitError> {
     let main_repo = main_repo_root(main_repo)?;
     let lock_path =
         git_common_dir(&main_repo)?.join(format!("persistent-{}.lock", segment.as_str()));
@@ -1984,7 +1975,7 @@ pub fn ensure_agent_worktree(
     if plan.strategy == PlacementStrategy::Create {
         plan.base_ref = agent_base_ref(&main_repo)?;
     }
-    let worktree = create_agent_worktree(&main_repo, &plan)?;
+    let worktree = apply_placement_plan(&main_repo, &plan, false)?;
     mark_persistent(&main_repo, &worktree.branch)?;
     Ok(worktree)
 }
@@ -2059,7 +2050,7 @@ fn set_branch_config(repo: &Path, branch: &str, key: &str, value: &str) -> Resul
 /// Move a bare/default `lf` session off canonical main while preserving both
 /// local commits and uncommitted files. A deliberate non-default checkout and
 /// an existing linked worktree are left alone.
-pub fn move_default_agent_to_worktree(repo: &Path) -> Result<Option<AgentWorktree>, GitError> {
+pub fn move_default_agent_to_worktree(repo: &Path) -> Result<Option<Worktree>, GitError> {
     let main_repo = main_repo_root(repo)?;
     let checkout = std::fs::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
     let canonical = std::fs::canonicalize(&main_repo).unwrap_or_else(|_| main_repo.clone());
@@ -2097,7 +2088,7 @@ pub fn move_default_agent_to_worktree(repo: &Path) -> Result<Option<AgentWorktre
     }
 
     let stashed = stash_including_untracked(&main_repo)?;
-    let worktree = match create_agent_worktree(&main_repo, &plan) {
+    let worktree = match apply_placement_plan(&main_repo, &plan, false) {
         Ok(worktree) => worktree,
         Err(error) => {
             if stashed {
@@ -2124,17 +2115,6 @@ pub fn move_default_agent_to_worktree(repo: &Path) -> Result<Option<AgentWorktre
     }
 
     Ok(Some(worktree))
-}
-
-fn create_agent_worktree(
-    main_repo: &Path,
-    plan: &PlacementPlan,
-) -> Result<AgentWorktree, GitError> {
-    let created = apply_placement_plan(main_repo, plan, false)?;
-    Ok(AgentWorktree {
-        path: created.path,
-        branch: created.branch,
-    })
 }
 
 fn agent_base_ref(main_repo: &Path) -> Result<String, GitError> {

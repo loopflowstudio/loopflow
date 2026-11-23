@@ -1,4 +1,4 @@
-at: c82adbe52f9e7ecd98a7aaf5ee94175bb3c22b3b
+at: 5f9fa127c5ce19a25114cc96bcfe7bc2e9093a1c
 first:
   - path: docs/dev/reference-models.md
     why: Shared Task facts and their Machine-local counterparts
@@ -8,14 +8,18 @@ first:
     why: Where historical Sessions and Graph runs acquire their Task
   - path: rust/loopflow-storage/src/sqlite/task_work.rs
     why: Task membership, open Graphs, and checkout cleanup
+  - path: rust/loopflow-execution/src/ops/human_session/workspace.rs
+    why: Where a listed Session lives today
   - path: rust/loopflow-storage/src/leaving_guard.rs
     why: How storage tests catch reads of retired facts
   - path: rust/loopflow-storage/src/sqlite/planning_order.rs
-    why: One Task order across the board and tracker
+    why: How tracker observations and rank edits share one order
+  - path: rust/loopflow-execution/src/git/worktrees.rs
+    why: Worktree placement and the recorded stack base
   - path: rust/loopflow-execution/src/ops/checkout.rs
     why: The base shared by sync and publication
   - path: rust/loopflow-execution/src/ops/sync.rs
     why: When a completed sync clears the stack base
   - path: rust/loopflow/tests/sync_tests.rs
-    why: Stacking, preview, conflict recovery, and publication through the CLI
+    why: Stacking, fork upstreams, conflict recovery, and publication
 hide: []

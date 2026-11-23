@@ -574,7 +574,10 @@ pub fn get_default_branch(repo: &Path) -> Result<String, GitError> {
 
 /// The default branch's Git upstream, or the local branch when none is configured.
 pub(crate) fn integration_base(repo: &Path) -> Result<String, GitError> {
-    let branch = get_default_branch(repo)?;
+    default_branch_upstream(repo, &get_default_branch(repo)?)
+}
+
+pub(crate) fn default_branch_upstream(repo: &Path, branch: &str) -> Result<String, GitError> {
     let local_ref = format!("refs/heads/{branch}");
     let upstream = git_stdout(
         repo,
@@ -611,7 +614,7 @@ pub(crate) fn integration_base(repo: &Path) -> Result<String, GitError> {
     if candidates.len() == 1 {
         return Ok(candidates[0].clone());
     }
-    Ok(branch)
+    Ok(branch.to_owned())
 }
 
 /// Refresh a remote-tracking ref; local branch and commit targets need no network.

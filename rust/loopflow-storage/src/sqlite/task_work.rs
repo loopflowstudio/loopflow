@@ -3,6 +3,7 @@
 //! ([`starting_task_in`]), and reads follow that column, never a path.
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use rusqlite::OptionalExtension;
 
@@ -68,19 +69,14 @@ fn checkout_at(root: &str) -> String {
 /// The root matches as `dir` is spelled and as it resolves through symlinks; a
 /// directory no Git worktree holds is its own root, the only answer the store
 /// has for a path that is gone.
-fn checkout_owner_in(
-    conn: &rusqlite::Connection,
-    dir: &std::path::Path,
-) -> StoreResult<Option<String>> {
-    let root = |dir: &std::path::Path| {
-        crate::address::worktree_root(dir).unwrap_or_else(|| dir.to_path_buf())
-    };
+fn checkout_owner_in(conn: &rusqlite::Connection, dir: &Path) -> StoreResult<Option<TaskId>> {
+    let root = |dir: &Path| crate::address::worktree_root(dir).unwrap_or_else(|| dir.to_path_buf());
     let spelled = root(dir);
     let resolved = dir
         .canonicalize()
         .ok()
-        .map(|dir| root(&dir))
-        .filter(|resolved| *resolved != spelled);
+        .filter(|resolved| resolved != dir)
+        .map(|dir| root(&dir));
     Ok(conn.query_row(
         &format!(
             "SELECT coalesce({},{})",
@@ -89,9 +85,9 @@ fn checkout_owner_in(
         ),
         rusqlite::params![
             spelled.to_string_lossy(),
-            resolved.as_deref().map(std::path::Path::to_string_lossy)
+            resolved.as_deref().map(Path::to_string_lossy)
         ],
-        |row| row.get(0),
+        |row| Ok(row.get::<_, Option<String>>(0)?.map(TaskId::from_raw)),
     )?)
 }
 
@@ -102,15 +98,15 @@ fn checkout_owner_in(
 pub(super) fn starting_task_in(
     conn: &rusqlite::Connection,
     named: Option<&TaskId>,
-    cwd: Option<&str>,
+    cwd: Option<&Path>,
     started_by: Option<&LfSessionId>,
 ) -> StoreResult<Option<TaskId>> {
     if let Some(named) = named {
         return Ok(Some(named.clone()));
     }
     if let Some(cwd) = cwd {
-        if let Some(task) = checkout_owner_in(conn, std::path::Path::new(cwd))? {
-            return Ok(Some(TaskId::from_raw(task)));
+        if let Some(task) = checkout_owner_in(conn, cwd)? {
+            return Ok(Some(task));
         }
     }
     match started_by {
@@ -540,9 +536,9 @@ impl SqliteStore {
     /// Machine; two Tasks recorded on one root resolve to the lower id. Work
     /// in a worktree nested inside a Task's checkout is no Task's until a Task
     /// adopts that worktree as its own checkout.
-    pub fn task_checkout_owner(&self, dir: &std::path::Path) -> StoreResult<Option<TaskId>> {
+    pub fn task_checkout_owner(&self, dir: &Path) -> StoreResult<Option<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(checkout_owner_in(&conn, dir)?.map(TaskId::from_raw))
+        checkout_owner_in(&conn, dir)
     }
 
     /// Held terminals of unfinished member Sessions, without loading

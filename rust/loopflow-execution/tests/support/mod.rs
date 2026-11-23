@@ -987,31 +987,24 @@ pub fn prepare_native_conversation(
     session.request = Some(request.into());
     session.interactive = true;
     let session = crate::store::sessions::create_session(&store, session, None).unwrap();
-    let cwd = cwd.canonicalize().unwrap();
-    let task = store
-        .task_checkouts()
-        .unwrap()
-        .into_iter()
-        .find(|checkout| checkout.worktree.canonicalize().unwrap() == cwd)
-        .map(|checkout| checkout.task_id)
-        .unwrap_or_else(|| {
-            store
-                .create_task(&loopflow_storage::work::task::NewTask {
-                    parent_task_id: None,
-                    id: loopflow_model::durable::TaskId::new(),
-                    repository_id: crate::repository::location::ensure_repository(
-                        &store,
-                        &crate::repository::discover(&cwd).unwrap().to_string(),
-                    )
-                    .unwrap(),
-                    project_id: None,
-                    title: "Native conversation".into(),
-                    description: String::new(),
-                    due_date: None,
-                })
-                .unwrap()
-                .id
-        });
+    let task = store.task_checkout_owner(cwd).unwrap().unwrap_or_else(|| {
+        store
+            .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
+                id: loopflow_model::durable::TaskId::new(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &store,
+                    &crate::repository::discover(cwd).unwrap().to_string(),
+                )
+                .unwrap(),
+                project_id: None,
+                title: "Native conversation".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap()
+            .id
+    });
     store
         .bind_session_prepared(
             &session.id,

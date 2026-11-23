@@ -324,3 +324,8 @@ formatting is shared by every Git failure, left for its own change.
   and leaving no `lf` command to unstack a `--stack` checkout.
 - The Git config edit uses the branch the completed sync verified. This also
   identifies the branch when `lf sync --continue` takes over a saved operation.
+
+- A retained checkout directory whose Git marker disappeared can now sit inside
+  another worktree. Session listing uses the enclosing worktree's recorded
+  owner, just as Task lookup does. Sync completion treats the default branch's
+  configured upstream as a detach target, including on a fork.

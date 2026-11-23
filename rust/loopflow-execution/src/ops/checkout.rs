@@ -274,7 +274,7 @@ pub fn refresh_main(repo: &Path, progress: &impl Progress) -> OpsResult<String> 
     // independent. Wait for the other refresh, then fetch again for this call.
     let _lock = lock_shared(repo, "lf-main-refresh.lock")?;
     let branch = get_default_branch(repo)?;
-    let target = crate::git::integration_base(repo)?;
+    let target = crate::git::default_branch_upstream(repo, &branch)?;
     if target == branch {
         return Ok(branch);
     }

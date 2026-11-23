@@ -1589,7 +1589,7 @@ mod tests {
     }
 
     #[test]
-    fn renaming_a_wave_renames_its_unlinked_project_and_not_a_linked_one() {
+    fn renaming_a_wave_renames_its_project_in_the_tracker_too() {
         let (_dir, store) = store();
         let rename = |wave: &crate::work::wave::Wave, to: &str| {
             store
@@ -1632,7 +1632,15 @@ mod tests {
         rename(&linked, "payments");
         let name = |id| store.project(id).unwrap().unwrap().name;
         assert_eq!(name(&local_project), "sandbox");
-        assert_eq!(name(&linked_project), "Billing 2026");
+        assert_eq!(name(&linked_project), "payments");
+        let renamed = store
+            .tracker_actions_for(&ActionOwner::Project(linked_project))
+            .unwrap()
+            .into_iter()
+            .find(|action| action.kind == ActionKind::Field)
+            .unwrap();
+        assert_eq!(renamed.phase, ActionPhase::Queued);
+        assert_eq!(renamed.subject.as_deref(), Some("project_name"));
     }
 
     #[test]

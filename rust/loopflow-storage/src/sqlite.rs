@@ -1430,15 +1430,15 @@ impl SqliteStore {
                     ],
                 ),
             )?;
-            // An unlinked Project is named for its Wave; a linked one keeps the tracker's name.
-            let unlinked: Option<String> = tx
+            // A Wave's Project is named for it; a linked one's new name goes to the tracker.
+            let project: Option<String> = tx
                 .query_row(
-                    "SELECT id FROM projects WHERE wave_id=?1 AND external_project_id IS NULL",
+                    "SELECT id FROM projects WHERE wave_id=?1",
                     [&update.wave_id],
                     |row| row.get(0),
                 )
                 .optional()?;
-            if let Some(project) = unlinked {
+            if let Some(project) = project {
                 planning_write::local(
                     &tx,
                     &crate::work::edit::WorkEdit::for_target(

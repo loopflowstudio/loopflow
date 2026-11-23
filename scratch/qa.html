@@ -125,6 +125,6 @@ Tracker: linear. 2 open · 0 lost.
 <ul><li>Sending the rename to Linear and reading back the new URL: needs a Linear login.</li>
 <li>The mounted Desktop header: no display capture here; covered by the view test above.</li></ul>
 <h3>Still wrong, worst first</h3>
-<ol><li>The URL keeps the old slug after a rename (<code>…/ledger-abc123</code> under <code>journal</code>) until the next tracker read; Linear redirects old slugs, so the link still opens.</li>
+<ol><li>The URL keeps the old slug after a rename (<code>…/ledger-abc123</code> under <code>journal</code>) until the next tracker read. Whether Linear still opens the old slug was not checked.</li>
 <li><code>lf wave status</code> aligns its rows unevenly (<code>machine      unplaced</code>, <code>Project   …</code>); not this branch.</li>
 <li><code>lf config set --shared repo.tracker.linear.team</code> prints "saved; DomainAction" (seen before; not this branch).</li></ol>

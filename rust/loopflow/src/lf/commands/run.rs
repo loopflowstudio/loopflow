@@ -282,9 +282,10 @@ fn build_bound_prompt(
 }
 
 /// An `lf` launch inside a registered Task's checkout binds to that Task unless
-/// the caller selected Work explicitly. Otherwise checkout ownership wins over
-/// an ancestor's explicit declaration. An unavailable registry leaves context
-/// unresolved; it never reconstructs Task identity from process ancestry.
+/// the caller selected Work explicitly. Otherwise the checkout holding the
+/// directory wins over an ancestor's explicit declaration. An unavailable
+/// registry leaves context unresolved; it never reconstructs Task identity
+/// from process ancestry.
 pub fn implicit_binding(cli: &Cli) -> Result<Option<loopflow_execution::ops::WorkBinding>> {
     if cli.work_subject_selector().is_some() {
         return Ok(None);

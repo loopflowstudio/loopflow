@@ -5,5 +5,6 @@
   predictable starting point without taking anyone's saved order away.
 - Keep drag feedback immediate. A pending move belongs to the write in flight,
   so a refusal reveals the last Machine reading even when the reread fails.
+  On transports without read revisions, keep the preview through the one-shot reread.
 - LOO-937's Project-rank redesign is a separate choice about ownership of
   Working order. Carry the activity-independence regression across it.

@@ -856,12 +856,6 @@ public struct RegistryQuery: Sendable {
             .desktopDashboardMove(directory: repoPath, board: "query:" + id, member: member.selector, destination: target.selector)))
     }
 
-    /// Move a Working Tasks member into `target`'s place in the repository's one Task order.
-    public func reorderTask(_ task: String, to target: String, repoPath: String) async throws -> [String] {
-        try Self.decode([String].self, from: await write(
-            .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: "task:" + task, destination: "task:" + target)))
-    }
-
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {
         if arguments.isEmpty { return try await serve(.desktopPortfolio).decode(Portfolio.self) }
         return try Self.decode(Portfolio.self, from: await write(.desktopPortfolioSet(change: arguments)))

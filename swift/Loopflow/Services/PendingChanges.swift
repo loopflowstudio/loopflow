@@ -17,13 +17,15 @@ public enum PendingCommand: Equatable, Sendable {
     case unassign(task: String)
     /// Leaves every list filtered to another Wave; nil leaves it in none.
     case move(task: String, wave: String?)
+    /// A repository drop keeps the side of the target chosen in the shown order.
+    case reorder(machine: String?, member: WorkWorkspaceKey, target: String, after: Bool)
     case renameSession(session: String, title: String)
 
     public var task: String? {
         switch self {
         case .complete(let task), .abandon(let task), .reopen(let task), .claim(let task, _), .unassign(let task),
              .move(let task, _): task
-        case .renameSession: nil
+        case .renameSession, .reorder: nil
         }
     }
 }
@@ -78,30 +80,37 @@ public final class PendingChanges {
     /// the answer advanced. A refusal says "LOO-4 couldn't be completed: … · Show",
     /// `show` going to the Task, and removes the change, or keeps it until a
     /// reading covers what moved while the refused write ran.
-    /// `answered` runs after an answer, to ask for the readings that show it.
+    /// A definite refusal calls `refused` after removing the preview. Other answers
+    /// call `answered` to request the readings that show what changed.
     @discardableResult
-    public func make(_ command: PendingCommand, subject: String, verb: String, write: ServedWrite, notices: NoticeCenter,
-                     show: Notice.Action?, answered: @escaping @MainActor () async -> Void = {}) -> String {
+    public func make(_ command: PendingCommand?, subject: String, verb: String, write: ServedWrite, notices: NoticeCenter,
+                     refused: (@MainActor () async -> Void)? = nil, show: Notice.Action?,
+                     answered: @escaping @MainActor () async -> Void = {}) -> Task<Void, Never> {
         let requestID = UUID().uuidString
-        changes.append(Change(requestID: requestID, command: command, answer: nil))
-        Task {
+        if let command { changes.append(Change(requestID: requestID, command: command, answer: nil)) }
+        return Task {
             switch await deliver(write, requestID: requestID) {
-            case .answered(let revisions):
+            case .answered(let revisions?):
                 self.answered(requestID, revisions: revisions)
                 await answered()
+            case .answered(nil):
+                // A one-shot transport has no read revisions. Keep the preview through its reread.
+                await answered()
+                changes.removeAll { $0.requestID == requestID }
             case .refused(let reason, let revisions):
-                notices.post(Notice("\(subject) couldn't be \(verb): \(reason)", key: requestID, action: show))
+                let notice = Notice("\(subject) couldn't be \(verb): \(reason)", key: requestID, action: show)
+                notices.post(notice)
                 // Domains moved while it failed, by it or by another write: the
                 // reading that covers them shows which.
                 guard let revisions else {
                     changes.removeAll { $0.requestID == requestID }
+                    if let refused { await notices.reread(keeping: notice, refused) }
                     return
                 }
                 self.answered(requestID, revisions: revisions)
                 await answered()
             }
         }
-        return requestID
     }
 
     /// Start, Run and the two Auto-Ship requests change nothing on screen: the
@@ -124,7 +133,7 @@ public final class PendingChanges {
     }
 
     private enum Delivery {
-        case answered(Revisions)
+        case answered(Revisions?)
         /// `revisions` are the domains that advanced while the write ran; the
         /// Machine cannot say whether this write moved them.
         case refused(String, revisions: Revisions?)
@@ -138,7 +147,7 @@ public final class PendingChanges {
             do {
                 let revisions = try await send(write, requestID)
                 linkReturned()
-                return .answered(revisions ?? Revisions([:]))
+                return .answered(revisions)
             } catch let error as ServerError {
                 linkReturned()
                 return .refused(error.message, revisions: error.revisions)
@@ -153,8 +162,7 @@ public final class PendingChanges {
     }
 
     /// The Machine answered: keep the change until a reading covers `revisions`.
-    /// An answer that advanced nothing (or a transport that cannot say) has no
-    /// reading to wait for: the rows show the readings as they are.
+    /// An answer that advanced nothing needs no further reading.
     private func answered(_ requestID: String, revisions: Revisions) {
         guard let index = changes.firstIndex(where: { $0.requestID == requestID }) else { return }
         guard !revisions.domains.isEmpty else {
@@ -237,6 +245,25 @@ public final class PendingChanges {
         return plan
     }
 
+    /// The repository's Working members in drop order until this reading covers the write.
+    public func workingOrder(_ plan: WorkViewPlan?, machine: String?, readAt: Revisions?) -> WorkViewPlan? {
+        guard var plan, !changes.isEmpty else { return plan }
+        for change in patches(at: readAt) {
+            guard case .reorder(let origin, let member, let target, let after) = change.command,
+                  origin == machine, member.repository == plan.repository else { continue }
+            var members = plan.resolution.members
+            guard let from = members.firstIndex(where: { $0.work == member }),
+                  let to = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == target }) else { continue }
+            let targetAfterRemoval = from < to ? to - 1 : to
+            let destination = after ? targetAfterRemoval + 1 : targetAfterRemoval
+            if from != destination {
+                members.insert(members.remove(at: from), at: destination)
+                plan.resolution.members = members
+            }
+        }
+        return plan
+    }
+
     /// One reading's Task rows with this Machine's changes made.
     public func apply(to contents: [WorkViewPlan.Content], readAt: Revisions?, wave: String? = nil) -> [WorkViewPlan.Content] {
         var contents = contents
@@ -267,7 +294,7 @@ public final class PendingChanges {
                 }
             case .unassign:
                 contents.updateStates(of: matches) { $0.subtracting([.working]).union([.backlog]) }
-            case .renameSession:
+            case .renameSession, .reorder:
                 break
             }
             contents.removeAll { gone.contains($0.work) }
@@ -312,7 +339,7 @@ public final class PendingChanges {
             case .move(_, let target):
                 tasks[index].task.waveId = target
                 if let wave, wave != target { tasks.remove(at: index) }
-            case .renameSession:
+            case .renameSession, .reorder:
                 break
             }
         }

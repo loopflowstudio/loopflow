@@ -1015,7 +1015,7 @@ struct WorkModelStreamTests {
 }
 
 @MainActor
-private func eventually(_ condition: @MainActor () -> Bool) async throws {
+func eventually(_ condition: @MainActor () -> Bool) async throws {
     let deadline = ContinuousClock.now + .seconds(3)
     while !condition() {
         guard ContinuousClock.now < deadline else {
@@ -1032,7 +1032,7 @@ private actor Flag {
 }
 
 /// A scripted reader: the test decides which frames arrive and when.
-private actor WorkFeed {
+actor WorkFeed {
     private var continuations: [AsyncThrowingStream<WorkFrame, any Error>.Continuation] = []
     private var requests: [WorkRequest] = []
     var openCount: Int { continuations.count }

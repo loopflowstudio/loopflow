@@ -56,29 +56,15 @@ The regression follows the rank-2 Task through Idle → Working → Idle before 
 first drag, then reads the saved order after dragging it above rank 1. Desktop
 replays the activity frames in one selected workspace.
 
-## Next slice · Show and recover a drop
+## Drop feedback
 
-Keep immediate feedback in the repository sidebar and Working Tasks grid.
-Replace `moveRepositoryMember`'s rewrite of `selectionPlans` and
-`taskListReadings` with a pending move applied at display time to their
-repository members. Use the existing pending-write and read-revision lifecycle.
-Apply the preview to the latest confirmed readings using the side of the target
-chosen at the drop. Applying the same preview to a frame that already shows the
-move should keep it on that side. When either member is absent, show the
-current membership. Keep raw readings available for failed reads.
+The sidebar and Working Tasks grid preview a drop against their own confirmed
+readings. A pending write names the Machine, repository, dragged Task, target
+and side. Each subscription retires its preview when its reading covers the
+write receipt. A refusal reveals the latest membership and order immediately.
+The follow-up read keeps the refusal Notice visible if either list fails.
 
-A definite refusal removes that move and posts a Notice even when the reread
-fails. Use the existing server receipt or read revision to retire an accepted
-move when its order arrives. If a newer reading arrived during the write, the
-refusal reveals that reading. It never restores an old copied frame. Scope the
-preview to the repository and Machine of the drop. Keep `desktop move` and the
-current `task_orders` write as the saved order's owner.
-
-In `WorkNavigationTests`, hold a drop to check immediate feedback, then reject it
-and fail the follow-up read. Check the last confirmed order in both displays,
-the Notice, and a later successful reading. Include a confirmed frame arriving
-before the write answer to catch a double-applied move. The sidebar docs
-already describe this behavior.
+The remaining product check is the Loopflow Dev walkthrough at gate.
 
 ## Docs
 
@@ -97,6 +83,12 @@ already describe this behavior.
 - `scripts/test_desktop.sh --filter TaskConceptTests` passed all seven tests,
   including the selected conversation, both sidebar filters and keyboard slots.
 - `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
+- The live refusal test first showed “Tasks couldn't be read: Read unavailable”
+  where the drop Notice belonged. After the fix, both lists kept the newer
+  confirmed order and the Notice showed “b couldn't be reordered: Order changed”.
+- `scripts/test_desktop.sh --filter 'TaskConceptTests|WorkNavigationTests'`
+  passed 58 tests. The shared pending-change tests and the one-shot Working Tasks
+  writer test passed 17 more.
 
 ## Gate
 

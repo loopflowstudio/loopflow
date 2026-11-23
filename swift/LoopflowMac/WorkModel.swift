@@ -159,7 +159,10 @@ final class WorkModel {
 
     private var taskList: WorkViewPlan? {
         let wave: String? = if case .wave(let id) = navigation.sidebarScope { id } else { nil }
-        return shown(taskListReading, wave: wave)
+        let reading = taskListReading
+        let plan = shown(reading, wave: wave)
+        guard wave == nil else { return plan }
+        return pendingChanges.workingOrder(plan, machine: workMachine ?? savedMachineId, readAt: reading.readAt)
     }
 
     func applySelectionPlans(_ plans: [WorkViewPlan]?, reason: String, readAt: Revisions? = nil) {
@@ -177,6 +180,10 @@ final class WorkModel {
         // read these plans, so an unchanged frame must not republish them.
         if selectionPlans != next { selectionPlans = next }
         reconcileSelectionRepository()
+        presentSelectionPlans()
+    }
+
+    private func presentSelectionPlans() {
         switch navigation.destination {
         case .dashboard, .workingTasks: if let plan = selectedViewPlan { presentView(plan) }
         case .work: presentWaveTiles()
@@ -2152,7 +2159,10 @@ final class WorkModel {
     }
 
     private func builtInPlan(_ expression: WorkSelection.Expression) -> WorkViewPlan? {
-        selectionPlans.value?.first { $0.dashboardID == nil && $0.selection.expression == expression }
+        let reading = selectionPlans
+        let plan = reading.value?.first { $0.dashboardID == nil && $0.selection.expression == expression }
+        guard expression == .repository else { return plan }
+        return pendingChanges.workingOrder(plan, machine: workMachine ?? savedMachineId, readAt: reading.readAt)
     }
 
     /// A Dashboard's visible Tasks in arrangement order; Working Tasks and a Wave's in plan order.
@@ -3558,41 +3568,43 @@ extension WorkModel {
         } catch { navigation.notices.post(Notice(error.localizedDescription)) }
     }
 
-    /// The sidebar and the Working Tasks grid write the same order; both read the
-    /// repository plan, so each shows the other's move.
-    /// The row moves now; the returned write replaces it, and a failed write re-reads it.
+    /// Both drop surfaces place the Task on the side chosen in the displayed order.
     @discardableResult
     func reorderWorkingTask(_ task: String, to target: String) -> Task<Void, Never> {
         guard task != target, let repoPath else { return Task {} }
-        moveRepositoryMember(task, to: target)
-        return Task {
+        let scope = repositoryReadingKey(repoPath)
+        let members = workingTaskMembers
+        let move: PendingCommand?
+        if let from = members.firstIndex(where: { $0.work.id == task }),
+           let to = members.firstIndex(where: { $0.work.id == target }) {
+            move = .reorder(machine: scope.machineId, member: members[from].work, target: target, after: from < to)
+        } else {
+            // The Machine can still answer a drop whose tile disappeared during the drag.
+            move = nil
+        }
+        let notices = navigation.notices
+        func reread(refused: Bool) async {
+            guard self.repoPath == repoPath, repositoryReadingKey(repoPath) == scope else { return }
+            presentSelectionPlans()
             do {
-                _ = try await query.reorderTask(task, to: target, repoPath: repoPath)
-                try await refreshPlan(nil, repoPath: repoPath)
+                if query.streamsWork {
+                    try await confirmWorkUpdate()
+                } else {
+                    try await refreshPlan(nil, repoPath: repoPath)
+                    if self.repoPath == repoPath, repositoryReadingKey(repoPath) == scope, taskListReading.value != nil {
+                        await refreshTaskList()
+                    }
+                }
             } catch {
-                navigation.notices.post(Notice(error.localizedDescription))
-                try? await refreshPlan(nil, repoPath: repoPath)
+                if !refused { notices.post(Notice(error.localizedDescription)) }
             }
         }
-    }
-
-    /// `task` takes `target`'s place in the repository plan, as `lf desktop move` writes it.
-    private func moveRepositoryMember(_ task: String, to target: String) {
-        guard var plans = selectionPlans.value,
-              let index = plans.firstIndex(where: { $0.dashboardID == nil && $0.selection.expression == .repository }) else { return }
-        var members = plans[index].resolution.members
-        guard let from = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == task }),
-              let to = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == target }) else { return }
-        members.insert(members.remove(at: from), at: to)
-        plans[index].resolution.members = members
-        applySelectionPlans(plans, reason: "")
-        let key = repositoryReadingKey(repoPath ?? "")
-        if let entry = taskListReadings[key], entry.wave == nil, var list = entry.reading.value,
-           let from = list.resolution.members.firstIndex(where: { $0.work.kind == .task && $0.work.id == task }),
-           let to = list.resolution.members.firstIndex(where: { $0.work.kind == .task && $0.work.id == target }) {
-            list.resolution.members.insert(list.resolution.members.remove(at: from), at: to)
-            taskListReadings[key] = (nil, .available(list))
-        }
+        let write = pendingChanges.make(move, subject: taskPresentation(id: task).identifier ?? task, verb: "reordered",
+            write: .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: "task:" + task,
+                                         destination: "task:" + target),
+            notices: notices, refused: { await reread(refused: true) }, show: nil, answered: { await reread(refused: false) })
+        presentSelectionPlans()
+        return write
     }
 
     /// The Working Tasks member a sidebar row shows; rows may use the planning ID.
@@ -3606,8 +3618,9 @@ extension WorkModel {
 
     /// Re-read one plan after a write; nil reads the repository's built-in plan.
     private func refreshPlan(_ expression: String?, repoPath: String) async throws {
+        let scope = repositoryReadingKey(repoPath)
         let plan = try await query.viewPlan(expression: expression, repoPath: repoPath)
-        guard self.repoPath == repoPath else { return }
+        guard self.repoPath == repoPath, repositoryReadingKey(repoPath) == scope else { return }
         replacePlan(plan)
     }
 
@@ -3619,7 +3632,8 @@ extension WorkModel {
                 && (plan.dashboardID != nil || other.selection.expression == plan.selection.expression)
         }
         plans.append(plan)
-        applySelectionPlans(plans, reason: "")
+        // Replacing one Dashboard leaves the repository members at their original read revision.
+        applySelectionPlans(plans, reason: "", readAt: plan.dashboardID == nil ? nil : selectionPlans.readAt)
     }
 }
 

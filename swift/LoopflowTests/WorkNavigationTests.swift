@@ -253,23 +253,99 @@ struct WorkNavigationTests {
         }
     }
 
-    @Test("A dropped Task row takes its place before the order is written")
-    func droppedRowMovesBeforeTheWrite() async throws {
-        let model = WorkModel(query: RegistryQuery { args, _ in
-            if args.contains("move") { try await Task.sleep(for: .seconds(30)) }
-            throw RegistryQueryError("unused")
-        }, repoPath: "/src/loopflow")
-        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
-        func task(_ id: String) -> WorkViewPlan.Content {
-            fixtureViewContent(work: .init(repository: "repo", kind: .task, id: id), title: id)
+    private func workingPlan(_ ids: [String]) -> WorkViewPlan {
+        let owner = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
+        let tasks = ids.map { id in
+            var content = fixtureViewContent(work: .init(repository: "repo", kind: .task, id: id), title: id)
+            content.states = [.working]
+            return content
         }
-        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
-                                                   members: [task("issue-review"), task("issue-now")])], reason: "")
-        #expect(model.workingTaskIDs == ["issue-review", "issue-now"])
-        let write = model.reorderWorkingTask("issue-now", to: "issue-review")
-        #expect(model.workingTaskIDs == ["issue-now", "issue-review"])
-        write.cancel()
+        return fixtureViewPlan(owner: owner, members: tasks)
+    }
+
+    @Test("A refused drop reveals the last reading in the sidebar and grid even when the reread fails")
+    func refusedWorkingTaskDrop() async throws {
+        let machine = HeldMachine()
+        let feed = WorkFeed()
+        let query = RegistryQuery(change: { try await machine.send($0, $1) }, subscribeWork: { await feed.open() }) { _, _ in
+            throw RegistryQueryError("Unexpected one-shot read")
+        }
+        let model = WorkModel(query: query, repoPath: "/repo")
+        let observing = Task { await model.keepWorkCurrent() }
+        defer { observing.cancel() }
+        let scope = try await feed.request(1)
+        func read(_ ids: [String], sequence: Int) async throws {
+            let plan = workingPlan(ids)
+            await feed.send(WorkFrame(sequence: sequence, answers: scope.id, unavailable: nil, content: .selections([plan]), wire: nil))
+            await feed.send(WorkFrame(sequence: sequence, answers: scope.id, unavailable: nil, content: .taskList(plan), wire: nil))
+            try await eventually { model.taskListReading.current == plan }
+        }
+        func expectOrder(_ ids: [String]) {
+            #expect(model.sidebarTaskIDs == ids)
+            #expect(model.workingTaskMembers.map(\.work.id) == ids)
+        }
+
+        try await read(["a", "b"], sequence: 1)
+        let write = model.reorderWorkingTask("b", to: "a")
+        expectOrder(["b", "a"])
+        // Another Task arrived while the Machine was deciding the drop.
+        try await read(["c", "a", "b"], sequence: 2)
+        expectOrder(["c", "b", "a"])
+        await machine.fail(ServerError(code: "conflict", message: "Order changed", data: .null))
+        let confirmation = try await feed.request(scope.id + 1)
+        expectOrder(["c", "a", "b"])
+        for content in [WorkFrame.Content.selections(nil), .taskList(nil), .checkpoint] {
+            await feed.send(WorkFrame(sequence: 3, answers: confirmation.id, unavailable: "Read unavailable", content: content, wire: nil))
+        }
         await write.value
+        expectOrder(["c", "a", "b"])
+        #expect(model.taskListReading.failure == "Read unavailable")
+        #expect(model.navigation.notices.current?.text == "b couldn't be reordered: Order changed")
+        try await read(["b", "c"], sequence: 4)
+        expectOrder(["b", "c"])
+        observing.cancel()
+        await observing.value
+    }
+
+    @Test("A drop stays on the chosen side until each reading covers the Machine's answer")
+    func workingTaskDropAcrossReceipt() async throws {
+        let machine = HeldMachine()
+        let feed = WorkFeed()
+        let query = RegistryQuery(change: { try await machine.send($0, $1) }, subscribeWork: { await feed.open() }) { _, _ in
+            throw RegistryQueryError("Unexpected one-shot read")
+        }
+        let model = WorkModel(query: query, repoPath: "/repo")
+        let observing = Task { await model.keepWorkCurrent() }
+        defer { observing.cancel() }
+        let scope = try await feed.request(1)
+        func frame(_ sequence: Int, _ revision: Int64, _ content: WorkFrame.Content) async {
+            await feed.send(WorkFrame(sequence: sequence, answers: scope.id, unavailable: nil, content: content,
+                                      wire: nil, readAt: Revisions(["planning": revision])))
+        }
+        let initial = workingPlan(["a", "b", "c"])
+        let moved = workingPlan(["b", "c", "a"])
+        await frame(1, 4, .selections([initial]))
+        await frame(1, 4, .taskList(initial))
+        try await eventually { model.sidebarTaskIDs == ["a", "b", "c"] }
+        let write = model.reorderWorkingTask("a", to: "c")
+        // The sidebar observed the commit before the answer. A positional swap would undo it.
+        await frame(2, 5, .taskList(moved))
+        try await eventually { model.taskListReading.value == moved }
+        #expect(model.sidebarTaskIDs == ["b", "c", "a"])
+        await machine.answer(Revisions(["planning": 5]))
+        let checkpoint = try await feed.request(scope.id + 1)
+        await feed.send(WorkFrame(sequence: 3, answers: checkpoint.id, unavailable: nil, content: .checkpoint, wire: nil))
+        await write.value
+        #expect(model.workingTaskIDs == ["b", "c", "a"])
+        // A later writer reversed the move. The grid hears first.
+        await frame(4, 6, .selections([initial]))
+        try await eventually { model.workingTaskIDs == ["a", "b", "c"] }
+        #expect(model.sidebarTaskIDs == ["b", "c", "a"])
+        await frame(5, 6, .taskList(initial))
+        try await eventually { model.sidebarTaskIDs == model.workingTaskIDs }
+        #expect(model.navigation.notices.current == nil)
+        observing.cancel()
+        await observing.value
     }
 
     @Test("Ready and Working-now filters read the started list's Task states, as the phone's filters do")

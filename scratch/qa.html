@@ -157,3 +157,28 @@ $ lf wave status loose --json | jq .project
 <ol><li>A linked Project's name draws in the same ink as plain text (<code>actionInk</code> = <code>textSecondary</code>); nothing says it opens Linear until hover. Design-system choice, not this branch.</li>
 <li>The sidebar's Wave list showed three of four Waves (Orphan missing until another Wave was selected); not investigated, likely not this branch.</li>
 <li><code>lf task move</code> prints <code>task_…: membership saved</code>, a raw id and internal word (same on main).</li></ol>
+<h2>Fifth run, 2026-11-23: a returning user with the real store</h2>
+<p>No code changed since the fourth run (the binary is still cd21c7b65). This run upgraded a copy of this Machine's own store (710 MB, 134 migrations, written by installed <code>lf</code> 5d5bf92c7, an ancestor of the branch) at <code>/tmp/lf-qa-995/h</code>, and read it from the real <code>~/src/loopflow</code> checkout under <code>sandbox-exec</code> with IP network and writes to the checkout and <code>~/.lf</code> denied, so nothing reached Linear, GitHub or the real store. Installed <code>lf</code> read the real store beside it.</p>
+<table><tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>First open of the copy with the branch</td><td><code>remove_chapters</code> applied with a backup, in one 9.1 s write-lock hold (<code>WARN write_holds held_seconds=9.07</code>). Every agent on the Machine waits that long once at upgrade.</td></tr>
+<tr><td>Invariants after the migration</td><td>63 live Waves, 0 without a Project, 0 with two, 0 Projects without a Wave; <code>projects_wave</code> unique; <code>tasks</code> has no wave column; 1,091 of 1,584 Tasks in a Project, none dangling; <code>foreign_key_check</code> clean. <code>coverage</code> keeps one Project with 86 Tasks, <code>infrastructure</code> 478.</td></tr>
+<tr><td><code>lf wave status</code> on infrastructure, product, growth, intelligence: branch vs installed</td><td>Same Tasks per Wave (49, 7, 0), except infrastructure: branch 95, installed 94. The extra is LOO-1081 (idle, has a worktree), which installed <code>lf task show</code> calls "not registered" though its row is in the store; the branch shows it. Installed-side skew, not this branch.</td></tr>
+<tr><td>Project lines on real Waves</td><td><code>Project   Infrastructure — Chapter demo-20260924 (linked) · started</code>. Six kept Projects carry chapter names (infrastructure, product, academy, experiments, release, growth); all six are linked, so the name is Linear's. No URL line until the next tracker read fills <code>tracker_projects.url</code>.</td></tr>
+<tr><td><code>lf repo tracker</code> in <code>~/src/loopflow</code> after the upgrade</td><td>Branch: <code>spend</code> and <code>engbot</code> Project creates queued. Installed already held <code>spend</code>'s ("Wave has no Linear Initiative"); <code>engbot</code> (Wave from 2026-07, no <code>.lf/wave/engbot</code> in the checkout) is new. Upgrading this Machine makes both as Linear Projects on its first export.</td></tr>
+</table>
+<pre>$ lf wave status infrastructure        # branch, migrated copy
+infrastructure  ready
+  …
+  Project   Infrastructure — Chapter demo-20260924 (linked) · started
+  LOO-715  idle  —  Keep Desktop alive when browser pages close during first paint …
+$ lf repo tracker | grep create
+  spend               create · queued · Could not read the credential. …
+  engbot              create · queued · Could not read the credential. …</pre>
+<h3>Fixed</h3>
+<p>Nothing needed fixing. <code>.lf/qa/tracker.md</code> gained the sandboxed real-store read.</p>
+<h3>Not reached</h3>
+<ul><li>Sending to Linear, <code>connect</code> against a real Linear Project, an import into a linked Wave: lf's Linear login is OAuth only, and using it from a copy would write to the real workspace.</li></ul>
+<h3>Still wrong, worst first</h3>
+<ol><li>Upgrading this Machine creates a Linear Project for <code>engbot</code>, a Wave nobody has touched since July (and <code>spend</code>, already queued). Designed (scratch/questions.md); retiring <code>engbot</code> first with <code>lf wave remove engbot</code> avoids it.</li>
+<li>Kept Projects read "… — Chapter …" in <code>lf wave status</code> and Desktop; renaming them is a Linear edit for their owner.</li>
+<li>Installed <code>lf</code> 5d5bf92c7 can't find LOO-1081; not this branch, not investigated.</li></ol>

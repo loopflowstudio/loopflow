@@ -203,3 +203,14 @@ A Wave with no Project (`Project   none`, `"project": {"state": "ok",
 record (`wave_name`, `wave_parent`, a `home_<32 hex>` machine) with the
 `repository` file as above and `lf task sync <id>`. Its first Task makes the
 Project.
+
+To see what the branch does to this Machine's real data without touching it,
+copy the store with SQLite's backup API (`sqlite3.connect(src).backup(dst)`)
+into a private `LF_HOME`, and run the branch `lf` under `sandbox-exec -f` a
+profile of `(allow default)`, `(deny network-outbound (remote ip))` and
+`(deny file-write* (subpath …))` for the real checkout and `~/.lf`. Run it
+from the real checkout: Waves belong to a repository by path, so a clone
+lists none. Its first command applies the branch's migrations; the Linear
+credential then fails to read, so every tracker action stays queued and
+`lf repo tracker` lists what an upgrade would send. Delete the copy after
+(about 1.4 GB with its backup).

@@ -39,3 +39,8 @@
   button went.
 - Asana Projects have no URL in the header: Asana project reads don't go
   through `TrackerProject` imports, only mirrored creates.
+- QA 2026-11-23, real-store copy: the upgrade queues Linear Project creates
+  for every unlinked live Wave in a connected repository; in
+  `~/src/loopflow` that is `spend` (already queued on installed lf) and
+  `engbot` (untouched since 2026-07, no `.lf/wave/engbot`). Six kept linked
+  Projects are named "… — Chapter …" in Linear.

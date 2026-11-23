@@ -134,14 +134,6 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
         assignee = try values.decode(String?.self, forKey: .assignee)
     }
 
-    public var terminalLabel: String? {
-        switch state {
-        case "canceled": "Canceled"
-        case "duplicate": "Duplicate"
-        default: isSuccessful ? "Completed" : nil
-        }
-    }
-
     public var isSuccessful: Bool { state == "completed" }
 }
 
@@ -202,14 +194,6 @@ public struct TaskOwner: Codable, Sendable, Hashable {
         try container.encode(personId, forKey: .personId)
         try container.encode(machine, forKey: .machine)
     }
-
-    /// "Jack Heart on mini"; "Machine unknown" when the Machine was never recorded.
-    public var summary: String {
-        let person = person ?? personKey ?? "Someone"
-        if let label = machine.label, !label.isEmpty { return "\(person) on \(label)" }
-        if let id = machine.id { return "\(person) on \(id)" }
-        return "\(person) · Machine unknown"
-    }
 }
 
 /// Stable Task references shared by `lf wave status` and `lf wave show`. The issue URL
@@ -269,10 +253,13 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let runControl: TaskRunControl
     public let pr: PrSnapshot?
     public internal(set) var section: TaskSection
+    /// Whether its owner is you, decided in Rust; false when nobody owns it.
+    public let ownedByYou: Bool
 
     enum CodingKeys: String, CodingKey {
         case task, reference, runtime, condition, actions, execution, section, pr, lifecycle
         case selectionStates = "selection_states"
+        case ownedByYou = "owned_by_you"
         case graphName = "graph_name"
         case graphSource = "graph_source"
         case latestGraphProcess = "latest_graph_process"
@@ -293,16 +280,27 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// open, and its Session slot offers Start instead.
     public var awaitsStart: Bool { lifecycle == .unstarted }
 
+    /// Whether a Graph has run for the Task. A stopped Graph still counts: a
+    /// Task parked at a step has run, one that was only opened has not.
+    public var graphHasRun: Bool { latestGraphProcess != nil }
+
+    /// Whether the Task needs someone, and how: nil when its condition is clear,
+    /// when it waits only for its first run, which its row offers as Start, or
+    /// when it is finished and so waits for nobody.
+    public var need: TaskConditionState? {
+        switch condition.state {
+        case .clear: nil
+        case .waiting: isCompleted || (!graphHasRun && actions.recommended == .run) ? nil : .waiting
+        case .blocked: .blocked
+        case .unknown: .unknown
+        }
+    }
+
     /// Where a Task that never ran its Graph stands, as the server reads it:
     /// starting that Graph, or why its setup stopped.
     public var setupPosition: String? {
         guard let execution, [.starting, .blocked].contains(execution.state) else { return nil }
         return execution.reason
-    }
-
-    /// Completion dates may be unknown even when the lifecycle is settled.
-    public var historyLabel: String {
-        lifecycle == .done && task.completedAt == nil ? "Done · date unavailable" : lifecycle.label
     }
 
     public var isCompleted: Bool { lifecycle.isTerminal }
@@ -494,6 +492,12 @@ public enum WorkEvidence<Item: Decodable & Sendable & Hashable>: Decodable, Send
     public var unavailableReason: String? {
         if case let .unavailable(reason) = self { return reason }
         return nil
+    }
+
+    /// Whether more items exist than were read.
+    public var truncated: Bool {
+        if case let .available(_, truncated) = self { return truncated }
+        return false
     }
 
     /// The items that pass `isIncluded`; unavailable evidence stays unavailable.

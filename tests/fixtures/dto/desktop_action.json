@@ -102,32 +102,6 @@
       "keys": []
     },
     {
-      "name": "section",
-      "title": "Show Wave Board Section",
-      "scope": "window",
-      "arguments": [
-        {
-          "name": "section",
-          "kind": "string",
-          "required": true
-        }
-      ],
-      "keys": []
-    },
-    {
-      "name": "filter",
-      "title": "Set Wave Board Done Days",
-      "scope": "window",
-      "arguments": [
-        {
-          "name": "days",
-          "kind": "integer",
-          "required": true
-        }
-      ],
-      "keys": []
-    },
-    {
       "name": "focus",
       "title": "Focus Pane",
       "scope": "pane",
@@ -336,6 +310,23 @@
         }
       ],
       "keys": []
+    },
+    {
+      "name": "details",
+      "title": "Show Task Details",
+      "scope": "pane",
+      "arguments": [
+        {
+          "name": "page",
+          "kind": "string",
+          "required": true
+        }
+      ],
+      "keys": [
+        "⌥⌘1",
+        "⌥⌘2",
+        "⌥⌘3"
+      ]
     },
     {
       "name": "graph-log",

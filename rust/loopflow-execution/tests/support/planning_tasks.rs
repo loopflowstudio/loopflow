@@ -621,7 +621,7 @@ pub async fn planning_response(
             state.issues[0]["project"]["id"] = json!(initial_project_id);
             mark_issue_updated(&mut state.issues[0]);
         }
-        json!({"issue":{"attachments":page(state.attachments.iter().map(|url| json!({"url":url})).collect::<Vec<_>>())}})
+        json!({"issue":{"attachments":page(state.attachments.iter().map(|url| json!({"id":format!("att-{url}"),"url":url})).collect::<Vec<_>>())}})
     } else if query.contains("query IssueEvent") {
         let mut issue = state
             .issues

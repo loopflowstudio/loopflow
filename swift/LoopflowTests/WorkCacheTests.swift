@@ -193,6 +193,44 @@ struct WorkCacheTests {
         registry.prepareForQuit()
     }
 
+    @Test("Restoring Dev Work waits for a visit, then prepares only that Task")
+    func devRestoresWithoutOpeningTerminals() async throws {
+        let source = try Source()
+        let cache = WorkCache(directory: try temporaryDirectory())
+        let previous = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
+        previous.confirmMachine("home-a")
+        await previous.refresh()
+        previous.select(.task(id: "issue-review"))
+        cache.flush()
+
+        let repository = "repo_" + UUID().uuidString.lowercased()
+        defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository)") }
+        let model = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
+        model.confirmMachine("home-a")
+        let registry = SessionsWorkspaceRegistry(localMachineId: "home-a", opensUnvisitedWork: false)
+        defer { registry.prepareForQuit() }
+        model.bindWorkspaces(registry, repository: repository)
+        await source.setLocationFailure(nil)
+        await model.refresh()
+        let selected = try #require(registry.selectedWork)
+        let workspace = try #require(registry.retained(selected))
+        #expect(selected.kind == .task)
+        #expect(registry.recentTasks.count > 1)
+        #expect(registry.warmPrimaries.count > 1)
+        #expect(!model.conversationIsOpening(workspace))
+        #expect(registry.preparationCount == 0)
+        #expect(await source.preparedTasks.isEmpty)
+        #expect(await source.preparedPrimaries.isEmpty)
+
+        model.select(.task(id: "issue-review"))
+        let store = registry.sessionStore(repository: repository, repoPath: Self.repo, query: source.query)
+        await spin { registry.preparationCount > 0 }
+        #expect(await source.preparedTasks == [selected.id])
+        #expect(await source.preparedPrimaries.isEmpty)
+        #expect(store.sessions.filter { $0.state == .prepared }.map(\.launchArguments) ==
+                [["lf", "session", "resume", "conversation-" + selected.id]])
+    }
+
     @Test("A failed load opening shows its failure")
     func failedPrefetchKeepsItsReason() async throws {
         let source = try Source()

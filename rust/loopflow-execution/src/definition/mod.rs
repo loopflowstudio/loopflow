@@ -53,6 +53,7 @@ impl Target {
             Self::Graph(graph) => graph,
             target => GraphDefinition {
                 name,
+                description: None,
                 items: vec![Step::new(target)],
             },
         }

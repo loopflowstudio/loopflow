@@ -14,9 +14,6 @@ struct WaveSurfaceLaunch {
     /// A fixed window width, so the narrow and wide legs of the
     /// selectable-without-clipping proof are deterministic.
     var width: Double?
-    /// An `lf-world build` directory. A `live` launch reads it through the
-    /// app's real `lf`: its `env.json` homes and its repository.
-    var world: String?
 
     @MainActor
     func makeApp() -> XCUIApplication {
@@ -31,14 +28,6 @@ struct WaveSurfaceLaunch {
         }
         if let width {
             app.launchEnvironment["LOOPFLOW_UI_TEST_WIDTH"] = String(Int(width))
-        }
-        if let world {
-            let url = URL(fileURLWithPath: world)
-            if let data = try? Data(contentsOf: url.appendingPathComponent("env.json")),
-               let env = try? JSONDecoder().decode([String: String].self, from: data) {
-                app.launchEnvironment.merge(env) { _, world in world }
-            }
-            app.launchArguments += ["--repo", url.appendingPathComponent("repo").path]
         }
         return app
     }

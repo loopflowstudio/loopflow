@@ -150,11 +150,8 @@ struct WorkCLISubscriptionTests {
         let created = try await fixture.json(["task", "create", "--wave", waveName, "--title", "Arrives through CLI", "--json"])["task"] as! [String: Any]
         let id = try #require(created["id"] as? String)
         try await eventually { model.task(id: id) != nil }
-        // An unstarted Task waits in the board's Backlog, where it offers Start; the strip lists Working Tasks.
-        try await eventually {
-            WaveStandup(tasks: model.visibleTasks, closed: [], doneDays: 0, now: .now, github: [:])
-                .backlog.contains { $0.id == id }
-        }
+        // An unstarted Task waits in the backlog, where it offers Start; the strip lists Working Tasks.
+        try await eventually { model.backlog(.repository).all.contains { $0.id == id } }
         #expect(!selectedPlanMembers(model).contains { $0.work.id == id })
         // `-b` would run `demo` headless; plain `task run` stops before it, needing no provider.
         _ = try await fixture.run(["task", "run", id])
@@ -206,7 +203,7 @@ struct WorkCLISubscriptionTests {
         let terminalTask = try #require(model.task(id: id)?.task)
         let header = TaskWorkflowHeader(model: model, task: terminalTask, work: model.taskWork[id])
         let label = try header.inspect().find(viewWithAccessibilityIdentifier: "task-lifecycle-status").text().string()
-        #expect(label == (action == "complete" ? "Completed" : "Canceled"))
+        #expect(label == (action == "complete" ? "Done" : "Abandoned"))
         #expect(FileManager.default.fileExists(atPath: checkout.worktree))
         #expect(workspace.multiplexer.layout == layout)
         #expect(workspace.multiplexer.focusedPaneId == focus)

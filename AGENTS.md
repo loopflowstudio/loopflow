@@ -18,7 +18,7 @@ How we build Loopflow. Contributors and agents follow it.
 **Both:**
 - Mock side effects; don't test mock wiring or reshape production code for tests
 - Design docs go under `scratch/`; `lf pr submit` and `lf pr land` run `lf scratch clear`, which removes added files and keeps existing ones
-- Headless runs make the call and keep moving; note genuinely open choices in `scratch/questions.md`
+- Stop only processes you started, by PID; never `pkill` or `killall` by pattern. Other agents and the person's own apps run on this Machine
 
 **Secrets:**
 - Fetch every secret from Doppler. Never hardcode a key, read one from a dotfile, or paste one into code. Prefer `doppler run -- <cmd>`, which injects the value as an env var.
@@ -265,6 +265,9 @@ user-facing behavior changes.
 plan, code and memory and keeps open findings with the work.
 
 **SQLite schema:**
+- Shallow checkouts lack first-parent migration history. For local builds set
+  `LOOPFLOW_MIGRATION_ORDER` to the merged slugs in first-parent order for
+  the checkout's base. Check that the packaged list covers that base.
 - One migration per Task: `uv run python scripts/new_migration.py <name>` creates `migrations/<name>.sql` or prints the branch's existing one.
 - Edit it in place until it merges; `build.rs` orders it by origin/main's first-parent history. Once on origin/main it is immutable: fix forward.
 - Destructive change is staged: a new migration is additive against origin/main's schema, or a contract (`-- expand: <migration>`, `-- exports: <where>`) that drops only what its expand step superseded once that step has been on origin/main for the window `check_migrations.py` measures (`STAGING_DAYS`), exporting the data first. A rebuild that keeps every column is additive. CI measures; nothing at runtime refuses.

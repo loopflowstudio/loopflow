@@ -73,7 +73,7 @@ private struct ReaderLaunchConfiguration: Equatable {
     let files: [String]
 
     static func current() throws -> Self {
-        let helper = try LocalWaveAgentLauncher.controlLfPath()
+        let helper = try LocalWaveAgentLauncher.machineLf().path
         let install = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".lf-machine/install")
         let paths = [URL(fileURLWithPath: helper),

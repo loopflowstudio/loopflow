@@ -64,19 +64,15 @@ impl Paste {
 /// Input from a view that does not size the terminal, without its terminal's
 /// answers to the agent's queries. Every view's terminal answers them; the
 /// agent hears one answer, from the view that sizes it. Keys pass unchanged.
-pub(super) fn without_reports(bytes: &[u8]) -> Vec<u8> {
-    let mut kept = Vec::with_capacity(bytes.len());
-    let mut at = 0;
-    while at < bytes.len() {
-        match report_length(&bytes[at..]) {
-            Some(length) => at += length,
-            None => {
-                kept.push(bytes[at]);
-                at += 1;
-            }
+pub(super) fn keys(mut bytes: &[u8]) -> impl Iterator<Item = u8> + '_ {
+    std::iter::from_fn(move || {
+        while let Some(length) = report_length(bytes) {
+            bytes = &bytes[length..];
         }
-    }
-    kept
+        let (&key, rest) = bytes.split_first()?;
+        bytes = rest;
+        Some(key)
+    })
 }
 
 /// The length of the terminal report `bytes` starts with: an OSC or DCS
@@ -160,7 +156,7 @@ impl PendingInput {
 mod tests {
     use std::io::{self, Write};
 
-    use super::{without_reports, Paste, PendingInput};
+    use super::{keys, Paste, PendingInput};
 
     #[test]
     fn a_second_views_terminal_answers_never_reach_the_agent_but_its_keys_do() {
@@ -179,9 +175,9 @@ mod tests {
         ];
         for answer in answers {
             let typed = [b"a".as_slice(), answer, b"b"].concat();
-            assert_eq!(without_reports(&typed), b"ab", "{answer:?}");
+            assert!(keys(&typed).eq(*b"ab"), "{answer:?}");
         }
-        let keys: &[&[u8]] = &[
+        let sequences: &[&[u8]] = &[
             b"\x1b[A",
             b"\x1b[1;5D",
             b"\x1b[3~",
@@ -191,8 +187,8 @@ mod tests {
             b"\x1b[200~pasted\x1b[201~",
             b"plain\r",
         ];
-        for key in keys {
-            assert_eq!(without_reports(key), *key, "{key:?}");
+        for sequence in sequences {
+            assert!(keys(sequence).eq(sequence.iter().copied()), "{sequence:?}");
         }
     }
 

@@ -137,18 +137,20 @@ writes! {
     TaskReopen { directory: PathBuf, issue: String } => loopflow_storage::work::task::Task;
     { issue, .. } => loopflow_execution::ops::task::task_reopen(issue, None)?,
 
-    /// `lf task edit <issue> --notes=<notes>`.
+    /// `lf task edit <issue> [--notes=<notes>] [--rank=<rank>]`: a new brief,
+    /// a new position in its Project, or both.
     #[serde(rename = "task.update")]
     TaskUpdate {
         directory: PathBuf,
         issue: String,
-        notes: String,
+        notes: Option<String>,
+        rank: Option<u32>,
     } => loopflow_execution::ops::task::TaskEdit;
-    { issue, notes, .. } => loopflow_execution::ops::task::task_edit(
+    { issue, notes, rank, .. } => loopflow_execution::ops::task::task_edit(
         &task_repo(issue)?,
         issue,
         None,
-        super::mutation::task_edit_update(&None, &Some(notes.clone()), None, &None),
+        super::mutation::task_edit_update(&None, notes, *rank, &None),
     )?,
 
     /// `lf task abandon <issue>`: cancels the Task and removes its PRs and

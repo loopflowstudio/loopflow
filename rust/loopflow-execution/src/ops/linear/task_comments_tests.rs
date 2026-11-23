@@ -323,6 +323,10 @@ async fn task_comments_read_and_publish_without_starting_work() {
             let saved_steers = store.task_steers(&task.id).await.unwrap();
 
             provider.lock().await.thread = Thread::Empty;
+            // A failed comment resends once its window has passed.
+            rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap()
+                .execute("UPDATE tracker_actions SET sent_at=sent_at-600 WHERE kind='comment'", [])
+                .unwrap();
             // The provider commits but loses its first reply. Concurrent catch-up
             // keeps the same UUID and confirms the exact issue and body.
             let (one, two) = tokio::join!(

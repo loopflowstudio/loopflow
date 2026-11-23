@@ -2856,8 +2856,26 @@
             }
           ]
         },
+        "description": {
+          "description": "Its `description:` line; `None` when the file has none or does not load.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "included_by": {
+          "description": "The Graphs that include this one with `graph:`, by name. Empty for a\nGraph people start with; a piece of other Graphs names them here.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "name": {
           "type": "string"
+        },
+        "runs": {
+          "$ref": "#/$defs/GraphSubject",
+          "description": "What it runs for: a Task, or a Wave's own operation."
         },
         "source": {
           "description": "The repository file that defines it; `None` for a builtin.",
@@ -2872,14 +2890,29 @@
             "string",
             "null"
           ]
+        },
+        "workflow": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowOutline"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Graph as a Task's workflow line draws it; null exactly when\n`compiled` is."
         }
       },
       "required": [
         "name",
+        "description",
         "source",
         "compiled",
         "composition",
-        "unavailable"
+        "workflow",
+        "unavailable",
+        "included_by",
+        "runs"
       ],
       "type": "object"
     },
@@ -3305,6 +3338,14 @@
         "error"
       ],
       "type": "object"
+    },
+    "GraphSubject": {
+      "description": "What a Graph is started on.",
+      "enum": [
+        "task",
+        "wave"
+      ],
+      "type": "string"
     },
     "HarnessRetention": {
       "properties": {
@@ -6892,8 +6933,14 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task file <issue> <path>`: one file of a Task's checkout.",
+          "description": "`lf task file <issue> <path> [--at <rev>]`: one file of a Task's\ncheckout, or its version at a commit.",
           "properties": {
+            "at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "issue": {
               "type": "string"
             },
@@ -6908,11 +6955,48 @@
           "required": [
             "kind",
             "issue",
-            "path"
+            "path",
+            "at"
           ],
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/TaskFileSnapshot"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf task files <issue> <path> [--cursor <cursor>] [--show-ignored]`:\none page of a Task checkout directory's immediate entries.",
+          "properties": {
+            "cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.files",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "show_ignored": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "path",
+            "cursor",
+            "show_ignored"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskDirectory"
           }
         },
         {
@@ -8481,6 +8565,10 @@
         "next_move": {
           "$ref": "#/$defs/NextMove"
         },
+        "owned_by_you": {
+          "description": "Whether its owner is you; `false` when nobody owns it.",
+          "type": "boolean"
+        },
         "pr": {
           "anyOf": [
             {
@@ -8537,7 +8625,8 @@
         "execution",
         "run_control",
         "pr",
-        "section"
+        "section",
+        "owned_by_you"
       ],
       "type": "object"
     },
@@ -11973,6 +12062,12 @@
     },
     "TaskChangedFile": {
       "properties": {
+        "changes": {
+          "description": "Runs of changed lines in the file's patch, each the Diff's stop: a run\nends at an unchanged line, a hunk's end, or a removal after additions.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "committed": {
           "type": "boolean"
         },
@@ -12001,7 +12096,8 @@
         "committed",
         "staged",
         "unstaged",
-        "untracked"
+        "untracked",
+        "changes"
       ],
       "type": "object"
     },
@@ -12009,6 +12105,13 @@
       "properties": {
         "base_commit": {
           "type": "string"
+        },
+        "commits": {
+          "description": "The commits on head's first-parent line since base, oldest first,\nwithout merges.",
+          "items": {
+            "$ref": "#/$defs/TaskCommit"
+          },
+          "type": "array"
         },
         "files": {
           "items": {
@@ -12047,6 +12150,7 @@
         "task_id",
         "base_commit",
         "head_commit",
+        "commits",
         "files",
         "scratch",
         "scratch_truncated"
@@ -12203,6 +12307,27 @@
         "pending_sync",
         "conflicts",
         "refresh_error"
+      ],
+      "type": "object"
+    },
+    "TaskCommit": {
+      "description": "One commit in a Task's comparison. A Graph step's commits share the subject\nprefix `lf <step>:`.",
+      "properties": {
+        "parent": {
+          "description": "The commit's first parent: a step starting here compares against it.",
+          "type": "string"
+        },
+        "sha": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "parent",
+        "subject"
       ],
       "type": "object"
     },
@@ -12613,6 +12738,31 @@
         "patch",
         "binary",
         "truncated"
+      ],
+      "type": "object"
+    },
+    "TaskDirectory": {
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/TaskFileEntry"
+          },
+          "type": "array"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "entries",
+        "next_cursor"
       ],
       "type": "object"
     },
@@ -13273,6 +13423,29 @@
         }
       ]
     },
+    "TaskFileEntry": {
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/TaskFileKind"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "TaskFileKind": {
+      "enum": [
+        "file",
+        "directory",
+        "symlink"
+      ],
+      "type": "string"
+    },
     "TaskFileRecovery": {
       "properties": {
         "changed": {
@@ -13314,6 +13487,13 @@
     "TaskFileSnapshot": {
       "properties": {
         "content": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "data": {
+          "description": "A `binary` file's bytes, base64, up to `MAX_BINARY_DATA_BYTES`.",
           "type": [
             "string",
             "null"
@@ -13361,6 +13541,7 @@
         "task_id",
         "path",
         "content",
+        "data",
         "state",
         "revision",
         "read_only_reason",
@@ -13402,6 +13583,15 @@
     "TaskGraph": {
       "description": "One Task's Graph as `lf task status --json` carries it.",
       "properties": {
+        "current_step": {
+          "description": "The index in `steps` of the step the Task stands in; null at `start`\nand at `end`.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "interactive_steps": {
           "items": {
             "$ref": "#/$defs/InteractiveStep"
@@ -13413,12 +13603,26 @@
         },
         "position": {
           "$ref": "#/$defs/TaskGraphPosition"
+        },
+        "sentence": {
+          "description": "Where the Task stands, in one sentence: \"build is running implement.\nYou are next needed at ship-review.\"",
+          "type": "string"
+        },
+        "steps": {
+          "description": "The Graph's top-level steps in order, as the workflow line shows them.",
+          "items": {
+            "$ref": "#/$defs/WorkflowStep"
+          },
+          "type": "array"
         }
       },
       "required": [
         "name",
         "interactive_steps",
-        "position"
+        "position",
+        "steps",
+        "current_step",
+        "sentence"
       ],
       "type": "object"
     },
@@ -16125,6 +16329,52 @@
       ],
       "type": "string"
     },
+    "WorkflowOutline": {
+      "description": "A Graph as the workflow line shows it before any Task stands on it.",
+      "properties": {
+        "interactive_steps": {
+          "description": "Every step where a person takes part, as `TaskGraph` carries them.",
+          "items": {
+            "$ref": "#/$defs/InteractiveStep"
+          },
+          "type": "array"
+        },
+        "sentence": {
+          "description": "\"You take part at explore, ship-review and verify.\" or \"Runs on its own.\"",
+          "type": "string"
+        },
+        "steps": {
+          "description": "The Graph's top-level steps in order, as `TaskGraph.steps` carries them.",
+          "items": {
+            "$ref": "#/$defs/WorkflowStep"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "steps",
+        "interactive_steps",
+        "sentence"
+      ],
+      "type": "object"
+    },
+    "WorkflowStep": {
+      "description": "One top-level step of a Task's Graph.",
+      "properties": {
+        "interactive": {
+          "description": "A person takes part somewhere inside it, XOR paths included.",
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "interactive"
+      ],
+      "type": "object"
+    },
     "Write": {
       "description": "A typed mutation with the same defaults and effects as its CLI spelling.\nOn the wire each write is a resource-named `kind` (`task.complete`);\n`desktop.*` writes are Desktop's own arrangement state.",
       "oneOf": [
@@ -16278,7 +16528,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task edit <issue> --notes=<notes>`.",
+          "description": "`lf task edit <issue> [--notes=<notes>] [--rank=<rank>]`: a new brief,\na new position in its Project, or both.",
           "properties": {
             "directory": {
               "type": "string"
@@ -16291,14 +16541,26 @@
               "type": "string"
             },
             "notes": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rank": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             }
           },
           "required": [
             "kind",
             "directory",
             "issue",
-            "notes"
+            "notes",
+            "rank"
           ],
           "type": "object",
           "x-result": {

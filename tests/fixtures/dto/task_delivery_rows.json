@@ -58,6 +58,7 @@
       "reason": "Merged; complete the Task"
     },
     "section": "working",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -348,6 +349,7 @@
       "reason": "Task is complete"
     },
     "section": "done",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -636,6 +638,7 @@
       "reason": "Task is complete"
     },
     "section": "done",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -900,6 +903,7 @@
       "reason": "Task is ready to start"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -975,6 +979,7 @@
       "reason": "Task is ready to start"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -1074,6 +1079,7 @@
       "reason": "Merged; complete the Task"
     },
     "section": "working",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -1364,6 +1370,7 @@
       "reason": "Merged; complete the Task"
     },
     "section": "done",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"

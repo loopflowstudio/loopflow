@@ -157,7 +157,7 @@ mod tests {
         // Which commit of another Machine's plan ref was read; views read the plan.
         "plan_refs",
         "blob_tokens",
-        // Desktop reads GitHub people once per repository through `lf repo people`.
+        // A lookup cache `lf repo people` fills; no Work projection reads it.
         "github_people",
         // Refresh attempts and watermarks do not change displayed Work.
         "linear_team_checks",

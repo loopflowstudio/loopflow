@@ -11,14 +11,39 @@ use yaml_edit::{Mapping, YamlFile};
 
 use super::{settings::SettingScope, ConfigSource};
 
-pub const PRIVATE_FILE: &str = "lf.config.local.yaml";
+/// Your own settings for a clone, beside the committed `.lf/config.yaml`.
+pub const PRIVATE_FILE: &str = ".lf/config.local.yaml";
+/// Where that file lived through 0.16, loose in the checkout root. Task b108f6
+/// removes this path and the move in `private_path`.
+const FORMER_PRIVATE_FILE: &str = "lf.config.local.yaml";
 
+/// The main checkout's private settings file. One left at the former path
+/// moves here, ignored before it arrives, the first time anything asks.
 pub fn private_path(repo: &Path) -> Result<PathBuf> {
     let root = match crate::git::worktree_root(repo) {
         Ok(_) => crate::git::worktrees::main_repo_root(repo)?,
         Err(_) => repo.to_owned(),
     };
-    Ok(root.join(PRIVATE_FILE))
+    let path = root.join(PRIVATE_FILE);
+    let former = root.join(FORMER_PRIVATE_FILE);
+    if former.exists() && !path.exists() {
+        protect_private_file(&path)?;
+        fs::create_dir_all(path.parent().context("private file has a parent")?)?;
+        match fs::rename(&former, &path) {
+            // Another lf moved it first.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            moved => moved
+                .with_context(|| format!("moving {} to {}", former.display(), path.display()))?,
+        }
+    }
+    Ok(path)
+}
+
+/// The checkout a private settings file belongs to.
+pub(crate) fn private_root(path: &Path) -> Result<&Path> {
+    path.parent()
+        .and_then(Path::parent)
+        .context("private settings sit in a checkout's .lf directory")
 }
 
 pub(crate) fn wave_key(repo: &Path, name: &str) -> Result<Option<String>> {
@@ -257,7 +282,7 @@ fn diagnose_private_file(path: &Path) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    let repo = path.parent().context("private file has a parent")?;
+    let repo = private_root(path)?;
     if !git(repo, &["rev-parse", "--git-dir"])?.status.success() {
         return Ok(());
     }
@@ -279,7 +304,7 @@ fn diagnose_private_file(path: &Path) -> Result<()> {
 
 pub(crate) fn protect_private_file(path: &Path) -> Result<()> {
     diagnose_private_file(path)?;
-    let repo = path.parent().context("private file has a parent")?;
+    let repo = private_root(path)?;
     let output = git(
         repo,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -289,12 +314,17 @@ pub(crate) fn protect_private_file(path: &Path) -> Result<()> {
     }
     let exclude = PathBuf::from(String::from_utf8(output.stdout)?.trim()).join("info/exclude");
     let _lock = lock(&exclude)?;
-    let mut text = read_text(&exclude)?;
+    let before = read_text(&exclude)?;
+    // The former path's rule goes when this one is written.
+    let mut text: String = before
+        .lines()
+        .filter(|line| *line != format!("/{FORMER_PRIVATE_FILE}"))
+        .map(|line| format!("{line}\n"))
+        .collect();
     if !text.lines().any(|line| line == format!("/{PRIVATE_FILE}")) {
-        if !text.is_empty() && !text.ends_with('\n') {
-            text.push('\n');
-        }
         text.push_str(&format!("/{PRIVATE_FILE}\n"));
+    }
+    if text != before {
         atomic_write(&exclude, &text)?;
     }
     Ok(())
@@ -410,7 +440,7 @@ fn patch_node(node: &yaml_edit::YamlNode, before: &Value, after: &Value) -> Resu
 }
 
 pub fn update<T>(path: &Path, change: impl FnOnce(&mut Value) -> Result<T>) -> Result<T> {
-    if path.file_name().is_some_and(|name| name == PRIVATE_FILE) {
+    if path.ends_with(PRIVATE_FILE) {
         protect_private_file(path)?;
     }
     LockedFile::open(path)?.update(change)
@@ -730,6 +760,7 @@ mod tests {
             .status
             .success());
         let private = repo.path().join(super::PRIVATE_FILE);
+        std::fs::create_dir_all(private.parent().unwrap()).unwrap();
         std::fs::write(&private, "agent: codex\n").unwrap();
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
@@ -771,6 +802,32 @@ mod tests {
     }
 
     #[test]
+    fn a_private_file_left_in_the_checkout_root_moves_under_lf_already_ignored() {
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(super::FORMER_PRIVATE_FILE, "agent: codex # mine\n");
+        repo.create_file(".git/info/exclude", "/lf.config.local.yaml\n/keep\n");
+        let path = private_path(repo.path()).unwrap();
+        assert!(path.ends_with(super::PRIVATE_FILE));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "agent: codex # mine\n"
+        );
+        assert!(!repo.path().join(super::FORMER_PRIVATE_FILE).exists());
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap(),
+            "/keep\n/.lf/config.local.yaml\n"
+        );
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["status", "--porcelain"])
+            .output()
+            .unwrap()
+            .stdout
+            .is_empty());
+    }
+
+    #[test]
     fn polling_settings_needs_no_git_and_sees_edits_while_writes_check_tracking() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
@@ -778,6 +835,7 @@ mod tests {
             crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         let path = repo.path().join(super::PRIVATE_FILE);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "agent: codex\n").unwrap();
         {
             // Missing Git makes any subprocess attempt fail. Ordinary reads

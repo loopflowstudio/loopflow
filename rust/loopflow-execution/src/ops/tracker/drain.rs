@@ -18,8 +18,8 @@ use loopflow_storage::sqlite::tracker_actions::{
 };
 use loopflow_storage::work::edit::WorkValue;
 
-use super::{message, value, values, Sent, Tracker};
-use crate::ops::OpsResult;
+use super::{message, value, values, Sent, Tracker, TrackerError};
+use crate::ops::{OpsError, OpsResult};
 use crate::store::Store;
 
 /// The shortest wait between looks for one lost reply.
@@ -98,6 +98,8 @@ pub(crate) async fn drain_repository(
     };
     let tracker = match tracker {
         Ok(tracker) => tracker,
+        // A pause belongs to the Home, not to each action: their own errors stay.
+        Err(OpsError::Tracker(TrackerError::RateLimited { .. })) => return Ok(Pass::default()),
         // Offline or signed out: the queue keeps every action and says why.
         Err(error) => {
             for action in &actions {
@@ -544,7 +546,7 @@ mod tests {
 
     use loopflow_model::durable::TaskId;
     use loopflow_storage::planning_sync::TrackerKind;
-    use loopflow_storage::sqlite::tracker_actions::{ActionOwner, ActionPhase};
+    use loopflow_storage::sqlite::tracker_actions::{ActionKind, ActionOwner, ActionPhase};
     use loopflow_storage::work::edit::WorkValue;
     use serde_json::json;
 
@@ -563,12 +565,16 @@ mod tests {
     }
 
     fn fixture() -> Fixture {
+        fixture_with(Fake::new())
+    }
+
+    fn fixture_with(fake: Fake) -> Fixture {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         let store = Store {
             sqlite: crate::store::opening::open_ephemeral(&path).unwrap(),
         };
-        let fake = Arc::new(Fake::new());
+        let fake = Arc::new(fake);
         Fixture {
             _home: home,
             path,
@@ -775,6 +781,36 @@ mod tests {
         assert_eq!(f.fake.requests(), 1, "only the other owner sends");
         assert_eq!(f.phases(&waiting), [ActionPhase::Sent, ActionPhase::Queued]);
         assert_eq!(f.phases(&other), [ActionPhase::Confirmed]);
+    }
+
+    #[tokio::test]
+    async fn a_failing_idempotent_send_waits_its_window_unless_synced_now() {
+        let mut fake = Fake::new();
+        fake.idempotent = vec![ActionKind::Field];
+        let f = fixture_with(fake);
+        let task = f.bound_task();
+        f.title(&task, "Renamed", "sent", None);
+        let now = loopflow_storage::rows::now_unix().to_string();
+        f.sql("UPDATE tracker_actions SET sent_at=?1", &[&now]);
+        f.pass().await;
+        f.pass().await;
+        assert_eq!(f.fake.requests(), 0, "no pass resends inside the window");
+        assert_eq!(f.phases(&task), [ActionPhase::Sent]);
+
+        let owner = ActionOwner::Task(task.clone());
+        let actions = queued(&f.store, "/repo", TrackerKind::Linear).unwrap();
+        drain(
+            &f.store,
+            "/repo",
+            &f.tracker,
+            actions,
+            Scope::Only(&owner),
+            Bound::NOW,
+        )
+        .await
+        .unwrap();
+        assert_eq!(f.fake.requests(), 1);
+        assert_eq!(f.phases(&task), [ActionPhase::Confirmed]);
     }
 
     #[tokio::test]

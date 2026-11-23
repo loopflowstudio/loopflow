@@ -312,6 +312,7 @@ final class WorkModel {
     /// before its Sessions read lands. Close, a failure or a missing location leaves
     /// a person something to do instead.
     func conversationIsOpening(_ workspace: SessionsWorkspace) -> Bool {
+        guard workspace.canOpenTerminals else { return false }
         if workspace.openingConversation { return true }
         guard !workspace.conversationClosed, !showsSavedWork,
               workspace.conversationError == nil,
@@ -319,6 +320,16 @@ final class WorkModel {
         guard workspace.key.kind == .task else { return workspaceRegistry?.localMachineId != nil && repoPath != nil }
         guard let task = task(id: workspace.key.id)?.task else { return false }
         return task.opensConversationAutomatically && taskWorkspaceIdentity(task) != nil
+    }
+
+    /// A repository whose plan was read and holds nothing, with no conversation
+    /// attached, opening or failed: `NoPlannedWork` stands in for its page until
+    /// a conversation opens or a Task exists.
+    func repositoryIsEmpty(_ workspace: SessionsWorkspace) -> Bool {
+        workspace.key.kind == .repository && roadmap.value != nil && !showsSavedWork
+            && visibleWaves.isEmpty && visibleTasks.isEmpty
+            && workspace.conversationError == nil && !conversationIsOpening(workspace)
+            && !workspace.multiplexer.layout.allPanes.contains { $0.sessionId != nil }
     }
 
     private func taskWorkspaceIdentity(_ task: RoadmapTask) -> WorkspaceIdentity? {
@@ -942,26 +953,24 @@ final class WorkModel {
             opening: selectionOpening ?? taskOpening)
     }
 
-    /// A Wave view's board, conversation and strip; other views have no named parts yet.
+    /// A Wave view's backlog, conversation and strip; other views have no named parts yet.
     func desktopViewParts(repository: String) -> [DesktopViewPart] {
         guard let view = navigation.waveView else { return [] }
-        let doneDays = WaveStandupDefaults.doneDays
         let tiles = boardTiles(view)
         let pages = boardPlan(view)?.slots.pages(tiles) ?? [tiles]
         let page = pageIndex(view, of: pages)
         let ratios = navigation.waveRatios[view] ?? WaveViewRatios()
         let zoomed = zoomedPart(in: view)
         return [
-            DesktopViewPart(name: "board", kind: .board, work: nil, section: boardSection(view).rawValue,
-                            doneDays: doneDays, text: standupText(view, doneDays: doneDays),
-                            page: nil, pages: nil, visible: [], hidden: isHidden(.board, in: view),
-                            ratio: 1 - ratios.session, zoomed: zoomed == .board,
-                            actions: ["section", "filter", "hide", "show", "zoom", "resize"]),
+            DesktopViewPart(name: "backlog", kind: .backlog, work: nil, text: backlogText(view),
+                            page: nil, pages: nil, visible: [], hidden: isHidden(.backlog, in: view),
+                            ratio: 1 - ratios.session, zoomed: zoomed == .backlog,
+                            actions: ["hide", "show", "zoom", "resize"]),
             DesktopViewPart(name: "session", kind: .session, work: viewWork(view, repository: workspaceRepository ?? repository),
-                            section: nil, doneDays: nil, text: nil, page: nil, pages: nil, visible: [],
+                            text: nil, page: nil, pages: nil, visible: [],
                             hidden: isHidden(.session, in: view), ratio: ratios.session, zoomed: zoomed == .session,
                             actions: []),
-            DesktopViewPart(name: "tiles", kind: .strip, work: nil, section: nil, doneDays: nil, text: nil,
+            DesktopViewPart(name: "tiles", kind: .strip, work: nil, text: nil,
                             page: page + 1, pages: pages.count, visible: pages[page].map(\.work),
                             hidden: isHidden(.tiles, in: view), ratio: 1 - ratios.band, zoomed: zoomed == .tiles,
                             actions: ["page", "hide", "show", "zoom", "resize"]),
@@ -985,7 +994,7 @@ final class WorkModel {
         return workspaceRegistry?.retained(viewWork(view, repository: repository))
     }
 
-    /// The board and strip hide in navigation; the conversation hides as its session
+    /// The backlog and strip hide in navigation; the conversation hides as its session
     /// pane does, so `lf desktop hide -p session` and the hover button agree.
     func isHidden(_ part: WaveViewPart, in view: WorkNavigation.Board) -> Bool {
         guard part == .session else { return navigation.hiddenViewParts[view, default: WaveViewPart.hiddenByDefault].contains(part) }
@@ -1006,7 +1015,7 @@ final class WorkModel {
         workspace.setCollapsed(paneId: pane.id, collapsed: hidden)
     }
 
-    /// The part filling a Wave view. The board and strip zoom in navigation; the
+    /// The part filling a Wave view. The backlog and strip zoom in navigation; the
     /// conversation zooms as its session pane, so `lf desktop zoom -p session` agrees.
     func zoomedPart(in view: WorkNavigation.Board) -> WaveViewPart? {
         if let part = navigation.zoomedViewParts[view] { return part }
@@ -1025,30 +1034,31 @@ final class WorkModel {
         }
     }
 
-    /// A Wave view's Tasks bucketed for its board, with owners' GitHub users and Sessions.
-    func standup(_ tasks: [RoadmapTask], doneDays: Int) -> WaveStandup {
-        WaveStandup(tasks: tasks, closed: tasks, doneDays: doneDays, now: .now, github: githubPeople)
-    }
-
-    func boardSection(_ view: WorkNavigation.Board) -> WaveBoardSection {
-        navigation.boardSections[view] ?? .backlog
-    }
-
-    /// The board as `lf desktop capture -p board` reads it.
-    private func standupText(_ view: WorkNavigation.Board, doneDays: Int) -> String? {
+    /// A Wave view's backlog as `lf desktop capture -p backlog` reads it.
+    private func backlogText(_ view: WorkNavigation.Board) -> String? {
         let scope = view == .repository ? "Repository" : "Wave"
-        switch standupTasks(view) {
-        case .available(let tasks, _):
-            let heading = if case .wave(let id) = view, let roadmap = wave(id: id) { WaveStandup.heading(roadmap) }
+        switch viewTasks(view) {
+        case .available:
+            let heading = if case .wave(let id) = view, let roadmap = wave(id: id) { BacklogList.heading(roadmap) }
                 else { [repositoryName] }
-            return standup(tasks, doneDays: doneDays).text(heading: heading, section: boardSection(view))
+            return backlog(view).text(heading: heading)
         case .unavailable(let reason): return "\(scope) planning unavailable · \(reason)"
         case nil: return nil
         }
     }
 
-    /// The Tasks a Wave view's board buckets: the Wave's, or every Task in the repository.
-    func standupTasks(_ view: WorkNavigation.Board) -> WorkEvidence<RoadmapTask>? {
+    /// A Wave view's backlog: its open Tasks nobody is running, in rank order, filtered and selected as the view left them.
+    func backlog(_ view: WorkNavigation.Board) -> BacklogList {
+        let waveNames = Dictionary(visibleRoadmaps.map { ($0.wave.id, $0.wave.displayName) }, uniquingKeysWith: { first, _ in first })
+        let scope: String? = if case .wave(let id) = view { id } else { nil }
+        let tasks = viewTasks(view)
+        return BacklogList(tasks: tasks?.items ?? [], truncated: tasks?.truncated ?? false,
+                           wave: scope, waveNames: waveNames,
+                           state: navigation.backlogs[view] ?? BacklogState())
+    }
+
+    /// A Wave view's Tasks: the Wave's, or every Task in the repository.
+    func viewTasks(_ view: WorkNavigation.Board) -> WorkEvidence<RoadmapTask>? {
         if case .wave(let id) = view { return wave(id: id).map { shown($0.tasks, wave: id) } }
         guard view == .repository, let tasks = roadmap.value?.tasks else { return nil }
         guard case .available(_, let truncated) = tasks else { return tasks }
@@ -1277,10 +1287,6 @@ final class WorkModel {
     private var graphCatalogKey: String { repoPath ?? "" }
     var graphCatalog: Reading<[GraphCatalogEntry]> {
         graphCatalogReadings[graphCatalogKey] ?? .loading
-    }
-    /// The same read, each graph seen as a Workflow.
-    var workflowCatalog: Reading<[WorkflowCatalogEntry]> {
-        graphCatalog.map { $0.map(WorkflowCatalogEntry.init) }
     }
     /// Comment threads, read on demand for the shown Task.
     private(set) var comments = TaskReadings<TaskComments>()
@@ -1977,19 +1983,6 @@ final class WorkModel {
         await refreshWorkActivity()
     }
 
-    /// Task owners' GitHub users by lowercase email, read once per repository.
-    private(set) var githubPeople: [String: GitHubPerson] = [:]
-    private var githubPeopleRepo: String?
-
-    /// Without GitHub the board keeps owners' names and initials.
-    func loadGitHubPeople() async {
-        guard !usesFixedFixture, let repo = repoPath, repo != githubPeopleRepo else { return }
-        githubPeopleRepo = repo
-        guard let people = try? await query.repoPeople(cwd: repo), repo == repoPath else { return }
-        githubPeople = Dictionary(people.compactMap { person in person.github.map { (person.email.lowercased(), $0) } },
-                                  uniquingKeysWith: { first, _ in first })
-    }
-
     private var portfolioGeneration = 0
 
     /// Consume the shared membership.
@@ -2219,9 +2212,9 @@ final class WorkModel {
         }
     }
 
-    /// A Wave or repository row's count: its board's Working column.
+    /// A Wave or repository row's count: its Working Tasks.
     func startedTaskCount(_ board: WorkNavigation.Board) -> Int {
-        (standupTasks(board)?.items ?? []).count { $0.section == .working }
+        (viewTasks(board)?.items ?? []).count { $0.section == .working }
     }
 
     /// Display identity comes from the same scoped readings as membership, never from IDs.
@@ -2270,6 +2263,11 @@ final class WorkModel {
 
     func taskSessions(_ id: String) -> [SessionRecord] {
         return (sessions.value ?? []).filter { $0.names(task: id) }
+    }
+
+    /// What a Task's programs report, for its row and the title bar.
+    func programStatus(task id: String) -> SessionProgramStatus {
+        SessionProgramStatus(sessions: taskSessions(id), unavailable: sessions.failure)
     }
 
     /// ⌘N: the Nth Task row on screen.
@@ -2619,7 +2617,7 @@ final class WorkModel {
         let destination = destinationGeneration
         let created: TaskCreated
         do {
-            created = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID)
+            created = try await query.createTask(request: request, wave: wave?.name, graph: graph, run: true, cwd: repoPath, requestID: requestID)
         } catch is SubmittedCreationError {
             Perf.finish(.startTask, id: requestID, owner: owner.performanceOwner, outcome: .unmeasured)
             // The saved submission owns recovery. Keeping a submit button here
@@ -2639,6 +2637,29 @@ final class WorkModel {
             await openCreatedTask(created)
         }
         if owner.startingTask?.id == requestID { owner.startingTask = nil }
+    }
+
+    /// New Task, filed only: `lf task create REQUEST` puts it in `wave`'s backlog
+    /// (nil: the repository's) and starts nothing. Its row is selected there,
+    /// with the filter and search out of its way. Throws while nothing is filed;
+    /// a request whose answer is lost belongs to recovery, as in `createTask`.
+    func fileTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
+        let requestID = UUID().uuidString
+        let created: TaskCreated
+        do {
+            created = try await query.createTask(request: request, wave: wave?.name, graph: graph, run: false,
+                                                 cwd: repoPath, requestID: requestID)
+        } catch is SubmittedCreationError { return }
+        let view: WorkNavigation.Board = wave.map { .wave($0.id) } ?? .repository
+        var state = navigation.backlogs[view] ?? BacklogState()
+        state.filter = .all
+        state.query = ""
+        state.selection = []
+        state.select(created.receipt.task.id)
+        state.notice = .did("Filed \(created.receipt.task.identifier)")
+        navigation.backlogs[view] = state
+        // Its backlog row is the Task's presentation; nothing opens.
+        await CreationRecovery.shared.presented([requestID])
     }
 
     /// Install a created Task's conversation from the answer: its row selects the
@@ -2681,18 +2702,18 @@ final class WorkModel {
         }
     }
 
-    /// Turn auto on and run the Task, as `lf task auto on` does: the Notice says auto on
+    /// Turn auto on and run the Task, as `lf task auto on` does: the Notice says Auto-Ship
     /// was requested and its Undo turns auto off. The Task moves when the
     /// Machine's reading says so.
     func turnAutoOn(_ task: RoadmapTask) {
-        request(task, "Auto on", .taskAutoOn(directory: directory(task), issue: task.task.identifier),
-                      undo: Notice.Action("Undo", help: "Auto off") { [weak self] in
+        request(task, TaskActions.Auto.off.offer, .taskAutoOn(directory: directory(task), issue: task.task.identifier),
+                      undo: Notice.Action("Undo", help: TaskActions.Auto.on.offer) { [weak self] in
                           self?.turnAutoOff(task)
                       })
     }
 
     func turnAutoOff(_ task: RoadmapTask) {
-        request(task, "Auto off", .taskAutoOff(directory: directory(task), issue: task.task.identifier))
+        request(task, TaskActions.Auto.on.offer, .taskAutoOff(directory: directory(task), issue: task.task.identifier))
     }
 
     /// The Work the Machine control describes: the current started Task, else the
@@ -2788,6 +2809,13 @@ final class WorkModel {
         }
     }
 
+    /// Put the Task at `rank` in its Project, from 0; Rust renumbers the rest and moves it in Linear.
+    func rankTask(_ task: RoadmapTask, rank: Int) async throws {
+        let home = workDataDirectory
+        try await query.rankTask(issue: task.task.identifier, rank: rank, cwd: directory(task))
+        try? await confirmWorkUpdate(after: home)
+    }
+
     /// The row is gone and the next Task selected in the click; a refusal
     /// brings the row back and the Notice says why.
     func completeTask(_ task: RoadmapTask) {
@@ -2802,6 +2830,23 @@ final class WorkModel {
     func reopenTask(_ task: RoadmapTask) {
         let issue = task.task.identifier
         change(task, .reopen(task: issue), .taskReopen(directory: directory(task), issue: issue), "reopened")
+    }
+
+    /// Why no change to Work can be requested now; nil when one can.
+    var changeRefusal: String? {
+        if !pendingChanges.acceptsChanges { return PendingChanges.awayText }
+        if showsSavedPlanning { return WorkCache.savedReason }
+        return nil
+    }
+
+    /// Why no run of `task` can be started now; nil when one can.
+    func runRefusal(_ task: RoadmapTask) -> String? {
+        changeRefusal ?? task.runControl.unavailable
+    }
+
+    /// Abandon… asks first: the window confirms before `abandonTask`.
+    func beginAbandon(_ task: RoadmapTask) {
+        navigation.abandoning = task.id
     }
 
     /// The row leaves every list and the selection moves on in the click; PR,
@@ -2908,7 +2953,7 @@ final class WorkModel {
         }
     }
 
-    /// Start, Auto on and Auto off say "requested" in the click.
+    /// Start, Auto-Ship and Stop Auto-Ship say "requested" in the click.
     private func request(_ task: RoadmapTask, _ name: String, _ write: ServedWrite, undo: Notice.Action? = nil,
                          refused: @escaping @MainActor () -> Void = {}) {
         pendingChanges.request(name, subject: task.task.identifier, write: write, notices: navigation.notices,
@@ -3628,5 +3673,34 @@ enum TaskOrderDrag {
     static func token(_ workID: String) -> String { "task-order:" + workID }
     static func taskID(_ token: String) -> String? {
         token.hasPrefix("task-order:") ? String(token.dropFirst("task-order:".count)) : nil
+    }
+}
+
+extension WorkModel {
+    /// The Wave a Task is filed in, else the repository.
+    func scopeName(_ wave: WaveSnapshot?) -> String { wave?.displayName ?? repositoryName }
+
+    /// Whose choice a workflow is, from the layer Rust says chose it: "your
+    /// default", "loopflow's default" for the scope it follows, "the default"
+    /// for the builtin, and "for this Task only" when the Task has its own.
+    func workflowChoice(source: String?, wave: WaveSnapshot?) -> String {
+        switch source {
+        case nil: "for this Task only"
+        case "personal": "your default"
+        case "repository": "\(scopeName(wave))'s default"
+        default: "the default"
+        }
+    }
+
+    /// The named workflow as the catalog outlines it; nil until the catalog is
+    /// read, or for a Graph that does not load.
+    func workflowOutline(_ name: String?) -> WorkflowOutline? {
+        name.flatMap { name in graphCatalog.value?.first { $0.name == name }?.workflow }
+    }
+
+    /// The workflow a Task's first run takes up and whose choice it is:
+    /// "feature, loopflow's default".
+    func workflowSelection(_ task: RoadmapTask) -> String? {
+        task.graphName.map { "\($0), \(workflowChoice(source: task.graphSource, wave: self.task(id: task.id)?.wave?.wave))" }
     }
 }

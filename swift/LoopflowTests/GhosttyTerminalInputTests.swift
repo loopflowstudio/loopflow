@@ -26,6 +26,7 @@ struct GhosttyTerminalMountTests {
         // advances one reading; no provider or personal Session is involved.
         terminal.command = """
         /bin/sh -c \(shellEscape("""
+        printf '%s' "$LF_RELAY_FOCUSED" > "\(directory.path)/initial-focus"
         {
           printf '%s\\n' '{"generation":1,"state":"connected","native_ready":false,"message":null}'
           for phase in 1 2 3; do
@@ -61,6 +62,7 @@ struct GhosttyTerminalMountTests {
             try Data().write(to: directory.appendingPathComponent(String(phase)))
         }
         try await wait { terminal.connectionReading?.state == .connected }
+        #expect(try String(contentsOf: directory.appendingPathComponent("initial-focus"), encoding: .utf8) == "0")
         #expect(!terminal.connectionAcceptsInput)
         window.makeFirstResponder(nil)
         try advance(1)

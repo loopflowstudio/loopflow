@@ -1,4 +1,5 @@
-# Settle what to build before any code.
+description: Settle what to build before any code.
+steps:
 - kickoff
 - concept-review            # the plan's premise
 - write-docs

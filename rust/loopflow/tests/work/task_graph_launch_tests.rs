@@ -1490,6 +1490,36 @@ fn a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named() {
     assert_eq!(graph["name"], "feature");
     assert_eq!(graph["position"], at("review"));
     assert_eq!(graph["interactive_steps"][0]["skill"], "demo");
+    let output = task.run(&["task", "status", "INF-123", "--json"]);
+    assert!(output.status.success(), "{output:?}");
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let mut fields: Vec<_> = status
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    fields.sort_unstable();
+    assert_eq!(
+        fields,
+        [
+            "auto",
+            "comments",
+            "conversation",
+            "graph",
+            "graph_processes",
+            "sessions",
+            "stack_parent",
+            "summary",
+            "task"
+        ]
+    );
+    assert_eq!(status["graph"], graph);
+    assert_eq!(
+        status["task"]["graph"],
+        serde_json::json!({"name": "feature", "step": "review"})
+    );
+    assert_eq!(status["task"]["next"], "lf task run INF-123");
     drop(task);
 
     // A Task that named its own keeps it when later runs name nothing.
@@ -1603,10 +1633,10 @@ fn nothing_after_the_last_interactive_step_reaches_end_without_a_pr() {
     assert_eq!(graph["interactive_steps"][0]["skill"], "research");
     assert_eq!(graph["position"], at("findings"));
     assert_eq!(task.state(), "active");
+    let status = task.text_status();
     assert!(
-        task.text_status().contains("Graph findings: at findings"),
-        "{}",
-        task.text_status()
+        status.contains("Graph findings: Waiting for you at findings."),
+        "{status}"
     );
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
     task.repo
@@ -1629,7 +1659,7 @@ fn nothing_after_the_last_interactive_step_reaches_end_without_a_pr() {
     assert!(task.status()["pr"].is_null());
     let error = refusal(task.run(&["task", "run", "INF-123"]));
     assert!(error.contains("is done"), "{error}");
-    assert!(task.text_status().contains("Graph findings: at end"));
+    assert!(task.text_status().contains("Graph findings: At its end."));
 }
 
 #[test]
@@ -2364,7 +2394,7 @@ fn a_failed_command_step_is_started_again() {
     assert_eq!(stopped["position"]["running"], false);
     let status = task.text_status();
     assert!(
-        status.contains("Graph held-review: stopped at graph show late"),
+        status.contains("Graph held-review: Stopped at graph show late."),
         "{status}"
     );
 }
@@ -2436,10 +2466,7 @@ fn a_stopped_run_is_started_again_at_the_step_that_failed() {
         ["failed", "failed", "failed"]
     );
     let status = task.text_status();
-    assert!(
-        status.contains("Graph gated: stopped at graph show late"),
-        "{status}"
-    );
+    assert!(status.contains("Graph gated: Stopped at gate."), "{status}");
 
     // The cause clears as the third attempt starts: an `lf` that defines
     // `late` the third time the gate asks for it.
@@ -3348,7 +3375,8 @@ fn auto_off_sticks_through_a_headless_relaunch() {
 
 #[test]
 fn a_run_that_fails_the_same_way_stops_and_keeps_auto_on() {
-    let task = stand_in_task();
+    let task = GraphTask::new();
+    let mark = last_graph(task.home.path());
     // `gate` refuses identically until the repository defines `late`.
     let output = task.run(&[
         "-b", "--task", "INF-123", "task", "auto", "on", "--graph", "gate",
@@ -3359,11 +3387,11 @@ fn a_run_that_fails_the_same_way_stops_and_keeps_auto_on() {
         stderr.contains("failed 3 times with the same error"),
         "{stderr}"
     );
-    // The run stopped on its own, so nothing carries it again; auto is
-    // still on for the next `lf task run`.
-    for _ in 0..3 {
-        task.ok(&["task", "list"]);
-    }
+    // The foreground run finished all three attempts and left auto on.
+    assert_eq!(
+        attempts(task.home.path(), mark),
+        ["failed", "failed", "failed"]
+    );
     assert_eq!(task.state(), "idle");
     assert_eq!(task.status()["auto"]["state"], "on");
     let stopped = task.run(&["--task", "INF-123", "task", "auto", "off"]);

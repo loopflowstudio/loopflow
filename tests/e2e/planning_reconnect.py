@@ -257,6 +257,17 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             time.sleep(1)
         raise AssertionError(message)
 
+    def elapse_comment_resend_window(comment_id: str) -> None:
+        # An outage can lose a reply. Move the send into the past so the next
+        # pass can resend the comment with its original identity.
+        with db:
+            sent = db.execute(
+                "UPDATE tracker_actions SET sent_at=0 "
+                "WHERE kind='comment' AND subject=? AND phase='sent'",
+                (comment_id,),
+            ).rowcount
+            assert sent == 1, "the offline comment did not leave a sent action"
+
     # Acquire a real baseline before the outage, not an invented provider revision.
     run("wave", "status", fixture["wave"], "--sync")
     remote_id = db.execute(
@@ -345,6 +356,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
                 == (1,)
             )
 
+        elapse_comment_resend_window(comment_id)
         if graph:
             # Agents have no Linear timer. End this turn, then let the next Graph
             # step resolve the lost write replies using their retained identities.
@@ -395,6 +407,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             with server.lock:
                 assert not any(c["id"] == gap for c in state["comments"])
                 state["offline"] = False
+            elapse_comment_resend_window(gap)
 
             def delivered() -> bool:
                 return db.execute(

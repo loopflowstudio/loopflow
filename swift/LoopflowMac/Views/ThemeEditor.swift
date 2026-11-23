@@ -7,8 +7,8 @@ struct ThemeEditor: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(appearance.selectedName).font(Typography.sectionTitle())
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            Text(appearance.selectedName).font(Typography.lede)
                 .accessibilityIdentifier("appearance-theme-name")
             colors("Surfaces", fields: [
                 ("Background", \.background), ("Surface", \.surface), ("Muted surface", \.surfaceMuted),
@@ -52,7 +52,7 @@ struct ThemeEditor: View {
                 DisclosureGroup("Extended colors (16–255)") { indexedColors(16..<256) }
             }
             Text("Apply writes \(appearance.paths.themes.appendingPathComponent(appearance.selectedName).path); Cancel discards your edits.")
-                .font(.caption).foregroundStyle(palette.textSecondary)
+                .font(Typography.meta).foregroundStyle(palette.textSecondary)
         }
         .accessibilityIdentifier("appearance-theme-editor")
     }
@@ -85,8 +85,8 @@ struct ThemeEditor: View {
     }
 
     private func colorGrid<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 10, content: content)
-            .padding(.vertical, 8)
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: Spacing.sm, content: content)
+            .padding(.vertical, Spacing.sm)
     }
 }
 
@@ -102,7 +102,7 @@ private struct ThemeColorPicker: View {
                 }
                 rgb = ThemeRGB(channel(color.redComponent) << 16 | channel(color.greenComponent) << 8 | channel(color.blueComponent))
             }), supportsOpacity: false)
-            Text(rgb.css).font(Typography.code(11)).textSelection(.enabled)
+            Text(rgb.css).font(Typography.mono).textSelection(.enabled)
         }
     }
 }

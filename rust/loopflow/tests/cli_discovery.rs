@@ -1219,19 +1219,11 @@ fn desktop_verbs_take_pane_paths_without_public_lifetime_tokens() {
     assert!(matches!(cli.command, Some(Commands::Desktop {
         cmd: DesktopCommand::Goto { index: 2, target }
     }) if target.json));
-    let cli = Cli::try_parse_from([
-        "lf",
-        "desktop",
-        "do",
-        "section",
-        "-p",
-        "board",
-        "section=done",
-    ])
-    .unwrap();
+    let cli =
+        Cli::try_parse_from(["lf", "desktop", "do", "page", "-p", "tiles", "page=2"]).unwrap();
     assert!(matches!(cli.command, Some(Commands::Desktop {
         cmd: DesktopCommand::Do { action, args, target }
-    }) if action == "section" && args == ["section=done"] && target.pane.as_deref() == Some("board")));
+    }) if action == "page" && args == ["page=2"] && target.pane.as_deref() == Some("tiles")));
     for removed in [
         &["desktop", "text", "hello"][..],
         &["desktop", "read", "--region", "screen"],
@@ -1689,4 +1681,170 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
             .unwrap(),
         1
     );
+}
+
+#[test]
+fn docs_command_lists_and_reads_embedded_pages_offline() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+
+    let index = String::from_utf8(success(run(repo.path(), home.path(), &["docs"]))).unwrap();
+    assert!(index.contains("agent-api"), "{index}");
+    assert!(index.contains("work"), "{index}");
+    assert!(index.contains("sessions"), "{index}");
+
+    let index_json: serde_json::Value =
+        serde_json::from_slice(&success(run(repo.path(), home.path(), &["docs", "--json"])))
+            .unwrap();
+    let topics: Vec<&str> = index_json
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["topic"].as_str().unwrap())
+        .collect();
+    assert!(topics.contains(&"agent-api"));
+    assert!(topics.contains(&"work"));
+
+    let work =
+        String::from_utf8(success(run(repo.path(), home.path(), &["docs", "work"]))).unwrap();
+    let work_md =
+        String::from_utf8(success(run(repo.path(), home.path(), &["docs", "work.md"]))).unwrap();
+    assert_eq!(work, work_md);
+    assert!(work.starts_with("# Work\n"), "{work}");
+
+    let agent_api_json: serde_json::Value = serde_json::from_slice(&success(run(
+        repo.path(),
+        home.path(),
+        &["docs", "agent-api", "--json"],
+    )))
+    .unwrap();
+    assert_eq!(agent_api_json["topic"], "agent-api");
+    assert_eq!(agent_api_json["title"], "The Agent API");
+    assert!(agent_api_json["content"]
+        .as_str()
+        .unwrap()
+        .contains("lf -b -a codex research"));
+
+    let unknown = run(repo.path(), home.path(), &["docs", "nonexistent-topic"]);
+    assert!(!unknown.status.success());
+    let stderr = String::from_utf8_lossy(&unknown.stderr);
+    assert!(stderr.contains("unknown doc topic"), "{stderr}");
+    assert!(stderr.contains("agent-api"), "{stderr}");
+
+    // Embedded docs require no store, no repo config, and leave ~/.lf untouched.
+    assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
+fn skill_and_loopflow_cli_examples_resolve_against_command_tree() {
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let tree = Cli::command();
+    let mut tree = tree;
+    tree.build();
+
+    let extract_lf_commands = |text: &str| -> Vec<Vec<String>> {
+        let mut commands = Vec::new();
+        let mut in_bash = false;
+        let mut push_line = |raw: &str| {
+            let line = raw.split('#').next().unwrap_or(raw).trim();
+            let Some(rest) = line.strip_prefix("lf ") else {
+                return;
+            };
+            let tokens: Vec<String> = rest.split_whitespace().map(str::to_string).collect();
+            if !tokens.is_empty() {
+                commands.push(tokens);
+            }
+        };
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("```bash") {
+                in_bash = true;
+                continue;
+            }
+            if in_bash && trimmed.starts_with("```") {
+                in_bash = false;
+                continue;
+            }
+            if in_bash {
+                push_line(trimmed);
+                continue;
+            }
+            let mut rest = trimmed;
+            while let Some(start) = rest.find('`') {
+                let after = &rest[start + 1..];
+                let Some(end) = after.find('`') else {
+                    break;
+                };
+                push_line(&after[..end]);
+                rest = &after[end + 1..];
+            }
+        }
+        commands
+    };
+
+    for rel in [
+        "skills/loopflow/SKILL.md",
+        "rust/loopflow-definitions/src/builtins/LOOPFLOW.md",
+    ] {
+        let text = fs::read_to_string(workspace_root.join(rel)).unwrap();
+        let invocations = extract_lf_commands(&text);
+        assert!(!invocations.is_empty(), "{rel} has no lf examples");
+        for tokens in invocations {
+            // Skip root flags before the command or skill name.
+            let mut index = 0;
+            while index < tokens.len() && tokens[index].starts_with('-') {
+                let flag = &tokens[index];
+                index += 1;
+                if matches!(
+                    flag.as_str(),
+                    "-a" | "--agent" | "--machine" | "--repo" | "--wave" | "--task"
+                ) && index < tokens.len()
+                {
+                    index += 1;
+                }
+            }
+            let Some(first) = tokens.get(index) else {
+                continue;
+            };
+            if first == ":"
+                || first.starts_with('<')
+                || first.starts_with('[')
+                || loopflow_definitions::builtins::resolve_builtin_skill(first).is_some()
+                || loopflow_definitions::builtins::resolve_builtin_graph(first).is_some()
+            {
+                continue;
+            }
+            let mut path = vec![first.clone()];
+            if let Some(second) = tokens.get(index + 1) {
+                let looks_like_subcommand = !second.starts_with('-')
+                    && !second.starts_with('<')
+                    && !second.starts_with('[')
+                    && !second.starts_with('\'')
+                    && second != "main"
+                    && second != "<<'EOF'";
+                if looks_like_subcommand
+                    && matches!(
+                        first.as_str(),
+                        "task"
+                            | "pr"
+                            | "session"
+                            | "graph"
+                            | "skill"
+                            | "wave"
+                            | "machine"
+                            | "config"
+                            | "desktop"
+                    )
+                {
+                    path.push(second.clone());
+                }
+            }
+            assert!(
+                loopflow::lf::navigation::resolve_path(&tree, &path).is_ok(),
+                "{rel}: `lf {}` does not resolve in the CLI command tree (from `{}`)",
+                path.join(" "),
+                tokens.join(" ")
+            );
+        }
+    }
 }

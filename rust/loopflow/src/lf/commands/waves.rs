@@ -500,6 +500,8 @@ pub struct RoadmapTask {
     pub run_control: TaskRunControl,
     pub pr: Option<PrSnapshot>,
     pub section: TaskSection,
+    /// Whether its owner is you; `false` when nobody owns it.
+    pub owned_by_you: bool,
     /// The graph step the Task stands at; `None` while a run carries it.
     /// Carried to `lf task status`'s `TaskRow`, not on the wire.
     #[serde(skip)]
@@ -1406,12 +1408,12 @@ pub(crate) async fn task_detail(
         .task
         .ok_or_else(|| anyhow!("this Task is not registered in Loopflow"))?;
     let (row, parent, children) = task_with_family(store, &task).await?;
-    let mut sessions = Vec::new();
-    for session in status
+    let (overview_sessions, graph) = status
         .overview
-        .map(|overview| overview.sessions)
-        .unwrap_or_default()
-    {
+        .map(|overview| (overview.sessions, overview.graph))
+        .unwrap_or_default();
+    let mut sessions = Vec::new();
+    for session in overview_sessions {
         if let Some(record) =
             loopflow_execution::ops::human_session::listed(store, session.id.as_str())?
         {
@@ -1440,6 +1442,7 @@ pub(crate) async fn task_detail(
             .and_then(|execution| execution.stack_parent),
         task: TaskNames::read(Some(store)).await?.row(row),
         sessions,
+        graph,
         graph_processes: status
             .graph_processes
             .into_iter()
@@ -2114,6 +2117,11 @@ struct DetailReads<'a> {
     /// Each repository's checkout, where a Task without a worktree resolves
     /// its agent; read once per repository.
     repositories: HashMap<loopflow_model::durable::RepositoryId, std::path::PathBuf>,
+    /// You in each Task's repository, which recognizes your claims; read once per repository.
+    you: HashMap<
+        loopflow_model::durable::RepositoryId,
+        loopflow_storage::sqlite::task_ownership::You,
+    >,
     /// Each Task's latest Graph and what its execution reads, asked once.
     graphs:
         HashMap<loopflow_model::durable::TaskId, loopflow_storage::graph_process::GraphExecution>,
@@ -2149,6 +2157,7 @@ impl<'a> DetailReads<'a> {
         let mut selections = HashMap::new();
         let mut wave_names = HashMap::new();
         let mut repositories = HashMap::new();
+        let mut you = HashMap::new();
         for task in tasks {
             let selection = match facts.graph_names.get(&task.id) {
                 Some(name) => (name.clone(), None),
@@ -2176,9 +2185,16 @@ impl<'a> DetailReads<'a> {
             if let std::collections::hash_map::Entry::Vacant(entry) =
                 repositories.entry(task.repository_id.clone())
             {
-                entry.insert(loopflow_execution::ops::task::repository_for_task(
-                    store, task,
-                )?);
+                let repo = loopflow_execution::ops::task::repository_for_task(store, task)?;
+                you.insert(
+                    task.repository_id.clone(),
+                    loopflow_execution::store::ownership::you(
+                        &store.sqlite,
+                        &task.repository_id,
+                        &repo,
+                    )?,
+                );
+                entry.insert(repo);
             }
         }
         Ok(Self {
@@ -2189,6 +2205,7 @@ impl<'a> DetailReads<'a> {
             selections,
             wave_names,
             repositories,
+            you,
             graphs,
             execution,
         })
@@ -2404,6 +2421,12 @@ async fn snapshot_task_detail(
         runtime.owner.is_some(),
         task.state.as_deref(),
     );
+    let owned_by_you = runtime.owner.as_ref().is_some_and(|holder| {
+        reads
+            .you
+            .get(&task.repository_id)
+            .is_some_and(|you| you.holds(holder))
+    });
     Ok(RoadmapTask {
         task: task_summary(
             task,
@@ -2447,6 +2470,7 @@ async fn snapshot_task_detail(
             PrSnapshot::new(pr, empty)
         }),
         section,
+        owned_by_you,
         step: facts.steps.get(&task.id).cloned(),
         finished,
         conducting,
@@ -5034,8 +5058,8 @@ mod tests {
         .replace("}]}','demo',3)", "}]}','end',3)");
         conn.execute_batch(&fixture).unwrap();
         loopflow_execution::store::migrations::upgrade_from_migration(&conn, "task_paused");
-        // The planning read, not this setup, fails.
-        conn.execute_batch("DROP TABLE task_auto").unwrap();
+        // Fail the planning inventory's latest-event query.
+        conn.execute_batch("DROP TABLE task_events").unwrap();
         let frontier =
             loopflow_execution::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
         let store: loopflow_execution::store::SharedStore =
@@ -5064,7 +5088,7 @@ mod tests {
                 roadmap.tasks
             );
         };
-        assert!(reason.contains("no such table: task_auto"), "{reason}");
+        assert!(reason.contains("no such table: task_events"), "{reason}");
         let graph = loopflow_execution::store::task_work::task_overview(&store.sqlite, &task)
             .unwrap()
             .0

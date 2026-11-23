@@ -47,7 +47,7 @@ pub struct DesktopWindowInspection {
     pub open_work: Vec<WorkWorkspaceKey>,
     pub view: Option<loopflow_storage::work::selection::ViewPlan>,
     /// The view's named parts that are neither panes nor tiles, such as a Wave
-    /// view's board; `-p` names them before tiles and panes.
+    /// view's backlog; `-p` names them before tiles and panes.
     pub view_parts: Vec<DesktopViewPart>,
     pub opening: Option<DesktopOpening>,
 }
@@ -60,11 +60,8 @@ pub struct DesktopViewPart {
     pub kind: DesktopViewPartKind,
     /// The Work a session part converses with.
     pub work: Option<WorkWorkspaceKey>,
-    /// A board's shown section: `backlog`, `working` or `done`.
-    pub section: Option<String>,
-    /// A board's Done window in days; 0 includes all ages.
-    pub done_days: Option<u32>,
-    /// A board as rendered text, what `lf desktop capture -p board` prints.
+    /// A backlog as text, what `lf desktop capture -p backlog` prints: its
+    /// filter counts, then its rows in order with their owners.
     pub text: Option<String>,
     /// A strip's page, from 1, and its page count.
     pub page: Option<u32>,
@@ -75,7 +72,7 @@ pub struct DesktopViewPart {
     /// `Show…` menu lists it. A session part is hidden as its pane is.
     pub hidden: bool,
     /// The part's share of its split, as its divider and `lf desktop resize` set it:
-    /// the conversation's and board's of the top band's width, the strip's of the
+    /// the conversation's and backlog's of the top band's width, the strip's of the
     /// view's height.
     pub ratio: f64,
     /// Filling the whole view, as `lf desktop zoom` or its hover button set it.
@@ -87,7 +84,7 @@ pub struct DesktopViewPart {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DesktopViewPartKind {
-    Board,
+    Backlog,
     Session,
     Strip,
 }
@@ -192,10 +189,10 @@ pub enum DesktopDestination {
 pub enum DesktopBoard {
     Dashboard(String),
     WorkingTasks,
-    /// A Wave view: its standup board and conversation above, its Tasks as tiles below.
+    /// A Wave view: its conversation and backlog above, its Tasks as tiles below.
     Wave(String),
     /// The repository page, the default Wave's view: every repository Task on its
-    /// board, the repository conversation, its Working Tasks as tiles.
+    /// backlog, the repository conversation, its Working Tasks as tiles.
     Repository,
 }
 
@@ -1405,7 +1402,7 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             max_bytes,
             trim,
         } => {
-            // A view part with text, such as a Wave board, captures as rendered.
+            // A view part with text, such as a Wave backlog, captures as rendered.
             if let Some(part) = window.view_part(verb.target.pane.as_deref()) {
                 let text = part.text.as_deref().ok_or_else(|| {
                     DesktopError::Target(format!(
@@ -2429,8 +2426,8 @@ impl PaneNeed {
     fn for_action(action: &str) -> Self {
         match action {
             "run" | "toggle-shell" => Self::Kind("shell"),
-            "browse" | "files" | "graph-log" | "page-back" | "page-forward" | "reload"
-            | "toggle-browser" => Self::Kind("browser"),
+            "browse" | "details" | "files" | "graph-log" | "page-back" | "page-forward"
+            | "reload" | "toggle-browser" => Self::Kind("browser"),
             "switch" => Self::Kind("session"),
             "send" | "send-key" => Self::Terminal,
             "show" => Self::Hidden,
@@ -2630,7 +2627,7 @@ impl<'a> Scope<'a> {
 
     /// The window shows tiles: a Dashboard (saved, Working Tasks or an unsaved
     /// query) or a Wave view (the repository page is one), whose Tasks are tiles
-    /// below its board and conversation.
+    /// below its backlog and conversation.
     fn shows_board(window: &DesktopWindowInspection) -> bool {
         matches!(
             &window.destination,
@@ -3810,12 +3807,12 @@ mod tests {
     }
 
     #[test]
-    fn a_wave_view_names_its_board_and_strip_before_tiles_and_its_session_as_a_pane() {
+    fn a_wave_view_names_its_backlog_and_strip_before_tiles_and_its_session_as_a_pane() {
         let (inspection, _) = fixture();
         let window = &inspection.windows[1];
         assert_eq!(
-            window.view_part(Some("board")).map(|part| part.kind),
-            Some(super::DesktopViewPartKind::Board)
+            window.view_part(Some("backlog")).map(|part| part.kind),
+            Some(super::DesktopViewPartKind::Backlog)
         );
         assert_eq!(
             window
@@ -3829,8 +3826,8 @@ mod tests {
         );
         // `-p session` stays the conversation pane, so send and capture reach it.
         assert!(window.view_part(Some("session")).is_none());
-        assert!(window.view_part(Some("board/session")).is_none());
-        assert!(inspection.windows[0].view_part(Some("board")).is_none());
+        assert!(window.view_part(Some("backlog/session")).is_none());
+        assert!(inspection.windows[0].view_part(Some("backlog")).is_none());
     }
 
     #[test]

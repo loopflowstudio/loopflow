@@ -548,10 +548,10 @@ struct WorkModelStreamTests {
             unavailable: "sqlite: no such column: t.paused", content: .planning(nil), wire: nil))
         try await eventually { model.roadmap.failure != nil }
         #expect(model.taskWork[found.task.id].value?.graph == workflow)
-        let header = TaskWorkflowHeader(model: model, task: found.task, work: model.taskWork[found.task.id])
-        #expect(throws: (any Error).self) { try header.inspect().find(text: "No workflow yet") }
+        let bar = TaskWorkflowBar(model: model, task: found.task, work: model.taskWork[found.task.id])
+        #expect(throws: (any Error).self) { try bar.inspect().find(text: "No workflow yet") }
         // Changes still show at once: a failed read is no reason to refuse one.
-        #expect(try !header.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move").isDisabled())
+        #expect(try !bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move").isDisabled())
         #expect(model.navigation.notices.current?.text == "The plan couldn't be read: sqlite: no such column: t.paused")
         await feed.fail(RegistryQueryError("reader exited"))
         try await eventually { model.taskWork[found.task.id].failure == "reader exited" }
@@ -749,15 +749,15 @@ struct WorkModelStreamTests {
         await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
         try await eventually { model.roadmap.value != nil }
         await model.loadGraphCatalog()
-        try await eventually { model.workflowCatalog.value?.isEmpty == false }
+        try await eventually { model.graphCatalog.value?.isEmpty == false }
         let baseline = await catalog.reads
         await catalog.update("[]")
         await feed.send(try fixture.unrelatedFrame(sequence: 2))
         try await Task.sleep(for: .milliseconds(50))
         #expect(await catalog.reads == baseline)
-        #expect(model.workflowCatalog.value?.isEmpty == false)
+        #expect(model.graphCatalog.value?.isEmpty == false)
         await feed.send(try fixture.planningFrame(sequence: 3, answers: nil))
-        try await eventually { model.workflowCatalog.value?.isEmpty == true }
+        try await eventually { model.graphCatalog.value?.isEmpty == true }
         #expect(await catalog.reads == baseline + 1)
         // Both catalogues are one read: returning from an editor rereads it once.
         await model.rereadDefinitions()
@@ -765,8 +765,8 @@ struct WorkModelStreamTests {
         #expect(model.graphCatalog.value?.isEmpty == true)
         await catalog.fail()
         await feed.send(try fixture.planningFrame(sequence: 4, answers: nil))
-        try await eventually { model.workflowCatalog.failure == "catalog unavailable" }
-        #expect(model.workflowCatalog.value?.isEmpty == true)
+        try await eventually { model.graphCatalog.failure == "catalog unavailable" }
+        #expect(model.graphCatalog.value?.isEmpty == true)
     }
 
     @Test("A late catalogue failure cannot replace a newer successful read")
@@ -789,8 +789,8 @@ struct WorkModelStreamTests {
         await model.loadGraphCatalog(force: true)
         await deferred.release("invalid old response")
         await old.value
-        #expect(model.workflowCatalog.value?.isEmpty == true)
-        #expect(model.workflowCatalog.failure == nil)
+        #expect(model.graphCatalog.value?.isEmpty == true)
+        #expect(model.graphCatalog.failure == nil)
     }
 
     @Test("A change shows in the click, then asks its parts for a reading once answered")
@@ -951,14 +951,13 @@ struct WorkModelStreamTests {
         #expect(await feed.openCount == 3)
     }
 
-    @Test("New turns clear previews and an ended reader recovers without reviving old output")
+    @Test("New turns replace the Session excerpt and an ended reader recovers without reviving old output")
     func readerEndRecovers() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
         let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
-        let now = Date(timeIntervalSince1970: 1000)
         let entries = try fixture.sessionEntries()
         let original = try #require((JSONSerialization.jsonObject(with: Data(entries.json.utf8)) as? [[String: Any]])?.first)
         var answers = 0
@@ -980,9 +979,8 @@ struct WorkModelStreamTests {
             return try fixture.sessionsFrame(sequence: sequence, answers: answers, repo: "/src/loopflow", entries: json)
         }
         func preview() -> String {
-            let records = model.sessions.value ?? []
-            return SessionProgramStatus(sessions: records, unavailable: model.sessions.failure)
-                .preview(now: now, fallback: "brief", sessions: records).text
+            if model.sessions.failure != nil { return "failed" }
+            return model.sessions.value?.first?.preview?.text ?? "none"
         }
 
         try await feed.opened(1)
@@ -991,13 +989,13 @@ struct WorkModelStreamTests {
         await feed.send(try sessionFrame(2, turn: "Previous result", available: true))
         try await eventually { preview() == "Previous result" }
         await feed.send(try sessionFrame(3, turn: nil))
-        try await eventually { preview() == "Summary · brief" }
+        try await eventually { preview() == "none" }
         await feed.send(try sessionFrame(4, turn: "New turn output"))
         try await eventually { preview() == "New turn output" }
         await feed.fail(RegistryQueryError("reader exited"))
         try await eventually { model.sessions.failure == "reader exited" }
         #expect(model.sessions.value?.first?.preview?.text == "New turn output")
-        #expect(preview() == "Summary · brief")
+        #expect(preview() == "failed")
         #expect(model.roadmap.value != nil)
         #expect(!model.roadmap.isLoading)
 
@@ -1006,10 +1004,10 @@ struct WorkModelStreamTests {
         // Planning recovery alone cannot revive the old Session reading.
         await feed.send(try fixture.planningFrame(sequence: 1, answers: answers, renaming: "After restart"))
         try await eventually { model.task(id: "issue-now")?.task.task.name == "After restart" }
-        #expect(preview() == "Summary · brief")
+        #expect(preview() == "failed")
         await feed.send(try sessionFrame(2, turn: nil))
         try await eventually { model.sessions.failure == nil }
-        #expect(preview() == "Summary · brief")
+        #expect(preview() == "none")
         await feed.send(try sessionFrame(3, turn: "Recovered result", available: true))
         try await eventually { preview() == "Recovered result" }
     }
@@ -1450,7 +1448,7 @@ struct TaskPlanningReadabilityTests {
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: "Planning unavailable") }
         model.select(.task(id: key.id))
         #expect(model.selection == key.reference)
-        #expect(try WorkBreadcrumbs(model: model).inspect().find(text: "Readable local Task").string() == "Readable local Task")
+        #expect(try TitleBar(model: model).inspect().find(text: "Readable local Task").string() == "Readable local Task")
         let row = WorkTaskIdentity(presentation: model.taskPresentation(id: key.id))
         #expect(try row.inspect().find(text: "Readable local Task").string() == "Readable local Task")
         #expect(try row.inspect().find(text: "LOO-905").string() == "LOO-905")
@@ -1487,16 +1485,16 @@ struct TaskPlanningReadabilityTests {
         #expect(model.taskPresentation(id: key.id).title == "Loading Task…")
     }
 
-    @Test("Session status, preview age and keyboard hints do not require a full Task record")
+    @Test("Session status and keyboard hints do not require a full Task record")
     func partialSessionMetadata() throws {
         let fixture = try WorkTestFixture.load()
         let entries = try fixture.sessionEntries()
         let session = try #require(RegistryQuery.decode([SessionRecord].self, from: entries.json).first)
-        let metadata = TaskRowMetadata(id: key.id, task: nil, status: .available(session), sourceAge: "3s")
+        let presentation = WorkModel.TaskPresentation(title: "Loading Task…", identifier: nil, context: nil)
+        let metadata = TaskRow(id: key.id, presentation: presentation, task: nil, status: .available(session))
         #expect(try metadata.inspect().find(text: "Available · inferred").string() == "Available · inferred")
-        #expect(try metadata.inspect().find(text: "3s").string() == "3s")
         #expect(throws: (any Error).self) { try metadata.inspect().find(text: "Unowned") }
-        let shortcut = TaskRowMetadata(id: key.id, task: nil, status: .unknown, slotHint: "⌘1")
+        let shortcut = TaskRow(id: key.id, presentation: presentation, task: nil, status: .unknown, slotHint: "⌘1")
         #expect(try shortcut.inspect().find(text: "⌘1").string() == "⌘1")
     }
 
@@ -1506,12 +1504,12 @@ struct TaskPlanningReadabilityTests {
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         // A pending list makes no empty claim; the one work status says it is loading.
         #expect(try navigator.inspect().find(text: "Loading work…").string() == "Loading work…")
-        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list") }
+        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list.") }
         model.applyTaskList(nil, wave: nil, reason: "Offline")
-        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list") }
+        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No working Tasks in this list.") }
         #expect(model.navigation.notices.current?.text == "Tasks couldn't be read: Offline")
         model.applyTaskList(fixtureViewPlan(owner: key, members: []), wave: nil, reason: "")
-        #expect(try navigator.inspect().find(text: "No working Tasks in this list").string() == "No working Tasks in this list")
+        #expect(try navigator.inspect().find(text: "No working Tasks in this list.").string() == "No working Tasks in this list.")
     }
 
     @Test("Saved planning rows never fill the sidebar; only the started list does")
@@ -1565,7 +1563,7 @@ struct TaskPlanningReadabilityTests {
         for model in windows {
             let own = try #require(model.visibleTasks.first)
             model.select(.task(id: own.id))
-            let crumbs = WorkBreadcrumbs(model: model)
+            let crumbs = TitleBar(model: model)
             #expect(try crumbs.inspect().find(text: own.task.name).string() == own.task.name)
             #expect(try crumbs.inspect().find(text: "Updating…").string() == "Updating…")
             #expect(model.workStatus == .updating)

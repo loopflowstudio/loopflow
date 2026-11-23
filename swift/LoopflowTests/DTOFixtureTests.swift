@@ -315,16 +315,6 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test func repoPeopleCarryEmailsAndOptionalGitHubUsers() throws {
-        let people = try JSONDecoder().decode([RepoPerson].self, from: loadFixtureData("repo_people.json"))
-        #expect(people.map(\.email) == ["maya@example.com", "sam@example.com", "unknown@example.com"])
-        #expect(people[0].github?.name == "Maya Lin")
-        #expect(people[1].github?.name == nil && people[1].name == nil)
-        #expect(people[2].github == nil)
-        let encoded = try JSONEncoder().encode(people)
-        #expect(try JSONDecoder().decode([RepoPerson].self, from: encoded) == people)
-    }
-
     @Test func desktopInspectionRetainsUnavailableWorkAndExactPanes() throws {
         let data = try loadFixtureData("desktop_inspection.json")
         let report = try JSONDecoder().decode(DesktopInspection.self, from: data)
@@ -351,9 +341,8 @@ struct DTOFixtureTests {
         #expect(report.windows[1].task?.runControl?.unavailable == "Task checkout is on another Machine")
         #expect(window.workspaces.first?.hiddenPanes == ["files-pane"])
         #expect(window.viewParts.isEmpty)
-        #expect(report.windows[1].viewParts.map(\.name) == ["board", "session", "tiles"])
-        #expect(report.windows[1].viewParts[0].doneDays == 7)
-        #expect(report.windows[1].viewParts[0].section == "backlog")
+        #expect(report.windows[1].viewParts.map(\.name) == ["backlog", "session", "tiles"])
+        #expect(report.windows[1].viewParts[0].text?.contains("All 0 · Mine 0") == true)
         #expect(report.windows[1].viewParts[2].ratio == 0.382)
         #expect(report.windows[1].viewParts.map(\.zoomed) == [false, false, true])
         #expect(report.windows[1].viewParts[2].page == 2 && report.windows[1].viewParts[2].pages == 3)
@@ -470,7 +459,19 @@ struct DTOFixtureTests {
         #expect(graph.interactiveSteps.map(\.description) == ["you review the plan", "you try the change"])
         #expect(graph.position == .run(step: "review-design", at: "implement", lfProcessId: work.graphProcesses[0].id, running: true))
         #expect(graph.waitingStep == nil)
+        #expect(graph.steps.map(\.name) == ["plan", "review-design", "build", "demo"])
+        #expect(graph.steps.map(\.interactive) == [false, true, false, true])
+        #expect(graph.currentStep == 2)
+        #expect(graph.sentence == "build is running implement. You are next needed at demo.")
         #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
+        // `current_step` is required even when null.
+        var absent = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var absentGraph = try #require(absent["graph"] as? [String: Any])
+        absentGraph.removeValue(forKey: "current_step")
+        absent["graph"] = absentGraph
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TaskWork.self, from: JSONSerialization.data(withJSONObject: absent))
+        }
         // Every position field is required.
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var wireGraph = try #require(wire["graph"] as? [String: Any])

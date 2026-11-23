@@ -1,5 +1,5 @@
-# Build, deliver and verify. You review the change, then check it
-# on main, in the Task conversation.
+description: Build, deliver and verify. You review the change, then check it on main.
+steps:
 - graph: plan
 - loop:
     - loop:

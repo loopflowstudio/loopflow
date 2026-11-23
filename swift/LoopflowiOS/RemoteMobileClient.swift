@@ -38,7 +38,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         let directory = URL.applicationSupportDirectory.appending(path: "submissions-\(savedMachine.machineID)")
         let machineID = savedMachine.machineID
         return CreationSubmissions(directory: directory, machine: { machineID }, lookup: { [self] id in
-            try await connection().request(.read(.creationGet(requestID: id)), deadline: Self.requestDeadline).printed
+            try await connection().read(.creationGet(requestID: id), deadline: Self.requestDeadline)
         }, send: { [self] payload in
             let creation = try JSONDecoder().decode(JSONValue.self, from: payload)
             return String(decoding: try await connection().request(.submittedCreation(creation), deadline: Self.requestDeadline).bytes,
@@ -56,6 +56,15 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         RemoteTaskObservation(query: .viewSelect(expression: expression), saved: saved, subscription: subscription) { [self] in
             try await connection()
         }
+    }
+
+    /// One Task as `lf task show` reads it, kept current: each update is a whole reading as sent.
+    func observeTask(issue: String) -> ServerWatch<RawJSON> {
+        // The Machine finds a Task by its ID from any directory, as Desktop asks.
+        ServerLink.subscribe(.taskGet(directory: "/", issue: issue), connect: { [self] in try await connection() }, map: { update in
+            guard case .reading(let frame) = update else { return nil }
+            return frame
+        })
     }
 
     /// The Machine's Waves that are still in use.
@@ -137,11 +146,17 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
     func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> MobileTask {
         try verifySubmission(submission)
-        let plan = try await query.viewPlan(expression: "task:\(taskID)", repoPath: submission.directory)
-        guard let task = try mobileTasks(plan).first(where: { $0.work.id == taskID }) else {
+        guard let task = try await task(id: taskID, directory: submission.directory) else {
             throw RegistryQueryError("The Task was created, but its workspace is not available yet. Try Open Task again.")
         }
-        return MobileTask(task)
+        return task
+    }
+
+    /// One Task's row as a reading of its repository lists it, with the
+    /// conversation it has now; nil when that reading does not list it.
+    func task(id: String, directory: String) async throws -> MobileTask? {
+        let plan = try await query.viewPlan(expression: "task:\(id)", repoPath: directory)
+        return try mobileTasks(plan).first { $0.work.id == id }.map(MobileTask.init)
     }
 
     private func verifySubmission(_ submission: MobileTaskSubmission) throws {

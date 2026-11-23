@@ -10,12 +10,15 @@
     "swift/GhosttyKitPatches/0006-ios-external-io.patch": "631c27da22817ec159885c2e12669166d2360ae48ded352b61021c6b520835a9",
     "swift/GhosttyKitPatches/0007-no-libintl-without-i18n.patch": "c3c0c273d01831441895728b00b9106baf64e4f86843b4dc60cffedb1703393b",
     "swift/GhosttyKitPatches/README.md": "17c0d3a5f3889586991adc7b6a5db5fe4fc038475a3454f44eb11bf3d48e8c38",
-    "swift/Loopflow/Fonts/CormorantGaramond-Medium.otf": "bc49bcebc38f68498956f47b9414d6907fe9192e8d3c38d077a095da2e8f2da5",
-    "swift/Loopflow/Fonts/CormorantGaramond-Regular.otf": "d276dd20a536a36c03f0ab6e845cb39260cc6639c0b835b26d1c354c8cb3b2b3",
-    "swift/Loopflow/Fonts/CormorantGaramond-SemiBold.otf": "62363e27dff8453a9577e0801cfde7573ac8af68f57b7d401b0d805b67a0cf11",
-    "swift/Loopflow/Fonts/JetBrainsMono-Regular.ttf": "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f",
-    "swift/Loopflow/Fonts/Lato-Bold.ttf": "bf1b8130069b44b9148eeece35e5423bedac49777ba746615b826b8276574a7b",
-    "swift/Loopflow/Fonts/Lato-Regular.ttf": "6f6940be0835c3ddec9199e5fc42be4cbc61ebcfd58c623fdf719366253f1780",
+    "swift/Loopflow/Fonts/AtkinsonHyperlegibleNext-Italic.ttf": "b7f8f03ceb28ebadb2de2332b2e869a00e8dbfb5c8e00fdbb06385770c8227e7",
+    "swift/Loopflow/Fonts/AtkinsonHyperlegibleNext-Regular.ttf": "88ed5c31a71584c7772963b02d04bef1eb7e3d2e9c8b9cb204339b1f82cf432c",
+    "swift/Loopflow/Fonts/AtkinsonHyperlegibleNext-SemiBold.ttf": "8e2fff779f35ac25239656bb0f3b2bd35959a2009e3dd21a12141c3b9030362b",
+    "swift/Loopflow/Fonts/AtkinsonHyperlegibleNext-SemiBoldItalic.ttf": "81255b975707232b59b1f673e36b8c83e34b64b01d90025b89420e1c6506d7a9",
+    "swift/Loopflow/Fonts/OldStandard-Regular.ttf": "42717a1280b523a506ca2b0285cca380e77fe214b1f6e3d75a8b925005f19eac",
+    "swift/Loopflow/Fonts/SplineSansMono-Bold.ttf": "9d17d41f75c8efdbc592f851ac3c9ed7486b8a472b4047c7ae518212cbd0d093",
+    "swift/Loopflow/Fonts/SplineSansMono-BoldItalic.ttf": "7df76e7881977508b65187a67dfc32d3f9354a143dc3d6ee96f861b6e4b6e6bc",
+    "swift/Loopflow/Fonts/SplineSansMono-Italic.ttf": "f3bfd4cf369064190159a13038c08d9ed50bd21c91235591585f8b506b5debea",
+    "swift/Loopflow/Fonts/SplineSansMono-Regular.ttf": "79384820b543bd4f52dff46c2da4ddca4bb5131ee3bcba4a6d17a5609351a098",
     "swift/Loopflow/Themes/Catalogue/Aubergine": "91e9503cf692d55f5d25302c1b280bbda3aca20a3d70176fd5748b1dae935d19",
     "swift/Loopflow/Themes/Catalogue/Catppuccin Latte": "b633e0361eda1c7803627d7b67e052aee392d94eaf58a48a9c7eb1074434140e",
     "swift/Loopflow/Themes/Catalogue/Catppuccin Mocha": "0ed392c81838631fbb1141907e1c7d929590a8ebc8d7dfe21ecfb426919729cd",
@@ -64,11 +67,11 @@
     "swift/LoopflowMac/GhosttyResources/share/terminfo/67/ghostty": "7b9448b1abe6f0f36410f424fd269da67116e31aea600dfbbfca863d09a5bc20",
     "swift/LoopflowMac/GhosttyResources/share/terminfo/78/xterm-ghostty": "7b9448b1abe6f0f36410f424fd269da67116e31aea600dfbbfca863d09a5bc20",
     "swift/LoopflowMac/GhosttyResources/share/terminfo/ghostty.terminfo": "e5e9cc4e9fddf6aab3088b40ec42fafe8309ef1ae5d3764d0bbf2fc44105ccf0",
-    "swift/Package.resolved": "3b4687150d10bfa159dd90dac1b81b1977f6b622d69ca5e214fdce206449251f",
-    "swift/Package.swift": "57813179473251a2eeda35f34856691bde71a50d04be6156c0fda10e2654bcba",
+    "swift/Package.resolved": "fba287731e05b06de2440f822a9c8648d29f60706fc4d96eab4dac6f7609431d",
+    "swift/Package.swift": "f0441d2599e973dbbf49b13a3ec65f875a1ebf8916f269f776e33a8f24334031",
     "third_party/README.md": "9d2661253b7c6152672de67cab7f676399f71b43eaff8788aa540d4fa9e04f25",
-    "third_party/manifest.json": "e27a444e69d3cb278e09e1ab2bea1505dbf837145a214b3fe2482e87a8a699f0",
-    "third_party/notices/app-fonts.txt": "17b912df78b4ed923a1b2d3a03def226afeb47279cd1e54823c13f3f0964c2e1",
+    "third_party/manifest.json": "18039cc65836ae0aea7fb688ec10d26b8a59492df7bfc1372ede7d168a7f37ed",
+    "third_party/notices/app-fonts.txt": "2e5e411aa76126bd1cfa09c005c22cbfd1e55ae0c89f47e13d5b54275017a0ca",
     "third_party/notices/breakpad-breakpad.txt": "28fd46313ce1f83fa2716c64c5e630296849bf059758023b3df2eb1ae98557b7",
     "third_party/notices/crate-block2.txt": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
     "third_party/notices/crate-dispatch2.txt": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
@@ -90,6 +93,34 @@
     "third_party/notices/oniguruma-oniguruma.txt": "a4d780032f7db15e33f8d8dd1500454178ab93aa57fe4963383443f2f6133099",
     "third_party/notices/sentry-sentry.txt": "fdd9ad263e47f7c65c000ded18a64a42a08fc279aef4a2113a99b02d47855221",
     "third_party/notices/spirv-cross-spirv_cross.txt": "dfab64ca84061bc754a6451980935a2879fb5157023bf7b643c1fcfc32e41a96",
+    "third_party/notices/swift-tree-sitter.txt": "792197b8debcdecb17f429bab3a43a5911364e2a6e8e7c0f7faf02032212fb5f",
+    "third_party/notices/tree-sitter-bash.txt": "49bf33cf78ef5897e4e161ce1517df7de1ae5042a65b6bcfd44401e0fc606559",
+    "third_party/notices/tree-sitter-c-sharp.txt": "778fb7d63b8c1844da315648c02f325c4713a6f4a5d19644fd413421422776d3",
+    "third_party/notices/tree-sitter-c.txt": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1",
+    "third_party/notices/tree-sitter-cpp.txt": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1",
+    "third_party/notices/tree-sitter-css.txt": "c5cfb43042b6b72045f4ba997834d0a7786d2793d91680868b5815b39f14fc78",
+    "third_party/notices/tree-sitter-dockerfile.txt": "806b8fcd19c1cdf23e178eb25942acc844a38669e36b2c896c7baf5f8bcecbb4",
+    "third_party/notices/tree-sitter-go.txt": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1",
+    "third_party/notices/tree-sitter-html.txt": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1",
+    "third_party/notices/tree-sitter-ini.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "third_party/notices/tree-sitter-java.txt": "52ed137b039cd9c46409bc22e89938af911c95b157feae2d040b51e6084369a7",
+    "third_party/notices/tree-sitter-javascript.txt": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1",
+    "third_party/notices/tree-sitter-json.txt": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1",
+    "third_party/notices/tree-sitter-just.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "third_party/notices/tree-sitter-kotlin.txt": "948495f61768f7de26bcc61113d8cd95f50bbc15adb678c28c941c6c8fcd5903",
+    "third_party/notices/tree-sitter-make.txt": "28eecdb75b6de2d9020603531461444bf54db827ee2fb345a8fcf4dbee7c2ad1",
+    "third_party/notices/tree-sitter-markdown.txt": "52ec8a1bf8256511e2a92613e0bb41ffefba3897f16fa958d7bb28c466dd4804",
+    "third_party/notices/tree-sitter-objc.txt": "099c44248f8cf353123211318680e93465587c005a4b3730ce8cb5334de043d6",
+    "third_party/notices/tree-sitter-python.txt": "d724405ce238a22c0d35769c5a36b386ad5958192efe8bbb304fb2896254575f",
+    "third_party/notices/tree-sitter-ruby.txt": "ee006f02a3d856df282e409be2a86e24a65bb573a98b9c28343771141351bb6b",
+    "third_party/notices/tree-sitter-rust.txt": "31d5b6f4243d5c7c6e1c4ebbbb9f6407bd1457a08bcc4f706521710341acba36",
+    "third_party/notices/tree-sitter-sql.txt": "3b3e4e4252d5d7d1c18e1257005f23242bf0580ad619204fd093c99b8c56748d",
+    "third_party/notices/tree-sitter-swift.txt": "3533cec129bb4bba015c0d61d86dd7c3b7e82110e4d2ff7837a01eff5bad5ccc",
+    "third_party/notices/tree-sitter-toml.txt": "b727eee929bee836e8102cecf749a795b199f291b58c885bcd81cae727ac5a46",
+    "third_party/notices/tree-sitter-typescript.txt": "49bf33cf78ef5897e4e161ce1517df7de1ae5042a65b6bcfd44401e0fc606559",
+    "third_party/notices/tree-sitter-yaml.txt": "2d181298822a124f6d106118dcc69c8d4d26ac668559be29682c452e712b0947",
+    "third_party/notices/tree-sitter-zig.txt": "0eea8dc45e89deeb03c7799bbbc7b4688f365fb274562f4540ecfebdea82e727",
+    "third_party/notices/tree-sitter.txt": "5f9cf9fb6acb1972b35ae29119ce563bb60ec097656bc4b69b9bac2d04c7a147",
     "third_party/notices/uucode.txt": "5c5f26c8d2e93f0ab15b658ccd95a22d02be65622401d8c92ef54e92fa4b087d",
     "third_party/notices/vaxis.txt": "1306dd94538c211fcfd9f9dda2ea715d243c042fa6e14934047e6a4e74001196",
     "third_party/notices/wuffs-pixels.txt": "7980eaa7ddc61c03ccd329426a25c4745409125ff13414515346bf902efbe94b",
@@ -431,7 +462,7 @@
       "notices": [
         {
           "path": "third_party/notices/app-fonts.txt",
-          "sha256": "17b912df78b4ed923a1b2d3a03def226afeb47279cd1e54823c13f3f0964c2e1"
+          "sha256": "2e5e411aa76126bd1cfa09c005c22cbfd1e55ae0c89f47e13d5b54275017a0ca"
         }
       ]
     },
@@ -442,6 +473,589 @@
         {
           "path": "third_party/notices/zig-runtime.txt",
           "sha256": "9f42c05fb5a3be1a3002fd81c88b8ac8769b1a8aa08ddfd69e919610bf8a7b9b"
+        }
+      ]
+    },
+    {
+      "id": "swift-tree-sitter",
+      "scope": "Desktop",
+      "source": {
+        "url": "https://github.com/ChimeHQ/SwiftTreeSitter/archive/08ef81eb8620617b55b08868126707ad72bf754f.tar.gz",
+        "sha256": "7d5f1894b9cb99071e9ab601686231066825a14a365e1d57212d03a11962d2f1"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/swift-tree-sitter.txt",
+          "sha256": "792197b8debcdecb17f429bab3a43a5911364e2a6e8e7c0f7faf02032212fb5f"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter",
+      "scope": "Desktop",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter/archive/da6fe9beb4f7f67beb75914ca8e0d48ae48d6406.tar.gz",
+        "sha256": "d7ccf512347cac69a151ff174140ae6563ea01c6424b62dd963c977cfa8a0992"
+      },
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter.txt",
+          "sha256": "5f9cf9fb6acb1972b35ae29119ce563bb60ec097656bc4b69b9bac2d04c7a147"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-swift",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/alex-pinkus/tree-sitter-swift/archive/refs/tags/0.7.4-with-generated-files.tar.gz",
+        "sha256": "bf4d34383638f41cde398f4678dea72cdcda8442c7cfd13944f4bb63e9a96f70"
+      },
+      "grammars": [
+        {
+          "name": "swift",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-swift.txt",
+          "sha256": "3533cec129bb4bba015c0d61d86dd7c3b7e82110e4d2ff7837a01eff5bad5ccc"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-rust",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter-rust/releases/download/v0.24.2/tree-sitter-rust.tar.gz",
+        "sha256": "953d7a7122cc004d3ad516ae193dde408e633c2da59356ba67e713f3e52d73fc"
+      },
+      "grammars": [
+        {
+          "name": "rust",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-rust.txt",
+          "sha256": "31d5b6f4243d5c7c6e1c4ebbbb9f6407bd1457a08bcc4f706521710341acba36"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-python",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter-python/releases/download/v0.25.0/tree-sitter-python.tar.gz",
+        "sha256": "7bce887eb2f33e94bf74a69645cf5138d4096720e54fd3269a6124c06b93c584"
+      },
+      "grammars": [
+        {
+          "name": "python",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-python.txt",
+          "sha256": "d724405ce238a22c0d35769c5a36b386ad5958192efe8bbb304fb2896254575f"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-typescript",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter-typescript/releases/download/v0.23.2/tree-sitter-typescript.tar.xz",
+        "sha256": "2d324af0616a692cc6fcaea35442a816decb2ef0d05242953cb1feb15a5dc72d"
+      },
+      "grammars": [
+        {
+          "name": "typescript",
+          "path": "typescript/src",
+          "queries": "queries"
+        },
+        {
+          "name": "tsx",
+          "path": "tsx/src"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-typescript.txt",
+          "sha256": "49bf33cf78ef5897e4e161ce1517df7de1ae5042a65b6bcfd44401e0fc606559"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-javascript",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter-javascript/releases/download/v0.25.0/tree-sitter-javascript.tar.gz",
+        "sha256": "3385229430f686c6ff6e756168d7e05a01da4c45acb7708239edc9fa9ee41514"
+      },
+      "grammars": [
+        {
+          "name": "javascript",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-javascript.txt",
+          "sha256": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-markdown",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter-grammars/tree-sitter-markdown/releases/download/v0.5.4/tree-sitter-markdown.tar.gz",
+        "sha256": "3c71744d49d9fb850057d59d1eb27269873eb16beb9f71bd6f3d7f6fa901660c"
+      },
+      "grammars": [
+        {
+          "name": "markdown",
+          "path": "tree-sitter-markdown/src",
+          "queries": "tree-sitter-markdown/queries"
+        },
+        {
+          "name": "markdown_inline",
+          "path": "tree-sitter-markdown-inline/src",
+          "queries": "tree-sitter-markdown-inline/queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-markdown.txt",
+          "sha256": "52ec8a1bf8256511e2a92613e0bb41ffefba3897f16fa958d7bb28c466dd4804"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-yaml",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter-grammars/tree-sitter-yaml/releases/download/v0.7.2/tree-sitter-yaml.tar.gz",
+        "sha256": "2707d9ff0556ee6c36a77299b4c08e5b2dcbd0d35f0b9688bb2ac8e276025f72"
+      },
+      "grammars": [
+        {
+          "name": "yaml",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-yaml.txt",
+          "sha256": "2d181298822a124f6d106118dcc69c8d4d26ac668559be29682c452e712b0947"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-toml",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter-grammars/tree-sitter-toml/releases/download/v0.7.0/tree-sitter-toml.tar.xz",
+        "sha256": "a8292c1bb022b9e1cb4591959e5a92fbabeafafd5fd8e16c0894cb88a68bb384"
+      },
+      "grammars": [
+        {
+          "name": "toml",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-toml.txt",
+          "sha256": "b727eee929bee836e8102cecf749a795b199f291b58c885bcd81cae727ac5a46"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-json",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter-json/releases/download/v0.24.8/tree-sitter-json.tar.xz",
+        "sha256": "3f53c9d908328ac6004dd51b1e1b617315886e1bd7e772430c5090252ec72fab"
+      },
+      "grammars": [
+        {
+          "name": "json",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-json.txt",
+          "sha256": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-sql",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/DerekStride/tree-sitter-sql/releases/download/v0.3.13/tree-sitter-sql-v0.3.13.tar.gz",
+        "sha256": "4c1c0317d44eaea101f37e15f32f4ce49fe06185642558fba4cec56b7c4c6f7a"
+      },
+      "grammars": [
+        {
+          "name": "sql",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-sql.txt",
+          "sha256": "3b3e4e4252d5d7d1c18e1257005f23242bf0580ad619204fd093c99b8c56748d"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-bash",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter-bash/releases/download/v0.25.1/tree-sitter-bash.tar.gz",
+        "sha256": "bd0d72814c6512de190439ce6562635c69ce27fa8bc59eaf381d44263579df36"
+      },
+      "grammars": [
+        {
+          "name": "bash",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-bash.txt",
+          "sha256": "49bf33cf78ef5897e4e161ce1517df7de1ae5042a65b6bcfd44401e0fc606559"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-html",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter-html/releases/download/v0.23.2/tree-sitter-html.tar.xz",
+        "sha256": "81c1cb452d7dd06946df11bec7056d4404cec0f6072c1927e66da048750ae10e"
+      },
+      "grammars": [
+        {
+          "name": "html",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-html.txt",
+          "sha256": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-css",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter-css/releases/download/v0.25.0/tree-sitter-css.tar.gz",
+        "sha256": "6e34c5a7f7a829a2f2077b782653bf3233db91b71f78f297797ec4ad20a0a494"
+      },
+      "grammars": [
+        {
+          "name": "css",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-css.txt",
+          "sha256": "c5cfb43042b6b72045f4ba997834d0a7786d2793d91680868b5815b39f14fc78"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-go",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter-go/releases/download/v0.25.0/tree-sitter-go.tar.gz",
+        "sha256": "ac412018d59f7cd5bb72fbde557e9ebf9fdfac12c5853f2bb03669f980a953bb"
+      },
+      "grammars": [
+        {
+          "name": "go",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-go.txt",
+          "sha256": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-c",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter-c/releases/download/v0.24.2/tree-sitter-c.tar.gz",
+        "sha256": "f3a2cdfbca39c79f60baf2ef62b42084c609782c76485de457ba36ff65d51baf"
+      },
+      "grammars": [
+        {
+          "name": "c",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-c.txt",
+          "sha256": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-cpp",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter-cpp/releases/download/v0.23.4/tree-sitter-cpp.tar.xz",
+        "sha256": "4333032439bef29e71c4d7a8d3acb0c4a498dc9d767980419859ed6fbeeeef29"
+      },
+      "grammars": [
+        {
+          "name": "cpp",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-cpp.txt",
+          "sha256": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-ruby",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter-ruby/releases/download/v0.23.1/tree-sitter-ruby.tar.xz",
+        "sha256": "bf2ac68d0311f5e3b0859ef0748aafce5cfeb20b60c4b70b24707128abc12e00"
+      },
+      "grammars": [
+        {
+          "name": "ruby",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-ruby.txt",
+          "sha256": "ee006f02a3d856df282e409be2a86e24a65bb573a98b9c28343771141351bb6b"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-java",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter-java/releases/download/v0.23.5/tree-sitter-java.tar.xz",
+        "sha256": "ed766e1045be236e50a7f99295996f6705d7506628b79af80d1fd5efb63c86a7"
+      },
+      "grammars": [
+        {
+          "name": "java",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-java.txt",
+          "sha256": "52ed137b039cd9c46409bc22e89938af911c95b157feae2d040b51e6084369a7"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-kotlin",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/fwcd/tree-sitter-kotlin/archive/refs/tags/0.3.8.tar.gz",
+        "sha256": "7dd60975786bf9cb4be6a5176f5ccb5fed505f9929a012da30762505b1015669"
+      },
+      "grammars": [
+        {
+          "name": "kotlin",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-kotlin.txt",
+          "sha256": "948495f61768f7de26bcc61113d8cd95f50bbc15adb678c28c941c6c8fcd5903"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-dockerfile",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/camdencheek/tree-sitter-dockerfile/archive/refs/tags/v0.2.0.tar.gz",
+        "sha256": "8cbdf50838cc55e841aa9585a1a09e5b8c41454ae30ce0a93a7bd71adb140818"
+      },
+      "grammars": [
+        {
+          "name": "dockerfile",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-dockerfile.txt",
+          "sha256": "806b8fcd19c1cdf23e178eb25942acc844a38669e36b2c896c7baf5f8bcecbb4"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-make",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter-grammars/tree-sitter-make/releases/download/v1.1.1/tree-sitter-make.tar.xz",
+        "sha256": "cac625af12a155a06fb4e2a2ade6b8476e579b5ebd493701dc08de894871fdb5"
+      },
+      "grammars": [
+        {
+          "name": "make",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-make.txt",
+          "sha256": "28eecdb75b6de2d9020603531461444bf54db827ee2fb345a8fcf4dbee7c2ad1"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-just",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/IndianBoy42/tree-sitter-just/archive/refs/tags/v0.2.0.tar.gz",
+        "sha256": "52a6f2617f770997a602d9dfce6bac720eaaa6e1b377f0267e3a503492a693b4"
+      },
+      "grammars": [
+        {
+          "name": "just",
+          "path": "src",
+          "queries": "queries/just"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-just.txt",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-ini",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/justinmk/tree-sitter-ini/archive/refs/tags/v1.4.0.tar.gz",
+        "sha256": "300adc8b5db7604dff2b156a3962c1fbc955d89dc8be6da90e6dfe2adc950d9b"
+      },
+      "grammars": [
+        {
+          "name": "ini",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-ini.txt",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-objc",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter-grammars/tree-sitter-objc/releases/download/v3.0.2/tree-sitter-objc.tar.xz",
+        "sha256": "9f9d0c5ea456166d10d68fa34f7730761d8e0ac4ec8d1d6d6b3b17a372e9df83"
+      },
+      "grammars": [
+        {
+          "name": "objc",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-objc.txt",
+          "sha256": "099c44248f8cf353123211318680e93465587c005a4b3730ce8cb5334de043d6"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-c-sharp",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter/tree-sitter-c-sharp/releases/download/v0.24.0/tree-sitter-c-sharp.tar.gz",
+        "sha256": "f916b4014ba2ae21c536177a95dde75b0553fd4740718c79dda7057e44fc5f58"
+      },
+      "grammars": [
+        {
+          "name": "c_sharp",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-c-sharp.txt",
+          "sha256": "778fb7d63b8c1844da315648c02f325c4713a6f4a5d19644fd413421422776d3"
+        }
+      ]
+    },
+    {
+      "id": "tree-sitter-zig",
+      "scope": "TreeSitterGrammars",
+      "source": {
+        "url": "https://github.com/tree-sitter-grammars/tree-sitter-zig/releases/download/v1.1.2/tree-sitter-zig.tar.xz",
+        "sha256": "80cbc2cae284b539930f9958003f8f28d4c056ddc3bed912f61bf64e7d6fd680"
+      },
+      "grammars": [
+        {
+          "name": "zig",
+          "path": "src",
+          "queries": "queries"
+        }
+      ],
+      "notices": [
+        {
+          "path": "third_party/notices/tree-sitter-zig.txt",
+          "sha256": "0eea8dc45e89deeb03c7799bbbc7b4688f365fb274562f4540ecfebdea82e727"
         }
       ]
     },
@@ -2646,5 +3260,5 @@
       }
     }
   ],
-  "notices_sha256": "74a81d3ed19bc6f4447a57b6f1d00ecf4b368a44709800722313496659e9f128"
+  "notices_sha256": "89dd2dd7f0294bd0aa384c7e50cdf8eed7141e94bcf89aaa21c8ec1b3fa646aa"
 }

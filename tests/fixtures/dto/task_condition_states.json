@@ -34,6 +34,7 @@
       "reason": "Task is ready to start"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -133,6 +134,7 @@
       "reason": "Linear Task is complete"
     },
     "section": "done",
+    "owned_by_you": false,
     "actions": {
       "recommended": "no_action",
       "reason": "Task is completed"
@@ -427,6 +429,7 @@
       "reason": "implementing"
     },
     "section": "working",
+    "owned_by_you": false,
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -691,6 +694,7 @@
       "reason": "implementing"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -791,6 +795,7 @@
       "reason": "choose the recovery boundary"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": "no_action",
       "reason": "Waiting for your answer"
@@ -1056,6 +1061,7 @@
       "reason": "implementing"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -1156,6 +1162,7 @@
       "reason": "merge pull request head head-commits on GitHub"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"

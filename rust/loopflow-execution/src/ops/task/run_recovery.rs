@@ -113,29 +113,30 @@ pub fn died_run(
     task: &loopflow_storage::work::task::TaskId,
 ) -> crate::store::StoreResult<Option<DiedRun>> {
     let read = || crate::store::task_work::task_graph_row(sqlite, task);
-    let gone = |carrier: &loopflow_storage::graph_process::TaskCarrier| {
-        carrier.pid.is_some() && !crate::store::task_work::carrier_may_run(carrier)
+    let died = |carrier: &loopflow_storage::graph_process::TaskCarrier| {
+        carrier.died_at.is_some()
+            || (carrier.pid.is_some() && !crate::store::task_work::carrier_may_run(carrier))
     };
-    let Some(mut row) = read()? else {
+    let Some(row) = read()? else {
         return Ok(None);
     };
+    if !row.run.as_ref().is_some_and(|(_, carrier)| died(carrier)) {
+        return Ok(None);
+    }
     // A carrier clears its OS process as the last thing it does, so one that
     // exited on its own after this read looks dead with its process still
     // recorded. Read what it left before calling that a death.
-    if row.run.as_ref().is_some_and(|(_, carrier)| gone(carrier)) {
-        let Some(after) = read()? else {
-            return Ok(None);
-        };
-        row = after;
-    }
+    let Some(row) = read()? else {
+        return Ok(None);
+    };
     let Some((cursor, carrier)) = row.run else {
         return Ok(None);
     };
     // A carrier that exited on its own (failed, interrupted, waiting on a
     // limit) cleared its OS process; one that died left it behind, until
     // retention cleared it and recorded the death.
-    let died = carrier.died_at.is_some() || gone(&carrier);
-    if !died || crate::ops::task_execution::open_graph_execution(sqlite, task)?.is_some() {
+    if !died(&carrier) || crate::ops::task_execution::open_graph_execution(sqlite, task)?.is_some()
+    {
         return Ok(None);
     }
     Ok(Some(DiedRun {

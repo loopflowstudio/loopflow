@@ -475,7 +475,8 @@
           "open",
           "unstarted",
           "backlog"
-        ]
+        ],
+        "owned_by_you": false
       },
       {
         "task": {
@@ -633,7 +634,8 @@
         "selection_states": [
           "unstarted",
           "backlog"
-        ]
+        ],
+        "owned_by_you": false
       }
     ],
     "truncated": false

@@ -203,6 +203,7 @@
           "reason": "ready"
         },
         "section": "backlog",
+        "owned_by_you": false,
         "actions": {
           "recommended": "run",
           "reason": "resume the parked Task"
@@ -466,6 +467,7 @@
           "reason": "merge pull request head abc1234 on GitHub"
         },
         "section": "backlog",
+        "owned_by_you": false,
         "actions": {
           "recommended": "open_pr",
           "reason": "merge head abc1234 on GitHub"
@@ -734,6 +736,7 @@
           "reason": "Task is ready to start"
         },
         "section": "backlog",
+        "owned_by_you": false,
         "actions": {
           "recommended": null,
           "reason": "Task is ready to start"
@@ -833,6 +836,7 @@
           "reason": "Linear Task is complete"
         },
         "section": "done",
+        "owned_by_you": false,
         "actions": {
           "recommended": "no_action",
           "reason": "Task is completed"

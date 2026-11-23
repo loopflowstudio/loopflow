@@ -899,6 +899,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::TaskChanges { .. }
         | Read::TaskDiff { .. }
         | Read::TaskFile { .. }
+        | Read::TaskFiles { .. }
         | Read::WaveList
         | Read::MachineSelf
         | Read::DesktopPortfolio
@@ -964,6 +965,18 @@ fn server_operations_match_their_lf_commands() {
                 Read::TaskFile {
                     issue: "INF-123".into(),
                     path: "edit.txt".into(),
+                    at: None,
+                },
+                Read::TaskFile {
+                    issue: "INF-123".into(),
+                    path: "edit.txt".into(),
+                    at: Some("parent".into()),
+                },
+                Read::TaskFiles {
+                    issue: "INF-123".into(),
+                    path: String::new(),
+                    cursor: None,
+                    show_ignored: false,
                 },
                 Read::WaveList,
                 Read::MachineSelf,
@@ -1189,6 +1202,7 @@ fn server_operations_match_their_lf_commands() {
         let file = Read::TaskFile {
             issue: "INF-123".into(),
             path: "edit.txt".into(),
+            at: None,
         }
         .read()
         .unwrap();
@@ -1312,7 +1326,8 @@ fn server_operations_match_their_lf_commands() {
                 Write::TaskUpdate {
                     directory: directory.clone(),
                     issue: "INF-123".into(),
-                    notes: "Served from the app".into(),
+                    notes: Some("Served from the app".into()),
+                    rank: Some(1),
                 },
                 Write::TaskMove {
                     machine: None,
@@ -2043,10 +2058,14 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             directory,
             issue,
             notes,
-        } => (
-            path(directory),
-            words(&["task", "edit", issue, &format!("--notes={notes}"), "--json"]),
-        ),
+            rank,
+        } => {
+            let mut args = words(&["task", "edit", issue]);
+            args.extend(notes.iter().map(|notes| format!("--notes={notes}")));
+            args.extend(rank.iter().map(|rank| format!("--rank={rank}")));
+            args.push("--json".into());
+            (path(directory), args)
+        }
         Write::TaskAbandon { directory, issue } => (
             path(directory),
             words(&["task", "abandon", issue, "--json"]),

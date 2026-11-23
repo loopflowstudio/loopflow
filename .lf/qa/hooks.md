@@ -26,9 +26,8 @@ batches even with `--task`: start, compact, prompt and tool hooks only,
 `LF_BARE_STEER`, and Task steers through `LF_STEER_TASK`; a chat's resume
 stays in the calling terminal, and a Graph's commit message is a batch. A
 stand-in must honor each hook group's `matcher`, or it runs the compact
-`SessionStart` hook at startup too. `lf-world`'s seeded primary Session has no
-saved launch (`exec: null` in its manifest) and resumes without `--settings`;
-create a Task and `lf checkout` it for a real work session.
+`SessionStart` hook at startup too. Use a private Machine and create a Task
+with `lf task create`, then run `lf checkout <id>` to start its work session.
 Driver scripts that delete their marker directory
 must do it before waiting on it, or a stale `provider.jsonl` releases a turn
 too early. A managed launch

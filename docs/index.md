@@ -167,11 +167,11 @@ Each page picks up where the previous one leaves off:
 ```text
 .lf/                      # Committed repo config and extensions
   config.yaml             # Default graph, tracker, context, release targets
+  config.local.yaml       # Your private repo/Wave preferences (auto-excluded from Git)
   skills/                 # Repo Skills (extend or replace builtins)
   graphs/                 # Repo Graphs
   qa/                     # Repo QA playbooks, updated by `qa`
   wave/<name>/            # Wave GOAL.md, MEMORY.md, and config.yaml
-lf.config.local.yaml      # Your private repo/Wave preferences (auto-excluded from Git)
 scratch/                  # Temporary working notes (added files cleared on submit/land)
 ~/.lf/                    # Global config, skills, and local SQLite stores
   loopflow.db             # Active state: Tasks, Sessions, running Processes
@@ -185,7 +185,7 @@ contract), `scratch/`, and `.lf/wave/` automatically. Pull in more context when
 you need it:
 
 ```bash
-lf gate --docs VISUAL_DESIGN.md     # one file
+lf gate --docs DESIGN.md            # one file
 lf gate --docs 'docs/*.md'          # a glob
 lf gate --diff files                # paths of files changed on the branch
 lf debug -c                         # clipboard contents

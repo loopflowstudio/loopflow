@@ -262,6 +262,32 @@ definitions! {
     files: Vec<String> = "[]", Personal, AppendReset, HostLocal, NextLaunch, Machines, "Home-relative files a remote launch copies to the same path when the destination has none";
 }
 
+/// One heading of a Task's Diff: the files a path pattern matches, or the
+/// files no group matches (`- rest: Everything else`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum DiffGroup {
+    Paths(DiffPathGroup),
+    Rest(DiffRestGroup),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DiffPathGroup {
+    pub title: String,
+    /// Matched against `/` + the file's path, ignoring case: contained
+    /// anywhere, or at the end when the pattern starts with `*`.
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DiffRestGroup {
+    /// The heading; `- rest:` alone takes Desktop's.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub rest: Option<String>,
+}
+
 definitions! {
     Config, DEFINITIONS, "", {
         skills: BTreeMap<String, Value> = BTreeMap::new();
@@ -296,6 +322,8 @@ definitions! {
     repo_root: Option<PathBuf> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Local repository discovery directory";
     theme: Option<String> = "null", Personal, Replace, ReferencedAssets, NextRead, Desktop, "Appearance theme or light:name,dark:name pair";
     portfolio: Option<crate::portfolio::Selection> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Repository navigation selection";
+    diff_hidden: Vec<String> = "[scratch/]", Repository, AppendReset, Portable, NextRead, Desktop, "Path patterns a Task's Diff leaves out; every layer adds, [] clears lower ones";
+    diff_groups: Vec<DiffGroup> = r#"[{title: Docs, paths: ["*.md", "*.mdx", "*.rst", "*.txt", "*.adoc", /docs/]}, {title: Data model, paths: [/migrations/, "*.sql", schema, /models/, "*.proto", dto]}, {rest: Everything else}, {title: Tests, paths: [/test/, tests/, /__tests__/, /spec/, /fixtures/, /test_, _test., .test., .spec., tests.]}, {title: Generated and lock files, paths: ["*.lock", "*.snap", "*.pbxproj", "-lock.json", .lock.json, .min., /generated/, /__generated__/, /__snapshots__/, /vendor/]}]"#, Repository, Replace, Portable, NextRead, Desktop, "Ordered headings for a Task's Diff; a file goes to the first group a path pattern matches, and to rest when none does";
     planning: Option<TrackerConfig> = "null", Repository, Replace, Portable, DomainAction, Planning, "Repository tracker and its settings";
     release: ReleaseConfig = "{targets: {}}", Repository, Merge, ReferencedAssets, DomainAction, Release, "Repository release targets";
     land: String = "gh", Repository, Replace, Portable, DomainAction, Release, "Landing strategy: gh or local";

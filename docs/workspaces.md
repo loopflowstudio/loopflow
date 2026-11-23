@@ -44,10 +44,11 @@ lf open --wave product --workspace  # open every started, unfinished Task in `pr
 lf open --workspace                 # open every started, unfinished Task in this repo
 lf open --available                 # open conversations ready for your next turn
 lf diff ENG-123 --base parent --difftool  # inspect one Task's changes in your diff tool
+lf task file ENG-123 README.md --at parent  # read a file as it was before the Task
 ```
 
 `--workspace` opens an overview of started, unfinished Tasks: Desktop opens its
-board, while Rex, Herdr, and cmux open native Task tabs (one per Task
+backlog, while Rex, Herdr, and cmux open native Task tabs (one per Task
 conversation, in a new Rex session, Herdr workspace, or cmux group). Pass
 `--no-focus` to keep your current tab selected.
 

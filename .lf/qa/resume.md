@@ -35,12 +35,11 @@ person sees. When stripping escapes by regex, end an OSC at BEL or `ESC \`:
 lf's and Claude's OSCs end in `ESC \`, and a BEL-only pattern deletes the
 text up to the next BEL, open-time lines included.
 
-For a provider that refuses a saved thread, have the stand-in write
-`~/.claude/projects/<cwd>/<id>.jsonl` on `--session-id` and exit 1 on
-`--resume`. For a Task conversation, `lf-world build one-task` (see
-`task-conversations.md`): its stand-in answers "No conversation found" to a
-`--resume` with no transcript, so move the seeded transcript away, kill the
-stand-in and run `lf resume --task <id>`.
+For a provider that refuses a saved thread, have the stand-in write the
+transcript under `$CLAUDE_CONFIG_DIR/projects/<project>/<id>.jsonl` on
+`--session-id` and exit 1 on `--resume`. To exercise this with a Task, create
+and check out a disposable Task in a [private Machine](served-launches.md),
+end the stand-in, and run `lf resume --task <id>`.
 
 Opening a conversation in a private home registers a launchd job
 (`com.loopflow.server.<hash>`, plist in the home) that restarts `lf server

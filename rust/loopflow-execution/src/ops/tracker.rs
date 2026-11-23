@@ -152,8 +152,9 @@ impl Tracker {
     }
 
     /// A send carrying our own id cannot duplicate, so a lost reply repeats
-    /// it: Linear comments take the id we give them, and every link reads
-    /// what the tracker holds before it adds anything.
+    /// it: Linear comments take the id we give them, a relation reads what
+    /// the tracker holds before adding one, and a PR link updates the
+    /// attachment it recorded or finds the one Linear already has.
     pub fn idempotent(&self, kind: ActionKind) -> bool {
         match self {
             Self::Linear(_) => matches!(kind, ActionKind::Comment | ActionKind::Link),

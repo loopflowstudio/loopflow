@@ -338,11 +338,20 @@ as text instead.
   there lands outside the window.
 - Sidebar rows ignore hook clicks. Navigate with search:
   `field Search settings|context.paste`, then `return <window title>` opens
-  the first match. Search an exact catalog key; a word can match an earlier
-  row's description first.
-- Switches answer a hook click Off→On only; On→Off never calls the setter,
-  on this branch's rows and the old autosave switch alike. Drive Off with
-  `scripts/test_desktop.sh` suites, which use the bindings.
+  the first match. An exact catalog key or title ranks first. The form's
+  `NSClipView origin` in `views` shows the scroll; the window's minimum is
+  760×648, so only Agents (≈1040 pt) and Machines (≈900 pt) scroll.
+- Switch clicks toggle both ways on Settings rows (`yolo` On→Off wrote
+  `yolo: false`). The first click after a launch is often swallowed.
+- `field Inherited|<text>` types into the first text row with that
+  placeholder, and `return <title>` commits it. A refused value shows its
+  error as a `SelectionTextField` just below the row; the file stays as it was.
+- An explicit null in a text row shows as the placeholder `Explicit null`;
+  choice rows put it in a popup, which `views` cannot read.
+- Interrupted moves: with the server stopped, write
+  `$LF_HOME/settings-moves/<sha256 of [destination, key] JSON>.json` holding
+  `{"receipt": <a config.promote preview's review.receipt>, "undo": false}`,
+  then start it again. `config.scope` offers `resume` on that slot.
 - The Undo notice and the Refresh button are missing from `tree`, and the
   window's `undoManager` is not the one SwiftUI registers with. Click Refresh
   by position (the first click after a change is often swallowed).

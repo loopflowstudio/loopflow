@@ -133,6 +133,8 @@ struct ContextSettingsWorkflowTests {
                 navigation.search = query
                 #expect(navigation.matches(in: model.catalogue).contains { $0.id == key })
             }
+            navigation.search = "agent"
+            #expect(navigation.matches(in: model.catalogue).first?.id == "agent")
             navigation.search = "nothing matches this"
             let empty = try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView()
             _ = try empty.find(text: "No matching settings")

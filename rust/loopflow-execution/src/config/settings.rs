@@ -109,7 +109,7 @@ pub struct ResolvedSettings {
 }
 
 fn invalid(message: impl Into<String>) -> LoadError {
-    LoadError::InvalidGraph(message.into())
+    LoadError::InvalidSetting(message.into())
 }
 
 pub fn validate_scope(

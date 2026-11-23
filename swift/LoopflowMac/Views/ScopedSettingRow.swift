@@ -163,7 +163,7 @@ struct ScopedSettingRow: View {
                 await model.apply(.set(JSONValue.array(values.map(JSONValue.string)).settingsYAML), key: key, to: file, notices: notices, manager: manager)
             })
         } else if !usesYAML {
-            TextField(definition.title, text: input, prompt: Text(declared == .present(.null) ? "Cleared (null)" : "Inherited"))
+            TextField(definition.title, text: input, prompt: Text(declared == .present(.null) ? "Explicit null" : "Inherited"))
                 .focused($focused)
                 .onSubmit { commitText() }
                 .onChange(of: focused) { _, focused in if !focused { commitText() } }

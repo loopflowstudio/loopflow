@@ -59,13 +59,18 @@ extension SettingsNavigation {
         var rows = SettingsPane.allCases.map(SettingsMatch.pane)
         rows += [.autosave, .appearanceMode, .theme, .mobileAccess]
         rows += catalogue.filter { !$0.isContainer && $0.pane != .appearance }.map(SettingsMatch.setting)
-        return rows.filter { row in
+        let found = rows.filter { row in
             var terms = row.terms
             if case .theme = row, let theme = catalogue.first(where: { $0.key == row.key }) {
                 terms += SettingsMatch.setting(theme).terms
             }
             return terms.contains { $0.localizedCaseInsensitiveContains(query) }
         }
+        // A query naming a row's key or title exactly leads, so Return opens that row.
+        let named = { (row: SettingsMatch) in
+            [row.key, row.title].contains { $0?.caseInsensitiveCompare(query) == .orderedSame }
+        }
+        return found.filter(named) + found.filter { !named($0) }
     }
 }
 

@@ -327,8 +327,13 @@ impl<'a> Move<'a> {
     }
 }
 
+/// A journal already gone (a second Dismiss, another window's) is the same outcome.
 fn remove_journal(path: &Path) -> Result<()> {
-    std::fs::remove_file(path)?;
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
     crate::observe::invalidate_path(path);
     Ok(())
 }
@@ -471,6 +476,10 @@ mod tests {
             Outcome::Dismissed
         ));
         assert!(!record.exists());
+        assert!(matches!(
+            run(&mine, key, None, &Action::Dismiss).unwrap(),
+            Outcome::Dismissed
+        ));
         assert_eq!(contents(), diverged);
         std::fs::write(&record, journal_bytes).unwrap();
         assert_eq!(get(&mine, key).unwrap().value, true);

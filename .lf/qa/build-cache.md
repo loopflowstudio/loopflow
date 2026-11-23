@@ -10,12 +10,12 @@ lf makes a Task's checkout the way the real repository does, so drive that seque
 `git worktree add --quiet --force --detach ../<repo>.qa-ready <base>` (this is when the hook
 seeds), then `git worktree move --force` it to the Task path and
 `git switch --quiet --no-track -c <branch> <base>` inside it. The switch has a non-null previous
-HEAD, so it never re-seeds. `<repo>.ready` is usually the newest-ranked source on this Machine.
+HEAD, so it never re-seeds. A seeded `<repo>.ready` can serve as a source once Cargo builds there.
 `target/.loopflow-seed` and `build_cache.py status` (`seed     from …`) name the source.
 
-`clonefile(2)` keeps file mtimes but gives cloned directories the clone time; sources are
-ranked by `target/debug/.fingerprint` mtime, which moves only when a new unit directory
-appears (workspace unit hashes don't depend on the checkout path). Compare the ranks with
+`clonefile(2)` keeps file mtimes but gives cloned directories the clone time. The hook copies
+the source's `target/debug/.fingerprint` mtime and uses it to rank built siblings.
+Compare the ranks with
 `stat -f "%m %N" <tree>/target/debug/.fingerprint` across `git worktree list`.
 
 A Cargo build in a sibling holds its locks: run `git worktree add` while it builds to see the
@@ -29,6 +29,8 @@ sccache daemon starts, so there is nothing to stop.
 
 To exercise the busy-source skip on the real repository, start a build in a fresh seed and
 `touch` its `target/debug/.fingerprint` so it ranks first; the next `git worktree add` must name
-another source. For the reverse race, hold a seed's locks from Python
+another built source, or leave the target absent if all built sources are busy. Unbuilt seeds
+should still have no Cargo lock files under `target/debug`. For the reverse race, hold a
+built source's locks from Python
 (`with build_cache._quiescent(Path("target/debug"))`, `sys.path` pointed at `scripts/`) and run
 `cargo build -v` there: it prints `Blocking waiting for file lock` until the block exits.

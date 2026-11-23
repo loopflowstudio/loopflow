@@ -141,7 +141,7 @@ def _clone(source: Path, destination: Path) -> None:
 
 @contextmanager
 def _quiescent(debug: Path):
-    """Hold Cargo's locks, creating them when a seed has never been built."""
+    """Hold the built target's Cargo locks while cloning."""
     with ExitStack() as locks:
         try:
             for name in CARGO_LOCKS:
@@ -154,19 +154,19 @@ def _quiescent(debug: Path):
 
 
 def _seed_sources(root: Path) -> list[Path]:
-    """Sibling worktrees holding every seed entry, most recently built first."""
-    candidates = [
-        tree
-        for tree in map(Path, _worktree_roots(root))
-        if tree != root and all((tree / "target/debug" / entry).is_dir() for entry in SEED_ENTRIES)
-    ]
-    # An unbuilt seed carries its source's mtime; at a tie the source wins.
+    """Built siblings, newest fingerprint directory first."""
+    candidates = []
+    for tree in map(Path, _worktree_roots(root)):
+        if tree == root:
+            continue
+        debug = tree / "target/debug"
+        if any((debug / name).is_file() for name in CARGO_LOCKS) and all(
+            (debug / entry).is_dir() for entry in SEED_ENTRIES
+        ):
+            candidates.append(tree)
     return sorted(
         candidates,
-        key=lambda tree: (
-            (tree / "target/debug/.fingerprint").stat().st_mtime_ns,
-            not (tree / "target" / SEED_RECORD).exists(),
-        ),
+        key=lambda tree: (tree / "target/debug/.fingerprint").stat().st_mtime_ns,
         reverse=True,
     )
 

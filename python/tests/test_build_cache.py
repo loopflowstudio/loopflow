@@ -458,25 +458,23 @@ def test_new_worktree_reuses_a_siblings_dependencies_and_rebuilds_its_own(cargo_
     assert _cargo_build(tree) == {"build-script-build": True, "scripted": True, "app": False}
 
 
-def test_a_building_sibling_is_never_cloned(cargo_repo):
+def test_new_worktree_starts_cold_when_only_an_unbuilt_seed_is_idle(cargo_repo):
     install_hook(cargo_repo)
+    unbuilt = _add_worktree(cargo_repo, "unbuilt")
+    assert build_cache.seed_record(unbuilt)["source"] == str(cargo_repo.resolve())
     lock = cargo_repo / "target/debug/.cargo-build-lock"
-    assert lock.exists()
     with lock.open() as held:
         fcntl.flock(held, fcntl.LOCK_EX)
         tree = _add_worktree(cargo_repo, "new tree")
         assert not (tree / "target").exists()
+        assert not list((unbuilt / "target/debug").glob(".cargo*lock"))
     assert _cargo_build(tree)["scripted"] is False
     assert "seed     none" in _cache_command(tree, "status").stdout
 
 
-def test_first_build_waits_while_a_freshly_seeded_sibling_is_locked(cargo_repo):
-    install_hook(cargo_repo)
-    tree = _add_worktree(cargo_repo, "seeded")
-    debug = tree / "target/debug"
-    assert (debug / ".fingerprint").is_dir()
-    assert not list(debug.glob(".cargo*lock"))
-    (tree / "src/main.rs").write_text('fn main() { println!("built in sibling"); }\n')
+def test_cargo_waits_while_a_built_source_is_locked(cargo_repo):
+    debug = cargo_repo / "target/debug"
+    (cargo_repo / "src/main.rs").write_text('fn main() { println!("rebuilt"); }\n')
 
     with ExitStack() as processes:
         with build_cache._quiescent(debug) as idle:
@@ -484,7 +482,7 @@ def test_first_build_waits_while_a_freshly_seeded_sibling_is_locked(cargo_repo):
             cargo = processes.enter_context(
                 subprocess.Popen(
                     ["cargo", "build", "--offline", "--color", "never"],
-                    cwd=tree,
+                    cwd=cargo_repo,
                     stdin=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -494,9 +492,8 @@ def test_first_build_waits_while_a_freshly_seeded_sibling_is_locked(cargo_repo):
             assert readable, "Cargo did not report its lock wait"
             message = cargo.stderr.readline()
             assert "Blocking waiting for file lock" in message, message
-            assert not (debug / "app").exists()
         assert cargo.wait(timeout=60) == 0
-    assert subprocess.check_output([debug / "app"], text=True).strip() == "built in sibling"
+    assert subprocess.check_output([debug / "app"], text=True).strip() == "rebuilt"
 
 
 def test_a_failed_clone_leaves_no_target(cargo_repo, monkeypatch):
@@ -522,14 +519,20 @@ def test_an_existing_target_is_never_replaced(cargo_repo):
     assert list((tree / "target").iterdir()) == []
 
 
-def test_an_unbuilt_seed_ranks_as_old_as_its_source(cargo_repo):
-    # Directory clones get fresh mtimes; a seed that never built must not
-    # outrank the sibling that last did.
-    built = _add_worktree(cargo_repo, "built")
-    _cargo_build(built)
+def test_a_seeded_worktree_can_seed_others_after_cargo_builds_in_it(cargo_repo):
     install_hook(cargo_repo)
-    _add_worktree(cargo_repo, "seeded")
-    later = _add_worktree(cargo_repo, "later")
+    built = _add_worktree(cargo_repo, "built")
+    assert build_cache.seed_record(built)["source"] == str(cargo_repo.resolve())
+    _cargo_build(built)
+    with (cargo_repo / "target/debug/.cargo-build-lock").open() as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        unbuilt = _add_worktree(cargo_repo, "unbuilt")
+        assert build_cache.seed_record(unbuilt)["source"] == str(built.resolve())
+        fingerprint = "target/debug/.fingerprint"
+        source_mtime = (built / fingerprint).stat().st_mtime_ns
+        assert (unbuilt / fingerprint).stat().st_mtime_ns == source_mtime
+        later = _add_worktree(cargo_repo, "later")
     assert json.loads(_cache_command(later, "status", "--json").stdout)["seed"]["source"] == str(
         built.resolve()
     )
+    assert not list((unbuilt / "target/debug").glob(".cargo*lock"))

@@ -350,8 +350,10 @@ git worktree add --detach ../loopflow.my-change HEAD && cd ../loopflow.my-change
 cargo build -v -p loopflow --bin lf
 ```
 
-The hook tries siblings in order of `.fingerprint` directory mtime, newest
-first. It holds Cargo's locks while cloning `.fingerprint`, `build` and `deps`.
+Only siblings where Cargo has run can seed a worktree. A freshly seeded
+checkout becomes eligible when Cargo creates its lock files. The hook tries
+built targets in order of `.fingerprint` directory mtime, newest first.
+It holds Cargo's locks while cloning `.fingerprint`, `build` and `deps`.
 A build starting in the source waits until the clone finishes. Each worktree
 builds its own top-level binaries and keeps its own incremental state. If every
 source is busy or the filesystem lacks copy-on-write clones, Cargo builds cold.

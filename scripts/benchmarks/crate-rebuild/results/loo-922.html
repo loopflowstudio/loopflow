@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>LOO-922 seeded worktrees</title>
+<style>
+body {font:16px/1.5 system-ui,sans-serif;max-width:1050px;margin:48px auto;
+padding:0 24px;color:#20252b}
+h1 {font-size:32px;letter-spacing:-.03em} h2 {margin-top:40px;font-size:22px}
+code,td {font-variant-numeric:tabular-nums} code {font-size:.9em}
+table {width:100%;border-collapse:collapse;margin:16px 0 28px}
+th,td {padding:10px;border-bottom:1px solid #ddd;text-align:left}
+thead {background:#f4f5f6} small {color:#626970;white-space:nowrap} a {color:#145b90}
+</style>
+<h1>LOO-922: a new worktree seeded from a sibling's target, against a cold one</h1>
+<p>3 cohorts alternating which arm goes first. Each sample adds a
+worktree through the installed post-checkout hook, builds <code>lf</code>, then passes
+<code>lf::tests::task_deletion_accepts_issue_identity</code>. The cold arm runs <code>rm -rf target</code>
+right after the add, and that removal counts toward its add. Values are
+<strong>median [minimum–maximum]</strong>; lower is better.</p>
+<p>Revision <code>bb939942b04d22882b62c7d97e0b6fd6cddaecf9</code>. The Machine's shared cache and Cargo
+jobs. One-minute load average 17–103 on 16 logical
+CPUs from other agents; elapsed time moves with it, CPU-seconds less.</p>
+<h2>Elapsed seconds</h2><table><thead><tr><th>Step</th><th>Seeded</th><th>Cold</th><th>Change</th></tr></thead><tbody><tr><th><code>git worktree add</code></th><td>1.8 <small>[1.3–4.8]</small></td><td>2.2 <small>[1.0–3.7]</small></td><td>-0.4 (-18%)</td></tr><tr><th><code>cargo build -p loopflow --bin lf</code></th><td>107.5 <small>[62.2–235.7]</small></td><td>253.2 <small>[236.7–307.3]</small></td><td>-145.8 (-58%)</td></tr><tr><th>Focused <code>cargo test -p loopflow --lib</code></th><td>104.2 <small>[63.6–307.1]</small></td><td>179.0 <small>[166.1–321.9]</small></td><td>-74.9 (-42%)</td></tr><tr><th>Through the passing test</th><td>213.4 <small>[127.1–547.6]</small></td><td>420.3 <small>[417.9–633.0]</small></td><td>-206.9 (-49%)</td></tr></tbody></table>
+<h2>CPU-seconds</h2><table><thead><tr><th>Step</th><th>Seeded</th><th>Cold</th><th>Change</th></tr></thead><tbody><tr><th><code>cargo build -p loopflow --bin lf</code></th><td>155.3 <small>[113.9–227.7]</small></td><td>212.6 <small>[196.5–317.4]</small></td><td>-57.3 (-27%)</td></tr><tr><th>Focused <code>cargo test -p loopflow --lib</code></th><td>185.1 <small>[107.2–227.8]</small></td><td>252.8 <small>[250.3–288.0]</small></td><td>-67.7 (-27%)</td></tr><tr><th>Through the passing test</th><td>340.4 <small>[221.1–455.5]</small></td><td>463.0 <small>[449.3–605.5]</small></td><td>-122.5 (-26%)</td></tr></tbody></table>
+<h2>Units Cargo compiled</h2><table><thead><tr><th>Step</th><th>Seeded</th><th>Cold</th><th>Change</th></tr></thead><tbody><tr><th><code>cargo build -p loopflow --bin lf</code></th><td>7 <small>[7–31]</small></td><td>256 <small>[256–256]</small></td><td>-249 (-97%)</td></tr><tr><th>Focused <code>cargo test -p loopflow --lib</code></th><td>8 <small>[8–16]</small></td><td>78 <small>[78–78]</small></td><td>-70 (-90%)</td></tr></tbody></table>
+<h2>Units Cargo found fresh</h2><table><thead><tr><th>Step</th><th>Seeded</th><th>Cold</th><th>Change</th></tr></thead><tbody><tr><th><code>cargo build -p loopflow --bin lf</code></th><td>249 <small>[225–249]</small></td><td>0 <small>[0–0]</small></td><td></td></tr><tr><th>Focused <code>cargo test -p loopflow --lib</code></th><td>292 <small>[284–292]</small></td><td>222 <small>[222–222]</small></td><td>+70 (+32%)</td></tr></tbody></table>
+<h2>Target bytes written, GiB</h2><table><thead><tr><th>Step</th><th>Seeded</th><th>Cold</th><th>Change</th></tr></thead><tbody><tr><th><code>cargo build -p loopflow --bin lf</code></th><td>1.73 <small>[1.65–1.92]</small></td><td>2.03 <small>[2.03–2.40]</small></td><td>-0.30 (-15%)</td></tr><tr><th>Focused <code>cargo test -p loopflow --lib</code></th><td>2.52 <small>[2.51–2.62]</small></td><td>2.85 <small>[2.85–2.93]</small></td><td>-0.33 (-12%)</td></tr><tr><th>Through the passing test</th><td>4.25 <small>[4.17–4.53]</small></td><td>4.89 <small>[4.88–5.33]</small></td><td>-0.64 (-13%)</td></tr></tbody></table>
+<p>Allocated bytes (st_blocks × 512) of regular files under target/debug that the command created or replaced, by inode and mtime against a walk before it; hard links count once. In a seeded target every other file still shares its blocks with the source&#x27;s clone. The method doesn't depend on the source
+keeping its copy; APFS private-size counters would. After the focused test, a median
+52% of a seeded target's allocated bytes were still the files the seed
+cloned.</p>
+<h2>Largest process RSS, GiB</h2><table><thead><tr><th>Step</th><th>Seeded</th><th>Cold</th><th>Change</th></tr></thead><tbody><tr><th><code>cargo build -p loopflow --bin lf</code></th><td>3.17 <small>[3.14–3.18]</small></td><td>2.09 <small>[2.05–3.20]</small></td><td>+1.08 (+52%)</td></tr><tr><th>Focused <code>cargo test -p loopflow --lib</code></th><td>3.10 <small>[3.07–3.10]</small></td><td>3.07 <small>[3.07–3.13]</small></td><td>+0.03 (+1%)</td></tr><tr><th>Through the passing test</th><td>3.17 <small>[3.14–3.18]</small></td><td>3.07 <small>[3.07–3.20]</small></td><td>+0.10 (+3%)</td></tr></tbody></table>
+<h2>Peak process-tree RSS, GiB</h2><table><thead><tr><th>Step</th><th>Seeded</th><th>Cold</th><th>Change</th></tr></thead><tbody><tr><th><code>cargo build -p loopflow --bin lf</code></th><td>4.06 <small>[3.80–4.08]</small></td><td>2.14 <small>[2.14–3.99]</small></td><td>+1.91 (+89%)</td></tr><tr><th>Focused <code>cargo test -p loopflow --lib</code></th><td>3.12 <small>[2.97–3.20]</small></td><td>3.13 <small>[3.02–3.15]</small></td><td>-0.00 (-0%)</td></tr><tr><th>Through the passing test</th><td>4.06 <small>[3.80–4.08]</small></td><td>3.13 <small>[3.02–3.99]</small></td><td>+0.93 (+30%)</td></tr></tbody></table>
+<h2>Seed sources</h2><p>The newest sibling target with no Cargo running, as the hook
+picked it at each add. The probe removes its own worktrees after each sample, so none
+seeds a later one.</p><ul><li><code>loopflow.43bf9b-remove-chapters-krs</code> at <code>10016f1f66</code>, 140 commits from the measured revision</li><li><code>loopflow.43bf9b-remove-chapters-krs</code> at <code>ecf604d8c0</code>, 143 commits from the measured revision</li><li><code>loopflow.b87204-visual-redesign-of</code> at <code>f6a35cb6f0</code>, 18 commits from the measured revision</li></ul>
+<p>Compiler: rustc 1.98.1 (48a229cea 2026-09-01) (Homebrew).
+Machine: arm64, Darwin
+25.6.0. Shared-cache counters include other agents' compiles and
+are not recorded.</p>
+<p><a href="loo-922.json">Receipts</a> · <a href="../README.md#seeded-worktrees">Method</a></p>
+</html>

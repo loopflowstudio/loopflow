@@ -12,3 +12,9 @@
   opt-in, and the probe showed −58% CPU on a fresh `lf` build. An env-var
   opt-out was dropped in concept review as a duplicate of deleting the
   directory.
+- The seeded `lf` build's largest process was 3.14–3.18 GB in all three
+  samples; cold was 2.05–2.09 GB in two of three (3.20 in cohort 1). A guess:
+  the `loopflow` lib compile hits sccache in some cold samples but misses after
+  a seed from another revision, whose registry artifacts give different keys.
+  The probe can't tell, because shared-cache counters include other agents.
+  A private-cache rerun of one seeded sample would show it.

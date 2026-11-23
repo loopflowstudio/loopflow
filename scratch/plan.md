@@ -171,16 +171,37 @@ and build scripts" becomes the seeded behaviour plus what still compiles.
    --bin lf` printed 7 `Compiling` lines, 76.5 s wall, 85 CPU-s, 2.24 GB RSS,
    and the built `lf --version` named this checkout's commit. Cargo agreed with
    the probe; nothing in the plan changed.
-2. **Measured arm (next).** Write `scripts/benchmarks/crate-rebuild/seed_probe.py`
-   (the README already documents it and `report.py --seed-probe`; neither
-   exists yet). Each sample: `git worktree add` from a fixed base, then
-   `cargo build -p loopflow --bin lf` and one focused
-   `cargo test -p loopflow --lib <filter>`, seeded vs `rm -rf target` after
-   the add, three alternating samples each. Record wall, CPU, peak RSS,
-   compiled/fresh unit counts from `-v`, the seed source, and rewritten bytes
-   by one stated method (open choice in `scratch/questions.md`). Render
-   `results/loo-922.html` and paste the table into this plan.
-3. **Docs.** Written ahead of the code: `scripts/testing.md` (Shared
+2. **Done: measured arm.** `seed_probe.py` and `report.py --seed-probe` are in;
+   [results/loo-922.html](../scripts/benchmarks/crate-rebuild/results/loo-922.html).
+   Run 2026-11-22 at bb939942b0, 3 cohorts, load average 17–103 on 16 CPUs.
+   Median [min–max]:
+
+   | step | seeded | cold |
+   |---|---|---|
+   | `lf` build, wall s | 107.5 [62.2–235.7] | 253.2 [236.7–307.3] |
+   | `lf` build, CPU s | 155.3 [113.9–227.7] | 212.6 [196.5–317.4] |
+   | `lf` build, compiled / fresh | 7 [7–31] / 249 | 256 / 0 |
+   | focused test, wall s | 104.2 [63.6–307.1] | 179.0 [166.1–321.9] |
+   | focused test, CPU s | 185.1 [107.2–227.8] | 252.8 [250.3–288.0] |
+   | focused test, compiled / fresh | 8 [8–16] / 292 | 78 / 222 |
+   | add through passing test, wall s | 213.4 [127.1–547.6] | 420.3 [417.9–633.0] |
+   | add through passing test, CPU s | 340.4 | 463.0 (−26%) |
+   | target bytes written, GiB | 4.25 | 4.89 (−13%) |
+   | largest process RSS, `lf` build, GiB | 3.17 [3.14–3.18] | 2.09 [2.05–3.20] |
+
+   What it taught, for slice 3's docs:
+   - Seeds came from siblings 18–143 commits away. The one at 140 commits
+     recompiled 31 units, not 7 (Cargo.lock drift); the doc's "7 Compiling
+     lines" is the common case, not a promise.
+   - Bytes: the `lf` build wrote 1.73 GiB into a seeded target vs 2.03 cold,
+     and after the test 52% of the seeded target's allocated bytes were still
+     the cloned files. testing.md's "about 40% had diverged" came from the
+     earlier probe's method; replace it with these numbers.
+   - The seeded `lf` build's largest process was 3.1 GB in all three samples;
+     cold was 2.05 GB in two of three. Unexplained; see questions.md.
+   - The seeded focused test cost 185 CPU-s, close to the "about 200" in
+     testing.md; that sentence holds.
+3. **Docs (next).** Written ahead of the code: `scripts/testing.md` (Shared
    compilation cache: `seed` status line, "New worktrees start warm", hook
    paragraph, `lf wt prune --builds` overcount) and
    `scripts/benchmarks/crate-rebuild/README.md` (`seed_probe.py` commands,

@@ -40,7 +40,8 @@ pub struct TaskConversation {
 /// Session's summary asks it of one, so both read one definition.
 pub(super) fn task_conversation_here_sql(s: &str, t: &str, c: &str) -> String {
     format!(
-        "({open} AND {s}.primary_scope='task' AND {s}.completed_at IS NULL AND {s}.interactive=1
+        "({open} AND EXISTS(SELECT 1 FROM task_primary_sessions tp WHERE tp.session_id={s}.id AND tp.task_id={t}.id)
+          AND {s}.completed_at IS NULL AND {s}.interactive=1
           AND {s}.moved_to_machine_id IS NULL
           AND rtrim({s}.cwd,'/')=rtrim({c}.worktree,'/'))",
         open = super::durable::task_open_sql(t),
@@ -56,9 +57,10 @@ impl SqliteStore {
         let mut statement = conn.prepare_cached(&format!(
             "SELECT s.id,t.id,s.agent_process_id,s.agent_ended_at,s.agent_exit_code,
                 s.agent_pid,s.agent_os_started_at,s.starts_since_turn,s.last_started_at,s.provider
-             FROM agent_sessions s INDEXED BY agent_sessions_primary_task
-             JOIN tasks t ON t.id=s.task_id
+             FROM task_primary_sessions tp
+             JOIN tasks t ON t.id=tp.task_id
              JOIN task_checkouts c ON c.task_id=t.id
+             JOIN agent_sessions s ON s.id=tp.session_id
              WHERE {here}
              ORDER BY t.updated_at DESC,t.id",
             here = task_conversation_here_sql("s", "t", "c"),

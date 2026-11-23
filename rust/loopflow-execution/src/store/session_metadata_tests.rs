@@ -32,7 +32,12 @@ fn session_inventory_distinguishes_primary_sessions_from_unassigned_tasks() {
             .unwrap();
             if let Some(primary) = primary {
                 conn.execute(
-                    "UPDATE agent_sessions SET primary_scope='task',task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id=?2",
+                    "UPDATE agent_sessions SET task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id=?2",
+                    params![task.as_str(), primary],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
                     params![task.as_str(), primary],
                 )
                 .unwrap();
@@ -71,13 +76,19 @@ fn input_replacement_retains_workspace_and_task_membership() {
         .unwrap();
         conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
         conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-        conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1',1)", params![task.as_str(), project.as_str()]).unwrap();
+        conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,workspace_slug,updated_at,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','Proof','','proof',1,1)", params![task.as_str(), project.as_str()]).unwrap();
         conn.execute(
             "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
             params![task.as_str(), session.cwd.to_str().unwrap()],
         )
         .unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET task_id=?1,wave_id=?2 WHERE id=?3",
+            params![task.as_str(), wave, session.id],
+        )
+        .unwrap();
     }
+    let session = store.session(&session.id).unwrap().unwrap();
     assert_eq!(
         crate::store::task_work::task_work(&store, &task)
             .unwrap()
@@ -109,7 +120,7 @@ fn input_replacement_retains_workspace_and_task_membership() {
         crate::store::sessions::replace_session_input(&store, session.captured, next, None)
             .unwrap();
     assert_eq!(replacement.cwd, session.cwd);
-    assert_eq!(replacement.task_id, None);
+    assert_eq!(replacement.task_id, Some(task.clone()));
     assert_eq!(
         crate::store::task_work::task_work(&store, &task)
             .unwrap()

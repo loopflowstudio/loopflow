@@ -272,9 +272,10 @@ row, seeded with a log of its current AgentSession, which stays in its history.
 Scope locks serialize admission. Primary grants no Graph, review or process authority, and
 the Wave's goal and memory reach it as ordinary Wave context.
 
-A Task's primary is one of its own conversations: `primary_scope='task'` on
-the row whose `task_id` names the Task, so it stays a Task member. Choosing
-another moves the mark. `lf resume --task ISSUE` keeps the selected primary. Without one, it
+A Task's primary is one of its own conversations, named by its row in
+`task_primary_sessions`, so it stays a Task member; reads report its scope as
+`task`. Choosing another replaces the row. Released lf reads the same table;
+LOO-877 moves the mark onto `primary_scope='task'`. `lf resume --task ISSUE` keeps the selected primary. Without one, it
 selects an unfinished interactive member by latest native human input, falling
 back to interactive opening and creation time; it creates one when none exists.
 `lf session bind` selects the primary explicitly. Opening an exact Session leaves

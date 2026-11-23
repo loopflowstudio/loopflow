@@ -372,9 +372,9 @@ fn task_checkout_prepares_the_conversation_and_manual_launch_reuses_it() {
         };
         let stored: (Option<String>, Option<String>) = db
             .query_row(
-                "SELECT p.id,c.worktree FROM tasks
+                "SELECT p.session_id,c.worktree FROM tasks
                  LEFT JOIN task_checkouts c ON c.task_id=tasks.id
-                 LEFT JOIN agent_sessions p ON p.task_id=tasks.id AND p.primary_scope='task' WHERE tasks.id=?1",
+                 LEFT JOIN task_primary_sessions p ON p.task_id=tasks.id WHERE tasks.id=?1",
                 [id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -401,7 +401,7 @@ fn task_checkout_prepares_the_conversation_and_manual_launch_reuses_it() {
         let session = ensured["id"].as_str().unwrap().to_owned();
         let primary: String = db
             .query_row(
-                "SELECT id FROM agent_sessions WHERE task_id=?1 AND primary_scope='task'",
+                "SELECT session_id FROM task_primary_sessions WHERE task_id=?1",
                 [id],
                 |row| row.get(0),
             )
@@ -2886,7 +2886,7 @@ fn promotion_background_run_does_not_claim_primary() {
     let primary: Option<String> = fixture
         .db()
         .query_row(
-            "SELECT id FROM agent_sessions WHERE task_id=?1 AND primary_scope='task'",
+            "SELECT session_id FROM task_primary_sessions WHERE task_id=?1",
             [task],
             |row| row.get(0),
         )

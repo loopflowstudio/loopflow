@@ -593,8 +593,12 @@ fn the_pass_starts_what_the_outlook_says_the_server_starts() {
         params![task.as_str(), checkout],
     );
     execute(
-        "UPDATE agent_sessions SET primary_scope='task',interactive=1,cwd=?2 WHERE id=?1",
+        "UPDATE agent_sessions SET interactive=1,cwd=?2 WHERE id=?1",
         params![session.as_str(), checkout],
+    );
+    execute(
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+        params![task.as_str(), session.as_str()],
     );
     // What the Session's outlook says, and whether the pass lists it.
     let read = || {
@@ -2031,7 +2035,7 @@ impl ListFilters {
         )
         .unwrap();
         db.execute(
-            "UPDATE agent_sessions SET primary_scope='task' WHERE id='task-primary' AND task_id=?1",
+            "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,'task-primary')",
             [task.as_str()],
         )
         .unwrap();

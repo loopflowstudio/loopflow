@@ -83,10 +83,12 @@ BEGIN UPDATE tasks SET planning_completed=(NEW.planning_state IS 'completed') WH
 -- leaving: tracker_projects.task_order_json LOO-877
 -- leaving: pm_projects.task_order_json LOO-877
 
--- A Task's primary conversation is marked on its own row, as a repository's
--- and a Wave's are: `primary_scope='task'`, and the row's `task_id` names the
--- Task, so "which Task" is written once. SQLite cannot alter a CHECK, so the
--- table is rebuilt with its column order, indexes and triggers.
+-- A Task's primary conversation will be marked on its own row, as a
+-- repository's and a Wave's are: `primary_scope='task'`, with the row's
+-- `task_id` naming the Task. Released lf reads and writes
+-- `task_primary_sessions`, so it stays the primary's home until LOO-877 moves
+-- writers to the mark; the CHECK accepts it now. SQLite cannot alter a CHECK,
+-- so the table is rebuilt with its column order, indexes and triggers.
 -- The same rebuild drops `work_source='inherited'`, unwritten since
 -- 2026-10-07: those rows declared their Task through the Session that started
 -- them, which is `declared`.
@@ -116,11 +118,11 @@ CREATE TABLE agent_sessions_task_primary (
     starts_since_turn INTEGER NOT NULL DEFAULT 0,
     last_started_at INTEGER,
     start_failure TEXT,
+    agent_socket TEXT,
     CHECK (primary_scope IS NOT 'task' OR task_id IS NOT NULL)
 );
-INSERT INTO agent_sessions_task_primary(id,current_capture,title,title_source,completed_at,created_at,request,interactive,repo,provider_thread,task_id,wave_id,work_source,bound_at,input_published,cwd,skill,provider,model,primary_scope,agent_process_id,transport_lf_process_id,fence_locator,moved_to_machine_id,held_terminal_id,skill_version,opened_at,transition,departed_attachment,departure,agent_started_at,agent_pid,agent_os_started_at,agent_ended_at,agent_exit_code,agent_launcher_lf_process_id,agent_spawn_state,agent_command,agent_interactive,agent_endpoint,agent_inbox,attachment_token,attached_lf_process_id,attached_pid,attached_os_started_at,attached_terminal_id,starts_since_turn,last_started_at,start_failure)
-SELECT s.id,s.current_capture,s.title,s.title_source,s.completed_at,s.created_at,s.request,s.interactive,s.repo,s.provider_thread,s.task_id,s.wave_id,CASE s.work_source WHEN 'inherited' THEN 'declared' ELSE s.work_source END,s.bound_at,s.input_published,s.cwd,s.skill,s.provider,s.model,CASE WHEN s.primary_scope IS NULL AND EXISTS(SELECT 1 FROM task_primary_sessions tps
-        WHERE tps.session_id=s.id AND tps.task_id IS s.task_id) THEN 'task' ELSE s.primary_scope END,s.agent_process_id,s.transport_lf_process_id,s.fence_locator,s.moved_to_machine_id,s.held_terminal_id,s.skill_version,s.opened_at,s.transition,s.departed_attachment,s.departure,s.agent_started_at,s.agent_pid,s.agent_os_started_at,s.agent_ended_at,s.agent_exit_code,s.agent_launcher_lf_process_id,s.agent_spawn_state,s.agent_command,s.agent_interactive,s.agent_endpoint,s.agent_inbox,s.attachment_token,s.attached_lf_process_id,s.attached_pid,s.attached_os_started_at,s.attached_terminal_id,s.starts_since_turn,s.last_started_at,s.start_failure
+INSERT INTO agent_sessions_task_primary(id,current_capture,title,title_source,completed_at,created_at,request,interactive,repo,provider_thread,task_id,wave_id,work_source,bound_at,input_published,cwd,skill,provider,model,primary_scope,agent_process_id,transport_lf_process_id,fence_locator,moved_to_machine_id,held_terminal_id,skill_version,opened_at,transition,departed_attachment,departure,agent_started_at,agent_pid,agent_os_started_at,agent_ended_at,agent_exit_code,agent_launcher_lf_process_id,agent_spawn_state,agent_command,agent_interactive,agent_endpoint,agent_inbox,attachment_token,attached_lf_process_id,attached_pid,attached_os_started_at,attached_terminal_id,starts_since_turn,last_started_at,start_failure,agent_socket)
+SELECT s.id,s.current_capture,s.title,s.title_source,s.completed_at,s.created_at,s.request,s.interactive,s.repo,s.provider_thread,s.task_id,s.wave_id,CASE s.work_source WHEN 'inherited' THEN 'declared' ELSE s.work_source END,s.bound_at,s.input_published,s.cwd,s.skill,s.provider,s.model,s.primary_scope,s.agent_process_id,s.transport_lf_process_id,s.fence_locator,s.moved_to_machine_id,s.held_terminal_id,s.skill_version,s.opened_at,s.transition,s.departed_attachment,s.departure,s.agent_started_at,s.agent_pid,s.agent_os_started_at,s.agent_ended_at,s.agent_exit_code,s.agent_launcher_lf_process_id,s.agent_spawn_state,s.agent_command,s.agent_interactive,s.agent_endpoint,s.agent_inbox,s.attachment_token,s.attached_lf_process_id,s.attached_pid,s.attached_os_started_at,s.attached_terminal_id,s.starts_since_turn,s.last_started_at,s.start_failure,s.agent_socket
 FROM agent_sessions s;
 DROP TABLE agent_sessions;
 ALTER TABLE agent_sessions_task_primary RENAME TO agent_sessions;
@@ -137,9 +139,8 @@ CREATE UNIQUE INDEX agent_sessions_primary_repository ON agent_sessions(repo)
     WHERE primary_scope = 'repository' AND completed_at IS NULL;
 CREATE UNIQUE INDEX agent_sessions_primary_wave ON agent_sessions(wave_id)
     WHERE primary_scope = 'wave' AND completed_at IS NULL;
--- A Task has one primary, finished or not: choosing another moves the mark,
--- clearing the old one first. The index becomes unique in LOO-877, with the
--- drop of `task_primary_sessions`, once no older writer can race it.
+-- A Task has one primary, finished or not. The index becomes unique in
+-- LOO-877, with the drop of `task_primary_sessions`.
 CREATE INDEX agent_sessions_primary_task ON agent_sessions(task_id)
     WHERE primary_scope = 'task';
 CREATE INDEX agent_sessions_provider_thread ON agent_sessions(provider_thread)
@@ -318,31 +319,3 @@ BEGIN SELECT RAISE(ABORT,'Captured event belongs to another Session'); END;
 CREATE TRIGGER validate_session_capture_insert BEFORE INSERT ON agent_sessions
 WHEN NEW.current_capture IS NOT NULL AND NOT EXISTS(SELECT 1 FROM session_events WHERE seq=NEW.current_capture AND session_id=NEW.id AND kind='captured')
 BEGIN SELECT RAISE(ABORT,'Captured event belongs to another Session'); END;
--- Released lf still reads and writes `task_primary_sessions`. Until the
--- contract drops it, a primary it chooses takes the mark (and the Task, when
--- its Session had none), and a mark this lf moves updates its row.
-CREATE TRIGGER task_primary_sessions_mark_insert AFTER INSERT ON task_primary_sessions
-BEGIN
-    UPDATE agent_sessions SET primary_scope=NULL
-    WHERE primary_scope='task' AND task_id=NEW.task_id AND id IS NOT NEW.session_id;
-    UPDATE agent_sessions SET primary_scope='task', task_id=NEW.task_id,
-        wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=NEW.task_id)
-    WHERE id=NEW.session_id AND primary_scope IS NULL AND (task_id IS NULL OR task_id=NEW.task_id);
-END;
-CREATE TRIGGER task_primary_sessions_mark_update AFTER UPDATE ON task_primary_sessions
-BEGIN
-    UPDATE agent_sessions SET primary_scope=NULL
-    WHERE primary_scope='task' AND task_id=NEW.task_id AND id IS NOT NEW.session_id;
-    UPDATE agent_sessions SET primary_scope='task', task_id=NEW.task_id,
-        wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=NEW.task_id)
-    WHERE id=NEW.session_id AND primary_scope IS NULL AND (task_id IS NULL OR task_id=NEW.task_id);
-END;
-CREATE TRIGGER agent_sessions_task_primary_row AFTER UPDATE OF primary_scope ON agent_sessions
-WHEN NEW.primary_scope IS NOT OLD.primary_scope AND (NEW.primary_scope IS 'task' OR OLD.primary_scope IS 'task')
-BEGIN
-    DELETE FROM task_primary_sessions WHERE session_id=OLD.id
-        OR (NEW.primary_scope IS 'task' AND task_id=NEW.task_id);
-    INSERT INTO task_primary_sessions(task_id,session_id)
-    SELECT NEW.task_id, NEW.id WHERE NEW.primary_scope IS 'task';
-END;
--- leaving: task_primary_sessions LOO-877

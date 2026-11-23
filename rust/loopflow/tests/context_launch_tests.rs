@@ -1256,7 +1256,7 @@ fn task_conversation_agent(db: &Path, task: &str) -> Option<(String, Option<i64>
         .unwrap()
         .query_row(
             "SELECT s.agent_process_id,s.agent_pid,s.starts_since_turn FROM agent_sessions s
-             WHERE s.task_id=?1 AND s.primary_scope='task' AND s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL",
+             WHERE s.id=(SELECT session_id FROM task_primary_sessions WHERE task_id=?1) AND s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL",
             [task],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
@@ -1448,7 +1448,7 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
         .unwrap()
         .query_row(
             "SELECT s.agent_process_id,s.starts_since_turn FROM agent_sessions s
-             WHERE s.task_id=?1 AND s.primary_scope='task'",
+             WHERE s.id=(SELECT session_id FROM task_primary_sessions WHERE task_id=?1)",
             [id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -1512,7 +1512,7 @@ fn a_task_conversation_whose_agent_is_not_installed_says_why_it_did_not_start() 
             .unwrap()
             .query_row(
                 "SELECT s.start_failure FROM agent_sessions s
-                 WHERE s.task_id=?1 AND s.primary_scope='task'",
+                 WHERE s.id=(SELECT session_id FROM task_primary_sessions WHERE task_id=?1)",
                 [id],
                 |row| row.get(0),
             )

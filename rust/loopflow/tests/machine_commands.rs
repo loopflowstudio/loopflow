@@ -1017,12 +1017,12 @@ fn task_run_open_resolves_remote_selectors_before_opening_locally() {
     )
     .unwrap();
     db.execute(
-        "UPDATE agent_sessions SET primary_scope=NULL WHERE primary_scope='task' AND task_id=?1 AND id!='remote-selected-primary'",
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,'remote-selected-primary')",
         [target.task.id.as_str()],
     )
     .unwrap();
     db.execute(
-        "UPDATE agent_sessions SET primary_scope='task',task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id='remote-selected-primary'",
+        "UPDATE agent_sessions SET task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id='remote-selected-primary'",
         [target.task.id.as_str()],
     )
     .unwrap();

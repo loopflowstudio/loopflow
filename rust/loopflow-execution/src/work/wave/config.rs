@@ -135,7 +135,10 @@ fn read_wave_file(repo: &Path, name: &str) -> Result<Option<(PathBuf, Mapping)>,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(source) => return Err(WaveConfigError::Read { path, source }),
     }
-    let path = goal_path(repo, name);
+    goal_settings(goal_path(repo, name))
+}
+
+pub(crate) fn goal_settings(path: PathBuf) -> Result<Option<(PathBuf, Mapping)>, WaveConfigError> {
     let content = match crate::observe::read_to_string(&path) {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -255,21 +258,16 @@ pub(crate) fn update_wave_config(
     name: &str,
     update: impl FnOnce(&mut Mapping) -> Result<(), String>,
 ) -> Result<(), String> {
-    let initial = read_wave_file(repo, name)
-        .map_err(|error| error.to_string())?
-        .map(|(_, mapping)| mapping)
-        .unwrap_or_default();
-    let path = config_path(repo, name);
-    let missing = !path.exists();
-    crate::config::files::update(&path, |document| {
-        if missing {
-            *document = Value::Mapping(initial);
-        }
-        let values = document
-            .as_mapping_mut()
-            .ok_or_else(|| anyhow::anyhow!("Wave config must be a mapping"))?;
-        update(values).map_err(anyhow::Error::msg)
-    })
+    crate::config::files::update_settings(
+        &config_path(repo, name),
+        crate::config::keys::Root::Wave,
+        |document| {
+            let values = document
+                .as_mapping_mut()
+                .ok_or_else(|| anyhow::anyhow!("Wave config must be a mapping"))?;
+            update(values).map_err(anyhow::Error::msg)
+        },
+    )
     .map_err(|error| error.to_string())
 }
 

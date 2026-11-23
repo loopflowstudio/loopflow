@@ -15,16 +15,13 @@ struct GeneralSettings: View {
     }
 
     var body: some View {
-        Form {
-            Section("Task Files") {
-                Toggle("Autosave Task Files", isOn: Binding(
-                    get: { savedAutosave ?? true },
-                    set: { saveAutosave($0) }
-                ))
-                .toggleStyle(.switch)
-            }
+        Section("Task Files") {
+            Toggle("Autosave Task Files", isOn: Binding(
+                get: { savedAutosave ?? true },
+                set: { saveAutosave($0) }
+            ))
+            .toggleStyle(.switch)
         }
-        .formStyle(.grouped)
     }
 
     private func saveAutosave(_ enabled: Bool) {

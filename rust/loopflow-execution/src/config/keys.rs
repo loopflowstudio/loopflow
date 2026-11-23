@@ -7,6 +7,15 @@
 //! that released layout, the one both builds read, before they edit it.
 use serde_yaml_ng::{Mapping, Value};
 
+pub(super) const CONTEXT_ALIASES: &[(&str, &str)] = &[
+    ("docs", "docs"),
+    ("exclude", "exclude"),
+    ("diff", "diff"),
+    ("diff_files", "diff_files"),
+    ("paste", "paste"),
+    ("context_budgets", "budgets"),
+];
+
 /// A Wave's own file already stands on the primitive: `graph` stays bare there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Root {
@@ -161,6 +170,13 @@ pub fn spellings(parts: &[&str], root: Root) -> Vec<Vec<String>> {
             .collect()
     };
     match parts {
+        ["context", name] => {
+            let mut paths = vec![own(parts)];
+            if let Some((old, _)) = CONTEXT_ALIASES.iter().find(|(_, new)| new == name) {
+                paths.push(own(&[old]));
+            }
+            paths
+        }
         ["planning", "team"] => vec![
             vec!["repo".into(), "plan".into(), "team".into()],
             vec!["plan".into(), "team".into()],
@@ -186,8 +202,13 @@ pub fn spellings(parts: &[&str], root: Root) -> Vec<Vec<String>> {
             rest,
         ),
         ["graph"] if root == Root::General => {
-            vec![vec!["wave".into(), "graph".into()], vec!["graph".into()]]
+            vec![
+                vec!["wave".into(), "graph".into()],
+                vec!["graph".into()],
+                vec![super::GRAPH_ALIAS.into()],
+            ]
         }
+        ["graph"] => vec![own(parts), vec![super::GRAPH_ALIAS.into()]],
         ["waves", id, rest @ ..] => {
             let tails = spellings(rest, Root::Wave);
             ["wave", "waves"]
@@ -282,6 +303,9 @@ pub fn fold(document: &mut Value) {
             }
         }
     }
+    if let Some(graph) = map.remove(super::GRAPH_ALIAS) {
+        map.entry("graph".into()).or_insert(graph);
+    }
     // Released lf's `graph: auto` is `code` with auto on. Remove once the
     // release reading `auto:` is installed (Task d3af77).
     if map.get("graph").and_then(Value::as_str) == Some("auto") {
@@ -315,7 +339,7 @@ pub fn gather(document: &mut Value, parts: &[&str], root: Root) -> Vec<String> {
     let (group, rest, inner): (&[&str], &[&str], Root) = match parts {
         ["planning", rest @ ..] => (&parts[..1], rest, Root::General),
         ["skills", _, rest @ ..] => (&parts[..2], rest, Root::General),
-        ["graph"] if root == Root::General => (parts, &[], Root::General),
+        ["graph"] => (parts, &[], root),
         ["waves", _, rest @ ..] => (&parts[..2], rest, Root::Wave),
         _ => return parts.iter().map(|part| (*part).to_owned()).collect(),
     };

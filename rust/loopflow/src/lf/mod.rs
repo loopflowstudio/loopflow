@@ -2965,8 +2965,16 @@ pub enum ConfigCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Inspect Context settings and both editable files for this checkout
+    /// Inspect effective settings and declarations for Global, a checkout or a Wave
     Scope {
+        #[arg(long)]
+        global: bool,
+        #[arg(long, conflicts_with = "graph")]
+        skill: Option<String>,
+        #[arg(long, requires = "step")]
+        graph: Option<String>,
+        #[arg(long, requires = "graph")]
+        step: Option<String>,
         #[arg(long)]
         json: bool,
         /// Print a reading whenever a settings file changes, until stdin closes

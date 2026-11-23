@@ -581,14 +581,7 @@ pub(crate) fn normalize_context(value: &mut serde_yaml_ng::Value) {
         }
         None => Mapping::new(),
     };
-    for (old, new) in [
-        ("docs", "docs"),
-        ("exclude", "exclude"),
-        ("diff", "diff"),
-        ("diff_files", "diff_files"),
-        ("paste", "paste"),
-        ("context_budgets", "budgets"),
-    ] {
+    for &(old, new) in keys::CONTEXT_ALIASES {
         if let Some(value) = map.remove(old) {
             context.entry(new.into()).or_insert(value);
         }

@@ -31,6 +31,29 @@ public struct RegistryQueryError: LocalizedError, Sendable {
 /// wave); machine-wide reads such as `lf wave list` ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
+public enum ConfigurationTarget: Encodable, Sendable, Hashable {
+    case general
+    case skill(String)
+    case step(graph: String, step: String)
+
+    public func encode(to encoder: Encoder) throws {
+        let fields: TaggedFields = switch self {
+        case .general: TaggedFields("general")
+        case .skill(let name): TaggedFields("skill", ["name": name])
+        case .step(let graph, let step): TaggedFields("step", ["graph": graph, "step": step])
+        }
+        try fields.encode(to: encoder, tag: "kind")
+    }
+
+    var arguments: [String] {
+        switch self {
+        case .general: []
+        case .skill(let name): ["--skill", name]
+        case .step(let graph, let step): ["--graph", graph, "--step", step]
+        }
+    }
+}
+
 /// A read Loopflow serves inside the app, encoded as its Rust `Read`: what
 /// `argv` prints in `cwd`, given `input` on stdin. A read whose command takes
 /// `--subscribe` is also served as that subscription.
@@ -51,7 +74,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case waveList
     case machineSelf
     case desktopPortfolio
-    case configScope(directory: String)
+    case configScope(directory: String?, wave: String?, target: ConfigurationTarget)
     case configSettings(directory: String, wave: String?, skill: String?, graph: String?, step: String?)
     case graphList(directory: String)
     case desktopViewGet(directory: String, expression: String?)
@@ -131,7 +154,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["desktop", "view", "list", "--all", "--json"] + (expression.map { ["--expression", $0] } ?? [])
         case .desktopPortfolio:
             return ["desktop", "portfolio", "--json"]
-        case .configScope: return ["config", "scope", "--json"]
+        case .configScope(let directory, let wave, let target):
+            return ["config", "scope", "--json"] + target.arguments + (directory == nil ? ["--global"] : []) + (wave.map { ["--wave", $0] } ?? [])
         case .configSettings(_, let wave, let skill, let graph, let step):
             return ["config", "settings", "--json"] + (wave.map { ["--wave", $0] } ?? [])
                 + (skill.map { ["--skill", $0] } ?? []) + (graph.map { ["--graph", $0] } ?? [])
@@ -232,7 +256,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .viewSelect(let expression):
             TaggedFields("view.select", ["expression": expression])
         case .desktopPortfolio: TaggedFields("desktop.portfolio")
-        case .configScope(let directory): TaggedFields("config.scope", ["directory": directory])
+        case .configScope(let directory, let wave, let target): TaggedFields("config.scope", ["directory": directory, "wave": wave, "target": target])
         case .configSettings(let directory, let wave, let skill, let graph, let step):
             TaggedFields("config.settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
         case .graphList(let directory): TaggedFields("graph.list", ["directory": directory])

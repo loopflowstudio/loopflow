@@ -296,7 +296,9 @@ public enum ConfigOperation: Encodable, Sendable {
     case configExplain(destination: JSONValue, key: String)
     /// `value` is YAML.
     case configSet(destination: JSONValue, key: String, value: String)
-    case editDiff(destination: JSONValue, expected: [String: JSONValue], change: DiffChange)
+    case preview(destination: JSONValue, key: String, expected: [ConfigurationEntry], change: ConfigurationChange)
+    case edit(destination: JSONValue, key: String, expected: [ConfigurationEntry], change: ConfigurationChange)
+    case promote(destination: JSONValue, key: String, wave: String?, action: JSONValue)
     case configUnset(destination: JSONValue, key: String)
     /// The serving Machine's `theme:`: set to `value` (YAML), or read when nil.
     case configTheme(value: String?)
@@ -314,8 +316,12 @@ public enum ConfigOperation: Encodable, Sendable {
             TaggedFields("config.explain", ["destination": destination, "key": key])
         case .configSet(let destination, let key, let value):
             TaggedFields("config.set", ["destination": destination, "key": key, "value": value])
-        case .editDiff(let destination, let expected, let change):
-            TaggedFields("config.edit_diff", ["destination": destination, "expected": expected, "change": change])
+        case .preview(let destination, let key, let expected, let change):
+            TaggedFields("config.preview", ["destination": destination, "key": key, "expected": expected, "change": change])
+        case .edit(let destination, let key, let expected, let change):
+            TaggedFields("config.edit", ["destination": destination, "key": key, "expected": expected, "change": change])
+        case .promote(let destination, let key, let wave, let action):
+            TaggedFields("config.promote", ["destination": destination, "key": key, "wave": wave, "action": action])
         case .configUnset(let destination, let key):
             TaggedFields("config.unset", ["destination": destination, "key": key])
         case .configTheme(let value):
@@ -324,16 +330,21 @@ public enum ConfigOperation: Encodable, Sendable {
     }
 }
 
-public enum DiffChange: Encodable, Sendable {
-    case set(Bool)
+public struct ConfigurationEntry: Codable, Sendable, Equatable {
+    public let path: [String]
+    public let value: JSONValue
+}
+
+public enum ConfigurationChange: Encodable, Sendable {
+    case set(String)
     case reset
-    case restore([String: JSONValue])
+    case restore([ConfigurationEntry])
 
     public func encode(to encoder: Encoder) throws {
         let fields: TaggedFields = switch self {
         case .set(let value): TaggedFields("set", ["value": value])
         case .reset: TaggedFields("reset")
-        case .restore(let declarations): TaggedFields("restore", ["declarations": declarations])
+        case .restore(let entries): TaggedFields("restore", ["entries": entries])
         }
         try fields.encode(to: encoder, tag: "kind")
     }

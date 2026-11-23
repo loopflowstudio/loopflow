@@ -450,6 +450,24 @@ pub fn active() -> bool {
     READING.with(|reading| reading.borrow().is_some())
 }
 
+/// Resolve a proposed file edit through the ordinary readers without publishing
+/// the draft in the serving Machine's observation cache.
+pub(crate) fn preview_files<T>(files: &[(PathBuf, String)], read: impl FnOnce() -> T) -> T {
+    let cache = Cache::default();
+    for (path, text) in files {
+        cache.entries.lock().expect("private preview cache").insert(
+            Fact::File(absolute(path)),
+            Arc::new(Mutex::new(Entry {
+                answer: Some(Answer::File(Ok(text.clone()))),
+                revision: 0,
+                used: SystemTime::now(),
+                checked: SystemTime::now(),
+            })),
+        );
+    }
+    Arc::new(cache).capture(read).0
+}
+
 /// Run `read` as one reading: the served reading already active, else one
 /// that lasts for this call, so a bare command observes each fact and
 /// computes each derived value once however often `read` asks.

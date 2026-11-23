@@ -13,7 +13,7 @@ struct SettingsWorkflowTests {
         var navigation = SettingsNavigation()
         let appearance = AppearanceStore(paths: .temporary(), systemDark: false)
         let window = SettingsWindow(navigation: Binding(get: { navigation }, set: { navigation = $0 }),
-                                    appearance: appearance, checkout: nil)
+                                    appearance: appearance, checkout: nil, portfolio: PortfolioService())
         let split = try window.inspect().find(ViewType.NavigationSplitView.self)
         let sidebar = try split.sidebarView()
         for pane in SettingsPane.allCases {
@@ -30,8 +30,8 @@ struct SettingsWorkflowTests {
         _ = try detail.find(KeyboardShortcutsView.self)
         navigation.open(.mobile)
         _ = try window.inspect().find(MobileSettings.self)
-        navigation.open(.configuration)
-        _ = try window.inspect().find(ConfigurationSettingsView.self)
+        navigation.open(.machines)
+        _ = try window.inspect().find(ScopedSettings.self)
         navigation.search = "missing"
         #expect(try window.inspect().find(text: "No matching panes").string() == "No matching panes")
         navigation.open(.appearance)

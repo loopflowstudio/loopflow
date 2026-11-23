@@ -3,22 +3,25 @@
 //! catalog|settings|get|set|unset|explain`) and the server's `config.*` kinds
 //! call these functions; Desktop's Settings and Appearance panes use them
 //! through the server.
+pub mod promotion;
+
 use anyhow::Result;
 use serde::Serialize;
 use serde_yaml_ng::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::config::files::{context_diff, Destination};
+use crate::config::files::{edit, Destination};
 
 /// `config.catalog`: every typed setting, its schema and its policies.
 pub fn catalog() -> Vec<&'static crate::config::catalog::Definition> {
     crate::config::catalog::definitions()
 }
 
-/// What applies in the checkout, alongside the files Settings can edit there.
+/// One resolver reading for the selected work and each editable declaration.
 #[derive(Debug, Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct Scope {
-    pub context_diff: crate::config::settings::EffectiveSetting,
+    pub settings: BTreeMap<String, crate::config::settings::EffectiveSetting>,
     pub files: Vec<ScopeFile>,
 }
 
@@ -26,60 +29,269 @@ pub struct Scope {
 pub struct ScopeFile {
     pub destination: Destination,
     pub path: PathBuf,
-    /// Every authored spelling, including a flat key shadowed by the nested one.
-    pub diff: context_diff::Declarations,
-    pub reset_preview: String,
+    /// Includes absent slots. Omitted keys do not apply at this destination.
+    pub slots: BTreeMap<String, Slot>,
 }
 
-pub fn scope(directory: &Path) -> Result<Scope> {
-    crate::observe::reading(|| {
-        anyhow::ensure!(
-            crate::observe::is_dir(directory),
-            "Checkout {} is unavailable",
-            directory.display()
-        );
-        let repository = crate::repo::working_directory_in(directory)?;
-        let resolved = crate::config::resolved(Some(&repository), None)?;
-        let context_diff = resolved
-            .settings
-            .get("context.diff")
-            .ok_or_else(|| anyhow::anyhow!("missing context.diff in resolved settings"))?
-            .clone();
-        let mut files = Vec::new();
-        for destination in [
-            Destination::PersonalRepository {
-                repository: repository.clone(),
+#[derive(Debug, Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct Slot {
+    pub key: String,
+    pub declared: Authored,
+    pub entries: Vec<edit::Entry>,
+    pub promotion: promotion::Availability,
+}
+
+#[derive(Debug, Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Authored {
+    Absent,
+    Present { value: serde_json::Value },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ScopeTarget {
+    General,
+    Skill { name: String },
+    Step { graph: String, step: String },
+}
+
+impl ScopeTarget {
+    pub fn from_options(
+        skill: Option<&str>,
+        graph: Option<&str>,
+        step: Option<&str>,
+    ) -> Result<Self> {
+        Ok(match (skill, graph, step) {
+            (None, None, None) => Self::General,
+            (Some(name), None, None) => Self::Skill { name: name.into() },
+            (None, Some(graph), Some(step)) => Self::Step {
+                graph: graph.into(),
+                step: step.into(),
             },
-            Destination::SharedRepository { repository },
-        ] {
-            let path = destination.resolve()?.path;
-            let (diff, reset_preview) = context_diff::inspect(&path)?;
+            _ => anyhow::bail!("select a Skill or a Graph and step"),
+        })
+    }
+
+    fn skill(&self, repo: Option<&Path>) -> Result<Option<crate::graph::Skill>> {
+        if matches!(self, Self::General) {
+            return Ok(None);
+        }
+        let repo = repo.ok_or_else(|| anyhow::anyhow!("select a checkout for the target"))?;
+        match self {
+            Self::General => Ok(None),
+            Self::Skill { name } => Ok(Some(crate::graph::load_skill(name, repo)?)),
+            Self::Step { graph, step } => Ok(select_steps(repo, None, Some(graph), Some(step))?
+                .into_iter()
+                .next()),
+        }
+    }
+}
+
+pub fn scope(directory: Option<&Path>, wave: Option<&str>, target: &ScopeTarget) -> Result<Scope> {
+    crate::observe::reading(|| {
+        let mut destinations = vec![Destination::PersonalGlobal {}];
+        let repository = directory
+            .map(|directory| -> Result<_> {
+                anyhow::ensure!(
+                    crate::observe::is_dir(directory),
+                    "Checkout {} is unavailable",
+                    directory.display()
+                );
+                crate::repo::working_directory_in(directory)
+            })
+            .transpose()?;
+        if let Some(repo) = &repository {
+            destinations.push(Destination::SharedRepository {
+                repository: repo.clone(),
+            });
+            destinations.push(Destination::PersonalRepository {
+                repository: repo.clone(),
+            });
+            if let Some(wave) = wave {
+                destinations.push(Destination::SharedWave {
+                    repository: repo.clone(),
+                    wave: wave.into(),
+                });
+                if crate::config::files::wave_key(repo, wave)?.is_some() {
+                    destinations.push(Destination::PersonalWave {
+                        repository: repo.clone(),
+                        wave: wave.into(),
+                    });
+                }
+            }
+        } else {
+            anyhow::ensure!(wave.is_none(), "select a checkout for the Wave");
+        }
+        let resolved = crate::config::resolved(repository.as_deref(), wave)?;
+        let definitions = catalog();
+        let skill = target.skill(repository.as_deref())?;
+        let settings = match &skill {
+            None => effective_settings(&resolved)?,
+            Some(skill) => effective_settings(&crate::config::settings::resolve(
+                &resolved.config,
+                Some(skill),
+            )?)?,
+        };
+        let prefix = match target {
+            ScopeTarget::General => Some(String::new()),
+            ScopeTarget::Skill { name } => Some(format!("skill.{name}.")),
+            ScopeTarget::Step { .. } => skill
+                .as_ref()
+                .and_then(|s| s.occurrence.as_ref())
+                .and_then(|occ| {
+                    occ.id
+                        .as_ref()
+                        .map(|id| format!("graphs.{}.steps.{id}.", occ.graph))
+                }),
+        };
+        let mut documents = BTreeMap::new();
+        let mut files = Vec::new();
+        for destination in destinations {
+            let address = destination.resolve()?;
+            let (raw, normalized) = match documents.entry(address.path.clone()) {
+                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    let (_, raw) = edit::read_document(&address)?;
+                    let mut normalized = raw.clone();
+                    crate::config::keys::fold(&mut normalized);
+                    crate::config::normalize_context(&mut normalized);
+                    entry.insert((raw, normalized))
+                }
+            };
+            let mut slots = BTreeMap::new();
+            for definition in &definitions {
+                let global_preference = address.scope
+                    == crate::config::settings::SettingScope::Global
+                    && definition.applicability == crate::config::catalog::Applicability::Personal;
+                if !definition.applies(
+                    address.source,
+                    address.scope,
+                    skill.is_some() && !global_preference,
+                ) {
+                    continue;
+                }
+                let key = definition.canonical_key();
+                let Some(prefix) = (if global_preference {
+                    Some("")
+                } else {
+                    prefix.as_deref()
+                }) else {
+                    continue;
+                };
+                let edit_key = format!("{prefix}{key}");
+                let setting = edit::Setting::catalogued(&address, &edit_key);
+                let entries = setting.entries(raw)?;
+                let declared = match setting.declared(normalized, &entries)? {
+                    Some(value) => Authored::Present {
+                        value: serde_json::to_value(value)?,
+                    },
+                    None => Authored::Absent,
+                };
+                slots.insert(
+                    key,
+                    Slot {
+                        key: edit_key,
+                        declared,
+                        entries,
+                        promotion: promotion::Availability::None,
+                    },
+                );
+            }
             files.push(ScopeFile {
                 destination,
-                path,
-                diff,
-                reset_preview,
+                path: address.path,
+                slots,
             });
         }
-        Ok(Scope {
-            context_diff,
-            files,
-        })
+        promotion::offer_moves(&mut files)?;
+        Ok(Scope { settings, files })
     })
 }
 
-/// Apply a change only to the declarations shown in the checkout's Context pane.
-pub fn edit_diff(
+fn effective_settings(
+    resolved: &crate::config::settings::ResolvedSettings,
+) -> Result<BTreeMap<String, crate::config::settings::EffectiveSetting>> {
+    let values = serde_yaml_ng::to_value(&resolved.config)?;
+    let definitions = catalog();
+    let mut settings = BTreeMap::new();
+    for definition in &definitions {
+        let key = definition.key;
+        let effective = if ["agent", "default_agent", "agents"].contains(&key) {
+            resolved.settings.get("agent").cloned()
+        } else {
+            resolved.settings.get(key).cloned()
+        };
+        let mut effective = effective.unwrap_or_else(|| {
+            let prefix = format!("{key}.");
+            crate::config::settings::EffectiveSetting {
+                value: key
+                    .split('.')
+                    .try_fold(&values, |node, part| node.get(part))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                candidates: resolved
+                    .settings
+                    .range(prefix.clone()..)
+                    .take_while(|(k, _)| k.starts_with(&prefix))
+                    .flat_map(|(_, row)| row.candidates.iter().cloned())
+                    .collect(),
+            }
+        });
+        if ["agents", "default_agent"].contains(&key) {
+            effective.value = serde_yaml_ng::to_value(resolved.config.agent_order())?;
+        }
+        if key == "planning" {
+            effective.value = crate::config::keys::tracker_value(&values);
+        }
+        settings.insert(definition.canonical_key(), effective);
+    }
+    Ok(settings)
+}
+
+pub fn checked_edit(
     destination: &Destination,
-    expected: &context_diff::Declarations,
-    change: &context_diff::Change,
-) -> Result<context_diff::Applied> {
-    let resolved = destination.resolve()?;
+    key: &str,
+    expected: &[edit::Entry],
+    change: &edit::Change,
+) -> Result<edit::Applied> {
+    let address = destination.resolve()?;
+    validate_edit(&address, key)?;
+    edit::Setting::catalogued(&address, key).apply(expected, change)
+}
+
+/// Render the exact YAML patch the checked edit would write.
+pub fn preview_edit(
+    destination: &Destination,
+    key: &str,
+    expected: &[edit::Entry],
+    change: &edit::Change,
+) -> Result<String> {
+    let address = destination.resolve()?;
+    validate_edit(&address, key)?;
+    let (text, mut document) = edit::read_document(&address)?;
+    let receipt =
+        edit::Setting::catalogued(&address, key).prepare(&mut document, expected, change)?;
+    if receipt.before == receipt.after {
+        return Ok(String::new());
+    }
+    Ok(edit::preview(
+        &text,
+        &crate::config::files::edited_text(&text, &document)?,
+    ))
+}
+
+fn validate_edit(address: &crate::config::files::ResolvedDestination, key: &str) -> Result<()> {
+    crate::config::settings::validate_scope(key, address.source, address.scope)?;
+    let typed = crate::config::keys::typed_key(key);
+    let preference = crate::config::settings::preference_path(&typed)?.join(".");
+    let definition = crate::config::catalog::definition(&preference).expect("validated key");
     anyhow::ensure!(
-        resolved.scope == crate::config::settings::SettingScope::Repository,
-        "choose a repository destination"
+        definition.key == preference,
+        "select the catalog key {}",
+        definition.canonical_key()
     );
-    context_diff::apply(&resolved.path, expected, change)
+    Ok(())
 }
 
 /// `config.get`: the declaration of `key` at `destination`, null when none.
@@ -219,12 +431,7 @@ fn declaration(
     }
     let mut parts: Vec<_> = destination.prefix.iter().map(String::as_str).collect();
     parts.extend(key.split('.'));
-    let root = match destination.scope {
-        crate::config::settings::SettingScope::Wave if destination.prefix.is_empty() => {
-            crate::config::keys::Root::Wave
-        }
-        _ => crate::config::keys::Root::General,
-    };
+    let root = destination.root();
     file_value(&destination.path, &parts, key, value, unset, root)
 }
 
@@ -281,7 +488,9 @@ fn file_value(
     if parsed.is_some() || unset {
         crate::config::files::edit(path, parts, parsed, root)?;
     }
-    let mut document = crate::config::files::read(path)?;
+    let text = crate::config::files::settings_text(path, root)?;
+    let mut document = Value::Mapping(crate::config::reader::parse(&text, path));
+    crate::config::keys::fold(&mut document);
     let preference = crate::config::settings::preference_path(key)?;
     if preference.len() > 1 && preference[0] == "context" {
         crate::config::normalize_context(&mut document);
@@ -324,13 +533,12 @@ pub fn inspect(
     inspect_selection(&config, repo, skill, graph, step)
 }
 
-fn inspect_selection(
-    config: &crate::config::Config,
-    repo: &std::path::Path,
+fn select_steps(
+    repo: &Path,
     skill: Option<&str>,
     graph: Option<&str>,
     step: Option<&str>,
-) -> anyhow::Result<Vec<Inspection>> {
+) -> Result<Vec<crate::graph::Skill>> {
     let mut selections = Vec::new();
     if let Some(graph) = graph {
         fn collect(
@@ -343,14 +551,22 @@ fn inspect_selection(
                     crate::graph::ConcreteStep::Skill(skill)
                         if target.is_none_or(|(graph, id)| {
                             skill.skill.occurrence.as_ref().is_some_and(|occurrence| {
-                                occurrence.graph == graph && occurrence.id.as_deref() == Some(id)
+                                occurrence.graph == graph
+                                    && (occurrence.id.as_deref() == Some(id)
+                                        || occurrence.address().as_deref() == Some(id))
                             })
                         }) =>
                     {
                         out.push(skill.skill.clone())
                     }
                     crate::graph::ConcreteStep::Xor(branch) => {
-                        if target.is_none() {
+                        if target.is_none_or(|(graph, step)| {
+                            branch.router.occurrence.as_ref().is_some_and(|occ| {
+                                occ.graph == graph
+                                    && (occ.id.as_deref() == Some(step)
+                                        || occ.address().as_deref() == Some(step))
+                            })
+                        }) {
                             out.push(branch.router.clone());
                         }
                         for path in branch.paths.values() {
@@ -371,6 +587,17 @@ fn inspect_selection(
     } else if let Some(skill) = skill {
         selections.push(crate::graph::load_skill(skill, repo)?);
     }
+    Ok(selections)
+}
+
+fn inspect_selection(
+    config: &crate::config::Config,
+    repo: &std::path::Path,
+    skill: Option<&str>,
+    graph: Option<&str>,
+    step: Option<&str>,
+) -> anyhow::Result<Vec<Inspection>> {
+    let selections = select_steps(repo, skill, graph, step)?;
     let mut output = Vec::new();
     for selection in if selections.is_empty() {
         vec![None]

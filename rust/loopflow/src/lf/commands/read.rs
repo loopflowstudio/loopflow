@@ -202,10 +202,16 @@ pub enum Read {
         graph: Option<String>,
         step: Option<String>,
     },
-    /// Checkout settings with the declarations in both editable files.
+    /// Effective settings and editable declarations for Global, a checkout or a Wave.
     #[serde(rename = "config.scope")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::engine::config::Scope>()))]
-    ConfigScope { directory: PathBuf },
+    ConfigScope {
+        target: loopflow_execution::engine::config::ScopeTarget,
+        #[serde(deserialize_with = "Option::deserialize")]
+        directory: Option<PathBuf>,
+        #[serde(deserialize_with = "Option::deserialize")]
+        wave: Option<String>,
+    },
     /// `lf config get <key> <destination flags> --json`: one file's declaration.
     #[serde(rename = "config.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::engine::config::Declaration>()))]
@@ -486,7 +492,26 @@ impl Read {
             Self::MachineSelf => words(&["machine", "self", "--json"]),
             Self::DesktopPortfolio => words(&["desktop", "portfolio", "--json"]),
             Self::ConfigCatalog => words(&["config", "catalog", "--json"]),
-            Self::ConfigScope { directory } => at(directory, &["config", "scope", "--json"]),
+            Self::ConfigScope {
+                directory,
+                wave,
+                target,
+            } => {
+                let mut argv = directory.as_ref().map_or_else(
+                    || words(&["config", "scope", "--global", "--json"]),
+                    |dir| at(dir, &["config", "scope", "--json"]),
+                );
+                argv.extend(optional("--wave", wave.as_ref()));
+                use loopflow_execution::engine::config::ScopeTarget;
+                match target {
+                    ScopeTarget::General => {}
+                    ScopeTarget::Skill { name } => argv.extend(words(&["--skill", name])),
+                    ScopeTarget::Step { graph, step } => {
+                        argv.extend(words(&["--graph", graph, "--step", step]))
+                    }
+                }
+                argv
+            }
             Self::ConfigGet { destination, key } => {
                 destination_argv(destination, &["config", "get", key, "--json"])
             }
@@ -775,9 +800,15 @@ impl Read {
                 graph.as_deref(),
                 step.as_deref(),
             )?),
-            Self::ConfigScope { directory } => {
-                value(&loopflow_execution::engine::config::scope(directory)?)
-            }
+            Self::ConfigScope {
+                directory,
+                wave,
+                target,
+            } => value(&loopflow_execution::engine::config::scope(
+                directory.as_deref(),
+                wave.as_deref(),
+                target,
+            )?),
             Self::ConfigCatalog => value(&loopflow_execution::engine::config::catalog()),
             Self::ConfigGet { destination, key } => {
                 value(&loopflow_execution::engine::config::get(destination, key)?)
@@ -949,7 +980,6 @@ impl Read {
             | Self::TaskDetail { directory, .. }
             | Self::TaskGet { directory, .. }
             | Self::TaskStatus { directory, .. }
-            | Self::ConfigScope { directory }
             | Self::ConfigSettings { directory, .. }
             | Self::DesktopLayout { directory, .. }
             | Self::RepoPeople { directory }
@@ -966,6 +996,7 @@ impl Read {
             | Self::SkillList { directory, .. }
             | Self::PrChecks { directory, .. }
             | Self::PrReviews { directory, .. } => Some(directory),
+            Self::ConfigScope { directory, .. } => directory.as_mut(),
             Self::SessionHistoryGet { .. }
             | Self::CreationGet { .. }
             | Self::ViewSelect { .. }
@@ -1022,9 +1053,11 @@ impl Read {
             events,
         };
         let subscription = match self {
-            Self::ConfigScope { directory } => {
-                super::setting::subscribe_scope(directory, transport)
-            }
+            Self::ConfigScope {
+                directory,
+                wave,
+                target,
+            } => super::setting::subscribe_scope(directory, wave, target, transport),
             Self::DesktopViewList { directory } => {
                 super::desktop::subscribe_plans(None, directory, transport)
             }
@@ -1133,7 +1166,7 @@ mod tests {
 
     #[test]
     fn checkout_scope_and_checked_edit_share_the_desktop_wire_shape() {
-        use loopflow_execution::{config::files::context_diff::Applied, engine::config::Scope};
+        use loopflow_execution::{config::files::edit::Applied, engine::config::Scope};
         use serde_json::{from_value, to_value, Value};
         let fixture: Value = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/configuration_scope.json"
@@ -1144,16 +1177,28 @@ mod tests {
             "read",
             to_value(from_value::<Read>(fixture["read"].clone()).unwrap()).unwrap(),
         );
-        check(
-            "write",
-            to_value(
-                from_value::<crate::lf::commands::write::Write>(fixture["write"].clone()).unwrap(),
-            )
-            .unwrap(),
-        );
+        for name in ["write", "preview", "promote"] {
+            check(
+                name,
+                to_value(
+                    from_value::<crate::lf::commands::write::Write>(fixture[name].clone()).unwrap(),
+                )
+                .unwrap(),
+            );
+        }
         check(
             "scope",
             to_value(from_value::<Scope>(fixture["scope"].clone()).unwrap()).unwrap(),
+        );
+        check(
+            "move_result",
+            to_value(
+                from_value::<loopflow_execution::engine::config::promotion::Outcome>(
+                    fixture["move_result"].clone(),
+                )
+                .unwrap(),
+            )
+            .unwrap(),
         );
         check(
             "receipt",

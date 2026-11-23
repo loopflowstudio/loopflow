@@ -6,12 +6,20 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     case appearance = "Appearance"
     case shortcuts = "Shortcuts"
     case mobile = "Mobile"
+    case agents = "Agents"
     case context = "Context"
-    case configuration = "Configuration"
+    case git = "Git & Release"
+    case machines = "Machines"
 
     var id: Self { self }
 
-    var isWorkflow: Bool { self == .configuration || self == .context }
+    var group: String {
+        switch self {
+        case .agents, .context, .git: "Workflow"
+        case .machines: "Infrastructure"
+        default: "App"
+        }
+    }
 
     var badge: (symbol: String, color: Color) {
         switch self {
@@ -20,7 +28,9 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .shortcuts: ("keyboard", .indigo)
         case .mobile: ("iphone", .green)
         case .context: ("doc.text.fill", .orange)
-        case .configuration: ("slider.horizontal.3", .blue)
+        case .agents: ("person.2.fill", .blue)
+        case .git: ("arrow.triangle.branch", .teal)
+        case .machines: ("desktopcomputer", .indigo)
         }
     }
 }
@@ -44,7 +54,9 @@ struct SettingsWindow: View {
     @Binding var navigation: SettingsNavigation
     let appearance: AppearanceStore
     let checkout: String?
-    @State private var context = ContextSettingsModel()
+    let portfolio: PortfolioService
+    @State private var scope = ScopedSettingsModel()
+    @State private var waves: [Wave] = []
     @State private var notices = NoticeCenter()
     @Environment(\.undoManager) private var undoManager
 
@@ -55,8 +67,9 @@ struct SettingsWindow: View {
                 set: { if let pane = $0 { navigation.open(pane) } }
             )) {
                 let panes = navigation.matches
-                sidebarSection("App", panes: panes.filter { !$0.isWorkflow })
-                sidebarSection("Workflow", panes: panes.filter(\.isWorkflow))
+                ForEach(["App", "Workflow", "Infrastructure"], id: \.self) { group in
+                    sidebarSection(group, panes: panes.filter { $0.group == group })
+                }
             }
             .listStyle(.sidebar)
             .overlay {
@@ -68,23 +81,21 @@ struct SettingsWindow: View {
         } detail: {
             Group {
                 switch navigation.pane {
-                case .general: GeneralSettings(notices: notices, undoManager: undoManager)
+                case .general, .agents, .context, .git, .machines:
+                    ScopedSettings(model: scope, pane: navigation.pane,
+                        checkouts: Array(Set(portfolio.repos.map(\.path) + [checkout, scope.checkout].compactMap { $0 })).sorted(),
+                        waves: waves, notices: notices)
                 case .appearance: ThemeChooser(appearance: appearance)
                 case .shortcuts: KeyboardShortcutsView()
                 case .mobile: MobileSettings()
-                case .context: ContextSettings(model: context, notices: notices)
-                case .configuration: ConfigurationSettingsView()
                 }
             }
             .navigationTitle(navigation.pane.rawValue)
             .overlay(alignment: .bottom) { NoticeView(center: notices) }
         }
-        .task(id: context.observation) {
-            if let checkout = context.checkout { await context.observe(checkout) }
-        }
-        .onChange(of: navigation.pane, initial: true) { _, pane in
-            if pane == .context, context.checkout == nil { context.checkout = checkout }
-        }
+        .task(id: scope.observation) { await scope.observe() }
+        .task { await portfolio.refresh() }
+        .task { waves = (try? await RegistryQueryLocal.shared.allWaves()) ?? [] }
         .frame(minWidth: 760, minHeight: 560)
         .environment(\.palette, appearance.effectiveTheme.palette)
         .environment(\.theme, appearance.effectiveTheme)
@@ -97,7 +108,14 @@ struct SettingsWindow: View {
             Section(title) {
                 ForEach(panes) { pane in
                     Label {
-                        Text(pane.rawValue)
+                        HStack {
+                            Text(pane.rawValue)
+                            if let file = scope.file, file.hasOverrides(in: pane, catalog: scope.catalogue) {
+                                Spacer()
+                                Circle().fill(.secondary).frame(width: 7, height: 7)
+                                    .accessibilityLabel("Settings saved in this file")
+                            }
+                        }
                     } icon: {
                         Image(systemName: pane.badge.symbol)
                             .imageScale(.small)

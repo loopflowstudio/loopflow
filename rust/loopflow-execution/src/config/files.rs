@@ -1,6 +1,6 @@
 //! One editor for personal and shared preference files. Locks protect LF writers;
 //! a content comparison also detects hand edits made while an edit is prepared.
-pub mod context_diff;
+pub mod edit;
 
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -94,6 +94,16 @@ pub struct ResolvedDestination {
     pub scope: super::settings::SettingScope,
     pub repository: Option<PathBuf>,
     pub wave: Option<String>,
+}
+
+impl ResolvedDestination {
+    pub fn root(&self) -> super::keys::Root {
+        if self.prefix.is_empty() && self.scope == SettingScope::Wave {
+            super::keys::Root::Wave
+        } else {
+            super::keys::Root::General
+        }
+    }
 }
 
 impl Destination {
@@ -232,35 +242,28 @@ pub fn wave_name(repo: &Path, selector: &str) -> Result<String> {
     };
     let root = repo.join(".lf/wave");
     let mut names = Vec::new();
-    if root.exists() {
-        for entry in ignore::WalkBuilder::new(&root)
-            .hidden(false)
-            .ignore(false)
-            .git_ignore(false)
-            .git_exclude(false)
-            .git_global(false)
-            .build()
+    let mut directories = vec![root.clone()];
+    while let Some(directory) = directories.pop() {
+        let entries = match crate::observe::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        for entry in entries {
+            if crate::observe::is_dir(&entry) && !crate::observe::is_symlink(&entry) {
+                directories.push(entry);
+            }
+        }
+        if directory == root {
+            continue;
+        }
+        let name = directory.strip_prefix(&root)?.to_string_lossy();
+        if crate::work::wave::config::try_read_wave_config(repo, &name)?
+            .and_then(|config| config.id)
+            .as_ref()
+            == Some(&id)
         {
-            let entry = entry?;
-            if entry.file_name() != "config.yaml"
-                || !entry.file_type().is_some_and(|kind| kind.is_file())
-            {
-                continue;
-            }
-            let name = entry
-                .path()
-                .parent()
-                .context("Wave file has a parent")?
-                .strip_prefix(&root)?
-                .to_string_lossy()
-                .into_owned();
-            if crate::work::wave::config::try_read_wave_config(repo, &name)?
-                .and_then(|config| config.id)
-                .as_ref()
-                == Some(&id)
-            {
-                names.push(name);
-            }
+            names.push(name.into_owned());
         }
     }
     ensure!(
@@ -350,6 +353,46 @@ pub fn read_text(path: &Path) -> Result<String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
         Err(error) => Err(error).with_context(|| format!("Read {}", path.display())),
     }
+}
+
+/// The first settings write to a legacy Wave adopts its identity and
+/// preferences together, just as the Wave configuration reader sees them.
+pub(crate) fn settings_text(path: &Path, root: super::keys::Root) -> Result<String> {
+    if root == super::keys::Root::Wave && !crate::observe::try_exists(path)? {
+        if let Some((_, mapping)) =
+            crate::work::wave::config::goal_settings(path.with_file_name("GOAL.md"))?
+        {
+            return Ok(serde_yaml_ng::to_string(&mapping)?);
+        }
+    }
+    read_text(path)
+}
+
+pub(crate) fn update_settings<T>(
+    path: &Path,
+    root: super::keys::Root,
+    change: impl FnOnce(&mut Value) -> Result<T>,
+) -> Result<T> {
+    if root != super::keys::Root::Wave {
+        return update(path, change);
+    }
+    LockedFile::open(path)?.update_text(|original| {
+        let starting = settings_text(path, root)?;
+        let mut document = parse_document(&starting, path)?;
+        let before = document.clone();
+        let result = change(&mut document)?;
+        let text = if document == before {
+            original.to_owned()
+        } else {
+            edited_text(&starting, &document)?
+        };
+        ensure!(
+            settings_text(path, root)? == starting,
+            "{} changed during this edit",
+            path.display()
+        );
+        Ok((text, result))
+    })
 }
 
 /// Read an authored configuration mapping in the typed layout, whichever
@@ -503,6 +546,11 @@ impl LockedFile {
 
 pub(crate) fn edited_text(original: &str, after: &Value) -> Result<String> {
     let before: Value = serde_yaml_ng::from_str(original)?;
+    if before == *after
+        || (before.is_null() && after.as_mapping().is_some_and(|map| map.is_empty()))
+    {
+        return Ok(original.to_owned());
+    }
     let file = YamlFile::from_str(original)?;
     let document = file.ensure_document();
     if let Some(sequence) = document.as_sequence() {
@@ -562,7 +610,7 @@ pub fn remove(root: &mut Value, path: &[&str]) -> bool {
         return false;
     };
     let removed = remove(child, rest);
-    if child.as_mapping().is_some_and(|map| map.is_empty()) {
+    if removed && child.as_mapping().is_some_and(|map| map.is_empty()) {
         map.remove(*key);
     }
     removed
@@ -576,56 +624,72 @@ pub fn edit(
     value: Option<Value>,
     root: super::keys::Root,
 ) -> Result<bool> {
-    update(path, |document| {
-        let written = super::keys::gather(document, parts, root);
-        let written: Vec<&str> = written.iter().map(String::as_str).collect();
-        let settings = match parts {
-            ["waves", _, settings @ ..] => settings,
-            _ => parts,
-        };
-        let preference = super::settings::preference_parts(settings)?;
-        if preference == ["context", "diff"] {
-            let prefix = &written[..written.len() - preference.len()];
-            return context_diff::edit_at(document, prefix, value);
-        }
-        if written.len() >= 2 && written[written.len() - 2] == "machine" {
-            if let Some(placement) = written[..written.len() - 1]
-                .iter()
-                .try_fold(&mut *document, |value, key| value.get_mut(*key))
-            {
-                super::placement::expand_shorthand(placement)?;
-            }
-        }
-        let changed = match value {
-            Some(value) => {
-                if written.len() >= 2 && written[written.len() - 2] == "machine" {
-                    let sibling = match written.last() {
-                        Some(&"tasks") => Some("capacity"),
-                        Some(&"capacity") => Some("tasks"),
-                        _ => None,
-                    };
-                    if let Some(sibling) = sibling {
-                        let mut path = written[..written.len() - 1].to_vec();
-                        path.push(sibling);
-                        remove(document, &path);
-                    }
-                }
-                super::settings::insert(document, &written, value);
-                true
-            }
-            None => remove(document, &written),
-        };
-        let root_index = parts.len() - preference.len();
-        let mut typed = document.clone();
-        super::keys::fold(&mut typed);
-        if let Some(value) = parts[..=root_index]
-            .iter()
-            .try_fold(&typed, |value, key| value.get(*key))
-        {
-            super::settings::validate_value(&[parts[root_index]], value)?;
-        }
-        Ok(changed)
+    update_settings(path, root, |document| {
+        edit_document(document, parts, value, root)
     })
+}
+
+fn edit_document(
+    document: &mut Value,
+    parts: &[&str],
+    value: Option<Value>,
+    root: super::keys::Root,
+) -> Result<bool> {
+    let written = super::keys::gather(document, parts, root);
+    let written: Vec<&str> = written.iter().map(String::as_str).collect();
+    let settings = match parts {
+        ["waves", _, settings @ ..] => settings,
+        _ => parts,
+    };
+    let preference = super::settings::preference_parts(settings)?;
+    let mut removed_alias = false;
+    if preference == ["context"] {
+        let mut path = written.clone();
+        for &(alias, _) in super::keys::CONTEXT_ALIASES {
+            *path.last_mut().expect("a context setting has a key") = alias;
+            removed_alias |= remove(document, &path);
+        }
+    }
+    if matches!(preference, ["context", _]) {
+        return edit::context_field(document, &written, preference, value, root);
+    }
+    if written.len() >= 2 && written[written.len() - 2] == "machine" {
+        if let Some(placement) = written[..written.len() - 1]
+            .iter()
+            .try_fold(&mut *document, |value, key| value.get_mut(*key))
+        {
+            super::placement::expand_shorthand(placement)?;
+        }
+    }
+    let changed = match value {
+        Some(value) => {
+            if written.len() >= 2 && written[written.len() - 2] == "machine" {
+                let sibling = match written.last() {
+                    Some(&"tasks") => Some("capacity"),
+                    Some(&"capacity") => Some("tasks"),
+                    _ => None,
+                };
+                if let Some(sibling) = sibling {
+                    let mut path = written[..written.len() - 1].to_vec();
+                    path.push(sibling);
+                    remove(document, &path);
+                }
+            }
+            super::settings::insert(document, &written, value);
+            true
+        }
+        None => remove(document, &written),
+    };
+    let root_index = parts.len() - preference.len();
+    let mut typed = document.clone();
+    super::keys::fold(&mut typed);
+    if let Some(value) = parts[..=root_index]
+        .iter()
+        .try_fold(&typed, |value, key| value.get(*key))
+    {
+        super::settings::validate_value(&[parts[root_index]], value)?;
+    }
+    Ok(changed || removed_alias)
 }
 
 /// Explicitly adopt authored recovery declarations into the addressed clone or global file.

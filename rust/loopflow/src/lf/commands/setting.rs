@@ -1,5 +1,6 @@
 //! `lf config get|set|unset|explain`: the CLI adapter for the `config.*`
 //! operations Desktop's Settings pane reaches through the server.
+use loopflow_execution::engine::config::ScopeTarget;
 use std::path::Path;
 
 use loopflow_execution::config::files::Destination;
@@ -71,15 +72,22 @@ pub fn explain(destination: &Destination, key: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn scope(directory: &Path, subscribe: bool) -> anyhow::Result<()> {
+pub fn scope(
+    directory: Option<&Path>,
+    wave: Option<&str>,
+    target: ScopeTarget,
+    subscribe: bool,
+) -> anyhow::Result<()> {
     if subscribe {
         return subscribe_scope(
-            directory.to_owned(),
+            directory.map(Path::to_owned),
+            wave.map(str::to_owned),
+            target,
             loopflow_execution::read_stream::Transport::Stdio,
         )
         .map(drop);
     }
-    let scope = loopflow_execution::engine::config::scope(directory)?;
+    let scope = loopflow_execution::engine::config::scope(directory, wave, &target)?;
     println!(
         "{}",
         serde_json::to_string_pretty(&loopflow_execution::read_stream::selected_answer(&scope)?)?
@@ -88,7 +96,9 @@ pub fn scope(directory: &Path, subscribe: bool) -> anyhow::Result<()> {
 }
 
 pub(super) fn subscribe_scope(
-    directory: std::path::PathBuf,
+    directory: Option<std::path::PathBuf>,
+    wave: Option<String>,
+    target: ScopeTarget,
     transport: loopflow_execution::read_stream::Transport,
 ) -> anyhow::Result<Option<loopflow_execution::read_stream::Subscription>> {
     loopflow_execution::read_stream::start(
@@ -96,7 +106,15 @@ pub(super) fn subscribe_scope(
         (),
         move |_, ()| {
             let directory = directory.clone();
-            async move { loopflow_execution::engine::config::scope(&directory) }
+            let wave = wave.clone();
+            let target = target.clone();
+            async move {
+                loopflow_execution::engine::config::scope(
+                    directory.as_deref(),
+                    wave.as_deref(),
+                    &target,
+                )
+            }
         },
         transport,
     )

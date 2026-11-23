@@ -479,11 +479,7 @@ pub(super) fn filter_file_preferences(
 
 fn _normalize_preferences(value: &mut Value) {
     super::normalize_context(value);
-    if let Some(map) = value.as_mapping_mut() {
-        if let Some(graph) = map.remove(super::GRAPH_ALIAS) {
-            map.entry(Value::String("graph".into())).or_insert(graph);
-        }
-    }
+    super::keys::fold(value);
 }
 
 /// Account routing preferences the released lf still reads from personal

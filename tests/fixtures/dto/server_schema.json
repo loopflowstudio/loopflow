@@ -71,6 +71,70 @@
       ],
       "type": "object"
     },
+    "Action": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "preview",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "resume",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "confirm",
+              "type": "string"
+            },
+            "review": {
+              "$ref": "#/$defs/Review2"
+            }
+          },
+          "required": [
+            "kind",
+            "review"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "undo",
+              "type": "string"
+            },
+            "receipt": {
+              "$ref": "#/$defs/Receipt"
+            }
+          },
+          "required": [
+            "kind",
+            "receipt"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ActionKind": {
       "enum": [
         "create",
@@ -145,20 +209,16 @@
     "Applied": {
       "properties": {
         "after": {
-          "additionalProperties": false,
-          "properties": {
-            "context.diff": true,
-            "diff": true
+          "items": {
+            "$ref": "#/$defs/Entry"
           },
-          "type": "object"
+          "type": "array"
         },
         "before": {
-          "additionalProperties": false,
-          "properties": {
-            "context.diff": true,
-            "diff": true
+          "items": {
+            "$ref": "#/$defs/Entry"
           },
-          "type": "object"
+          "type": "array"
         }
       },
       "required": [
@@ -288,6 +348,36 @@
         }
       ]
     },
+    "Authored": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "absent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "present",
+              "type": "string"
+            },
+            "value": true
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "AuthoredFiles": {
       "description": "What happened to the authored files on the main checkout.",
       "oneOf": [
@@ -391,6 +481,50 @@
         }
       ]
     },
+    "Availability": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "none",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "destination": {
+              "$ref": "#/$defs/Destination"
+            },
+            "kind": {
+              "const": "move",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "destination"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "resume",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "BoardPr": {
       "properties": {
         "url": {
@@ -489,7 +623,7 @@
               "type": "string"
             },
             "value": {
-              "type": "boolean"
+              "type": "string"
             }
           },
           "required": [
@@ -514,13 +648,11 @@
         {
           "additionalProperties": false,
           "properties": {
-            "declarations": {
-              "additionalProperties": false,
-              "properties": {
-                "context.diff": true,
-                "diff": true
+            "entries": {
+              "items": {
+                "$ref": "#/$defs/Entry"
               },
-              "type": "object"
+              "type": "array"
             },
             "kind": {
               "const": "restore",
@@ -529,7 +661,7 @@
           },
           "required": [
             "kind",
-            "declarations"
+            "entries"
           ],
           "type": "object"
         }
@@ -2247,6 +2379,22 @@
       "type": "object"
     },
     "Entry": {
+      "properties": {
+        "path": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "value": true
+      },
+      "required": [
+        "path",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Entry2": {
       "additionalProperties": false,
       "properties": {
         "builtin": {
@@ -2605,6 +2753,21 @@
         "path",
         "key",
         "inspections"
+      ],
+      "type": "object"
+    },
+    "FilePreview": {
+      "properties": {
+        "patch": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "patch"
       ],
       "type": "object"
     },
@@ -5322,6 +5485,66 @@
       ],
       "description": "What a request asks for, named by its `kind`: a dotted resource and verb\n(`task.complete`, `plan.list`). `desktop.*` kinds are Desktop's own\narrangement state, not part of what other clients are offered."
     },
+    "Outcome": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "preview",
+              "type": "string"
+            },
+            "review": {
+              "$ref": "#/$defs/Review2"
+            }
+          },
+          "required": [
+            "kind",
+            "review"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "applied",
+              "type": "string"
+            },
+            "receipt": {
+              "$ref": "#/$defs/Receipt"
+            }
+          },
+          "required": [
+            "kind",
+            "receipt"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "pending",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "recovered",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "OwnershipKind": {
       "oneOf": [
         {
@@ -7143,19 +7366,33 @@
         },
         {
           "additionalProperties": false,
-          "description": "Checkout settings with the declarations in both editable files.",
+          "description": "Effective settings and editable declarations for Global, a checkout or a Wave.",
           "properties": {
             "directory": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "kind": {
               "const": "config.scope",
               "type": "string"
+            },
+            "target": {
+              "$ref": "#/$defs/ScopeTarget"
+            },
+            "wave": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
             "kind",
-            "directory"
+            "target",
+            "directory",
+            "wave"
           ],
           "type": "object",
           "x-result": {
@@ -7960,7 +8197,7 @@
           "type": "object",
           "x-result": {
             "items": {
-              "$ref": "#/$defs/Entry"
+              "$ref": "#/$defs/Entry2"
             },
             "type": "array"
           },
@@ -8114,6 +8351,21 @@
           }
         }
       ]
+    },
+    "Receipt": {
+      "properties": {
+        "receiving": {
+          "$ref": "#/$defs/Applied"
+        },
+        "source": {
+          "$ref": "#/$defs/Applied"
+        }
+      },
+      "required": [
+        "source",
+        "receiving"
+      ],
+      "type": "object"
     },
     "Records": {
       "description": "Oldest first; replacement moves a record to the end. No heartbeat or clock.",
@@ -8393,6 +8645,28 @@
         "state",
         "body",
         "commit"
+      ],
+      "type": "object"
+    },
+    "Review2": {
+      "properties": {
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/FilePreview"
+          },
+          "type": "array"
+        },
+        "effective": {
+          "$ref": "#/$defs/EffectiveSetting"
+        },
+        "receipt": {
+          "$ref": "#/$defs/Receipt"
+        }
+      },
+      "required": [
+        "changes",
+        "effective",
+        "receipt"
       ],
       "type": "object"
     },
@@ -8695,20 +8969,23 @@
       ]
     },
     "Scope": {
-      "description": "What applies in the checkout, alongside the files Settings can edit there.",
+      "description": "One resolver reading for the selected work and each editable declaration.",
       "properties": {
-        "context_diff": {
-          "$ref": "#/$defs/EffectiveSetting"
-        },
         "files": {
           "items": {
             "$ref": "#/$defs/ScopeFile"
           },
           "type": "array"
+        },
+        "settings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/EffectiveSetting"
+          },
+          "type": "object"
         }
       },
       "required": [
-        "context_diff",
+        "settings",
         "files"
       ],
       "type": "object"
@@ -8718,29 +8995,78 @@
         "destination": {
           "$ref": "#/$defs/Destination"
         },
-        "diff": {
-          "additionalProperties": false,
-          "description": "Every authored spelling, including a flat key shadowed by the nested one.",
-          "properties": {
-            "context.diff": true,
-            "diff": true
-          },
-          "type": "object"
-        },
         "path": {
           "type": "string"
         },
-        "reset_preview": {
-          "type": "string"
+        "slots": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Slot"
+          },
+          "description": "Includes absent slots. Omitted keys do not apply at this destination.",
+          "type": "object"
         }
       },
       "required": [
         "destination",
         "path",
-        "diff",
-        "reset_preview"
+        "slots"
       ],
       "type": "object"
+    },
+    "ScopeTarget": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "general",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "skill",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "graph": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "step",
+              "type": "string"
+            },
+            "step": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "graph",
+            "step"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Secrets": {
       "additionalProperties": {
@@ -11150,6 +11476,32 @@
         "id",
         "title",
         "reason"
+      ],
+      "type": "object"
+    },
+    "Slot": {
+      "properties": {
+        "declared": {
+          "$ref": "#/$defs/Authored"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/Entry"
+          },
+          "type": "array"
+        },
+        "key": {
+          "type": "string"
+        },
+        "promotion": {
+          "$ref": "#/$defs/Availability"
+        }
+      },
+      "required": [
+        "key",
+        "declared",
+        "entries",
+        "promotion"
       ],
       "type": "object"
     },
@@ -18760,7 +19112,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Change the checkout's Diff declaration if its authored spellings still match.",
+          "description": "Change a catalog setting if its authored declarations still match.",
           "properties": {
             "change": {
               "$ref": "#/$defs/Change"
@@ -18769,27 +19121,101 @@
               "$ref": "#/$defs/Destination"
             },
             "expected": {
-              "additionalProperties": false,
-              "properties": {
-                "context.diff": true,
-                "diff": true
+              "items": {
+                "$ref": "#/$defs/Entry"
               },
-              "type": "object"
+              "type": "array"
+            },
+            "key": {
+              "type": "string"
             },
             "kind": {
-              "const": "config.edit_diff",
+              "const": "config.edit",
               "type": "string"
             }
           },
           "required": [
             "kind",
             "destination",
+            "key",
             "expected",
             "change"
           ],
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Applied"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Preview a checked edit against the current configuration file.",
+          "properties": {
+            "change": {
+              "$ref": "#/$defs/Change"
+            },
+            "destination": {
+              "$ref": "#/$defs/Destination"
+            },
+            "expected": {
+              "items": {
+                "$ref": "#/$defs/Entry"
+              },
+              "type": "array"
+            },
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "config.preview",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "destination",
+            "key",
+            "expected",
+            "change"
+          ],
+          "type": "object",
+          "x-result": {
+            "type": "string"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Preview, confirm or undo a move to the next broader configuration file.",
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/Action"
+            },
+            "destination": {
+              "$ref": "#/$defs/Destination"
+            },
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "config.promote",
+              "type": "string"
+            },
+            "wave": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "destination",
+            "key",
+            "wave",
+            "action"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/Outcome"
           }
         },
         {

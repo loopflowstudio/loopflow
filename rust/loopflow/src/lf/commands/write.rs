@@ -1064,14 +1064,36 @@ writes! {
     } => loopflow_execution::engine::config::Declaration;
     { destination, key } => loopflow_execution::engine::config::unset(destination, key)?,
 
-    /// Change the checkout's Diff declaration if its authored spellings still match.
-    #[serde(rename = "config.edit_diff")]
-    ConfigEditDiff {
+    /// Change a catalog setting if its authored declarations still match.
+    #[serde(rename = "config.edit")]
+    ConfigEdit {
         destination: loopflow_execution::config::files::Destination,
-        expected: loopflow_execution::config::files::context_diff::Declarations,
-        change: loopflow_execution::config::files::context_diff::Change,
-    } => loopflow_execution::config::files::context_diff::Applied;
-    { destination, expected, change } => loopflow_execution::engine::config::edit_diff(destination, expected, change)?,
+        key: String,
+        expected: Vec<loopflow_execution::config::files::edit::Entry>,
+        change: loopflow_execution::config::files::edit::Change,
+    } => loopflow_execution::config::files::edit::Applied;
+    { destination, key, expected, change } => loopflow_execution::engine::config::checked_edit(destination, key, expected, change)?,
+
+    /// Preview a checked edit against the current configuration file.
+    #[serde(rename = "config.preview")]
+    ConfigPreview {
+        destination: loopflow_execution::config::files::Destination,
+        key: String,
+        expected: Vec<loopflow_execution::config::files::edit::Entry>,
+        change: loopflow_execution::config::files::edit::Change,
+    } => String;
+    { destination, key, expected, change } => loopflow_execution::engine::config::preview_edit(destination, key, expected, change)?,
+
+    /// Preview, confirm or undo a move to the next broader configuration file.
+    #[serde(rename = "config.promote")]
+    ConfigPromote {
+        destination: loopflow_execution::config::files::Destination,
+        key: String,
+        #[serde(deserialize_with = "Option::deserialize")]
+        wave: Option<String>,
+        action: loopflow_execution::engine::config::promotion::Action,
+    } => loopflow_execution::engine::config::promotion::Outcome;
+    { destination, key, wave, action } => loopflow_execution::engine::config::promotion::run(destination,key,wave.as_deref(),action)?,
 
     /// The Machine's `theme:` choice: set to `value`, or read when null.
     /// Desktop owns its Apply/Cancel transaction and the phone reads it; no
@@ -1147,7 +1169,9 @@ macro_rules! directory_of {
             | Write::AccountDisconnect { .. }
             | Write::AccountConnect { .. }
             | Write::ConfigSet { .. }
-            | Write::ConfigEditDiff { .. }
+            | Write::ConfigPromote { .. }
+            | Write::ConfigPreview { .. }
+            | Write::ConfigEdit { .. }
             | Write::ConfigUnset { .. }
             | Write::ConfigTheme { .. } => None,
         }

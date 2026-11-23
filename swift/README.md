@@ -322,6 +322,9 @@ In **Settings → Context**, choose a checkout and switch **Save in** between
 **My settings** and **Shared settings**. Expand **In effect** to see which file
 sets Diff for the next launch. **Reset layer…** shows the change to the selected
 file. Undo restores the declaration even after switching destinations.
+For **Additional documents**, **Save empty list** clears inherited entries.
+**Reset layer…** lets them apply again. **Move to Shared Repository…** shows
+both patches and the result for the selected work before saving.
 
 Choose **Settings → Appearance** (**⌘,**) to pick a theme for every window,
 Ghostty, and iPhone. Pick **System**, **Light**, or **Dark**; System follows

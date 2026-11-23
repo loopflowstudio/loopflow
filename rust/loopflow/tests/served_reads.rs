@@ -131,13 +131,18 @@ fn configuration_edits_use_the_server_without_work_processes() {
     let id = connection
         .subscribe(
             Read::ConfigScope {
-                directory: repo.path().to_owned(),
+                target: loopflow_execution::engine::config::ScopeTarget::General,
+                directory: Some(repo.path().to_owned()),
+                wave: None,
             },
             None,
         )
         .unwrap();
     let frame = connection.reading(&id).unwrap().unwrap();
-    assert_eq!(frame["body"]["context_diff"]["value"], false, "{frame}");
+    assert_eq!(
+        frame["body"]["settings"]["context.diff"]["value"], false,
+        "{frame}"
+    );
     assert!(frame["read_at"].is_null());
     assert_eq!(theme["value"], "Hearth");
     assert_eq!(fs::read(&database).unwrap(), before);
@@ -994,7 +999,9 @@ fn server_operations_match_their_lf_commands() {
                     step: None,
                 },
                 Read::ConfigScope {
-                    directory: repo.path().to_owned(),
+                    target: loopflow_execution::engine::config::ScopeTarget::General,
+                    directory: Some(repo.path().to_owned()),
+                    wave: None,
                 },
                 Read::ConfigCatalog,
                 Read::ConfigGet {
@@ -1328,7 +1335,9 @@ fn server_operations_match_their_lf_commands() {
         | Write::DesktopDashboardMove { .. }
         // configuration_edits_use_the_server_without_work_processes covers settings.
         | Write::ConfigSet { .. }
-        | Write::ConfigEditDiff { .. }
+        | Write::ConfigPromote { .. }
+        | Write::ConfigPreview { .. }
+        | Write::ConfigEdit { .. }
         | Write::ConfigUnset { .. }
         | Write::ConfigTheme { .. } => (
             [
@@ -2828,7 +2837,9 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             ]),
         ),
         Write::ConfigSet { .. }
-        | Write::ConfigEditDiff { .. }
+        | Write::ConfigPromote { .. }
+        | Write::ConfigPreview { .. }
+        | Write::ConfigEdit { .. }
         | Write::ConfigUnset { .. }
         | Write::ConfigTheme { .. } => {
             unreachable!("settings writes are compared on their own")

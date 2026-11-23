@@ -71,15 +71,15 @@ struct ContextSettingsWorkflowTests {
         // Desktop opens an installed Machine. Finish first-open migrations before connecting.
         _ = try await lf.run(["desktop", "portfolio", "--json"])
         let server = LocalServerFixture(lf)
-        let model = ContextSettingsModel(location: server.location())
+        let model = ScopedSettingsModel(location: server.location())
         let notices = NoticeCenter()
-        model.checkout = repo.path
-        var watch = Task { await model.observe(repo.path) }
+        model.select(checkout: repo.path)
+        var watch = Task { await model.observe() }
         func awaitReading(_ condition: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
             let deadline = ContinuousClock.now + .seconds(10)
             while model.saving || !condition() {
                 try #require(model.reading.failure == nil, "\(model.reading.failure ?? "")", sourceLocation: sourceLocation)
-                try #require(ContinuousClock.now < deadline, "Context subscription last showed \(String(describing: model.file?.declared)); edit error: \(model.editError ?? "none")", sourceLocation: sourceLocation)
+                try #require(ContinuousClock.now < deadline, "Context subscription last showed \(String(describing: model.file?.slots["context.diff"]?.value)); edit error: \(model.editError ?? "none")", sourceLocation: sourceLocation)
                 try await Task.sleep(for: .milliseconds(20))
             }
         }
@@ -87,61 +87,62 @@ struct ContextSettingsWorkflowTests {
         do {
             _ = try await server.status()
             try await awaitReading { model.file != nil }
-            #expect(model.file?.diff.isEmpty == true)
-            let view = ContextSettings(model: model, notices: notices)
+            #expect(model.file?.slots["context.diff"]?.entries.isEmpty == true)
+            let view = ScopedSettings(model: model, pane: .context, checkouts: [repo.path], waves: [], notices: notices)
             let toggle = try view.inspect().find(ViewType.Toggle.self)
             #expect(try toggle.isOn())
             #expect(try await launchHasDiff(in: repo))
             try toggle.tap()
-            try await awaitReading { model.file?.declared == .bool(false) }
+            try await awaitReading { model.file?.slots["context.diff"]?.value == .bool(false) }
             #expect(try await !launchHasDiff(in: repo))
 
             let picker = try view.inspect().find(ViewType.Picker.self)
             try picker.select(value: ConfigurationDestination.sharedRepository)
             #expect(try view.inspect().find(ViewType.Toggle.self).isOn())
             let sharedFile = try #require(model.file)
-            #expect(sharedFile.resetPreview == "- diff: true")
+            #expect(try await model.preview(.reset, key: "context.diff", file: sharedFile) == "- diff: true")
             try view.inspect().find(ViewType.Toggle.self).tap()
-            try await awaitReading { model.file?.declared == .bool(false) }
+            try await awaitReading { model.file?.slots["context.diff"]?.value == .bool(false) }
             #expect(try String(contentsOf: shared, encoding: .utf8) == original.replacingOccurrences(of: "true", with: "false"))
             try view.inspect().find(ViewType.Toggle.self).tap()
-            try await awaitReading { model.file?.declared == .bool(true) }
-            #expect(model.reading.value?.source == ConfigurationDestination.personalRepository.title)
+            try await awaitReading { model.file?.slots["context.diff"]?.value == .bool(true) }
+            #expect(try #require(model.file).hasOverrides(in: .context, catalog: model.catalogue))
+            #expect(model.reading.value?.source("context.diff") == ConfigurationDestination.personalRepository.title)
             #expect(try await !launchHasDiff(in: repo))
 
             try picker.select(value: ConfigurationDestination.personalRepository)
             let privateOff = try #require(model.file)
-            await model.apply(.reset, to: privateOff, notices: notices, manager: nil)
-            try await awaitReading { model.file?.diff.isEmpty == true }
+            await model.apply(.reset, key: "context.diff", to: privateOff, notices: notices, manager: nil)
+            try await awaitReading { model.file?.slots["context.diff"]?.entries.isEmpty == true }
             #expect(try await launchHasDiff(in: repo))
             let undo = try #require(notices.current?.action)
             try picker.select(value: ConfigurationDestination.sharedRepository)
             undo.perform()
-            try await awaitReading { model.reading.value?.contextDiff.value == .bool(false) }
+            try await awaitReading { model.reading.value?.settings["context.diff"]?.value == .bool(false) }
             #expect(try await !launchHasDiff(in: repo))
 
             // The reset preview was opened on private Off. A later hand edit wins.
             let external = "# hand edit\ncontext: {diff: true}\n"
             try external.write(to: mine, atomically: true, encoding: .utf8)
-            await model.apply(.reset, to: privateOff, notices: notices, manager: nil)
+            await model.apply(.reset, key: "context.diff", to: privateOff, notices: notices, manager: nil)
             #expect(model.editError?.contains("refresh") == true)
             #expect(try String(contentsOf: mine, encoding: .utf8) == external)
             try picker.select(value: ConfigurationDestination.personalRepository)
-            try await awaitReading { model.file?.declared == .bool(true) }
+            try await awaitReading { model.file?.slots["context.diff"]?.value == .bool(true) }
             watch.cancel()
             await watch.value
             model.refresh()
-            watch = Task { await model.observe(repo.path) }
-            try await awaitReading { model.editError == nil && model.file?.declared == .bool(true) }
-            await model.apply(.reset, to: try #require(model.file), notices: notices, manager: nil)
-            try await awaitReading { model.file?.diff.isEmpty == true }
+            watch = Task { await model.observe() }
+            try await awaitReading { model.editError == nil && model.file?.slots["context.diff"]?.value == .bool(true) }
+            await model.apply(.reset, key: "context.diff", to: try #require(model.file), notices: notices, manager: nil)
+            try await awaitReading { model.file?.slots["context.diff"]?.entries.isEmpty == true }
 
             _ = try await lf.run(["config", "set", "context.diff", "false", "--shared"], cwd: linked)
             _ = try await lf.run(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.org", "commit", "-am", "Set linked Diff"], cwd: linked, executable: "/usr/bin/git")
             #expect(try await !launchHasDiff(in: linked))
             let child = try await cliScope(linked)
-            #expect(child.contextDiff.value == .bool(false))
-            #expect(try await cliScope(repo).contextDiff.value == .bool(true))
+            #expect(child.settings["context.diff"]?.value == .bool(false))
+            #expect(try await cliScope(repo).settings["context.diff"]?.value == .bool(true))
             #expect(child.files.first { $0.owner == .personalRepository }?.path == privateOff.path)
             let linkedRoot = try await lf.run(["rev-parse", "--show-toplevel"], cwd: linked, executable: "/usr/bin/git")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -158,6 +159,117 @@ struct ContextSettingsWorkflowTests {
         }
         watch.cancel()
         await watch.value
+        await server.stop()
+    }
+    @Test func scopedEditsAndPromoteRoundTripThroughTheCLI() async throws {
+        let root = URL(fileURLWithPath: "/tmp/lf-scope-\(UUID().uuidString.prefix(8))").resolvingSymlinksInPath()
+        let repo = root.appending(path: "project")
+        let home = root.appending(path: "home")
+        let fm = FileManager.default
+        let waveID = "8ae21a68-8940-4553-a3ab-135133925e35"
+        let wave = repo.appending(path: ".lf/wave/old")
+        for dir in [home, wave, repo.appending(path: ".lf/skills"), repo.appending(path: ".lf/graphs")] {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        defer { try? fm.removeItem(at: root) }
+        try Data("---\nid: \(waveID)\nagent: codex\n---\nA Wave.\n".utf8).write(to: wave.appending(path: "GOAL.md"))
+        try Data("- step: {name: probe, id: work}\n".utf8).write(to: repo.appending(path: ".lf/graphs/review.yaml"))
+        try Data("Probe.\n".utf8).write(to: repo.appending(path: ".lf/skills/probe.md"))
+        try Data("context: [README.md] # include\nrepo: {tracker: git}\n".utf8)
+            .write(to: repo.appending(path: ".lf/config.yaml"))
+        let lf = try BuiltLf(home: home, cwd: repo)
+        _ = try await lf.run(["desktop", "portfolio", "--json"])
+        let server = LocalServerFixture(lf)
+        let model = ScopedSettingsModel(location: server.location())
+        let notices = NoticeCenter()
+        model.select(checkout: repo.path)
+        func scope(_ arguments: [String] = [], target: [String] = []) async throws -> ConfigurationScope {
+            let output = try await lf.run(arguments + ["config", "scope", "--json"] + target)
+            return try JSONDecoder().decode(ConfigurationScope.self, from: Data(output.utf8))
+        }
+        func file(_ owner: ConfigurationDestination, _ arguments: [String] = []) async throws -> ConfigurationScope.File {
+            let reading = try await scope(arguments)
+            return try #require(reading.files.first { $0.owner == owner })
+        }
+        func set(_ key: String, _ value: String, _ owner: ConfigurationDestination) async throws {
+            let address = try await file(owner)
+            let saved = await model.apply(.set(value), key: key, to: address, notices: notices, manager: nil)
+            try #require(saved, "\(model.editError ?? "Save failed")")
+        }
+        func cliValue(_ key: String, _ arguments: [String] = []) async throws -> JSONValue {
+            let output = try await lf.run(["config", "get", key, "--json"] + arguments)
+            return try JSONDecoder().decode(ConfigurationFileValue.self, from: Data(output.utf8)).value
+        }
+        do {
+            _ = try await server.status()
+            #expect(try await file(.personalRepository).slots["context.docs"]?.value == nil)
+            try await set("context.docs", "[]", .personalRepository)
+            #expect(try await cliValue("context.docs") == .array([]))
+            #expect(try await scope().settings["context.docs"]?.value == .array([]))
+            let mine = try await file(.personalRepository)
+            #expect(await model.apply(.reset, key: "context.docs", to: mine, notices: notices, manager: nil))
+            #expect(try await cliValue("context.docs") == .null)
+            #expect(try await scope().settings["context.docs"]?.value == .array([.string("README.md")]))
+
+            try await set("agent", "claude", .sharedRepository)
+            try await set("default_agent", "codex", .personalRepository)
+            #expect(try await scope().settings["agent"]?.value == .string("claude"))
+            #expect(try await cliValue("default_agent") == .string("codex"))
+            try await set("repo.tracker", "{linear: {team: dev}}", .sharedRepository)
+            #expect(try await cliValue("repo.tracker", ["--shared"]) == .object(["linear": .object(["team": .string("dev")])]))
+            try await set("machine", "{session: local, tasks: local}", .personalRepository)
+            try await set("machine", "{session: local, capacity: spare}", .personalRepository)
+            #expect(try await cliValue("machine.tasks") == .null)
+            #expect(try await cliValue("machine.capacity") == .string("spare"))
+
+            try await set("diff_hidden", "[generated/**]", .personalRepository)
+            let hidden = try #require(try await scope().settings["diff_hidden"])
+            #expect(TaskFilesStore.hidden(from: hidden)?.contains(.init(pattern: "generated/**", source: nil)) == true)
+            for (target, key) in [(["--skill", "probe"], "skill.probe.context.diff"),
+                                  (["--graph", "review", "--step", "work"], "graphs.review.steps.work.context.diff")] {
+                let reading = try await scope(target: target)
+                let addressed = try #require(reading.files.first { $0.owner == .personalRepository })
+                #expect(addressed.slots["context.diff"]?.key == key)
+                #expect(await model.apply(.set("false"), key: "context.diff", to: addressed, notices: notices, manager: nil))
+                #expect(try await scope(target: target).settings["context.diff"]?.value == .bool(false))
+            }
+            #expect(try await cliValue("context.diff") == .null)
+
+            let source = try await file(.personalRepository)
+            let review = try #require(await model.promote(key: "default_agent", file: source, review: nil,
+                resume: false, notices: notices, manager: nil))
+            #expect(review.changes.count == 2)
+            #expect(try await cliValue("default_agent", ["--shared"]) == .null)
+            _ = await model.promote(key: "default_agent", file: source, review: review,
+                resume: false, notices: notices, manager: nil)
+            #expect(try await cliValue("default_agent", ["--shared"]) == .string("codex"))
+            #expect(try await cliValue("default_agent") == .null)
+            model.select(checkout: repo.path, wave: waveID)
+            try #require(notices.current?.action).perform()
+            let deadline = ContinuousClock.now + .seconds(10)
+            while try await cliValue("default_agent") == .null {
+                try #require(ContinuousClock.now < deadline)
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(try await cliValue("default_agent", ["--shared"]) == .null)
+
+            let sharedWave = try await file(.sharedWave, ["--wave", waveID])
+            #expect(await model.apply(.set("true"), key: "chrome", to: sharedWave, notices: notices, manager: nil))
+            let renamed = wave.deletingLastPathComponent().appending(path: "renamed")
+            try fm.moveItem(at: wave, to: renamed)
+            try fm.createDirectory(at: wave, withIntermediateDirectories: true)
+            try Data("id: 7ae21a68-8940-4553-a3ab-135133925e35\n".utf8).write(to: wave.appending(path: "config.yaml"))
+            let selected = try await scope(["--wave", waveID])
+            #expect(selected.settings["agent"]?.value == .string("codex"))
+            let selectedPath = try #require(selected.files.first { $0.owner == .sharedWave }?.path)
+            let expectedURL = renamed.appending(path: "config.yaml")
+            let selectedID = try FileManager.default.attributesOfItem(atPath: selectedPath)[.systemFileNumber] as? NSNumber
+            let expectedID = try FileManager.default.attributesOfItem(atPath: expectedURL.path)[.systemFileNumber] as? NSNumber
+            #expect(try #require(selectedID) == expectedID)
+        } catch {
+            await server.stop()
+            throw error
+        }
         await server.stop()
     }
 }

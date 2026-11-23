@@ -60,7 +60,10 @@ Mac’s sidebar requests only the selected section. Working and Paused have dist
 Remaining:
 
 - **Codex tool sessions outside the worker's OS session.** The three probes below found no launch-side identity on Codex 0.171.0: the app-server reports `osPid: null`, a later census cannot tell the build from a double-forked service, and a zsh startup hook misses an explicit `/bin/sh`. Current choice (`scratch/questions.md`): such jobs stay outside signal authority and the PR names the gap. Open choice for review: accept that gap for this PR, or wrap Codex's tool command (a PreToolUse prefix, which can displace a configured rewrite) to register the session before the command runs.
+- **Pause after a move's payload is sent but before the destination has a checkout.** The destination refuses, so the person retries after arrival. Name it in the PR beside the Codex gap; the source-push window is covered.
 - **Five-harness worker matrix and Linux session enumeration:** gate and CI.
+
+Next: gate. Every implement item has a passing check; what remains is the two review choices above and CI.
 
 ## Pause during interrupt and move
 

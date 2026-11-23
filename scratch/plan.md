@@ -110,6 +110,7 @@ prompt once and hears the steer once.
     nothing.
   - a Codex launch's start report wakes an idle reopened Session through its
     endpoint (`codex_app_server` stand-in).
+  - a worker's boundaries answer while another connection holds the write lock.
 - `lf::commands::context::tests::a_wakeable_start_leaves_waiting_steers_to_the_wake`.
 - `tests/e2e/idle_wake.py` by hand on OpenCode and Pi (reopen leg), plus the
   same reopen by hand on real Claude and Codex.
@@ -127,14 +128,6 @@ prompt once and hears the steer once.
   someone types… Claude's start hook reads those steers into its context
   instead"). `harness/README.md` reopen paragraph.
 - No wire change, no migration.
-
-## What goes
-
-- The `session_activity` UPDATE inside `record_agent_inbox`, and the
-  comment saying a provider naming its inbox has run no turn.
-- `boundary::tests` assertions that tie the idle reset to inbox naming;
-  rewrite them against the first boundary.
-- README sentences above.
 
 ## Slices
 

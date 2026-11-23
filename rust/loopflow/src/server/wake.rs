@@ -9,7 +9,8 @@
 //! it at its next boundary.
 //!
 //! A steer naming a stopped interactive Session starts it, once per steer,
-//! in a held terminal as `session.continue` does.
+//! in a held terminal as `session.continue` does; the resumed conversation
+//! reads its steers as its first input.
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;

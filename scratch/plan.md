@@ -160,6 +160,27 @@ a log naming its port, a wake file) receives the token header and its `cascadeId
 `harness::context::tests::` Node runs drive each plugin's wake socket and check Pi's
 `sendMessage` options and OpenCode's `synthetic` call.
 
+## Status (implement, 2026-11-22)
+
+Slices 1–3 built and passing their focused tests (`server::wake::tests::` 9,
+`harness::context::tests::` 12, `harness::antigravity::tests::` 8; clippy clean on the three crates).
+What the build taught:
+
+- The store's provider for Antigravity is `agy` (`HarnessKind::as_str`), not `antigravity`.
+- The wake file and `--log-file` sit beside the context delivery in `<LF_HOME>/context-deliveries/`
+  (`<uuid>.wake`, `<uuid>.agy.log`), not the checkout's prompts dir: the delivery already lives there
+  and survives checkout moves. `SqliteStore::record_launch_inbox` is the attachment-keyed write.
+- `agy` logs its HTTPS (gRPC) port with the same "Language server listening on random port at" prefix;
+  the reach takes only the line ending `for HTTP` (seen in `~/.gemini/antigravity-cli/log/`).
+- A refused plugin wake leaves an unconfirmed claim; it lapses after 60 s like a dead hook's.
+- OpenCode's first prompt reports nothing: its conversation is selected at the first request after it,
+  and a `Turn` boundary before selection is refused. Later prompts report `UserPromptSubmit`, fire and forget.
+- OpenCode 2.0.32's external plugin `session` has `synthetic` (read from the binary's plugin bridge).
+
+Not yet seen live: an OpenCode TUI, Pi and `agy` each woken by `lf steer` (risk 1 and the demo). The
+Machine server here is the released `lf`, so the wake watcher in this branch runs only once the branch
+is installed; that run belongs to demo/qa.
+
 ## Slices
 
 1. **OpenCode end to end** (could prove the plan wrong): `IdleReach::Plugin` by provider in the

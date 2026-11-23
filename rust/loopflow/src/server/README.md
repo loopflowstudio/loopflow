@@ -821,8 +821,9 @@ for the next boundary:
   undocumented (seen on `agy` 1.5.14); when a release breaks it, the wake fails
   in `logs/lf.log` and the steer arrives at the next boundary.
 
-OpenCode's plugin names its conversation at turn end (`Stop`) and at a typed
-prompt (`UserPromptSubmit`), so its work session shows as idle like the others;
+OpenCode's plugin names its conversation at turn end (`Stop`) and at each
+typed prompt after the first, which selects it (`UserPromptSubmit`), so its
+work session shows as idle like the others;
 Pi's idle comes from `agent_settled`.
 
 A server that restarts reads the same conversations again. An unreachable

@@ -23,3 +23,5 @@
   can't reach the server.
 - Pi's `stop {}` stays: Pi already records idle from `agent_settled`. Passed over: a named Stop
   for Pi, which would add a second idle writer.
+- Antigravity's wake file and log live in `<LF_HOME>/context-deliveries/` beside the delivery, not
+  `.lf/prompts/`. Passed over: the checkout's prompts dir, which moves with the checkout.

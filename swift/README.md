@@ -820,6 +820,37 @@ cannot guarantee exact hue or separation of nearly identical colors. Faint text
 may not reach the requested ratio. Graphics, images, transparent backdrops and
 custom postprocessing are outside the opaque-text contrast guarantee.
 
+In a focused Session or Shell pane, press **Shift-Return** or **Control-Return**
+to send the modified return to the agent or shell (such as inserting a newline
+in Claude Code or Codex instead of submitting), including after closing and
+reopening the pane. Option chords follow Ghostty's `macos-option-as-alt`
+setting — Ghostty's default for the active macOS keyboard layout when unset,
+updated when you switch input sources, or your choice in
+`~/.config/ghostty/config`:
+
+```ini
+# In ~/.config/ghostty/config; reopen Loopflow after editing.
+macos-option-as-alt = left    # true, left, right, or false
+```
+
+With `left`, Left Option sends Alt chords (`Option-B` jumps back a word) while
+Right Option types macOS characters (`∫`) and dead-key accents.
+
+Keystrokes in a focused Session or Shell follow one order:
+
+1. **Active IME or dead-key composition** finishes first. Desktop shortcuts and
+   modifier-only presses wait while marked text is open, and canceling
+   composition sends nothing to the terminal.
+2. **Desktop shortcuts and macOS app menus** keep their keys (`⌘K`, `⌘\`,
+   `⌘1–9`, `⌃Tab` / `⌃⇧Tab`, `⌃\``, `⌘C` / `⌘V` / `⌘F`, window cycling `⌘\`` /
+   `⌘⇧~`, and app menus such as `⌘Q`, `⌘,`, `⌘H`, `⌘M`, `⌘⇧W`, `⌘⇧O`, `⌘/`).
+3. **Ghostty terminal bindings** run surface actions (`⌘↑` / `⌘↓` prompt jump,
+   `⌘A` select all, font size, scrollback, and custom `keybind = …` terminal
+   rules in your Ghostty config). Ghostty's standalone window, tab, and split
+   defaults are unbound so they do not intercept Desktop menus or chords.
+4. **The running program** receives every remaining keystroke with its modifiers
+   intact, including Kitty keyboard modes across pane reopen and reconnect.
+
 Files and the Graph process log open beside retained Sessions and shells in the
 same multiplexer. Resize, zoom, close and Reopen preserve each pane’s content.
 Drag any pane divider to resize; it highlights on hover and snaps near 38.2% or

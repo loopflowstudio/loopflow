@@ -57,10 +57,10 @@ public enum MoveResult: Decodable, Sendable {
     case preview(MoveReview)
     case applied(MoveReceipt)
     case pending
-    case recovered
+    case recovered, dismissed
 
     private enum Keys: String, CodingKey { case kind, review, receipt }
-    private enum Kind: String, Decodable { case preview, applied, pending, recovered }
+    private enum Kind: String, Decodable { case preview, applied, pending, recovered, dismissed }
     public init(from decoder: Decoder) throws {
         let fields = try decoder.container(keyedBy: Keys.self)
         switch try fields.decode(Kind.self, forKey: .kind) {
@@ -68,17 +68,19 @@ public enum MoveResult: Decodable, Sendable {
         case .applied: self = .applied(try fields.decode(MoveReceipt.self, forKey: .receipt))
         case .pending: self = .pending
         case .recovered: self = .recovered
+        case .dismissed: self = .dismissed
         }
     }
 }
 
 public enum MoveAction: Encodable, Sendable {
-    case preview, resume, confirm(MoveReview), undo(MoveReceipt)
+    case preview, resume, dismiss, confirm(MoveReview), undo(MoveReceipt)
 
     public func encode(to encoder: Encoder) throws {
         let fields: TaggedFields = switch self {
         case .preview: TaggedFields("preview")
         case .resume: TaggedFields("resume")
+        case .dismiss: TaggedFields("dismiss")
         case .confirm(let review): TaggedFields("confirm", ["review": review])
         case .undo(let receipt): TaggedFields("undo", ["receipt": receipt])
         }

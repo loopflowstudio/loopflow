@@ -59,6 +59,8 @@ struct MachineConnectionRow: View {
 
 struct MachineConnections: View {
     let location: ServerLocation
+    let declaration: ConfigurationScope.Authored?
+    @State private var refreshID = UUID()
     @State var connections = MachineConnectionChecks()
 
     var body: some View {
@@ -70,14 +72,17 @@ struct MachineConnections: View {
                     MachineConnectionRow(name: name, health: machines[name].flatMap { connections.health[$0.id] } ?? .checking)
                 }
             } else { ProgressView("Loading connections") }
+            Button("Refresh connections") { refreshID = UUID() }
         }
-        .task {
+        .task(id: Check(declaration: declaration, refreshID: refreshID)) {
+            guard let declaration else { return }
             while !Task.isCancelled {
-                await connections.refresh(location: location)
+                await connections.refresh(declaration, location: location)
                 do { try await Task.sleep(for: .seconds(30)) } catch { return }
             }
         }
     }
+    private struct Check: Hashable { let declaration: ConfigurationScope.Authored?; let refreshID: UUID }
 }
 
 @MainActor @Observable
@@ -87,19 +92,21 @@ final class MachineConnectionChecks {
     private(set) var health: [String: MachineConnectionHealth] = [:]
     private(set) var failure: String?
 
-    func refresh(location: ServerLocation) async {
+    func refresh(_ declaration: ConfigurationScope.Authored, location: ServerLocation) async {
         do {
-            // The connection names live in the global file. The full Machine listing also reads every held Task.
-            let data = try await ServerClient.configuration(.configGet(destination: .object(["kind": .string("personal_global")]),
-                key: "machines"), location: location)
-            let value = try JSONDecoder().decode(ConfigurationFileValue.self, from: data).value
-            let listed = value == .null ? [:] : try JSONDecoder().decode([String: Connection].self, from: JSONEncoder().encode(value))
+            let listed: [String: Connection]
+            switch declaration {
+            case .absent: listed = [:]
+            case .present(let value):
+                listed = try JSONDecoder().decode([String: Connection].self, from: JSONEncoder().encode(value))
+            }
             try Task.checkCancellation()
             machines = listed
             failure = nil
-            health = [:]
+            let ids = Set(listed.values.map(\.id))
+            health = health.filter { ids.contains($0.key) }
             await withTaskGroup(of: (String, MachineConnectionHealth).self) { group in
-                var next = Set(listed.values.map(\.id)).sorted().makeIterator()
+                var next = ids.sorted().makeIterator()
                 func enqueue() {
                     guard !Task.isCancelled, let id = next.next() else { return }
                     group.addTask { [location] in

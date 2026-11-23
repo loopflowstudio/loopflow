@@ -11,22 +11,30 @@ struct ThemeChooser: View {
 
     var body: some View {
         Form {
+            if appearance.readFailure != nil || appearance.notice != nil {
+                Section {
+                    if let failure = appearance.readFailure { Text(failure).foregroundStyle(palette.failure).textSelection(.enabled) }
+                    if let notice = appearance.notice { Text(notice).textSelection(.enabled) }
+                }
+            }
             if appearance.editing {
                 ThemeEditor(appearance: appearance)
                     .settingsRow(SettingsMatch.theme.id, highlighted: highlightedKey)
             } else {
-                Picker("Appearance", selection: Binding(get: { appearance.selection.mode }, set: { mode in
-                    Task { await appearance.applyMode(mode, notices: notices, manager: undoManager) }
-                })) {
-                    ForEach(AppearanceMode.allCases, id: \.self) { Text($0.menuTitle).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityIdentifier("appearance-mode")
-                .settingsRow(SettingsMatch.appearanceMode.id, highlighted: highlightedKey)
+                Section {
+                    Picker("Appearance", selection: Binding(get: { appearance.selection.mode }, set: { mode in
+                        Task { await appearance.applyMode(mode, notices: notices, manager: undoManager) }
+                    })) {
+                        ForEach(AppearanceMode.allCases, id: \.self) { Text($0.menuTitle).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("appearance-mode")
+                    .settingsRow(SettingsMatch.appearanceMode.id, highlighted: highlightedKey)
 
-                Button("Customize \(appearance.selectedName)") { appearance.customize() }
-                    .accessibilityIdentifier("appearance-customize-theme")
-                    .settingsRow(SettingsMatch.theme.id, highlighted: highlightedKey)
+                    Button("Customize \(appearance.selectedName)") { appearance.customize() }
+                        .accessibilityIdentifier("appearance-customize-theme")
+                        .settingsRow(SettingsMatch.theme.id, highlighted: highlightedKey)
+                }
 
                 let sides: [AppearanceMode] = appearance.selection.mode == .system ? [.light, .dark] : [appearance.selection.mode]
                 ForEach(sides, id: \.self) { side in
@@ -49,11 +57,8 @@ struct ThemeChooser: View {
                     }
                 }
             }
-            ForEach([appearance.readFailure, appearance.notice].compactMap { $0 }, id: \.self) {
-                Text($0).foregroundStyle(palette.failure).textSelection(.enabled)
-            }
         }
-        .formStyle(.grouped)
+        .settingsForm(highlighted: highlightedKey)
         .disabled(appearance.saving)
         .onDisappear { if appearance.editing { appearance.cancel() } }
     }

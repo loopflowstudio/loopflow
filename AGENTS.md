@@ -449,6 +449,11 @@ gate or CI; it never blocks an earlier step. Real failures still get fixed.
 Scratch keeps one line per check: command, result, and who runs it later;
 once gate clears scratch, the PR body keeps them.
 
+A served subscription suppresses identical readings. After a write, use a
+checkpoint on the same subscription when the next edit needs the saved value.
+A separate read can show an intermediate value that Undo restores before the
+subscription sends a frame.
+
 Swift async process fixtures install `terminationHandler` before `run()` and
 await its completion. Don't call blocking `waitUntilExit()` on a cooperative
 executor; it can stay in Foundation's run loop after the child has exited.

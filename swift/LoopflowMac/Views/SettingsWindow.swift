@@ -116,24 +116,21 @@ struct SettingsWindow: View {
             .frame(minWidth: 210)
             .navigationSplitViewColumnWidth(min: 210, ideal: 220, max: 280)
         } detail: {
-            ScrollViewReader { proxy in
-                Group {
-                    switch navigation.pane {
-                    case .general, .agents, .context, .git, .machines:
-                        ScopedSettings(model: scope, pane: navigation.pane,
-                            checkouts: Array(Set(portfolio.repos.map(\.path) + [checkout, scope.checkout].compactMap { $0 })).sorted(),
-                            waves: waves, notices: notices, highlightedKey: navigation.highlightedKey)
-                    case .appearance: ThemeChooser(appearance: appearance, notices: notices, highlightedKey: navigation.highlightedKey)
-                    case .shortcuts: KeyboardShortcutsView()
-                    case .mobile: MobileSettings(setup: mobile, highlightedKey: navigation.highlightedKey)
-                    }
+            Group {
+                switch navigation.pane {
+                case .general, .agents, .context, .git, .machines:
+                    ScopedSettings(model: scope, pane: navigation.pane,
+                        checkouts: Array(Set(portfolio.repos.map(\.path) + [checkout, scope.checkout].compactMap { $0 })).sorted(),
+                        waves: waves, notices: notices, highlightedKey: scrollTarget)
+                case .appearance: ThemeChooser(appearance: appearance, notices: notices, highlightedKey: scrollTarget)
+                case .shortcuts: KeyboardShortcutsView()
+                case .mobile: MobileSettings(setup: mobile, highlightedKey: scrollTarget)
                 }
-                .task(id: scrollTarget) {
-                    guard let key = scrollTarget else { return }
-                    proxy.scrollTo(key, anchor: .center)
-                    do { try await Task.sleep(for: .seconds(1.5)) } catch { return }
-                    if navigation.highlightedKey == key { navigation.highlightedKey = nil }
-                }
+            }
+            .task(id: scrollTarget) {
+                guard let key = scrollTarget else { return }
+                do { try await Task.sleep(for: .seconds(1.5)) } catch { return }
+                if navigation.highlightedKey == key { navigation.highlightedKey = nil }
             }
             .navigationTitle(navigation.pane.rawValue)
             .overlay(alignment: .bottom) { NoticeView(center: notices) }
@@ -168,7 +165,7 @@ struct SettingsWindow: View {
         let selection = navigation.selection(in: matches)?.id
         return ScrollViewReader { proxy in
             List {
-                if let error = scope.editError ?? scope.reading.failure {
+                if let error = scope.reading.failure {
                     Text(error).foregroundStyle(.secondary)
                     Button("Refresh settings") { scope.refresh() }
                 }

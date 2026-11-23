@@ -47,7 +47,7 @@ enum SettingsMatch: Identifiable {
         case .appearanceMode: [title, "System Light Dark"]
         case .theme: [title, "Customize or import a theme"]
         case .mobileAccess: [title, "Tailscale iPhone pairing QR code and Machine address"]
-        case .setting(let definition): [title, definition.key, definition.description] + definition.shorthands
+        case .setting(let definition): [title, definition.key, definition.description, definition.lifecycle] + definition.shorthands
         }
     }
 }
@@ -70,6 +70,17 @@ extension SettingsNavigation {
 }
 
 extension View {
+    func settingsForm(highlighted key: String?) -> some View {
+        ScrollViewReader { proxy in
+            self.formStyle(.grouped)
+                .task(id: key) {
+                    guard let key else { return }
+                    await Task.yield()
+                    if !Task.isCancelled { proxy.scrollTo(key, anchor: .center) }
+                }
+        }
+    }
+
     func settingsRow(_ key: String, highlighted: String?) -> some View {
         background(key == highlighted ? Color.accentColor.opacity(0.18) : .clear,
                    in: RoundedRectangle(cornerRadius: CornerRadius.row))
@@ -88,8 +99,8 @@ struct SettingsSearchRow: View {
     let open: () -> Void
 
     private var booleanToggle: ScopedBooleanToggle? {
-        guard case .setting(let definition) = result, definition.controlType == "boolean",
-              let file = scope.file(for: definition.pane), file.slots[definition.key] != nil,
+        guard case .setting(let definition) = result, definition.controlType == "boolean", !definition.nullable,
+              let file = scope.file(for: definition), file.slots[definition.key] != nil,
               let effective = scope.reading.value?.settings[definition.key] else { return nil }
         return ScopedBooleanToggle(model: scope, definition: definition, effective: effective, file: file,
                                    notices: notices, manager: manager)
@@ -112,10 +123,16 @@ struct SettingsSearchRow: View {
             Button(action: open) {
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
                     Text(result.title)
+                    if case .setting(let definition) = result, definition.lifecycle == "inactive" {
+                        Text("Inactive").font(Typography.meta).foregroundStyle(.secondary)
+                    }
                     if let toggle {
                         Text(destinationLabel(for: toggle))
                             .font(Typography.meta).foregroundStyle(.secondary)
                             .help(toggle.file.path)
+                        if let error = scope.errors[.init(toggle.file, toggle.definition.key)] {
+                            Text(error).font(Typography.meta).foregroundStyle(.secondary)
+                        }
                     } else if result.key != nil {
                         Text(result.pane.rawValue).font(Typography.meta).foregroundStyle(.secondary)
                     }

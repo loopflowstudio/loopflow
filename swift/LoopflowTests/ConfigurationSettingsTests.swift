@@ -23,8 +23,25 @@ struct ConfigurationSettingsTests {
         let result = try JSONDecoder().decode(MoveResult.self, from: JSONEncoder().encode(fixture["move_result"]))
         guard case .preview(let preview) = result else { Issue.record("Expected a move preview"); return }
         #expect(try json(ConfigOperation.promote(destination: mine.destination, key: "context.diff", wave: nil, action: .confirm(preview))) == fixture["promote"])
+        #expect(try json(ConfigOperation.promote(destination: mine.destination, key: "context.diff", wave: nil, action: .dismiss)) == fixture["dismiss"])
+        let dismissed = try JSONDecoder().decode(MoveResult.self, from: JSONEncoder().encode(fixture["dismissed"]))
+        guard case .dismissed = dismissed else { Issue.record("Expected a dismissed move"); return }
         let receipt = try JSONDecoder().decode(ConfigurationEditReceipt.self, from: JSONEncoder().encode(fixture["receipt"]))
         #expect(try json(receipt) == fixture["receipt"])
+    }
+
+    @Test func nullableDeclarationsKeepAbsentNullAndFalseDistinct() throws {
+        for (json, expected) in [
+            (#"{"kind":"absent"}"#, ConfigurationScope.Authored.absent),
+            (#"{"kind":"present","value":null}"#, .present(.null)),
+            (#"{"kind":"present","value":false}"#, .present(.bool(false)))
+        ] {
+            let decoded = try JSONDecoder().decode(ConfigurationScope.Authored.self, from: Data(json.utf8))
+            #expect(decoded == expected)
+        }
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(ConfigurationScope.Authored.self, from: Data(#"{"kind":"present"}"#.utf8))
+        }
     }
 
     @Test func rowsSummarizeMapsAndListsInWords() {

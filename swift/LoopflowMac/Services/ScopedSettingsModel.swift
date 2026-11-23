@@ -7,24 +7,37 @@ final class ScopedSettingsModel {
     private(set) var checkout: String?
     private(set) var wave: String?
     var target = ConfigurationTarget.general {
-        didSet { if target != oldValue { reading = .loading; editError = nil; refresh() } }
+        didSet { if target != oldValue { reading = .loading; errors.removeAll(); refresh() } }
     }
     var destination = ConfigurationDestination.personalGlobal
     private(set) var observation = UUID()
     private(set) var reading = Reading<ConfigurationScope>.loading
     private(set) var catalogue: [ConfigurationDefinition] = []
-    private(set) var editError: String?
+    struct RowAddress: Hashable {
+        let destination: JSONValue
+        let key: String
+
+        init(_ file: ConfigurationScope.File, _ key: String) {
+            destination = file.destination
+            self.key = file.slots[key]?.key ?? key
+        }
+    }
+
+    private(set) var errors: [RowAddress: String] = [:]
     private(set) var saving = false
+    @ObservationIgnored private var stream: LineSubscription?
+    @ObservationIgnored private var checkpoint = 0
+    @ObservationIgnored private var confirmations: [Int: CheckedContinuation<Void, Never>] = [:]
 
     init(location: ServerLocation = .shared) { self.location = location }
 
     var file: ConfigurationScope.File? { reading.value?.files.first { $0.owner == destination } }
 
-    func file(for pane: SettingsPane) -> ConfigurationScope.File? {
-        pane == .general ? reading.value?.files.first { $0.owner == .personalGlobal } : file
+    func file(for definition: ConfigurationDefinition) -> ConfigurationScope.File? {
+        definition.applicability == "personal" ? reading.value?.files.first { $0.owner == .personalGlobal } : file
     }
 
-    var editsDisabled: Bool { saving || editError != nil || reading.failure != nil }
+    var editsDisabled: Bool { saving || reading.failure != nil }
 
     func select(checkout: String?, wave: String? = nil) {
         guard self.checkout != checkout || self.wave != wave else { return }
@@ -33,11 +46,38 @@ final class ScopedSettingsModel {
         self.wave = wave
         destination = wave != nil ? .personalWave : checkout != nil ? .personalRepository : .personalGlobal
         reading = .loading
-        editError = nil
+        errors.removeAll()
         refresh()
     }
 
-    func refresh() { observation = UUID() }
+    func refresh() {
+        observation = UUID()
+        stream = nil
+        finishConfirmations(through: .max)
+    }
+
+    private func confirmReading() async {
+        guard let stream else { return }
+        checkpoint += 1
+        await withCheckedContinuation { continuation in
+            confirmations[checkpoint] = continuation
+            stream.checkpoint(checkpoint)
+        }
+    }
+
+    private func finishConfirmations(through id: Int) {
+        for key in confirmations.keys.filter({ $0 <= id }) {
+            confirmations.removeValue(forKey: key)?.resume()
+        }
+    }
+
+    func refresh(key: String, file: ConfigurationScope.File) async -> ConfigurationScope.File? {
+        let id = observation
+        await confirmReading()
+        guard observation == id, let scope = reading.current else { return nil }
+        errors[RowAddress(file, key)] = nil
+        return scope.files.first { $0.destination == file.destination }
+    }
 
     func observe() async {
         let id = observation
@@ -49,24 +89,26 @@ final class ScopedSettingsModel {
                 return
             }
         }
-        var first = true
+        guard !Task.isCancelled, observation == id else { return }
         let stream = ServerClient.subscribe(.configScope(directory: checkout, wave: wave, target: target), location: location)
+        self.stream = stream
         do {
             for try await line in stream.lines {
                 guard !Task.isCancelled, observation == id else { break }
                 let frame = try JSONDecoder().decode(SubscriptionFrame<ConfigurationScope>.self, from: line)
                 if let value = frame.body {
                     reading = .available(value)
-                    if first {
-                        editError = nil
-                        if destination == .personalWave && file == nil { destination = .sharedWave }
-                    }
-                    first = false
+                    if destination == .personalWave && file == nil { destination = .sharedWave }
                 } else { reading = reading.failed(frame.unavailable ?? "Settings unavailable") }
+                if let answered = frame.answers { finishConfirmations(through: answered) }
             }
             if !Task.isCancelled, observation == id { reading = reading.failed("Settings disconnected") }
         } catch {
             if !Task.isCancelled, observation == id { reading = reading.failed(error.localizedDescription) }
+        }
+        if observation == id {
+            self.stream = nil
+            finishConfirmations(through: .max)
         }
         await stream.cancel()
     }
@@ -74,7 +116,7 @@ final class ScopedSettingsModel {
     @discardableResult
     func apply(_ change: ConfigurationChange, key: String, to file: ConfigurationScope.File,
                notices: NoticeCenter, manager: UndoManager?) async -> Bool {
-        guard !saving, let slot = file.slots[key] else { return false }
+        guard !editsDisabled, let slot = file.slots[key] else { return false }
         saving = true
         defer { saving = false }
         let id = observation
@@ -83,7 +125,13 @@ final class ScopedSettingsModel {
             let address = slot.key
             let receipt = try await ServerClient.edit(change, destination: destination, key: address,
                                                       expected: slot.entries, location: location)
+            errors[RowAddress(file, key)] = nil
             guard receipt.before != receipt.after else { return true }
+            // A second click needs the new slot even if the subscription is between frames.
+            if observation == id, let shown = reading.value?.files.first(where: { $0.id == file.id })?.slots[key],
+               shown.key == address, shown.entries != receipt.after {
+                await confirmReading()
+            }
             let name = "\(key) in \(file.owner?.title ?? file.path)"
             let undo = Notice.Action.undo(name, manager: manager, target: self) { [weak notices] model in
                 Task {
@@ -92,21 +140,21 @@ final class ScopedSettingsModel {
                                                         expected: receipt.after, location: model.location)
                         notices?.clear(key: key)
                     } catch {
-                        model.report(error, id: id, key: key, notices: notices)
+                        model.report(error, id: id, key: key, file: file, notices: notices)
                     }
                 }
             }
             notices.post(Notice("Saved \(name)", key: key, action: undo))
             return true
         } catch {
-            report(error, id: id, key: key, notices: notices)
+            report(error, id: id, key: key, file: file, notices: nil)
             return false
         }
     }
 
     func promote(_ action: MoveAction, key: String, file: ConfigurationScope.File,
                  notices: NoticeCenter, manager: UndoManager?) async -> MoveReview? {
-        guard !saving else {
+        guard !editsDisabled else {
             if case .confirm(let review) = action { return review }
             return nil
         }
@@ -117,9 +165,12 @@ final class ScopedSettingsModel {
         let destination = file.destination
         let wave = self.wave
         do {
-            switch try await move(address, destination: destination, wave: wave, action: action) {
+            let result = try await move(address, destination: destination, wave: wave, action: action)
+            errors[RowAddress(file, key)] = nil
+            switch result {
             case .preview(let review): return review
             case .pending: refresh()
+            case .dismissed: notices.post(Notice("Dismissed pending move for \(key)", key: key))
             case .recovered: notices.post(Notice("Finished moving \(key)", key: key))
             case .applied(let receipt):
                 let name = "Move \(key)"
@@ -130,12 +181,12 @@ final class ScopedSettingsModel {
                             case .applied: notices?.clear(key: key)
                             default: notices?.post(Notice("Refresh to inspect the move in progress", key: key))
                             }
-                        } catch { model.report(error, id: id, key: key, notices: notices) }
+                        } catch { model.report(error, id: id, key: key, file: file, notices: notices) }
                     }
                 }
                 notices.post(Notice("Moved \(key)", key: key, action: undo))
             }
-        } catch { report(error, id: id, key: key, notices: notices) }
+        } catch { report(error, id: id, key: key, file: file, notices: nil) }
         return nil
     }
 
@@ -150,8 +201,8 @@ final class ScopedSettingsModel {
             expected: slot.entries, change: change), as: String.self, location: location)
     }
 
-    private func report(_ error: Error, id: UUID, key: String, notices: NoticeCenter?) {
-        if observation == id { editError = error.localizedDescription }
+    private func report(_ error: Error, id: UUID, key: String, file: ConfigurationScope.File, notices: NoticeCenter?) {
+        if observation == id { errors[RowAddress(file, key)] = error.localizedDescription }
         notices?.post(Notice(error.localizedDescription, key: key))
     }
 }

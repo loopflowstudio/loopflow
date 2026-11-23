@@ -308,7 +308,13 @@ control. A switch in the results edits the destination shown beside it.
 
 **Applies to** selects Global, a checkout or a Wave. Expand **Advanced** to
 inspect a Skill or Graph step. **Save in** selects the file to edit. A checkout
-or Wave starts on your personal settings. Global writes to `~/.lf/config.yaml`.
+or Wave starts on your personal settings when available. The header names the
+active Skill or Graph step. Use **Inspect general work** to clear it. A step
+needs an `id:` before you can save preferences for it.
+
+**This Machine (Global)** writes to `~/.lf/config.yaml` and keeps the selected
+**Save in** destination for other settings. Machine placement is personal.
+At Wave scope, **Git & Release** offers a shortcut to the checkout.
 
 For example, open **Context** on a checkout where the shared file sets
 `context.diff: true` and your file sets it to `false`. Choose **Shared
@@ -320,17 +326,22 @@ repository settings**. The switch shows **On**. **In effect** still shows
   apply again.
 - **Move to Shared Repository…** appears when the shared slot is empty. From
   a private Wave you can move to your repository settings. Review the YAML
-  changes and the projected result before confirming.
+  changes and the projected result before confirming. If either file changes
+  the preview, review it again. **Finish interrupted move…** completes a
+  partial move. If the declarations have diverged, **Dismiss pending move**
+  keeps the current contents of both files.
 - Switches and pickers save immediately. Text fields save on Return or focus
   loss. Escape discards the text. YAML editors have **Apply** and **Cancel**.
   **Undo** or **⌘Z** restores a saved edit even after switching destinations.
   If the declaration changed on disk, use **Refresh** to review it before
-  retrying. Settings and the CLI share the same [configuration files](config.md).
+  retrying. A rejected edit leaves its field editable. An unavailable scope
+  keeps the last reading visible and pauses edits until the read succeeds.
+  Settings and the CLI share the same [configuration files](config.md).
 
 | Sidebar group | Panes |
 | --- | --- |
 | App | **General** includes Task file autosave and global preferences. **Appearance** selects themes or opens the color editor. **Shortcuts** shows the keyboard reference. **Mobile** shows a green dot and pairing code when [phone access](server.md#phone-access) is ready. |
-| Workflow | **Agents** shows the pin, starting preference and fallback order. **Context** controls launch inputs. **Git & Release** includes the repository tracker. |
+| Workflow | **Agents** groups the pin, starting preference and fallback order with their effective agent order. **Context** controls launch inputs. **Git & Release** includes the repository tracker. |
 | Infrastructure | **Machines** shows placement, connections and forwarding. While open, it checks up to four registered identities at once and distinguishes connection errors from ended rentals. |
 
 A dot beside a scoped pane means the selected non-global file declares a

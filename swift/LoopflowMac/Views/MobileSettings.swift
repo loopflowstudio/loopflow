@@ -55,7 +55,7 @@ struct MobileSettings: View {
                 Button("Refresh", systemImage: "arrow.clockwise") { Task { await setup.refresh() } }.disabled(setup.busy)
             }
         }
-        .formStyle(.grouped)
+        .settingsForm(highlighted: highlightedKey)
     }
 }
 

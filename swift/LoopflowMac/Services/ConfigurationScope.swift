@@ -73,13 +73,39 @@ struct ConfigurationScope: Codable {
 
     struct Slot: Codable {
         let key: String
-        let declared: JSONValue
+        let declared: Authored
         let entries: [ConfigurationEntry]
         let promotion: JSONValue
+    }
+
+    enum Authored: Codable, Hashable {
+        case absent
+        case present(JSONValue)
+
+        private enum Keys: String, CodingKey { case kind, value }
+        private enum Kind: String, Codable { case absent, present }
+
+        init(from decoder: Decoder) throws {
+            let fields = try decoder.container(keyedBy: Keys.self)
+            switch try fields.decode(Kind.self, forKey: .kind) {
+            case .absent: self = .absent
+            case .present: self = .present(try fields.decode(JSONValue.self, forKey: .value))
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var fields = encoder.container(keyedBy: Keys.self)
+            switch self {
+            case .absent: try fields.encode(Kind.absent, forKey: .kind)
+            case .present(let value):
+                try fields.encode(Kind.present, forKey: .kind)
+                try fields.encode(value, forKey: .value)
+            }
+        }
 
         var value: JSONValue? {
-            guard case .object(let fields) = declared, fields["kind"] == .string("present") else { return nil }
-            return fields["value"]
+            if case .present(let value) = self { return value }
+            return nil
         }
     }
 

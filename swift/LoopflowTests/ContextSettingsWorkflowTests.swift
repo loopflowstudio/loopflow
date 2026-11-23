@@ -79,7 +79,7 @@ struct ContextSettingsWorkflowTests {
             let deadline = ContinuousClock.now + .seconds(10)
             while model.saving || !condition() {
                 try #require(model.reading.failure == nil, "\(model.reading.failure ?? "")", sourceLocation: sourceLocation)
-                try #require(ContinuousClock.now < deadline, "Context subscription last showed \(String(describing: model.file?.slots["context.diff"]?.value)); edit error: \(model.editError ?? "none")", sourceLocation: sourceLocation)
+                try #require(ContinuousClock.now < deadline, "Context subscription last showed \(String(describing: model.file?.slots["context.diff"]?.declared.value)); edit error: \(model.errors.values.first ?? "none")", sourceLocation: sourceLocation)
                 try await Task.sleep(for: .milliseconds(20))
             }
         }
@@ -93,7 +93,7 @@ struct ContextSettingsWorkflowTests {
             #expect(try toggle.isOn())
             #expect(try await launchHasDiff(in: repo))
             try toggle.tap()
-            try await awaitReading { model.file?.slots["context.diff"]?.value == .bool(false) }
+            try await awaitReading { model.file?.slots["context.diff"]?.declared.value == .bool(false) }
             #expect(try await !launchHasDiff(in: repo))
 
             let picker = try view.inspect().find(ViewType.Picker.self)
@@ -113,7 +113,7 @@ struct ContextSettingsWorkflowTests {
             #expect(try await model.preview(.reset, key: "context.diff", file: sharedFile) == "- diff: true")
             try diffResult().find(ViewType.Toggle.self).tap()
             #expect(navigation.search == " Diff ")
-            try await awaitReading { model.file?.slots["context.diff"]?.value == .bool(false) }
+            try await awaitReading { model.file?.slots["context.diff"]?.declared.value == .bool(false) }
             #expect(try String(contentsOf: shared, encoding: .utf8) == original.replacingOccurrences(of: "true", with: "false"))
             try diffResult().find(ViewType.Button.self).tap()
             #expect(navigation.search.isEmpty)
@@ -123,7 +123,7 @@ struct ContextSettingsWorkflowTests {
             #expect(try revealed.accessibilityTraits().contains(.isSelected))
             #expect(try !revealed.find(ViewType.Toggle.self).isOn())
             try detail.find(button: "Undo").tap()
-            try await awaitReading { model.file?.slots["context.diff"]?.value == .bool(true) }
+            try await awaitReading { model.file?.slots["context.diff"]?.declared.value == .bool(true) }
             #expect(try #require(model.file).hasOverrides(in: .context, catalog: model.catalogue))
             #expect(model.reading.value?.source("context.diff") == ConfigurationDestination.personalRepository.title)
             #expect(try await !launchHasDiff(in: repo))
@@ -152,18 +152,17 @@ struct ContextSettingsWorkflowTests {
             let external = "# hand edit\ncontext: {diff: true}\n"
             try external.write(to: mine, atomically: true, encoding: .utf8)
             await model.apply(.reset, key: "context.diff", to: privateOff, notices: notices, manager: nil)
-            #expect(model.editError?.contains("refresh") == true)
+            #expect(model.errors[.init(privateOff, "context.diff")]?.contains("refresh") == true)
             #expect(try String(contentsOf: mine, encoding: .utf8) == external)
             try picker.select(value: ConfigurationDestination.personalRepository)
-            try await awaitReading { model.file?.slots["context.diff"]?.value == .bool(true) }
+            try await awaitReading { model.file?.slots["context.diff"]?.declared.value == .bool(true) }
             navigation.search = "diff"
-            #expect(try diffResult().find(ViewType.Toggle.self).isDisabled())
-            watch.cancel()
-            await watch.value
-            try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView().find(button: "Refresh settings").tap()
-            watch = Task { await model.observe() }
-            try await awaitReading { model.editError == nil && model.file?.slots["context.diff"]?.value == .bool(true) }
             #expect(try !diffResult().find(ViewType.Toggle.self).isDisabled())
+            let staleRow = try view.inspect().find(viewWithId: "context.diff")
+            _ = try staleRow.find(button: "Refresh")
+            #expect(throws: (any Error).self) { try view.inspect().find(viewWithId: "context.paste").find(button: "Refresh") }
+            try staleRow.find(button: "Refresh").tap()
+            try await awaitReading { model.errors.isEmpty }
             await model.apply(.reset, key: "context.diff", to: try #require(model.file), notices: notices, manager: nil)
             try await awaitReading { model.file?.slots["context.diff"]?.entries.isEmpty == true }
 
@@ -241,7 +240,7 @@ struct ContextSettingsWorkflowTests {
         func set(_ key: String, _ value: String, _ owner: ConfigurationDestination) async throws {
             let address = try await file(owner)
             let saved = await model.apply(.set(value), key: key, to: address, notices: notices, manager: nil)
-            try #require(saved, "\(model.editError ?? "Save failed")")
+            try #require(saved, "\(model.errors.values.first ?? "Save failed")")
         }
         func cliValue(_ key: String, _ arguments: [String] = []) async throws -> JSONValue {
             let output = try await lf.run(["config", "get", key, "--json"] + arguments)
@@ -249,7 +248,7 @@ struct ContextSettingsWorkflowTests {
         }
         do {
             _ = try await server.status()
-            #expect(try await file(.personalRepository).slots["context.docs"]?.value == nil)
+            #expect(try await file(.personalRepository).slots["context.docs"]?.declared == .absent)
             try await set("context.docs", "[]", .personalRepository)
             #expect(try await cliValue("context.docs") == .array([]))
             #expect(try await scope().settings["context.docs"]?.value == .array([]))

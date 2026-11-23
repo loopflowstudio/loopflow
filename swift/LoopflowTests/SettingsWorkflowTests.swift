@@ -1,4 +1,5 @@
 #if os(macOS)
+import AppKit
 import Foundation
 import Loopflow
 import SwiftUI
@@ -81,6 +82,131 @@ struct SettingsWorkflowTests {
         #expect(defaults.object(forKey: "taskFilesAutosave") == nil)
     }
 
+    @Test func sharedCheckoutKeepsItsDestinationThroughValidationAndGlobalMachineEdits() async throws {
+        let root = URL(fileURLWithPath: "/tmp/lf-form-\(UUID().uuidString.prefix(8))").resolvingSymlinksInPath()
+        let repo = root.appending(path: "project")
+        let home = root.appending(path: "home")
+        for folder in [repo.appending(path: ".lf"), home] {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("chrome: null\n".utf8).write(to: repo.appending(path: ".lf/config.yaml"))
+        let lf = try BuiltLf(home: home, cwd: repo)
+        _ = try await lf.run(["desktop", "portfolio", "--json"])
+        let server = LocalServerFixture(lf)
+        let model = ScopedSettingsModel(location: server.location())
+        model.select(checkout: repo.path)
+        let notices = NoticeCenter()
+        let watch = Task { await model.observe() }
+        func pane(_ pane: SettingsPane) -> ScopedSettings {
+            ScopedSettings(model: model, pane: pane, checkouts: [repo.path], waves: [], notices: notices)
+        }
+        do {
+            let deadline = ContinuousClock.now + .seconds(10)
+            while model.file == nil {
+                try #require(model.reading.failure == nil && ContinuousClock.now < deadline,
+                             "\(model.reading.failure ?? "Waiting for the checkout")")
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            try pane(.agents).inspect().find(ViewType.Picker.self).select(value: ConfigurationDestination.sharedRepository)
+            let shared = try #require(model.file)
+            let agents = try pane(.agents).inspect()
+            _ = try agents.find(text: "Effective agent order")
+            let chrome = try agents.find(viewWithId: "chrome").find(ViewType.Picker.self)
+            #expect(try chrome.selectedValue(ConfigurationScope.Authored.self) == .present(.null))
+
+            #expect(await !model.apply(.set("no-such-graph"), key: "wave.graph", to: shared, notices: notices, manager: nil))
+            let graph = try pane(.agents).inspect().find(viewWithId: "wave.graph")
+            _ = try graph.find(button: "Refresh")
+            #expect(try !graph.find(ViewType.TextField.self).isDisabled())
+
+            let machines = try pane(.machines).inspect()
+            _ = try machines.find(button: "Switch Save in to My repository settings")
+            let hub = try machines.find(viewWithId: "hub").find(ScopedSettingRow.self).actualView()
+            #expect(hub.file.owner == .personalGlobal)
+            let machineID = "home_11111111111111111111111111111111"
+            #expect(await model.apply(.set(machineID), key: "hub", to: hub.file, notices: notices, manager: nil))
+            #expect(model.destination == .sharedRepository)
+            #expect(model.file?.hasOverrides(in: .agents, catalog: model.catalogue) == true)
+            #expect(try String(contentsOf: home.appending(path: "config.yaml"), encoding: .utf8).contains(machineID))
+            #expect(model.errors[.init(shared, "wave.graph")] != nil)
+            #expect(await model.apply(.set("code"), key: "wave.graph", to: shared, notices: notices, manager: nil))
+            #expect(model.errors.isEmpty)
+
+            for enabled in [true, false] {
+                let file = try #require(model.file)
+                #expect(await model.apply(.set(String(enabled)), key: "chrome", to: file, notices: notices, manager: nil))
+                let picker = try pane(.agents).inspect().find(viewWithId: "chrome").find(ViewType.Picker.self)
+                #expect(try picker.selectedValue(ConfigurationScope.Authored.self) == .present(.bool(enabled)))
+            }
+            let onDisk = try #require(model.file)
+            #expect(await model.apply(.set("null"), key: "chrome", to: onDisk, notices: notices, manager: nil))
+            #expect(model.file?.slots["chrome"]?.declared == .present(.null))
+            let fresh = try #require(model.file)
+            #expect(await model.apply(.reset, key: "chrome", to: fresh, notices: notices, manager: nil))
+            #expect(model.file?.slots["chrome"]?.declared == .absent)
+        } catch {
+            watch.cancel()
+            await watch.value
+            await server.stop()
+            throw error
+        }
+        watch.cancel()
+        await watch.value
+        await server.stop()
+    }
+
+    @Test(.requiresDisplay) func searchScrollsToTheLastContextRowInACompactWindow() async throws {
+        try await withThemeServer { location, _ in
+            _ = NSApplication.shared
+            let model = ScopedSettingsModel(location: location)
+            let notices = NoticeCenter()
+            func pane(_ key: String?) -> ScopedSettings {
+                ScopedSettings(model: model, pane: .context, checkouts: [], waves: [], notices: notices, highlightedKey: key)
+            }
+            let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 520, height: 240),
+                                  styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.alphaValue = 0
+            let host = NSHostingView(rootView: pane(nil))
+            window.contentView = host
+            window.orderBack(nil)
+            defer { window.contentView = nil; window.close() }
+
+            @MainActor func scrollView(in view: NSView) -> NSScrollView? {
+                if let scroll = view as? NSScrollView { return scroll }
+                return view.subviews.lazy.compactMap { scrollView(in: $0) }.first
+            }
+            @MainActor func waitFor(_ condition: @MainActor () -> Bool) async throws {
+                let deadline = ContinuousClock.now + .seconds(5)
+                while !condition() {
+                    try #require(ContinuousClock.now < deadline)
+                    try await Task.sleep(for: .milliseconds(20))
+                    window.layoutIfNeeded()
+                }
+            }
+            let watch = Task { await model.observe() }
+            do {
+                try await waitFor {
+                    guard let scroll = scrollView(in: host), let document = scroll.documentView else { return false }
+                    return model.file != nil && document.bounds.height > scroll.contentSize.height
+                }
+                let scroll = try #require(scrollView(in: host))
+                let document = try #require(scroll.documentView)
+                host.rootView = pane("context.budgets")
+                try await waitFor { scroll.documentVisibleRect.maxY >= document.bounds.maxY - 45 }
+                host.rootView = pane("context.diff")
+                try await waitFor { scroll.documentVisibleRect.maxY < document.bounds.midY + scroll.contentSize.height / 2 }
+            } catch {
+                watch.cancel()
+                await watch.value
+                throw error
+            }
+            watch.cancel()
+            await watch.value
+        }
+    }
+
     @Test func machineRowsShowTheServedIdentityCheckAndEndedRental() async throws {
         let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let wire = try JSONDecoder().decode([String: JSONValue].self, from: Data(contentsOf:
@@ -104,14 +230,17 @@ struct SettingsWorkflowTests {
         let server = LocalServerFixture(lf)
         let location = server.location()
         let checks = MachineConnectionChecks()
-        let pane = MachineConnections(location: location, connections: checks)
         do {
+            let scope = try await ServerClient.read(.configScope(directory: nil, wave: nil, target: .general), location: location)
+                .decode(ConfigurationScope.self)
+            let declaration = try #require(scope.files.first?.slots["machines"]?.declared)
+            let pane = MachineConnections(location: location, declaration: declaration, connections: checks)
             _ = try MachineConnectionRow(name: "builder", health: .checking).inspect().find(text: "Checking…")
-            await checks.refresh(location: location)
+            await checks.refresh(declaration, location: location)
             _ = try pane.inspect().find(text: "builder")
             _ = try pane.inspect().find(text: "Reachable")
             try answering("home_22222222222222222222222222222222")
-            await checks.refresh(location: location)
+            await checks.refresh(declaration, location: location)
             let wrongHost = try pane.inspect()
             _ = try wrongHost.find(text: "Connection error")
             #expect(try wrongHost.findAll(ViewType.Text.self).contains { try $0.string().contains("identity changed") })
@@ -120,7 +249,7 @@ struct SettingsWorkflowTests {
                 VALUES('rent_test','code','daytona','fixture',0,'{"vcpus":4,"memory_gb":8,"disk_gb":10,"gpu":null,"spot":false}',
                     '0.24','1.00',4000000000,'ended',1,'\(id)')
                 """], executable: "/usr/bin/sqlite3")
-            await checks.refresh(location: location)
+            await checks.refresh(declaration, location: location)
             _ = try pane.inspect().find(text: "Ended rental")
         } catch { await server.stop(); throw error }
         await server.stop()

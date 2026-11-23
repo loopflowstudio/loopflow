@@ -339,6 +339,9 @@ public struct LineSubscription: Sendable {
     public let lines: AsyncThrowingStream<Data, any Error>
     /// Queue one newline-terminated request line.
     public let send: @Sendable (Data) -> Void
+    /// Ask for a reading begun after this request, even when its body is unchanged.
+    public func checkpoint(_ id: Int) { send(Data("{\"id\":\(id)}\n".utf8)) }
+
     /// Returns only after the subscription has ended.
     public let cancel: @Sendable () async -> Void
     /// What to say of a line this build can't decode, when the transport knows
@@ -405,11 +408,11 @@ public final class WorkSubscriptions: @unchecked Sendable {
                     scope = next
                     try select(id: id)
                 case .refresh(let id):
-                    for running in running.values { running.subscription.send(Self.confirm(id)) }
+                    for running in running.values { running.subscription.checkpoint(id) }
                 case .checkpoint(let id, let replay):
                     let parts = replay.isEmpty ? Set(running.keys)
                         : Set(replay.compactMap(WorkPart.init(rawValue:))).intersection(running.keys)
-                    for part in parts { running[part]?.subscription.send(Self.confirm(id)) }
+                    for part in parts { running[part]?.subscription.checkpoint(id) }
                     checkpoints.append((id, parts, []))
                     settleCheckpoints()
                 }
@@ -529,9 +532,5 @@ public final class WorkSubscriptions: @unchecked Sendable {
             running.reader.cancel()
             await running.subscription.cancel()
         }
-    }
-
-    private static func confirm(_ id: Int) -> Data {
-        Data("{\"id\":\(id)}\n".utf8)
     }
 }

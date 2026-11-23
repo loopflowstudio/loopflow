@@ -13,8 +13,6 @@ struct SettingsTargetPicker: View {
 
     var body: some View {
         DisclosureGroup("Advanced", isExpanded: $expanded) {
-            LabeledContent("Target", value: title)
-            Button("Inspect general work") { model.target = .general }
             Menu("Inspect Skill") {
                 ForEach(skills, id: \.self) { name in Button(name) { model.target = .skill(name) } }
             }
@@ -54,14 +52,6 @@ struct SettingsTargetPicker: View {
                     graph: graph, step: nil), location: model.location).decode([ConfigurationInspection].self)
                 if !Task.isCancelled { steps = value; error = nil }
             } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
-        }
-    }
-
-    private var title: String {
-        switch model.target {
-        case .general: "General work"
-        case .skill(let name): name
-        case .step(let graph, let step): "\(graph) / \(step)"
         }
     }
 }

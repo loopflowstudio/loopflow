@@ -311,7 +311,9 @@ Ordinary controls and links use text roles; the theme’s accent emphasizes deli
 Status labels and shapes retain their meaning across palettes.
 Press **⌘,** to open [Settings](../docs/surfaces.md#settings). Search for a
 control or choose a pane in the sidebar. In Workflow and Machines, **Applies
-to** selects the work and **Save in** selects the file to edit.
+to** selects the work and **Save in** selects the file to edit. In Machines,
+**This Machine (Global)** always edits the global file. The placement row
+follows the selected work.
 
 Choose **Settings → Appearance** (**⌘,**) to pick a theme for every window,
 Ghostty, and iPhone. Pick **System**, **Light**, or **Dark**; System follows

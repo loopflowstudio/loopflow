@@ -167,7 +167,7 @@ Processes to the calling agent's Task; 5,672 `lf session serve`, plus `commit`,
   `task_id` only. Three path matches remain, all about what occupies a
   directory now: `task_open_graph_pairs` for unended runs that recorded no
   Task, `checkout_open_work` for a checkout no Task holds, and
-  `task_holding` for a launch and for provider conversations lf has no
+  `task_checkout_owner` (by Git root) for a launch and for provider conversations lf has no
   Session for (`human_session/turns.rs`).
 - Backfill in `task_facts_once.sql`: the 3 primaries from
   `task_primary_sessions`, the deepest checkout for Sessions naming nothing

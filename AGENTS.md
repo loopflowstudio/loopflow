@@ -141,6 +141,15 @@ the refusal and corrupts state. Prefer dropping a precondition to adding one.
 If a fix reads as "extend the allowlist" or "verify identity", reframe it as a
 reduction. The best fix makes the system smaller.
 
+## Choosing between designs
+
+Rank candidate designs in this order: reliably functional, resilient and
+recoverable for the core uses (steering among them); then performant, without
+needless work or scattered processes on the Machine; then consistent across
+harnesses and surfaces; then open to functionality outside the core. When one
+harness drops a mechanism another keeps (an OpenCode server beside Codex's
+app-server), the plan says why at the top, before anything is deleted.
+
 ## Work model
 
 Waves hold durable objectives, memory, cadence and budget under

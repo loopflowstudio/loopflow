@@ -412,8 +412,11 @@ Main is merged through #1988 (`8892ba5671`, origin/main's head). The review is
    cwd update. "Which Session is the Task's primary" joins the table
    (`primary_session_in`, `task_conversation_here_sql`, `primary_scope()`).
    `mark_task_primary_in` is `INSERT OR REPLACE` of the row. Gone: the
-   mirror triggers, the rebuild's `'task'` backfill, the leaving mark. Kept:
-   the CHECK accepting `'task'` and the plain index, for LOO-877. Found on
+   mirror triggers, the rebuild's `'task'` backfill, the leaving mark, and
+   (compress, `8cc3ba3f9c`) the CHECK's `'task'` value, its `task_id` CHECK
+   and index `agent_sessions_primary_task`: nothing writes the mark, so
+   LOO-877 adds them with its writers; `query_plans.rs` measures
+   `task_primary_sessions` again, as main does. Found on
    the way: the `agent_sessions` rebuild dropped main's `agent_socket`
    (`loo974_agent_socket`); it carries it now (SCHEMA.md regenerated).
    Fixed a fixture that still relied on path membership

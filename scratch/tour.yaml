@@ -1,4 +1,4 @@
-at: 60058d46a53199ea0e601a4affdf03b799def8f6
+at: 4d8a3ff88ce6f8874ea1921e4298c1ad3f9e9bfc
 first:
   - path: docs/work.md
     why: What pausing and unpausing do
@@ -16,6 +16,10 @@ first:
     why: Decide when a primary conversation comes back
   - path: rust/loopflow-storage/src/sqlite/steers.rs
     why: Leave steers unread while their target is paused
+  - path: rust/loopflow-storage/src/sqlite/task_moves.rs
+    why: When the sender can still include a pause
+  - path: rust/loopflow-execution/src/store/ownership.rs
+    why: Route pause while the checkout is leaving
   - path: rust/loopflow-execution/src/ops/human_session/moves.rs
     why: Carry the pause across Machines and acknowledge retries
   - path: rust/loopflow-execution/src/task_graph.rs
@@ -35,9 +39,9 @@ first:
   - path: swift/LoopflowTests/TaskConceptTests.swift
     why: Select a paused Task and click Unpause in the Mac workflow bar
   - path: rust/loopflow/tests/machine_commands.rs
-    why: Pause remotely and read the owner's answer
+    why: Pause during the push and inspect both Machines
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
-    why: Pause at admission, during land, and during builds
+    why: Pause during admission, land, interrupt, and builds
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Generated from the Rust protocol and request fixtures

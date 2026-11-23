@@ -129,9 +129,77 @@ enum QAHook {
                 }
             }
             return "typed"
+        case "equivalents":
+            // Lists main-menu items with a key equivalent: title, characters (hex), modifier mask, enabled, hidden.
+            func list(_ menu: NSMenu) -> [String] {
+                menu.items.flatMap { item -> [String] in
+                    let own = item.keyEquivalent.isEmpty ? [] : ["\(item.title) \(item.keyEquivalent.unicodeScalars.map { String($0.value, radix: 16) }) \(item.keyEquivalentModifierMask.rawValue) enabled=\(item.isEnabled) hidden=\(item.isHidden)"]
+                    return own + (item.submenu.map(list) ?? [])
+                }
+            }
+            return NSApp.mainMenu.map(list)?.joined(separator: "\n") ?? "no menu"
+        case "claims":
+            // Who claims ⌘↩ as a key equivalent: the main menu, then the window's views.
+            guard let window = windows.first(where: { $0.firstResponder is GhosttyMetalView }),
+                  let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: ProcessInfo.processInfo.systemUptime,
+                                               windowNumber: window.windowNumber, context: nil, characters: "\r",
+                                               charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36) else { return "no terminal" }
+            // AppKit asks the key window first; a locked screen has no key window, so ask it here.
+            if window.performKeyEquivalent(with: event) { return "window" }
+            let claimed = (NSApp.mainMenu?.items ?? []).filter { $0.submenu?.performKeyEquivalent(with: event) == true }.map(\.title)
+            return "menus \(claimed)"
+        case "terminal":
+            // Makes the first terminal pane first responder and prints its screen.
+            for window in windows {
+                if let view = terminalView(window.contentView) {
+                    window.makeFirstResponder(view)
+                    if case .available(let text, _) = try? view.readText(region: .screen, maxBytes: 65536) { return text }
+                    return "no screen (accepts input: \(view.connectionAcceptsInput))"
+                }
+            }
+            return "no terminal"
+        case "key":
+            // key <post|send> <keyCode> <flags: s c o m, plus raw device bits like o+0x20> <characters> [unmodified]
+            // post goes through the app's event queue (local monitors, menus, performKeyEquivalent); send skips monitors.
+            let n = arg.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+            guard n.count >= 4, let code = UInt16(n[1]),
+                  let window = windows.first(where: { $0.firstResponder is GhosttyMetalView }) ?? windows.first else {
+                return "usage: key post|send code flags chars [unmodified]"
+            }
+            var flags = NSEvent.ModifierFlags()
+            for part in n[2].split(separator: "+") {
+                if part.hasPrefix("0x"), let raw = UInt(part.dropFirst(2), radix: 16) { flags.insert(NSEvent.ModifierFlags(rawValue: raw)); continue }
+                for letter in part {
+                    switch letter {
+                    case "s": flags.insert(.shift)
+                    case "c": flags.insert(.control)
+                    case "o": flags.insert(.option)
+                    case "m": flags.insert(.command)
+                    default: break
+                    }
+                }
+            }
+            func decode(_ text: String) -> String {
+                text.replacingOccurrences(of: "\\r", with: "\r").replacingOccurrences(of: "\\t", with: "\t").replacingOccurrences(of: "\\s", with: " ")
+            }
+            let chars = decode(n[3]), plain = n.count > 4 ? decode(n[4]) : chars
+            for type in [NSEvent.EventType.keyDown, .keyUp] {
+                guard let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+                                                   windowNumber: window.windowNumber, context: nil, characters: chars,
+                                                   charactersIgnoringModifiers: plain, isARepeat: false, keyCode: code) else { return "no event" }
+                if n[0] == "post" { NSApp.postEvent(event, atStart: false) } else { window.sendEvent(event) }
+            }
+            return "\(n[0]) \(code) \(flags.rawValue) to \(window.title) first responder \(String(describing: window.firstResponder.map { type(of: $0) }))"
         default:
             return "unknown: \(line)"
         }
+    }
+
+    private static func terminalView(_ view: NSView?) -> GhosttyMetalView? {
+        guard let view else { return nil }
+        if let terminal = view as? GhosttyMetalView, terminal.surface != nil { return terminal }
+        for child in view.subviews { if let found = terminalView(child) { return found } }
+        return nil
     }
 
     private static func children(_ element: Any) -> [Any] {

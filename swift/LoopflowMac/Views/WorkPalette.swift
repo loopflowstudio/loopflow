@@ -312,7 +312,7 @@ struct WorkPaletteShortcut: NSViewRepresentable {
         context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak coordinator = context.coordinator] event in
             guard let coordinator, let window = coordinator.view?.window,
                   event.window === window, window.isKeyWindow, window.attachedSheet == nil,
-                  (window.firstResponder as? NSTextView)?.hasMarkedText() != true
+                  (window.firstResponder as? NSTextInputClient)?.hasMarkedText() != true
             else { return event }
             if event.type == .flagsChanged {
                 coordinator.modifiersChanged(event.modifierFlags.intersection([.command, .control, .option, .shift]) == [.command])

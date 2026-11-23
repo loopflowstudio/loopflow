@@ -118,7 +118,6 @@ final class GhosttyManager: ObservableObject {
     adjust-cell-height = 10%
     font-feature = -calt
     font-feature = -liga
-    font-thicken = true
     minimum-contrast = 3
 
     """
@@ -152,16 +151,11 @@ final class GhosttyManager: ObservableObject {
         NotificationCenter.default.post(name: .loopflowThemeChanged, object: theme)
     }
 
-    // These settings load after user defaults. Resources enable Ghostty's
-    // native shell integration for detected shells; provider Sessions launch
-    // `lf`, so they receive no shell hooks. Keep their historical TERM value
-    // even though the matching Ghostty terminfo is now bundled. The padding
-    // is fixed here because block overlays are laid out from the same numbers.
-    // Command-Up and Command-Down move between prompts whatever the person's
-    // own Ghostty config binds them to.
-    /// Loaded after the person's files. `font-family` is a list that a later line
-    /// extends, so a family they set stays first and Spline Sans Mono fills the
-    /// glyphs it lacks; with none set, Spline Sans Mono is the face.
+    /// Loaded after personal settings. Ghostty appends Spline Sans Mono as a
+    /// fallback for any personal font family. Clearing the theme prevents Ghostty
+    /// from replaying personal colors over the palette selected in Appearance.
+    /// Provider Sessions launch `lf`, so shell detection skips their hooks.
+    /// Keep their historical TERM and match padding to the block overlays.
     static let embeddedConfig = """
     font-family = \(Typography.monoFamily)
     term = xterm-256color
@@ -174,6 +168,8 @@ final class GhosttyManager: ObservableObject {
     image-storage-limit = 67108864
     keybind = super+arrow_up=jump_to_prompt:-1
     keybind = super+arrow_down=jump_to_prompt:1
+    theme =
+
     """
 
     /// Ghostty's process-wide state is set up once, however many callers ask.
@@ -215,9 +211,7 @@ final class GhosttyManager: ObservableObject {
                 print("[GhosttyManager] CoreVideo display link unavailable (\(displayLinkStatus)); using timer rendering")
             }
             displayLink = nil
-            // Independent theme files never participate in the base configuration.
-            // Clearing before finalize also removes their conditional replay path.
-            try GhosttyThemeConfiguration.load(embeddedConfig + "\ntheme =\n", into: cfg)
+            try GhosttyThemeConfiguration.load(embeddedConfig, into: cfg)
             ghostty_config_finalize(cfg)
             self.baseline = cfg
             config = try GhosttyThemeConfiguration.candidate(theme, baseline: cfg)

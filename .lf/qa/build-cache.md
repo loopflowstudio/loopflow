@@ -13,10 +13,22 @@ seeds), then `git worktree move --force` it to the Task path and
 HEAD, so it never re-seeds. A seeded `<repo>.ready` can serve as a source once Cargo builds there.
 `target/.loopflow-seed` and `build_cache.py status` (`seed     from …`) name the source.
 
+The Machine's `cargo` is Homebrew's; rustup's `stable` (Cargo 1.100, CI's toolchain) is the
+other layout, with no `.fingerprint` or `deps`. Prepend
+`~/.rustup/toolchains/stable-aarch64-apple-darwin/bin` to `PATH` to drive it, and run the
+seeding tests under both. A fixture needs a registry crate to show `Fresh`; with
+`CARGO_HOME` left real, `itoa = "=1.0.19"` builds `--offline` from the local registry. Path
+crates always rebuild.
+
+The python-test job runs on ext4, where `cp --reflink=always` fails, so the seeding tests
+skip there. They are checked only on a Mac.
+
 `clonefile(2)` keeps file mtimes but gives cloned directories the clone time. The hook copies
-the source's `target/debug/.fingerprint` mtime and uses it to rank built siblings.
-Compare the ranks with
-`stat -f "%m %N" <tree>/target/debug/.fingerprint` across `git worktree list`.
+the source's `target/debug/.fingerprint` mtime (`build` under Cargo 1.100) and uses it to
+rank built siblings. To see the order and which are busy, run
+`b._seed_sources(root)` and `b._quiescent(debug)` from Python with `sys.path` pointed at
+`scripts/`. A sibling skipped while ranked higher is usually mid-build: `ls -lt` its
+`target/debug/deps` shows the link.
 
 A Cargo build in a sibling holds its locks: run `git worktree add` while it builds to see the
 seeder skip it. A non-cloning volume: `hdiutil attach -nomount ram://65536`, `newfs_hfs`,

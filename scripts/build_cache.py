@@ -116,10 +116,12 @@ def _write_inventory(repo: Path, config: Path, settings: dict | None = None) -> 
 
 # --- Target seeding ---
 
-# Cargo's freshness records, build-script outputs and compiled units. Incremental
-# state is bound to its checkout's paths, and uplifted binaries would run another
-# branch's code before the first build.
-SEED_ENTRIES = (".fingerprint", "build", "deps")
+# Cargo's freshness records, build-script outputs and compiled units: three
+# directories before Cargo 1.100, one `build/<package>/<hash>/` tree since. The
+# first entry ranks the target. Incremental state is bound to its checkout's
+# paths, and uplifted binaries would run another branch's code before the first
+# build.
+SEED_LAYOUTS = ((".fingerprint", "build", "deps"), ("build",))
 CARGO_LOCKS = (".cargo-lock", ".cargo-build-lock", ".cargo-artifact-lock")
 SEED_RECORD = ".loopflow-seed"
 
@@ -153,33 +155,39 @@ def _quiescent(debug: Path):
             yield True
 
 
-def _seed_sources(root: Path) -> list[Path]:
-    """Built siblings, newest fingerprint directory first."""
+def _seed_entries(debug: Path) -> tuple[str, ...] | None:
+    for entries in SEED_LAYOUTS:
+        if all((debug / entry).is_dir() for entry in entries):
+            return entries
+    return None
+
+
+def _seed_sources(root: Path) -> list[tuple[Path, tuple[str, ...]]]:
+    """Built siblings and their seed entries, most recently grown first."""
     candidates = []
     for tree in map(Path, _worktree_roots(root)):
         if tree == root:
             continue
         debug = tree / "target/debug"
-        if any((debug / name).is_file() for name in CARGO_LOCKS) and all(
-            (debug / entry).is_dir() for entry in SEED_ENTRIES
-        ):
-            candidates.append(tree)
+        entries = _seed_entries(debug)
+        if entries and any((debug / name).is_file() for name in CARGO_LOCKS):
+            candidates.append((tree, entries))
     return sorted(
         candidates,
-        key=lambda tree: (tree / "target/debug/.fingerprint").stat().st_mtime_ns,
+        key=lambda c: (c[0] / "target/debug" / c[1][0]).stat().st_mtime_ns,
         reverse=True,
     )
 
 
-def _clone_debug(debug: Path, target: Path) -> None:
+def _clone_debug(debug: Path, entries: tuple[str, ...], target: Path) -> None:
     target.mkdir()
     staging = target / "debug.seeding"
     try:
         staging.mkdir()
-        for entry in SEED_ENTRIES:
+        for entry in entries:
             _clone(debug / entry, staging / entry)
         # Directory clones can get a fresh mtime. Keep the source's rank.
-        shutil.copystat(debug / ".fingerprint", staging / ".fingerprint")
+        shutil.copystat(debug / entries[0], staging / entries[0])
         staging.rename(target / "debug")
     except (OSError, subprocess.CalledProcessError):
         shutil.rmtree(staging, ignore_errors=True)
@@ -194,12 +202,12 @@ def seed_target(repo: Path) -> Path | None:
     target = root / "target"
     if os.path.lexists(target):
         return None
-    for source in _seed_sources(root):
+    for source, entries in _seed_sources(root):
         debug = source / "target/debug"
         with _quiescent(debug) as idle:
             if not idle:
                 continue
-            _clone_debug(debug, target)
+            _clone_debug(debug, entries, target)
         commit = subprocess.run(
             ["git", "rev-parse", "--short=10", "HEAD"],
             cwd=source,

@@ -423,6 +423,17 @@ def cargo_repo(tmp_path, monkeypatch):
     return repo
 
 
+@pytest.fixture
+def cloning(tmp_path):
+    """Skip where the temporary filesystem has no copy-on-write clones (ext4)."""
+    probe = tmp_path / "clone-probe"
+    probe.mkdir()
+    try:
+        build_cache._clone(probe, tmp_path / "clone-probe-copy")
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("this filesystem cannot clone")
+
+
 def _add_worktree(repo: Path, name: str) -> Path:
     tree = repo.parent / name
     _git(repo, "worktree", "add", "--detach", str(tree))
@@ -447,18 +458,23 @@ def _cargo_build(directory: Path) -> dict[str, bool]:
     }
 
 
-def test_new_worktree_reuses_a_siblings_dependencies_and_rebuilds_its_own(cargo_repo):
+def _seed_entries(tree: Path) -> tuple[str, ...]:
+    return build_cache._seed_entries(tree / "target/debug")
+
+
+def test_new_worktree_reuses_a_siblings_dependencies_and_rebuilds_its_own(cargo_repo, cloning):
     install_hook(cargo_repo)
     tree = _add_worktree(cargo_repo, "new tree")
 
     debug = tree / "target/debug"
-    assert sorted(path.name for path in debug.iterdir()) == [".fingerprint", "build", "deps"]
+    entries = sorted(path.name for path in debug.iterdir())
+    assert entries == sorted(_seed_entries(cargo_repo))
     status = json.loads(_cache_command(tree, "status", "--json").stdout)
     assert status["seed"]["source"] == str(cargo_repo.resolve())
     assert _cargo_build(tree) == {"build-script-build": True, "scripted": True, "app": False}
 
 
-def test_new_worktree_starts_cold_when_only_an_unbuilt_seed_is_idle(cargo_repo):
+def test_new_worktree_starts_cold_when_only_an_unbuilt_seed_is_idle(cargo_repo, cloning):
     install_hook(cargo_repo)
     unbuilt = _add_worktree(cargo_repo, "unbuilt")
     assert build_cache.seed_record(unbuilt)["source"] == str(cargo_repo.resolve())
@@ -496,16 +512,15 @@ def test_cargo_waits_while_a_built_source_is_locked(cargo_repo):
     assert subprocess.check_output([debug / "app"], text=True).strip() == "rebuilt"
 
 
-def test_a_failed_clone_leaves_no_target(cargo_repo, monkeypatch):
+def test_a_failed_clone_leaves_no_target(cargo_repo, cloning, monkeypatch):
     tree = _add_worktree(cargo_repo, "new tree")
     clone = build_cache._clone
 
-    def clone_once(source, destination):
-        if any(destination.parent.iterdir()):
-            raise OSError(errno.EXDEV, "cross-device", str(source))
+    def clone_then_fail(source, destination):
         clone(source, destination)
+        raise OSError(errno.EXDEV, "cross-device", str(source))
 
-    monkeypatch.setattr(build_cache, "_clone", clone_once)
+    monkeypatch.setattr(build_cache, "_clone", clone_then_fail)
     with pytest.raises(OSError):
         build_cache.seed_target(tree)
     assert not (tree / "target").exists()
@@ -519,7 +534,7 @@ def test_an_existing_target_is_never_replaced(cargo_repo):
     assert list((tree / "target").iterdir()) == []
 
 
-def test_a_seeded_worktree_can_seed_others_after_cargo_builds_in_it(cargo_repo):
+def test_a_seeded_worktree_can_seed_others_after_cargo_builds_in_it(cargo_repo, cloning):
     install_hook(cargo_repo)
     built = _add_worktree(cargo_repo, "built")
     assert build_cache.seed_record(built)["source"] == str(cargo_repo.resolve())
@@ -528,7 +543,7 @@ def test_a_seeded_worktree_can_seed_others_after_cargo_builds_in_it(cargo_repo):
         fcntl.flock(held, fcntl.LOCK_EX)
         unbuilt = _add_worktree(cargo_repo, "unbuilt")
         assert build_cache.seed_record(unbuilt)["source"] == str(built.resolve())
-        fingerprint = "target/debug/.fingerprint"
+        fingerprint = Path("target/debug", _seed_entries(built)[0])
         source_mtime = (built / fingerprint).stat().st_mtime_ns
         assert (unbuilt / fingerprint).stat().st_mtime_ns == source_mtime
         later = _add_worktree(cargo_repo, "later")
@@ -536,3 +551,31 @@ def test_a_seeded_worktree_can_seed_others_after_cargo_builds_in_it(cargo_repo):
         built.resolve()
     )
     assert not list((unbuilt / "target/debug").glob(".cargo*lock"))
+
+
+def test_a_target_in_cargos_unit_directory_layout_seeds_its_build_tree(tmp_path, cloning):
+    # Cargo 1.100 keeps each unit's fingerprint and outputs under build/<package>/<hash>/.
+    repo = tmp_path / "source"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(
+        repo,
+        "-c",
+        "user.name=F",
+        "-c",
+        "user.email=f@example.com",
+        "commit",
+        "-qm",
+        "i",
+        "--allow-empty",
+    )
+    unit = repo / "target/debug/build/scripted/0123abcd/fingerprint"
+    unit.mkdir(parents=True)
+    (unit / "lib-scripted.json").write_text("{}")
+    (repo / "target/debug/.cargo-build-lock").touch()
+    (repo / "target/debug/scripted").touch()
+    tree = _add_worktree(repo, "new tree")
+
+    assert build_cache.seed_target(tree) == repo.resolve()
+    assert [path.name for path in (tree / "target/debug").iterdir()] == ["build"]
+    assert (tree / "target/debug/build/scripted/0123abcd/fingerprint/lib-scripted.json").is_file()

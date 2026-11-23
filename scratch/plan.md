@@ -98,6 +98,9 @@ In `scripts/build_cache.py`:
 - **What a seed is:** exactly three entries of the source's `target/debug`:
   `.fingerprint`, `build` and `deps` (Cargo's freshness records, build-script
   outputs and compiled units), each cloned into the empty `debug.seeding`.
+  Cargo 1.100 (rustup `stable`, CI's toolchain) keeps all three per unit under
+  `build/<package>/<hash>/`, so its targets seed `build` alone, ranked by
+  `build`'s mtime (`SEED_LAYOUTS`; QA run 3 found 1.100 targets never seeded).
   Everything else is never copied: `incremental/` (path-bound, measured slower
   when carried), the lock files, and the uplifted top-level files (`lf`, `*.d`,
   `*.rlib`). Name what goes in, not what comes out afterwards; there is no
@@ -239,6 +242,10 @@ Both seed-probe arms built and passed one focused test in a disposable Cargo
 repository, then removed their worktrees. Gate and CI run the suites.
 
 The delivery instruction is “ok lg2m ship it when it works”.
+
+QA run 3 (2026-11-22): Cargo 1.100's layout fixed in `build_cache.py`; the
+seeding tests pass under Cargo 1.98.1 and 1.100 (27 each) and skip where the
+temporary filesystem can't clone (CI's ubuntu-latest).
 
 Peak memory attribution is tracked separately in LOO-1070.
 

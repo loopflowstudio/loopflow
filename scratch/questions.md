@@ -33,3 +33,8 @@
 - Kept the six recorded LOO-922 samples as measured. Their disk totals used
   path, inode and mtime. Future samples count each inode and mtime once,
   including when Cargo creates a new name for an existing artifact.
+
+- QA run 3: CI's python-test job (ubuntu-latest, ext4) can't reflink, so the
+  real-clone seeding tests skip there and run only on a Mac. Chosen over
+  copying in tests, which would hide whether the hook clones. No CI job
+  exercises seeding.

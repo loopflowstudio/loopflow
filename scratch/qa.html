@@ -8,6 +8,49 @@ h2{margin-top:1.8em}td,th{padding:.25em .7em;border-bottom:1px solid #ddd;text-a
 .bad{color:#a40}.ok{color:#270}
 </style>
 <h1>LOO-922 QA: seeded worktree targets</h1>
+<h2>Run 3 (2026-11-22, built-only seeding at e439d7ffc7)</h2>
+<p>Load average 95&ndash;120 on 16 CPUs. Installed hook matched the branch at the start; refreshed again after the fix below.</p>
+
+<h3>Real repository: unbuilt seeds are never sources</h3>
+<pre>before: loopflow.ready and the wave checkout are seeded, 0 Cargo lock files
+git worktree add --detach ../loopflow.qa922c-w1 HEAD    real 4.64 s
+  seed     from ../loopflow.loo-937-store-each-task at 06c6145399
+  skipped 4 higher-ranked siblings: 3 held by cargo (lsof); loo-1068 linked
+  an integration test binary at 23:09, during the add
+git worktree add ... qa922c-w2   real 3.56 s  → also from loo-937, not from W1 (unbuilt, equal mtime)
+lock files after: W1 0, ready 0, wave 0</pre>
+<p class="ok">Works.</p>
+
+<h3>The built seed becomes a source</h3>
+<pre>W1: cargo build -v -p loopflow --bin lf
+  7 Compiling / 249 Fresh; 289.6 real, 207.8 user, 9.0 sys; max RSS 3.28 GB
+  lf 0.16.0+e439d7ffc   # W1 HEAD e439d7ffc7
+  rustc lines naming loo-937: 0
+_seed_sources now lists W1. W3 seeded from d92894 (grew at …870, the newest idle; W1 ranks …481, its source's).</pre>
+<p class="ok">Works. RSS 3.28 GB, CPU 208 s: same pattern as LOO-1070.</p>
+
+<h3 class="bad">Bug found and fixed: Cargo 1.100 targets never seed</h3>
+<p>The isolated-HOME fixture picked up rustup's <code>stable</code>, Cargo 1.100.0 (2026-11-05), the toolchain CI installs. Its target has no <code>.fingerprint</code> or <code>deps</code>:</p>
+<pre>target/debug/build/native/dfd533986bcc3545/{fingerprint,out}
+target/debug/build/native/3f0b5e9b17608c93/{fingerprint,out,run}
+target/debug/build/app/49dd366ceffae467/{fingerprint,out}</pre>
+<p>The seeder required all three entries, so every 1.100 sibling was ruled out: the hook stayed silent and <code>status</code> said <code>seed     none</code>. Nothing broke, but seeding would stop when Homebrew moves to 1.100. Cloning <code>build</code> alone by hand, then <code>cargo build -v</code> with a registry crate:</p>
+<pre>       Fresh itoa v1.0.19
+       Dirty app v0.1.0 (...): the file `app/src/main.rs` has changed
+   Compiling app v0.1.0</pre>
+<p>Fix: <code>SEED_LAYOUTS</code> accepts either layout. It ranks by the first entry and copies its mtime. Tests now compare against the source's layout. The failed-clone stand-in clones and then raises, so a one-entry layout still fails partway. A new test seeds a unit-directory target. Seeding tests skip when the temporary filesystem can't clone (CI's ext4), and they had never run in CI on this branch. Real hook after the fix:</p>
+<pre>Cargo 1.100, git worktree add: target/debug = build
+  seed     from ../qa922r.DmgI-s at 862885a13f
+  Fresh itoa v1.0.19 / Compiling app → prints 7
+Cargo 1.98.1, real repo: W3 target/debug = .fingerprint build deps</pre>
+<p><code>pytest python/tests/test_build_cache.py</code>: 27 passed under Cargo 1.98.1, 27 passed under 1.100.</p>
+
+<h3>Fixture: only idle sibling is an unbuilt seed</h3>
+<p>Source's lock held from Python through <code>_quiescent</code>. The new worktree got no <code>target/</code>, and the unbuilt seed got no lock files. After Cargo built in that seed, it was eligible. Under Cargo 1.100 this only showed once the fix was in: before it, nothing seeded at all.</p>
+
+<h3>Run 3 result</h3>
+<p>Works: built-only selection on the real repository and both Cargo layouts through the hook. Fixed: 1.100 layout support (this commit). Not reached: Linux reflink (CI can't clone; no Linux Machine); a Task started through <code>lf task create --run</code>; <code>test_loop.py</code>/<code>seed_probe.py</code> unchanged since compress ran both arms, not rerun. Open: LOO-1070 memory.</p>
+
 <h2>Run 2 (2026-11-22, after the first-build lock fix, 5336a5ebaf and 5e305e63c7)</h2>
 <p>Load average 102&ndash;145 on 16 CPUs. The installed hook copy predated the lock fix; <code>build_cache.py install</code> refreshed it from the branch first.</p>
 <h3>Real repository: seed, then add worktrees during the seed's first build</h3>

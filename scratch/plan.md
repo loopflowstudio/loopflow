@@ -149,11 +149,13 @@ prompt once and hears the steer once.
    `HOOK_DEADLINE` moved to `machine::client`. Test:
    `wake::tests::a_reopened_codex_work_session_starts_a_turn_on_its_waiting_steer`
    (stand-in app-server, server side only).
-3. **Next:** a reopen leg in `tests/e2e/idle_wake.py` (after the wake leg:
-   quit the TUI, `lf steer`, `lf resume --task`, wait for a marker turn with
-   nothing typed, then `lf session steers` reads `delivered` once). Run it on
-   OpenCode and Pi; Pi is not installed here, `npm install -g` it first.
-4. **qa, real providers:** the same reopen by hand on real Claude and Codex
+3. **Built:** the reopen leg in `tests/e2e/idle_wake.py` (quit with
+   Ctrl-C/Ctrl-D, `lf steer`, `lf resume --task`, a marker turn with nothing
+   typed, `lf session steers` delivered, the model sees it once). The OpenCode
+   fixture moved its model to a `fixture` provider id: OpenCode 2.0.32 asked
+   for a Console login on the built-in `opencode` provider, so the wake leg
+   had not been reaching the model on this Machine.
+4. **Next (qa), real providers:** the same reopen by hand on real Claude and Codex
    with the branch `lf` (held terminal, the account's logins). Claude's run
    answers the inbox-at-SessionStart risk above: `delivered` with no turn
    means Claude dropped the early message; then build the bounded
@@ -163,4 +165,6 @@ prompt once and hears the steer once.
 
 - `cargo nextest run -p loopflow --lib -E 'test(server::boundary::tests::) | test(server::wake::tests::) | test(lf::commands::context::tests::)'`: 25 passed (implement).
 - `cargo test -p loopflow --test integration documented_commands::`: passed (implement).
-- clippy, real Claude/Codex/OpenCode/Pi reopen: gate and qa.
+- `tests/e2e/idle_wake.py --harness opencode` (OpenCode 2.0.32): passed, wake and reopen legs (implement).
+- `tests/e2e/idle_wake.py --harness pi` (Pi 1.6.0, `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`): passed, wake and reopen legs (implement).
+- clippy, real Claude/Codex reopen: gate and qa.

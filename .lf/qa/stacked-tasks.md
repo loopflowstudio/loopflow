@@ -19,7 +19,8 @@ Run every command through a wrapper that unsets `LF_*`, sets `HOME`,
 `claude`/`codex` (so `lf task checkout` warms no conversation), and closes
 stdin. `HOME` needs a `.gitconfig` identity. `lf task create '<title>'` gives
 short hex identifiers; `lf task checkout <id>` places the worktree beside the
-repository. `lf pr open --title … --body …` publishes through the stand-in.
+repository. `lf pr open --title … --body …` publishes through the stand-in. It has no
+`gh pr merge`, so `lf land` cannot finish against it.
 
 The stand-in keeps PRs in `$GH_QA_STATE` (edit `base`, `state: MERGED`,
 `merge_commit`, `merged_head` there to act as GitHub) and logs every call to

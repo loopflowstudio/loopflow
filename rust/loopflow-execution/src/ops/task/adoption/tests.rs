@@ -250,10 +250,22 @@ fn a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout() {
         resume(&outer_root).unwrap().0,
         Some(crate::session::PrimaryScope::Task(outer.id.clone()))
     );
+    // Its branch is its own, so `lf pr open` and `lf commit` there deliver no Task.
+    let delivers = |cwd: &Path| match table
+        .runtime
+        .block_on(super::super::delivery::resolve_managed_task(cwd))
+        .unwrap()
+    {
+        super::super::delivery::ManagedTask::Managed { task, .. } => Some(task.id),
+        super::super::delivery::ManagedTask::Unmanaged => None,
+    };
+    assert_eq!(delivers(&nested_root), None);
+    assert_eq!(delivers(&outer_root), Some(outer.id.clone()));
 
     let nested = table.create("Nested", None, Some(&nested_root)).unwrap();
     assert_ne!(nested.id, outer.id);
     assert_eq!(nested.worktree.as_deref(), Some(nested_root.as_path()));
+    assert_eq!(delivers(&nested_root), Some(nested.id.clone()));
     assert_eq!(table.task(&outer.id).worktree, Some(outer_root.clone()));
     assert_eq!(
         table.create("Retry", None, Some(&outer_root)).unwrap().id,

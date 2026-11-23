@@ -189,7 +189,8 @@ binary for branch commands only, and put stand-in `claude` and `codex`
 scripts first on `PATH`. `lf task create '<words>' --worktree <path> --json`
 adopts a worktree; inside it `lf -b graph qa` records a run,
 `lf -b default hello` a finished headless Session (the stand-in fails the
-turn; the row stays) and `lf session resume --prepare --json` the Task's
+turn; the row stays; it must `exit 1` without reading stdin, since `cat` on
+`-p` stream-json never ends) and `lf session resume --prepare --json` the Task's
 primary. A live taskless conversation is `lf -a claude : 'hello'` under a PTY
 driver in a plain worktree, with a stand-in that `exec sleep 300`.
 `lf task show <id>` piped prints JSON: `execution.work.sessions[].id` and
@@ -205,7 +206,10 @@ or Machine), and `lf task list` and `lf task show` show the result, `lf task
 status --json` carries no rank. A worktree nested inside another Task's
 checkout (`git worktree add <checkout>/nested`) is the case where "the Task
 holding a directory" and "the Task whose checkout this is" differ: adopt it
-with `lf task create --worktree`, then launch in a subdirectory of each. To move a repository with its checkouts,
+with `lf task create --worktree`, then launch in a subdirectory of each.
+Before adopting, check both questions there: launches count toward the outer
+Task, while bare `lf resume`, `lf commit` and `lf pr open` (fake GitHub in
+`stacked-tasks.md`) treat it as nobody's checkout, as the installed lf does. To move a repository with its checkouts,
 keep the worktrees inside it, `mv` it, `git worktree repair`, then run
 `lf task list` from the new path. Once every writer has exited, `sqlite3
 ?mode=ro` cannot open a home's store (no `-shm`); open it read-write.

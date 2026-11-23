@@ -78,12 +78,20 @@ pub(super) async fn resolve_managed_task(repo: &Path) -> OpsResult<ManagedTask> 
         }
         None => return Err(missing_task_registry()),
     };
-    let binding = crate::ops::resolve_execution_binding(&store, repo).await?;
-    let task = match binding.map(|binding| binding.work) {
-        Some(loopflow_model::durable::WorkRef::Task(id)) => {
-            store.get_task(&id).await.map_err(task_error)?
-        }
-        _ => None,
+    // A worktree nested inside a Task's checkout holds that Task's work, but
+    // its branch is its own: only the Task whose checkout it is delivers it.
+    let owner = match crate::git::worktree_root(repo) {
+        Ok(root) => super::checkout_owner(&store, &root).await?,
+        Err(_) => None,
+    };
+    let task = match owner {
+        Some(task) => Some(task),
+        None => match crate::ops::run::select_execution_work(&store, repo).await? {
+            Some(selected) if selected.source == crate::session::WorkSource::Declared => {
+                selected.task
+            }
+            _ => None,
+        },
     };
     match task {
         Some(task) => Ok(ManagedTask::Managed {

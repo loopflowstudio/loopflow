@@ -463,6 +463,16 @@ nested worktree end to end (gate/CI: `land_tests`). Compress inlined
 
 ## Then: gate
 
+QA on `71feca7db5` (2026-11-23, `scratch/qa.html`) found one more regression
+of the same kind and fixed it: `lf commit`/`lf pr open` in a plain worktree
+nested inside a Task's checkout acted for the outer Task ("Task … expects
+branch \"ta\", but the worktree is on \"ti\""), because `resolve_managed_task`
+used the launch selection, now containment. Delivery asks the Git root's
+`checkout_owner`, else a declared Task;
+`a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout` covers it.
+`ops::task::adoption::` 9, `ops::task::tests:: ops::run:: ops::human_session::`
+98 passed.
+
 QA on `86fe72ab65` (2026-11-22, `scratch/qa.html`) found one regression and
 fixed it: `lf task create --worktree` refused a worktree nested inside another
 Task's checkout ("<outer> already has a different checkout"), because

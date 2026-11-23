@@ -363,7 +363,38 @@ Drop `task_primary_sessions` with its three mirror triggers and make
 ship the release whose peer protocol accepts a `Disposition` without
 `planning_completed`, then stop sending it.
 
-## Next: implement (concept review after the plan hub, 2026-11-22)
+## Next: implement (human review of the ownership split, 2026-11-23)
+
+Answer on the page's question 1: "i think I prefer (c)": Git-root equality
+everywhere. A Task's work is what runs in its checkout's Git worktree (any
+subdirectory of it); a Git worktree nested inside it is not the Task's, for
+ownership or membership. Questions 2-4 follow (choices made, not asked): bare
+`lf resume` there says "no associated work conversation" (2a, as built); bare
+`lf task status` there says the checkout has no Task (3b); run liveness is
+LOO-1075 (4a).
+
+1. **One rule: the Task whose checkout is this directory's Git root.**
+   `task_checkout_owner(root)` is the one store answer; `task_holding` and
+   its deepest-containing walk go, with every membership caller
+   (`starting_task_in`, `counted_task`, `run.rs` select, `handoff.rs`
+   `--design`, provider conversations, `implicit_binding`) asking by Git root.
+   Counterexample to settle first: the store cannot see Git. A live start
+   resolves the root before it records (launch already does); the
+   migration's backfill, which has only stored paths, keeps its
+   deepest-checkout rule for history written before it, and says so. A
+   nested `task_checkouts` row is its own root and still owns itself.
+2. **Instructions steer agents away from nested worktrees.** In
+   `rust/loopflow-definitions/src/builtins/LOOPFLOW.md`, the child-agent
+   paragraph: a harness subagent works in this checkout; a separate checkout
+   comes from `lf wt create <name>`, beside this one, never from the
+   harness's own worktree tools (Claude Code's `EnterWorktree` and
+   `isolation: worktree` nest one under `.claude/worktrees/`, which belongs
+   to no Task). Keep it to two sentences; LOOPFLOW.md is paid for on every run.
+3. Tests: a Session and a Graph run started in a nested worktree get no Task;
+   one started in a subdirectory of the checkout gets the Task; `lf land` and
+   bare `lf task status` in the nested worktree answer "no Task".
+
+## Earlier: implement (concept review after the plan hub, 2026-11-22)
 
 Main is merged through #1988 (`8892ba5671`, origin/main's head). The review is
 `scratch/concept-review.html`; the answers, word for word, are in

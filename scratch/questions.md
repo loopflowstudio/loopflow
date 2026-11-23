@@ -232,3 +232,9 @@ Answers (Jack Heart): "1a 2a 3b 4b 5 not sure, explain"
   (subagent work leaves the Task's history). This answers the QA question
   above: bare `lf resume` in a nested non-Task worktree says "no associated
   work conversation", as released lf does.
+
+## Human review of the ownership split (2026-11-23)
+
+Jack Heart, on page question 1: "i think I prefer (c)". On nested worktrees:
+"We should make sure our loopflow instructions are clear about using lf wt
+create instead of this so that we avoid it." Run liveness filed as LOO-1075.

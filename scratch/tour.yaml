@@ -1,4 +1,4 @@
-at: 865509b31f94cc022b7b0f20d51c7f1592e720fb
+at: e1ffa15cdc5ad286f1bb827efbe06690ba2cb43b
 first:
   - path: docs/surfaces.md
     why: Follow the second sidebar row through a conversation turn.
@@ -6,8 +6,16 @@ first:
     why: Saved position, rank and ID determine order.
   - path: rust/loopflow/src/lf/commands/waves.rs
     why: Compare roadmap, Wave, repository and phone readings.
+  - path: swift/Loopflow/Services/PendingChanges.swift
+    why: Apply the drop until each reading covers its receipt.
+  - path: swift/LoopflowMac/WorkModel.swift
+    why: Follow a drop from either display through confirmation.
+  - path: swift/Loopflow/Services/Notice.swift
+    why: Keep the refusal visible through a failed reread.
   - path: swift/LoopflowTests/TaskConceptTests.swift
     why: Replay the turn with the second Task selected.
+  - path: swift/LoopflowTests/WorkNavigationTests.swift
+    why: Watch a refusal and an early confirmation frame.
 hide:
   - path: tests/fixtures/dto/task_concepts.json
     why: Rust observations exercised by the Desktop tests.

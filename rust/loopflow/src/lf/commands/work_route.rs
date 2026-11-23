@@ -143,7 +143,10 @@ fn launch_task(cli: &Cli) -> Option<&str> {
                 },
         }) if connection.task.is_some() => connection.task.as_deref(),
         Some(Commands::Task {
-            cmd: TaskCommand::Find { issue, .. } | TaskCommand::Grep { issue, .. },
+            cmd:
+                TaskCommand::Find { issue, .. }
+                | TaskCommand::Grep { issue, .. }
+                | TaskCommand::Symbols { issue, .. },
         }) => Some(issue),
         // Ownership is written only on the Task's writer.
         Some(Commands::Task {

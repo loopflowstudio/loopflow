@@ -257,6 +257,11 @@ struct DesktopPaneControlTests {
         let bindings = DesktopAction.all.flatMap { action in action.keys.map { (action, $0) } }
         #expect(bindings.count >= 20)
         for (action, binding) in bindings {
+            let (keyModel, keyRegistry, _, _) = actionFixture()
+            let workspace = try #require(keyRegistry.retained(WorkWorkspaceKey(repository: repository, kind: .task, id: "b")))
+            let context = DesktopActionContext(model: keyModel, workspaces: keyRegistry, workspace: workspace,
+                pane: workspace.multiplexer.focusedPane, args: binding.args)
+            guard action.available(context) else { continue }
             let (found, args) = try #require(DesktopAction.binding(characters: {
                 if case .character(let character) = binding.key { return String(character) }
                 return binding.key == .tab ? "\t" : nil
@@ -268,15 +273,10 @@ struct DesktopPaneControlTests {
                 case .down: .downArrow
                 default: nil
                 }
-            }(), modifiers: binding.modifiers))
+            }(), modifiers: binding.modifiers, context: context))
             #expect(found.name == action.name, "\(binding.display)")
             #expect(args == binding.args)
 
-            let (keyModel, keyRegistry, _, _) = actionFixture()
-            let workspace = try #require(keyRegistry.retained(WorkWorkspaceKey(repository: repository, kind: .task, id: "b")))
-            let context = DesktopActionContext(model: keyModel, workspaces: keyRegistry, workspace: workspace,
-                pane: workspace.multiplexer.focusedPane, args: args)
-            guard action.available(context) else { continue }
             var keyFailure: Error?
             do { try action.perform(context) } catch { keyFailure = error }
 

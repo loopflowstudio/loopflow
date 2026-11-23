@@ -13,3 +13,5 @@
 - **Checkout inventory cache.** Recheck an idle checkout on the next request after Git’s three-second observation interval. Keep up to 100,000 path entries across idle inventories, most recently used first. A live reading keeps its inventory until it finishes.
 
 - **Opening a grep hit.** Return opens the numbered source even for Markdown and HTML, since a rendered page has no source-line coordinate. Selecting the file normally opens its rendered view. Disk byte ranges highlight only when the reader holds that revision.
+
+- **Definition lookup order.** Prefer exact declarations in the live source file. When it has none, search the owning checkout. Closing the peek leaves history untouched. The source reader uses the same syntax tree for outline entries and coloring.

@@ -83,7 +83,8 @@ public enum Typography {
     /// Counts, times, secondary facts.
     public static let meta = step(sansFace, mac: 11, iPhone: 13, .footnote)
     /// Inline IDs, paths, commands.
-    public static let mono = step(monoFace, mac: 12, iPhone: 14, .subheadline)
+    public static let monoSize: CGFloat = 12
+    public static let mono = step(monoFace, mac: monoSize, iPhone: 14, .subheadline)
     /// The Mac text step in points for AppKit fields.
     public static let textSize: CGFloat = 13
     /// Ghostty's `font-size` default; the person's configuration replaces it on the Mac.

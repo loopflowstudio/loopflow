@@ -974,6 +974,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::TaskFile { .. }
         | Read::TaskFind { .. }
         | Read::TaskGrep { .. }
+        | Read::TaskSymbols { .. }
         | Read::TaskFiles { .. }
         | Read::WaveList
         | Read::MachineSelf
@@ -1046,6 +1047,11 @@ fn server_operations_match_their_lf_commands() {
                     issue: "INF-123".into(),
                     path: "edit.txt".into(),
                     at: Some("parent".into()),
+                },
+                Read::TaskSymbols {
+                    issue: "INF-123".into(),
+                    name: "edit".into(),
+                    path: Some("edit.txt".into()),
                 },
                 Read::TaskGrep {
                     issue: "INF-123".into(),

@@ -644,8 +644,9 @@ Edit, rendered Markdown, rendered HTML and Diff (images report no text matches),
 with match count, Return / Shift-Return stepping and one-click promotion to
 checkout-wide Grep. **⇧⌘O** builds the open file's outline (types, functions,
 methods, Markdown headings) locally from Desktop's bundled Tree-sitter grammars,
-including live unsaved edits; cross-file `⌘-click` / `gd` definitions and `gr`
-references query the owning Machine so remote checkouts work the same way.
+including live unsaved edits. A definition in the current buffer resolves locally.
+Cross-file `⌘-click` / `gd` definitions and `gr` references query the owning
+Machine so remote checkouts work the same way.
 Sidebar selection switches the whole Task workspace; selections inside a Task
 can focus its companion. Resizing or closing the browser is remembered while the
 window stays open; layouts are not yet restored after quitting the app.

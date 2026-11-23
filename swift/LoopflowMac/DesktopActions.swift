@@ -237,13 +237,23 @@ struct DesktopAction {
 
     /// The registry action and arguments a key press performs.
     static func binding(characters: String?, keyCode: UInt16 = 0, specialKey: NSEvent.SpecialKey? = nil,
-                        modifiers: NSEvent.ModifierFlags) -> (DesktopAction, [String: String])? {
+                        modifiers: NSEvent.ModifierFlags,
+                        context: @autoclosure () -> DesktopActionContext? = nil) -> (DesktopAction, [String: String])? {
+        var windowBinding: (DesktopAction, [String: String])?
         for action in all {
-            if let binding = action.keys.first(where: {
+            guard let binding = action.keys.first(where: {
                 $0.matches(characters: characters, keyCode: keyCode, specialKey: specialKey, modifiers: modifiers)
-            }) { return (action, binding.args) }
+            }) else { continue }
+            if let context = context() {
+                guard action.available(context.with(args: binding.args)) else { continue }
+                if action.scope == .window {
+                    windowBinding = (action, binding.args)
+                    continue
+                }
+            }
+            return (action, binding.args)
         }
-        return nil
+        return windowBinding
     }
 
     /// The socket's entry: resolve the exact target, then perform.
@@ -549,6 +559,24 @@ struct DesktopAction {
             files.chooseFile(.grep)
             return nil
         },
+        DesktopAction("files-outline", "Show File Outline", scope: .pane,
+            keys: [.init(.character("o"), [.command, .shift])], available: { $0.readingFiles?.selectedDocument != nil }) { context in
+            guard let files = context.readingFiles, files.selectedDocument != nil else { throw DesktopTargetError("Open a file to see its outline.") }
+            files.jumps.search(nil, line: files.jumps.readingLine, in: files)
+            return nil
+        },
+        DesktopAction("files-back", "Previous File Location", scope: .pane,
+            keys: [.init(.character("["), .command)], available: { $0.readingFiles?.jumps.back.isEmpty == false }) { context in
+            guard let files = context.readingFiles, !files.jumps.back.isEmpty else { throw DesktopTargetError("No previous file location.") }
+            files.jumps.step(backwards: true, in: files)
+            return nil
+        },
+        DesktopAction("files-forward", "Next File Location", scope: .pane,
+            keys: [.init(.character("]"), .command)], available: { $0.readingFiles?.jumps.forward.isEmpty == false }) { context in
+            guard let files = context.readingFiles, !files.jumps.forward.isEmpty else { throw DesktopTargetError("No next file location.") }
+            files.jumps.step(backwards: false, in: files)
+            return nil
+        },
         DesktopAction("files-edit", "Toggle File Editing", scope: .pane,
             keys: [.init(.character("e"), [.control, .command])], available: { $0.editableFile != nil }) { context in
             guard let files = context.editableFile else { throw DesktopTargetError("Open a text file in Files to edit it.") }
@@ -709,13 +737,11 @@ struct DesktopActionMonitor: NSViewRepresentable {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self, let window = self.view?.window,
                       event.window === window, window.isKeyWindow, window.attachedSheet == nil,
-                      (window.firstResponder as? NSTextView)?.hasMarkedText() != true,
-                      let (action, args) = DesktopAction.binding(characters: event.charactersIgnoringModifiers,
-                          keyCode: event.keyCode, specialKey: event.specialKey, modifiers: event.modifierFlags)
+                      (window.firstResponder as? NSTextView)?.hasMarkedText() != true else { return event }
+                guard let (action, args) = DesktopAction.binding(characters: event.charactersIgnoringModifiers,
+                          keyCode: event.keyCode, specialKey: event.specialKey, modifiers: event.modifierFlags, context: self.context())
                 else { return event }
-                let context = self.context().with(args: args)
-                guard action.available(context) else { return event }
-                do { try action.perform(context) } catch { self.failed(error) }
+                do { try action.perform(self.context().with(args: args)) } catch { self.failed(error) }
                 return nil
             }
         }

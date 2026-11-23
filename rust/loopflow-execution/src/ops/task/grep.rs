@@ -12,7 +12,7 @@ use super::checkout_file::{open_file, parent_directory};
 use super::{file_context, file_store, task_error, TaskFileInventory, MAX_FILE_BYTES};
 use crate::ops::OpsResult;
 
-const MAX_HITS: usize = 100;
+pub(super) const MAX_HITS: usize = 100;
 const EXCERPT_BYTES: usize = 240;
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -69,12 +69,65 @@ fn search(
         .line_number(true)
         .bom_sniffing(false)
         .build();
+    result.truncated = scan_checkout(
+        root,
+        inventory.paths.iter().map(String::as_str),
+        cancelled,
+        |path, bytes| {
+            let mut revision = None;
+            let mut omitted = false;
+            searcher.search_slice(
+                &matcher,
+                bytes,
+                UTF8(|line, text| {
+                    let text = text.strip_suffix('\n').unwrap_or(text);
+                    let text = text.strip_suffix('\r').unwrap_or(text);
+                    matcher
+                        .find_iter(text.as_bytes(), |span| {
+                            if result.hits.len() == MAX_HITS {
+                                omitted = true;
+                                return false;
+                            }
+                            let start = span.start();
+                            let excerpt_start = text.ceil_char_boundary(start.saturating_sub(60));
+                            let excerpt_end = text.floor_char_boundary(
+                                (excerpt_start + EXCERPT_BYTES).min(text.len()),
+                            );
+                            let revision =
+                                revision.get_or_insert_with(|| hex::encode(Sha256::digest(bytes)));
+                            result.hits.push(TaskGrepHit {
+                                path: path.into(),
+                                line,
+                                start,
+                                end: span.end(),
+                                revision: revision.clone(),
+                                excerpt: text[excerpt_start..excerpt_end].into(),
+                            });
+                            true
+                        })
+                        .expect("RegexMatcher cannot fail while matching");
+                    Ok(!omitted)
+                }),
+            )?;
+            Ok(!omitted)
+        },
+    )? || inventory.truncated;
+    Ok(result)
+}
+
+/// Returns true when the visitor stopped before consuming every match.
+pub(super) fn scan_checkout<'a>(
+    root: &Path,
+    paths: impl Iterator<Item = &'a str>,
+    cancelled: &dyn Fn() -> bool,
+    mut visit: impl FnMut(&str, &[u8]) -> OpsResult<bool>,
+) -> OpsResult<bool> {
     let root = root.canonicalize()?;
     let checkout = File::open(&root)?;
     // Scan one bounded buffer at a time. Retaining every file as an observed
     // Bytes fact would keep rereading the checkout after the picker closes.
     let mut bytes = Vec::new();
-    for path in &inventory.paths {
+    for path in paths {
         if cancelled() {
             return Err(task_error("Search cancelled"));
         }
@@ -84,47 +137,11 @@ fn search(
             Err(error) => return Err(task_error(format!("Cannot search {path:?}: {error}"))),
             Ok(true) => {}
         }
-        let mut revision = None;
-        let mut omitted = false;
-        searcher.search_slice(
-            &matcher,
-            &bytes,
-            UTF8(|line, text| {
-                let text = text.strip_suffix('\n').unwrap_or(text);
-                let text = text.strip_suffix('\r').unwrap_or(text);
-                matcher
-                    .find_iter(text.as_bytes(), |span| {
-                        if result.hits.len() == MAX_HITS {
-                            omitted = true;
-                            return false;
-                        }
-                        let start = span.start();
-                        let excerpt_start = text.ceil_char_boundary(start.saturating_sub(60));
-                        let excerpt_end = text
-                            .floor_char_boundary((excerpt_start + EXCERPT_BYTES).min(text.len()));
-                        let revision =
-                            revision.get_or_insert_with(|| hex::encode(Sha256::digest(&bytes)));
-                        result.hits.push(TaskGrepHit {
-                            path: path.clone(),
-                            line,
-                            start,
-                            end: span.end(),
-                            revision: revision.clone(),
-                            excerpt: text[excerpt_start..excerpt_end].into(),
-                        });
-                        true
-                    })
-                    .expect("RegexMatcher cannot fail while matching");
-                Ok(!omitted)
-            }),
-        )?;
-        if omitted {
-            result.truncated = true;
-            break;
+        if !visit(path, &bytes)? {
+            return Ok(true);
         }
     }
-    result.truncated |= inventory.truncated;
-    Ok(result)
+    Ok(false)
 }
 
 fn read_search_file(

@@ -47,6 +47,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case taskChanges(issue: String, base: String, head: String?)
     case taskDiff(issue: String, path: String?, base: String, head: String?, draft: String?)
     case taskFile(issue: String, path: String, at: String?)
+    case taskFilesSymbols(issue: String, name: String, path: String?)
     case taskFilesGrep(issue: String, query: String, wholeWord: Bool)
     case taskFilesFind(issue: String, query: String?, limit: UInt?)
     case taskFiles(issue: String, path: String, cursor: String?, showIgnored: Bool)
@@ -121,6 +122,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
                 + (head.map { ["--head", $0] } ?? []) + (draft == nil ? [] : ["--draft"])
         case .taskFile(let issue, let path, let at):
             return ["task", "file", issue, path, "--json"] + argument("--at", at)
+        case .taskFilesSymbols(let issue, let name, let path):
+            return ["task", "symbols", issue, "--json"] + argument("--path", path) + ["--", name]
         case .taskFilesGrep(let issue, let query, let wholeWord):
             return ["task", "grep", issue, "--json"] + (wholeWord ? ["--whole-word"] : []) + ["--", query]
         case .taskFilesFind(let issue, let query, let limit):
@@ -230,6 +233,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("task.diff", ["issue": issue, "path": path, "base": base, "head": head, "draft": draft])
         case .taskFile(let issue, let path, let at):
             TaggedFields("task.file", ["issue": issue, "path": path, "at": at])
+        case .taskFilesSymbols(let issue, let name, let path):
+            TaggedFields("task.files.symbols", ["issue": issue, "name": name, "path": path])
         case .taskFilesGrep(let issue, let query, let wholeWord):
             TaggedFields("task.files.grep", ["issue": issue, "query": query, "whole_word": wholeWord])
         case .taskFilesFind(let issue, let query, let limit):
@@ -1229,6 +1234,10 @@ public struct RegistryQuery: Sendable {
         draft: String? = nil
     ) async throws -> TaskDiffSnapshot {
         try await serve(.taskDiff(issue: issue, path: path, base: base, head: head, draft: draft)).decode(TaskDiffSnapshot.self)
+    }
+
+    public func taskSymbols(issue: String, name: String, path: String? = nil) async throws -> TaskSymbols {
+        try await serve(.taskFilesSymbols(issue: issue, name: name, path: path)).decode(TaskSymbols.self)
     }
 
     public func taskGrep(issue: String, query: String, wholeWord: Bool = false) async throws -> TaskGrepResults {

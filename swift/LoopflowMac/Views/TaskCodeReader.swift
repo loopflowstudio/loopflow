@@ -1,16 +1,24 @@
 #if os(macOS)
+import CoreText
 import Loopflow
 import SwiftUI
 
 struct TaskCodeReader: View {
     let path: String
     let text: String
-    var location: FileMatchLocation?
+    var location: FileVisit?
+    var store: TaskFilesStore?
     var revision: String?
     let ready: () -> Void
     @Environment(\.palette) private var palette
     @Environment(\.theme) private var theme
     @State private var lines: [CodeLine]?
+
+    @FocusState private var focused: Bool
+    @State private var selectedWord: String?
+    @State private var selectedLine = 1
+    @State private var pendingG = false
+    @State private var scrolling = false
 
     var body: some View {
         Group {
@@ -19,21 +27,45 @@ struct TaskCodeReader: View {
                     ScrollView([.horizontal, .vertical]) {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(lines.indices, id: \.self) { index in
-                                HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-                                    Text(verbatim: String(lines.count)).hidden()
-                                        .overlay(alignment: .trailing) { Text(verbatim: String(index + 1)) }
-                                        .foregroundStyle(palette.textSecondary)
-                                    Text(painted(lines[index], number: index + 1))
-                                        .textSelection(.enabled)
+                                VStack(alignment: .leading, spacing: 0) {
+                                    HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+                                        Text(verbatim: String(lines.count)).hidden()
+                                            .overlay(alignment: .trailing) { Text(verbatim: String(index + 1)) }
+                                            .foregroundStyle(palette.textSecondary)
+                                        source(lines[index], number: index + 1)
+                                    }
+                                    if let store, let peek = store.jumps.peek, peek.name != nil,
+                                       peek.origin.line == index + 1 {
+                                        FileSymbolPeek(store: store, peek: peek)
+                                    }
                                 }
                             }
                         }
+                        .scrollTargetLayout()
                         .font(Typography.mono)
                         .padding(Spacing.sm)
                     }
                     .defaultScrollAnchor(.topLeading, for: .alignment)
+                    .onScrollPhaseChange { _, phase in
+                        scrolling = phase == .tracking || phase == .interacting || phase == .decelerating
+                    }
+                    .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.1) { visible in
+                        if scrolling, let store, let first = visible.min() { store.jumps.readingLine = first + 1 }
+                    }
+                    .focusable(store != nil).focused($focused).focusEffectDisabled()
+                    .onChange(of: focused) { if !focused { pendingG = false } }
+                    .onKeyPress { key in
+                        guard let store, key.modifiers.isEmpty, let selectedWord else { pendingG = false; return .ignored }
+                        if key.characters == "d", pendingG {
+                            pendingG = false
+                            store.jumps.search(selectedWord, line: selectedLine, in: store)
+                            return .handled
+                        }
+                        pendingG = key.characters == "g"
+                        return pendingG ? .handled : .ignored
+                    }
                     .task(id: location) {
-                        if let hit = location?.hit { proxy.scrollTo(hit.line - 1, anchor: UnitPoint(x: 0, y: 0.5)) }
+                        if let location { proxy.scrollTo(location.line - 1, anchor: UnitPoint(x: 0, y: 0.5)) }
                     }
                 }
                 .onAppear(perform: ready)
@@ -43,12 +75,57 @@ struct TaskCodeReader: View {
             }
         }
         .task(id: text) {
-            let result = await Task.detached(priority: .userInitiated) { [text, path] in
-                CodeLine.read(text, grammar: Grammar.named(path))
+            selectedWord = nil
+            pendingG = false
+            let document = store?.selectedDocument
+            let version = document?.editVersion
+            let result = await Task.detached(priority: .userInitiated) { [text, path, needsOutline = document != nil] in
+                let grammar = Grammar.named(path)
+                let tree = grammar?.parse(text)
+                let highlights = tree.flatMap { grammar?.highlights(in: $0, text: text) } ?? []
+                return (CodeLine.read(text, highlights: highlights),
+                        needsOutline ? FileOutline(tree: tree, text: text, path: path) : nil)
             }.value
             guard !Task.isCancelled else { return }
-            lines = result
+            if let outline = result.1, let version { document?.receive(outline, version: version) }
+            lines = result.0
         }
+    }
+
+    @ViewBuilder private func source(_ line: CodeLine, number: Int) -> some View {
+        let label = Text(painted(line, number: number)).textSelection(.enabled)
+        if let store {
+            label.simultaneousGesture(SpatialTapGesture().onEnded { tap in
+                focused = true
+                store.jumps.readingLine = number
+                selectedLine = number
+                selectedWord = Self.word(in: line.text, at: tap.location)
+                pendingG = false
+                if NSApp.currentEvent?.modifierFlags.contains(.command) == true, let selectedWord {
+                    store.jumps.search(selectedWord, line: number, in: store)
+                }
+            })
+        } else { label }
+    }
+
+    static func word(in text: String, at point: CGPoint) -> String? {
+        let font = NSFont(name: Typography.monoFace, size: Typography.monoSize)
+            ?? .monospacedSystemFont(ofSize: Typography.monoSize, weight: .regular)
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+        var index = CTLineGetStringIndexForPosition(line, point)
+        guard index != kCFNotFound, point.x >= 0,
+              point.x < CTLineGetTypographicBounds(line, nil, nil, nil) else { return nil }
+        // Core Text returns the nearest caret. The right half of a glyph
+        // therefore names the insertion position after the clicked character.
+        if CTLineGetOffsetForStringIndex(line, index, nil) > point.x { index -= 1 }
+        let source = text as NSString
+        let characters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_$")).inverted
+        guard index >= 0, index < source.length else { return nil }
+        let before = source.rangeOfCharacter(from: characters, options: .backwards, range: NSRange(location: 0, length: index))
+        let after = source.rangeOfCharacter(from: characters, options: [], range: NSRange(location: index, length: source.length - index))
+        let start = before.location == NSNotFound ? 0 : NSMaxRange(before)
+        let end = after.location == NSNotFound ? source.length : after.location
+        return index < end ? source.substring(with: NSRange(location: start, length: end - start)) : nil
     }
 
     private func painted(_ line: CodeLine, number: Int) -> AttributedString {

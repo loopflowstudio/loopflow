@@ -19,8 +19,10 @@ mod checkout_file;
 mod directory;
 mod find;
 mod grep;
+mod symbols;
 pub use find::{task_find, TaskFileInventory};
 pub use grep::{task_grep, TaskGrepHit, TaskGrepResults};
+pub use symbols::{task_symbols, TaskSymbol, TaskSymbols};
 mod handoff;
 mod lifecycle;
 #[cfg(test)]

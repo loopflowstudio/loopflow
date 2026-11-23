@@ -383,7 +383,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.detail` | `lf task detail <issue>` | read |
 | `task.list` (`closed: true`) | `lf task list --closed --wave <wave>` | read |
 | `task.changes` | `lf task changes <issue>` | read |
-| `task.diff`, `task.file`, `task.files`, `task.files.find`, `task.files.grep` | `lf task diff`, `lf task file`, `lf task files`, `lf task find`, `lf task grep` | read |
+| `task.diff`, `task.file`, `task.files`, `task.files.find`, `task.files.grep`, `task.files.symbols` | `lf task diff`, `lf task file`, `lf task files`, `lf task find`, `lf task grep`, `lf task symbols` | read |
 | `task.context` | `lf task context <issue>` | read |
 | `task.runs` | `lf task runs <issue>` | read |
 | `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |

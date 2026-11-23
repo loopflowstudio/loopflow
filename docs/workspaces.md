@@ -90,7 +90,8 @@ swift/LoopflowMac/TaskFileDocument.swift:318:func reconcile (TaskFileDocument)
   line in the file’s reported `revision`.
 - `lf task symbols <ID> <name> [--path <path>]` finds declarations (functions,
   types, methods, and Markdown headings) with their enclosing container, path,
-  and line number, capping at 100 hits.
+  and 1-based line number. JSON returns up to 100 exact-name matches in `hits`.
+  Check `truncated` before treating a single result as unique.
 
 ## Split in the right directory
 

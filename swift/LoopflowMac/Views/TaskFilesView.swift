@@ -62,6 +62,7 @@ struct TaskFilesView: View {
         .task(id: "\(store.selection ?? "")|\(store.mode)") {
             if store.mode != .diff { await store.loadFile() }
         }
+        .onChange(of: store.selectedDocument?.editVersion) { store.jumps.dismiss() }
         .task(id: diffIdentity) { if store.mode == .diff { await store.loadDiff() } }
     }
 
@@ -111,6 +112,9 @@ struct TaskFilesView: View {
             Text(store.query.remoteMachine ?? "This Mac").font(Typography.meta).fixedSize()
             Text(checkout + (directory.isEmpty ? "" : "/" + directory)).font(Typography.mono)
                 .lineLimit(1).truncationMode(.head)
+            if let enclosing = store.selectedDocument?.outline?.enclosing(store.jumps.readingLine) {
+                Text("› " + enclosing.name).lineLimit(1)
+            }
         }
         .foregroundStyle(palette.textSecondary)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -123,6 +127,7 @@ struct TaskFilesView: View {
     private var filesPage: some View {
         VStack(spacing: 0) {
             location
+            if let peek = store.jumps.peek, peek.name == nil { FileSymbolPeek(store: store, peek: peek) }
             GeometryReader { geometry in
                 let docked = store.navigator == .pinned && geometry.size.width >= 360
                 HSplitView {
@@ -423,7 +428,7 @@ struct TaskFilesView: View {
             if snapshot.state == .text, store.mode == .read {
                 TaskFileReadingView(document: document, baseURL: store.query.remoteMachine == nil
                     ? URL(fileURLWithPath: store.cwd).appendingPathComponent(document.path) : nil,
-                    visit: store.grepVisit, interacted: store.noteInteraction, ready: { reportVisible(document.path) })
+                    store: store, visit: store.visit, interacted: store.noteInteraction, ready: { reportVisible(document.path) })
                     .id(document.path)
             } else if snapshot.state == .text {
                 TaskDocumentView(document: document, isFocused: isFocused, ready: { reportVisible(document.path) })
@@ -447,7 +452,8 @@ struct TaskFileReadingView: View {
     let document: TaskFileDocument
     /// Where relative references resolve; `nil` for a peer's checkout.
     let baseURL: URL?
-    var visit: FileMatchLocation?
+    var store: TaskFilesStore?
+    var visit: FileVisit?
     var interacted: () -> Void = {}
     var ready: () -> Void = {}
 
@@ -467,7 +473,7 @@ struct TaskFileReadingView: View {
             .accessibilityIdentifier("files-rendered-markdown")
             .onAppear(perform: ready)
         default:
-            TaskCodeReader(path: document.path, text: document.text, location: visit,
+            TaskCodeReader(path: document.path, text: document.text, location: visit, store: store,
                            revision: document.dirty ? nil : document.snapshot?.revision, ready: ready)
                 .onScrollPhaseChange { _, phase in if phase == .interacting { interacted() } }
         }

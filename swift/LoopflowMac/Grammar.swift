@@ -39,14 +39,23 @@ final class Grammar: Sendable {
         return loaded(name)
     }
 
+    func parse(_ text: String) -> MutableTree? {
+        let parser = Parser()
+        guard (try? parser.setLanguage(language)) != nil else { return nil }
+        return parser.parse(text)
+    }
+
     /// Every named piece of `text`, ordered for painting: each piece starts at
     /// or after the one before, and a piece inside another follows it, so
     /// painting in order leaves the innermost color on top. Pieces without an
     /// ink are left out, so a broad capture such as `variable` never hides a
     /// narrower one that colors.
     func highlights(of text: String) -> [Highlight] {
-        let parser = Parser()
-        guard (try? parser.setLanguage(language)) != nil, let tree = parser.parse(text) else { return [] }
+        guard let tree = parse(text) else { return [] }
+        return highlights(in: tree, text: text)
+    }
+
+    func highlights(in tree: MutableTree, text: String) -> [Highlight] {
         var found = captures(in: tree, text: text)
         if let inline, let root = tree.rootNode {
             var ranges: [TSRange] = []
@@ -229,10 +238,14 @@ struct CodeLine: Sendable {
     let highlights: [Grammar.Highlight]
 
     static func read(_ text: String, grammar: Grammar?) -> [Self] {
+        read(text, highlights: grammar?.highlights(of: text) ?? [])
+    }
+
+    static func read(_ text: String, highlights: [Grammar.Highlight]) -> [Self] {
         // Keep CR in the offsets for Tree-sitter, and leave it out of displayed CRLF lines.
         let raw = text.utf8.split(separator: 10, omittingEmptySubsequences: false)
             .map { String(decoding: $0, as: UTF8.self) }
-        let spans = Grammar.Highlight.byLine(grammar?.highlights(of: text) ?? [], lines: raw)
+        let spans = Grammar.Highlight.byLine(highlights, lines: raw)
         return zip(raw, spans).map { line, highlights in
             Self(text: line.last == "\r" ? String(line.dropLast()) : line, highlights: highlights)
         }

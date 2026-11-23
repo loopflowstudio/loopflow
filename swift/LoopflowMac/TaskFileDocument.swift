@@ -4,12 +4,6 @@ import Combine
 import Loopflow
 import Observation
 
-/// A preview follows the selected hit. Each accepted visit can reveal it again.
-struct FileMatchLocation: Equatable {
-    let hit: TaskGrepHit
-    let visitID: UUID?
-}
-
 /// The working document. Its native editor stays with it after the first edit.
 @MainActor
 @Observable
@@ -22,6 +16,21 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     private(set) var saving = false
     private(set) var text = ""
     private(set) var editVersion = 0
+    private var parsedOutline: (version: Int, outline: FileOutline)?
+    var outline: FileOutline? { parsedOutline?.version == editVersion ? parsedOutline?.outline : nil }
+
+    func receive(_ outline: FileOutline, version: Int) {
+        if version == editVersion { parsedOutline = (version, outline) }
+    }
+
+    func readOutline() async {
+        guard outline == nil else { return }
+        let version = editVersion
+        let result = await Task.detached(priority: .userInitiated) { [text, path] in
+            FileOutline(tree: Grammar.named(path)?.parse(text), text: text, path: path)
+        }.value
+        if !Task.isCancelled { receive(result, version: version) }
+    }
     @ObservationIgnored private(set) var retainedEditor: TaskFileTextView?
     @ObservationIgnored private lazy var undo = UndoManager()
     @ObservationIgnored lazy var scroll: NSScrollView = {
@@ -386,7 +395,7 @@ final class TaskFilesStore {
     }
     var comparison = ChangeComparison.workingTree(base: "parent")
     let pullRequest = PullRequestStore()
-    var page = Page.files
+    var page = Page.files { didSet { if page != oldValue { jumps.dismiss() } } }
 
     /// The page a pane shows: Brief needs the Task's row, and a pane without
     /// one reads Files instead.
@@ -397,6 +406,7 @@ final class TaskFilesStore {
 
     func chooseFile(_ mode: TaskFilePicker.Mode = .files) {
         guard filePicker?.mode != mode else { return }
+        jumps.dismiss()
         noteInteraction()
         filePicker = TaskFilePicker(store: self, mode: mode)
     }
@@ -416,16 +426,25 @@ final class TaskFilesStore {
 
     let performanceOwner = UUID()
 
-    private(set) var grepVisit: FileMatchLocation?
+    let jumps = FileJumps()
+    private(set) var visit: FileVisit?
+
+    func reveal(_ location: FilePosition, hit: TaskGrepHit? = nil) {
+        selectFileFromInput(location.path)
+        mode = .read
+        jumps.readingLine = location.line
+        visit = FileVisit(line: location.line, hit: hit, visitID: UUID())
+    }
 
     func openMatch(_ hit: TaskGrepHit) {
-        selectFileFromInput(hit.path)
-        mode = .read
-        grepVisit = FileMatchLocation(hit: hit, visitID: UUID())
+        let destination = FilePosition(path: hit.path, line: hit.line)
+        jumps.record(destination, from: jumps.position(in: self))
+        reveal(destination, hit: hit)
     }
 
     func selectFileFromInput(_ path: String) {
-        grepVisit = nil
+        visit = nil
+        jumps.dismiss()
         if selection == path, page == .files {
             selectFile(path)
             return
@@ -618,7 +637,7 @@ final class TaskFilesStore {
     private(set) var tabs: [WorkFileTab] = []
     var selection: String? {
         didSet {
-            if selection != oldValue { grepVisit = nil }
+            if selection != oldValue { visit = nil; jumps.readingLine = 1; jumps.dismiss() }
             if let path = selection, !tabs.contains(where: { $0.path == path }) {
                 tabs.append(WorkFileTab(id: UUID().uuidString, path: path))
             }
@@ -669,6 +688,7 @@ final class TaskFilesStore {
         get { selection.flatMap { modes[$0] } ?? .read }
         set {
             guard let selection else { return }
+            if newValue != mode { jumps.dismiss() }
             modes[selection] = newValue == .read ? nil : newValue
         }
     }

@@ -229,7 +229,7 @@ struct TaskFilePickerView: View {
                 switch picker.preview {
                 case .text(let text, let revision):
                     TaskCodeReader(path: path, text: text,
-                                   location: result.hit.map { FileMatchLocation(hit: $0, visitID: nil) },
+                                   location: result.hit.map { FileVisit(line: $0.line, hit: $0, visitID: nil) },
                                    revision: revision, ready: {})
                 case .message(let message): Text(message).font(Typography.meta)
                 case nil: ProgressView()

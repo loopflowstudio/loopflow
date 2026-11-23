@@ -1203,6 +1203,7 @@ impl TaskCommand {
             | Self::Runs { .. }
             | Self::Find { .. }
             | Self::Grep { .. }
+            | Self::Symbols { .. }
             | Self::Files { .. }
             | Self::File { .. }
             | Self::Wait { .. } => false,
@@ -2446,6 +2447,16 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
+    /// Find declarations of a name in this Task's checkout
+    Symbols {
+        issue: String,
+        name: String,
+        /// Limit the search to this checkout-relative file
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Search for literal text in this Task's checkout
     Grep {
         issue: String,
@@ -2610,6 +2621,7 @@ impl TaskCommand {
             | Self::Runs { issue, .. }
             | Self::Find { issue, .. }
             | Self::Grep { issue, .. }
+            | Self::Symbols { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }
             | Self::Save { issue, .. }
@@ -2646,6 +2658,7 @@ impl TaskCommand {
             | Self::Runs { issue, .. }
             | Self::Find { issue, .. }
             | Self::Grep { issue, .. }
+            | Self::Symbols { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }
             | Self::Save { issue, .. }

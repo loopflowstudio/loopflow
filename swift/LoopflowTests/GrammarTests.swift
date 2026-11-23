@@ -99,6 +99,20 @@ struct GrammarTests {
         #expect(Grammar.named("build.gradle.kts")?.name == "kotlin")
     }
 
+    @Test func outlineReadsDeclarationsAndHeadingsFromTheirSyntaxTrees() throws {
+        for (path, text, names) in [
+            ("x.rs", "struct A {}\nimpl A { fn read() {} }", ["A", "A", "read"]),
+            ("x.py", "class A:\n def read(self): pass", ["A", "read"]),
+            ("x.tsx", "class A { read() { return <div/>; } }", ["A", "read"]),
+            ("x.go", "package a\ntype A struct {}\nfunc (a *A) read() {}", ["A", "read"]),
+            ("x.md", "# A\n## read\n\n```\n# ignored\n```", ["A", "read"])
+        ] {
+            let grammar = try #require(Grammar.named(path))
+            let outline = FileOutline(tree: grammar.parse(text), text: text, path: path)
+            #expect(outline.entries.map(\.symbol.name) == names, "\(path)")
+        }
+    }
+
     @Test func plainTextAtTheFileSizeLimitKeepsEveryLine() {
         let line = String(repeating: "x", count: 98)
         let text = String(repeating: line + "\r\n", count: 10_000)

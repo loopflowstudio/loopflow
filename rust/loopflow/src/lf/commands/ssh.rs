@@ -103,6 +103,7 @@ pub(super) fn run_with_io(
                 | crate::lf::TaskCommand::WatchFiles { .. }
                 | crate::lf::TaskCommand::Find { .. }
                 | crate::lf::TaskCommand::Grep { .. }
+                | crate::lf::TaskCommand::Symbols { .. }
                 | crate::lf::TaskCommand::Files { .. }
                 | crate::lf::TaskCommand::File { .. }
                 | crate::lf::TaskCommand::Diff { .. }
@@ -434,6 +435,19 @@ fn checkout_search(
                 issue: owner_issue(issue),
                 query: query.clone(),
                 limit: *limit,
+            },
+            *json,
+        )),
+        TaskCommand::Symbols {
+            issue,
+            name,
+            path,
+            json,
+        } => Some((
+            Read::TaskSymbols {
+                issue: owner_issue(issue),
+                name: name.clone(),
+                path: path.clone(),
             },
             *json,
         )),

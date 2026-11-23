@@ -15,6 +15,38 @@ public struct TaskFileEntry: Decodable, Sendable, Hashable, Identifiable {
     }
 }
 
+public struct TaskSymbol: Decodable, Hashable, Sendable {
+    public let name: String
+    public let kind: String
+    public let path: String
+    public let line: Int
+    public let container: String?
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        name = try values.decode(String.self, forKey: .name)
+        kind = try values.decode(String.self, forKey: .kind)
+        path = try values.decode(String.self, forKey: .path)
+        line = try values.decode(Int.self, forKey: .line)
+        container = try values.decode(String?.self, forKey: .container)
+    }
+
+    public init(name: String, kind: String, path: String, line: Int, container: String?) {
+        self.name = name
+        self.kind = kind
+        self.path = path
+        self.line = line
+        self.container = container
+    }
+
+    private enum CodingKeys: CodingKey { case name, kind, path, line, container }
+}
+
+public struct TaskSymbols: Decodable, Sendable {
+    public let hits: [TaskSymbol]
+    public let truncated: Bool
+}
+
 public struct TaskGrepHit: Decodable, Hashable, Sendable {
     public let path: String
     public let line: Int

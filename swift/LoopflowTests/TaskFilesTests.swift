@@ -9,6 +9,7 @@ import ViewInspector
 @testable import LoopflowMac
 
 private struct FilesFixture: Decodable {
+    let symbols: TaskSymbols
     let grep: TaskGrepResults
     let find: TaskFileInventory
     let directory: TaskDirectory
@@ -169,6 +170,87 @@ struct TaskFilesTests {
         #expect(document.dirty)
         #expect(store.selection == "other.txt")
         await peer.end(stale: false)
+    }
+
+    @Test func choosingAPeerDefinitionReturnsToTheCallLine() async throws {
+        let data = try Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let query = RegistryQuery { args, cwd in
+            guard cwd == nil, args == ["--machine", "peer", "--repo-id", "plan", "task", "symbols", "TEST-1", "--json", "--", "read"]
+            else { throw RegistryQueryError("Expected declaration lookup on the peer") }
+            let fixture = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            return String(decoding: try JSONSerialization.data(withJSONObject: fixture["symbols"]!), as: UTF8.self)
+        }.onMachine("peer", repository: "plan")
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/peer/checkout", query: query)
+        store.selectFile("Calls.swift")
+        let doc = store.document("Calls.swift")
+        await doc.reconcile(snapshot("func run() {\n  read()\n}\n", path: doc.path))
+        await store.jumps.search("read", line: 2, in: store)?.value
+        let peek = try #require(store.jumps.peek)
+        #expect(peek.symbols.map(\.path) == ["src/A.swift", "src/B.swift"])
+        #expect(store.selection == doc.path && store.jumps.back.isEmpty)
+        let list = FileSymbolPeek(store: store, peek: peek)
+        #expect(try list.inspect().find(text: "A.read").string() == "A.read")
+        #expect(try list.inspect().find(text: "B.read").string() == "B.read")
+        #expect(try list.inspect().find(text: "src/B.swift:7").string() == "src/B.swift:7")
+        store.jumps.dismiss()
+        #expect(store.jumps.back.isEmpty)
+        await store.jumps.search("read", line: 2, in: store)?.value
+        let reopened = FileSymbolPeek(store: store, peek: try #require(store.jumps.peek))
+        try reopened.inspect().find(ViewType.Button.self, where: { button in
+            (try? button.labelView().find(text: "B.read")) != nil
+        }).tap()
+        #expect(store.selection == "src/B.swift" && store.visit?.line == 7)
+        store.jumps.step(backwards: true, in: store)
+        #expect(store.selection == doc.path && store.visit?.line == 2 && store.jumps.back.isEmpty)
+        store.jumps.step(backwards: false, in: store)
+        #expect(store.selection == "src/B.swift" && store.visit?.line == 7)
+    }
+
+    @Test func anIncompleteLookupCannotTakeTheReaderToAUniqueDefinition() async throws {
+        let query = RegistryQuery { args, _ in
+            switch args.last {
+            case "partial":
+                return #"{"hits":[{"path":"b.py","name":"partial","kind":"def","container":null,"line":1}],"truncated":true}"#
+            case "missing": return #"{"hits":[],"truncated":false}"#
+            default: throw RegistryQueryError("Peer disconnected")
+            }
+        }
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: query)
+        store.selectFile("a.py")
+        await store.document("a.py").reconcile(snapshot("partial()\n", path: "a.py"))
+        for (name, message) in [("partial", "Results truncated"), ("missing", "No declarations found"), ("offline", "Peer disconnected")] {
+            await store.jumps.search(name, line: 1, in: store)?.value
+            #expect(store.jumps.peek?.message?.contains(message) == true)
+            #expect(store.selection == "a.py" && store.jumps.back.isEmpty)
+        }
+    }
+
+    @Test func readerIdentifiesTheClickedWordAfterUnicode() {
+        let font = NSFont(name: Typography.monoFace, size: Typography.monoSize)
+            ?? .monospacedSystemFont(ofSize: Typography.monoSize, weight: .regular)
+        let prefix = NSAttributedString(string: "😀. ", attributes: [.font: font]).size().width
+        #expect(TaskCodeReader.word(in: "😀. read()", at: CGPoint(x: prefix + 1, y: 0)) == "read")
+        #expect(TaskCodeReader.word(in: "read()", at: CGPoint(x: 1000, y: 0)) == nil)
+    }
+
+    @Test func outlineAndLocalDefinitionReadTheLiveSwiftBuffer() async throws {
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/peer", query: RegistryQuery { _, _ in
+            throw RegistryQueryError("A same-file declaration should resolve in the draft")
+        })
+        store.autosave = false
+        store.selectFile("Draft.swift")
+        let doc = store.document("Draft.swift")
+        await doc.reconcile(snapshot("struct Reader {}", path: doc.path))
+        let draft = "struct Reader {\n func lookup() {}\n}\nReader().lookup()"
+        doc.editor.insertText(draft, replacementRange: NSRange(location: 0, length: doc.text.utf16.count))
+        await store.jumps.search(nil, line: 4, in: store)?.value
+        #expect(store.jumps.peek?.symbols.map(\.name) == ["Reader", "lookup"])
+        #expect(doc.outline?.enclosing(2)?.container == "Reader")
+        await store.jumps.search("lookup", line: 4, in: store)?.value
+        #expect(store.visit?.line == 2 && store.jumps.peek == nil && doc.text == draft)
+        store.jumps.step(backwards: true, in: store)
+        #expect(store.visit?.line == 4)
     }
 
     @Test(arguments: TaskFilePicker.Mode.allCases)
@@ -400,6 +482,15 @@ struct TaskFilesTests {
         #expect(lines.map(\.text) == ["// 😀", "struct NewStore {}"])
         #expect(lines[1].highlights.contains { $0.ink == .keyword && $0.range == NSRange(location: 0, length: 6) })
 
+        func bracket(_ key: String) throws -> DesktopAction {
+            try #require(DesktopAction.binding(characters: key, modifiers: .command, context: context)?.0)
+        }
+        #expect(try bracket("[").name == "back")
+        store.jumps.record(.init(path: "Store.swift", line: 2), from: .init(path: "Store.swift", line: 1))
+        #expect(try bracket("[").name == "files-back")
+        try bracket("[").perform(context)
+        #expect(try bracket("[").name == "back")
+        #expect(try bracket("]").name == "files-forward")
         let (grep, _) = try #require(DesktopAction.binding(characters: "f", modifiers: [.shift, .command]))
         store.page = .changes
         #expect(!edit.available(context) && !grep.available(context))
@@ -916,6 +1007,7 @@ struct TaskFilesTests {
 
     @Test func wirePreservesExactBaseAndLosslessText() throws {
         let fixture = try fixture()
+        #expect(fixture.symbols.hits.map(\.container) == ["A", "B"])
         #expect(fixture.grep.hits.last?.start == 12)
         #expect(fixture.find.latestScratchPage == fixture.find.scratch.first)
         #expect(fixture.directory.entries.map(\.kind) == [.directory, .file, .symlink])

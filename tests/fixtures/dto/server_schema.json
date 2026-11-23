@@ -6931,6 +6931,38 @@
         },
         {
           "additionalProperties": false,
+          "description": "Find declarations of a name in the Task checkout.",
+          "properties": {
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.files.symbols",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "name",
+            "path"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskSymbols"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "Search the Task checkout for literal text.",
           "properties": {
             "issue": {
@@ -14666,6 +14698,56 @@
         "completed_at",
         "due_date",
         "assignee"
+      ],
+      "type": "object"
+    },
+    "TaskSymbol": {
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "line": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "kind",
+        "line",
+        "container"
+      ],
+      "type": "object"
+    },
+    "TaskSymbols": {
+      "properties": {
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/TaskSymbol"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hits",
+        "truncated"
       ],
       "type": "object"
     },

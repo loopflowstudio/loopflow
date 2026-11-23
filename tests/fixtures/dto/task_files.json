@@ -1,4 +1,11 @@
 {
+  "symbols": {
+    "hits": [
+      {"name": "read", "kind": "func", "path": "src/A.swift", "line": 3, "container": "A"},
+      {"name": "read", "kind": "func", "path": "src/B.swift", "line": 7, "container": "B"}
+    ],
+    "truncated": false
+  },
   "grep": {
     "hits": [
       {

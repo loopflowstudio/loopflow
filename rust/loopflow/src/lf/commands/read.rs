@@ -25,7 +25,7 @@ use crate::lf::SessionListArgs;
 use loopflow_execution::engine::{Error, ErrorCode};
 use loopflow_execution::machine::connection::local_machine;
 use loopflow_execution::ops::task::{
-    task_changes, task_diff, task_file, task_files, task_find, task_grep,
+    task_changes, task_diff, task_file, task_files, task_find, task_grep, task_symbols,
 };
 use loopflow_execution::read_stream::{Subscription, Transport};
 use loopflow_execution::session::SessionFilter;
@@ -166,6 +166,14 @@ pub enum Read {
         issue: String,
         path: String,
         at: Option<String>,
+    },
+    /// Find declarations of a name in the Task checkout.
+    #[serde(rename = "task.files.symbols")]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskSymbols>()))]
+    TaskSymbols {
+        issue: String,
+        name: String,
+        path: Option<String>,
     },
     /// Search the Task checkout for literal text.
     #[serde(rename = "task.files.grep")]
@@ -483,6 +491,12 @@ impl Read {
             Self::TaskFile { issue, path, at } => {
                 let mut argv = words(&["task", "file", issue, path, "--json"]);
                 argv.extend(optional("--at", at.as_ref()));
+                argv
+            }
+            Self::TaskSymbols { issue, name, path } => {
+                let mut argv = words(&["task", "symbols", issue, "--json"]);
+                argv.extend(optional("--path", path.as_ref()));
+                argv.extend(words(&["--", name]));
                 argv
             }
             Self::TaskGrep {
@@ -811,6 +825,9 @@ impl Read {
                 query,
                 whole_word,
             } => value(&task_grep(issue, query, *whole_word, cancelled)?),
+            Self::TaskSymbols { issue, name, path } => {
+                value(&task_symbols(issue, name, path.as_deref(), cancelled)?)
+            }
             Self::TaskFiles {
                 issue,
                 path,
@@ -1032,6 +1049,7 @@ impl Read {
             | Self::TaskFile { .. }
             | Self::TaskFind { .. }
             | Self::TaskGrep { .. }
+            | Self::TaskSymbols { .. }
             | Self::TaskFiles { .. }
             | Self::WaveList
             | Self::MachineSelf

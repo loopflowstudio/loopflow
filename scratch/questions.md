@@ -255,3 +255,13 @@ worktree is gone. Reversible in `checkout_owner_in` (`sqlite/task_work.rs`).
 - `lf wt create` from a Task checkout branches from `main`. LOOPFLOW.md now
   sends child agents there for a separate checkout; open whether it should
   start from the Task's branch.
+
+## Concept review on 8e62c4f468 (2026-11-23)
+
+- **The Session list's `task_ids` read the stored Task only** (page 1a,
+  chosen for review). `WorkspaceResolver::associate` derived them from the
+  cwd's current Git root plus the stored Task, so a reused path listed an old
+  Session under two Tasks. Passed over: leaving it for LOO-934, now that it
+  is the last membership reader that disagrees with `task_id`.
+- **`lf wt create` branches from `main`** (page 2). Open: should a child
+  agent's separate checkout start from the Task's branch? Left as is.

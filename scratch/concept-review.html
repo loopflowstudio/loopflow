@@ -1,9 +1,6 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-937 Concept Review (a8627a30)</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-937 Concept Review (8e62c4f4)</title>
 <style>
 :root{--bg:#fbfaf7;--fg:#1d1c1a;--mute:#6b675f;--line:#e2ded5;--card:#fff;--yes:#2f7d4f;--no:#b3412e;--new:#7a5bc4;--code:#f1eee7}
 @media (prefers-color-scheme:dark){:root{--bg:#171614;--fg:#ece9e2;--mute:#a19c92;--line:#34312c;--card:#1f1e1b;--yes:#6cc28f;--no:#ec8a76;--new:#b9a2f0;--code:#2a2824}}
@@ -24,64 +21,56 @@ th{font-weight:600;color:var(--mute)}
 .prop{border-left:3px solid var(--new)}
 ol li{margin:.5rem 0}
 .wrap{overflow-x:auto}
-</style>
-</head>
-<body><main>
-<h1>LOO-937 as built, at <code>a8627a30</code></h1>
-<p class="mute">The area: which record holds each Task fact, and how a directory, a Session, a Graph run, a landing or a commit finds its Task. Read against the branch base <code>7487986a</code>, with the ownership split, the compress and the delivery fix in. The earlier review at <code>a49184a2</code> proposed the split. This page checks the split as built, across every caller.</p>
+</style></head><body><main>
+<h1>LOO-937 as built, at <code>8e62c4f4</code></h1>
+<p class="mute">The area: which record holds each Task fact, and how a directory, a Session or a Graph run finds its Task. Read against the branch base <code>5d5bf92c</code>, with the Git-root rule (answer 1c, "i think I prefer (c)") built, compressed and QA'd. The previous page (<code>a8627a30</code>) proposed an ownership/membership split; that split is gone.</p>
 
 <h2>Product concepts and code concepts</h2>
 <div class="wrap"><table>
 <tr><th>What a person knows</th><th>What the code has</th><th></th><th>Note</th></tr>
-<tr><td>A Task's title, state, rank, URL, branch</td><td><code>tasks</code> (desired), <code>tracker_items</code>/<code>pm_items</code> (observed)</td><td class="yes">yes</td><td>Two records on purpose: they're the merge base for conflicts.</td></tr>
-<tr><td>Is it done?</td><td><code>planning_state</code>; the boolean is leaving</td><td class="yes">yes</td><td>One fact.</td></tr>
+<tr><td>A Task's title, state, rank, URL, branch</td><td><code>tasks</code> (desired), <code>tracker_items</code>/<code>pm_items</code> (observed)</td><td class="yes">yes</td><td>Two records on purpose: the conflict merge base.</td></tr>
+<tr><td>Is it done?</td><td><code>planning_state</code>; the boolean is leaving</td><td class="yes">yes</td><td></td></tr>
 <tr><td>Task order, the drag on the Working board</td><td><code>tasks.planning_rank</code>, <code>reorder_task</code></td><td class="yes">yes</td><td><code>task_orders</code> is leaving.</td></tr>
-<tr><td>A Task's conversation</td><td><code>task_primary_sessions</code>, read through <code>primary_scope_sql</code></td><td class="yes">yes</td><td>Kept until LOO-877 so released lf agrees with it.</td></tr>
-<tr><td>A Session's or a run's Task (its history)</td><td><code>agent_sessions.task_id</code>, <code>graph_processes.task_id</code>, written once by <code>starting_task_in</code></td><td class="yes">yes</td><td>The work stays with its Task after a move or path reuse.</td></tr>
-<tr><td><b>"I'm working in this Task's directory"</b> (membership)</td><td><code>SqliteStore::task_holding(dir)</code>: the deepest checkout containing <code>dir</code></td><td class="yes">yes</td><td>Launch selection, context, <code>lf task status</code>, <code>--design</code>, provider conversations.</td></tr>
-<tr><td><b>"This checkout is this Task's"</b> (ownership: whose PR lands or commits from it, which conversation <code>lf resume</code> opens, whether <code>lf task create --worktree</code> may take it)</td><td><code>SqliteStore::task_checkout_owner(root)</code>: exact Git root</td><td class="yes">yes</td><td>Now its own answer. Was <span class="no">no</span> at <code>a49184a2</code>.</td></tr>
-<tr><td>Edit revision (stale edit refused)</td><td><code>tasks.planning_revision</code></td><td class="yes">yes</td><td>The compare-and-set every edit checks.</td></tr>
-<tr><td>Is a run alive?</td><td><code>task_graphs.run_pid</code> (carrier) and <code>graph_processes.pid</code> (child)</td><td class="no">no</td><td>Two OS processes behind one concept. Launch work, larger than this Task (questions.md).</td></tr>
-<tr><td>The Session list's Task column</td><td><code>WorkspaceResolver</code> working from Git roots</td><td class="no">no</td><td>A third lookup. Fits LOO-934.</td></tr>
+<tr><td>A Task's conversation</td><td><code>task_primary_sessions</code>, through <code>primary_scope_sql</code></td><td class="yes">yes</td><td>Code is right; the plan still called it <code>primary_scope='task'</code> in three places. Fixed in the plan this pass.</td></tr>
+<tr><td>"This directory is this Task's"</td><td><code>task_checkout_owner(dir)</code>: the Task whose checkout is <code>dir</code>'s Git worktree</td><td class="yes">yes</td><td>One answer for launch, resume, status, commit, land, provider conversations. A nested Git worktree is no Task's. QA: every command gives the same answer in every directory it tried.</td></tr>
+<tr><td>A Session's or a run's Task (its history)</td><td><code>agent_sessions.task_id</code>, <code>graph_processes.task_id</code>, written once by <code>starting_task_in</code></td><td class="yes">yes</td><td>Survives a move and a reused path (QA §4).</td></tr>
+<tr><td><b>The Task's Sessions, as listed</b> (<code>lf session list --task</code>, Desktop's Session list)</td><td><code>WorkspaceResolver::associate</code>: Git root of the cwd <em>now</em> + the stored Task</td><td class="no">no</td><td>One idea, two answers. Everything else reads <code>session_task_ids</code>; the list recomputes from paths.</td></tr>
+<tr><td>Is a run alive?</td><td><code>task_graphs.run_pid</code> and <code>graph_processes.pid</code></td><td class="no">no</td><td>Two processes behind one concept. LOO-1075.</td></tr>
+<tr><td>"Give a helper its own checkout"</td><td><code>lf wt create &lt;name&gt;</code>, branched from <code>main</code></td><td class="no">?</td><td>LOOPFLOW.md now sends child agents there; they start without the Task's work. Question 2.</td></tr>
 </table></div>
 
-<h2>The split, caller by caller</h2>
-<p>The earlier proposal named three ownership callers. QA on <code>71feca7d</code> found a fourth: delivery (<code>lf commit</code>, <code>lf pr open</code>) still went through the launch selection, so in a nested worktree it acted for the outer Task and refused on its branch. <code>a8627a30</code> moved it to the owner. A grep of every caller of both answers and of <code>select_work</code>/<code>select_execution_work</code> finds no fifth.</p>
+<h2>The biggest mismatch: the Session list's own membership</h2>
+<p>Walk it. Task A's checkout lives at <code>~/src/r.wt</code>. Its conversation runs there. The repository moves; a fresh clone takes <code>~/src/r.wt</code> and becomes Task C's checkout.</p>
 <div class="cols">
-<div class="card"><b>Membership</b>: <code>task_holding(dir)</code>
-<pre>starting_task_in       Session / run history
-run::select_work       launch, lf context, implicit_binding
-task_status            bare lf task status
-handoff --design       source Task of a design
-turns.rs               provider conversations</pre></div>
-<div class="card"><b>Ownership</b>: <code>task_checkout_owner(root)</code>
-<pre>checkout_scope         resume, adoption, bind
-pr_landing             lf land
-delivery               lf commit, lf pr open   <i>(a8627a30)</i>
-work_route             bare lf resume routing</pre></div>
+<div class="card"><b>Now</b>
+<pre>lf session list --task C
+  A's old conversation      ← cwd's Git root is C's checkout
+lf session list --task A
+  A's old conversation      ← stored task_id
+lf task show C
+  (none of A's)             ← session_task_ids</pre>
+<p>Same Session, two Tasks in one surface, one in another. The resolver also prints "Multiple Tasks claim this checkout" where the store answers the lower id.</p></div>
+<div class="card prop"><b>Proposed</b> <span class="tag">plan: next</span>
+<pre>lf session list --task C
+  (none)
+lf session list --task A
+  A's old conversation</pre>
+<p><code>associate</code> sets <code>task_ids</code> from the stored Task only. The resolver keeps what it is good at: the worktree root to show and the "checkout is unavailable" reasons. Its <code>workspace.task_id</code> follows <code>task_checkout_owner</code>'s rule.</p></div>
 </div>
-<p>Delivery's fallback is still a <code>Declared</code> selection (<code>LF_AS</code> or <code>--task</code>), as on main: a Session that names a Task can commit for it from a directory no Task owns.</p>
-
-<h2>What's left that's small</h2>
-<p>One word. <code>rust/loopflow/src/lf/commands/run.rs:285</code>, the comment on <code>implicit_binding</code>, says "checkout ownership wins over an ancestor's explicit declaration". The code asks <code>task_holding</code>, which is membership. "Ownership" now names the other answer, so the comment should say "the checkout holding the directory". That's a gate fix, not a design change.</p>
+<p>This is inside the Task: the plan's outcome says a Task's Sessions stay with it after a move and a path reuse, and its readers section says membership reads <code>task_id</code> only. The previous two pages marked the resolver "fits LOO-934"; with the Git-root rule built it is the last reader that disagrees, and fixing it deletes code.</p>
 
 <h2>What else holds</h2>
-<p>The slices match the product: one completion fact, one order, the primary in its released home, work recorded once at start, the leaving guard. Nothing is left over from replaced designs. The adoption special case is gone, so are the primary mark nothing wrote and <code>'inherited'</code>, and compress merged <code>TaskOverviewRecords</code>/<code>TaskWorkRecords</code>.</p>
+<p>Nothing is left over from the split: <code>task_holding</code> and <code>deepest_checkout</code> are gone, and the migration's backfill keeps the deepest checkout only for history written before it, saying why. <code>address::worktree_root</code> is one walk that <code>git::worktree_root</code> calls. The leaving guard covers every slice.</p>
 
 <h2>Questions</h2>
 <ol>
-<li>Ownership vs membership:
- <br>a) two store answers, as built <span class="tag">built</span>
- <br>b) containment everywhere
- <br>c) Git-root equality everywhere</li>
-<li>Bare <code>lf resume</code> in a nested non-Task worktree:
- <br>a) "no associated work conversation", as released lf says <span class="tag">built</span>
- <br>b) open the outer Task's conversation</li>
-<li>Bare <code>lf task status</code> in a plain nested worktree:
- <br>a) show the outer Task (membership) <span class="tag">current</span>
- <br>b) "this checkout has no Task" (ownership)</li>
-<li>Run liveness has two process records (carrier vs child):
- <br>a) leave it for a launch Task <span class="tag">current</span>
- <br>b) the carrier records itself as the run in <code>graph_processes</code></li>
+<li>The Session list's Task:
+ <br>a) the stored Task only, as the plan now says <span class="tag">chosen for review</span>
+ <br>b) leave the path-derived list for LOO-934</li>
+<li><code>lf wt create</code> from inside a Task's checkout, used for a child agent's separate checkout:
+ <br>a) branch from <code>main</code>, as today <span class="tag">current</span>
+ <br>b) branch from the Task's branch when run inside a Task's checkout
+ <br>c) LOOPFLOW.md says to pass a base (if <code>lf wt create</code> takes one)</li>
+<li>Run liveness: LOO-1075 holds it; nothing here.</li>
 </ol>
 </main></body></html>

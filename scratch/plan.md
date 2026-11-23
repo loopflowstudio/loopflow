@@ -124,7 +124,7 @@ keeps every column; it belongs with LOO-939 (naming), not here. Noted in
 | Member | Verdict | Why |
 |---|---|---|
 | `task_checkouts`, `task_ship_events` | keep | LOO-874's homes |
-| `task_primary_sessions` | **leaving** | a Task's primary is `agent_sessions.primary_scope='task'`, as a repository's and a Wave's are; three triggers mirror the table for released lf until LOO-877 |
+| `task_primary_sessions` | keep until LOO-877 | the Task primary's one home, read and written by this build and released lf alike; read through `primary_scope_sql(s)`. LOO-877 moves it onto `agent_sessions.primary_scope='task'` with its writers |
 | `task_prs.branch/base_commit/parent_pr_id` | keep for now | trigger-copied from `task_checkouts` and enforced equal (`task_machine_local.sql:105-140`); PR delivery reads them for merged PRs too, where the checkout is gone. Not a free duplicate; questions.md |
 | `pr_landings.worktree` | keep | a landing is supervised on one Machine (`supervisor_machine_id`) and may have no Task (`lf land` in any checkout). Execution table already |
 | `agent_sessions.task_id` | keep, backfill | the only Session→Task link |
@@ -134,7 +134,7 @@ keeps every column; it belongs with LOO-939 (naming), not here. Noted in
 ## Source of truth after the change
 
 - Task (shared): `tasks`. Observed provider Task: `pm_items`. Queue: `tracker_actions` (LOO-925/938).
-- Checkout here: `task_checkouts`. Primary conversation: `agent_sessions.primary_scope='task'`. Auto-Ship: `task_ship_events`.
+- Checkout here: `task_checkouts`. Primary conversation: `task_primary_sessions` (LOO-877 moves it). Auto-Ship: `task_ship_events`.
 - A Session's Task: `agent_sessions.task_id`. A Graph run's Task: `graph_processes.task_id`.
 - Order: `tasks.planning_rank` (desired), `pm_items.rank` (observed).
 
@@ -243,8 +243,8 @@ primary-key read of the calling Session.
 - `task_orders` and `commit_task_order`/`task_order_inputs`/`task_order_in`,
   `TaskOrder` key's manual position.
 - `pm_projects.task_order_json` reads/writes.
-- `task_primary_sessions` as the home of a Task's primary, and `task_primary`
-  on the Session wire record (Swift derives `taskPrimary` from `primary_scope`).
+- `task_primary` on the Session wire record (Swift derives `taskPrimary` from
+  `primary_scope`, which `primary_scope_sql` fills from `task_primary_sessions`).
 
 Survives: every Task's title, description, state, rank, URL, branch,
 every Process/Session association, conflict answers.
@@ -327,22 +327,12 @@ every Process/Session association, conflict answers.
    planning label"; slice 3 made that one fact, so the phase and its entry in
    `tests/fixtures/dto/task_concepts.json` are gone (Swift reads phases by name).
 
-5. **A Task's primary on its own row.** *Built (`task_facts_once.sql`, commits
-   "Mark a Task's primary conversation on its own row" and "Drop task_primary
-   from the Session record").* `agent_sessions.primary_scope='task'` is the
-   mark; index `agent_sessions_primary_task` is plain, because
-   `check_migrations.py` refuses a new unique index while older writers run,
-   so every write clears the old mark first. `task_primary_sessions` is
-   leaving, kept in step by `task_primary_sessions_mark_insert`,
-   `task_primary_sessions_mark_update` and `agent_sessions_task_primary_row`.
-   In the window, any lf older than this change that reads the migrated
-   store (QA, installed `0.16.0+7bb879aff`): leaves each Task's primary out
-   of the Task's Sessions (`task_ids: []` in `lf session list --json`, absent
-   from `lf task show`), and `lf session resume` in the checkout fails with
-   "is not an unfinished interactive conversation of this Task", because its
-   membership requires `primary_scope IS NULL`. It can open a new Task's
-   conversation once. Nothing in the store can change that; it ends when
-   every lf process on the Machine is this build or newer.
+5. **A Task's primary: one home, `task_primary_sessions`.** *Built
+   (`06c6145399`, compress `8cc3ba3f9c`); details under "Earlier" item 5.*
+   This build and released lf read and write the same table, so nothing
+   disagrees in the window. `primary_scope_sql(s)` derives the wire
+   `primary_scope='task'`; nothing stores it. LOO-877 moves the mark onto
+   `agent_sessions` with its writers.
 
 ## Docs
 
@@ -413,7 +403,25 @@ Task's), `ops::task::tests:: ops::run:: ops::human_session:: git::` passed;
 `lf land` in a nested worktree end to end (`land_tests`, CI);
 `pr_landing` already asked the owner by Git root.
 
-Next: gate.
+## Next: the Session list reads the stored Task (concept review on 8e62c4f468)
+
+One reader still computes membership from paths at read time:
+`human_session/workspace.rs` `associate` sets each listed Session's
+`task_ids` from the Task whose checkout is its cwd's Git root *now*, then
+adds the stored Task. `lf session list --task`, its JSON `task_ids` and
+Desktop's `SessionRecord.names(task:)` read that. It breaks the outcome:
+reuse a path with a clone that becomes Task C's checkout, and an old
+Session of Task A lists under A and C; an untasked Session in a nested
+directory that later becomes a checkout joins it. It also says "Multiple
+Tasks claim this checkout" where the store answers the lower id.
+
+Build: `associate` sets `task_ids` from the stored Task only
+(`session.work`'s Task, i.e. `agent_sessions.task_id`); `WorkspaceResolver`
+keeps the workspace presentation (worktree root, unavailable reasons) and
+its `workspace.task_id` comes from `task_checkout_owner`'s rule (lower id on
+a shared root) or goes if nothing reads it. Test: the move-and-reuse demo
+extended through `lf session list --task <C>` listing none of A's Sessions.
+Then gate.
 
 ## Earlier: implement (concept review after the plan hub, 2026-11-22)
 

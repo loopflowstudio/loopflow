@@ -68,3 +68,12 @@
 - Sync onto main: use main’s launch kinds and Session-owned agent identity for
   steer delivery. Crash recovery and named steers share the existing held
   terminal start. The old stacked harness implementation is superseded.
+
+- QA 2026-11-22 on agy 1.5.14 (scratch/qa.html case 12): all five cases
+  pass; no defect in this change. Seen, left as is: a Task steer reaches
+  the model as the tracker comment's raw body ("Comment <id> by QA:" plus
+  `<!-- loopflow-requester -->` and `<!-- loopflow-steer -->` markers),
+  while a named steer is bare text. Repro: `lf steer TASK 'x'` to a Task
+  whose primary is quit, then read the held start's `-i` argument in `ps`.
+  Also a quit chat outside any Task is absent from `lf session list --all`
+  (it has `completed_at`); pre-existing, untouched by this diff.

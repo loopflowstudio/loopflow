@@ -136,9 +136,58 @@ Saved 22be21f8-…; session_a326693f… reads it at its next boundary           
 # step ends: both delivered; graph log "…I'll reply once it finishes.SLOW-STEERED"</pre>
 <p>Every refusal and reader line names worker or batch; no "finished Run", "is a Run" or "takes only Sessions" is left in docs, messages or QA notes. <code>lf -b steer</code> to a running Session saving and returning, which the plan lists as untested, works on the real product.</p>
 <p>Seen, not changed: a finished batch's ID is in neither <code>lf session list --headless</code> (unfinished only) nor <code>lf history --json</code> (empty), and <code>lf -b</code> prints the reply with no ID, so a person holding a batch has no command that names it. Pre-existing.</p>
+<h2>12. Antigravity after the sync onto main (fb20f2bd4e)</h2>
+<p>Real <code>agy</code> 1.5.14 (Gemini 4 Neon, the account's login), branch <code>lf</code> built from this checkout, private <code>LF_HOME=~/lfq958agy/home</code>, repository <code>~/lfq958agy/repo</code> with a bare origin and <code>graph: qa</code> (<code>- cmd: help task</code>, <code>- interactive: demo</code>), <code>lf server run</code> with stdin closed and <code>LF_*</code>, <code>CLAUDECODE</code>, <code>CLAUDE_CODE_*</code> unset. TUIs driven from a Python PTY, rendered with pyte.</p>
+<table>
+<tr><th>Case</th><th>Result</th></tr>
+<tr><td>1. Quit agy chat, <code>lf steer S</code></td><td class="ok">"the Machine server starts S"; one held <code>agy --conversation 0c5ad63e… -i &lt;lf:steers&gt;…</code>; steer is the first USER_INPUT; answer PLUM; delivered; <code>lf resume S</code> attaches and shows it</td></tr>
+<tr><td>2. Two steers saved with the server down, then server up</td><td class="ok">one held agy, one input carrying both; answer "PLUM, FIG"</td></tr>
+<tr><td>3. <code>lf steer TASK</code>, primary and a second chat both quit</td><td class="ok">only the primary's thread starts; answer KIWI; the other chat keeps the steer pending, no process</td></tr>
+<tr><td>4. <code>lf -b steer S</code> on the quit Session</td><td class="ok">prints <code>MULP</code>, exit 0, same agy conversation, no held start</td></tr>
+<tr><td>5. <code>lf resume S --message hi</code> (and <code>-b</code>)</td><td class="ok">"unexpected argument '--message'", exit 2</td></tr>
+</table>
+<pre>$ cd ~/lfq958agy/repo.w1                                  # from lf wt create w1
+$ lf default 'Remember the word PLUM. Reply only with OK.' -a agy    # PTY; OK; ctrl+c twice
+agy --conversation=0c5ad63e-2bf9-412a-9f02-6d1b14a56590
+$ lf steer session_18dd0107… 'What word did I give you? Reply with only the word.'
+Saved 3241dcb6-…; the Machine server starts session_18dd0107… to read it
+$ lf session steers session_18dd0107… --json             # "pending": 0, delivered_at 1795413775
+$ ps                                                      # child of the private holder 29955 (child of the server):
+agy --conversation 0c5ad63e-… --add-dir …/repo.w1/.lf/prompts/…-agy --dangerously-skip-permissions
+    --add-dir …/repo/.git --settings {"trustedWorkspaces":[…/repo.w1]} -i &lt;lf:steers&gt;\nSteer 3241dcb6-…; author QA:\n…
+# brain/0c5ad63e…/transcript_full.jsonl after the first turn:
+USER_INPUT        &lt;lf:steers&gt; Steer 3241dcb6-…; author QA: What word did I give you? … &lt;/lf:steers&gt;   (id appears once)
+SYSTEM_MESSAGE    PreInvocation hook: This Session: session_18dd0107…
+PLANNER_RESPONSE  PLUM
+$ lf resume session_18dd0107…                             # attaches: "&gt; &lt;lf:steers&gt; … PLUM"
+
+$ kill &lt;server&gt;                                           # case 2
+$ lf steer S 'Remember a second word: FIG. Reply only with OK.'
+$ lf steer S 'Now list both words I gave you, comma separated, nothing else.'
+$ lf session steers S                                     # 2 pending
+$ lf server run                                           # 12 s later: 0 pending; one agy, -i names both steers
+PLANNER_RESPONSE  PLUM, FIG
+
+$ lf -b steer S 'Spell the first word I gave you backwards. Reply with only that.'   # case 4, after quitting
+MULP                                                      # exit 0; same conversation; holder has no child
+
+$ lf task create 'QA: remember the word KIWI and reply only with OK. Change no files.'   # 52b0b8
+$ lf task run 52b0b8 -a agy                               # primary b4426f94… on agy, at demo; quit it
+$ lf default 'Reply only with OK.' -a agy                 # in the Task checkout: session_31f74d35…, quit
+$ lf steer 52b0b8 'What word does this Task title ask you to remember? Reply with only that word.'
+Saved fa92e9a8-…
+# one held agy --conversation 97801aa7 (the primary's thread); answer KIWI
+# b4426f94…: 0 pending, delivered; session_31f74d35…: 1 pending, no process</pre>
+<p>Seen, not changed:</p>
+<ul>
+<li>A Task steer reaches agy as the tracker comment's raw body: "Comment 30a1b3f6-… by QA:", the text, then <code>&lt;!-- loopflow-requester:"QA" --&gt;</code> and <code>&lt;!-- loopflow-steer:… --&gt;</code>. A named Session steer is just the text.</li>
+<li><code>lf -b steer</code>'s input nests the steers in the message: <code>&lt;lf:message&gt;&lt;lf:steers&gt;…&lt;/lf:steers&gt;&lt;/lf:message&gt;</code>; a held start sends <code>&lt;lf:steers&gt;</code> alone.</li>
+<li>A quit chat outside any Task gets <code>completed_at</code> and is in neither <code>lf session list</code> nor <code>--all</code>; its ID is on agy's quit line ("Continue with: lf resume …"). The quit chat in the Task's checkout stays listed as <code>closed</code>. Not touched by this branch's diff.</li>
+<li><code>lf steer TASK</code> still prints only "Saved …" (as in case 10).</li>
+</ul>
 <h2>Where it stands</h2>
-<p><b>Works:</b> <code>resume</code> without <code>--message</code>; <code>lf -b steer</code> foreground turns with full text; a named stopped Session started once by the server and answering; Task steer starting only the primary conversation; the three reader lines; idle wake of a server-started Session. Rerun at 6c96330 on the returning home: named start, Task start, a Task steer saved before its primary existed, and a restart starting nothing (case 10). Slice 5 at 8e26c5a: <code>lf resume</code> refusals and <code>lf steer</code> reader lines for a finished batch, a finished worker and a running worker; <code>-b steer</code> to a running worker saves and returns; a running worker reads two steers at its boundary (case 11).</p>
-<p><b>Not reached:</b> Codex, Pi and OpenCode held starts (no Codex held-terminal run; the plan's open question stands); the upgrade (steers saved by the released <code>lf</code> starting nothing), covered only by storage and wake unit tests; the slice-4 replaced and already-read Task steers, which no command produces (case 10).</p>
+<p><b>Works:</b> <code>resume</code> without <code>--message</code>; <code>lf -b steer</code> foreground turns with full text; a named stopped Session started once by the server and answering; Task steer starting only the primary conversation; the three reader lines; idle wake of a server-started Session. Rerun at 6c96330 on the returning home: named start, Task start, a Task steer saved before its primary existed, and a restart starting nothing (case 10). Slice 5 at 8e26c5a: <code>lf resume</code> refusals and <code>lf steer</code> reader lines for a finished batch, a finished worker and a running worker; <code>-b steer</code> to a running worker saves and returns; a running worker reads two steers at its boundary (case 11). Antigravity after the sync onto main: named start, two steers in one start, Task steer starting only the primary, foreground <code>-b steer</code>, <code>--message</code> refused (case 12).</p>
+<p><b>Not reached:</b> Codex, Pi and OpenCode held starts (Antigravity reached in case 12) (no Codex held-terminal run; the plan's open question stands); the upgrade (steers saved by the released <code>lf</code> starting nothing), covered only by storage and wake unit tests; the slice-4 replaced and already-read Task steers, which no command produces (case 10).</p>
 <p><b>Still wrong, worst first:</b></p>
 <ol>
 <li>Steers taken by a start that never runs a turn read <code>delivered</code> and nothing retries them (case 9, and a start killed at a dialog).</li>
